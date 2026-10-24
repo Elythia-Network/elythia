@@ -75,29 +75,13 @@ type Handler struct {
 	// fallback 無し。
 	accessTokenRepo repository.AccessTokenRepository
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3796)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetEntityPacker wires the Packer this Handler packs entities with (#3796).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
 
 // SetAccessTokenRepo wires the access token repo used by notifications/create
 // to resolve the request's app token for header/icon fallback (#1557)。
@@ -109,26 +93,9 @@ func (h *Handler) SetAccessTokenRepo(r repository.AccessTokenRepository) {
 // embedded role (#1559)。
 func (h *Handler) SetRoleLookup(fn entity.RoleLookup) { h.roleLookup = fn }
 
-// SetModeratorChecker wires the moderation check used to re-verify who may
-// read abuseReport notifications (#2868).
-//
-// **未配線なら abuseReport を返さない (fail-closed)。** 対象ユーザー ID が Extra に入り通報の存在自体が機微なので、判定できないまま出すより出さないほうが安全側。
-func (h *Handler) SetModeratorChecker(c ModeratorChecker) { h.moderatorChecker = c }
-
 // AbuseReportStateLookup resolves the resolution state of several reports at
 // once (#2868)。実装は repository.AbuseReportRepository.FindStatesByIDs。
 type AbuseReportStateLookup func(ids []string) (map[string]model.AbuseReportState, error)
-
-// SetAbuseReportLookup wires the read-time state lookup for abuseReport
-// notifications (#2868)。未配線なら abuseReport 通知を返さない (fail-closed)。
-func (h *Handler) SetAbuseReportLookup(fn AbuseReportStateLookup) { h.abuseReportStates = fn }
-
-// SetAbuseReportUnresolvedCounter wires the count of unresolved reports shown
-// on abuseReport notifications (#3200)。実装は
-// repository.AbuseReportRepository.CountUnresolved。未配線なら件数を出さない。
-func (h *Handler) SetAbuseReportUnresolvedCounter(fn func() (int64, error)) {
-	h.abuseUnresolvedCount = fn
-}
 
 // SetEmojiApplicationLookup wires the read-time state lookup for
 // emojiApplicationProcessed notifications (#2934)。未配線なら返さない
@@ -139,13 +106,6 @@ func (h *Handler) SetAbuseReportUnresolvedCounter(fn func() (int64, error)) {
 // 並ぶ形にならない。N+1 を避けるための複雑さに見合わない。
 func (h *Handler) SetEmojiApplicationLookup(fn entity.EmojiApplicationLookup) {
 	h.emojiApplicationLookup = fn
-}
-
-// SetSignupApplicationLookup wires the read-time state lookup for
-// signupApplicationReceived notifications (#2987)。未配線なら通知ごと返さない
-// (fail-closed。状態を引けないまま出すと、処理済みの申請に二重で当たる)。
-func (h *Handler) SetSignupApplicationLookup(fn entity.SignupApplicationLookup) {
-	h.signupApplicationLookup = fn
 }
 
 // SetChatInvitationLookup wires the lookup used to pack
@@ -255,8 +215,37 @@ func (h *Handler) batchAbuseReportLookup(rows []entity.NotificationItem) (entity
 }
 
 // NewHandler creates a new notifications Handler.
-func NewHandler(svc *notification.Service, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, idGen: idGen}
+//
+// entityPacker is the Packer this Handler packs entities with (#3796) and
+// noteHider applies the per-viewer hideNote gate to the notes it packs (#3786).
+// moderatorChecker re-verifies who may read abuseReport notifications (#2868)
+// and abuseReportStates looks up their state at read time (#2868); without
+// either, abuseReport notifications are not returned (fail-closed).
+// abuseUnresolvedCount is the count of unresolved reports shown on them
+// (#3200, repository.AbuseReportRepository.CountUnresolved); without it the
+// count is left out. signupApplicationLookup looks up the state of
+// signupApplicationReceived notifications at read time (#2987); without it
+// those notifications are not returned (fail-closed).
+func NewHandler(
+	svc *notification.Service,
+	idGen id.Generator,
+	entityPacker *entity.Packer,
+	noteHider *notehide.Hider,
+	moderatorChecker ModeratorChecker,
+	abuseReportStates AbuseReportStateLookup,
+	abuseUnresolvedCount func() (int64, error),
+	signupApplicationLookup entity.SignupApplicationLookup,
+) *Handler {
+	return &Handler{
+		svc:                     svc,
+		idGen:                   idGen,
+		entityPacker:            entityPacker,
+		noteHider:               noteHider,
+		moderatorChecker:        moderatorChecker,
+		abuseReportStates:       abuseReportStates,
+		abuseUnresolvedCount:    abuseUnresolvedCount,
+		signupApplicationLookup: signupApplicationLookup,
+	}
 }
 
 // TestNotifier creates a 'test' notification on the caller's own stream so the

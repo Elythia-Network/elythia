@@ -52,29 +52,13 @@ type Handler struct {
 	// (= 安全側)。
 	metaRepo repository.MetaRepository
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetMetaRepo wires the meta repository used to honor enableIpLogging on upload.
 func (h *Handler) SetMetaRepo(m repository.MetaRepository) {
@@ -94,16 +78,13 @@ func (h *Handler) SetNoteFieldResolver(r *entity.NoteFieldResolver) {
 	h.fieldRes = r
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new drive Handler.
-func NewHandler(svc *coredrive.Service, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, idGen: idGen}
+// entityPacker is the Packer this handler packs entities with (#3790);
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786); background is the group the work after a response runs in,
+// so stopping the server generation waits for it (#3661).
+func NewHandler(svc *coredrive.Service, idGen id.Generator, entityPacker *entity.Packer, noteHider *notehide.Hider, background *bgwork.Group) *Handler {
+	return &Handler{svc: svc, idGen: idGen, entityPacker: entityPacker, noteHider: noteHider, background: background}
 }
 
 // SetRepos attaches repositories for drive listing endpoints.

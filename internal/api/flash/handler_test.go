@@ -27,7 +27,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockFlashRepository, *testuti
 	likeRepo := testutil.NewMockFlashLikeRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, likeRepo, idGen)
-	return NewHandler(svc, nil, nil), repo, likeRepo
+	return NewHandler(svc, nil, nil, nil), repo, likeRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -153,7 +153,7 @@ func TestCreate_RepoError(t *testing.T) {
 	repo := &failingFlashRepo{MockFlashRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"title":"t","summary":"s","script":"x","permissions":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -255,7 +255,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	repo := &failingUpdateRepo{MockFlashRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"flashId":"f1","title":"x"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -311,7 +311,7 @@ func TestDelete_RepoError(t *testing.T) {
 	repo := &failingDeleteRepo{MockFlashRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"flashId":"f1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
@@ -326,7 +326,7 @@ func TestDelete_ModeratorWithModLog(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	require.NoError(t, userRepo.Create(&model.User{ID: "owner", Username: "ownername"}))
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, userRepo, idGen)
+	h := NewHandler(svc, userRepo, idGen, nil)
 	h.SetRoleChecker(&stubRoles{moderators: map[string]bool{"mod": true}})
 	ml := &stubModLog{}
 	h.SetModLog(ml)
@@ -392,7 +392,7 @@ func TestMy_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockFlashRepository: testutil.NewMockFlashRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.My(c))
@@ -464,7 +464,7 @@ func TestFeatured_RepoError(t *testing.T) {
 	repo := &featuredFailRepo{MockFlashRepository: testutil.NewMockFlashRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	require.NoError(t, h.Featured(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -507,7 +507,7 @@ func TestSearch_RepoError(t *testing.T) {
 	repo := &searchFailRepo{MockFlashRepository: testutil.NewMockFlashRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"query":"x"}`)
 	require.NoError(t, h.Search(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -615,7 +615,7 @@ func TestLike_RepoError(t *testing.T) {
 	likeRepo := &failingCreateLikeRepo{MockFlashLikeRepository: testutil.NewMockFlashLikeRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, likeRepo, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"flashId":"f1"}`)
 	setUser(c, "bob")
 	require.NoError(t, h.Like(c))
@@ -678,7 +678,7 @@ func TestUnlike_RepoError(t *testing.T) {
 	likeRepo := &failingDeleteLikeRepo{MockFlashLikeRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, likeRepo, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{"flashId":"f1"}`)
 	setUser(c, "bob")
 	require.NoError(t, h.Unlike(c))
@@ -723,7 +723,7 @@ func TestMyLikes_RepoError(t *testing.T) {
 	likeRepo := &myLikesFailRepo{MockFlashLikeRepository: testutil.NewMockFlashLikeRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreflash.NewService(repo, likeRepo, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "bob")
 	require.NoError(t, h.MyLikes(c))

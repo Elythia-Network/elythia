@@ -216,6 +216,13 @@ type Server struct {
 	// **購読の最後 (全部の処理の後) で呼ぶこと。** 前で呼ぶと、テストが処理の
 	// 終わる前に検査を始める。
 	metaUpdatedHandled atomic.Pointer[func(payload []byte)]
+	// builtHandlers is what buildHandlers built for this generation, after
+	// setupRoutes has run every setter on it. 本番では読まない。
+	//
+	// 構築子の必須の引数にした依存 (#3817) は、型では渡し忘れを防げても nil は
+	// 渡せる。TestBuiltHandlersHaveNoNilDependencies が組み立てた後の handler の
+	// フィールドを見て、nil を渡した配線を落とすために持つ。
+	builtHandlers apiHandlers
 }
 
 func runReactionFlushWorker(ctx context.Context, enqueue func() error) {

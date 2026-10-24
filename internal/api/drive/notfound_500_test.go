@@ -49,7 +49,7 @@ func TestDrive_DBFailureIsNot4xx(t *testing.T) {
 		}
 		storage := coredrive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 		idGen, _ := id.NewGenerator("aidx")
-		h := NewHandler(coredrive.NewService(fileRepo, folderRepo, storage, idGen), idGen)
+		h := NewHandler(coredrive.NewService(fileRepo, folderRepo, storage, idGen), idGen, nil, nil, nil)
 		h.SetRepos(fileRepo, folderRepo, testutil.NewMockNoteRepository())
 		return h
 	}

@@ -193,7 +193,7 @@ func newTestHandler() (*Handler, *mockAuthSessionRepo) {
 	repo := newMockRepo()
 	cfg := &config.Config{URL: "http://localhost:3000"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, cfg, idGen)
+	h := NewHandler(repo, cfg, idGen, nil, nil, nil)
 	return h, repo
 }
 
@@ -328,7 +328,7 @@ func TestAccept_UpdateSessionError(t *testing.T) {
 
 	cfg := &config.Config{URL: "http://localhost:3000"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failUpdateRepo{base}, cfg, idGen)
+	h := NewHandler(&failUpdateRepo{base}, cfg, idGen, nil, nil, nil)
 
 	rec := post(h.Accept, `{"token":"tok1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -655,7 +655,7 @@ func TestMiAuthCheck_LosesFetchRace(t *testing.T) {
 	base.accessTokens["k"] = &model.AccessToken{ID: "at1", Token: "t", UserID: "u1", Session: &sess}
 	cfg := &config.Config{URL: "http://localhost:3000"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failMarkRepo{base}, cfg, idGen)
+	h := NewHandler(&failMarkRepo{base}, cfg, idGen, nil, nil, nil)
 
 	rec := postMiAuthCheck(h, sess, nil)
 	var out map[string]any

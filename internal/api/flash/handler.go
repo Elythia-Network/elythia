@@ -43,20 +43,13 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // NewHandler creates a new flash Handler.
 // userRepo / idGen are required by list endpoints to embed the
 // `user` (UserLite) and `createdAt` fields that the upstream Misskey
 // frontend expects when rendering Play (Flash) cards.
-func NewHandler(svc *coreflash.Service, userRepo repository.UserRepository, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen}
+// entityPacker is the Packer this Handler packs entities with (#3794).
+func NewHandler(svc *coreflash.Service, userRepo repository.UserRepository, idGen id.Generator, entityPacker *entity.Packer) *Handler {
+	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen, entityPacker: entityPacker}
 }
 
 // SetRoleChecker wires the moderator check used by flash/delete (#1548).

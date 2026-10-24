@@ -323,7 +323,8 @@ server.New() → setupRoutes()
   │   setter と、outbound client や setupRoutes で作る部品に依存するものは元の位置)
   ├→ hook 注入 (§5)
   ├→ Handler 生成 (§3.1)。作るだけの handler は buildHandlers → wiring.handlers
-  │   で作り、usersHandler の位置で別名を置く。setter は元の位置。この途中
+  │   で作り、usersHandler の位置で別名を置く。setter は元の位置 (#3817 で構築子の
+  │   必須の引数にした依存は buildHandlers で渡す)。この途中
   │   (プラグインの準備より前) で、queue の handler を registerQueueHandlers で 1 回だけ
   │   登録する (一覧は builtinQueueHandlers)
   ├→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
@@ -628,8 +629,9 @@ setupRoutes()
     `w.stream = streamSvcs`、別名は `x := streamSvcs.x`)。`buildStream()` は `Server` の
     フィールドを読まないので、メソッドではなく普通の関数にした。stream の pubsub は
     `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける
-  - `handlers` も同じ形 (`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)`、
-    `w.handlers = hSvcs`、別名は `x := hSvcs.x`)
+  - `handlers` も同じ形 (`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, …)`、
+    `w.handlers = hSvcs`、別名は `x := hSvcs.x`。`…` は #3817 で足した、handler の構築子へ
+    渡す値)
   - **後の領域の `build…()` も、先に作った領域を `w.core.x` のようにコンテナから読まず、
     `coreSvcs` のような変数を引数で受ける。** コンテナのフィールドから読むと、その
     `build…()` を代入より前に置いてもコンパイルが通り、ゼロ値を受け取る (別名と同じ穴)。
@@ -1067,7 +1069,8 @@ setupRoutes()
 
 - **`buildHandlers()` は `*Server` のメソッドで、repository は `w` から、core の service と
   連合の部品は `buildCore()` / `buildFederation()` の戻り値 `coreSvcs` / `fedSvcs` から
-  受け取る。** 中の行は `setupRoutes()` にあった行をそのまま移し、作る順も元のまま。使う
+  受け取る。** 中の行は `setupRoutes()` にあった行をそのまま移し、作る順も元のまま (#3694 の
+  時点。#3817 で構築子の引数を足した。下の「handlerの依存を構築子の必須の引数にする」)。使う
   `Server` のフィールドは `s.db` / `s.config` / `s.echo`。`s.echo` は endpoints の handler の
   closure の中で読むだけで、作るときには読まない (呼ばれたときにルートを数える)。連合の部品
   から使うのは `apRenderer` (ap/show など) と `apURLs` (WebFinger)
@@ -1083,7 +1086,8 @@ setupRoutes()
 - **setter もルートの登録も 1 つも動かさない。** `buildHandlers()` を呼ぶ位置は、移した
   handler の中で最初に作っていた `usersHandler` の位置。移した構築は副作用を持たないので、
   DB と Redis の文の順は変わらない。handler へ依存を入れる setter (`setupRoutes()` で
-  `…Handler.Set…` を呼ぶ 385 行) は、位置も順も元のまま
+  `…Handler.Set…` を呼ぶ 385 行) は、位置も順も元のまま (どちらも #3694 の時点。#3817 で
+  一部の setter を構築子の引数に移した)
 - **移すのは、`usersHandler` の位置へ前倒ししても、setter で後から入れる辺 (4.1) が増えない
   handler に限る。** 前倒しすると、その handler の setter の依存のうち、`usersHandler` の位置
   から元の位置までの間で定義していたものが、受け手より後で作った依存になる。呼ぶ位置は、
@@ -1164,6 +1168,68 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 の種類。行の中身と順は前後で同じ (行の列を突き合わせた)。行数は同じ本文の `wc -l`。5 行増えたのは、
 `hSvcs` の 2 行・別名の 30 行・理由を書いたコメント 9 行・空行 1 行 (計 42 行) を足し、構築の
 30 行・使わなくなった別名 5 行・`buildHandlers()` へ移したコメント 2 行 (計 37 行) を消したため。
+
+#### handlerの依存を構築子の必須の引数にする(#3817)
+
+**`buildHandlers()`で作るhandlerのうち、入れ忘れると黙って劣化する依存は、setterではなく構築子の
+必須の引数で受ける。** #3812の段(1)。以前は`setupRoutes()`でsetterを呼んで後から入れ、入れ忘れを
+起動時の検査(`recordCriticalWiring`の表)とwiring-checkの文字列の照合で拾っていた。引数にすると、
+渡し忘れはコンパイルで落ちる。**ただし引数にもnilは渡せる。** 以前の表と照合はnilを渡す形も
+落としていたので、それは`TestBuiltHandlersHaveNoNilDependencies`(`internal/server`)が見る(下)。
+
+- **置き換えたのは、表の行かwiring-checkの照合で見ていた依存。** 1段目は小さいhandlerの16個
+  (webhooks・notifications・gallery・mute・renote-mute・federation・flash・following・user-lists・
+  bubble-game・invite・blocking・auth・hashtags・pages・drive)で、表の34行と、wiring-checkが照合して
+  いたnotificationsとinviteのsetter 5本(通報と申請の受付の通知のlookup・未対応の件数・権限の
+  再確認、inviteのモデレーターの判定)。表にもwiring-checkにも載っていないsetter
+  (`blockingHandler.SetModeratorChecker`など)は、setterのまま元の位置に残した
+- **`buildHandlers()`は、置き換えに要る値を引数で受ける。** `setupRoutes()`の局所変数の
+  `noteHider`・`entityPacker`・`sharedUserPacker`・`metaRepo`・`abuseNotifStates`・
+  `signupApplicationNotifLookup`と、`abuseReportRepoForNotif.CountUnresolved`。どれも
+  `buildHandlers()`を呼ぶ位置より前で作ってあるので、呼ぶ位置は変えていない。`Server`の
+  フィールドは`s.db`・`s.config`・`s.echo`に加えて`s.background`も読むようになった。`CountUnresolved`などのmethod valueを
+  `buildHandlers()`の中で`w.repos`から作らないのは、ゼロ値の`wiring`で組み立てる
+  `TestBuildHandlersFillsEveryField`が、nilのinterfaceからmethod valueを作るところでpanicするため
+- **置き換えたsetterと、起動時の検査に使っていた`Has…`は消した。** 構築子は引数を構造体に入れる
+  だけで、副作用は足していない。テストは構築子で依存を渡す。テストの補助関数が作ったhandlerに
+  後から入れていたテストは、同じパッケージのテストに限り、フィールドへ直接代入する
+- **構築子が引数を捨てても、ビルドは通る。** 起動時の検査はhandlerのフィールドを見ていたので、
+  この形も拾っていた。代わりに、各パッケージの`TestNewHandlerKeepsDependencies`が、渡した依存を
+  handlerが持つことを確かめる
+- **nilを渡す形は、組み立てたサーバーで見る。** `TestBuiltHandlersHaveNoNilDependencies`は
+  `New`でサーバーを組み立て(test mode・`MK_ONLY_SERVER`)、`buildHandlers()`が作ったhandlerの
+  うち`requiredDepHandlers`に並べたものについて、nilになりうるフィールド(ポインタ・interface・
+  func・map・slice・chan)がどれもnilでないことを確かめる。interfaceに型付きのnilのポインタを
+  入れた形もnilとみなす。setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で
+  見る。組み立てたhandlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。
+  nilでよいフィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に
+  載せ、使われない項目があれば落とす。抽出が空振りしても緑にならないよう、置き換えた依存の
+  フィールドを名指しで要求する(`requiredDepChecks`)。`i`のhandlerなど対象外の欄は見ない
+- **`entityPacker`の行も外した。** この行は`nil`ではなく`HasMediaURL()`を見ていて、mediaURLを
+  持つことは型では保証できない。ただ、どのhandlerも`setupRoutes()`の同じ`entityPacker`を受け取り、
+  その値そのものは表の`entityPacker.mediaURL`の行が見ている。段(8)でmediaURLを位置引数にするまで、
+  `entityPacker.mediaURL`の行と、setterで受ける部品の`entityPacker`の行は残す
+- **pubsubの購読のhandlerから辿れる配線は変わらない(4.1)。** 依存を入れる時点が、元のsetterの
+  位置(followingのlist packer・authのbackground・inviteのpolicyなどはstreamの節より後)から
+  `buildHandlers()`の位置へ前へ移った。購読のhandler(`metaUpdated`・`federationRulesUpdated`・
+  `rolesUpdated`・`antennaUpdated`と、`cachebus`・`corerelationcache`の`Connect…`)が触るのは、
+  meta・ロール・アンテナ・関係・認証・利用者などのキャッシュと、metaとnodeinfoのhandlerで、
+  置き換えたhandlerには届かない。置き換えたhandlerはHTTPのリクエストからしか呼ばれず、
+  リクエストは構築の後にしか来ない
+- **`buildHandlers()`より後で作る値に依存するものは、setterのまま。** `usersHandler.SetAbuseReportCreatedNotifier`
+  (値をstreamの節で作る)と、`i`のhandlerの依存(`streamRevoker`がstreamの節で作る値)。`i`の
+  handlerは、streamの組み立てを前へ動かす段(4)で扱う
+
+| | #3817の前(`16a2d79186`) | 1段目の後 |
+|---|---|---|
+| `criticalWiringCount` | 209 | 175 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 437 | 398 |
+| そのsetterを呼ぶhandler(受け手) | 42 | 41 |
+
+数え方: `criticalWiringCount`は`internal/server/wiring_check.go`の定数(表の実数と一致することは
+`TestCriticalWiringCountMatchesTable`が見る)。setterの行は`setupRoutes()`の本文(`func`の行から、
+行頭の`}`まで)で、行頭の空白の後が`<名前>Handler.Set`の行。受け手はその`<名前>Handler`の種類で、
+1段目で減ったのは`bubbleGameHandler`(setterが`SetEntityPacker`だけだった)。
 
 #### /api のルートの登録 (#3697)
 

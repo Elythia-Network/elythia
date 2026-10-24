@@ -20,8 +20,7 @@ func TestGenToken_NotifierRunsInTheBackgroundGroup(t *testing.T) {
 	notifier := &chanTokenNotifier{ch: make(chan string, 1)}
 	h.SetTokenNotifier(notifier)
 	g := bgwork.New()
-	h.SetBackground(g)
-	assert.True(t, h.HasBackground())
+	h.background = g
 	require.Zero(t, g.Stop(context.Background()))
 
 	rec := post(h.GenToken, `{"permission":["read:account"]}`, &model.User{ID: "u1", Username: "testuser"})

@@ -12,31 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
-// HasEntityPacker は mediaURL を持つ Packer を受け取ったときだけ true を返す
-// (#3796)。criticalWiring がこれで入れ忘れを見る。
-func TestHasEntityPacker(t *testing.T) {
-	for name, h := range map[string]interface {
-		SetEntityPacker(*entity.Packer)
-		HasEntityPacker() bool
-	}{"Handler": &Handler{}} {
-		t.Run(name, func(t *testing.T) {
-			if h.HasEntityPacker() {
-				t.Error("an unwired component must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{}))
-			if h.HasEntityPacker() {
-				t.Error("a Packer without mediaURL must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-				"https://local.example", "", []byte("secret"), false, true)}))
-			if !h.HasEntityPacker() {
-				t.Error("a Packer with mediaURL must report true")
-			}
-		})
-	}
-}
-
-// i/notifications の通知した人 (UserLite) は、SetEntityPacker で渡された Packer で
+// i/notifications の通知した人 (UserLite) は、NewHandler で渡された Packer で
 // 包む (#3796)。
 // 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
 // URL になって落ちる。
@@ -46,8 +22,8 @@ func TestShow_PacksWithTheGivenPacker(t *testing.T) {
 	avatar := "https://remote.example/avatar.png"
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", AvatarURL: &avatar}
 	h.SetRepos(userRepo, testutil.NewMockNoteRepository())
-	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	h.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
 	_, err := svc.Create(context.Background(), notification.CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: notification.TypeFollow,
 	})

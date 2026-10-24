@@ -71,21 +71,16 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
 func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
 // NewHandler creates a new federation Handler.
-func NewHandler(svc *coreinstance.Service) *Handler {
-	return &Handler{svc: svc}
+// entityPacker is the Packer this handler packs entities with (#3792); packer
+// packs the users embedded in federation/users, federation/followers and
+// federation/following (#1957-a, #3330).
+func NewHandler(svc *coreinstance.Service, entityPacker *entity.Packer, packer userpack.ListPacker) *Handler {
+	return &Handler{svc: svc, entityPacker: entityPacker, packer: packer}
 }
 
 // SetFollowingRepo attaches a FollowingRepository for followers/following lookup.
@@ -108,18 +103,6 @@ func (h *Handler) SetIDGen(g id.Generator) {
 func (h *Handler) SetResolver(r ActorResolver) {
 	h.resolver = r
 }
-
-// SetListPacker wires the packer of the users embedded in federation/users,
-// federation/followers and federation/following (#1957-a, #3330).
-func (h *Handler) SetListPacker(p userpack.ListPacker) {
-	h.packer = p
-}
-
-// HasListPacker reports whether the list packer was wired.
-//
-// 未配線だと federation/users・followers・following の利用者に関係・ピン留め・
-// 移行先・instance・絵文字が載らない。起動時検査に使う。
-func (h *Handler) HasListPacker() bool { return h.packer != nil }
 
 // SetSignatureCapabilityLookup wires the store that reports which signature
 // scheme each remote host uses (#2393).

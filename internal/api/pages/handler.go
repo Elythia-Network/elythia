@@ -63,28 +63,18 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
 func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
-// SetDriveFileRepo wires the drive file repo used to resolve a page's
-// attachedFiles (image-block files) and eyeCatchingImage (#1662)。
-func (h *Handler) SetDriveFileRepo(r repository.DriveFileRepository) {
-	h.driveFileRepo = r
-}
-
 // NewHandler creates a new pages Handler. idGen is required so that
 // responses include createdAt derived from the aidx-encoded page ID.
-func NewHandler(svc *corepage.Service, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, idGen: idGen}
+// entityPacker is the Packer this handler packs entities with (#3792);
+// driveFileRepo resolves attachedFiles and eyeCatchingImage and checks that the
+// eyecatching image belongs to the author (#1662, #2683); userPacker packs the
+// user embedded in the page-push pageEvent (#3330).
+func NewHandler(svc *corepage.Service, idGen id.Generator, entityPacker *entity.Packer, driveFileRepo repository.DriveFileRepository, userPacker UserPacker) *Handler {
+	return &Handler{svc: svc, idGen: idGen, entityPacker: entityPacker, driveFileRepo: driveFileRepo, userPacker: userPacker}
 }
 
 // SetMainStreamPublisher attaches a publisher used to emit `pageEvent` on
@@ -696,12 +686,6 @@ func (h *Handler) pageToMapWithOwner(p *model.Page, owner *model.User, isLiked *
 		IsLiked:          isLiked,
 	})
 }
-
-// HasDriveFileRepo reports whether the drive file repository was wired.
-//
-// 未配線だと eyecatching image の所有者チェックが素通しになり、他人の drive
-// ファイルを自分の page に貼れる (IDOR)。起動時検査に使う (#2683)。
-func (h *Handler) HasDriveFileRepo() bool { return h.driveFileRepo != nil }
 
 // validPageVisibility reports whether v is one of the values the
 // `page_visibility_enum` column accepts.

@@ -64,21 +64,16 @@ type Handler struct {
 	rolePolicyProvider role.PolicyProvider
 }
 
-// NewHandler creates a new webhooks handler.
-func NewHandler(repo repository.WebhookRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
+// NewHandler creates a new webhooks handler. rolePolicyProvider is the role
+// policy source Create uses to enforce the `webhookLimit` role policy (#1029).
+func NewHandler(repo repository.WebhookRepository, idGen id.Generator, rolePolicyProvider role.PolicyProvider) *Handler {
+	return &Handler{repo: repo, idGen: idGen, rolePolicyProvider: rolePolicyProvider}
 }
 
 // SetDispatcher wires a TestDispatcher so that /api/i/webhooks/test can fire
 // a synthetic test payload through the production pipeline.
 func (h *Handler) SetDispatcher(d TestDispatcher) {
 	h.dispatcher = d
-}
-
-// SetRolePolicyProvider wires a role policy source so Create enforces the
-// `webhookLimit` role policy (#1029).
-func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
-	h.rolePolicyProvider = p
 }
 
 func packWebhook(w *model.Webhook) map[string]any {
@@ -343,12 +338,6 @@ func (h *Handler) Test(c echo.Context) error {
 
 	return c.NoContent(http.StatusNoContent)
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと `webhookLimit` が効かず、webhook を無制限に作れる。起動時検査に
-// 使う (#2683)。
-func (h *Handler) HasRolePolicyProvider() bool { return h.rolePolicyProvider != nil }
 
 // webhookFieldsFit enforces the upstream paramDef maxLength of i/webhooks
 // create / update (name 100, url 1024, secret 1024) and rejects characters

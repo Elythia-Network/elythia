@@ -9,6 +9,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	coremuting "github.com/elythia-network/elythia/internal/core/muting"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -21,11 +22,17 @@ import (
 
 func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	t.Helper()
+	return newHandlerWithExtras(t, nil)
+}
+
+// newHandlerWithExtras builds the handler with extras as the detail extras filler.
+func newHandlerWithExtras(t *testing.T, extras userpack.DetailExtrasMany) (*Handler, *testutil.MockUserRepository) {
+	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
 	mutingRepo := testutil.NewMockMutingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, mutingRepo, idGen)
-	return NewHandler(svc, userRepo, idGen), userRepo
+	return NewHandler(svc, userRepo, idGen, nil, extras), userRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -128,7 +135,7 @@ func TestCreate_RepoError(t *testing.T) {
 	addUser(userRepo, "bob")
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, &failingMutingRepo{MockMutingRepository: testutil.NewMockMutingRepository()}, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"userId":"bob"}`)
 	setUser(c, "alice")
@@ -207,7 +214,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "alice", MuteeID: "bob"}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, &failingDeleteMutingRepo{MockMutingRepository: mock}, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"userId":"bob"}`)
 	setUser(c, "alice")
@@ -241,7 +248,7 @@ func TestList_EmbedsRelationFlags(t *testing.T) {
 	mutingRepo := testutil.NewMockMutingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, mutingRepo, idGen)
-	h := NewHandler(svc, userRepo, idGen)
+	h := NewHandler(svc, userRepo, idGen, nil, nil)
 	h.SetRelationRepos(userrelation.Repos{
 		Following:     testutil.NewMockFollowingRepository(),
 		Blocking:      testutil.NewMockBlockingRepository(),
@@ -282,7 +289,7 @@ func newGatedHandler(t *testing.T, mod ModeratorChecker) (*Handler, *httptest.Re
 	mutingRepo := testutil.NewMockMutingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, mutingRepo, idGen)
-	h := NewHandler(svc, userRepo, idGen)
+	h := NewHandler(svc, userRepo, idGen, nil, nil)
 	h.SetRelationRepos(userrelation.Repos{
 		Following: testutil.NewMockFollowingRepository(),
 		Muting:    mutingRepo,
@@ -360,7 +367,7 @@ func TestList_RepoError(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coremuting.NewService(userRepo, &failingListMutingRepo{MockMutingRepository: testutil.NewMockMutingRepository()}, idGen)
-	h := NewHandler(svc, nil, nil)
+	h := NewHandler(svc, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
@@ -414,7 +421,7 @@ func TestCreate_ExpiresAtZeroIsPermanent(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	mutingRepo := testutil.NewMockMutingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(coremuting.NewService(userRepo, mutingRepo, idGen), userRepo, idGen)
+	h := NewHandler(coremuting.NewService(userRepo, mutingRepo, idGen), userRepo, idGen, nil, nil)
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 

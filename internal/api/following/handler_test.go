@@ -65,7 +65,7 @@ func newHandlerWithFailingCounters(t *testing.T) (*Handler, *testutil.MockUserRe
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	return NewHandler(fSvc, uSvc), mockUR, fRepo, frRepo
+	return NewHandler(fSvc, uSvc, nil, nil), mockUR, fRepo, frRepo
 }
 
 // newHandlerWithFailingRequestDelete builds a handler whose FollowRequest Delete fails.
@@ -78,7 +78,7 @@ func newHandlerWithFailingRequestDelete(t *testing.T) (*Handler, *testutil.MockU
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	return NewHandler(fSvc, uSvc), userRepo, mockFRR
+	return NewHandler(fSvc, uSvc, nil, nil), userRepo, mockFRR
 }
 
 // newHandlerWithFailingListReceived builds a handler whose ListReceived fails.
@@ -91,7 +91,7 @@ func newHandlerWithFailingListReceived(t *testing.T) (*Handler, *testutil.MockUs
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	return NewHandler(fSvc, uSvc), userRepo
+	return NewHandler(fSvc, uSvc, nil, nil), userRepo
 }
 
 func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
@@ -102,7 +102,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	return NewHandler(fSvc, uSvc), userRepo
+	return NewHandler(fSvc, uSvc, nil, nil), userRepo
 }
 
 func addUser(repo *testutil.MockUserRepository, id string, locked bool) *model.User {
@@ -187,7 +187,7 @@ func newTestHandlerWithRepos(t *testing.T) (*Handler, *testutil.MockUserReposito
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	return NewHandler(fSvc, uSvc), userRepo, fRepo, frRepo
+	return NewHandler(fSvc, uSvc, nil, nil), userRepo, fRepo, frRepo
 }
 
 // #1056: POST /api/following/create with withReplies=true should persist
@@ -369,15 +369,14 @@ func TestList_EmbedsRelationFlags(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	h := NewHandler(fSvc, uSvc)
-	h.SetIDGen(idGen)
-	h.SetListPacker(userpack.New(nil, userpack.Lookups{Relations: userrelation.Repos{
+	h := NewHandler(fSvc, uSvc, nil, userpack.New(nil, userpack.Lookups{Relations: userrelation.Repos{
 		Following:     fRepo,
 		Blocking:      testutil.NewMockBlockingRepository(),
 		Muting:        testutil.NewMockMutingRepository(),
 		RenoteMuting:  testutil.NewMockRenoteMutingRepository(),
 		FollowRequest: frRepo,
 	}}, idGen))
+	h.SetIDGen(idGen)
 
 	addUser(userRepo, "alice", false)
 	bob := addUser(userRepo, "bob", false)
@@ -671,7 +670,7 @@ func newTestHandlerWithFollowings(t *testing.T) (*Handler, *testutil.MockUserRep
 	idGen, _ := id.NewGenerator("aidx")
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	uSvc := coreuser.NewService(userRepo, nil, nil, nil)
-	h := NewHandler(fSvc, uSvc)
+	h := NewHandler(fSvc, uSvc, nil, nil)
 	h.SetIDGen(idGen)
 	return h, userRepo, fRepo
 }

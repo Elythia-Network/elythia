@@ -24,9 +24,9 @@ func wireEmojiApplicationLookup(h *Handler, status string) {
 }
 
 func wireSignupApplicationLookup(h *Handler, status string) {
-	h.SetSignupApplicationLookup(func(string) (entity.SignupApplicationStatus, bool) {
+	h.signupApplicationLookup = func(string) (entity.SignupApplicationStatus, bool) {
 		return entity.SignupApplicationStatus{Status: status}, true
-	})
+	}
 }
 
 func seedEmojiApplicationReceived(t *testing.T, svc *notification.Service, notifieeID string) {
@@ -54,11 +54,11 @@ func seedSignupApplicationReceived(t *testing.T, svc *notification.Service, noti
 // 条件にならない (`HasRolePolicy` は root / 管理者しか短絡しない)。
 func TestShow_EmojiApplicationReceived_VisibleToPolicyHolder(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{
+	h.moderatorChecker = stubModeratorChecker{
 		policies: map[string]map[string]bool{
 			"emojimgr": {role.PolicyCanManageCustomEmojis: true},
 		},
-	})
+	}
 	wireEmojiApplicationLookup(h, "pending")
 	seedEmojiApplicationReceived(t, svc, "emojimgr")
 
@@ -76,7 +76,7 @@ func TestShow_EmojiApplicationReceived_VisibleToPolicyHolder(t *testing.T) {
 // 「届いたのに押せない」になる。
 func TestShow_EmojiApplicationReceived_HiddenFromPlainModerator(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireEmojiApplicationLookup(h, "pending")
 	seedEmojiApplicationReceived(t, svc, "mod1")
 
@@ -86,7 +86,7 @@ func TestShow_EmojiApplicationReceived_HiddenFromPlainModerator(t *testing.T) {
 // 管理者は policy を持たなくても通る (HasRolePolicy が短絡する)。
 func TestShow_EmojiApplicationReceived_VisibleToAdministrator(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{admins: map[string]bool{"admin1": true}})
+	h.moderatorChecker = stubModeratorChecker{admins: map[string]bool{"admin1": true}}
 	wireEmojiApplicationLookup(h, "pending")
 	seedEmojiApplicationReceived(t, svc, "admin1")
 
@@ -97,7 +97,7 @@ func TestShow_EmojiApplicationReceived_VisibleToAdministrator(t *testing.T) {
 // 作られるので、これが無いと元管理者が申請の存在を見続けられる。
 func TestShow_EmojiApplicationReceived_HiddenAfterLosingPolicy(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{})
+	h.moderatorChecker = stubModeratorChecker{}
 	wireEmojiApplicationLookup(h, "pending")
 	seedEmojiApplicationReceived(t, svc, "exmgr")
 
@@ -116,7 +116,7 @@ func TestShow_EmojiApplicationReceived_HiddenWhenCheckerUnwired(t *testing.T) {
 // lookup 未配線 / 申請が消えていたら通知ごと drop する。
 func TestShow_EmojiApplicationReceived_DroppedWhenApplicationGone(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{admins: map[string]bool{"admin1": true}})
+	h.moderatorChecker = stubModeratorChecker{admins: map[string]bool{"admin1": true}}
 	h.SetEmojiApplicationLookup(func(string) (entity.EmojiApplicationStatus, bool) {
 		return entity.EmojiApplicationStatus{}, false
 	})
@@ -129,7 +129,7 @@ func TestShow_EmojiApplicationReceived_DroppedWhenApplicationGone(t *testing.T) 
 
 func TestShow_SignupApplicationReceived_VisibleToModerator(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireSignupApplicationLookup(h, "pending")
 	seedSignupApplicationReceived(t, svc, "mod1")
 
@@ -148,11 +148,11 @@ func TestShow_SignupApplicationReceived_VisibleToModerator(t *testing.T) {
 // 絵文字管理者に見せると「届いたのに押せない」になる。
 func TestShow_SignupApplicationReceived_HiddenFromEmojiManager(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{
+	h.moderatorChecker = stubModeratorChecker{
 		policies: map[string]map[string]bool{
 			"emojimgr": {role.PolicyCanManageCustomEmojis: true},
 		},
-	})
+	}
 	wireSignupApplicationLookup(h, "pending")
 	seedSignupApplicationReceived(t, svc, "emojimgr")
 
@@ -162,7 +162,7 @@ func TestShow_SignupApplicationReceived_HiddenFromEmojiManager(t *testing.T) {
 // 処理済みかどうかが読み出し時に分かる (二重で当たらないため)。
 func TestShow_SignupApplicationReceived_ShowsCurrentStatus(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireSignupApplicationLookup(h, "approved")
 	seedSignupApplicationReceived(t, svc, "mod1")
 
@@ -175,7 +175,7 @@ func TestShow_SignupApplicationReceived_ShowsCurrentStatus(t *testing.T) {
 // surface しない (roleId / invitationId と同じ扱い)。
 func TestShow_ApplicationReceived_DoesNotSurfaceRawApplicationID(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireSignupApplicationLookup(h, "pending")
 	seedSignupApplicationReceived(t, svc, "mod1")
 
@@ -189,10 +189,10 @@ func TestShow_ApplicationReceived_DoesNotSurfaceRawApplicationID(t *testing.T) {
 // 見えると二重で当たる (絵文字側と同じ形)。
 func TestShow_SignupApplicationReceived_DroppedWhenApplicationGone(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
-	h.SetSignupApplicationLookup(func(string) (entity.SignupApplicationStatus, bool) {
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
+	h.signupApplicationLookup = func(string) (entity.SignupApplicationStatus, bool) {
 		return entity.SignupApplicationStatus{}, false
-	})
+	}
 	seedSignupApplicationReceived(t, svc, "mod1")
 
 	assert.Empty(t, listNotifications(t, h, "mod1"))
@@ -202,7 +202,7 @@ func TestShow_SignupApplicationReceived_DroppedWhenApplicationGone(t *testing.T)
 // 処理済みの申請に二重で当たる。
 func TestShow_SignupApplicationReceived_DroppedWhenLookupUnwired(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	seedSignupApplicationReceived(t, svc, "mod1")
 
 	assert.Empty(t, listNotifications(t, h, "mod1"))
@@ -213,7 +213,7 @@ func TestShow_SignupApplicationReceived_DroppedWhenLookupUnwired(t *testing.T) {
 // 一切現れなくなる。
 func TestShow_EmojiApplicationReceived_NotFilteredByMute(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{admins: map[string]bool{"admin1": true}})
+	h.moderatorChecker = stubModeratorChecker{admins: map[string]bool{"admin1": true}}
 	wireEmojiApplicationLookup(h, "pending")
 	userRepo := testutil.NewMockUserRepository()
 	mutingRepo := testutil.NewMockMutingRepository()
@@ -232,7 +232,7 @@ func TestShow_EmojiApplicationReceived_NotFilteredByMute(t *testing.T) {
 func TestShow_StaffFilterDoesNotDropOrdinaryNotifications(t *testing.T) {
 	h, svc := newTestHandler(t)
 	// 権限なし (= 運営向け通知は落ちる)。
-	h.SetModeratorChecker(stubModeratorChecker{})
+	h.moderatorChecker = stubModeratorChecker{}
 	wireSignupApplicationLookup(h, "pending")
 	seedSignupApplicationReceived(t, svc, "u1")
 

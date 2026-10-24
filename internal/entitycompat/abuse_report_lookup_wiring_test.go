@@ -10,17 +10,14 @@ import "testing"
 //
 // **配線先は 2 つある。** REST (i/notifications) と WebSocket の publisher で
 // 別々に pack するので、片方だけ配線すると「一覧には出るが realtime では
-// 出ない」という非対称になる。
+// 出ない」という非対称になる。REST の handler は lookup と未対応の件数を
+// 構築子の必須の引数で受けるので、ここでは見ない (#3817)。
 func TestAbuseReportLookupIsWired(t *testing.T) {
-	assertWired(t, serverPkg, "notificationsHandler.SetAbuseReportLookup(abuseNotifStates)",
-		"abuseReport 通知が一覧に出なくなる (fail-closed)。")
 	assertWired(t, serverPkg, "notificationPublisher.SetAbuseReportLookup(abuseNotifLookup)",
 		"abuseReport 通知が realtime (WebSocket) で出なくなる。\n"+
 			"一覧には出るので、片方だけ壊れていることに気付きにくい。")
 	// 未対応の件数 (#3200)。通知をまとめているので、これが無いと最初の通報が
 	// 対処済みになった時点で後続の通報に通知欄から気付けない。
-	assertWired(t, serverPkg, "notificationsHandler.SetAbuseReportUnresolvedCounter(abuseReportRepoForNotif.CountUnresolved)",
-		"通知一覧に未対応の件数が出ず、まとめた通知の後続を見落とす。")
 	// realtime 側は router の lookup の中で数える。取れなくても通知は落とさない
 	// 作りなので、この呼び出しを消しても他のテストは緑のまま件数だけが消える。
 	assertWired(t, serverPkg, "abuseReportRepoForNotif.CountUnresolved()",

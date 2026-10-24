@@ -22,7 +22,7 @@ func setListPacker(h *Handler, rel userrelation.Repos, mod userpack.ModeratorChe
 	p := userpack.New(nil, userpack.Lookups{Relations: rel, Moderators: mod}, idGen)
 	extras := &recordingManyExtras{}
 	p.SetDetailExtrasMany(extras)
-	h.SetListPacker(p)
+	h.packer = p
 	return extras
 }
 
@@ -43,13 +43,6 @@ func (r *recordingManyExtras) FillDetailedExtrasMany(_ context.Context, viewer *
 		t.Detailed.PinnedNoteIDs = []string{"pin-" + t.User.ID}
 	}
 	r.ids = append(r.ids, ids)
-}
-
-func TestHasListPacker(t *testing.T) {
-	h, _ := newHandler(t)
-	assert.False(t, h.HasListPacker())
-	setListPacker(h, userrelation.Repos{}, nil)
-	assert.True(t, h.HasListPacker())
 }
 
 // 本家 federation/users は packMany(users, me) なので、ピン留めと移行先を

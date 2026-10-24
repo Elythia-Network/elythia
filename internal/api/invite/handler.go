@@ -27,10 +27,9 @@ import (
 // ModeratorChecker reports whether a user holds a moderator (or administrator)
 // role. Delete uses it to reproduce upstream's moderator bypass (#2812).
 //
-// 未配線なら「モデレーターではない」に倒れる。**緩む側ではなく厳しい側**なので、
-// `recordCriticalWiring` (= 起動を止める配線検査) の対象にはしない。代わりに
-// `TestInviteModeratorCheckerIsWired` が router のソースを読んで固定する — 配線を
-// 消してもこのパッケージのテストは checker を自分で注入するので緑のまま通る。
+// 未配線なら「モデレーターではない」に倒れる。**緩む側ではなく厳しい側**。
+// NewHandler の必須の引数なので、組み立てで渡し忘れるとコンパイルが通らない
+// (#3817。以前は router のソースを読むテストで固定していた)。
 type ModeratorChecker interface {
 	IsModerator(userID string) bool
 }
@@ -47,23 +46,13 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // NewHandler returns a Handler wired with the given repository + id generator.
-func NewHandler(repo repository.RegistrationTicketRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
-}
-
-// SetRolePolicyProvider wires the policy provider used by Create / Limit.
-// Nil keeps the gate disabled (= test fixture / wire 未配線).
-func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
-	h.rolePolicyProvider = p
+// entityPacker is the Packer this Handler packs entities with (#3794).
+// rolePolicyProvider is the policy provider used by Create / Limit; nil keeps
+// the gate disabled. moderatorChecker is the moderator lookup used by Delete
+// (#2812); nil only disables the moderator bypass.
+func NewHandler(repo repository.RegistrationTicketRepository, idGen id.Generator, entityPacker *entity.Packer, rolePolicyProvider role.PolicyProvider, moderatorChecker ModeratorChecker) *Handler {
+	return &Handler{repo: repo, idGen: idGen, entityPacker: entityPacker, rolePolicyProvider: rolePolicyProvider, moderatorChecker: moderatorChecker}
 }
 
 // SetUserRepo wires the user repository used by List to pack the createdBy /
@@ -71,14 +60,6 @@ func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
 // (createdBy は middleware user から常に解決できる)。
 func (h *Handler) SetUserRepo(r repository.UserRepository) {
 	h.userRepo = r
-}
-
-// SetModeratorChecker wires the moderator lookup used by Delete (#2812).
-//
-// 未配線なら bypass が効かないだけ (= 作成者の未使用の招待しか消せない)。
-// **#2812 以前と同じではない** — あちらは作成者なら使用済みでも消せた。
-func (h *Handler) SetModeratorChecker(c ModeratorChecker) {
-	h.moderatorChecker = c
 }
 
 // Create implements POST /api/invite/create. Upstream Misskey TS
@@ -352,9 +333,3 @@ func generateInviteCode() string {
 	}
 	return string(b)
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと policy が空 map になり、招待の上限が無制限になる。起動時検査に
-// 使う (#2683)。
-func (h *Handler) HasRolePolicyProvider() bool { return h.rolePolicyProvider != nil }

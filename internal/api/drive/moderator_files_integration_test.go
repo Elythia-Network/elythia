@@ -115,7 +115,7 @@ func newModeratorFilesFixture(t *testing.T) *moderatorFilesFixture {
 	svc.SetStreamingPublisher(fx.pub)
 	svc.SetModerationLog(modLog, repository.NewUserRepository(db))
 	fx.svc = svc
-	fx.h = NewHandler(svc, idGen)
+	fx.h = NewHandler(svc, idGen, nil, nil, nil)
 	return fx
 }
 

@@ -34,29 +34,12 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetListPacker wires the packer of the users embedded in following/list and
-// following/requests/{list,sent} (#1912, #3330).
-func (h *Handler) SetListPacker(p userpack.ListPacker) {
-	h.packer = p
-}
-
-// HasListPacker reports whether the list packer was wired.
-//
-// 未配線だと following/list の followee に関係・ピン留め・移行先・instance・絵文字が
-// 載らず、following/requests/* の利用者に instance・絵文字が載らない。起動時検査に使う。
-func (h *Handler) HasListPacker() bool { return h.packer != nil }
-
 // NewHandler creates a new following Handler.
-func NewHandler(followingService *corefollowing.Service, userService *coreuser.Service) *Handler {
-	return &Handler{followingService: followingService, userService: userService}
+// entityPacker is the Packer this handler packs entities with (#3792); packer
+// packs the users of following/list and following/requests/{list,sent} (#1912,
+// #3330).
+func NewHandler(followingService *corefollowing.Service, userService *coreuser.Service, entityPacker *entity.Packer, packer userpack.ListPacker) *Handler {
+	return &Handler{followingService: followingService, userService: userService, entityPacker: entityPacker, packer: packer}
 }
 
 // SetIDGen wires an id.Generator so /api/following/list can derive Following.createdAt

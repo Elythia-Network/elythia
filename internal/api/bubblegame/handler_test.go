@@ -41,7 +41,7 @@ func (m *mockBubbleGameRepo) Ranking(gameMode string, _ int) ([]*model.BubbleGam
 func newTestHandler() (*Handler, *mockBubbleGameRepo) {
 	repo := &mockBubbleGameRepo{}
 	idGen, _ := id.NewGenerator("aidx")
-	return NewHandler(repo, idGen), repo
+	return NewHandler(repo, idGen, nil), repo
 }
 
 func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -283,7 +283,7 @@ func (f *failRankingRepo) Ranking(_ string, _ int) ([]*model.BubbleGameRecord, e
 
 func TestRanking_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failRankingRepo{&mockBubbleGameRepo{}}, idGen)
+	h := NewHandler(&failRankingRepo{&mockBubbleGameRepo{}}, idGen, nil)
 	rec := post(h.Ranking, `{"gameMode":"normal"}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "[]\n", rec.Body.String())

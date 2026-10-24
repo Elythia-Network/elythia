@@ -38,8 +38,7 @@ func TestUsers_ModeratorViewerGetsModeratorFields(t *testing.T) {
 	now := time.Now()
 	seedTagUser(t, "u_htu_mod1", "htumod1", []string{"modtag"}, nil, false, 42, now)
 	seedTagProfile(t, "u_htu_mod1", model.FollowingVisibilityPrivate, "watch this")
-	h := newHandler()
-	h.SetModeratorChecker(moderatorSet{"mod1": true})
+	h := newHandlerWith(nil, moderatorSet{"mod1": true}, nil)
 
 	decode := func(viewerID string) map[string]any {
 		t.Helper()
@@ -66,13 +65,6 @@ func TestUsers_ModeratorViewerGetsModeratorFields(t *testing.T) {
 		assert.NotContains(t, row, "twoFactorEnabled", "viewer=%q", viewer)
 		assert.Equal(t, float64(0), row["followersCount"], "viewer=%q", viewer)
 	}
-}
-
-func TestHandler_HasModeratorChecker(t *testing.T) {
-	h := newHandler()
-	assert.False(t, h.HasModeratorChecker())
-	h.SetModeratorChecker(moderatorSet{})
-	assert.True(t, h.HasModeratorChecker())
 }
 
 // countingDB returns a handle on testDB's connections that counts every
@@ -110,7 +102,7 @@ func TestUsers_QueriesDoNotScaleWithUsers(t *testing.T) {
 	}
 
 	db, n := countingDB(t)
-	h := hashtags.NewHandler(db)
+	h := hashtags.NewHandler(db, nil, nil, nil, nil)
 	gen, _ := id.NewGenerator("aidx")
 	h.SetIDGen(gen)
 	h.SetRelationRepos(userrelation.Repos{

@@ -34,14 +34,14 @@ func init() {
 }
 
 func newHandler() *gallery.Handler {
-	return gallery.NewHandler(testDB, testIDGen)
+	return gallery.NewHandler(testDB, testIDGen, nil)
 }
 
 func brokenHandler() *gallery.Handler {
 	db := testutil.MustOpenTestDB()
 	sqlDB, _ := db.DB()
 	_ = sqlDB.Close()
-	return gallery.NewHandler(db, testIDGen)
+	return gallery.NewHandler(db, testIDGen, nil)
 }
 
 // stubRanking is an in-memory GalleryRanking for #1548 tests. It records
@@ -85,7 +85,7 @@ func (s *stubModLog) Log(_ context.Context, moderatorID string, t moderationlog.
 }
 
 func newHandlerWithRanking(r gallery.GalleryRanking) *gallery.Handler {
-	h := gallery.NewHandler(testDB, testIDGen)
+	h := gallery.NewHandler(testDB, testIDGen, nil)
 	h.SetRanking(r)
 	return h
 }
@@ -94,7 +94,7 @@ func brokenHandlerWithRanking(r gallery.GalleryRanking) *gallery.Handler {
 	db := testutil.MustOpenTestDB()
 	sqlDB, _ := db.DB()
 	_ = sqlDB.Close()
-	h := gallery.NewHandler(db, testIDGen)
+	h := gallery.NewHandler(db, testIDGen, nil)
 	h.SetRanking(r)
 	return h
 }
