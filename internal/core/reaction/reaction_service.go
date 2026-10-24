@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/misc/reactionlegacy"
 	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
@@ -753,6 +754,13 @@ func (s *Service) applyReactionAcceptance(user *model.User, target *model.Note, 
 	if emoji == nil {
 		return reaction
 	}
+	// ローカル限定の絵文字は、投稿者 (renote なら renote 元の投稿者も) が
+	// リアクションした人と同じサーバーのときだけ使える。そうでなければ ❤
+	// (本家 ReactionService.create の canUseLocalOnlyEmoji)。他のサーバーへ
+	// 配送される投稿に、配らない絵文字を付けないため。
+	if emoji.LocalOnly && !canUseLocalOnlyEmoji(user, target) {
+		return FallbackReaction
+	}
 	// role-gated emoji: 使用可能 role を持たなければ ❤。
 	if len(emoji.RoleIDsThatCanBeUsedThisEmojiAsReaction) > 0 && !s.reactorHasAllowedRole(user.ID, emoji.RoleIDsThatCanBeUsedThisEmojiAsReaction) {
 		return FallbackReaction
@@ -766,6 +774,29 @@ func (s *Service) applyReactionAcceptance(user *model.User, target *model.Note, 
 		return FallbackReaction
 	}
 	return reaction
+}
+
+// canUseLocalOnlyEmoji reports whether the reacter may use a local-only emoji
+// on target: the note's author and, for a renote, the renoted note's author
+// must be on the reacter's host. Mirrors upstream
+// `note.userHost === reacterHost && (note.renoteUserHost == null || note.renoteUserHost === reacterHost)`.
+func canUseLocalOnlyEmoji(user *model.User, target *model.Note) bool {
+	if !sameHost(target.UserHost, user.Host) {
+		return false
+	}
+	return target.RenoteUserHost == nil || sameHost(target.RenoteUserHost, user.Host)
+}
+
+// sameHost compares two hosts the way upstream compares userHost columns with
+// toPunyNullable(user.host): nil (or empty) is this server, and remote hosts
+// are compared in their punycode form.
+func sameHost(a, b *string) bool {
+	aLocal := a == nil || *a == ""
+	bLocal := b == nil || *b == ""
+	if aLocal || bLocal {
+		return aLocal && bLocal
+	}
+	return idnhost.Puny(*a) == idnhost.Puny(*b)
 }
 
 // reactorHasAllowedRole reports whether the user holds any of the roles allowed
