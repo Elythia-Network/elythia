@@ -798,6 +798,8 @@ DB に繋ぎ直し、サーバーの中身 (キャッシュ・購読・ジョブ
 
 判定に使う設定 (`maintenance.maintenanceDb` / `maintenance.drainTimeout`) は [configuration.md](configuration.md#メンテナンスモード-maintenance) にある。
 
+各プロセスのログには、止めるときと作り直すときの段ごとの時間が出る (#3802)。入るときは`maintenance: drained`の`drain` (処理中のリクエストを待った時間)・`stopBackground`・`closeDB`、抜けるときは`maintenance: serving again`の`openDB`・`construct` (組み立て)・`startBackground`。作り直しに失敗したときの`maintenance: failed to build a new server generation; will retry`にも`openDB`・`construct`・`startBackground`が出る (走らなかった段は0)。起動したときの組み立ては`server generation built`に出る (メンテナンス中に起動したときは、抜けるときに組み立てるので`maintenance: serving again`に出る)。
+
 ### 入るときに起きること
 
 1. 新しいリクエストへの応答を、メンテナンスの応答に切り替える
