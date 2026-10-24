@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.0","ajv":"8.20.0","paramdefsSha256":"28ca396aabe160a581f4278f1a0711160caed335246c16dc38a63f362658583e","cases":27114}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"0b30bbc9d9e4b3fd6a5ab5b18cb3e3729bfc391c86726fe1d1c36a15e759c734","cases":27190}
 {"ep":"admin/abuse-report/notification-recipient/create"}
 {"in":{"isActive":false,"name":"hello","method":"email"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'isActive'"}
@@ -849,7 +849,7 @@
 {"in":{"id":"abc123","isSensitive":{"bad":1},"dayOfWeek":{"bad":1}},"ok":false,"path":"#/properties/dayOfWeek/type","msg":"must be integer"}
 {"in":{"isSensitive":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
 {"ep":"admin/announcements/create"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'title'"}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":[],"ok":false,"path":"#/type","msg":"must be object"}
@@ -857,72 +857,72 @@
 {"in":1,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":true,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","unknownProperty":1},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","unknownProperty":1,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","unknownProperty":1},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","unknownProperty":1,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"text":"hello","imageUrl":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'title'"}
 {"in":{"title":null,"text":"hello","imageUrl":"hello"},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"title":123,"text":"hello","imageUrl":"hello"},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"title":true,"text":"hello","imageUrl":"hello"},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"title":[],"text":"hello","imageUrl":"hello"},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"title":"","text":"hello","imageUrl":"hello"},"ok":false,"path":"#/properties/title/minLength","msg":"must NOT have fewer than 1 characters"}
-{"in":{"title":"a","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"a","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"😀","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"😀","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"x-y","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"x-y","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"a","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"a","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"😀","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"😀","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"x-y","text":"hello","imageUrl":"hello"},"ok":true,"out":{"title":"x-y","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","imageUrl":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'text'"}
 {"in":{"title":"hello","text":null,"imageUrl":"hello"},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
 {"in":{"title":"hello","text":123,"imageUrl":"hello"},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
 {"in":{"title":"hello","text":true,"imageUrl":"hello"},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
 {"in":{"title":"hello","text":[],"imageUrl":"hello"},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
 {"in":{"title":"hello","text":"","imageUrl":"hello"},"ok":false,"path":"#/properties/text/minLength","msg":"must NOT have fewer than 1 characters"}
-{"in":{"title":"hello","text":"a","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"a","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"😀","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"😀","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"x-y","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"x-y","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"a","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"a","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"😀","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"😀","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"x-y","imageUrl":"hello"},"ok":true,"out":{"title":"hello","text":"x-y","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'imageUrl'"}
-{"in":{"title":"hello","text":"hello","imageUrl":null},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":null,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":null},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":null,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":123},"ok":false,"path":"#/properties/imageUrl/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":true},"ok":false,"path":"#/properties/imageUrl/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":[]},"ok":false,"path":"#/properties/imageUrl/type","msg":"must be string"}
-{"in":{"title":"hello","text":"hello","imageUrl":""},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"x-y"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"x-y","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":""},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"x-y"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"x-y","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":null},"ok":false,"path":"#/properties/icon/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":123},"ok":false,"path":"#/properties/icon/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":true},"ok":false,"path":"#/properties/icon/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":[]},"ok":false,"path":"#/properties/icon/type","msg":"must be string"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"warning"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"warning","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"error"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"error","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"success"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"success","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"warning"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"warning","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"error"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"error","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"success"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","icon":"success","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":""},"ok":false,"path":"#/properties/icon/enum","msg":"must be equal to one of the allowed values"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","icon":"x-y"},"ok":false,"path":"#/properties/icon/enum","msg":"must be equal to one of the allowed values"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":null},"ok":false,"path":"#/properties/display/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":123},"ok":false,"path":"#/properties/display/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":true},"ok":false,"path":"#/properties/display/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":[]},"ok":false,"path":"#/properties/display/type","msg":"must be string"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"normal"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"normal","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"banner"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"banner","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"dialog"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"dialog","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"normal"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"normal","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"banner"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"banner","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"dialog"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","display":"dialog","icon":"info","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":""},"ok":false,"path":"#/properties/display/enum","msg":"must be equal to one of the allowed values"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","display":"x-y"},"ok":false,"path":"#/properties/display/enum","msg":"must be equal to one of the allowed values"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":null},"ok":false,"path":"#/properties/forExistingUsers/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":0},"ok":false,"path":"#/properties/forExistingUsers/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":"true"},"ok":false,"path":"#/properties/forExistingUsers/type","msg":"must be boolean"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":false,"icon":"info","display":"normal","silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","forExistingUsers":false,"icon":"info","display":"normal","silence":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","silence":null},"ok":false,"path":"#/properties/silence/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","silence":0},"ok":false,"path":"#/properties/silence/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","silence":"true"},"ok":false,"path":"#/properties/silence/type","msg":"must be boolean"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","silence":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","silence":false,"icon":"info","display":"normal","forExistingUsers":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","silence":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","silence":false,"icon":"info","display":"normal","forExistingUsers":false,"needConfirmationToRead":false,"userId":null,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":null},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":0},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":"true"},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":false,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"userId":null}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":null},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":null,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":false},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":false,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"userId":null,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":null},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":null,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"abc123"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"abc123","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"ABC"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"ABC","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false}}
-{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"0"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"0","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"abc123"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"abc123","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"ABC"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"ABC","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"autoArchiveAt":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"0"},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","userId":"0","icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"autoArchiveAt":null}}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
@@ -931,6 +931,16 @@
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":null},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":null,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":1.5},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":10.0},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":10,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":1e1},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":10,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":1e400},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":-0},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":0,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":"1"},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":true},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":-1},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":-1,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":1},"ok":true,"out":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":1,"icon":"info","display":"normal","forExistingUsers":false,"silence":false,"needConfirmationToRead":false,"userId":null}}
 {"in":{"title":{"bad":1},"text":{"bad":1},"imageUrl":"hello"},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"title":"hello","text":{"bad":1},"imageUrl":{"bad":1}},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
 {"in":{"title":"hello","text":"hello","imageUrl":{"bad":1},"icon":{"bad":1}},"ok":false,"path":"#/properties/imageUrl/type","msg":"must be string"}
@@ -944,7 +954,9 @@
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":{"bad":1},"silence":{"bad":1}},"ok":false,"path":"#/properties/silence/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","needConfirmationToRead":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
 {"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":{"bad":1},"needConfirmationToRead":{"bad":1}},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
-{"in":{"userId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'title'"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","userId":{"bad":1},"autoArchiveAt":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"title":"hello","text":"hello","imageUrl":"hello","autoArchiveAt":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"autoArchiveAt":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'title'"}
 {"ep":"admin/announcements/delete"}
 {"in":{"id":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
@@ -1176,6 +1188,16 @@
 {"in":{"id":"abc123","isActive":0},"ok":false,"path":"#/properties/isActive/type","msg":"must be boolean"}
 {"in":{"id":"abc123","isActive":"true"},"ok":false,"path":"#/properties/isActive/type","msg":"must be boolean"}
 {"in":{"id":"abc123","isActive":false},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":null},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":1.5},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"id":"abc123","autoArchiveAt":10.0},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":1e1},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":1e400},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"id":"abc123","autoArchiveAt":-0},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":"1"},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"id":"abc123","autoArchiveAt":true},"ok":false,"path":"#/properties/autoArchiveAt/type","msg":"must be integer"}
+{"in":{"id":"abc123","autoArchiveAt":-1},"ok":true}
+{"in":{"id":"abc123","autoArchiveAt":1},"ok":true}
 {"in":{"id":{"bad":1},"title":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
 {"in":{"id":"abc123","title":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
 {"in":{"id":"abc123","text":{"bad":1},"title":{"bad":1}},"ok":false,"path":"#/properties/title/type","msg":"must be string"}
@@ -1193,7 +1215,9 @@
 {"in":{"id":"abc123","needConfirmationToRead":{"bad":1},"silence":{"bad":1}},"ok":false,"path":"#/properties/silence/type","msg":"must be boolean"}
 {"in":{"id":"abc123","needConfirmationToRead":{"bad":1},"isActive":{"bad":1}},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
 {"in":{"id":"abc123","isActive":{"bad":1},"needConfirmationToRead":{"bad":1}},"ok":false,"path":"#/properties/needConfirmationToRead/type","msg":"must be boolean"}
-{"in":{"isActive":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
+{"in":{"id":"abc123","isActive":{"bad":1},"autoArchiveAt":{"bad":1}},"ok":false,"path":"#/properties/isActive/type","msg":"must be boolean"}
+{"in":{"id":"abc123","autoArchiveAt":{"bad":1},"isActive":{"bad":1}},"ok":false,"path":"#/properties/isActive/type","msg":"must be boolean"}
+{"in":{"autoArchiveAt":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
 {"ep":"admin/avatar-decorations/create"}
 {"in":{"name":"hello","description":"hello","url":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'name'"}
@@ -14145,6 +14169,10 @@
 {"in":{"tag":123},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
 {"in":{"tag":true},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
 {"in":{"tag":[]},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
 {"in":{"tag":""},"ok":true}
 {"in":{"tag":"x-y"},"ok":true}
 {"in":{"tag":{"bad":1}},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
@@ -14172,6 +14200,10 @@
 {"in":{"tag":123,"sort":"+follower"},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
 {"in":{"tag":true,"sort":"+follower"},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
 {"in":{"tag":[],"sort":"+follower"},"ok":false,"path":"#/properties/tag/type","msg":"must be string"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sort":"+follower"},"ok":true,"out":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sort":"+follower","limit":10,"offset":0,"state":"all","origin":"local"}}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sort":"+follower"},"ok":false,"path":"#/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀","sort":"+follower"},"ok":true,"out":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀","sort":"+follower","limit":10,"offset":0,"state":"all","origin":"local"}}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀","sort":"+follower"},"ok":false,"path":"#/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
 {"in":{"tag":"","sort":"+follower"},"ok":true,"out":{"tag":"","sort":"+follower","limit":10,"offset":0,"state":"all","origin":"local"}}
 {"in":{"tag":"x-y","sort":"+follower"},"ok":true,"out":{"tag":"x-y","sort":"+follower","limit":10,"offset":0,"state":"all","origin":"local"}}
 {"in":{"tag":"hello","sort":"+follower","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
@@ -16733,6 +16765,38 @@
 {"in":{"autoAcceptFollowed":0},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
 {"in":{"autoAcceptFollowed":"true"},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
 {"in":{"autoAcceptFollowed":false},"ok":true}
+{"in":{"followApprovalLocalSeconds":null},"ok":true}
+{"in":{"followApprovalLocalSeconds":1.5},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":10.0},"ok":true}
+{"in":{"followApprovalLocalSeconds":1e1},"ok":true}
+{"in":{"followApprovalLocalSeconds":1e400},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":-0},"ok":true}
+{"in":{"followApprovalLocalSeconds":"1"},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":true},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":0},"ok":true}
+{"in":{"followApprovalLocalSeconds":-1},"ok":false,"path":"#/properties/followApprovalLocalSeconds/minimum","msg":"must be >= 0"}
+{"in":{"followApprovalLocalSeconds":-0.5},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":0.0},"ok":true}
+{"in":{"followApprovalLocalSeconds":2592000},"ok":true}
+{"in":{"followApprovalLocalSeconds":2592001},"ok":false,"path":"#/properties/followApprovalLocalSeconds/maximum","msg":"must be <= 2592000"}
+{"in":{"followApprovalLocalSeconds":2592000.5},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalLocalSeconds":2592000e0},"ok":true}
+{"in":{"followApprovalRemoteSeconds":null},"ok":true}
+{"in":{"followApprovalRemoteSeconds":1.5},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":10.0},"ok":true}
+{"in":{"followApprovalRemoteSeconds":1e1},"ok":true}
+{"in":{"followApprovalRemoteSeconds":1e400},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":-0},"ok":true}
+{"in":{"followApprovalRemoteSeconds":"1"},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":true},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":0},"ok":true}
+{"in":{"followApprovalRemoteSeconds":-1},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/minimum","msg":"must be >= 0"}
+{"in":{"followApprovalRemoteSeconds":-0.5},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":0.0},"ok":true}
+{"in":{"followApprovalRemoteSeconds":2592000},"ok":true}
+{"in":{"followApprovalRemoteSeconds":2592001},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/maximum","msg":"must be <= 2592000"}
+{"in":{"followApprovalRemoteSeconds":2592000.5},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":2592000e0},"ok":true}
 {"in":{"noCrawle":null},"ok":false,"path":"#/properties/noCrawle/type","msg":"must be boolean"}
 {"in":{"noCrawle":0},"ok":false,"path":"#/properties/noCrawle/type","msg":"must be boolean"}
 {"in":{"noCrawle":"true"},"ok":false,"path":"#/properties/noCrawle/type","msg":"must be boolean"}
@@ -17772,8 +17836,12 @@
 {"in":{"carefulBot":{"bad":1},"publicReactions":{"bad":1}},"ok":false,"path":"#/properties/publicReactions/type","msg":"must be boolean"}
 {"in":{"carefulBot":{"bad":1},"autoAcceptFollowed":{"bad":1}},"ok":false,"path":"#/properties/carefulBot/type","msg":"must be boolean"}
 {"in":{"autoAcceptFollowed":{"bad":1},"carefulBot":{"bad":1}},"ok":false,"path":"#/properties/carefulBot/type","msg":"must be boolean"}
-{"in":{"autoAcceptFollowed":{"bad":1},"noCrawle":{"bad":1}},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
-{"in":{"noCrawle":{"bad":1},"autoAcceptFollowed":{"bad":1}},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
+{"in":{"autoAcceptFollowed":{"bad":1},"followApprovalLocalSeconds":{"bad":1}},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
+{"in":{"followApprovalLocalSeconds":{"bad":1},"autoAcceptFollowed":{"bad":1}},"ok":false,"path":"#/properties/autoAcceptFollowed/type","msg":"must be boolean"}
+{"in":{"followApprovalLocalSeconds":{"bad":1},"followApprovalRemoteSeconds":{"bad":1}},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":{"bad":1},"followApprovalLocalSeconds":{"bad":1}},"ok":false,"path":"#/properties/followApprovalLocalSeconds/type","msg":"must be integer"}
+{"in":{"followApprovalRemoteSeconds":{"bad":1},"noCrawle":{"bad":1}},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
+{"in":{"noCrawle":{"bad":1},"followApprovalRemoteSeconds":{"bad":1}},"ok":false,"path":"#/properties/followApprovalRemoteSeconds/type","msg":"must be integer"}
 {"in":{"noCrawle":{"bad":1},"preventAiLearning":{"bad":1}},"ok":false,"path":"#/properties/noCrawle/type","msg":"must be boolean"}
 {"in":{"preventAiLearning":{"bad":1},"noCrawle":{"bad":1}},"ok":false,"path":"#/properties/noCrawle/type","msg":"must be boolean"}
 {"in":{"preventAiLearning":{"bad":1},"requireSigninToViewContents":{"bad":1}},"ok":false,"path":"#/properties/preventAiLearning/type","msg":"must be boolean"}
@@ -21184,6 +21252,10 @@
 {"in":{"tag":123},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/type","msg":"must be string"}
 {"in":{"tag":true},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/type","msg":"must be string"}
 {"in":{"tag":[]},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/type","msg":"must be string"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true,"out":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true,"out":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀","reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
+{"in":{"tag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/maxLength","msg":"must NOT have more than 128 characters"}
 {"in":{"tag":""},"ok":false,"path":"#/allOf/0/anyOf/0/properties/tag/minLength","msg":"must NOT have fewer than 1 characters"}
 {"in":{"tag":"a"},"ok":true,"out":{"tag":"a","reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
 {"in":{"tag":"😀"},"ok":true,"out":{"tag":"😀","reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
@@ -21212,6 +21284,10 @@
 {"in":{"query":[[123]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
 {"in":{"query":[[true]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
 {"in":{"query":[[[]]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
+{"in":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]]},"ok":true,"out":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]],"reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
+{"in":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
+{"in":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"]]},"ok":true,"out":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"]],"reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
+{"in":{"query":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
 {"in":{"query":[[""]]},"ok":false,"path":"#/allOf/0/anyOf/0/required","msg":"must have required property 'tag'"}
 {"in":{"query":[["a"]]},"ok":true,"out":{"query":[["a"]],"reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}
 {"in":{"query":[["😀"]]},"ok":true,"out":{"query":[["😀"]],"reply":null,"renote":null,"withFiles":false,"poll":null,"limit":10}}

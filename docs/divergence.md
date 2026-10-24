@@ -2,13 +2,13 @@
 
 Elythia が持つ「純正 Misskey (misskey-dev/misskey) には無い、または挙動が異なる」ものをまとめたリファレンスの目次。差分そのものは、領域ごとに [`docs/divergence/`](#領域ごとの差分) のファイルへ分けてある (#3414)。
 
-- 基準: **Elythia 2.0.0** ⇔ Misskey TS `2026.10.0`
+- 基準: **Elythia 2.0.0** ⇔ Misskey TS `2026.10.1`
 - 最終更新: 2026-10-07 (領域ごとのファイルへの分割、#3414)
 
 > ベースラインを固定したのは 1.0.0 (= Misskey TS `2026.7.0` 追従完了時点)。1.1.x は
 > upstream を追従したのではなく、**Elythia 側の独自変更と互換性 fix** を積んだもので、比較対象の
 > Misskey TS は 1.0.0 時点と同じ `2026.7.0` のままだった。**2026.9.0 への追従 (#2877) で
-> ベースラインを `2026.9.0` へ更新し、2026.9.1 への追従 (#3176) で `2026.9.1`、2026.10.0 への追従 (#3285) で `2026.10.0` へ上げた。**
+> ベースラインを `2026.9.0` へ更新し、2026.9.1 への追従 (#3176) で `2026.9.1`、2026.10.0 への追従 (#3285) で `2026.10.0`、2026.10.1 への追従 (#3809) で `2026.10.1` へ上げた。**
 > 個々の記述はまだ 2026.7.0 時点の観察に基づくものが
 > 混じりうるので、乖離を判断するときは対象の実装を現 pin (`2026.10.0-mk.5`) で確認すること。
 
@@ -35,7 +35,7 @@ Elythia は Misskey TS からの drop-in 移行 (Misskey TS の DB / Redis を�
 | API endpoint | GET variant 25 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 10 + フォローの止め方 1 + DB のバックアップ 11 | chat 15 | **0** |
 | API レスポンスの additive field | 10 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength` / `managedByPlugin` / `has<秘密の欄>` (`admin/meta` の 11 欄と `admin/captcha/current` の `hasSecretKey` を 1 つと数える。[security.md §7](divergence/security.md#7-意図的な安全側-divergence))) | reversi packed game の `crc32` 等 | — |
 | DB テーブル | 21 (+ bookkeeping 2) | 0 | 0 |
-| DB カラム | 30 (+ 未使用の残存列 3) | 3 | 0 |
+| DB カラム | 27 (+ 未使用の残存列 3) | 3 | 0 |
 | ActivityPub | Ed25519 / RemoteStatsFetcher ほか | reversi 連合 / chat 連合 | — |
 | config キー | 20 前後 | 0 | — |
 | fork frontend の独自変更 | 143 tag (`2026.7.0-mk.0` ～ `2026.10.0-mk.5`) | — | — |

@@ -93,19 +93,19 @@ jobs:
         include:
           - name: swap-test
             make: dropin-swap-test
-            image: misskey/misskey:2026.10.0
+            image: misskey/misskey:2026.10.1
             compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml -f tests/dropin/compose.fedibird.yml
           - name: elythia-born
             make: dropin-elythia-born-test
-            image: misskey/misskey:2026.10.0
+            image: misskey/misskey:2026.10.1
             compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml
           - name: ed25519-verify
             make: dropin-fedibird-test
-            image: misskey/misskey:2026.10.0
+            image: misskey/misskey:2026.10.1
             compose: -f tests/dropin/compose.yml -f tests/dropin/compose.mk.yml -f tests/dropin/compose.fedibird.yml
           - name: federation
             make: federation-misskey-e2e
-            image: misskey/misskey:2026.10.0
+            image: misskey/misskey:2026.10.1
             compose: -f tests/federation/compose.misskey.yml
           - name: federation-mastodon
             make: federation-mastodon-e2e

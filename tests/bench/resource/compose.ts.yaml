@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: misskey/misskey:2026.10.0
+    image: misskey/misskey:2026.10.1
     depends_on:
       db:
         condition: service_healthy

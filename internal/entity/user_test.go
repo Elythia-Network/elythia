@@ -790,7 +790,7 @@ func TestMeDetailed_EmitsAvatarIDKey(t *testing.T) {
 
 // #968: PackMeDetailed が User / UserProfile から self-view-only field を
 // 全て transfer することを確認する。i/update の response はフロントの
-// updateCurrentAccountPartial にそのまま流れ込むので、欠損すると session
+// updateCurrentAccount にそのまま流れ込むので、欠損すると session
 // state が stale なまま残る。
 func TestPackMeDetailed_TransfersSelfViewFields(t *testing.T) {
 	u := &model.User{
@@ -970,7 +970,7 @@ func TestPackMeDetailed_ProfileDerivedHighFields(t *testing.T) {
 }
 
 // #1240: PackMeDetailed 単体 (policies override 無し) は policies を **出さない**
-// こと。i/update / meUpdated はこれを直接 frontend の updateCurrentAccountPartial
+// こと。i/update / meUpdated はこれを直接 frontend の updateCurrentAccount
 // に流すため、`policies:null` を出すと `$i.policies` を null 上書きして policy
 // 判定が壊れる。omitempty で省略されることを保証する。
 func TestPackMeDetailed_OmitsPoliciesWhenUnset(t *testing.T) {
@@ -983,7 +983,7 @@ func TestPackMeDetailed_OmitsPoliciesWhenUnset(t *testing.T) {
 }
 
 // #968: serialized JSON が drop-in 互換 key 名 (isExplorable / noCrawle 等)
-// を出すこと。フロントの updateCurrentAccountPartial が key 名で merge
+// を出すこと。フロントの updateCurrentAccount が key 名で merge
 // するので、key drift があると session には反映されない。
 func TestPackMeDetailed_SerializedJSON(t *testing.T) {
 	u := &model.User{
