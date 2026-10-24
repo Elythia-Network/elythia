@@ -27,7 +27,7 @@ import { mainRouter } from '@/router.js';
 import { makeHotkey } from '@/utility/hotkey.js';
 import { addCustomEmoji, removeCustomEmojis, updateCustomEmojis } from '@/custom-emojis.js';
 import { prefer } from '@/preferences.js';
-import { updateCurrentAccountPartial } from '@/accounts.js';
+import { updateCurrentAccount } from '@/accounts.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { unisonReload } from '@/utility/unison-reload.js';
 import { isBirthday } from '@/utility/is-birthday.js';
@@ -397,7 +397,7 @@ export async function mainBoot() {
 					const me = await misskeyApi('i');
 					// 飛行中に差分イベントが来ていたら、そちらのほうが新しい。
 					if (generation !== unreadCountGeneration) return;
-					updateCurrentAccountPartial({
+					updateCurrentAccount({
 						hasUnreadNotification: me.hasUnreadNotification,
 						unreadNotificationsCount: me.unreadNotificationsCount,
 					});
@@ -444,13 +444,13 @@ export async function mainBoot() {
 				// 捨てられたうえで誰も正しい値を書かないので、バッジが stale の
 				// まま次の再接続まで残る = 直しに来た症状そのものになる。
 				if ('unreadNotificationsCount' in i) unreadCountGeneration++;
-				updateCurrentAccountPartial(i);
+				updateCurrentAccount(i);
 			});
 
 			// generation は飛行中の resync が古いスナップショットで上書きするのを防ぐ。
 			main.on('readAllNotifications', () => {
 				unreadCountGeneration++;
-				updateCurrentAccountPartial({
+				updateCurrentAccount({
 					hasUnreadNotification: false,
 					unreadNotificationsCount: 0,
 				});
@@ -459,19 +459,19 @@ export async function mainBoot() {
 			main.on('unreadNotification', () => {
 				unreadCountGeneration++;
 				const unreadNotificationsCount = ($i?.unreadNotificationsCount ?? 0) + 1;
-				updateCurrentAccountPartial({
+				updateCurrentAccount({
 					hasUnreadNotification: true,
 					unreadNotificationsCount,
 				});
 			});
 
 			main.on('newChatMessage', () => {
-				updateCurrentAccountPartial({ hasUnreadChatMessages: true });
+				updateCurrentAccount({ hasUnreadChatMessages: true });
 				sound.playMisskeySfx('chatMessage');
 			});
 
 			main.on('readAllAnnouncements', () => {
-				updateCurrentAccountPartial({ hasUnreadAnnouncement: false });
+				updateCurrentAccount({ hasUnreadAnnouncement: false });
 			});
 
 			// 個人宛てお知らせが発行されたとき

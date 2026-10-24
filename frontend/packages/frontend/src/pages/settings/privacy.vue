@@ -264,7 +264,7 @@ import { misskeyApi } from '@/utility/misskey-api.js';
 import { i18n } from '@/i18n.js';
 import { instance } from '@/instance.js';
 import { ensureSignin } from '@/i.js';
-import { updateCurrentAccountPartial } from '@/accounts.js';
+import { updateCurrentAccount } from '@/accounts.js';
 import { definePage } from '@/page.js';
 import FormSlot from '@/components/form/slot.vue';
 import { formatDateTimeString } from '@/utility/format-time-string.js';
@@ -278,11 +278,12 @@ import MkInfo from '@/components/MkInfo.vue';
 import MkFeatureBanner from '@/components/MkFeatureBanner.vue';
 
 const $i = ensureSignin();
-// 期間の設定 (本家 PR 17998) は、この版の misskey-js にまだ無い。止め方は Elythia 独自 (#3466)。
+// 止め方 (followApprovalAction) は Elythia 独自 (#3466) なので、misskey-js の型には無い。
 const $iFollowApproval = $i as Elythia.MeDetailed;
 
 const isLocked = ref($i.isLocked);
 const autoAcceptFollowed = ref($i.autoAcceptFollowed);
+
 const noCrawle = ref($i.noCrawle);
 const preventAiLearning = ref($i.preventAiLearning);
 const isExplorable = ref($i.isExplorable);
@@ -405,7 +406,7 @@ function saveFollowApproval(setting: FollowApprovalSetting) {
 	const request = setting.key === 'followApprovalLocalSeconds'
 		? misskeyApi('i/update', { followApprovalLocalSeconds: value })
 		: misskeyApi('i/update', { followApprovalRemoteSeconds: value });
-	request.then(() => updateCurrentAccountPartial(patch), alertSaveError);
+	request.then(() => updateCurrentAccount(patch), alertSaveError);
 }
 
 const {
@@ -423,7 +424,7 @@ const {
 function saveFollowApprovalAction() {
 	const action = followApprovalAction.value;
 	const patch: Partial<Elythia.MeDetailed> = { followApprovalAction: action };
-	misskeyApi('i/update', { followApprovalAction: action }).then(() => updateCurrentAccountPartial(patch), alertSaveError);
+	misskeyApi('i/update', { followApprovalAction: action }).then(() => updateCurrentAccount(patch), alertSaveError);
 }
 
 const makeNotesFollowersOnlyBefore_type = computed({

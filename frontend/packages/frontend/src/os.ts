@@ -90,7 +90,7 @@ export const apiWithDialog = (<
 			// 伏せ字のまま保存しようとした (admin/update-meta・admin/captcha/save)。
 			title = i18n.ts.secretReentryRequired;
 			text = i18n.ts.secretReentryRequiredDescription;
-		} else if (err.code.startsWith('TOO_MANY')) { // TODO: バックエンドに kind: client/contentsLimitExceeded みたいな感じで送るように統一してもらってそれで判定する
+		} else if (err.code.startsWith('TOO_MANY')) {
 			title = i18n.ts.youCannotCreateAnymore;
 			text = `${i18n.ts.error}: ${err.id}`;
 		} else if (err.message.startsWith('Unexpected token')) {

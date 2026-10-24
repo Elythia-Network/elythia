@@ -33,7 +33,7 @@ const CSPReportPath = "/csp-report"
 // frontendShikiVersion is the shiki version the frontend loads from esm.sh. It
 // must equal `dependencies.shiki` of frontend/packages/frontend and
 // frontend-embed (checked by TestFrontendCSP_EsmShSourcesMatchFrontend).
-const frontendShikiVersion = "4.4.3"
+const frontendShikiVersion = "4.5.0"
 
 // esmShSources are the esm.sh path prefixes the frontend actually loads.
 //

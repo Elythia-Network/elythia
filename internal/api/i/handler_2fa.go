@@ -591,7 +591,7 @@ func (h *Handler) PublishMeUpdated(userID string) { h.publishMeUpdated(userID) }
 // 失敗は best-effort で握り潰す (publishing は副次的なので main flow を
 // 止めない)。userService.ShowByID で User + Profile を 1 度に取得する。
 //
-// frontend (main-boot.ts) は payload を updateCurrentAccountPartial で
+// frontend (main-boot.ts) は payload を updateCurrentAccount で
 // 部分 merge するので、本 helper が送る MeDetailed の field がそのまま
 // `$i` に反映される。upstream Misskey TS の meUpdated stream は
 // MeDetailed shape を流すため、(*entity.Packer).PackMeDetailed で isExplorable /
@@ -609,14 +609,14 @@ func (h *Handler) publishMeUpdated(userID string) {
 		return
 	}
 	// 生 PackMeDetailed だと unread 系が default (0/[]/false) で出て、frontend の
-	// updateCurrentAccountPartial が `$i` の実 unread 状態を clobber する。
+	// updateCurrentAccount が `$i` の実 unread 状態を clobber する。
 	// meDetailedWithUnread で fillUnreadFields を通して実値を送る (#1258 fu)。
 	packed := h.meDetailedWithUnread(context.Background(), bundle.User, bundle.Profile)
 	h.mainStreamPublisher.PublishMainEvent(userID, "meUpdated", packed)
 }
 
 // publishMeUpdatedPartial は specific field のみを `meUpdated` payload と
-// して送る。frontend は updateCurrentAccountPartial で部分 merge する
+// して送る。frontend は updateCurrentAccount で部分 merge する
 // ので、(*entity.Packer).PackUserDetailed が含まない private profile field を
 // 更新した endpoint がこの helper で当該 field だけ publish できる
 // (#758)。fields が空 / mainStreamPublisher 未配線なら no-op。

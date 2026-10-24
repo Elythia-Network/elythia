@@ -1316,7 +1316,7 @@ func jsonbArray(raw []byte) any {
 //
 // PackMeDetailed は role を知らないので、これらは handler 層で埋める必要がある。
 // /api/i と /api/i/update の両方が同じ値を返さないと、フロントの
-// updateCurrentAccountPartial が `$i` に部分マージしたときに policies が
+// updateCurrentAccount が `$i` に部分マージしたときに policies が
 // 消えてしまう。
 func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies map[string]any, roles []any) {
 	policies = role.DefaultPolicies()
@@ -1363,7 +1363,7 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 // (i/update, meUpdated) and enriches it with authoritative unread values via
 // fillUnreadFields. Raw PackMeDetailed would emit the struct defaults
 // (unreadNotificationsCount:0 / unreadAnnouncements:[] / hasUnread*:false),
-// which the frontend's updateCurrentAccountPartial would merge into `$i`,
+// which the frontend's updateCurrentAccount would merge into `$i`,
 // clobbering the real badge/unread state. Going through fillUnreadFields keeps
 // those fields correct on every path (the same shape /api/i returns).
 func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profile *model.UserProfile) map[string]any {
@@ -1374,7 +1374,7 @@ func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profi
 	h.fillUnreadFields(ctx, u, resp)
 	// policies / roles はここでは足さない。この helper は meUpdated
 	// (ストリーミングの部分更新) でも使われ、そこに policies を混ぜると
-	// frontend の updateCurrentAccountPartial が `$i.policies` を空で clobber
+	// frontend の updateCurrentAccount が `$i.policies` を空で clobber
 	// する (#1240 の不変条件、handler_webauthn_test.go が回帰ガード)。
 	// API 応答である i/update 側は handler で明示的に足す。
 	return resp
@@ -2124,7 +2124,7 @@ func (h *Handler) Update(c echo.Context) error {
 
 	// upstream Misskey TS UserEntityService.ts:590-630 の MeDetailed shape を
 	// drop-in 互換で返す。i/update のレスポンスはフロントの
-	// updateCurrentAccountPartial にそのまま流し込まれるため、isExplorable /
+	// updateCurrentAccount にそのまま流し込まれるため、isExplorable /
 	// noCrawle / preventAiLearning など self-view-only field が UserDetailed
 	// 側に無いと session の `$i` が更新されず stale なまま残る (#968)。
 	// unread 系は meDetailedWithUnread で実値を埋める。生 PackMeDetailed だと
@@ -2136,7 +2136,7 @@ func (h *Handler) Update(c echo.Context) error {
 	//
 	// policies / roles も同じ理由で埋める。upstream i/update は MeDetailed を
 	// そのまま返すので両 field を含むが、mk-go は落としていた。フロントは
-	// i/update の応答を updateCurrentAccountPartial で `$i` にマージするため、
+	// i/update の応答を updateCurrentAccount で `$i` にマージするため、
 	// 欠けているとプロフィール更新のたびに role 由来の権限が消える。
 	// meUpdated (ストリーミング) は逆に policies を含めてはならないので
 	// (#1240)、共通 helper ではなくこの API 応答側だけで足す。

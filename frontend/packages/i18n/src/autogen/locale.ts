@@ -657,6 +657,10 @@ export interface Locale extends ILocale {
      */
     "selectAntenna": string;
     /**
+     * クリップを選択
+     */
+    "selectClip": string;
+    /**
      * アンテナを編集
      */
     "editAntenna": string;
@@ -5297,6 +5301,15 @@ export interface Locale extends ILocale {
      */
     "keepOriginalFilenameDescription": string;
     /**
+     * センシティブなメディアは選択できません
+     */
+    "cannotSelectSensitiveMedia": string;
+    /**
+     * 自分でセンシティブ設定を行っていないのにこのエラーが出ている場合、自動判定によりセンシティブなメディアとされている可能性があります。
+     * サーバーの規則に照らして不要な場合は、ファイルのセンシティブ設定を解除してもう一度お試しください。
+     */
+    "cannotSelectSensitiveMediaDescription": string;
+    /**
      * 説明文はありません
      */
     "noDescription": string;
@@ -6840,6 +6853,18 @@ export interface Locale extends ILocale {
          * 有効にすると、このお知らせを既読にする際に確認ダイアログが表示されます。また、一括既読操作の対象になりません。
          */
         "needConfirmationToReadDescription": string;
+        /**
+         * 自動アーカイブ日時
+         */
+        "autoArchiveAt": string;
+        /**
+         * 指定した日時を過ぎると、このお知らせは自動的にアーカイブされます。空欄の場合は自動的にアーカイブされません。
+         */
+        "autoArchiveAtDescription": string;
+        /**
+         * 自動アーカイブ日時には現在より後の日時を指定してください。
+         */
+        "autoArchiveAtMustBeInFuture": string;
         /**
          * お知らせを終了
          */
@@ -12756,6 +12781,10 @@ export interface Locale extends ILocale {
              * チャンネル
              */
             "channel": string;
+            /**
+             * クリップ
+             */
+            "clip": string;
             /**
              * メンション
              */

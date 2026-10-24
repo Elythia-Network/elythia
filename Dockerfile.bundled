@@ -69,7 +69,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # **Node の版は frontend/.node-version と揃える。** 揃っていることを
 # internal/entitycompat の bundled_node_version_test が見る。tag だけでは中身が
 # 固定されないので digest を併記する。
-FROM --platform=$BUILDPLATFORM node:26.4.0-trixie@sha256:b46a10d964ad15136ebdf9012142131481caa0697d7a4d4eafe4bbabd818f876 AS frontend
+FROM --platform=$BUILDPLATFORM node:26.12.1-trixie@sha256:a98e6fda54fdbb22d4238054cca9a2a113bcd1191c09193a535aae22f400aa8e AS frontend
 
 # frontend / sw / i18n / misskey-js など 7 パッケージが NODE_ENV を見ており、
 # production でないと minify されず _DEV_ フラグも立つ。
@@ -83,13 +83,14 @@ WORKDIR /work/frontend
 # pnpm は package.json の packageManager から入れる (Node 26 には corepack が
 # 同梱されていない)。`pnpm fetch` は lock だけで依存を取得し、node_modules/.pnpm まで
 # 作る (依存の postinstall もここで走る)。ソースより先に行って、ソースの変更で
-# 取り直さないようにする。
+# 取り直さないようにする。lock しか読まないので、pnpm 12 は `--frozen-lockfile` を
+# 受けず、渡すと落ちる。
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 # 依存にあてるパッチ (pnpm-workspace.yaml の patchedDependencies)。fetch の時点で無いと
 # ERR_PNPM_PATCH_NOT_FOUND で落ちる。
 COPY frontend/patches/ ./patches/
 RUN node -e "console.log(JSON.parse(require('node:fs').readFileSync('./package.json')).packageManager)" | xargs npm install -g
-RUN --mount=type=cache,target=/pnpm-store pnpm fetch --frozen-lockfile
+RUN --mount=type=cache,target=/pnpm-store pnpm fetch
 
 # build context はホストの frontend/built を含む (.dockerignore は UDS 構成と連合 e2e の
 # ために残している) ので、持ち込んだ古い成果物を下で消してから作る。
