@@ -66,7 +66,7 @@ func TestListEndpoints_ResolveInstanceAndEmojis(t *testing.T) {
 			b := pinUser(userRepo, "bob")
 			meta := testutil.NewMockMetaRepository()
 			meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@alice@remote.example"}}
-			h.SetMetaRepo(meta)
+			h.metaRepo = meta
 			fRepo := h.followingRepo.(*testutil.MockFollowingRepository)
 			require.NoError(t, fRepo.Create(&model.Following{ID: "f1", FollowerID: a.ID, FolloweeID: b.ID}))
 			require.NoError(t, fRepo.Create(&model.Following{ID: "f2", FollowerID: b.ID, FolloweeID: a.ID}))

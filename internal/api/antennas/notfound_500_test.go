@@ -33,7 +33,7 @@ func TestAntennaShow_DBFailureIsNot4xx(t *testing.T) {
 	svc := coreantenna.NewService(
 		&dbFailingAntennaRepo{MockAntennaRepository: testutil.NewMockAntennaRepository(), err: dbErr},
 		testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // clips/notes の匿名 visitor への ugcVisibilityForVisitor gate。upstream
@@ -32,7 +31,7 @@ func TestNotes_UGCVisibilityForVisitor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h, repo, clipNoteRepo, notes := newHandler(t)
-			h.SetUGCVisibilityLookup(func() string { return tc.policy })
+			h.ugcVisibilityFn = func() string { return tc.policy }
 			repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice", IsPublic: true}
 			host := "remote.example"
 			clipNoteRepo.Entries["cn_loc"] = &model.ClipNote{ID: "cn_loc", ClipID: "c1", NoteID: "n_loc"}
@@ -62,24 +61,10 @@ func TestNotes_UGCVisibilityForVisitor(t *testing.T) {
 // 空配列ではなくエラーになる。
 func TestNotes_UGCVisibilityNoneKeepsNoSuchClip(t *testing.T) {
 	h, repo, _, _ := newHandler(t)
-	h.SetUGCVisibilityLookup(func() string { return "none" })
+	h.ugcVisibilityFn = func() string { return "none" }
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice", IsPublic: false}
 	c, rec := newReq(t, `{"clipId":"c1"}`)
 	require.NoError(t, h.Notes(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_CLIP")
-}
-
-// 起動時の配線検査が見る述語。他の述語と取り違えていないことも見る。
-func TestHandler_HasUGCVisibility(t *testing.T) {
-	assert.False(t, (&Handler{}).HasUGCVisibility(), "未配線なら false")
-
-	h := &Handler{}
-	h.SetUGCVisibilityLookup(func() string { return "local" })
-	assert.True(t, h.HasUGCVisibility(), "配線したら true")
-	assert.False(t, h.HasMetaRepo(), "他の述語は満たされないこと")
-
-	other := &Handler{}
-	other.SetMetaRepo(testutil.NewMockMetaRepository())
-	assert.False(t, other.HasUGCVisibility())
 }

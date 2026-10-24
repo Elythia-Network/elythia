@@ -70,13 +70,11 @@ func dbFollowersHandler(t *testing.T, db *gorm.DB) *Handler {
 	fRepo := repository.NewFollowingRepository(db)
 	frRepo := repository.NewFollowRequestRepository(db)
 	h := NewHandler(coreuser.NewService(userRepo, noteRepo, pinRepo, idGen),
-		corefollowing.NewService(userRepo, fRepo, frRepo, idGen), noteRepo, idGen)
+		corefollowing.NewService(userRepo, fRepo, frRepo, idGen), noteRepo, idGen, nil, nil, nil, nil, nil, nil, repository.NewMutingRepository(db), repository.NewBlockingRepository(db), nil)
 	h.SetUserRepo(userRepo)
 	h.SetPiningRepo(pinRepo)
 	h.SetFollowingRepo(fRepo)
 	h.SetFollowRequestRepo(frRepo)
-	h.SetBlockingRepo(repository.NewBlockingRepository(db))
-	h.SetMutingRepo(repository.NewMutingRepository(db))
 	h.SetRenoteMutingRepo(repository.NewRenoteMutingRepository(db))
 	h.SetMemoRepo(repository.NewUserMemoRepository(db))
 	h.SetPageRepo(repository.NewPageRepository(db))
@@ -372,8 +370,8 @@ func TestFollowers_RemoteStatsOverrideRegatesFollowersOnly(t *testing.T) {
 	t.Setenv("FORCE_FOLLOW_REMOTE_USER_FOR_TESTING", "true")
 	h, repo := newTestHandler(t)
 	addTestUser(repo)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
-	h.SetMutingRepo(testutil.NewMockMutingRepository())
+	h.blockingRepo = testutil.NewMockBlockingRepository()
+	h.mutingRepo = testutil.NewMockMutingRepository()
 	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
 	host := "remote.example"
 	repo.Users["remote-yui"] = &model.User{ID: "remote-yui", Username: "yui", UsernameLower: "yui", Host: &host,

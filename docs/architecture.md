@@ -1181,13 +1181,20 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   (webhooks・notifications・gallery・mute・renote-mute・federation・flash・following・user-lists・
   bubble-game・invite・blocking・auth・hashtags・pages・drive)で、表の34行と、wiring-checkが照合して
   いたnotificationsとinviteのsetter 5本(通報と申請の受付の通知のlookup・未対応の件数・権限の
-  再確認、inviteのモデレーターの判定)。表にもwiring-checkにも載っていないsetter
-  (`blockingHandler.SetModeratorChecker`など)は、setterのまま元の位置に残した
+  再確認、inviteのモデレーターの判定)。2段目は投稿を返すhandlerの6個(users・channels・
+  antennas・clips・roles・ap)で、表の30行と、wiring-checkが照合していた
+  `usersHandler.SetUserRelationReader`。表にもwiring-checkにも載っていないsetter
+  (`blockingHandler.SetModeratorChecker`・`rolesHandler.SetMuteBlockRepos`など)は、setterのまま
+  元の位置に残した
 - **`buildHandlers()`は、置き換えに要る値を引数で受ける。** `setupRoutes()`の局所変数の
   `noteHider`・`entityPacker`・`sharedUserPacker`・`metaRepo`・`abuseNotifStates`・
   `signupApplicationNotifLookup`と、`abuseReportRepoForNotif.CountUnresolved`。どれも
   `buildHandlers()`を呼ぶ位置より前で作ってあるので、呼ぶ位置は変えていない。`Server`の
-  フィールドは`s.db`・`s.config`・`s.echo`に加えて`s.background`も読むようになった。`CountUnresolved`などのmethod valueを
+  フィールドは`s.db`・`s.config`・`s.echo`に加えて`s.background`も読むようになった。repository (`muting`・`blocking`・
+  `channelMuting`・`userRelation`) は`w.repos`から、apの`inboxSoftwareChecker`は`fedSvcs`から
+  受ける。ugcVisibilityForVisitorの毎回読むlookup (`func() string { return
+  metaUGCVisibility(metaRepo) }`) は、users・channels・clipsのそれぞれに、元のsetterと同じ式で
+  作って渡す。`CountUnresolved`などのmethod valueを
   `buildHandlers()`の中で`w.repos`から作らないのは、ゼロ値の`wiring`で組み立てる
   `TestBuildHandlersFillsEveryField`が、nilのinterfaceからmethod valueを作るところでpanicするため
 - **置き換えたsetterと、起動時の検査に使っていた`Has…`は消した。** 構築子は引数を構造体に入れる
@@ -1198,13 +1205,16 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   handlerが持つことを確かめる
 - **nilを渡す形は、組み立てたサーバーで見る。** `TestBuiltHandlersHaveNoNilDependencies`は
   `New`でサーバーを組み立て(test mode・`MK_ONLY_SERVER`)、`buildHandlers()`が作ったhandlerの
-  うち`requiredDepHandlers`に並べたものについて、nilになりうるフィールド(ポインタ・interface・
-  func・map・slice・chan)がどれもnilでないことを確かめる。interfaceに型付きのnilのポインタを
-  入れた形もnilとみなす。setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で
-  見る。組み立てたhandlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。
-  nilでよいフィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に
-  載せ、使われない項目があれば落とす。抽出が空振りしても緑にならないよう、置き換えた依存の
-  フィールドを名指しで要求する(`requiredDepChecks`)。`i`のhandlerなど対象外の欄は見ない
+  うち`requiredDepHandlers`に並べたもの(2段目の後で22個)について、nilになりうるフィールド(ポインタ・interface・func・map・slice・chan)が
+  どれもnilでないことを確かめる。interfaceに型付きのnilのポインタを入れた形もnilとみなす。
+  setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で見る。組み立てた
+  handlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。nilでよい
+  フィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に載せ、
+  使われない項目があれば落とす。今は空。このテストを書く途中で、`setupRoutes()`が
+  `clipsHandler.SetNoteRepo`を呼んでおらず本番でもnilのままだったことが分かり
+  (clips/notesのrenoteの入れ子のmute/block検査が飛んでいた)、#3818で配線した。
+  抽出が空振りしても緑にならないよう、置き換えた依存のフィールドを名指しで要求する
+  (`requiredDepChecks`)。`i`のhandlerなど対象外の欄は見ない
 - **`entityPacker`の行も外した。** この行は`nil`ではなく`HasMediaURL()`を見ていて、mediaURLを
   持つことは型では保証できない。ただ、どのhandlerも`setupRoutes()`の同じ`entityPacker`を受け取り、
   その値そのものは表の`entityPacker.mediaURL`の行が見ている。段(8)でmediaURLを位置引数にするまで、
@@ -1217,14 +1227,15 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   置き換えたhandlerには届かない。置き換えたhandlerはHTTPのリクエストからしか呼ばれず、
   リクエストは構築の後にしか来ない
 - **`buildHandlers()`より後で作る値に依存するものは、setterのまま。** `usersHandler.SetAbuseReportCreatedNotifier`
-  (値をstreamの節で作る)と、`i`のhandlerの依存(`streamRevoker`がstreamの節で作る値)。`i`の
-  handlerは、streamの組み立てを前へ動かす段(4)で扱う
+  (`abuseCreatedNotifier`を`buildHandlers()`より後で作る)と、`i`のhandlerの依存(`streamRevoker`が
+  `buildStream()`の`streamRevokePublisher`)。`i`のhandlerは、streamの組み立てを前へ動かす段(4)で
+  扱う
 
-| | #3817の前(`16a2d79186`) | 1段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 209 | 175 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 437 | 398 |
-| そのsetterを呼ぶhandler(受け手) | 42 | 41 |
+| | #3817の前(`16a2d79186`) | 1段目の後 | 2段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 209 | 175 | 145 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 437 | 398 | 367 |
+| そのsetterを呼ぶhandler(受け手) | 42 | 41 | 41 |
 
 数え方: `criticalWiringCount`は`internal/server/wiring_check.go`の定数(表の実数と一致することは
 `TestCriticalWiringCountMatchesTable`が見る)。setterの行は`setupRoutes()`の本文(`func`の行から、

@@ -8,23 +8,8 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
-
-// SetMetaRepo attaches a MetaRepository for POST /api/pinned-users.
-//
-// 未配線なら pinned-users は空配列を返す (upstream も `pinnedUsers` が空なら
-// 同じ結果になるので、shape は変わらない)。
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) { h.metaRepo = r }
-
-// HasMetaRepo reports whether the blocked-host filter can read meta.
-//
-// 未配線だと `blockedHosts` の除外が黙って no-op になる (ブロックしたはずの
-// インスタンスのノートが一覧に出続ける)。起動時の critical wiring 検査で落とす。
-func (h *Handler) HasMetaRepo() bool {
-	return h != nil && h.metaRepo != nil
-}
 
 // SetLocalHost records the instance hostname used to resolve `@user@host`
 // entries in `meta.pinnedUsers`.

@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
@@ -26,6 +27,21 @@ import (
 
 func newExtraHandler(t *testing.T) (*users.Handler, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
 	t.Helper()
+	return newExtraHandlerWith(t, extraRepos{})
+}
+
+// extraRepos are the mute/block repositories newExtraHandlerWith passes to
+// users.NewHandler. A nil field is passed as nil.
+type extraRepos struct {
+	channelMuting repository.ChannelMutingRepository
+	muting        repository.MutingRepository
+	blocking      repository.BlockingRepository
+}
+
+// newExtraHandlerWith builds the handler newExtraHandler builds, with the
+// mute/block repositories in r.
+func newExtraHandlerWith(t *testing.T, r extraRepos) (*users.Handler, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
+	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
@@ -34,7 +50,7 @@ func newExtraHandler(t *testing.T) (*users.Handler, *testutil.MockUserRepository
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	followingSvc := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen)
-	h := users.NewHandler(userSvc, followingSvc, noteRepo, idGen)
+	h := users.NewHandler(userSvc, followingSvc, noteRepo, idGen, nil, nil, nil, nil, nil, r.channelMuting, r.muting, r.blocking, nil)
 	h.SetAbuseRepo(testutil.NewMockAbuseReportRepository())
 	return h, userRepo, noteRepo
 }
@@ -162,16 +178,14 @@ func TestRelation_PartialDirection(t *testing.T) {
 // bool field flips to true. Validates #984 drift fix: handler returns real
 // DB-backed state instead of hardcoded false.
 func TestRelation_PopulatedRelations(t *testing.T) {
-	h, _, _ := newExtraHandler(t)
 	followingRepo := testutil.NewMockFollowingRepository()
 	followRequestRepo := testutil.NewMockFollowRequestRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	mutingRepo := testutil.NewMockMutingRepository()
 	renoteMutingRepo := testutil.NewMockRenoteMutingRepository()
+	h, _, _ := newExtraHandlerWith(t, extraRepos{muting: mutingRepo, blocking: blockingRepo})
 	h.SetFollowingRepo(followingRepo)
 	h.SetFollowRequestRepo(followRequestRepo)
-	h.SetBlockingRepo(blockingRepo)
-	h.SetMutingRepo(mutingRepo)
 	h.SetRenoteMutingRepo(renoteMutingRepo)
 
 	// 双方向の follow / request / block + viewer→target の mute / renote-mute
@@ -221,7 +235,7 @@ func TestReportAbuse_NilRepo(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	h := users.NewHandler(userSvc, nil, noteRepo, idGen)
+	h := users.NewHandler(userSvc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// abuseRepo not set
 	rec := postExtra(h.ReportAbuse, `{"userId":"u2","comment":"spam"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -247,12 +261,19 @@ func TestReactions_InvalidParam(t *testing.T) {
 
 func newReactionsHandler(t *testing.T) (*users.Handler, *testutil.MockUserRepository, *testutil.MockNoteReactionRepository) {
 	t.Helper()
+	return newReactionsHandlerWith(t, nil)
+}
+
+// newReactionsHandlerWith builds the handler newReactionsHandler builds, with
+// blocking as the blocking repository.
+func newReactionsHandlerWith(t *testing.T, blocking repository.BlockingRepository) (*users.Handler, *testutil.MockUserRepository, *testutil.MockNoteReactionRepository) {
+	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	h := users.NewHandler(userSvc, nil, noteRepo, idGen)
+	h := users.NewHandler(userSvc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, blocking, nil)
 	h.SetUserRepo(userRepo)
 	rxRepo := testutil.NewMockNoteReactionRepository()
 	h.SetNoteReactionRepo(rxRepo)
@@ -372,7 +393,7 @@ func TestReactions_NoteReactionRepoNotWired(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	h := users.NewHandler(userSvc, nil, noteRepo, idGen)
+	h := users.NewHandler(userSvc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetUserRepo(userRepo)
 	userRepo.Users["u_x"] = &model.User{ID: "u_x"}
 	userRepo.Profiles["u_x"] = &model.UserProfile{UserID: "u_x", PublicReactions: true}
@@ -675,7 +696,7 @@ func TestFeaturedNotes_Error(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	h := users.NewHandler(userSvc, nil, noteRepo, idGen)
+	h := users.NewHandler(userSvc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := postExtra(h.FeaturedNotes, `{"userId":"u1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -694,7 +715,7 @@ func TestSearchByUsernameAndHost_Error(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	h := users.NewHandler(userSvc, nil, noteRepo, idGen)
+	h := users.NewHandler(userSvc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := postExtra(h.SearchByUsernameAndHost, `{"username":"x"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -954,12 +975,11 @@ func TestValidListState(t *testing.T) {
 // #2106 L8: viewer が block されていても remote target には block 早期 return より先に
 // IS_REMOTE_USER を返す (upstream reactions.ts の評価順)。
 func TestReactions_BlockedAndRemote_ReturnsRemoteError(t *testing.T) {
-	h, userRepo, _ := newReactionsHandler(t)
-	host := "remote.example"
-	userRepo.Users["u_remote"] = &model.User{ID: "u_remote", Host: &host}
 	blockRepo := testutil.NewMockBlockingRepository()
 	_ = blockRepo.Create(&model.Blocking{ID: "b1", BlockerID: "u_remote", BlockeeID: "u_viewer"})
-	h.SetBlockingRepo(blockRepo)
+	h, userRepo, _ := newReactionsHandlerWith(t, blockRepo)
+	host := "remote.example"
+	userRepo.Users["u_remote"] = &model.User{ID: "u_remote", Host: &host}
 	rec := postExtra(h.Reactions, `{"userId":"u_remote"}`, &model.User{ID: "u_viewer"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "IS_REMOTE_USER")

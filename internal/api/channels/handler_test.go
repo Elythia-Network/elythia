@@ -32,7 +32,7 @@ func newHandler(t *testing.T) (
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, noteRepo, idGen)
-	return NewHandler(svc, idGen), repo, followRepo, noteRepo
+	return NewHandler(svc, idGen, nil, nil, nil, nil), repo, followRepo, noteRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -131,7 +131,7 @@ func TestCreate_RepoError(t *testing.T) {
 	repo := &failingChannelRepo{MockChannelRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"name":"alpha"}`)
 	setUser(c, "alice")
@@ -386,7 +386,7 @@ func newModeratorHandler(t *testing.T, moderators ...string) (*Handler, *testuti
 		mods[m] = true
 	}
 	svc.SetModeratorChecker(stubModerator{moderators: mods})
-	return NewHandler(svc, idGen), repo
+	return NewHandler(svc, idGen, nil, nil, nil, nil), repo
 }
 
 func TestUpdate_ModeratorBypass(t *testing.T) {
@@ -429,7 +429,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	repo := &failingUpdateRepo{MockChannelRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"channelId":"c1","name":"x"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -494,7 +494,7 @@ func TestFollow_InternalError(t *testing.T) {
 	followRepo := &failingFollowRepo{MockChannelFollowingRepository: testutil.NewMockChannelFollowingRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	setUser(c, "alice")
@@ -546,7 +546,7 @@ func TestUnfollow_InternalError(t *testing.T) {
 	followRepo := &failingUnfollowRepo{MockChannelFollowingRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	setUser(c, "alice")
@@ -586,7 +586,7 @@ func TestFollowed_RepoError(t *testing.T) {
 	followRepo := &listFailFollowRepo{MockChannelFollowingRepository: testutil.NewMockChannelFollowingRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Followed(c))
@@ -623,7 +623,7 @@ func TestOwned_RepoError(t *testing.T) {
 	repo := &listFailChannelRepo{MockChannelRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Owned(c))
@@ -649,7 +649,7 @@ func TestFeatured_RepoError(t *testing.T) {
 	repo := &listFailChannelRepo{MockChannelRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	require.NoError(t, h.Featured(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -871,7 +871,7 @@ func TestSearch_RepoError(t *testing.T) {
 	repo := &listFailChannelRepo{MockChannelRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"query":"x"}`)
 	require.NoError(t, h.Search(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -1003,7 +1003,7 @@ func TestTimeline_RepoError(t *testing.T) {
 	noteRepo := &failingChannelNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), noteRepo, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	require.NoError(t, h.Timeline(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

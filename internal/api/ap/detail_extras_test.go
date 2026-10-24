@@ -27,8 +27,7 @@ func (r *recordingExtras) FillDetailedExtras(_ context.Context, viewer, _ *model
 func TestPackUserForAPI_FillsDetailExtras(t *testing.T) {
 	h, _, _, _ := newHandler(t)
 	extras := &recordingExtras{}
-	h.SetDetailExtras(extras)
-	assert.True(t, h.HasDetailExtras())
+	h.detailExtras = extras
 
 	result := h.packUserForAPI(&model.User{ID: "viewer"}, &model.User{ID: "u1", Username: "alice"}, nil)
 	d, ok := result.(entity.UserDetailed)
@@ -36,9 +35,4 @@ func TestPackUserForAPI_FillsDetailExtras(t *testing.T) {
 	assert.Equal(t, []string{"pinned"}, d.PinnedNoteIDs)
 	require.NotNil(t, extras.viewer)
 	assert.Equal(t, "viewer", extras.viewer.ID)
-}
-
-func TestHandler_HasDetailExtrasUnwired(t *testing.T) {
-	h, _, _, _ := newHandler(t)
-	assert.False(t, h.HasDetailExtras())
 }

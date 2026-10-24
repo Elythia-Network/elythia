@@ -68,36 +68,12 @@ type Handler struct {
 	// channels/timeline の匿名 visitor への gate に使う。
 	ugcVisibilityFn func() string
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790)。組み立てで渡す。
 	entityPacker *entity.Packer
-}
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetUGCVisibilityLookup wires a live lookup of meta.ugcVisibilityForVisitor.
-//
-// **毎回読む。** 起動時に焼き込むと、運営者が管理画面で締めても
-// プロセスを再起動するまで反映されない。
-func (h *Handler) SetUGCVisibilityLookup(fn func() string) {
-	h.ugcVisibilityFn = fn
 }
 
 // ugcVisibilityNow resolves the current policy ("" when unwired, which the
@@ -107,25 +83,6 @@ func (h *Handler) ugcVisibilityNow() string {
 		return ""
 	}
 	return h.ugcVisibilityFn()
-}
-
-// HasUGCVisibility reports whether the visitor content visibility lookup was
-// wired. 未配線だと channels/timeline の匿名 visitor への gate が素通しになる。
-// 起動時検査に使う。
-func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityFn != nil }
-
-// HasMetaRepo reports whether the blocked-host filter can read meta.
-//
-// 未配線だと `blockedHosts` の除外が黙って no-op になる (ブロックしたはずの
-// インスタンスのノートが一覧に出続ける)。起動時の critical wiring 検査で落とす。
-func (h *Handler) HasMetaRepo() bool {
-	return h != nil && h.metaRepo != nil
-}
-
-// SetMetaRepo wires a MetaRepository used for the blocked-host filter on
-// channels/timeline (upstream generateBlockedHostQueryForNote)。
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
-	h.metaRepo = r
 }
 
 // SetUserFollowingRepo wires the user-following lookup used by the pinnedNotes
@@ -256,8 +213,28 @@ type ChannelMutingRepository interface {
 }
 
 // NewHandler creates a new channels Handler.
-func NewHandler(svc *corechannel.Service, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, idGen: idGen}
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// metaRepo backs the blocked-host filter on channels/timeline (upstream
+// generateBlockedHostQueryForNote). ugcVisibilityFn is a live lookup of
+// meta.ugcVisibilityForVisitor, read on every request so that changing the
+// setting takes effect without a restart.
+func NewHandler(
+	svc *corechannel.Service,
+	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	metaRepo repository.MetaRepository,
+	ugcVisibilityFn func() string,
+) *Handler {
+	return &Handler{
+		svc:             svc,
+		idGen:           idGen,
+		noteHider:       noteHider,
+		entityPacker:    entityPacker,
+		metaRepo:        metaRepo,
+		ugcVisibilityFn: ugcVisibilityFn,
+	}
 }
 
 // CreateRequest is the request body for channels/create.

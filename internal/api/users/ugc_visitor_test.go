@@ -28,7 +28,7 @@ const ugcRemoteHost = "remote.example"
 func ugcFixture(t *testing.T, policy string) (*Handler, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
 	t.Helper()
 	h, userRepo := newTestHandler(t)
-	h.SetUGCVisibilityLookup(func() string { return policy })
+	h.ugcVisibilityFn = func() string { return policy }
 	host := ugcRemoteHost
 	userRepo.Users["loc"] = &model.User{ID: "loc", Username: "loc", UsernameLower: "loc", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	userRepo.Users["rem"] = &model.User{ID: "rem", Username: "rem", UsernameLower: "rem", Host: &host, AvatarDecorations: datatypes.JSON([]byte("[]"))}

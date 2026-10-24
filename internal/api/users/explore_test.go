@@ -78,7 +78,7 @@ func TestPinnedUsers(t *testing.T) {
 
 		meta := testutil.NewMockMetaRepository()
 		meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@alice"}}
-		h.SetMetaRepo(meta)
+		h.metaRepo = meta
 
 		rec := postStub(h.PinnedUsers, `{}`, nil)
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -98,7 +98,7 @@ func TestPinnedUsers(t *testing.T) {
 
 		meta := testutil.NewMockMetaRepository()
 		meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@nobody", "@alice", "@"}}
-		h.SetMetaRepo(meta)
+		h.metaRepo = meta
 
 		rec := postStub(h.PinnedUsers, `{}`, nil)
 		var got []map[string]any
@@ -112,7 +112,7 @@ func TestPinnedUsers(t *testing.T) {
 		h.SetUserRepo(repo)
 		meta := testutil.NewMockMetaRepository()
 		meta.Meta = &model.Meta{}
-		h.SetMetaRepo(meta)
+		h.metaRepo = meta
 
 		rec := postStub(h.PinnedUsers, `{}`, nil)
 		assert.JSONEq(t, `[]`, rec.Body.String())
@@ -122,7 +122,7 @@ func TestPinnedUsers(t *testing.T) {
 		// meta を引けなくても about ページを開けるようにする。
 		h, repo := newTestHandler(t)
 		h.SetUserRepo(repo)
-		h.SetMetaRepo(testutil.NewMockMetaRepository()) // Meta が nil = ErrNotFound
+		h.metaRepo = testutil.NewMockMetaRepository() // Meta が nil = ErrNotFound
 
 		rec := postStub(h.PinnedUsers, `{}`, nil)
 		assert.JSONEq(t, `[]`, rec.Body.String())

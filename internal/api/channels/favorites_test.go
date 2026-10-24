@@ -24,7 +24,7 @@ func newStubHandler(t *testing.T) (*Handler, *testutil.MockChannelRepository, *t
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, noteRepo, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	favRepo := testutil.NewMockChannelFavoriteRepository()
 	mutRepo := testutil.NewMockChannelMutingRepository()
 	h.SetFavoriteRepo(favRepo)
@@ -83,7 +83,7 @@ func TestFavorite_NilRepo(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, followRepo, noteRepo, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil)
 	// favoriteRepo is nil
 	rec := postStubWithBody(t, h.Favorite, `{"channelId":"ch1"}`, "u1")
 	assert.Equal(t, http.StatusNoContent, rec.Code)

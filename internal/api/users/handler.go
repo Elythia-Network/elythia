@@ -115,29 +115,13 @@ type Handler struct {
 	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
 	selfPacker *meself.Packer
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
@@ -203,14 +187,6 @@ func (h *Handler) SetUGCVisibility(v string) {
 	h.ugcVisibility = v
 }
 
-// SetUGCVisibilityLookup wires a live lookup of the policy.
-//
-// **毎回読む。** 起動時に文字列を焼き込むと、運営者が管理画面で締めても
-// プロセスを再起動するまで反映されない。
-func (h *Handler) SetUGCVisibilityLookup(fn func() string) {
-	h.ugcVisibilityFn = fn
-}
-
 // ugcVisibilityNow resolves the current policy.
 func (h *Handler) ugcVisibilityNow() string {
 	if h.ugcVisibilityFn != nil {
@@ -256,12 +232,6 @@ type UserListMembershipEventPublisher interface {
 // connected userList channels when update-membership changes withReplies (#2051)。
 func (h *Handler) SetUserListEventPublisher(p UserListMembershipEventPublisher) {
 	h.userListEventPub = p
-}
-
-// SetChannelMutingRepo wires the channel muting repository used by the
-// users/notes post-fetch filter.
-func (h *Handler) SetChannelMutingRepo(r repository.ChannelMutingRepository) {
-	h.channelMutingRepo = r
 }
 
 func (h *Handler) SetUserRepo(r repository.UserRepository) {
@@ -341,13 +311,6 @@ func (h *Handler) SetMemoRepo(r repository.UserMemoRepository) {
 	h.memoRepo = r
 }
 
-// SetUserRelationReader attaches the reader that fetches the users/show
-// relation block in one statement (#3608). Without it the block is read with
-// one query per relation; the response is the same either way.
-func (h *Handler) SetUserRelationReader(r repository.UserRelationReader) {
-	h.relationReader = r
-}
-
 // viewerRelationRepos returns the Repos bundle used to populate viewer->target
 // relation fields on packed users (users/show, users/recommendation,
 // get-frequently-replied-users)。二重実装を避けるため抽出 (#1802 / #1973)。
@@ -368,18 +331,6 @@ func (h *Handler) SetFollowingRepo(r repository.FollowingRepository) {
 	h.followingRepo = r
 }
 
-// SetBlockingRepo attaches a BlockingRepository for block status queries.
-func (h *Handler) SetBlockingRepo(r repository.BlockingRepository) {
-	h.blockingRepo = r
-}
-
-// SetRolePolicyProvider wires a role policy source so create-from-public enforces
-// the userListLimit / userEachUserListsLimit role policies (#1550)。nil 時は
-// limit gate を skip する (= test / 旧挙動)。
-func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
-	h.rolePolicyProvider = p
-}
-
 // ProxyFollowEnqueuer makes the proxy account follow remote users added to a
 // list (#1704)。実装は core/userlist.ProxyFollower。
 type ProxyFollowEnqueuer interface {
@@ -390,11 +341,6 @@ type ProxyFollowEnqueuer interface {
 // remote users are copied into the new list (#1704). nil 時は skip。
 func (h *Handler) SetProxyFollow(p ProxyFollowEnqueuer) {
 	h.proxyFollow = p
-}
-
-// SetMutingRepo attaches a MutingRepository for mute status queries.
-func (h *Handler) SetMutingRepo(r repository.MutingRepository) {
-	h.mutingRepo = r
 }
 
 // SetRenoteMutingRepo attaches a RenoteMutingRepository for renote mute status queries.
@@ -471,8 +417,6 @@ func (h *Handler) populateUserEmojis(u *model.User, lite *entity.UserLite) {
 	lite.Emojis = m
 }
 
-// NewHandler creates a new users Handler.
-// followingService, noteRepo, idGen are optional for the bare /show endpoint.
 // ValidListState reports whether state is an accepted value for the public
 // /users listing. upstream users.ts:35 の state enum は ['all','alive']
 // (default 'all'); 空文字列は default 'all' として許容する。範囲外は ajv 同様に
@@ -486,17 +430,50 @@ func ValidListState(state string) bool {
 	}
 }
 
+// NewHandler creates a new users Handler.
+// followingService, noteRepo, idGen are optional for the bare /show endpoint.
+//
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// rolePolicyProvider enforces the userListLimit / userEachUserListsLimit role
+// policies on users/lists/create-from-public (#1550); nil skips the limit gate.
+// metaRepo backs /pinned-users and the blocked-host filter. ugcVisibilityFn is
+// a live lookup of meta.ugcVisibilityForVisitor that gates remote profiles for
+// anonymous visitors (#2106 S3); it is read on every request so that changing
+// the setting takes effect without a restart. channelMutingRepo, mutingRepo and
+// blockingRepo back the users/notes mute/block filters and the
+// blocked-by-target check. relationReader fetches the users/show relation block
+// in one statement (#3608); without it the block is read with one query per
+// relation and the response is the same.
 func NewHandler(
 	userService *user.Service,
 	followingService *corefollowing.Service,
 	noteRepo repository.NoteRepository,
 	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	rolePolicyProvider role.PolicyProvider,
+	metaRepo repository.MetaRepository,
+	ugcVisibilityFn func() string,
+	channelMutingRepo repository.ChannelMutingRepository,
+	mutingRepo repository.MutingRepository,
+	blockingRepo repository.BlockingRepository,
+	relationReader repository.UserRelationReader,
 ) *Handler {
 	return &Handler{
-		userService:      userService,
-		followingService: followingService,
-		noteRepo:         noteRepo,
-		idGen:            idGen,
+		userService:        userService,
+		followingService:   followingService,
+		noteRepo:           noteRepo,
+		idGen:              idGen,
+		noteHider:          noteHider,
+		entityPacker:       entityPacker,
+		rolePolicyProvider: rolePolicyProvider,
+		metaRepo:           metaRepo,
+		ugcVisibilityFn:    ugcVisibilityFn,
+		channelMutingRepo:  channelMutingRepo,
+		mutingRepo:         mutingRepo,
+		blockingRepo:       blockingRepo,
+		relationReader:     relationReader,
 	}
 }
 
@@ -1349,40 +1326,6 @@ func (h *Handler) fillPinned(ctx context.Context, viewer *model.User, u *model.U
 	h.fillPinnedNotes(ctx, viewer, targets)
 	h.fillPinnedPages(viewer, targets)
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと `users/lists/create-from-public` の `userListLimit` /
-// `userEachUserListsLimit` が効かない。起動時検査に使う (#2683)。
-func (h *Handler) HasRolePolicyProvider() bool { return h.rolePolicyProvider != nil }
-
-// HasChannelMutingRepo / HasMutingRepo / HasBlockingRepo report whether the
-// users/notes mute/block gates were wired (#2709 review).
-//
-// 未配線時にそれぞれ: `users/notes` (withChannelNotes) の post-fetch filter で
-// チャンネルミュートが効かない、同 filter のミュート集合が空になる、
-// `isBlockedByTarget` が常に false を返して**被ブロック中の相手の
-// users/notes・reactions・featured-notes が読める**。いずれも
-// `LoadMuteBlockSets` が nil を空集合として素通しするための fail-open。
-func (h *Handler) HasChannelMutingRepo() bool { return h.channelMutingRepo != nil }
-
-// HasMutingRepo reports whether the muting repository was wired.
-func (h *Handler) HasMutingRepo() bool { return h.mutingRepo != nil }
-
-// HasBlockingRepo reports whether the blocking repository was wired.
-func (h *Handler) HasBlockingRepo() bool { return h.blockingRepo != nil }
-
-// HasUGCVisibility reports whether the visitor content visibility policy was set.
-//
-// 未配線だと匿名 visitor への remote profile 露出を
-// `ugcVisibilityForVisitor` で gate できない。**空文字は gate 無効**と同義
-// (`"none"` でも `"local"` でもないので素通し)。起動時検査に使う (#2708)。
-//
-// **live lookup も見る。** 焼き込みを止めて `SetUGCVisibilityLookup` に
-// 移したとき、この述語だけが固定フィールドを見たままだと**配線済みなのに
-// 起動時検査が落ちて本番が起動しない**。notes 側 (`ugcVisibilityNow`) と
-// 同じ形にしてある。
-func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityNow() != "" }
 
 // pinnedPageVisibleTo reports whether viewer may read the pinned page body.
 //

@@ -2068,48 +2068,26 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	promoHandler := hSvcs.promo
 	inviteHandler := hSvcs.invite
 	echoTestHandler := hSvcs.echoTest
-	// 投稿を返す handler へ、上で作った noteHider を渡す (#3786)。渡し忘れると
-	// その経路だけ匿名の閲覧者に ugcVisibilityForVisitor が効かないので、
+	// 投稿を返す handler へ、上で作った noteHider と Packer を渡す (#3786 / #3790)。
+	// buildHandlers で作る handler の多くは構築子の引数で受ける (#3817)。i の handler は
+	// stream の節で作る値に依存するので、まだ setter で入れる (#3812 の段 (4))。渡し
+	// 忘れると、その経路だけ匿名の閲覧者に ugcVisibilityForVisitor が効かないので、
 	// 下の recordCriticalWiring が handler ごとに検査する。
-	antennasHandler.SetNoteHider(noteHider)
-	apHandler.SetNoteHider(noteHider)
-	channelsHandler.SetNoteHider(noteHider)
-	clipsHandler.SetNoteHider(noteHider)
 	iHandler.SetNoteHider(noteHider)
-	rolesHandler.SetNoteHider(noteHider)
-	usersHandler.SetNoteHider(noteHider)
-	// 投稿を包む handler に Packer を渡す (#3790)。
-	antennasHandler.SetEntityPacker(entityPacker)
-	apHandler.SetEntityPacker(entityPacker)
-	channelsHandler.SetEntityPacker(entityPacker)
-	clipsHandler.SetEntityPacker(entityPacker)
 	iHandler.SetEntityPacker(entityPacker)
 	notesHandler.SetEntityPacker(entityPacker)
-	rolesHandler.SetEntityPacker(entityPacker)
-	usersHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
 	// userList channel snapshot を live 更新する (#2051)。
 	usersHandler.SetUserListEventPublisher(userListStreamPublisher)
-	// /pinned-users は meta.pinnedUsers の acct を解決する (#2791 で router.go の
-	// inline closure から移設)。
-	usersHandler.SetMetaRepo(metaRepo)
 	usersHandler.SetLocalHost(localHost)
 	usersHandler.SetServerURL(s.config.URL)
 	usersHandler.SetChartHook(chartHooks)
-	// users/notes (withChannelNotes) の post-fetch filter でチャンネルミュートを効かせる。
-	usersHandler.SetChannelMutingRepo(channelMutingRepo)
-	// #2106 S3: 匿名 visitor への remote profile 露出を ugcVisibilityForVisitor で gate。
-	// notes 側と同じ理由で無条件に配線する (#2708)。
-	usersHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	usersHandler.SetFeaturedRanking(featuredService) // #1687: users/featured-notes ランキング
 	usersHandler.SetPiningRepo(piningRepo)
 	usersHandler.SetFollowingRepo(followingRepo)
-	usersHandler.SetBlockingRepo(blockingRepo)
-	usersHandler.SetMutingRepo(mutingRepo)
-	usersHandler.SetRolePolicyProvider(roleService) // #1550: create-from-public userListLimit/userEachUserListsLimit
-	usersHandler.SetProxyFollow(listProxyFollow)    // #1704: create-from-public remote member proxy follow
+	usersHandler.SetProxyFollow(listProxyFollow) // #1704: create-from-public remote member proxy follow
 	usersHandler.SetRenoteMutingRepo(renoteMutingRepo)
 	usersHandler.SetFollowRequestRepo(followRequestRepo)
 	usersHandler.SetInstanceRepo(instanceRepo)
@@ -2143,7 +2121,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	usersHandler.SetAbuseRepo(abuseReportRepo)
 	usersHandler.SetMemoRepo(userMemoRepo)
-	usersHandler.SetUserRelationReader(userRelationRepo) // #3608: users/show の関係を 1 文で引く
 	usersHandler.SetUserListFavoriteRepo(userListFavoriteRepo)
 	usersHandler.SetUserListRepo(userListRepo)
 	// users/reactions で moderator/admin が remote / 非 public reactions を
@@ -2374,13 +2351,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/proxy/*", proxyHandler.Handle)
 
 	// ActivityPub resource endpoints
-	apHandler.SetDetailExtras(usersHandler) // #3330: ap/show の利用者のピン留め・移行先
 	apHandler.SetRemote(apFetcher, federationResolver)
-	// ap/show の federation-allow gate (#1557)。instanceService が blocked /
-	// federation policy を判定する。local host は port 無しの hostname
-	// (config 起動時に validate 済で非空保証) を渡す — IsBlocked/IsAllowed は
-	// hostname suffix match のため。
-	apHandler.SetFederationGate(instanceService, s.config.Hostname)
 	apHandler.SetExternalRedirectPolicy(func() bool {
 		m, err := metaRepo.Fetch()
 		if err != nil || m == nil {
@@ -2390,8 +2361,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		}
 		return m.AllowExternalApRedirect
 	}, s.config.URL)
-	// 受信を拒否するソフトウェアのホストも ap/show で FEDERATION_NOT_ALLOWED にする (#3563)。
-	apHandler.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	// FEP-521a Multikey 対応で actor JSON に assertionMethod[] を expose する
 	// ため Ed25519 keypair repo を wire (#1067 / #1069)。
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
@@ -2640,9 +2609,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// channels/timeline の mute / block filter (#2345 の timelines 調査)。
 	channelsHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, noteRepo)
 	channelsHandler.SetDriveFileRepo(driveFileRepo)
-	// channels/timeline の匿名 visitor への ugcVisibilityForVisitor gate。
-	// notes 側と同じ理由で無条件に配線し、毎回読む (#2708)。
-	channelsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	channelsHandler.SetInstanceRepo(instanceRepo)
 	channelsHandler.SetEmojiRepo(emojiRepo)
 	channelsHandler.SetReactionReader(reactionCountWriter)
@@ -2654,7 +2620,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// `CanSeeNote` が fail-closed に倒れ、followers 限定ノートが投稿者本人に
 	// しか出なくなる (漏れる側ではないが、正当なピン留めも消える)。
 	channelsHandler.SetUserFollowingRepo(followingRepo)
-	channelsHandler.SetMetaRepo(metaRepo) // channels/timeline の blocked-host filter
 
 	// Antennas endpoints (Phase 4.3)
 	antennasHandler.SetInstanceRepo(instanceRepo)
@@ -2662,9 +2627,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	antennasHandler.SetReactionReader(reactionCountWriter)
 	antennasHandler.SetNoteFieldResolver(noteFieldResolver)
 	antennasHandler.SetUserRepo(userRepo)
-	antennasHandler.SetQueryService(noteQueryService)                              // #1464: Notes の visibility filter (defense-in-depth)
-	antennasHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, channelMutingRepo) // #1544: Notes の mute/block/channel-mute filter
-	antennasHandler.SetMetaRepo(metaRepo)                                          // #2106 N5: Notes の blocked-host filter
+	antennasHandler.SetQueryService(noteQueryService) // #1464: Notes の visibility filter (defense-in-depth)
 
 	// Clips endpoints (Phase 4.4)
 	clipsHandler.SetFavoriteRepo(clipFavoriteRepo)
@@ -2673,12 +2636,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	clipsHandler.SetReactionReader(reactionCountWriter)
 	clipsHandler.SetNoteFieldResolver(noteFieldResolver)
 	clipsHandler.SetUserRepo(userRepo)
-	clipsHandler.SetQueryService(noteQueryService)           // #1456: AddNote の visibility gate
-	clipsHandler.SetMuteBlockRepos(mutingRepo, blockingRepo) // #1562: Notes の muted/blocked-user filter
-	clipsHandler.SetMetaRepo(metaRepo)                       // #1562: Notes の blocked-host filter
-	clipsHandler.SetNoteRepo(noteRepo)                       // #1630 / #3818: Notes の renote 入れ子の mute/block filter
-	// clips/notes の匿名 visitor への ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む)。
-	clipsHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
+	clipsHandler.SetQueryService(noteQueryService) // #1456: AddNote の visibility gate
+	clipsHandler.SetNoteRepo(noteRepo)             // #1630 / #3818: Notes の renote 入れ子の mute/block filter
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
@@ -3299,14 +3258,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	rolesHandler.SetRelationCache(s.relationCache)
 	rolesHandler.SetNotesQuery(repository.NewRoleNotesQuery(s.db))
 	rolesHandler.SetNoteRepo(noteRepo) // #1630: notes の renote 入れ子 mute/block 検査
-	rolesHandler.SetMetaRepo(metaRepo) // roles/notes の blocked-host filter
 	rolesHandler.SetInstanceRepo(instanceRepo)
 	rolesHandler.SetEmojiRepo(emojiRepo)
 	rolesHandler.SetReactionReader(reactionCountWriter)
 	rolesHandler.SetNoteFieldResolver(noteFieldResolver)
 	rolesHandler.SetUserRepo(userRepo)
 	rolesHandler.SetMuteBlockRepos(mutingRepo, blockingRepo, channelMutingRepo) // #1544: Notes の mute/block/channel-mute filter
-	rolesHandler.SetListPacker(sharedUserPacker)                                // #1973 / #3330: roles/users の embed user を本家 packMany と同じ形に
 
 	// User lists (Phase 6)
 	userListHandler.SetUserRepo(userRepo)                              // #1550: push NO_SUCH_USER check
@@ -4025,23 +3982,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
 		// ugcVisibilityForVisitor='none' を効かせない。
-		{"antennas.noteHider", antennasHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"ap.noteHider", apHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"channels.noteHider", channelsHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"clips.noteHider", clipsHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"i.noteHider", iHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"notes.noteHider", notesHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"roles.noteHider", rolesHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"users.noteHider", usersHandler.HasNoteHider(), noteHiderMissingEffect},
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
-		{"antennas.entityPacker", antennasHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"ap.entityPacker", apHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"channels.entityPacker", channelsHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"clips.entityPacker", clipsHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"i.entityPacker", iHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"roles.entityPacker", rolesHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"users.entityPacker", usersHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"noteCreate.entityPacker", noteCreateService.HasEntityPacker(), entityPackerMissingEffect},
 		{"webhookNote.entityPacker", webhookNoteHook.HasEntityPacker(), entityPackerMissingEffect},
 		{"webhookReaction.entityPacker", webhookReactionHook.HasEntityPacker(), entityPackerMissingEffect},
@@ -4187,8 +4132,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"clipLimit と noteEachClipsLimit が両方とも効かない"},
 		{"clip.streamPublisher", clipService.HasStreamPublisher(),
 			"クリップの変更と削除が clip チャンネルへ流れず、デッキのクリップのカラムが追従しない"},
-		{"users.rolePolicyProvider", usersHandler.HasRolePolicyProvider(),
-			"users/lists/create-from-public の userListLimit / userEachUserListsLimit が効かない"},
 
 		// ここから #2708。#2683 で「既存 entry と基準上区別できない」まで取り込み、
 		// 残していた同クラスの依存。
@@ -4196,10 +4139,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
 		{"chat.driveFileRepo", chatHandler.HasDriveFileRepo(),
 			"他人の drive ファイルをチャットに添付できる (IDOR)"},
-		{"ap.hostBlockChecker", apHandler.HasHostBlockChecker(),
-			"federation: none でも Person を AP serve し、ap/show の FEDERATION_NOT_ALLOWED gate も skip される"},
-		{"ap.softwareBlocker", apHandler.HasSoftwareSuspensionChecker(),
-			"受信を拒否するソフトウェアのホストを ap/show で引くと、取得した生の AP JSON をそのまま返す (#3563)"},
 		{"remoteUserResolver.softwareBlocker", remoteUserResolver.HasSoftwareSuspensionChecker(),
 			"受信を拒否するソフトウェアのホストにも、メンションの解決や users/show で WebFinger を投げる (#3563)"},
 		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
@@ -4222,16 +4161,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"署名鍵は payload に載せず配送時に引くので、未配線だと全ての AP 配送が POST されないまま失敗する (連合が止まる)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),
 			"blocked-host の note が post-fetch 経路で漏れる"},
-		{"antennas.metaRepo", antennasHandler.HasMetaRepo(),
-			"blocked-host の note が antenna で漏れる"},
-		{"clips.metaRepo", clipsHandler.HasMetaRepo(),
-			"blocked-host の note が clip で漏れる"},
-		{"users.metaRepo", usersHandler.HasMetaRepo(),
-			"blocked-host の note が users/notes・users/reactions・users/featured-notes で漏れる"},
-		{"roles.metaRepo", rolesHandler.HasMetaRepo(),
-			"blocked-host の note が roles/notes で漏れる"},
-		{"channels.metaRepo", channelsHandler.HasMetaRepo(),
-			"blocked-host の note が channels/timeline で漏れる"},
 		{"reaction.mediaSilenceChecker", reactionService.HasMediaSilenceChecker(),
 			"media-silenced な host からのカスタム絵文字リアクションがそのまま出る"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
@@ -4263,14 +4192,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"blocking.roomInvitationRemover", blockingService.HasRoomInvitationRemover(),
 			"ブロックしても互いのチャットルームへの招待が残り、ブロックした相手のルームに参加できる"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
-		{"ap.detailExtras", apHandler.HasDetailExtras(),
-			"ap/show の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"admin.detailExtras", adminHandler.HasDetailExtras(),
 			"admin/accounts/find-by-email と admin/update-proxy-account の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"roles.listPacker", rolesHandler.HasListPacker(),
-			"roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
 		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
 			"reversi/invitations のリモートの招待者に instance・絵文字が載らない"},
 		{"chat.liteFiller", chatHandler.HasLiteFiller(),
@@ -4303,12 +4228,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"alwaysMarkNsfw の自己解除防止・wordMuteLimit・canUpdateBioMedia・i/import-antennas の antennaLimit が同時に外れ、avatarDecorationLimit は policy を無視して 1 固定になり、canUseEmojiAsAvatarDecoration も既定の true 固定になる (ロールで絵文字デコレーションを止められなくなる)"},
 		{"notes.ugcVisibility", notesHandler.HasUGCVisibility(),
 			"匿名 visitor への note 露出を ugcVisibilityForVisitor で gate できない"},
-		{"users.ugcVisibility", usersHandler.HasUGCVisibility(),
-			"匿名 visitor への remote profile 露出を ugcVisibilityForVisitor で gate できない"},
-		{"channels.ugcVisibility", channelsHandler.HasUGCVisibility(),
-			"匿名 visitor への channels/timeline の露出を ugcVisibilityForVisitor で gate できない"},
-		{"clips.ugcVisibility", clipsHandler.HasUGCVisibility(),
-			"匿名 visitor への clips/notes の露出を ugcVisibilityForVisitor で gate できない"},
 		{"deleteAccount.pageRepo", deleteAccountProcessor.HasPageRepo(),
 			"アカウント削除でページが user 行の CASCADE で消え、参照していたノートの pageCount が減らない (リモートのノートが掃除で消えなくなる)"},
 		{"deleteAccount.pushSubscriptionCache", deleteAccountProcessor.HasPushSubscriptionCache(),
@@ -4318,16 +4237,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。
-		{"antennas.muteBlockRepos", antennasHandler.HasMuteBlockRepos(),
-			"antennas/notes でミュート / ブロック / チャンネルミュートの filter が消える (呼び出し元の gate も無い)"},
-		{"clips.muteBlockRepos", clipsHandler.HasMuteBlockRepos(),
-			"clips/notes でミュート / ブロックの filter が消える"},
-		{"users.channelMutingRepo", usersHandler.HasChannelMutingRepo(),
-			"users/notes (withChannelNotes) の post-fetch filter でチャンネルミュートが効かない"},
-		{"users.mutingRepo", usersHandler.HasMutingRepo(),
-			"users/notes の post-fetch filter のミュート集合が空になる"},
-		{"users.blockingRepo", usersHandler.HasBlockingRepo(),
-			"isBlockedByTarget が常に false になり、被ブロック中の相手の users/notes・reactions・featured-notes が読める"},
 		{"notes.renoteMutingRepo", notesHandler.HasRenoteMutingRepo(),
 			"renote ミュートが read 時に一切効かない"},
 		// #3661: 応答の後などに投げっぱなしで起動する goroutine は世代の箱から

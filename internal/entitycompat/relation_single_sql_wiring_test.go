@@ -8,9 +8,9 @@ import (
 // users/show の関係と /api/i の未読は、reader を配線したときだけ 1 文で引く
 // (#3608)。配線が無くても応答は同じ (表ごとに引く経路に戻る) なので、**行を
 // 消しても build もテストも通り、黙って 10 本 / 5 本に戻る**。ここで固定する。
+// users の handler は reader を構築子の必須の引数で受けるので、ここでは見ない
+// (#3817)。
 func TestRelationSingleStatementReadersAreWired(t *testing.T) {
-	assertWired(t, serverPkg, "usersHandler.SetUserRelationReader(userRelationRepo)",
-		"users/show の関係が 1 文でなく 10 本の同時の問い合わせに戻る (#3608)")
 	assertWired(t, serverPkg, "iHandler.SetMeUnreadFlagsReader(repository.NewMeUnreadFlagsRepository(s.db))",
 		"/api/i の未読の真偽値が 1 文でなく 5 本の問い合わせに戻る (#3608)")
 	assertWired(t, serverPkg, "userRelationRepo := repository.NewUserRelationRepository(s.db)",

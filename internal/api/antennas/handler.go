@@ -56,33 +56,12 @@ type Handler struct {
 	// 同じ設計。未配線時は blocked-host filter skip。
 	metaRepo repository.MetaRepository
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790)。組み立てで渡す。
 	entityPacker *entity.Packer
-}
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetMetaRepo wires a MetaRepository used by the antennas/notes blocked-host filter.
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
-	h.metaRepo = r
 }
 
 // blockedHosts returns meta.blockedHosts, or nil when the meta repo is unwired.
@@ -98,20 +77,6 @@ func (h *Handler) blockedHosts() ([]string, error) {
 		return nil, nil
 	}
 	return meta.BlockedHosts, nil
-}
-
-// SetMuteBlockRepos wires the muting / blocking / channel-muting repositories so
-// antennas/notes excludes notes from users the viewer muted or who blocked the
-// viewer, plus notes in channels the viewer muted (#1544). Unwired repos simply
-// disable that filter dimension.
-func (h *Handler) SetMuteBlockRepos(
-	muting repository.MutingRepository,
-	blocking repository.BlockingRepository,
-	channelMuting repository.ChannelMutingRepository,
-) {
-	h.mutingRepo = muting
-	h.blockingRepo = blocking
-	h.channelMutingRepo = channelMuting
 }
 
 // SetUserRepo wires a UserRepository so antennas/notes filters out notes that
@@ -136,8 +101,34 @@ func (h *Handler) SetNoteFieldResolver(r *entity.NoteFieldResolver) {
 
 // NewHandler constructs an antennas Handler. noteRepo は antennas/notes で
 // note id → entity 変換に使う。
-func NewHandler(svc *coreantenna.Service, noteRepo repository.NoteRepository, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, noteRepo: noteRepo, idGen: idGen}
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// metaRepo backs the antennas/notes blocked-host filter. mutingRepo,
+// blockingRepo and channelMutingRepo let antennas/notes exclude notes from
+// users the viewer muted or who blocked the viewer, plus notes in channels the
+// viewer muted (#1544); a nil repository disables that filter dimension.
+func NewHandler(
+	svc *coreantenna.Service,
+	noteRepo repository.NoteRepository,
+	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	metaRepo repository.MetaRepository,
+	mutingRepo repository.MutingRepository,
+	blockingRepo repository.BlockingRepository,
+	channelMutingRepo repository.ChannelMutingRepository,
+) *Handler {
+	return &Handler{
+		svc:               svc,
+		noteRepo:          noteRepo,
+		idGen:             idGen,
+		noteHider:         noteHider,
+		entityPacker:      entityPacker,
+		metaRepo:          metaRepo,
+		mutingRepo:        mutingRepo,
+		blockingRepo:      blockingRepo,
+		channelMutingRepo: channelMutingRepo,
+	}
 }
 
 // SetInstanceRepo attaches an InstanceRepository so antennas/notes populates
@@ -603,22 +594,6 @@ func jsonArrayOrEmpty(b []byte) any {
 		return []any{}
 	}
 	return json.RawMessage(b)
-}
-
-// HasMetaRepo reports whether the meta repository was wired.
-//
-// 未配線だと blocked-host の note が post-fetch 経路で漏れる。起動時検査に
-// 使う (#2708)。
-func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
-
-// HasMuteBlockRepos reports whether all three mute/block repositories were wired.
-//
-// **3 つを 1 つの述語で見る。** 呼び出しは `LoadMuteBlockSets` への直渡しで、
-// 各 repo は nil を**空集合として素通し**するため、1 つ欠けるだけでその次元の
-// filter が黙って消える。notes 側と違い呼び出し元の gate も無い。起動時検査に
-// 使う (#2709 review)。
-func (h *Handler) HasMuteBlockRepos() bool {
-	return h.mutingRepo != nil && h.blockingRepo != nil && h.channelMutingRepo != nil
 }
 
 // SetRelationCache wires the per-user relation cache used by the mute / block

@@ -41,7 +41,7 @@ func newP189Kit(t *testing.T) *p189Kit {
 	idGen, _ := id.NewGenerator("aidx")
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	h := users.NewHandler(userSvc, fSvc, noteRepo, idGen)
+	h := users.NewHandler(userSvc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetFollowingRepo(fRepo)
 	h.SetUserListRepo(listRepo)
 	return &p189Kit{h: h, userRepo: userRepo, noteRepo: noteRepo, fRepo: fRepo, listRepo: listRepo}

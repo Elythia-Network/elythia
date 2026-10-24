@@ -143,6 +143,10 @@ func (s *Server) buildHandlers(
 	promoReadRepo := w.repos.promoRead
 	signupTicketRepo := w.repos.signupTicket
 	driveFileRepo := w.repos.driveFile
+	mutingRepo := w.repos.muting
+	blockingRepo := w.repos.blocking
+	channelMutingRepo := w.repos.channelMuting
+	userRelationRepo := w.repos.userRelation
 	userService := coreSvcs.user
 	followingService := coreSvcs.following
 	notificationService := coreSvcs.notification
@@ -160,8 +164,15 @@ func (s *Server) buildHandlers(
 	roleService := coreSvcs.role
 	apRenderer := fedSvcs.apRenderer
 	apURLs := fedSvcs.apURLs
+	inboxSoftwareChecker := fedSvcs.inboxSoftwareChecker
 
-	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen)
+	// ugcVisibilityForVisitor の lookup は、notes 側と同じ理由で無条件に渡し、毎回読む
+	// (#2106 S3 / #2708)。roleService は users/lists/create-from-public の
+	// userListLimit / userEachUserListsLimit (#1550)、userRelationRepo は users/show の
+	// 関係を 1 文で引く reader (#3608)。
+	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen, noteHider, entityPacker,
+		roleService, metaRepo, func() string { return metaUGCVisibility(metaRepo) },
+		channelMutingRepo, mutingRepo, blockingRepo, userRelationRepo)
 	iHandler := i.NewHandler(userService, idGen)
 	webhookHandler := apiwebhooks.NewHandler(webhookRepo, idGen, roleService) // #1029: webhookLimit
 	notificationsHandler := notifications.NewHandler(notificationService, idGen, entityPacker, noteHider,
@@ -176,21 +187,37 @@ func (s *Server) buildHandlers(
 	muteHandler := mute.NewHandler(mutingService, userRepo, idGen, entityPacker, usersHandler)                   // #3330
 	renoteMuteHandler := renotemute.NewHandler(renoteMutingService, userRepo, idGen, entityPacker, usersHandler) // #3330
 	driveHandler := drive.NewHandler(driveService, idGen, entityPacker, noteHider, s.background)                 // #3661: 世代の停止で待つ
-	apHandler := ap.NewHandler(apRenderer, userService, noteQueryService, keypairRepo, idGen)
+	// ap/show の federation-allow gate (#1557)。instanceService が blocked / federation
+	// policy を判定する。local host は port 無しの hostname (config 起動時に validate
+	// 済で非空保証) を渡す — IsBlocked/IsAllowed は hostname suffix match のため。
+	// 受信を拒否するソフトウェアのホストも FEDERATION_NOT_ALLOWED にする (#3563)。
+	// usersHandler は ap/show の利用者のピン留め・移行先を埋める (#3330)。
+	apHandler := ap.NewHandler(apRenderer, userService, noteQueryService, keypairRepo, idGen, noteHider, entityPacker,
+		instanceService, s.config.Hostname, inboxSoftwareChecker, usersHandler)
 	wellknownHandler := wellknown.NewHandler(apURLs, userService, s.config.Host, s.config.URL)
 	nodeinfoHandler := nodeinfo.NewHandler(s.config)
 	// #1957-a / #3330: followers/following/users の embed user を本家 packMany と同じ形に。
 	federationHandler := apifederation.NewHandler(instanceService, entityPacker, sharedUserPacker)
-	channelsHandler := apichannels.NewHandler(channelService, idGen)
-	antennasHandler := antennas.NewHandler(antennaService, noteRepo, idGen)
-	clipsHandler := clips.NewHandler(clipService, idGen)
+	// channels/timeline の blocked-host filter と、匿名 visitor への
+	// ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む。#2708)。
+	channelsHandler := apichannels.NewHandler(channelService, idGen, noteHider, entityPacker, metaRepo,
+		func() string { return metaUGCVisibility(metaRepo) })
+	// Notes の blocked-host filter (#2106 N5) と mute/block/channel-mute filter (#1544)。
+	antennasHandler := antennas.NewHandler(antennaService, noteRepo, idGen, noteHider, entityPacker, metaRepo,
+		mutingRepo, blockingRepo, channelMutingRepo)
+	// Notes の blocked-host filter と muted/blocked-user filter (#1562)、匿名 visitor への
+	// ugcVisibilityForVisitor gate (notes 側と同じく無条件・毎回読む)。
+	clipsHandler := clips.NewHandler(clipService, idGen, noteHider, entityPacker, metaRepo,
+		func() string { return metaUGCVisibility(metaRepo) }, mutingRepo, blockingRepo)
 	// #1662: page の attachedFiles / eyeCatchingImage の解決と所有者の確認、#3330: pageEvent の
 	// 利用者を持ち主から見た本家 pack と同じ形に。
 	pagesHandler := pages.NewHandler(pageService, idGen, entityPacker, driveFileRepo, sharedUserPacker)
 	flashHandler := apiflash.NewHandler(flashService, userRepo, idGen, entityPacker)
 	// #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に。
 	followingHandler := following.NewHandler(followingService, userService, entityPacker, sharedUserPacker)
-	rolesHandler := apiroles.NewHandler(roleService, idGen)
+	// roles/notes の blocked-host filter と、#1973 / #3330: roles/users の embed user を
+	// 本家 packMany と同じ形に。
+	rolesHandler := apiroles.NewHandler(roleService, idGen, noteHider, entityPacker, metaRepo, sharedUserPacker)
 	// #1029: userListLimit / userEachUserListsLimit
 	userListHandler := apiuserlists.NewHandler(userListRepo, idGen, entityPacker, roleService)
 	// #3330: auth/session/userkey・miauth check のピン留め・移行先、#3661: 世代の停止で待つ。

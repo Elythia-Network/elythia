@@ -64,7 +64,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *testutil
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	renderer := activitypub.NewRenderer(urls)
-	return NewHandler(renderer, userSvc, querySvc, keypairRepo, idGen), userRepo, noteRepo, keypairRepo
+	return NewHandler(renderer, userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil), userRepo, noteRepo, keypairRepo
 }
 
 func newReq(t *testing.T, paramName, paramValue string) (echo.Context, *httptest.ResponseRecorder) {
@@ -533,7 +533,7 @@ func TestNote_RemoteWithoutURIIs500(t *testing.T) {
 // のはず)。リダイレクトするとループになり得るので upstream と同じく 500。
 func TestNote_RemoteSelfHostIs500(t *testing.T) {
 	h, _, noteRepo, _ := newHandler(t)
-	h.SetFederationGate(nil, "self.example")
+	h.hostBlocker, h.localHost = nil, "self.example"
 	host := "SELF.example" // 大文字小文字は無視して照合する
 	uri := "https://self.example/notes/n1"
 	noteRepo.Notes["n1"] = &model.Note{
@@ -982,14 +982,14 @@ func TestAPIShow_URIInvalid(t *testing.T) {
 // #1557 blocked / 非 federation host の URI → FEDERATION_NOT_ALLOWED。
 func TestAPIShow_FederationNotAllowed(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.SetFederationGate(apShowHostBlocker{blocked: map[string]bool{"blocked.example": true}}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{blocked: map[string]bool{"blocked.example": true}}, "local.example"
 
 	rec := postJSON(h.APIShow, `{"uri":"https://blocked.example/users/x"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "FEDERATION_NOT_ALLOWED")
 
 	// 自 host は gate を skip する (blocked 判定に巻き込まれない)。
-	h.SetFederationGate(apShowHostBlocker{allowed: map[string]bool{}}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{allowed: map[string]bool{}}, "local.example"
 	rec = postJSON(h.APIShow, `{"uri":"https://local.example/notes/ghost"}`)
 	assert.NotEqual(t, http.StatusForbidden, rec.Code, "自 host は federation gate で弾かない")
 }
@@ -1139,7 +1139,7 @@ func TestUserByAcct_LDJSON(t *testing.T) {
 // ローカルの Person を返す取り違えになる (#2506)。
 func TestUserByAcct_SelfHostSuffixIsLocal(t *testing.T) {
 	h, userRepo, _, keypairRepo := newHandler(t)
-	h.SetFederationGate(nil, "self.example")
+	h.hostBlocker, h.localHost = nil, "self.example"
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice"}
 	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUB"}
 
@@ -1205,7 +1205,7 @@ func TestUserByAcct_ParsesLikeUpstreamAcct(t *testing.T) {
 // 自ホスト指しのリモート user はデータ異常として 500 (Note と同じ)。
 func TestUser_RemoteSelfHostIs500(t *testing.T) {
 	h, userRepo, _, _ := newHandler(t)
-	h.SetFederationGate(nil, "self.example")
+	h.hostBlocker, h.localHost = nil, "self.example"
 	host := "SELF.example"
 	uri := "https://self.example/users/u1"
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host, URI: &uri}
@@ -1274,7 +1274,7 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
-	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
+	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
 	return h, userRepo, noteRepo, piningRepo
 }
 
@@ -1433,7 +1433,7 @@ func newHandlerWithFollowing(t *testing.T) (*Handler, *testutil.MockUserReposito
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
-	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
+	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
 	h.SetFollowingRepo(followingRepo)
 	return h, userRepo, followingRepo
 }
@@ -1655,7 +1655,7 @@ func newHandlerWithOutbox(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
-	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen)
+	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
 	h.SetNoteRepo(noteRepo)
 	return h, userRepo, noteRepo
 }
@@ -1881,7 +1881,7 @@ func TestAPServe_FederationDisabled_403(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h, userRepo, _, _ := newHandler(t)
-			h.SetFederationGate(apShowHostBlocker{fedDisabled: true}, "local.example")
+			h.hostBlocker, h.localHost = apShowHostBlocker{fedDisabled: true}, "local.example"
 			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 			c, rec := newReq(t, "id", "u1") // AP Accept
 			require.NoError(t, tc.call(h, c))
@@ -1893,7 +1893,7 @@ func TestAPServe_FederationDisabled_403(t *testing.T) {
 // federation 有効時は従来どおり serve する (gate が false を返す regression guard)。
 func TestAPServe_FederationEnabled_Serves(t *testing.T) {
 	h, userRepo, _, keypairRepo := newHandler(t)
-	h.SetFederationGate(apShowHostBlocker{fedDisabled: false}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{fedDisabled: false}, "local.example"
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUB"}
 	c, rec := newReq(t, "id", "u1")
@@ -1906,7 +1906,7 @@ func TestAPServe_FederationEnabled_Serves(t *testing.T) {
 // federation gate の影響を受けない)。
 func TestUser_FederationDisabled_BrowserStillRedirects(t *testing.T) {
 	h, userRepo, _, _ := newHandler(t)
-	h.SetFederationGate(apShowHostBlocker{fedDisabled: true}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{fedDisabled: true}, "local.example"
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	c, rec := newBrowserReq(t, "id", "u1")
 	require.NoError(t, h.User(c))
@@ -2023,7 +2023,7 @@ func TestNoteActivity_FederationDisabledIs403(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{
 		ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic,
 	}
-	h.SetFederationGate(apShowHostBlocker{fedDisabled: true}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{fedDisabled: true}, "local.example"
 	c, rec := newReq(t, "id", "n1")
 	require.NoError(t, h.NoteActivity(c))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -2147,7 +2147,7 @@ func TestOutbox_UnstorableCursor_400(t *testing.T) {
 // なら従来どおり転送し、ブラウザ (AP でない Accept) は false でも転送する。
 func TestUser_ExternalRedirectRefusedWhenDisallowed(t *testing.T) {
 	h, userRepo, _, _ := newHandler(t)
-	h.SetFederationGate(nil, "local.example")
+	h.hostBlocker, h.localHost = nil, "local.example"
 	host := "remote.example"
 	uri := "https://remote.example/users/abc"
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host, URI: &uri}
@@ -2171,7 +2171,7 @@ func TestUser_ExternalRedirectRefusedWhenDisallowed(t *testing.T) {
 // 自サーバーへの転送と、AP でない Accept は止めない。
 func TestRedirectAP_SelfAndNonAPPass(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.SetFederationGate(nil, "local.example")
+	h.hostBlocker, h.localHost = nil, "local.example"
 	h.SetExternalRedirectPolicy(func() bool { return false }, "https://local.example/")
 
 	c, rec := newReq(t, "id", "x")
@@ -2201,7 +2201,7 @@ func TestRedirectAP_SelfAndNonAPPass(t *testing.T) {
 // リモートのノートの 302 も、allowExternalApRedirect が false なら止めること。
 func TestNote_ExternalRedirectRefusedWhenDisallowed(t *testing.T) {
 	h, _, noteRepo, _ := newHandler(t)
-	h.SetFederationGate(nil, "local.example")
+	h.hostBlocker, h.localHost = nil, "local.example"
 	h.SetExternalRedirectPolicy(func() bool { return false }, "https://local.example/")
 	host := "remote.example"
 	uri := "https://remote.example/notes/abc"
