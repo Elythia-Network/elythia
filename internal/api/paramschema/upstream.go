@@ -84,3 +84,11 @@ func parseUpstream(golden []byte) (map[string]Endpoint, error) {
 	}
 	return out, nil
 }
+
+// UpstreamGolden returns the embedded golden (upstream_paramdefs.json) as is.
+// Besides the paramDefs it holds what upstream's /api.json is built from
+// (each endpoint's doc and the packed schemas as refs), which
+// internal/api/openapi reads. The slice is shared and must not be modified.
+func UpstreamGolden() []byte {
+	return upstreamGolden
+}

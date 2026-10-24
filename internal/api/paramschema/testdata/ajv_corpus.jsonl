@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"0b30bbc9d9e4b3fd6a5ab5b18cb3e3729bfc391c86726fe1d1c36a15e759c734","cases":27190}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","cases":27190}
 {"ep":"admin/abuse-report/notification-recipient/create"}
 {"in":{"isActive":false,"name":"hello","method":"email"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'isActive'"}

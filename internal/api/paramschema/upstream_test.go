@@ -41,6 +41,22 @@ func TestUpstreamIsTheGolden(t *testing.T) {
 	}
 }
 
+func TestUpstreamGolden(t *testing.T) {
+	b, err := os.ReadFile(goldenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, UpstreamGolden()) {
+		t.Fatal("UpstreamGolden is not the golden file")
+	}
+	// /api.jsonの材料(#3810)がgoldenに入っている。
+	for _, want := range []string{`"refs": {`, `"directRoutes": [`, `"doc":{`, `"Note": {`} {
+		if !bytes.Contains(UpstreamGolden(), []byte(want)) {
+			t.Errorf("golden has no %s", want)
+		}
+	}
+}
+
 func TestParseUpstream(t *testing.T) {
 	if _, err := parseUpstream([]byte(`{"endpoints":`)); err == nil {
 		t.Error("broken golden parsed")

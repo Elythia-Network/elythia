@@ -3,6 +3,13 @@
 // code: each endpoint's object literal is read from its TypeScript AST and
 // evaluated, following imports to resolve the constants it references.
 //
+// It also holds what upstream's /api.json (server/api/openapi/gen-spec.ts) is
+// built from, for internal/api/openapi (#3810): each endpoint's `doc` (the
+// description, tags, errors and res of its meta, and whether it has a rate
+// limit), the packed schemas as `refs` (misc/json-schema.ts), and as
+// `directRoutes` the routes ApiServerService.ts registers under /api besides
+// the endpoints.
+//
 // The golden also records how upstream configures ajv (endpoint-base.ts):
 // the ajv version from packages/backend/package.json, the constructor options
 // and the formats added with addFormat. corpus.mjs builds its ajv from these,
@@ -41,8 +48,12 @@ const SRC = path.join(BACKEND, 'src');
 const API = path.join(SRC, 'server/api');
 
 // metaのうちAPIの層が読むものだけを残す。rate limit (`ms('1hour')`)と
-// res (`getJsonSchema`)は引数の検証に関係せず、解決もしないので落とす。
+// res (`getJsonSchema`)は引数の検証に関係しないので、ここには入れない。
 const META_KEYS = ['requireCredential', 'requireAdmin', 'requireModerator', 'requireFile', 'allowGet', 'cacheSec', 'secure', 'kind', 'prohibitMoved', 'requireRolePolicy'];
+
+// /api.jsonの説明(gen-spec.ts)が読むmetaの項目。引数の検証には使わないので、
+// META_KEYSとは分けてendpointごとの`doc`に置く(#3810)。
+const DOC_KEYS = ['description', 'tags', 'errors', 'res'];
 
 function fail(msg) {
 	console.error(`paramdefspec/extract: ${msg}`);
@@ -273,12 +284,47 @@ function ev(mod, n) {
 			const inner = n.expression.expression?.expression?.expression;
 			if (inner && ts.isRegularExpressionLiteral(inner) && inner.text.endsWith('/')) return regexBody(inner);
 		}
+		if (callee === 'getJsonSchema' && n.arguments.length === 1 && importedFrom(mod, 'getJsonSchema') === CHART_CORE) {
+			const v = ev(mod, n.arguments[0]);
+			if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Unresolved)) return chartJsonSchema(v);
+		}
 		if ((callee === 'Object.keys' || callee === 'Object.values') && n.arguments.length === 1) {
 			const v = ev(mod, n.arguments[0]);
 			if (v && typeof v === 'object' && !(v instanceof Unresolved)) return callee === 'Object.keys' ? Object.keys(v) : Object.values(v);
 		}
 	}
 	return new Unresolved(n.getText().slice(0, 200));
+}
+
+// chartの応答のschemaを作る本家の関数。chartのendpointのmeta.resが呼ぶ。
+const CHART_CORE = path.join(SRC, 'core/chart/core.ts');
+
+// importedFrom returns the file the name is imported from in mod, or null.
+function importedFrom(mod, name) {
+	const im = mod.imports.get(name);
+	if (!im || im.name !== name) return null;
+	return resolveSpec(mod.file, im.spec);
+}
+
+// chartJsonSchema is getJsonSchema of core/chart/core.ts: each key of the
+// chart schema ("a.b.c") becomes nested objects ending in an array of numbers.
+// requiredは本家でも空の配列のまま埋まらないので、そのまま残す。
+function chartJsonSchema(schema) {
+	const root = { type: 'object', properties: {}, required: [] };
+	for (const k of Object.keys(schema)) {
+		const keys = k.split('.');
+		let parent = root;
+		for (let i = 0; i < keys.length; i++) {
+			const key = keys[i];
+			const last = i === keys.length - 1;
+			if (parent.properties[key] == null) {
+				parent.properties[key] = last ? { type: 'array', items: { type: 'number' } } : { type: 'object', properties: {}, required: [] };
+			}
+			if (last) break;
+			parent = parent.properties[key];
+		}
+	}
+	return root;
 }
 
 function regexBody(lit) {
@@ -339,6 +385,48 @@ function readAjvConfig() {
 	return { version, options, formats };
 }
 
+// --- 応答の型の定義(misc/json-schema.tsの`refs`) ---
+// 本家の/api.jsonは、これをcomponents.schemasにそのまま並べる(schemas.tsのgetSchemas)。
+function readRefs() {
+	const file = path.join(SRC, 'misc/json-schema.ts');
+	const mod = load(file);
+	if (!mod) fail(`cannot read ${file}`);
+	const r = lookup(mod, 'refs');
+	if (!r || r.bad) fail(`refs not found in ${file}${r?.bad ? `: ${r.bad}` : ''}`);
+	const v = ev(r.mod, r.node);
+	if (!v || typeof v !== 'object' || v instanceof Unresolved || Object.keys(v).length === 0) fail(`refs in ${file} is not an object literal`);
+	return v;
+}
+
+// --- endpoint-list.tsの外で登録される/api配下のroute(ApiServerService.ts) ---
+// signupやmiauthのcheckなど。本家の/api.jsonには載らないので、Elythiaの
+// /api.jsonでも「Elythia独自」と取り違えずに外すために名前だけ持つ(#3810)。
+// endpointを回して登録する`'/' + endpoint.name`と、未知のpathを404にする
+// `'/*'`は数えない。
+function readDirectRoutes() {
+	const file = path.join(API, 'ApiServerService.ts');
+	const mod = load(file);
+	if (!mod) fail(`cannot read ${file}`);
+	const routes = new Set();
+	const visit = (node) => {
+		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === 'fastify' && ['get', 'post', 'all', 'put', 'delete', 'patch'].includes(node.expression.name.text)) {
+			const a = node.arguments[0];
+			if (a && (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a))) {
+				if (a.text !== '/*') {
+					if (!a.text.startsWith('/')) fail(`unexpected route path ${a.text} in ${file}`);
+					routes.add(a.text.slice(1));
+				}
+			} else if (!(a && ts.isBinaryExpression(a) && a.getText() === "'/' + endpoint.name")) {
+				fail(`unsupported route registration in ${file}: ${node.getText().slice(0, 120)}`);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(mod.sf);
+	if (routes.size === 0) fail(`no direct routes found in ${file}`);
+	return [...routes].sort();
+}
+
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const ajv = readAjvConfig();
 const endpoints = {};
@@ -368,10 +456,18 @@ for (const { name, file } of listEndpoints()) {
 	}
 	const meta = {};
 	for (const k of META_KEYS) if (Object.hasOwn(fullMeta, k)) meta[k] = fullMeta[k];
+	const doc = {};
+	for (const k of DOC_KEYS) if (Object.hasOwn(fullMeta, k)) doc[k] = fullMeta[k];
+	// rate limitの値(`ms('1hour')`)は解決しない。gen-spec.tsが見るのは有無だけ。
+	if (Object.hasOwn(fullMeta, 'limit')) doc.limit = true;
 	findUnresolved(paramDef, `${name}.paramDef`, problems);
 	findUnresolved(meta, `${name}.meta`, problems);
-	endpoints[name] = { paramDef, meta };
+	findUnresolved(doc, `${name}.doc`, problems);
+	endpoints[name] = { paramDef, meta, doc };
 }
+const refs = readRefs();
+const directRoutes = readDirectRoutes();
+findUnresolved(refs, 'refs', problems);
 if (problems.length) fail(`unresolved values:\n  ${problems.join('\n  ')}`);
 const names = Object.keys(endpoints).sort();
 if (names.length === 0) fail('no endpoints found');
@@ -381,8 +477,14 @@ if (names.length === 0) fail('no endpoints found');
 let out = '{\n';
 out += `"misskeyVersion": ${JSON.stringify(rootPkg.version)},\n`;
 out += `"ajv": ${JSON.stringify(ajv)},\n`;
+out += `"directRoutes": ${JSON.stringify(directRoutes)},\n`;
 out += '"endpoints": {\n';
 out += names.map((n) => `${JSON.stringify(n)}: ${JSON.stringify(endpoints[n])}`).join(',\n');
+out += '\n},\n';
+// 応答の型の定義も、本家の版を上げたときの差分が型単位で読めるように1行ずつ書く。
+// 順はrefsの宣言の順(= 本家の/api.jsonのcomponents.schemasの順)のまま残す。
+out += '"refs": {\n';
+out += Object.keys(refs).map((n) => `${JSON.stringify(n)}: ${JSON.stringify(refs[n])}`).join(',\n');
 out += '\n}\n}\n';
 fs.writeFileSync(args.out, out);
 console.log(`paramdefspec/extract: ${names.length} endpoints (Misskey ${rootPkg.version}, ajv ${ajv.version}) -> ${args.out}`);
