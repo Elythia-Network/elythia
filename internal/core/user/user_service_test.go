@@ -621,6 +621,37 @@ func TestService_UpdateProfile_AvatarNotImage(t *testing.T) {
 	assert.True(t, errors.Is(err, user.ErrAvatarNotImage))
 }
 
+// 本家 2026.10.1: センシティブと印を付けた画像はアイコンとバナーにできない。
+// 画像でないものは、センシティブでも先に AVATAR_NOT_AN_IMAGE になる (本家と同じ順)。
+func TestService_UpdateProfile_SensitiveMediaRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		typ  string
+		in   func(id *string) user.UpdateInput
+		want error
+	}{
+		{"avatar", "image/png", func(id *string) user.UpdateInput { return user.UpdateInput{AvatarID: id} }, user.ErrAvatarIsSensitive},
+		{"banner", "image/png", func(id *string) user.UpdateInput { return user.UpdateInput{BannerID: id} }, user.ErrBannerIsSensitive},
+		{"avatar not an image first", "video/mp4", func(id *string) user.UpdateInput { return user.UpdateInput{AvatarID: id} }, user.ErrAvatarNotImage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, userRepo, _, _ := newFullSvc(t)
+			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+			driveRepo := testutil.NewMockDriveFileRepository()
+			owner := "u1"
+			driveRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner, Type: tc.typ, URL: "https://x/a", IsSensitive: true}
+			svc.SetDriveFileRepository(driveRepo)
+
+			id := "f1"
+			_, err := svc.UpdateProfile("u1", tc.in(&id))
+			assert.ErrorIs(t, err, tc.want)
+			assert.Nil(t, userRepo.Users["u1"].AvatarID)
+			assert.Nil(t, userRepo.Users["u1"].BannerID)
+		})
+	}
+}
+
 // #521: UpdateInput.AvatarDecorations が user.avatarDecorations カラムに
 // jsonb (= string) として書き込まれることを確認する。
 func TestService_UpdateProfile_AvatarDecorationsSet(t *testing.T) {
