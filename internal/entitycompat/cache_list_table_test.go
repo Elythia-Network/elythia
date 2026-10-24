@@ -72,6 +72,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"locks", "mu"}, nil},
 	"internal/core/chart.uniqueTempDecodeWarnOnce": {kindNotCache, "警告を1回だけ出す印",
 		[]string{}, nil},
+	"internal/core/clip.Service": {kindThrottle, "pendingUpdatedはclipチャンネルへのupdatedを3秒の窓で間引く、クリップごとの開いている窓(本家ClipService.pendingUpdatedと同じ、#3809)。DBから来ない。捨てても次の更新を先頭として即座に流すだけ。DropLocalは持たない",
+		[]string{"afterFunc", "clock", "idGen", "materializer", "noteRepo", "notes", "pendingUpdated", "repo", "rolePolicyProvider", "streamPublisher", "updatedMu"}, nil},
 	"internal/core/dbhealth.Service": {kindDropLocal, "",
 		[]string{"cached", "clock", "db", "gen", "group", "mu", "readFn", "replicas"}, map[string]string{
 			"group": "実行中の読み込みをまとめるsingleflight。鍵に世代の番号を含める(4.4)",

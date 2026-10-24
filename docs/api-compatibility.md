@@ -215,8 +215,10 @@ upstream / 他実装が出してくる variant に対するロバスト性:
 
 ### チャンネルカバー率
 
-**upstream の 18 チャンネルをすべて実装**し、Elythia 独自の `notifications` を
-加えて 19。#125 で欠損 9 チャンネルを追加した。
+**upstream の 19 チャンネルをすべて実装**し、Elythia 独自の `notifications`・
+`bubbleVersus`・`bubbleVersusMatch` を加えて 22。#125 で欠損 9 チャンネルを追加した。
+`clip` は本家 2026.10.1 で増えたもの (#3809)。一覧は
+[divergence/config.md](divergence/config.md#4-1-websocket-streaming-チャンネル) にある。
 
 `notifications` は upstream に無い (upstream は `main` チャンネルで通知を流す)
 ので、これに依存するクライアントは Misskey TS では動かない。

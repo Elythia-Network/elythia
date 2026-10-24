@@ -1021,11 +1021,11 @@ registry は `buildStream()` で作り、登録は `setupRoutes()` の別名に�
 上の形に限って許す)、欄の書き忘れが無いこと、パッケージの中で stream の registry に登録する
 関数が `registerStreamChannels()` に限られること)。
 
-**`setupRoutes()` に残したもの** (`stream.New…` の 9 回の呼び出し):
+**`setupRoutes()` に残したもの** (`stream.New…` の 9 回の呼び出し。#3809 で 1 回足して 10 回):
 
 | 理由 | 例 |
 |---|---|
-| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`) |
+| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`)、`NewClipStreamPublisher` (#3809。受け手は `clipService` で、setter の引数の中で作る) |
 | `Start` と shutdown hook を対で持つ | `serverStatsPub`、`queueStatsPub` (queueInspector の分岐の中) |
 | 別の部品の構築の引数の中で作る | `NewAdminStreamPublisher` (`coreabuse.NewCreatedNotifier` の引数。ゲートが式ごと照合する)、`NewBubbleVersusPublisher` (`corebubbleversus.NewService` の引数) |
 
@@ -2156,7 +2156,8 @@ setupRoutes()
   3 つとも DB を直接読むので、ほかの系統との間に順の制約は無い
 - **キャッシュとして扱わず、一覧に入れないもの。** 値のキャッシュではなく、取得の backoff・同時実行の
   上限・ログの間引きで、捨てると間引きが外れるだけになる: `instance.Service` の警告の間引き
-  (`lastMetaWarn`)、`mentionFetchGuard`、`Resolver.keyFetchFailures`、`MetadataRefresher` の実行中の印
+  (`lastMetaWarn`)、`mentionFetchGuard`、`Resolver.keyFetchFailures`、`MetadataRefresher` の実行中の印、
+  `clip.Service` の `updated` の間引きの窓 (#3809)
 - `MetadataRefresher` の次の確認の時刻 (`nextCheck`) は、DB の `infoUpdatedAt` から計算した取り直しの
   時刻で、その間は DB も見ない。`dropAll` だけで捨てて同じ世代のまま DB を戻すと、戻した行の nodeinfo
   (ソフトウェアの版など) のまま最大 24 時間取り直さない。#3729 では一覧に入れなかった。メンテナンスでは

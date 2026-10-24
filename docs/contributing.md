@@ -259,7 +259,7 @@ rate limit の例:
 - **gate を doc で説明するときは、その gate が検査していない半分も書く。** 7 周の
   Medium / Low で最も繰り返された型がこれ (射程の過大主張・fail-open・偽陽性)。
   手本は `docs/divergence/config.md` §4-1 の「固定できるのは Elythia 側だけで、
-  『upstream は 18』『名前も upstream に揃えてある』は検証していない
+  『upstream は 19』『名前も upstream に揃えてある』は検証していない
   (`test-shards` は本家のソースを取得しない)」
 
 ## コーディング規約
