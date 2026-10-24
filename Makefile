@@ -1349,6 +1349,26 @@ paramdef-gen: ## 本家のparamDefのgoldenと、ajvの照合corpusを作り直�
 	node tools/paramdefspec/extract.mjs --typescript "$(PARAMDEF_NODE_MODULES)/typescript" --upstream "$(UPSTREAM_DIR)" --out $(PARAMDEF_JSON)
 	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --synthetic tools/paramdefspec/synthetic.json --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(PARAMDEF_CORPUS)
 
+# /api.json(internal/api/openapi)の本家互換の部分が、本家の/api.jsonと項目の
+# 順まで一致するかを見る(#3810)。本家の公式imageの中で本家のgenOpenapiSpecを
+# 呼んで/api.jsonを書き出し、Goのテストがそれと突き合わせる。goldenの抽出
+# (paramdef-gen)とGoへの移植のどちらがずれても落ちる。
+#
+# **本家の版を上げたら、paramdef-genの後に回す。** imageをpullするので
+# `make gates`にもCIにも入れていない。imageは`--network none`で動かし、
+# 書き出し先だけを書き込み可能にして渡す(imageのnodeはrootでない)。
+OPENAPI_UPSTREAM_IMAGE ?= misskey/misskey:$(UPSTREAM_MISSKEY_VERSION)
+OPENAPI_UPSTREAM_OUT = $(BUILD_DIR)/openapi-upstream
+.PHONY: openapi-upstream-check
+openapi-upstream-check: ## /api.jsonの本家互換の部分が、本家の公式imageで作った/api.jsonと一致するか検査(Dockerが要る)
+	mkdir -p $(OPENAPI_UPSTREAM_OUT)
+	chmod 777 $(OPENAPI_UPSTREAM_OUT)
+	docker run --rm --network none --entrypoint node \
+		-v $(CURDIR)/tools/paramdefspec/upstream-apijson.mjs:/tool/upstream-apijson.mjs:ro \
+		-v $(abspath $(OPENAPI_UPSTREAM_OUT)):/out \
+		$(OPENAPI_UPSTREAM_IMAGE) /tool/upstream-apijson.mjs /out/api.json
+	MK_UPSTREAM_API_JSON=$(abspath $(OPENAPI_UPSTREAM_OUT))/api.json go test ./internal/api/openapi/ -run TestSpecMatchesUpstreamAPIJSON -count=1 -v
+
 # 本家の新しい版 (TO=<版>) の差分のうち、frontend/ が取り込むパスだけを 3-way で当てる
 # (設計 D4、#3379)。手順の全体は docs/upstream-catch-up.md。
 #

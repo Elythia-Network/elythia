@@ -215,6 +215,8 @@ func TestSelfEncodedRoutesSkipGlobalGzip(t *testing.T) {
 		"/vite/*":       true,
 		"/embed_vite/*": true,
 		"/api/emojis":   true,
+		"/api.json":     true,
+		"/api-doc":      false,
 		"/api/emoji":    false,
 		"/api/notes":    false,
 	} {
