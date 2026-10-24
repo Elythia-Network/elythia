@@ -4147,6 +4147,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"nodeinfo の取得が redirect の飛び先に縛られなくなり、任意の host が返した JSON を instance 行へ書き戻せる"},
 		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
 			"リモートから届くノートに禁止語のフィルタが掛からなくなる (ローカル投稿にだけ効く状態)"},
+		{"federation.sensitiveWords", federationResolver.HasSensitiveWordsSource(),
+			"センシティブワードに当たるリモートの public のノートが home にならない (ローカル投稿にだけ効く状態)"},
 		{"federation.noteDeleteHook.userRepo", noteDeleteHook.HasUserRepo(),
 			"DM / フォロワー限定ノートの Delete が宛先に届かず、相手サーバーに残り続ける"},
 		{"federation.noteDeleteHook.noteRepo", noteDeleteHook.HasNoteRepo(),

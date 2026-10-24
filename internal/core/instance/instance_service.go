@@ -523,6 +523,19 @@ func (s *Service) ProhibitedWords() []string {
 	return []string(meta.ProhibitedWords)
 }
 
+// SensitiveWords returns meta.sensitiveWords.
+//
+// 連合の note 取り込み (`federation.Resolver`) が、ローカル投稿と同じく
+// センシティブワードに当たる public の投稿を home にするために読む。meta が
+// 読めない場合は nil を返す (= 判定を skip)。ProhibitedWords と同じ方針。
+func (s *Service) SensitiveWords() []string {
+	meta, err := s.metaRepo.Fetch()
+	if err != nil {
+		return nil
+	}
+	return []string(meta.SensitiveWords)
+}
+
 // IsMediaSilenced reports whether the host matches an entry in
 // meta.mediaSilencedHosts. Used by reaction gating to reject custom emoji
 // reactions from media-silenced remote hosts (#1538) and to mark remote
