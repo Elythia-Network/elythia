@@ -138,6 +138,33 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 - サーバーで当てない規則 (`v` や frontend が受け付けない flags の付いたもの、上の表の構文を含むもの) にも、`i/update` は `hardMutedWords` の命令数の上限を掛ける。本家が受け付ける大きな規則を、Elythia だけが `INVALID_REGEXP` にしうる
 - #3369 より前は、語を大文字と小文字を区別せずに比べ、`/.../` の形でない文字列も部分一致の語として扱い、判定はノート自身の本文と CW だけで、詳細画面の一覧 (`children` / `replies` / `renotes` / `conversation`) と `show-partial-bulk` にも掛けていた
 
+## `/api.json`と`/api-doc` (#3810)
+
+`/api.json`は、本家の`gen-spec.ts`と同じ形で組み立てる(`internal/api/openapi`)。本家互換のエンドポイントのpathと、`components`(`Error`と、本家の`refs`にある応答の型の全部)は、本家の公式imageの`genOpenapiSpec`が出す`/api.json`と項目の順まで同じになる(`make openapi-upstream-check`で確かめる)。材料は`internal/api/paramschema/upstream_paramdefs.json`(`make paramdef-gen`が本家の`.ts`から抜き出す)で、本家のコードは実行しない。
+
+| 項目 | 本家 | Elythia |
+|---|---|---|
+| 載るエンドポイント | 本家の全エンドポイント(`endpoint-list.ts`) | Echoに登録した`/api/<名前>`のGET / POSTだけ。本家にあってもElythiaが持たないもの(testModeでないときの`reset-db`)は載らない。GETはElythiaがGETのルートを持つときだけ載せる |
+| Elythiaにしかないエンドポイント | — | タグ`Elythia`にまとめ、引数と応答の型を付けずに一覧だけ載せる。このときだけ、トップレベルの`tags`を出す(本家互換のタグをpathに現れた順に並べ、`Elythia`を最後に置く) |
+| 本家互換のエンドポイントの応答にElythiaが足したフィールド | — | 載せない(本家の型のまま) |
+| `endpoint-list.ts`の外で登録されるroute(`signup` / `signin-flow` / miauthのcheckなど) | 載らない | 載らない(本家と同じ。本家の`ApiServerService.ts`から抜き出した一覧で外す) |
+| 本家の旧いpathの互換(`signin`) | 載らない(今の本家には無い) | 載らない(`internal/api/openapi`の`legacyRoutes`で外す) |
+| `info` | `title: Misskey API`、`version`はMisskeyの版 | `title: Elythia API`、`version`は`<Elythiaの版> (Misskey <版> 互換)`、`description`に説明 |
+| トップレベルの`externalDocs` | 本家のリポジトリ | Elythiaのリポジトリ(`config.MkGoRepositoryURL`)。本家と同じく固定で、運営者が設定する`meta.repositoryUrl`は見ない。各エンドポイントの`externalDocs`(本家のendpointのソース)は本家と同じ |
+| `servers` | `config.apiUrl` | `config.url` + `/api` |
+
+2026-10-24の`develop`(本家2026.10.1追従)で数えると、`/api.json`のpathは519で、本家互換が437、Elythia独自が82。数え方は、testModeでない設定で起動した実サーバーの`elythia dump-routes`から`/api/<名前>`のGET / POSTを取り、catch-all(`*`を含むもの)、本家の`directRoutes`、`legacyRoutes`を除いた名前の数(GETとPOSTの両方があっても1つと数える)。`/api.json`のpathの集合とメソッドがこれと一致することを確かめた。
+
+`/api.json`の本文(約1.3MB)とそのgzipは、初めて読まれたときに1度だけ作って持つ。全体のgzip middlewareはこのルートを外し(`selfEncodedRoutes`)、ハンドラが`Accept-Encoding`(`q=0`も見る)でどちらを返すかを決め、`Vary: Accept-Encoding`を付ける。組み立てに使った変換済みのgolden(十数MB)は、本文を作ったら捨てる。
+
+`/api-doc`は本家と同じく、Scalar(`@scalar/api-reference`)が`/api.json`を表示する1枚のHTMLを返す。
+
+- **版を固定し、SRIを付ける。** 本家は版を付けずにjsdelivrから読む。Elythiaは`internal/server/apidoc.go`の`scalarVersion`の版の`dist/browser/standalone.js`を、jsdelivrの実ファイルから計算したsha384(`scalarIntegrity`)で照合して読む
+- **見た目はElythiaの既定テーマ**(`l-elythia` / `d-elythia`)の色にする。ライトとダークは`prefers-color-scheme`で切り替え、Scalarの切り替えボタンは隠す。`<title>`は`Elythia API`、アイコンは`/favicon.ico`
+- Scalarの既定のフォント(`fonts.scalar.com`)と、Scalarのサービスへつなぐagent・mcpは切る。telemetryは1.73.1では設定のschemaにあるだけで使われていないが、将来の版に備えて切る。ページを読み込むときに外へ出る通信は、jsdelivrのScalar 1本だけになる(画面から操作して送るもの、たとえば「Test Request」は数えていない)
+- **「Test Request」はproxyを通さない**(設定の`proxyUrl`を空にする)。Scalarはproxyが未指定だと、layoutによって`proxy.scalar.com`を既定の中継先にし、利用者が入れたアクセストークンも中継先へ渡る。`/api-doc`はAPIと同じoriginから配るので、中継は要らない。モーダルの「Open API Client」のボタンも隠す(`hideClientButton`)。押すと`client.scalar.com`へ`/api.json`の絶対URL付きで移り、その先のScalar Clientは既定で`proxy.scalar.com`を使うため
+- **CSPはfrontendの設定(`frontendContentSecurityPolicy`)に従う**(既定は`off`で何も付けない)。付けるときはfrontendと同じpolicyの`script-src`に、ScalarのファイルのURL(版まで含む)だけを足す。他のページのCSPは変えない。inlineのscriptは無い(Scalarの設定は`data-configuration`属性で渡す)。styleはScalarが実行時に`<style>`を差し込むので、frontendと同じ`'unsafe-inline'`で通す(hashを足すと`'unsafe-inline'`が無視され、Scalarのstyleが止まる)
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
