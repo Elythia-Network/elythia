@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -513,6 +514,12 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	// upstream: 'tag' があれば単一タグ、無ければ query をそのまま使う。
 	var tagGroups [][]string
 	if req.Tag != "" {
+		// 本家の paramDef は tag に maxLength: 128 を持つ (ajv は code point で数える)。
+		// 保存されるタグは 128 文字以下なので、それより長いタグはどのノートにも
+		// 一致しない。正規化 (NFKC) の前に拒否する。
+		if utf8.RuneCountInString(req.Tag) > hashtag.MaxTagLength {
+			return apierr.JSONInvalidParam(c)
+		}
 		tagGroups = [][]string{{req.Tag}}
 	} else {
 		// **query の大きさに上限を置く。** 1 要求の検索の重さを一定に収めるため。
@@ -526,6 +533,12 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 		for _, inner := range req.Query {
 			if len(inner) > hashtag.MaxNoteTags {
 				return apierr.JSONInvalidParam(c)
+			}
+			// query の各タグにも本家と同じ maxLength: 128 を掛ける (tag と同じ理由)。
+			for _, t := range inner {
+				if utf8.RuneCountInString(t) > hashtag.MaxTagLength {
+					return apierr.JSONInvalidParam(c)
+				}
 			}
 		}
 		for _, inner := range req.Query {

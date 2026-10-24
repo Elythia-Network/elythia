@@ -1436,3 +1436,43 @@ func TestTranslate_TranslatorNotConfigured_Unavailable(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, 1, tr.calls, "blank text must not reach the translator")
 }
+
+// tag と query の各タグは、本家の paramDef と同じく 128 文字 (code point) までで、
+// 超えたら INVALID_PARAM。数えるのは正規化 (NFKC) の前の文字数。
+func TestSearchByTag_TagLengthLimit(t *testing.T) {
+	queryOf := func(tag string) string {
+		b, err := json.Marshal(map[string]any{"query": [][]string{{"ok", tag}}})
+		require.NoError(t, err)
+		return string(b)
+	}
+	tagOf := func(tag string) string {
+		b, err := json.Marshal(map[string]any{"tag": tag})
+		require.NoError(t, err)
+		return string(b)
+	}
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"tag at limit", tagOf(strings.Repeat("あ", 128)), http.StatusOK},
+		{"tag over limit", tagOf(strings.Repeat("あ", 129)), http.StatusBadRequest},
+		{"tag over limit before normalization", tagOf(strings.Repeat("e\u0301", 65)), http.StatusBadRequest},
+		{"query tag at limit", queryOf(strings.Repeat("あ", 128)), http.StatusOK},
+		{"query tag over limit", queryOf(strings.Repeat("あ", 129)), http.StatusBadRequest},
+		{"query tag over limit before normalization", queryOf(strings.Repeat("e\u0301", 65)), http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _ := newExtraHandler(t)
+			rec := postExtra(h.SearchByTag, tc.body, nil)
+			require.Equal(t, tc.want, rec.Code, rec.Body.String())
+			if tc.want == http.StatusBadRequest {
+				var resp map[string]map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				assert.Equal(t, "INVALID_PARAM", resp["error"]["code"])
+				assert.Equal(t, "3d81ceae-475f-4600-b2a8-2bc116157532", resp["error"]["id"])
+			}
+		})
+	}
+}

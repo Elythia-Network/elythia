@@ -91,3 +91,38 @@ func TestHashtag_RejectsOverlongTag(t *testing.T) {
 	require.Len(t, ctx.subs, 1)
 	ch.Dispose()
 }
+
+// 長さは正規化の前の文字数で判定すること (本家 hashtag.ts と同じ)。結合文字の
+// 並びは NFKC で短くなるので、正規化の後だけで数えると 128 文字を超える入力を
+// 通してしまう。
+func TestHashtag_JudgesLengthBeforeNormalization(t *testing.T) {
+	// "e" + U+0301 は NFKC で "é" 1 文字になる。65 組 = 正規化前 130 文字、後 65 文字
+	long := strings.Repeat("e\u0301", 65)
+	body, err := json.Marshal(map[string]any{"q": [][]string{{long}}})
+	require.NoError(t, err)
+
+	ctx := newCtx(nil)
+	ch := NewHashtag(ctx)
+	require.ErrorIs(t, ch.Init(json.RawMessage(body)), stream.ErrInvalidParams)
+	require.Empty(t, ctx.subs)
+	ch.Dispose()
+
+	// 正規化前 128 文字ちょうどは通る。
+	body, err = json.Marshal(map[string]any{"q": [][]string{{strings.Repeat("e\u0301", 64)}}})
+	require.NoError(t, err)
+	ctx = newCtx(nil)
+	ch = NewHashtag(ctx)
+	require.NoError(t, ch.Init(json.RawMessage(body)))
+	require.Len(t, ctx.subs, 1)
+	ch.Dispose()
+
+	// 正規化で 128 文字を超えても、正規化前が 128 文字以下なら通す (本家と同じ)。
+	// U+337F (㍿) は NFKC で 4 文字になる。100 文字 = 正規化後 400 文字
+	body, err = json.Marshal(map[string]any{"q": [][]string{{strings.Repeat("\u337f", 100)}}})
+	require.NoError(t, err)
+	ctx = newCtx(nil)
+	ch = NewHashtag(ctx)
+	require.NoError(t, ch.Init(json.RawMessage(body)))
+	require.Len(t, ctx.subs, 1)
+	ch.Dispose()
+}
