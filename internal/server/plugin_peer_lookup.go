@@ -57,8 +57,8 @@ type nodeInfoPeerLister struct {
 
 	mu    sync.Mutex
 	cache map[string]peerLookupEntry
-	// gen は DropLocal で進める世代の番号 (#3776)。取得はロックの外で走るので、
-	// 捨てる前に始めた取得の結果を、捨てた後に積まないために使う。
+	// gen は DropLocal (#3776) と Forget (#3804) で進める世代の番号。取得はロックの
+	// 外で走るので、捨てる前に始めた取得の結果を、捨てた後に積まないために使う。
 	gen uint64
 }
 
@@ -132,8 +132,11 @@ func (l *nodeInfoPeerLister) DropLocal() {
 // Forget drops the cached answer for host.
 //
 // 受け口が無いと分かったときに送信側が呼ぶ。次の問い合わせで引き直す。
+// 世代も進めるので、Forget の前に始めた取得は結果を積まない (#3804)。他の host の
+// 取得も積まなくなるが、次の問い合わせで引き直すだけで済む。
 func (l *nodeInfoPeerLister) Forget(host string) {
 	l.mu.Lock()
+	l.gen++
 	delete(l.cache, host)
 	l.mu.Unlock()
 }

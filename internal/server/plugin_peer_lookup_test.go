@@ -230,3 +230,35 @@ func TestNodeInfoPeerLister_DropLocalDuringFetchIsNotStored(t *testing.T) {
 	assert.Equal(t, []string{"demo", "other"}, got, "the answer fetched before the drop was stored")
 	assert.Equal(t, int32(2), hits.Load())
 }
+
+// A Forget while nodeinfo is fetched keeps the answer out of the cache
+// (#3804). 404 で受け口が無いと分かった後に、その前に始めた取得が「持っている」
+// を積み直さないこと。
+func TestNodeInfoPeerLister_ForgetDuringFetchIsNotStored(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	l, hits := testLister(t, seqNodeInfo(true, entered, release))
+
+	done := make(chan []string, 1)
+	go func() {
+		got, _ := l.Plugins(context.Background(), "other.example")
+		done <- got
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first fetch never reached the server")
+	}
+	l.Forget("other.example")
+	close(release)
+	select {
+	case got := <-done:
+		require.Equal(t, []string{"demo"}, got)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first fetch never returned")
+	}
+
+	got, err := l.Plugins(context.Background(), "other.example")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"demo", "other"}, got, "the answer fetched before Forget was stored")
+	assert.Equal(t, int32(2), hits.Load())
+}
