@@ -72,14 +72,16 @@ type cachePart struct {
 // between rebuilds the document from the stale row).
 //
 // The zero value is an empty list ready to use. Nothing in production calls
-// dropAll yet; stage 6 of #3666 uses it to drop the caches instead of
-// rebuilding the whole generation. The precise invalidations (the meta row on
+// dropAll: a maintenance rebuilds the whole generation (#3802), and the list
+// is the base of the check that every cache of a generation is registered
+// (#3777). The precise invalidations (the meta row on
 // internal:metaUpdated, the emoji (name, host) entries, the role of one user)
 // stay as they are; the list adds a way to drop everything, it replaces none
 // of them.
 //
-// 今は誰も dropAll を呼ばない。段階 (6) で、メンテナンスの作り直しの代わりに
-// キャッシュだけを捨てる形を検討するときに使う (docs/architecture.md 4.4)。
+// 本番では dropAll を呼ばない。段階 (6) で、メンテナンスの作り直しの代わりにキャッシュだけを
+// 捨てる形を検討する予定だったが、作り直しが短いので範囲を狭めないと決めた (#3802、
+// docs/architecture.md 4.4)。
 type cacheList struct {
 	parts []cachePart
 	// err is the first invalid registration. newServer fails the

@@ -55,8 +55,10 @@ const (
 	// counters and metrics.
 	kindNotCache cacheEntryKind = "notCache"
 	// kindWriteBuffer holds writes (or notices to other processes) not yet
-	// made. Dropping them loses them; stage 6 of #3666 decides whether to
-	// flush or drop them when the database is restored.
+	// made. Dropping them loses them; a maintenance stops the generation
+	// (StopBackground), which stops each part, and the parts flush what they
+	// hold (best effort, within the drain timeout) before the database is
+	// restored (#3802).
 	kindWriteBuffer cacheEntryKind = "writeBuffer"
 	// kindFollowsRegistered is built from a registered cache and checks it on
 	// each use, so dropping that cache drops it too.
@@ -66,7 +68,8 @@ const (
 	kindReloadOnDrop cacheEntryKind = "reloadOnDrop"
 	// kindPerConnection is the state of one streaming connection or channel.
 	// It is read from the database when the connection or channel starts and
-	// stays while it is open; stage 6 of #3666 closes or re-reads the streams.
+	// stays while it is open; a maintenance rebuilds the generation and closes
+	// the streams (#3802).
 	kindPerConnection cacheEntryKind = "perConnection"
 	// kindPerCall is built for one call (one verification, one notification,
 	// one resolution) and dropped with it.

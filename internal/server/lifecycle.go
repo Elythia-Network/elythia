@@ -269,7 +269,8 @@ type StopReport struct {
 	// Err is the error StopBackground or CloseDB returned.
 	Err error
 	// Drain, StopBackground and CloseDB are how long each step took
-	// (#3802). 作り直す範囲を狭めるかどうかを、段ごとの時間で決めるため。
+	// (#3802). 作り直す範囲を狭めないと決めた根拠で、本番のログで作り直しが
+	// 遅くなっていないかを見るため。
 	Drain          time.Duration
 	StopBackground time.Duration
 	CloseDB        time.Duration

@@ -63,8 +63,8 @@ type lifecyclePart struct {
 // startAll as well (#3705).
 //
 // 構築では作って登録するだけにし、起動はStartBackgroundに寄せる(#3703)。構築だけして
-// 起動しない使い方(dump-routes、テストのnewServer)で部品が動かないようにし、段階(6)で
-// 作り直す範囲を部品の単位に絞れるよう、作ることと動かすことを分ける。
+// 起動しない使い方(dump-routes、テストのnewServer)で部品が動かないよう、作ることと
+// 動かすことを分ける。
 type lifecycle struct {
 	parts []lifecyclePart
 	// err is the first invalid registration (an empty name, a nil stop or a
