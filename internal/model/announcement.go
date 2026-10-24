@@ -16,6 +16,10 @@ type Announcement struct {
 	ForExistingUsers       bool       `gorm:"column:forExistingUsers;default:false" json:"forExistingUsers"`
 	Silence                bool       `gorm:"column:silence;default:false" json:"silence"`
 	UserID                 *string    `gorm:"column:userId;type:varchar(32)" json:"userId"`
+	// AutoArchiveAt is the time after which the announcement is treated as
+	// archived (upstream 2026.10.1, #3809). nil means it is never archived
+	// automatically.
+	AutoArchiveAt *time.Time `gorm:"column:autoArchiveAt" json:"autoArchiveAt"`
 }
 
 func (Announcement) TableName() string { return "announcement" }

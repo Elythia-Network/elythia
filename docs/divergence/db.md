@@ -38,12 +38,13 @@
 
 `__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
 
-### 2-2. 独自カラム (35 = 実使用 32 + 未使用の残存 3)
+### 2-2. 独自カラム (36 = 実使用 33 + 未使用の残存 3)
 
-うち **Elythia が実際に読み書きするのは 32 件** (cherrypick 由来 3 + Elythia 独自 29)。Elythia 独自のうち `user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` の 2 件は、本家が次の版で足す列 (PR 17998、2026.10.0 には無い) を先に取り込んだもので、本家の版を上げると独自ではなくなる。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
+うち **Elythia が実際に読み書きするのは 33 件** (cherrypick 由来 3 + Elythia 独自 30)。Elythia 独自のうち `user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` の 2 件は、本家が次の版で足す列 (PR 17998、2026.10.0 には無い) を先に取り込んだもので、`announcement` の `autoArchiveAt` は本家 2026.10.1 の列 (#3809)。どれも本家の版を上げると独自ではなくなる。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
 
 | テーブル | カラム | 由来 | 理由 |
 |---|---|---|---|
+| `announcement` | `autoArchiveAt` | 本家 2026.10.1 | お知らせの自動アーカイブの日時 (#3809)。列名・型 (`timestamp with time zone`、NULL 可)・コメントは本家の migration `AutoArchiveAnnouncements1783913268595` と同じで、`ADD COLUMN IF NOT EXISTS` なので TS 2026.10.1 以降の DB には重ねない。**本家の 2026.10.0 には無い**ので、TS 2026.10.0 へ戻すと列が残るだけ (TS は読まない)。2026.10.1 へ上げると本家の migration が `already exists` で落ちる (復路は保証しない、#3191) |
 | `chat_message` | `emojis` / `isDelivering` / `isDeliverFailed` | cherrypick | 連合配送の状態追跡 |
 | `chat_room` | `host` | Elythia 独自 | 取り込んだ chat room の出どころ (#2994)。ローカル room は NULL (`user.host` / `emoji.host` と同じ規約)。値は**正規形の room URI の authority** から入る (実行時) / owner の `user.host` (migration の backfill)。どちらも punycode + 小文字 + 既定ポート除去済みだが、**`www.` の扱いだけは揃わない** — actor の binding 検査は `www.` を畳むのに対し `sameDeliveryHost` は畳まないので、`https://www.e.example/users/x` が document id に `https://e.example/users/x` を名乗る相手では `user.host` が `e.example`、`chat_room.host` が `www.e.example` になる |
 | `chat_room` | `uri` | Elythia 独自 | 取り込んだ chat room の正規 AP URI (#2994)。**room の身元はこれ**で、行の `id` はローカルで採番する。room id は相手が自由に決められる値なので ID 空間はホストをまたいで共有されており、id で keying していた頃は**あるホストが同じ id の room を先に作ると、別のホストの正規の room からの Invite が owner 不一致で恒久的に drop されていた** (retry もされない)。`uri IS NOT NULL` の部分 UNIQUE index で二重取り込みを DB でも止める。**PK は `id` のまま** — upstream の `MiChatRoom` は `@PrimaryColumn() id` なので複合キーにすると TS へ戻せず、`host` を NULL にしたままでは PK にも入れられない (複合 FK も `MATCH SIMPLE` で NULL を素通りするのでローカル room だけ整合性が消える)。`note.uri` / `chat_message.uri` と同じ列の足し方 |

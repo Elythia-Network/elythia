@@ -163,7 +163,7 @@ type Server struct {
 	// stopped, before they stop anything.
 	//
 	// 起動の間は握ったままにする。起動は部品のgoroutineを立てるほか、cronの登録
-	// (registerSchedulerJobsの11個の登録の関数)と撤去(PruneUnregistered)でRedisを
+	// (registerSchedulerJobsの12個の登録の関数)と撤去(PruneUnregistered)でRedisを
 	// context.Background()のまま呼ぶので、その分だけ長くかかりうる。本番の経路では
 	// StartBackgroundとStopBackgroundをどちらもSupervisorのgenMuの下で呼ぶので、
 	// 固まった起動は#3709の前から停止を止めていた(Supervisor.ShutdownはlockBeforeで
@@ -1089,6 +1089,7 @@ func (s *Server) registerSchedulerJobs() {
 		{"instance refresh", s.queueScheduler.RegisterInstanceRefreshJob},
 		{"retention", s.queueScheduler.RegisterRetentionJob},
 		{"checkExpiredMutings", s.queueScheduler.RegisterCheckExpiredMutingsJob},
+		{"archiveAnnouncements", s.queueScheduler.RegisterArchiveAnnouncementsJob},
 		{"clean", s.queueScheduler.RegisterCleanJob},
 		{"chunkedUploadGc", s.queueScheduler.RegisterChunkedUploadGCJob},
 		{"cleanRemoteNotes", s.queueScheduler.RegisterCleanRemoteNotesJob},
