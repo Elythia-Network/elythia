@@ -11,11 +11,11 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// MeDetailed は本家 PR 17998 の followApprovalLocalSeconds /
-// followApprovalRemoteSeconds と Elythia 独自の followApprovalAction を出す。
-// 未設定 (NULL / 既定の request / 未知の値) のときは key ごと出さない — 追従して
-// いる本家 2026.10.0 の e2e が MeDetailed の key の過不足を完全一致で見るため
-// (#3466)。0 は未設定と区別して出す。
+// MeDetailed は本家 2026.10.1 (PR 17998) の followApprovalLocalSeconds /
+// followApprovalRemoteSeconds を、未設定でも null で必ず出す (本家の schema で
+// optional ではないため、#3809)。Elythia 独自の followApprovalAction は、
+// 未設定 (既定の request / 未知の値) なら key ごと出さない — 本家の e2e が
+// MeDetailed の key の過不足を完全一致で見るため (#3466)。0 は null と区別して出す。
 func TestPackMeDetailed_FollowApproval(t *testing.T) {
 	u := &model.User{ID: "u1", Username: "u1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	decode := func(me MeDetailed) map[string]any {
@@ -32,9 +32,12 @@ func TestPackMeDetailed_FollowApproval(t *testing.T) {
 		"unknown action": {UserID: "u1", FollowApprovalAction: "bogus"},
 	} {
 		m := decode(currentPacker().PackMeDetailed(u, profile))
-		for _, k := range []string{"followApprovalLocalSeconds", "followApprovalRemoteSeconds", "followApprovalAction"} {
-			assert.NotContains(t, m, k, "%s: %s", name, k)
+		for _, k := range []string{"followApprovalLocalSeconds", "followApprovalRemoteSeconds"} {
+			v, ok := m[k]
+			assert.True(t, ok, "%s: %s は未設定でも出す", name, k)
+			assert.Nil(t, v, "%s: %s", name, k)
 		}
+		assert.NotContains(t, m, "followApprovalAction", name)
 	}
 	m := decode(currentPacker().PackMeDetailed(u, &model.UserProfile{UserID: "u1", FollowApprovalAction: model.FollowApprovalActionRequest}))
 	assert.NotContains(t, m, "followApprovalAction", "既定の request は出さない")

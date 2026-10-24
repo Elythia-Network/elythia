@@ -485,26 +485,20 @@ export type FollowApprovalAction = 'request' | 'silentRequest' | 'silentFollow';
 
 /**
  * Fields that the signed-in user (`i`, `i/update`, `meUpdated`) has on
- * Elythia but not in this version of misskey-js. Absent when unset (`null`,
- * or `request` for the action).
+ * Elythia but not in misskey-js. Absent when unset (`request`).
  *
- * 本家 2026.10.0 の e2e が MeDetailed の key の過不足を見るので、未設定なら出さない。
- * 古い版のサーバーでも欠ける。どちらも未設定として読む。
+ * 本家の e2e が MeDetailed の key の過不足を見るので、既定の request なら出さない。
+ * 古い版のサーバーでも欠ける。どちらも request として読む。期間の 2 項目
+ * (followApprovalLocalSeconds / followApprovalRemoteSeconds) は本家 2026.10.1 で
+ * misskey-js の MeDetailed に入ったので、ここには書かない (#3809)。
  */
 export type ElythiaMeDetailedFields = {
 	/**
-	 * Follows from local accounts younger than this many seconds are held back
-	 * (`null` or 0: off). An upstream field (misskey-dev/misskey#17998) that
-	 * this version of misskey-js does not have yet.
+	 * How a follow from an account younger than `followApprovalLocalSeconds` /
+	 * `followApprovalRemoteSeconds` is handled. Elythia-only. Elythia counts the
+	 * age of a remote account from the creation time its server published when
+	 * known, and from when this server first saw the account otherwise.
 	 */
-	followApprovalLocalSeconds?: number | null;
-	/**
-	 * The same for remote accounts. Elythia counts from the account creation
-	 * time the remote server published when known, and from when this server
-	 * first saw the account otherwise. Upstream always uses the latter.
-	 */
-	followApprovalRemoteSeconds?: number | null;
-	/** How a held-back follow is handled. Elythia-only. */
 	followApprovalAction?: FollowApprovalAction;
 };
 

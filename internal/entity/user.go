@@ -218,18 +218,14 @@ type MeDetailed struct {
 	AutoSensitive      bool    `json:"autoSensitive"`
 	CarefulBot         bool    `json:"carefulBot"`
 	AutoAcceptFollowed bool    `json:"autoAcceptFollowed"`
-	// FollowApprovalLocalSeconds / FollowApprovalRemoteSeconds は本家 PR 17998
-	// の MeDetailed の項目 (#3466)。**未設定 (NULL) のときは key ごと出さない。**
-	// 本家の schema では nullable・optional ではないが、それは 2026.10.0 より後の
-	// 版で、追従している版 (2026.10.0) の本家 e2e (users.ts) は MeDetailed の
-	// key の過不足を完全一致で見るため、常に出すと i と i/update の応答を比べる
-	// テストが落ちる。逆に PR 17998 の e2e (follow-approval.ts) の最初のテストは
-	// `i` に null の key があることを見るので、こちらは今は落ちる。本家の版を
-	// PR 17998 を含むものへ上げるときに omitempty を外す (両方とも通る形に戻る)。
-	FollowApprovalLocalSeconds  *int `json:"followApprovalLocalSeconds,omitempty"`
-	FollowApprovalRemoteSeconds *int `json:"followApprovalRemoteSeconds,omitempty"`
-	// FollowApprovalAction は止め方 (#3466、Elythia 独自の追加)。同じ理由で、
-	// 既定 (request) のときは出さない。
+	// FollowApprovalLocalSeconds / FollowApprovalRemoteSeconds は本家 2026.10.1
+	// (PR 17998) の MeDetailed の項目 (#3466)。本家の schema では nullable で
+	// optional ではないので、未設定 (NULL) でも null で必ず出す (#3809)。
+	FollowApprovalLocalSeconds  *int `json:"followApprovalLocalSeconds"`
+	FollowApprovalRemoteSeconds *int `json:"followApprovalRemoteSeconds"`
+	// FollowApprovalAction は止め方 (#3466、Elythia 独自の追加)。本家の e2e
+	// (users.ts) は MeDetailed の key の過不足を完全一致で見るので、既定
+	// (request) のときは出さず、本家と同じ key のままにする。
 	FollowApprovalAction     string `json:"followApprovalAction,omitempty"`
 	AlwaysMarkNsfw           bool   `json:"alwaysMarkNsfw"`
 	ReceiveAnnouncementEmail bool   `json:"receiveAnnouncementEmail"`
@@ -279,7 +275,7 @@ type MeDetailed struct {
 	// Policies は role 依存で AsMeDetailed (entity 層) では nil のまま。omitempty で
 	// 「未設定なら省略」にするのが重要 (#1240): PackMeDetailed を override 無しで
 	// 直接返す i/update / meUpdated 経路で nil を `null` として出すと frontend の
-	// updateCurrentAccountPartial が `$i.policies` を null 上書きして policy 判定が
+	// updateCurrentAccount が `$i.policies` を null 上書きして policy 判定が
 	// 壊れる。users/show self-view は handler が DefaultPolicies() を明示セットする
 	// ので含まれ、/api/i は handler が実 policies で override する。
 	Policies map[string]any `json:"policies,omitempty"`
@@ -335,7 +331,7 @@ func (d *UserDetailed) EnsureRelationFlags() {
 // PackMeDetailed packs a self-view user payload, extending PackUserDetailed
 // with MeDetailed fields. Self-mutation handlers (i/update, i/2fa/*)
 // should use this instead of PackUserDetailed so frontend's
-// updateCurrentAccountPartial receives the full $i shape; otherwise
+// updateCurrentAccount receives the full $i shape; otherwise
 // privacy-scoped fields like isExplorable / noCrawle stay stale in the
 // session (#968).
 func (pkr *Packer) PackMeDetailed(u *model.User, profile *model.UserProfile, idGens ...id.Generator) MeDetailed {

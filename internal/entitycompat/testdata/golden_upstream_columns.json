@@ -49,6 +49,7 @@
     "url"
   ],
   "announcement": [
+    "autoArchiveAt",
     "display",
     "forExistingUsers",
     "icon",
@@ -867,6 +868,8 @@
     "emailVerifyCode",
     "enableWordMute",
     "fields",
+    "followApprovalLocalSeconds",
+    "followApprovalRemoteSeconds",
     "followedMessage",
     "followersVisibility",
     "followingVisibility",

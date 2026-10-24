@@ -5,9 +5,9 @@
 -- 本家に追従するときは、この 2 列を足す migration を重ねて作らない。
 -- NULL と 0 はどちらも「止めない」。値は秒で、i/update が 0〜2592000 に絞る。
 --
--- 本家の版 (2026.10.0) にはまだ無い列なので、この DB を TS へ戻して、この
--- migration を含む本家の版へ上げると、本家の migration が already exists で
--- 落ちる。復路は保証しない (#3191)。
+-- 本家は 2026.10.1 でこの 2 列を足した。TS 2026.10.1 以降の DB には既に列が
+-- あるので IF NOT EXISTS で重ねない。TypeORM の migrations テーブルへの seed は
+-- 000135 が足す (#3809)。
 ALTER TABLE "user_profile" ADD COLUMN IF NOT EXISTS "followApprovalLocalSeconds" integer;
 ALTER TABLE "user_profile" ADD COLUMN IF NOT EXISTS "followApprovalRemoteSeconds" integer;
 

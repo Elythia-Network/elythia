@@ -1297,6 +1297,16 @@
       "optional": true,
       "type": "boolean"
     },
+    "followApprovalLocalSeconds": {
+      "nullable": true,
+      "optional": false,
+      "type": "number"
+    },
+    "followApprovalRemoteSeconds": {
+      "nullable": true,
+      "optional": false,
+      "type": "number"
+    },
     "followedMessage": {
       "nullable": true,
       "optional": false,

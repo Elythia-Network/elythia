@@ -23,7 +23,7 @@ func followApprovalUser(repo *testutil.MockUserRepository, locked bool) *model.U
 
 // i/update は期間を本家の paramDef (integer、nullable、0〜2592000) どおりに
 // 受け、MeDetailed に同じ値を返す。省略は不変、null はクリア。null の項目は
-// 応答に出さない (entity.MeDetailed の注記、#3466)。
+// 応答に null で出す (本家 2026.10.1 と同じ、#3809)。
 func TestUpdate_FollowApprovalSeconds(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := followApprovalUser(repo, false)
@@ -47,7 +47,8 @@ func TestUpdate_FollowApprovalSeconds(t *testing.T) {
 	assert.Equal(t, 2592000, *p.FollowApprovalRemoteSeconds)
 	body = nil
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.NotContains(t, body, "followApprovalLocalSeconds", "null は出さない")
+	require.Contains(t, body, "followApprovalLocalSeconds", "null でも key は出す")
+	assert.Nil(t, body["followApprovalLocalSeconds"])
 	assert.EqualValues(t, 2592000, body["followApprovalRemoteSeconds"])
 
 	// 本家の ajv (type: integer) と同じく、整数の値なら小数や指数の書き方でも受ける。
@@ -94,9 +95,11 @@ func TestUpdate_FollowApprovalAction(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	for _, k := range []string{"followApprovalLocalSeconds", "followApprovalRemoteSeconds", "followApprovalAction"} {
-		assert.NotContains(t, body, k, "未設定の利用者の i は本家 2026.10.0 と同じ key のまま")
+	for _, k := range []string{"followApprovalLocalSeconds", "followApprovalRemoteSeconds"} {
+		require.Contains(t, body, k, "未設定でも本家 2026.10.1 と同じく null で出す")
+		assert.Nil(t, body[k])
 	}
+	assert.NotContains(t, body, "followApprovalAction", "未設定の利用者の i は本家と同じ key のまま")
 
 	for _, action := range []string{"silentRequest", "silentFollow", "request"} {
 		rec = post(h.Update, `{"followApprovalAction":"`+action+`"}`, user)

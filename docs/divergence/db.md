@@ -33,18 +33,17 @@
 | `plugin_secret` | Elythia 独自 | サーバープラグインの秘密の値 (API キーなど、#3470)。設定ファイルの `pluginSecretKey` で暗号化 (AES-256-GCM、鍵は HKDF-SHA256 で導出) した暗号文だけを置き、平文の列は持たない — DB のバックアップと一緒に値が漏れないようにするため。暗号文はプラグイン名と値の名前に結び付けてある (AAD) ので、行の名前を書き換えても別の値としては読めない。**プラグインの schema (`plugin_<name>`) ではなく `public` に置く** — プラグインの schema はプラグイン自身が自由に読み書きする場所なので。鍵を失うと読めなくなり、管理画面から入れ直す ([plugins/operating.md](../plugins/operating.md#秘密の値))。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `silent_follow` | Elythia 独自 | フォローの止め方を「静かに成立させる」(`user_profile.followApprovalAction` = `silentFollow`、#3466) にした人へ、通知を出さずに成立させたフォローの記録。受け手が `following/silent/list` で後から確かめる。`(followeeId, followerId)` で 1 組 1 行にまとめ、同じ人がまた来たら `id` (= 日時) を書き換える。**フォローが解除されても消さない** — 確かめたいのは「誰が来たか」なので。`user` への FK は両方 `ON DELETE CASCADE`。TS は未知のテーブルを無視する。**純正へは還元できない行** (止め方そのものが upstream に無い) |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。Elythia はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` を Redis stream を舐めずに解決する (`isSpecified` の行の有無。`isMentioned` も書き込むが読む経路は無く、`hasUnreadMentions` は通知の stream から mention / reply を探して求める)。upstream legacy 版にある `noteChannelId` は Elythia の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
-| `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 346 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
+| `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 349 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
 | `schema_migrations` | tooling | golang-migrate 用 |
 
 `__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
 
-### 2-2. 独自カラム (36 = 実使用 33 + 未使用の残存 3)
+### 2-2. 独自カラム (33 = 実使用 30 + 未使用の残存 3)
 
-うち **Elythia が実際に読み書きするのは 33 件** (cherrypick 由来 3 + Elythia 独自 30)。Elythia 独自のうち `user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` の 2 件は、本家が次の版で足す列 (PR 17998、2026.10.0 には無い) を先に取り込んだもので、`announcement` の `autoArchiveAt` は本家 2026.10.1 の列 (#3809)。どれも本家の版を上げると独自ではなくなる。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。
+うち **Elythia が実際に読み書きするのは 30 件** (cherrypick 由来 3 + Elythia 独自 27)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。`user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (#3466 で本家 PR 17998 から先に取り込んだ列) と `announcement` の `autoArchiveAt` (#3809) は、本家 2026.10.1 に同じ列が入ったので独自ではなくなった。
 
 | テーブル | カラム | 由来 | 理由 |
 |---|---|---|---|
-| `announcement` | `autoArchiveAt` | 本家 2026.10.1 | お知らせの自動アーカイブの日時 (#3809)。列名・型 (`timestamp with time zone`、NULL 可)・コメントは本家の migration `AutoArchiveAnnouncements1783913268595` と同じで、`ADD COLUMN IF NOT EXISTS` なので TS 2026.10.1 以降の DB には重ねない。**本家の 2026.10.0 には無い**ので、TS 2026.10.0 へ戻すと列が残るだけ (TS は読まない)。2026.10.1 へ上げると本家の migration が `already exists` で落ちる (復路は保証しない、#3191) |
 | `chat_message` | `emojis` / `isDelivering` / `isDeliverFailed` | cherrypick | 連合配送の状態追跡 |
 | `chat_room` | `host` | Elythia 独自 | 取り込んだ chat room の出どころ (#2994)。ローカル room は NULL (`user.host` / `emoji.host` と同じ規約)。値は**正規形の room URI の authority** から入る (実行時) / owner の `user.host` (migration の backfill)。どちらも punycode + 小文字 + 既定ポート除去済みだが、**`www.` の扱いだけは揃わない** — actor の binding 検査は `www.` を畳むのに対し `sameDeliveryHost` は畳まないので、`https://www.e.example/users/x` が document id に `https://e.example/users/x` を名乗る相手では `user.host` が `e.example`、`chat_room.host` が `www.e.example` になる |
 | `chat_room` | `uri` | Elythia 独自 | 取り込んだ chat room の正規 AP URI (#2994)。**room の身元はこれ**で、行の `id` はローカルで採番する。room id は相手が自由に決められる値なので ID 空間はホストをまたいで共有されており、id で keying していた頃は**あるホストが同じ id の room を先に作ると、別のホストの正規の room からの Invite が owner 不一致で恒久的に drop されていた** (retry もされない)。`uri IS NOT NULL` の部分 UNIQUE index で二重取り込みを DB でも止める。**PK は `id` のまま** — upstream の `MiChatRoom` は `@PrimaryColumn() id` なので複合キーにすると TS へ戻せず、`host` を NULL にしたままでは PK にも入れられない (複合 FK も `MATCH SIMPLE` で NULL を素通りするのでローカル room だけ整合性が消える)。`note.uri` / `chat_message.uri` と同じ列の足し方 |
@@ -53,8 +52,7 @@
 | `meta` | `inboxSuspendedSoftware` | Elythia 独自 | 受信を拒否するソフトウェアの設定 (#3362)。形は本家の `deliverSuspendedSoftware` と同じ `[{software, versionRange}]`。`NOT NULL DEFAULT '[]'`。**TS はこの列を認識しない**ので、TS へ戻すと受信の拒否が黙って効かなくなる ([TS版からの移行](../migration-from-ts.md#misskey-tsへのロールバック)) |
 | `user` | `accountCreatedAt` | Elythia 独自 | リモートの人がアカウントを作った日時 (#3465)。`createdAt` は id から出るので、リモートの人では「このサーバーが初めて知った日時」にしかならない。actor の `published` か、Misskey 系なら相手の `/api/users/show` の `createdAt` から埋める ([連合の差分](federation.md#3-7-リモートのアカウントの作成日時-elythia-独自))。ローカルの人と、どちらからも取れなかった人は NULL。**TS はこの列を認識しない**ので、TS へ戻すと読まれないだけで害は無い |
 | `user` | `managedByPlugin` | Elythia 独自 | プラグインが管理するアカウント (#3468) のプラグイン名。NULL は普通のアカウント。埋まっているアカウントには本体がどの経路からもログインさせず、ネイティブトークンをプロセス内の呼び出しでだけ受け付ける ([security.md](security.md) §6)。**TS はこの列を認識しない**ため、TS へ戻すと普通のアカウントとして扱われ、トークンも外から使えるようになる (パスワードは持たないので、パスワードではログインできないまま) |
-| `user_profile` | `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` | 本家の次の版 (PR 17998) | 作られてからこの秒数に満たないアカウントからのフォローを止める設定 (#3466)。列名・型 (`integer`、NULL 可) は本家の migration `FollowApprovalByAccountAge1791109435844` と同じにしてあり、本家に追従するときに同じ列を足す migration を重ねて作らない。**本家の 2026.10.0 には無い**ので、TS へ戻してから PR 17998 を含む本家の版へ上げると、本家の migration が `already exists` で落ちる (復路は保証しない、#3191)。経過時間の数え方の違いは [api.md](api.md#作られてから日の浅いアカウントからのフォロー-3466) |
-| `user_profile` | `followApprovalAction` | Elythia 独自 | 上の期間に当たったフォローの止め方 (#3466)。`request` (既定、本家と同じ) / `silentRequest` / `silentFollow`。`NOT NULL DEFAULT 'request'` なので、TS から移ってきた行も本家と同じ動きになる。TS はこの列を読まない |
+| `user_profile` | `followApprovalAction` | Elythia 独自 | 作られてから `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (本家と同じ列) に満たないアカウントからのフォローの止め方 (#3466)。`request` (既定、本家と同じ) / `silentRequest` / `silentFollow`。`NOT NULL DEFAULT 'request'` なので、TS から移ってきた行も本家と同じ動きになる。TS はこの列を読まない |
 | `user` | `isRoot` | Elythia 独自 | upstream は system_account 移行で DROP 済み。`role.Service.isRootUser` の fallback に必要 |
 | `meta` | `proxyAccountId` | Elythia 独自 | 同じく upstream は DROP 済み。`admin/update-proxy-account` が書き込む |
 | `note_favorite` | `createdAt` | Elythia 独自 | upstream は `deleteCreatedAt` で DROP 済み。`/api/i/favorites` の response 要件で復活 |

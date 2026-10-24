@@ -83,15 +83,9 @@ export type ElythiaRequestExtensions = {
 	};
 	'i/update': {
 		/**
-		 * Holds back follows from local accounts younger than this many seconds
-		 * (0 to 2592000, `null` or 0: off). An upstream parameter
-		 * (misskey-dev/misskey#17998) that this version of misskey-js does not
-		 * have yet.
+		 * How a follow from an account younger than `followApprovalLocalSeconds` /
+		 * `followApprovalRemoteSeconds` is handled. Elythia-only.
 		 */
-		followApprovalLocalSeconds?: number | null;
-		/** The same for remote accounts. */
-		followApprovalRemoteSeconds?: number | null;
-		/** How a held-back follow is handled. Elythia-only. */
 		followApprovalAction?: FollowApprovalAction;
 	};
 	'i/regenerate-token': {

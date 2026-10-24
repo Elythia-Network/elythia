@@ -25,10 +25,14 @@
   "admin/ad/update": {
     "NO_SUCH_AD": "b7aa1727-1354-47bc-a182-3a9c3973d300"
   },
+  "admin/announcements/create": {
+    "INVALID_AUTO_ARCHIVE_AT": "2a892bd5-487d-46a2-a5fe-3d85ad51defe"
+  },
   "admin/announcements/delete": {
     "NO_SUCH_ANNOUNCEMENT": "ecad8040-a276-4e85-bda9-015a708d291e"
   },
   "admin/announcements/update": {
+    "INVALID_AUTO_ARCHIVE_AT": "01b83d7b-2fd5-4d7c-86c4-d03144d16355",
     "NO_SUCH_ANNOUNCEMENT": "d3aae5a7-6372-4cb4-b61c-f511ffc2d7cc"
   },
   "admin/captcha/save": {
@@ -520,7 +524,9 @@
     "NO_SUCH_NOTE": "454170ce-9d63-4a43-9da1-ea10afe81e21"
   },
   "i/update": {
+    "AVATAR_IS_SENSITIVE": "71bb5e53-4742-4609-b465-36081e131208",
     "AVATAR_NOT_AN_IMAGE": "f419f9f8-2f4d-46b1-9fb4-49d3a2fd7191",
+    "BANNER_IS_SENSITIVE": "e148b34c-9f33-4300-93e0-7817008fb366",
     "BANNER_NOT_AN_IMAGE": "75aedb19-2afd-4e6d-87fc-67941256fa60",
     "FORBIDDEN_TO_SET_YOURSELF": "25c90186-4ab0-49c8-9bba-a1fa6c202ba4",
     "INVALID_REGEXP": "0d786918-10df-41cd-8f33-8dec7d9a89a5",
