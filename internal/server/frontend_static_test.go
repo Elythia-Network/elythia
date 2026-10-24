@@ -151,14 +151,21 @@ func TestFrontendBuild_MissingAndOddPaths(t *testing.T) {
 	for _, path := range []string{
 		"/vite/ja-JP/bSIsCqU1u-zzzzzzzz.js",
 		"/vite/../devmode.go",
-		"/vite/ja-JP%2fbSIsCqU1u-0qk-1YEG.js",
 	} {
 		rec := getFrontend(e, path, "gzip, br")
 		assert.NotEqual(t, http.StatusOK, rec.Code, path)
 		assert.Empty(t, rec.Header().Get(echo.HeaderCacheControl), path)
 	}
+	// 区切りを符号化したパスは、自前では扱わず echo の静的配信に任せる。echo 4.16 から
+	// echo は %2f を戻してからファイルを探すので 200 になりうる (二重に符号化した %252f
+	// も同じ)。echo が . / .. のセグメントを弾き、os.DirFS の中で閉じるので /vite の
+	// 外へは出ない。ここでは、事前圧縮の変種と immutable を付けないことだけを見る。
+	rec := getFrontend(e, "/vite/ja-JP%2fbSIsCqU1u-0qk-1YEG.js", "gzip, br")
+	assert.Empty(t, rec.Header().Get(echo.HeaderCacheControl))
+	assert.NotEqual(t, "br", rec.Header().Get(echo.HeaderContentEncoding))
+	assert.NotEqual(t, "BROTLI-BYTES", rec.Body.String())
 	// ディレクトリは echo の静的配信と同じく、末尾の / へ寄せる。
-	rec := getFrontend(e, "/vite/ja-JP", "")
+	rec = getFrontend(e, "/vite/ja-JP", "")
 	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
 }
 
