@@ -279,25 +279,6 @@ type Service struct {
 	resets repository.EmojiApplicationQuotaResetRepository
 }
 
-// SetPolicyProvider wires the role policy source used for the rolling quota.
-func (s *Service) SetPolicyProvider(p role.PolicyProvider) { s.policies = p }
-
-// HasPolicyProvider reports whether the quota can be enforced.
-func (s *Service) HasPolicyProvider() bool { return s.policies != nil }
-
-// SetQuotaResetRepo wires the manual quota reset store (#2962).
-func (s *Service) SetQuotaResetRepo(r repository.EmojiApplicationQuotaResetRepository) {
-	s.resets = r
-}
-
-// HasQuotaResetRepo reports whether the manual quota reset is available.
-//
-// **起動時の自己診断に載せるため (レビュー M2)。** 静的ゲートは
-// `SetQuotaResetRepo(` という呼び出しの存在しか見ないので、`nil` を渡す形は
-// 素通りする。未配線だとリセットは 500 で失敗し続け、**過去に戻した枠も
-// 読めなくなる** (再び満杯に見える)。
-func (s *Service) HasQuotaResetRepo() bool { return s.resets != nil }
-
 // QuotaExceededError is returned when a rolling window is full (#2958).
 // 呼び出し元はこれを HTTP 429 に翻訳し、期間・使用数・上限・再試行時刻を返す。
 type QuotaExceededError struct {
@@ -564,7 +545,13 @@ func policyMax(p map[string]any, key string) int {
 }
 
 // NewService constructs the service. creator / notifier may be nil in tests and
-// in configurations that do not wire them.
+// in configurations that do not wire them. policies is the role policy source
+// used for the rolling quota (#2958); resets is the manual quota reset store
+// (#2962).
+//
+// policies と resets は、無いと黙って劣化する (上限が丸ごと効かない / リセットが
+// 500 で失敗し続け、過去に戻した枠も再び満杯に見える) ので、構築子の必須の引数で
+// 受ける (#3823)。
 func NewService(
 	apps repository.EmojiApplicationRepository,
 	emojis EmojiLookup,
@@ -572,6 +559,8 @@ func NewService(
 	idGen IDGenerator,
 	creator EmojiCreator,
 	notifier ResultNotifier,
+	policies role.PolicyProvider,
+	resets repository.EmojiApplicationQuotaResetRepository,
 ) *Service {
 	return &Service{
 		apps:     apps,
@@ -580,6 +569,8 @@ func NewService(
 		idGen:    idGen,
 		creator:  creator,
 		notifier: notifier,
+		policies: policies,
+		resets:   resets,
 		nowFunc:  time.Now,
 	}
 }

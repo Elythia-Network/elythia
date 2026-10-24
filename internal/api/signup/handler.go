@@ -100,14 +100,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetFormTokenIssuer wires the signed form tokens used when no real captcha
 // provider is configured (#2806).
 func (h *Handler) SetFormTokenIssuer(i *signupform.Issuer) {
@@ -141,16 +133,16 @@ func (h *Handler) SetTestMode(v bool) {
 	h.testMode = v
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new signup Handler.
-func NewHandler(signupService *coresignup.Service, metaRepo repository.MetaRepository, idGen id.Generator) *Handler {
-	return &Handler{signupService: signupService, metaRepo: metaRepo, idGen: idGen}
+// background is the group the work after a response runs in, so stopping the
+// server generation waits for it (#3661); entityPacker is the Packer this
+// handler packs entities with (#3792); userPolicies is the effective-policy
+// source for the signup response (#2673).
+func NewHandler(signupService *coresignup.Service, metaRepo repository.MetaRepository, idGen id.Generator,
+	background *bgwork.Group, entityPacker *entity.Packer, userPolicies role.PolicyProvider,
+) *Handler {
+	return &Handler{signupService: signupService, metaRepo: metaRepo, idGen: idGen,
+		background: background, entityPacker: entityPacker, userPolicies: userPolicies}
 }
 
 // SetCaptcha attaches a CaptchaService for signup verification.
@@ -621,10 +613,6 @@ func (h *Handler) validateInvitationCode(code string, emailRequired bool) (*mode
 	return ticket, nil
 }
 
-// SetUserPolicyResolver wires the effective-policy source for the signup
-// response.
-func (h *Handler) SetUserPolicyResolver(r role.PolicyProvider) { h.userPolicies = r }
-
 // signupPolicies returns the policies advertised in the signup response.
 //
 // **実効値を返すこと。** upstream の SignupApiService は MeDetailed を pack し、
@@ -670,10 +658,3 @@ func packSignupResponse(pk *entity.Packer, u *model.User, profile *model.UserPro
 
 // defaultPolicies returns the Misskey default policies for a new user.
 var errInvalidCode = errors.New("invalid invitation code")
-
-// HasUserPolicyResolver reports whether the effective-policy resolver was wired.
-//
-// 未配線だと素の default policy を返すので、meta の base policy override も
-// server cap も反映されず、signup と /api/i が違う値を答える (#2673)。
-// 起動時検査に使う (#2683)。
-func (h *Handler) HasUserPolicyResolver() bool { return h.userPolicies != nil }

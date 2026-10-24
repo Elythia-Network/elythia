@@ -22,7 +22,7 @@ func TestSuspendUser_InvalidatesAfterTheWrite(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "target"}
 	var seen []bool
-	h.SetUserTokenInvalidator(orderCheckingInvalidator{check: func(userID string) {
+	h.SetUserTokenInvalidatorForTest(orderCheckingInvalidator{check: func(userID string) {
 		require.Equal(t, "u1", userID)
 		seen = append(seen, userRepo.Users["u1"].IsSuspended)
 	}})

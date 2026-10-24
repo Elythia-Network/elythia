@@ -28,7 +28,8 @@ func TestAbuseReportNotifierIsWired(t *testing.T) {
 		"buildCore の core service を wiring に入れていない。")
 	assertWired(t, serverPkg, "abuseInAppNotifier := coreSvcs.abuseInAppNotifier",
 		"setupRoutes の通報の通知が buildCore で作ったものでなくなる。")
-	assertWired(t, serverPkg, "coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))",
+	// 世代の箱と Packer は構築子の必須の引数 (#3823)。
+	assertWired(t, serverPkg, "coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub), s.background, entityPacker)",
 		"通報の通知欄と admin stream (newAbuseUserReport) が出なくなる。")
 	assertWired(t, serverPkg, "usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)",
 		"ローカルの通報 (users/report-abuse) で通知が一切出なくなる。")

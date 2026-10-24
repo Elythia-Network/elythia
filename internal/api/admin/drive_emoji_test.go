@@ -305,7 +305,7 @@ func TestDriveShowFile_HidesRequestHeadersWhenRoleLookupFails(t *testing.T) {
 	require.NoError(t, err)
 	flaky := &failingAssignmentRepo{MockRoleAssignmentRepository: assignRepo}
 	roleSvc := corerole.NewService(roleRepo, flaky, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	repo := testutil.NewMockDriveFileRepository()
 	owner := "admin2"
@@ -608,7 +608,7 @@ func TestEmojiCopy_StoresInDrive(t *testing.T) {
 			Type:          "image/png",
 		},
 	}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -657,7 +657,7 @@ func TestEmojiCopy_StoresInDrive_NoWebpublic(t *testing.T) {
 			Type: "image/png",
 		},
 	}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -684,7 +684,7 @@ func TestEmojiCopy_FetcherErrorReturns500(t *testing.T) {
 	)
 
 	fetcher := &fakeEmojiImageFetcher{returnErr: assert.AnError}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -1985,7 +1985,7 @@ func TestEmojiCopy_RejectsInvalidRemoteName(t *testing.T) {
 			fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 				ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 			}}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2012,7 +2012,7 @@ func TestEmojiCopy_NameOverrideAllowsInvalidRemoteName(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 		ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1","name":"plus_eyes"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -2035,7 +2035,7 @@ func TestEmojiCopy_RejectsInvalidNameOverride(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 		ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1","name":"bad-name"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2058,7 +2058,7 @@ func TestEmojiCopy_DuplicateCheckUsesOverriddenName(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 		ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1","name":"taken"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2081,7 +2081,7 @@ func TestEmojiCopy_CleansUpDriveFileWhenCreateFails(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 		ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -2112,7 +2112,7 @@ func TestEmojiCopy_RejectsUnsupportedFileType(t *testing.T) {
 			fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 				ID: "df1", URL: "https://local.example/files/x.bin", Type: tc.mime,
 			}}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2148,7 +2148,7 @@ func TestEmojiCopy_RejectsNameOverrideByLength(t *testing.T) {
 			fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 				ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 			}}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			body, err := json.Marshal(map[string]any{"emojiId": "src1", "name": tc.override})
 			require.NoError(t, err)

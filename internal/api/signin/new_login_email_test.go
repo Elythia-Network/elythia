@@ -90,7 +90,7 @@ func TestNewLoginEmail_SentInJapaneseFromMetaLangsWhenProfileLangUnset(t *testin
 	h.SetEmailSender("https://example.test", sender.send)
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x", Langs: []string{"ja-JP"}}
-	h.SetMetaRepo(metaRepo)
+	h.SetMetaRepoForTest(metaRepo)
 	setProfileEmail(repo, "u1", strptr("user@example.test"), true)
 
 	h.RecordSuccessfulSignin("u1", "1.2.3.4", http.Header{})

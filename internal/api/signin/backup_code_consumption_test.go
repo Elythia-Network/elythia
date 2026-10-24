@@ -52,7 +52,7 @@ func newBackupCodeHandler(t *testing.T, codes ...string) (*signin.Handler, *test
 	h, repo := newTestHandler(t)
 	newTestUserWithTOTP(repo, "alice", "pass", "JBSWY3DPEHPK3PXP", codes)
 	guard := &signinCountingGuard{used: map[string]bool{}}
-	h.SetTOTPReplayGuard(guard)
+	h.SetTOTPReplayGuardForTest(guard)
 	return h, repo, guard
 }
 

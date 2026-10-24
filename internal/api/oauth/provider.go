@@ -93,34 +93,26 @@ func (h *Handler) SetStreamRevoker(r StreamRevoker) {
 // HasStreamRevoker reports whether the stream revoker is wired.
 func (h *Handler) HasStreamRevoker() bool { return h.streamRevoker != nil }
 
-// SetAuthInvalidator wires the auth middleware so code-replay revocation takes
-// effect immediately instead of after the auth cache TTL.
-func (h *Handler) SetAuthInvalidator(inv TokenInvalidator) {
-	h.authInvalidator = inv
-}
-
-// HasAuthInvalidator reports whether the auth cache invalidator is wired.
-//
-// **これが引かれるのは攻撃を検出した瞬間**。RFC 6749 4.1.2 の
-// authorization code 再利用を見つけて token を失効させる経路なので、
-// 未配線だとコードを盗んで再利用した相手の access token が、サーバーが
-// 失効を決めた後も auth cache の TTL (30s) のあいだ通り続ける (#2682)。
-func (h *Handler) HasAuthInvalidator() bool { return h.authInvalidator != nil }
-
 // NewHandler constructs the OAuth provider handler. httpClient must be
 // SSRF-guarded (it fetches attacker-suppliable client_id URLs). allowHTTP
 // permits http client_id schemes (tests only). renderConsent serves the
-// consent page.
-func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tokenRepo TokenStore, idGen IDGenerator, issuer string, allowHTTP bool, renderConsent ConsentRenderer) *Handler {
+// consent page. authInvalidator is the auth middleware, so code-replay
+// revocation takes effect immediately instead of after the auth cache TTL.
+//
+// authInvalidator が引かれるのは攻撃を検出した瞬間 (RFC 6749 4.1.2 の
+// authorization code の再利用)。無いと、コードを盗んで再利用した相手の
+// access token が、失効を決めた後も auth cache の TTL のあいだ通り続ける (#2682)。
+func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tokenRepo TokenStore, idGen IDGenerator, issuer string, allowHTTP bool, renderConsent ConsentRenderer, authInvalidator TokenInvalidator) *Handler {
 	return &Handler{
-		store:         store,
-		httpClient:    httpClient,
-		userRepo:      userRepo,
-		tokenRepo:     tokenRepo,
-		idGen:         idGen,
-		issuer:        issuer,
-		allowHTTP:     allowHTTP,
-		renderConsent: renderConsent,
+		store:           store,
+		httpClient:      httpClient,
+		userRepo:        userRepo,
+		tokenRepo:       tokenRepo,
+		idGen:           idGen,
+		issuer:          issuer,
+		allowHTTP:       allowHTTP,
+		renderConsent:   renderConsent,
+		authInvalidator: authInvalidator,
 	}
 }
 

@@ -62,16 +62,12 @@ func TestIPRelatedAccountsRouteIsRegistered(t *testing.T) {
 			"モデレーター全員が関連アカウント候補を引けるようになる (#3105)")
 }
 
-// IP 照会の監査 (#3106) は router が配線しないと残らない。
+// IP 照会の監査 (#3106) の記録を読む口は router が配線しないと使えない。
 //
-// **未配線でも照会は成立する。** 記録されないだけなので、画面からも API からも
-// 異常に見えない。起動時の critical wiring 検査にも入れてあるが、そちらは
-// `HasIPLookupAudit()` の戻り値を見るだけなので、**配線そのものを落とす変更**は
-// ここで止める。
+// 監査を書く側 (iplookuplog.Service) は #3823 で admin の handler の構築子の必須の
+// 引数にしたので、渡し忘れはコンパイルで、nil を渡す形は組み立てたサーバーを見る
+// TestBuiltHandlersHaveNoNilDependencies で落ちる。ここでは読む側だけを見る。
 func TestIPLookupAuditIsWired(t *testing.T) {
-	assertWired(t, serverPkg,
-		"adminHandler.SetIPLookupAudit(iplookuplog.NewService(ipLookupLogRepo, idGen))",
-		"IP 照会が監査に残らない (照会そのものは成立するので誰も気付けない、#3106)")
 	assertWired(t, serverPkg,
 		"adminHandler.SetIPLookupLogRepo(ipLookupLogRepo)",
 		"admin/ip/lookup-log が 500 を返し、監査記録を読めなくなる (#3106)")

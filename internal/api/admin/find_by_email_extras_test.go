@@ -28,10 +28,8 @@ func (r *recordingExtras) FillDetailedExtras(_ context.Context, viewer, _ *model
 // ピン留めと移行先を匿名の閲覧者として埋める (#3330)。
 func TestAccountsFindByEmail_FillsDetailExtras(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
-	assert.False(t, h.HasDetailExtras())
 	extras := &recordingExtras{}
-	h.SetDetailExtras(extras)
-	assert.True(t, h.HasDetailExtras())
+	h.SetDetailExtrasForTest(extras)
 	email := "alice@example.com"
 	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
 	userRepo.Profiles["alice"] = &model.UserProfile{UserID: "alice", Email: &email}

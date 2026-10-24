@@ -43,7 +43,7 @@ func newApprovalHandlerWithDB(t *testing.T) (*apisignup.Handler, *gorm.DB, *mode
 	svc.SetSignupApplicationRepo(appRepo)
 	svc.SetDB(db)
 
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	h.SetSignupApplications(signupapplication.NewService(appRepo, idGen))
 
 	now := time.Now()
@@ -145,7 +145,7 @@ func TestApplicationRegister_PoliciesAreEffective(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	roleRepo := repository.NewRoleRepository(db)
 	roleSvc := corerole.NewService(roleRepo, repository.NewRoleAssignmentRepository(db), metaRepo, idGen)
-	h.SetUserPolicyResolver(roleSvc)
+	h.SetUserPolicyResolverForTest(roleSvc)
 
 	// 条件ロールを 1 つ置く。これが無いと、作成直後の利用者はロールを持たないので
 	// GetUserPolicies("") と GetUserPolicies(userID) が同じ値になり、**user ID を

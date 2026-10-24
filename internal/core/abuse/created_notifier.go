@@ -85,18 +85,16 @@ type CreatedNotifier struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this CreatedNotifier packs entities with (#3794).
-func (n *CreatedNotifier) SetEntityPacker(p *entity.Packer) { n.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと webhook の本文の avatarUrl がリモートの生の URL に
-// なり、ほかの経路 (media proxy を通す) と形が変わる。
-func (n *CreatedNotifier) HasEntityPacker() bool { return n.entityPacker.HasMediaURL() }
-
-// NewCreatedNotifier constructs a CreatedNotifier. Any nil dependency
-// disables that channel.
-func NewCreatedNotifier(inApp ReportInAppNotifier, mods ModeratorLister, admin AdminEventPublisher) *CreatedNotifier {
-	return &CreatedNotifier{inApp: inApp, mods: mods, admin: admin}
+// NewCreatedNotifier constructs a CreatedNotifier. A nil inApp / mods / admin
+// disables that channel. background is the group the mail is sent in, so
+// stopping the server generation waits for it (#3661); entityPacker is the
+// Packer this CreatedNotifier packs entities with (#3794).
+//
+// background と entityPacker は、無いと黙って劣化する (世代の停止でメールを待たない /
+// webhook の本文の avatarUrl がリモートの生の URL になる) ので、構築子の必須の
+// 引数で受ける (#3823)。
+func NewCreatedNotifier(inApp ReportInAppNotifier, mods ModeratorLister, admin AdminEventPublisher, background *bgwork.Group, entityPacker *entity.Packer) *CreatedNotifier {
+	return &CreatedNotifier{inApp: inApp, mods: mods, admin: admin, background: background, entityPacker: entityPacker}
 }
 
 // SetWebhook wires the system webhook channel.
@@ -111,13 +109,6 @@ func (n *CreatedNotifier) SetWebhook(d SystemWebhookDispatcher, recipients Recip
 	n.lookups = lookups
 	n.idGen = idGen
 }
-
-// SetBackground sets the group the mail is sent in, so stopping the server
-// generation waits for it (#3661).
-func (n *CreatedNotifier) SetBackground(g *bgwork.Group) { n.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (n *CreatedNotifier) HasBackground() bool { return n.background != nil }
 
 // SetMail wires the email channel (#3265): 本家 notifyMail と同じく、有効な
 // メール方式の通知先と meta.email へ送る。

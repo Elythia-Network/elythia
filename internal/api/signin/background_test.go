@@ -30,7 +30,8 @@ func stoppedBackgroundHandler(t *testing.T) (*Handler, *testutil.MockSigninRepos
 	repo.Users["u1"] = &model.User{ID: "u1", Token: &tok}
 	email := "u1@example.test"
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Email: &email, EmailVerified: true, UsePasswordLessLogin: true}
-	h := NewHandler(repo)
+	g := bgwork.New()
+	h := NewHandler(repo, g, nil, nil)
 	signins := testutil.NewMockSigninRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
@@ -39,9 +40,6 @@ func stoppedBackgroundHandler(t *testing.T) (*Handler, *testutil.MockSigninRepos
 	h.SetLoginNotifier(notifier)
 	var mails atomic.Int32
 	h.SetEmailSender("https://example.test", func(string, miscsmtp.Message) { mails.Add(1) })
-	g := bgwork.New()
-	h.SetBackground(g)
-	require.True(t, h.HasBackground())
 	require.Zero(t, g.Stop(context.Background()))
 	return h, signins, notifier, &mails, g
 }

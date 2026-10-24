@@ -1210,7 +1210,7 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で見る。組み立てた
   handlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。nilでよい
   フィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に載せ、
-  使われない項目があれば落とす。今は空。このテストを書く途中で、`setupRoutes()`が
+  使われない項目があれば落とす。#3817の時点では空(#3823で2つ足した。下の段(2))。このテストを書く途中で、`setupRoutes()`が
   `clipsHandler.SetNoteRepo`を呼んでおらず本番でもnilのままだったことが分かり
   (clips/notesのrenoteの入れ子のmute/block検査が飛んでいた)、#3818で配線した。
   抽出が空振りしても緑にならないよう、置き換えた依存のフィールドを名指しで要求する
@@ -1241,6 +1241,60 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 `TestCriticalWiringCountMatchesTable`が見る)。setterの行は`setupRoutes()`の本文(`func`の行から、
 行頭の`}`まで)で、行頭の空白の後が`<名前>Handler.Set`の行。受け手はその`<名前>Handler`の種類で、
 1段目で減ったのは`bubbleGameHandler`(setterが`SetEntityPacker`だけだった)。
+
+##### 段(2): `setupRoutes()`の本文で作るhandlerと部品(#3823)
+
+**`buildHandlers()`の外(`setupRoutes()`の本文)で作るhandlerと部品も、同じ形にした。** #3812の
+段(2)。置き換えたのは、表の行で見ていた依存だけ。
+
+- **1段目は認証・管理の7構築子・22行。** adminのhandler(9行: `background`・`entityPacker`・
+  `detailExtras`・`listPacker`・`suspensionOriginRepo`・`userTokenInvalidator`・
+  `userStreamRevoker`・`ipLookupAudit`・`emojiImageFetcher`)、signup(3行)、signin(3行)、
+  resetpassword(2行)、oauthの`authInvalidator`(1行)、`emojiapplication.Service`(2行)、
+  `abuse.CreatedNotifier`(2行)
+- **`signup.formTokens`は残した。** 鍵かnonceの置き場が作れないときは機能を切る設計で、#3812で
+  残すと決めた行。表の行もsetterも元のまま
+- **段(4)へ回したもの。** `oauth.streamRevoker`(構築子より後の`buildStream()`で作る値)、
+  `reversiPublisher.entityPacker`(構築子が`entityPacker`より前にあり、置き換えるには作る位置を
+  動かす必要がある)、`feed.ugcVisibility`・`peer.blocker`(setterではなく構造体リテラルで、
+  置き換えるには構築子を新しく作る必要がある)
+- **作る順は変えていない。** どの部品も、置き換えた依存は構築子より前で作ってあった。依存を入れる
+  時点が、元のsetterの位置から構築子の位置へ前へ移っただけで、構築子から最後に置き換えたsetterまでの
+  間に、`Subscribe`・`Connect…`・`Start`・goroutineの起動は無い(行を突き合わせて確かめた)。
+  pubsubの購読のhandlerから辿れる配線は変わらない(4.1)
+- **外部パッケージのテストは、`export_test.go`の`…ForTest`で後から入れる。** 同じパッケージの
+  テストはフィールドへ直接代入するが(1段目と同じ)、adminとsignup・signinのテストの多くは
+  外部パッケージ(`admin_test`など)にある。補助関数が作ったhandlerに後から入れていた箇所
+  (adminは`SetEmojiImageFetcher`だけで60か所。テストで`h.SetEmojiImageFetcherForTest(`を呼ぶ行を数えた)を、構築子の引数へ書き換える代わりに、テストの
+  ビルドでだけ見える入れ口を置いた。本番のコードからは呼べない
+- **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `setupRoutes()`の
+  本文で作る部品を、`Server`のフィールド`builtRouteParts`(型は`routeParts`、
+  `internal/server/route_parts.go`)に持たせる。代入は全部のsetterを呼んだ後
+  (`recordCriticalWiring`の直前)。テストは`routeParts`の欄を全部見るので、欄を足せばそのまま
+  対象になる。許可リスト(`handlerNilAllowed`)に入れたのは、adminの`captchaVerifierFactory`と
+  `clock`の2つで、どちらもテストだけが入れるseam(`SetCaptchaVerifierFactory`・`SetClockForTest`)。
+  `setupRoutes()`は入れないので、本番では常にnil。issueで挙げていたadminのqueueまわり・captcha・
+  WebAuthnは、テストの組み立て(test mode・miniredis)では全部入るので、載せると「使われない項目」
+  として落ちる
+- **依存の中まで見るものは`nestedDepChecks`に書く。** `iplookuplog.Service`は`repo`と`idGen`の
+  どちらかがnilだと黙って記録しない。以前の表の述語(`Wired()`)は両方を見ていたので、
+  `admin.ipLookupAudit`の`repo`・`idGen`も見る。`Wired()`は使う所が無くなったので消した
+- **wiring-checkの照合も直した。** `TestIPLookupAuditIsWired`から`adminHandler.SetIPLookupAudit`の
+  項目を外し(読む側の`SetIPLookupLogRepo`は残す)、`TestAbuseReportNotifierIsWired`は構築子の
+  呼び出しを、`TestEmojiApplicationIsWired`(`internal/server`)は`emojiapplication.NewService`の
+  最後の引数が`repository.NewEmojiApplicationQuotaResetRepository(s.db)`であることと、
+  `apiadmin.NewHandler`の最後の引数が`apiadmin.NewEmojiImageFetcher(...)`であることを照合する
+
+| | #3823の前(`8b832bd5ec`) | 1段目の後 |
+|---|---|---|
+| `criticalWiringCount` | 145 | 123 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 368 | 350 |
+| そのsetterを呼ぶhandler(受け手) | 41 | 41 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 721 | 699 |
+
+数え方: 上の表と同じ。最後の行は、行頭の空白の後が`<変数>.Set`に大文字が続く行(handler以外の
+部品も数える)。#3823の前の368行は、2段目の後の367行に、#3818で足した`clipsHandler.SetNoteRepo`の
+1行を足したもの。
 
 #### /api のルートの登録 (#3697)
 

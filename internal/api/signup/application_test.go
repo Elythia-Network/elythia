@@ -520,7 +520,7 @@ func newApprovalEnvWithEmail(t *testing.T) (*approvalEnv, *testutil.MockUserPend
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	// **審査した管理者を入れておく。** 入れないと「ticket に漏れない」(#2805) の
 	// アサートが空振りする — 元が nil なら何をしても nil になる。

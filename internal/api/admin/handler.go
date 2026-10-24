@@ -278,14 +278,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
 func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
@@ -349,32 +341,12 @@ type UserTokenInvalidator interface {
 	InvalidateTokensForUser(userID string)
 }
 
-// SetUserTokenInvalidator wires the AuthMiddleware so admin/suspend-user
-// / admin/unsuspend-user / admin/accounts/delete drop the target user's
-// cached auth entries immediately. production では必ず wire すること
-// (未配線時は最大 30 秒 stale window が残る)。
-func (h *Handler) SetUserTokenInvalidator(inv UserTokenInvalidator) {
-	h.userTokenInvalidator = inv
-}
-
 // UserStreamRevoker closes every live /streaming connection of a user.
 // Implemented by stream.StreamRevokePublisher (pubsub fan-out so connections
 // held by other processes close too).
 type UserStreamRevoker interface {
 	RevokeUserStreams(userID string)
 }
-
-// SetUserStreamRevoker wires the revoker used by admin/suspend-user and the
-// account deletion endpoints.
-func (h *Handler) SetUserStreamRevoker(r UserStreamRevoker) {
-	h.userStreamRevoker = r
-}
-
-// HasUserStreamRevoker reports whether the stream revoker is wired.
-//
-// 未配線だと、凍結・削除した利用者の WebSocket が**再接続するまで通知・DM・
-// フォロワー限定投稿を受け取り続ける** (HasUserTokenInvalidator とは独立)。
-func (h *Handler) HasUserStreamRevoker() bool { return h.userStreamRevoker != nil }
 
 // revokeUserStreams closes the target user's streaming connections. 凍結解除
 // では呼ばない (凍結中の利用者の token では /streaming へ接続できない — upgrade が 403 — ので閉じる対象が無い)。
@@ -439,18 +411,6 @@ func (h *Handler) SetInstanceRepo(r repository.InstanceRepository) {
 // target user's signin history. Without it the `signins` field falls back to
 // an empty array (#1198).
 func (h *Handler) SetSigninRepo(r repository.SigninRepository) { h.signinRepo = r }
-
-// SetSuspensionOriginRepo wires the suspension-origin store (#2973).
-//
-// **未配線だとモデレーターの解除が次の actor refresh で戻る。** 由来が無い行を
-// resolver が local 扱いにするのは**解除方向だけ**で、凍結方向は
-// 「まだ誰も判断していない」として発信元に従うため。`criticalWiring` で見る。
-func (h *Handler) SetSuspensionOriginRepo(r repository.UserSuspensionOriginRepository) {
-	h.suspensionOriginRepo = r
-}
-
-// HasSuspensionOriginRepo reports whether the store is wired.
-func (h *Handler) HasSuspensionOriginRepo() bool { return h.suspensionOriginRepo != nil }
 
 // recordLocalSuspensionOrigin marks the user's suspension state as decided by
 // our own moderator (#2973).
@@ -677,22 +637,6 @@ type EmojiImageFetcher interface {
 	DeleteSystemFile(ctx context.Context, fileID string) error
 }
 
-// SetEmojiImageFetcher attaches an EmojiImageFetcher used by admin/emoji/copy.
-// nil のままだと EmojiCopy は src の URL をそのまま継承する legacy 挙動を
-// 維持する (テスト容易性 + 未配線環境での graceful degradation 用)。
-func (h *Handler) SetEmojiImageFetcher(f EmojiImageFetcher) {
-	h.emojiImageFetcher = f
-}
-
-// HasEmojiImageFetcher reports whether emoji images can be taken into drive.
-//
-// **未配線だと 3 つのバグがそのまま残る (#2966 / #670 / #2999)。** 自作画像の申請を
-// 承認すると絵文字が申請者所有のファイルを参照し続け (申請者が消すと壊れる)、
-// リモート絵文字の複製は相手サーバーの URL を参照し続け (相手が消すと壊れる)、
-// `admin/emoji/add` は操作者の drive ファイルを参照し続ける (操作者が消すと壊れる)。
-// いずれも「動いているように見えて後から壊れる」ので、起動時に気付けるようにする。
-func (h *Handler) HasEmojiImageFetcher() bool { return h.emojiImageFetcher != nil }
-
 // QueueInspector abstracts the driver inspector for queue management
 // endpoints.
 type QueueInspector interface {
@@ -888,31 +832,64 @@ func (h *Handler) SetQueueRuntimeProvider(p QueueRuntimeProvider) {
 	h.queueRuntime = p
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
 // SetPasswordHasher sets the Hasher that admin/reset-password hashes the
 // generated password with. Unset, the default cost is used.
 func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
 
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new admin Handler.
+//
+// The remaining arguments are the dependencies whose absence would degrade
+// behaviour silently (#3823):
+//   - background is the group the work after a response (the test mail)
+//     runs in, so stopping the server generation waits for it (#3661)
+//   - entityPacker is the Packer this handler packs entities with (#3792)
+//   - detailExtras fills pinnedNotes / pinnedPage / movedTo / alsoKnownAs for
+//     admin/accounts/find-by-email and admin/update-proxy-account (#3330)
+//   - listPacker packs the users embedded in admin/show-users,
+//     admin/roles/users, admin/abuse-user-reports and
+//     admin/show-moderation-logs, and the instance / emojis of
+//     admin/accounts/find-by-email (#3330)
+//   - suspensionOriginRepo records that a moderator decided the suspension
+//     state, so the next actor refresh does not undo it (#2973)
+//   - userTokenInvalidator drops the target user's cached auth entries on
+//     admin/suspend-user / admin/unsuspend-user / admin/accounts/delete (#965)
+//   - userStreamRevoker closes the /streaming connections of suspended and
+//     deleted users
+//   - ipLookupAudit records the admin/ip/* lookups (#3106)
+//   - emojiImageFetcher takes emoji images into system-owned drive files for
+//     admin/emoji/copy, admin/emoji/add, admin/emoji/update and emoji
+//     application approval (#2966 / #670 / #2999)
 func NewHandler(
 	signupService *signup.Service,
 	roleService *role.Service,
 	metaRepo repository.MetaRepository,
 	userRepo repository.UserRepository,
 	idGen id.Generator,
+	background *bgwork.Group,
+	entityPacker *entity.Packer,
+	detailExtras userpack.DetailExtras,
+	listPacker userpack.ListPacker,
+	suspensionOriginRepo repository.UserSuspensionOriginRepository,
+	userTokenInvalidator UserTokenInvalidator,
+	userStreamRevoker UserStreamRevoker,
+	ipLookupAudit *iplookuplog.Service,
+	emojiImageFetcher EmojiImageFetcher,
 ) *Handler {
 	return &Handler{
-		signupService: signupService,
-		roleService:   roleService,
-		metaRepo:      metaRepo,
-		userRepo:      userRepo,
-		idGen:         idGen,
+		signupService:        signupService,
+		roleService:          roleService,
+		metaRepo:             metaRepo,
+		userRepo:             userRepo,
+		idGen:                idGen,
+		background:           background,
+		entityPacker:         entityPacker,
+		detailExtras:         detailExtras,
+		listPacker:           listPacker,
+		suspensionOriginRepo: suspensionOriginRepo,
+		userTokenInvalidator: userTokenInvalidator,
+		userStreamRevoker:    userStreamRevoker,
+		ipLookupAudit:        ipLookupAudit,
+		emojiImageFetcher:    emojiImageFetcher,
 	}
 }
 
@@ -4911,13 +4888,6 @@ func validateSignupApplicationForm(fields map[string]any) error {
 	fields["signupApplicationForm"] = datatypes.JSON(normalized)
 	return nil
 }
-
-// HasUserTokenInvalidator reports whether the auth cache invalidator is wired.
-//
-// 未配線だと admin/suspend-user や admin/accounts/delete の後も、対象の
-// session が auth cache の TTL のあいだ生き残る。router 側のコメントも
-// これを security regression と呼んでいる (#2682)。
-func (h *Handler) HasUserTokenInvalidator() bool { return h.userTokenInvalidator != nil }
 
 // now returns the current time, or the fixed one set in tests (SetClockForTest)。
 func (h *Handler) now() time.Time {

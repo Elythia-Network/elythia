@@ -56,7 +56,7 @@ func TestEmojiAdd_RejectsUnstorableFileURL(t *testing.T) {
 				ID: "f_img", UserID: &owner, Type: "image/png", URL: "https://example/user/orig.png",
 			})
 			fetcher := &fakeEmojiImageFetcher{copyDF: tc.copy}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			rec := doPost(h.EmojiAdd, `{"name":"happy","fileId":"f_img"}`, adminUser)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -79,7 +79,7 @@ func TestEmojiAdd_AcceptsFileURLAtLimit(t *testing.T) {
 		ID: "f_img", UserID: &owner, Type: "image/png", URL: "https://example/user/orig.png",
 	})
 	url := longURL(emojiURLLimit)
-	h.SetEmojiImageFetcher(&fakeEmojiImageFetcher{copyDF: systemCopy("sys_u3", url, "", "")})
+	h.SetEmojiImageFetcherForTest(&fakeEmojiImageFetcher{copyDF: systemCopy("sys_u3", url, "", "")})
 
 	rec := doPost(h.EmojiAdd, `{"name":"happy","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -97,7 +97,7 @@ func TestEmojiUpdate_RejectsUnstorableFileURL(t *testing.T) {
 		ID: "f_img", UserID: &owner, Type: "image/png", URL: "https://example/user/orig.png",
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys_u4", longURL(emojiURLLimit+1), "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -117,7 +117,7 @@ func TestEmojiCopy_RejectsUnstorableFileURL(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{returnDF: &model.DriveFile{
 		ID: "df_u1", URL: longURL(emojiURLLimit + 1), Type: "image/png",
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -169,7 +169,7 @@ func TestEmojiAdd_KeepsSystemOwnedSourceWhenURLTooLong(t *testing.T) {
 		ID: "f_sys", Type: "image/png", URL: longURL(emojiURLLimit + 1),
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("never", "https://example/never.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiAdd, `{"name":"happy","fileId":"f_sys"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -194,7 +194,7 @@ func TestEmojiUpdate_KeepsSystemOwnedSourceWhenURLTooLong(t *testing.T) {
 		ID: "f_sys", Type: "image/png", URL: longURL(emojiURLLimit + 1),
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("never", "https://example/never.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_sys"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)

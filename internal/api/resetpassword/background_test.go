@@ -25,8 +25,7 @@ func TestRequestReset_MailRunsInTheBackgroundGroup(t *testing.T) {
 	var sent atomic.Int32
 	h.SetEmailSender(func(string, miscsmtp.Message) { sent.Add(1) })
 	g := bgwork.New()
-	h.SetBackground(g)
-	assert.True(t, h.HasBackground())
+	h.background = g
 	require.Zero(t, g.Stop(context.Background()))
 
 	rec := post(h.RequestReset, `{"username":"testuser","email":"test@example.com"}`)

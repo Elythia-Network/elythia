@@ -86,7 +86,7 @@ func TestDeletePluginManagedAccount(t *testing.T) {
 		stub := &stubDeleteAccountEnqueuer{}
 		h.SetDeleteAccountEnqueuer(stub)
 		inv := &stubUserTokenInvalidator{}
-		h.SetUserTokenInvalidator(inv)
+		h.SetUserTokenInvalidatorForTest(inv)
 		bot := &model.User{ID: "bot", Username: "bot", ManagedByPlugin: managedBy("bot-plugin")}
 		userRepo.Users["bot"] = bot
 

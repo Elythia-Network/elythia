@@ -51,7 +51,7 @@ func TestEmojiUpdate_FileIDCopiesToSystemOwnedFile(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{
 		copyDF: systemCopy("sys1", "https://example/system/copy.png", "https://example/system/copy.webp", "image/webp"),
 	}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -97,7 +97,7 @@ func TestEmojiUpdate_CopyUsesUpdatedNameAndSensitive(t *testing.T) {
 			h, _ := seedUpdatableEmoji(t)
 			userOwnedImage(t, h)
 			fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys2", "https://example/system/copy.png", "", "")}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			rec := doPost(h.EmojiUpdate, tc.body, adminUser)
 			require.Equal(t, http.StatusNoContent, rec.Code)
@@ -120,7 +120,7 @@ func TestEmojiUpdate_KeepsPreviousFile(t *testing.T) {
 		ID: "f_old_sys", Type: "image/png", URL: "https://example/system/old.png",
 	}))
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys3", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -144,7 +144,7 @@ func TestEmojiUpdate_FileIDSkipsCopyForSystemOwnedFile(t *testing.T) {
 		Size: int(apiadmin.MaxEmojiCopyBytes) + 1,
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys4", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_sys"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -161,7 +161,7 @@ func TestEmojiUpdate_FileIDCopiesRemoteCachedFile(t *testing.T) {
 		ID: "f_remote", UserHost: &host, Type: "image/png", URL: "https://remote.example/cached.png",
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys5", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_remote"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -177,7 +177,7 @@ func TestEmojiUpdate_FileIDRejectsCopiedNonImageAndCleansUp(t *testing.T) {
 	userOwnedImage(t, h)
 	bad := systemCopy("sys6", "https://example/system/copy.bin", "", "")
 	bad.Type = "text/plain"
-	h.SetEmojiImageFetcher(&fakeEmojiImageFetcher{copyDF: bad})
+	h.SetEmojiImageFetcherForTest(&fakeEmojiImageFetcher{copyDF: bad})
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -194,7 +194,7 @@ func TestEmojiUpdate_FileIDRejectsCopiedNonImageDeletesCopy(t *testing.T) {
 	bad := systemCopy("sys7", "https://example/system/copy.bin", "", "")
 	bad.Type = "text/plain"
 	fetcher := &fakeEmojiImageFetcher{copyDF: bad}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	require.Equal(t, http.StatusBadRequest,
 		doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser).Code)
@@ -241,7 +241,7 @@ func TestEmojiUpdate_FileIDCopyFailureMapping(t *testing.T) {
 			h, repo := seedUpdatableEmoji(t)
 			userOwnedImage(t, h)
 			fetcher := &fakeEmojiImageFetcher{copyErr: tc.copyErr}
-			h.SetEmojiImageFetcher(fetcher)
+			h.SetEmojiImageFetcherForTest(fetcher)
 
 			rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 			require.Equal(t, tc.status, rec.Code)
@@ -275,7 +275,7 @@ func TestEmojiUpdate_DoesNotCopyBeforeValidation(t *testing.T) {
 			ID: "f_img", UserID: &owner, Type: mime, URL: "https://example/user/orig.png",
 		})
 		fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys_x", "https://example/system/copy.png", "", "")}
-		h.SetEmojiImageFetcher(fetcher)
+		h.SetEmojiImageFetcherForTest(fetcher)
 		return h, fetcher
 	}
 
@@ -335,7 +335,7 @@ func TestEmojiUpdate_FileIDRejectsOversizedRowBeforeReading(t *testing.T) {
 		Size: int(apiadmin.MaxEmojiCopyBytes) + 1,
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys8", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_big"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -355,7 +355,7 @@ func TestEmojiUpdate_FileIDAcceptsRowAtSizeLimit(t *testing.T) {
 		Size: int(apiadmin.MaxEmojiCopyBytes),
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys9", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_max"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -366,7 +366,7 @@ func TestEmojiUpdate_FileIDAcceptsRowAtSizeLimit(t *testing.T) {
 func TestEmojiUpdate_FileIDCopyReturnsNoFile(t *testing.T) {
 	h, repo := seedUpdatableEmoji(t)
 	userOwnedImage(t, h)
-	h.SetEmojiImageFetcher(&fakeEmojiImageFetcher{})
+	h.SetEmojiImageFetcherForTest(&fakeEmojiImageFetcher{})
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -381,7 +381,7 @@ func TestEmojiUpdate_RowGoneDeletesSystemCopy(t *testing.T) {
 	repo.UpdateErr = testutil.ErrNotFound
 	userOwnedImage(t, h)
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys10", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusNotFound, rec.Code)
@@ -404,7 +404,7 @@ func TestEmojiUpdate_UpdateFailureDecidesCopyByReread(t *testing.T) {
 		repo.UpdateErr = assert.AnError
 		userOwnedImage(t, h)
 		fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys11", "https://example/system/copy.png", "", "")}
-		h.SetEmojiImageFetcher(fetcher)
+		h.SetEmojiImageFetcherForTest(fetcher)
 
 		rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 		require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -432,7 +432,7 @@ func TestEmojiUpdate_UpdateFailureDecidesCopyByReread(t *testing.T) {
 		fetcher := &fakeEmojiImageFetcher{
 			copyDF: systemCopy("sys12", "https://example/system/copy.png", "https://example/system/copy.webp", "image/webp"),
 		}
-		h.SetEmojiImageFetcher(fetcher)
+		h.SetEmojiImageFetcherForTest(fetcher)
 
 		rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 		require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -478,7 +478,7 @@ func newRereadFailureHandler(t *testing.T, rereadErr error, copyID string) (*api
 	h.SetEmojiRepo(&failingRereadEmojiRepo{MockEmojiRepository: inner, rereadErr: rereadErr})
 	userOwnedImage(t, h)
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy(copyID, "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 	return h, fetcher
 }
 
@@ -522,7 +522,7 @@ func TestEmojiUpdate_DriveLookupFailureReturns500(t *testing.T) {
 	h, repo := seedUpdatableEmoji(t)
 	h.SetDriveFileRepo(&failingFindDriveFileRepo{testutil.NewMockDriveFileRepository()})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys15", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -544,7 +544,7 @@ func TestEmojiUpdate_DuplicateLookupFailureReturns500(t *testing.T) {
 	h.SetEmojiRepo(&failingFindByNameEmojiRepo{repo})
 	userOwnedImage(t, h)
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys16", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img","name":"renamed"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)

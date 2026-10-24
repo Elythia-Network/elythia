@@ -102,7 +102,7 @@ func TestSignupPending_RegistrationClosed(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	row, err := svc.CreatePending("bob", "bob@example.com", "secret", nil)
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestSignupPending_RegistrationClosed_UnknownCode(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.SignupPending, `{"code":"nope"}`)
 	assertRegistrationClosed(t, rec.Code, parseResp(t, rec))
