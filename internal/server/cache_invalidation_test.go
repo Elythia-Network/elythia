@@ -56,8 +56,6 @@ func TestSetupRoutes_CacheInvalidationReachesOtherProcess(t *testing.T) {
 		Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	// New はプロセス共有の状態を張り替える (#2795)。2 つ作っても戻すのは 1 回でよい。
-	restoreProcessGlobals(t)
 	// 停止判定は meta の federation が all のときだけ instance 行で決まる。B の meta は
 	// キャッシュされるので、サーバーを作る前に揃え、終わったら戻す。
 	_, err = repository.NewMetaRepository(db).Fetch()

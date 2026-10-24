@@ -231,7 +231,6 @@ func TestPluginSecrets_EndToEnd(t *testing.T) {
 		}
 	}
 
-	restoreProcessGlobals(t)
 	srv, err := newServer(cfg, db, redisClients, []plugin.Definition{probe("psec-a"), probe("psec-b")}, noopStorage)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })
@@ -352,7 +351,6 @@ func TestNew_QueueOnlyPluginsCanReadSecrets(t *testing.T) {
 			return nil
 		},
 	}
-	restoreProcessGlobals(t)
 	srv, err := newServer(cfg, db, redisClients, []plugin.Definition{def}, noopStorage)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })

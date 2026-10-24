@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	apimeta "github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // **初回セットアップの判定に使う利用者の数え方が、`requireSetup`を返す5つの
@@ -27,9 +27,10 @@ import (
 // 外し、ローカルの利用者を1人置いた状態で、各経路の`requireSetup`がfalseに
 // なることを見る。
 //
-// 利用者を一度見たという印(`setupLatch`)はまだパッケージの変数なので、経路
-// ごとに戻す。戻さないと、先に見た経路の観測で後の経路もfalseになり、配線の
-// 漏れを隠す。
+// 利用者を一度見たという印は、組み立てで作った`SetupDetector`の値が持つ(#3803)。
+// 5つの経路は同じ値を共有するので、先に見た経路の観測で後の経路も数えずにfalseに
+// なるが、それで配線の漏れは隠れない。渡し忘れた経路はnilか別の値を持ち、その値には
+// 印が無いので、`rootUserId`だけで判定してtrueを返す。
 func TestNewServer_WiresTheSetupDetectorToEveryMetaEmbedding(t *testing.T) {
 	db := serverIntegrationDB
 	if db == nil {
@@ -43,7 +44,6 @@ func TestNewServer_WiresTheSetupDetectorToEveryMetaEmbedding(t *testing.T) {
 	require.NoError(t, db.Exec(`UPDATE "meta" SET "rootUserId" = NULL`).Error)
 	cleanupPluginAccountUsers(t, db, "sd_user")
 	createLocalUser(t, db, "sd-user", "sd_user", "sdusertokenx3782", "sd-pass", false)
-	t.Cleanup(apimeta.ResetSetupLatchForTest)
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
 
@@ -94,10 +94,54 @@ func TestNewServer_WiresTheSetupDetectorToEveryMetaEmbedding(t *testing.T) {
 		{name: "OAuth consent", meta: func(t *testing.T) map[string]any { return fromHTML(t, authorize) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			apimeta.ResetSetupLatchForTest()
 			got := tt.meta(t)
 			require.Contains(t, got, "requireSetup")
 			assert.Equal(t, false, got["requireSetup"], "rootUserIdだけで判定している(数え方が渡っていない)")
 		})
 	}
+}
+
+// **組み立て直した世代は、前の世代の「利用者を見た」印を持ち越さない(#3803)。**
+//
+// 以前は印がパッケージの変数だったので、利用者の居るDBで一度観測すると、利用者の
+// 居ないDBへ戻して組み立て直した後も、数えずにセットアップ画面を出さなかった。
+// 最初の管理者を作る窓(`admin/accounts/create`)は開いているのに、画面が出ない。
+//
+// 利用者0の状態を作るので、パッケージの共有schemaではなく専用のschemaを使う。
+func TestNewServer_SetupLatchDoesNotOutliveTheGeneration(t *testing.T) {
+	db, err := testutil.OpenTestDBSchema("setupgen")
+	if err != nil {
+		t.Skipf("PostgreSQL unavailable: %v", err)
+	}
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	testutil.ApplyMigrations(db)
+	reset := func() {
+		require.NoError(t, db.Exec(`TRUNCATE "user" CASCADE`).Error)
+		require.NoError(t, db.Exec(`DELETE FROM "used_username"`).Error)
+		require.NoError(t, db.Exec(`UPDATE "meta" SET "rootUserId" = NULL`).Error)
+	}
+	reset()
+	t.Cleanup(reset)
+
+	requireSetup := func(h *pluginAccountsHarness) bool {
+		t.Helper()
+		rec := h.do(http.MethodPost, "/api/meta", "", map[string]any{})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &m))
+		v, ok := m["requireSetup"].(bool)
+		require.True(t, ok, "requireSetup must be a bool: %v", m["requireSetup"])
+		return v
+	}
+
+	createLocalUser(t, db, "sg-user", "sg_user", "sgusertokenx3803", "sg-pass", false)
+	first := newPluginAccountsHarnessDB(t, db, nil)
+	require.False(t, requireSetup(first), "利用者が居るのでセットアップ画面を出さない (前提)")
+
+	// 利用者の居ないDBへ戻し、組み立て直した。
+	reset()
+	second := newPluginAccountsHarnessDB(t, db, nil)
+	assert.True(t, requireSetup(second), "前の世代の印を持ち越している")
 }

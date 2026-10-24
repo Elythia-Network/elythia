@@ -103,6 +103,11 @@ func registerFrontendAssets(e *echo.Echo, cfg *config.Config, prefix, dir, devSe
 }
 
 // loaderAssetsFor returns the bootloader assets to inline into the SPA shell.
+// It reads them from disk, so callers read it once at construction, like
+// clientEntryFor.
+//
+// **組み立てのときに読み、描画へ渡す (#3803)。** entry と loader を同じ時点で
+// 読むので、組み立て直した世代は両方とも作り直した frontend のものになる。
 //
 // **dev では埋め込まない (#2477 と同じ理由)。** ビルド成果物が残っているだけの
 // 状態で埋め込むと、dev server が返す新しい loader ではなく古い built を読んで
@@ -112,7 +117,7 @@ func loaderAssetsFor(cfg *config.Config) frontendutil.LoaderAssets {
 	if isDev(cfg) {
 		return frontendutil.LoaderAssets{}
 	}
-	return frontendutil.BootLoaderAssets()
+	return frontendutil.ReadBootLoaderAssets()
 }
 
 // embedLoaderAssetsFor is loaderAssetsFor for the embed bundle.
@@ -120,5 +125,5 @@ func embedLoaderAssetsFor(cfg *config.Config) frontendutil.LoaderAssets {
 	if isDev(cfg) {
 		return frontendutil.LoaderAssets{}
 	}
-	return frontendutil.EmbedLoaderAssets()
+	return frontendutil.ReadEmbedLoaderAssets()
 }

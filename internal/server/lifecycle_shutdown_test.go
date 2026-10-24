@@ -220,7 +220,6 @@ func TestServer_StopBackgroundSends1012AndLeavesTimeForHooks(t *testing.T) {
 // 張ってから失敗している) も、失敗させる時点のパターンの数で直接確かめる。
 func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 	db, clients, mr, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	var built *Server
 	patternsAtFailure := -1
 	fail := failingRoutesWith(func() { patternsAtFailure = mr.PubSubNumPat() })
@@ -244,12 +243,11 @@ func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 // 進め、**最後まで成功させる**。共有の状態を同期無しに書き換える処理が、
 // beforeSetup より後のどこかに戻れば、-race (make test は付ける) で落とす。
 // lock や sync.Once で守った張り替えはデータ競合にならないので拾えないが、
-// `pkg.SetXxx(...)` の形なら TestProcessGlobalsAreRestored が別に拾う。
+// `pkg.SetXxx(...)` の形なら TestConstructionSetsNoProcessGlobals が別に拾う。
 // プラグインは渡さない (失敗するプラグインを渡すと setupPlugins で戻り、その先が
 // 検査から漏れる)。
 func TestNewServer_ConstructionsMayOverlap(t *testing.T) {
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	// ドライブのファイルは作業ディレクトリ相対の./drive-filesに置かれるので、
 	// リポジトリを汚さないよう一時ディレクトリへ移る。
 	t.Chdir(t.TempDir())

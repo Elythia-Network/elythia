@@ -115,7 +115,6 @@ func TestNewServer_ConstructionStartsNoPart(t *testing.T) {
 		t.Skip("PostgreSQL unavailable")
 	}
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	require.NoError(t, db.Exec(`DELETE FROM retention_aggregation`).Error)
 	t.Cleanup(func() { db.Exec(`DELETE FROM retention_aggregation`) })
 	retentionRows := func() int64 {

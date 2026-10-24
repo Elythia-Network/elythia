@@ -345,18 +345,21 @@ func TestReadInlinableAsset_RejectsTerminators(t *testing.T) {
 	}
 }
 
-// 読み込みは 1 回だけ。**再ビルド後は再起動が要る** (client entry と同じ前提)。
-func TestBootLoaderAssets_ReadsOnce(t *testing.T) {
+// **呼ぶたびにディスクから読み直す (#3803)。** キャッシュは組み立ての側
+// (internal/server) が持ち、組み立て直した世代は作り直した frontend の loader を
+// 読む。ここでプロセスに 1 つのキャッシュを持つと、組み立て直しても古い loader が
+// 残る。
+func TestReadBootLoaderAssets_ReadsEveryCall(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "loader"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "style.css"),
 		[]byte("first"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_DIR", dir)
 
-	first := BootLoaderAssets()
+	require.Equal(t, "first", ReadBootLoaderAssets().CSS)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "style.css"),
 		[]byte("second"), 0o644))
-	assert.Equal(t, first, BootLoaderAssets(), "2 回目もキャッシュを返す")
+	assert.Equal(t, "second", ReadBootLoaderAssets().CSS, "前に読んだ内容を返している")
 }
 
 func TestFrontendEmbedDir_Default(t *testing.T) {
@@ -393,38 +396,20 @@ func TestDetectEmbedEntry(t *testing.T) {
 	})
 }
 
-// embed 側の loader も同じく 1 回だけ読む (#2551)。
-func TestEmbedLoaderAssets(t *testing.T) {
+// embed 側の loader も、呼ぶたびに読み直す (#2551、#3803)。
+func TestReadEmbedLoaderAssets(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "loader"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
 		[]byte("embed-boot"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
-	ResetLoaderCacheForTest()
 
-	assert.Equal(t, "embed-boot", EmbedLoaderAssets().JS)
-	assert.Empty(t, EmbedLoaderAssets().CSS, "無いものは空のまま")
-}
+	assert.Equal(t, "embed-boot", ReadEmbedLoaderAssets().JS)
+	assert.Empty(t, ReadEmbedLoaderAssets().CSS, "無いものは空のまま")
 
-// **キャッシュを捨てられないと、ディレクトリを差し替える test 同士が干渉する。**
-func TestResetLoaderCacheForTest(t *testing.T) {
-	first := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(first, "loader"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(first, "loader", "style.css"),
-		[]byte("first"), 0o644))
-	t.Setenv("MISSKEY_FRONTEND_DIR", first)
-	ResetLoaderCacheForTest()
-	require.Equal(t, "first", BootLoaderAssets().CSS)
-
-	second := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(second, "loader"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(second, "loader", "style.css"),
-		[]byte("second"), 0o644))
-	t.Setenv("MISSKEY_FRONTEND_DIR", second)
-	assert.Equal(t, "first", BootLoaderAssets().CSS, "捨てるまではキャッシュのまま")
-
-	ResetLoaderCacheForTest()
-	assert.Equal(t, "second", BootLoaderAssets().CSS)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
+		[]byte("embed-boot-2"), 0o644))
+	assert.Equal(t, "embed-boot-2", ReadEmbedLoaderAssets().JS, "前に読んだ内容を返している")
 }
 
 // preloads.json (ビルドの locale inliner が書く) から、entry の modulepreload の一覧を

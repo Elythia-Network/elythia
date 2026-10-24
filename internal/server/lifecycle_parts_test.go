@@ -437,7 +437,6 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ran++
 			db, clients, _, cfg := constructionFixture(t)
-			restoreProcessGlobals(t)
 			switch tt.role {
 			case config.RoleServer:
 				t.Setenv(config.EnvOnlyServer, "1")
@@ -521,7 +520,6 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 // order.
 func TestNewServer_FailedConstructionStopsTheRegisteredParts(t *testing.T) {
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	var built *Server
 	var rec lifecycleRecorder
 	var listed []string
@@ -554,7 +552,6 @@ func TestNewServer_FailedConstructionStopsTheRegisteredParts(t *testing.T) {
 // twice fails newServer, and that the rollback still stops both parts.
 func TestNewServer_DuplicatePartFailsTheConstruction(t *testing.T) {
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	stopped := 0
 	_, err := newServer(cfg, db, clients, nil, noopStorage, func(s *Server) {
 		s.addPart("userCacheLink", nil, func(context.Context) { stopped++ })
@@ -615,7 +612,6 @@ func TestNewServer_ShutdownStopsTheNamedParts(t *testing.T) {
 		t.Skip("PostgreSQL unavailable")
 	}
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	const pluginName = "lifecyclestop"
 	cfg.DB = testDBConfig(t).DB
 	dropPluginSchema(t, cfg, pluginName)

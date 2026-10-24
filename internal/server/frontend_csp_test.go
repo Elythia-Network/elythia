@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -435,10 +434,6 @@ func TestFrontendCSP_HashesCoverRenderedInlineScripts(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
 		[]byte("window.__markerBootJs = 1;"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_DIR", dir)
-	frontendutil.ResetLoaderCacheForTest()
-	// cache は sync.Once なので、戻さないと fixture の loader がプロセス全体に
-	// 残る。同 package に shell を描画するテストが他にもある。
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{
 		URL:                           "https://example.test",

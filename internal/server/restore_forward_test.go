@@ -76,7 +76,6 @@ func TestSetupRoutes_RestoreIsForwardedWithoutTheGuard(t *testing.T) {
 		Redis: ro, RedisForPubsub: ro, RedisForJobQueue: ro, RedisForTimelines: ro, RedisForReactions: ro,
 		Backup: &config.BackupOptions{Server: config.BackupServerOptions{ServiceURL: daemon.URL, ServiceToken: "svc"}},
 	}
-	restoreProcessGlobals(t)
 	srv, err := New(cfg, serverIntegrationDB, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })

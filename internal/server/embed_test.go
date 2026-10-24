@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
@@ -184,7 +183,7 @@ func TestEmbedShell_IconLinks(t *testing.T) {
 		if m != nil {
 			repo.Meta = m
 		}
-		h := &embedHandlers{cfg: cfg, metaRepo: repo}
+		h := newEmbedHandlers(cfg, repo, nil, nil, nil, EmbedDeps{})
 
 		e := echo.New()
 		rec := httptest.NewRecorder()
@@ -222,11 +221,9 @@ func TestEmbedShell_InlinesLoaderAssets(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
 		[]byte("window.__markerEmbedJs = 1;"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	h := &embedHandlers{cfg: cfg, metaRepo: testutil.NewMockMetaRepository()}
+	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, EmbedDeps{})
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -242,11 +239,9 @@ func TestEmbedShell_InlinesLoaderAssets(t *testing.T) {
 
 func TestEmbedShell_FallsBackToLoaderReferences(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", t.TempDir())
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	h := &embedHandlers{cfg: cfg, metaRepo: testutil.NewMockMetaRepository()}
+	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, EmbedDeps{})
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -272,10 +267,6 @@ func TestEmbedShell_CSP(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
 		[]byte("window.__markerEmbedBootJs = 1;"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
-	frontendutil.ResetLoaderCacheForTest()
-	// cache は sync.Once なので、戻さないと fixture の loader がプロセス全体に
-	// 残る。同 package に embed shell を描画するテストが他にもある。
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	render := func(t *testing.T, cfg *config.Config, m *model.Meta) *httptest.ResponseRecorder {
 		t.Helper()
@@ -283,7 +274,7 @@ func TestEmbedShell_CSP(t *testing.T) {
 		if m != nil {
 			repo.Meta = m
 		}
-		h := &embedHandlers{cfg: cfg, metaRepo: repo}
+		h := newEmbedHandlers(cfg, repo, nil, nil, nil, EmbedDeps{})
 
 		e := echo.New()
 		rec := httptest.NewRecorder()

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/elythia-network/elythia/internal/frontendutil"
 )
 
 // writeViteManifest lays down a minimal built-asset tree and points the
@@ -39,10 +38,6 @@ func writeViteManifest(t *testing.T) {
 	// FrontendEmbedDir は FrontendDir の sibling として解決されるので、
 	// SPA 側だけ指定すれば両方に効く。
 	t.Setenv("MISSKEY_FRONTEND_DIR", spa)
-	// **loader キャッシュはプロセスに 1 つ。** fixture は `t.TempDir()` なので、
-	// 捨てないと消えたディレクトリの内容が居座る (#2795)。
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 }
 
 func TestIsDev(t *testing.T) {
@@ -78,8 +73,6 @@ func TestEmbedEntryFor_DevIgnoresBuiltAssets(t *testing.T) {
 // dev フラグの導入で従来の動作が変わっていないことの確認。
 func TestClientEntryFor_NoBuiltAssets(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_DIR", filepath.Join(t.TempDir(), "absent"))
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	assert.Empty(t, clientEntryFor(&config.Config{}).Script)
 	assert.Empty(t, clientEntryFor(&config.Config{Dev: true}).Script)

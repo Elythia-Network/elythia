@@ -73,8 +73,6 @@ func newServerWithTrustProxy(t *testing.T, trustProxy []string) *Server {
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 		TrustProxy: trustProxy,
 	}
-	// **`New` はプロセス共有の状態を張り替える** (#2795)。
-	restoreProcessGlobals(t)
 	srv, err := New(cfg, serverIntegrationDB, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })

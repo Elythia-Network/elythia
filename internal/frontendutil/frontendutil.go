@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 )
@@ -296,31 +295,25 @@ type LoaderAssets struct {
 	JS  string
 }
 
-var (
-	loaderOnce       sync.Once
-	loaderCache      LoaderAssets
-	embedLoaderOnce  sync.Once
-	embedLoaderCache LoaderAssets
-)
-
-// BootLoaderAssets returns the SPA bootloader assets, read once per process.
+// ReadBootLoaderAssets reads the SPA bootloader assets from disk on every call.
 //
 // **参照のままにすると loader の更新が閲覧側に届かない (#2551)。**
 // `loader/style.css` と `loader/boot.js` はファイル名にハッシュが付かないので、
 // 内容を変えても URL が変わらない。CDN を挟むと HTML だけが新しくなり、
 // 「新しいマークアップに古い CSS が当たる」状態で表示が壊れる。
 //
-// 読み込みは 1 回だけ。**再ビルド後は再起動が要る**が、これは client entry
-// (DetectClientEntry) が既にそうなので前提は変わらない。
-func BootLoaderAssets() LoaderAssets {
-	loaderOnce.Do(func() { loaderCache = readLoaderAssets(FrontendDir()) })
-	return loaderCache
+// **ここではキャッシュしない (#3803)。** 呼び出し側 (internal/server) が、
+// client entry (DetectClientEntry) と同じく組み立てのときに 1 回読み、描画へ
+// 渡す。以前はプロセスで 1 回だけ読んでいたので、メンテナンスの間に frontend を
+// 作り直すと、組み立て直した世代で「新しい entry に古い loader」が組み合わさり、
+// #2551 と同じ形で表示が崩れた。
+func ReadBootLoaderAssets() LoaderAssets {
+	return readLoaderAssets(FrontendDir())
 }
 
-// EmbedLoaderAssets is BootLoaderAssets for the embed bundle.
-func EmbedLoaderAssets() LoaderAssets {
-	embedLoaderOnce.Do(func() { embedLoaderCache = readLoaderAssets(FrontendEmbedDir()) })
-	return embedLoaderCache
+// ReadEmbedLoaderAssets is ReadBootLoaderAssets for the embed bundle.
+func ReadEmbedLoaderAssets() LoaderAssets {
+	return readLoaderAssets(FrontendEmbedDir())
 }
 
 func readLoaderAssets(dir string) LoaderAssets {
@@ -350,15 +343,4 @@ func readInlinableAsset(path string) string {
 		}
 	}
 	return s
-}
-
-// ResetLoaderCacheForTest clears the once-per-process loader cache.
-//
-// 本番では使わない。**キャッシュは意図的に 1 回きり**なので、環境変数で
-// ディレクトリを差し替える test 同士が干渉しないよう明示的に捨てる口だけ出す。
-func ResetLoaderCacheForTest() {
-	loaderOnce = sync.Once{}
-	embedLoaderOnce = sync.Once{}
-	loaderCache = LoaderAssets{}
-	embedLoaderCache = LoaderAssets{}
 }

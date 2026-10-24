@@ -196,7 +196,6 @@ func newPluginNotificationsHarness(t *testing.T) *pluginNotificationsHarness {
 		{Name: "bot-b", APIVersion: plugin.APIVersion, Routes: capture(&h.ctxB), Notifications: handlerFor("bot-b")},
 		{Name: "bot-c", APIVersion: plugin.APIVersion, Routes: capture(&h.ctxC)},
 	}
-	restoreProcessGlobals(t)
 	srv, err := newServer(cfg, h.db, redisClients, defs, noopStorage, func(s *Server) {
 		rd := &pluginRecordingDriver{Driver: s.queueDriver, rec: h.rec}
 		s.queueClient = queue.NewClient(rd)
