@@ -2546,3 +2546,74 @@ func TestCreateService_HooksRunInTheBackgroundGroup(t *testing.T) {
 	// 1 つでも素の goroutine に戻ると数が減る。
 	assert.EqualValues(t, 8, g.Dropped())
 }
+
+// 禁止語は、本文の URL を表示される形に直したものにも掛かること
+// (本家 extractUrlsForKeyWordCheck)。ホストのパーセントエンコードと全角表記の両方。
+func TestCreateService_ProhibitedWords_NormalizedURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		words    []string
+		text, cw string
+	}{
+		{name: "percent-encoded host in text", words: []string{"banned.example"}, text: "hoge https://%62anned.example/ huge"},
+		{name: "fullwidth host in text", words: []string{"banned.example"}, text: "hoge <https://ｂａｎｎｅｄ．example/> huge"},
+		{name: "percent-encoded path in text", words: []string{"/forbidden-path"}, text: "https://ok.example/%66orbidden-path"},
+		{name: "link node in cw", words: []string{"banned.example"}, text: "clean", cw: "[label](https://%62anned.example/)"},
+		{name: "AND filter across the field and its URL", words: []string{"spam banned.example"}, text: "spam https://%62anned.example/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newCreateService(t)
+			metaRepo := testutil.NewMockMetaRepository()
+			metaRepo.Meta = &model.Meta{ID: "m1", ProhibitedWords: tc.words}
+			svc.SetMetaRepo(metaRepo)
+
+			in := note.CreateInput{User: &model.User{ID: "u1"}, Text: &tc.text}
+			if tc.cw != "" {
+				in.CW = &tc.cw
+			}
+			_, err := svc.Create(in)
+			assert.ErrorIs(t, err, note.ErrContainsProhibitedWords)
+		})
+	}
+}
+
+// 禁止語に当たらない URL は、正規化しても通ること (境界の反対側)。
+func TestCreateService_ProhibitedWords_NormalizedURLNoMatch(t *testing.T) {
+	svc, _, _ := newCreateService(t)
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "m1", ProhibitedWords: []string{"banned.example"}}
+	svc.SetMetaRepo(metaRepo)
+
+	text := "hoge https://%6Fk.example/ huge"
+	_, err := svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &text})
+	require.NoError(t, err)
+}
+
+// センシティブワードも、本文と CW の URL を表示される形に直したものに掛かり、
+// public の投稿を home にすること (本家と同じ)。
+func TestCreateService_SensitiveWords_NormalizedURLDemotes(t *testing.T) {
+	tests := []struct {
+		name     string
+		text, cw string
+	}{
+		{name: "percent-encoded host in text", text: "hoge https://%73ensitive.example/ huge"},
+		{name: "percent-encoded host in cw", text: "clean", cw: "https://%73ensitive.example/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newCreateService(t)
+			metaRepo := testutil.NewMockMetaRepository()
+			metaRepo.Meta = &model.Meta{ID: "m1", SensitiveWords: []string{"sensitive.example"}}
+			svc.SetMetaRepo(metaRepo)
+
+			in := note.CreateInput{User: &model.User{ID: "u1"}, Text: &tc.text, Visibility: model.NoteVisibilityPublic}
+			if tc.cw != "" {
+				in.CW = &tc.cw
+			}
+			created, err := svc.Create(in)
+			require.NoError(t, err)
+			assert.Equal(t, model.NoteVisibilityHome, created.Visibility)
+		})
+	}
+}

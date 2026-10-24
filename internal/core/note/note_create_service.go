@@ -1391,15 +1391,18 @@ func normalizeChannelID(id *string) *string {
 // caller が fetch error で nil を渡すケースも fail-open で false: 反映漏れ
 // の方が「投稿が思わぬ form で blocked される」より影響軽微で、upstream
 // も同タイミングで throw しないので挙動も揃う。
+//
+// 本家と同じく、欄の中の URL を表示される形に直したもの (apmfm.KeywordCheckTarget)
+// も同じ欄の一部として判定する。
 func matchesSensitiveWords(meta *model.Meta, text, cw *string) bool {
 	if meta == nil || len(meta.SensitiveWords) == 0 {
 		return false
 	}
 	words := []string(meta.SensitiveWords)
-	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(*cw, words) {
+	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(apmfm.KeywordCheckTarget(*cw), words) {
 		return true
 	}
-	if text != nil && *text != "" && keyword.IsKeyWordIncluded(*text, words) {
+	if text != nil && *text != "" && keyword.IsKeyWordIncluded(apmfm.KeywordCheckTarget(*text), words) {
 		return true
 	}
 	return false
@@ -1417,15 +1420,17 @@ func matchesSensitiveWords(meta *model.Meta, text, cw *string) bool {
 // keyword.IsKeyWordIncluded (regex / space-AND / case-sensitive) に揃え、upstream
 // checkProhibitedWordsContain と同じく poll choices も検査対象に含める。各 field を
 // 独立に渡すのは sensitiveWords (#1106) と同方針 (concat 案は改行越境 match で挙動が読みにくい)。
+// cw と text は、欄の中の URL を表示される形に直したもの (apmfm.KeywordCheckTarget) も
+// 同じ欄の一部として判定する (本家 checkProhibitedWordsContain と同じく URL も見る)。
 func checkProhibitedWords(meta *model.Meta, text, cw *string, pollChoices []string) error {
 	if meta == nil || len(meta.ProhibitedWords) == 0 {
 		return nil
 	}
 	words := []string(meta.ProhibitedWords)
-	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(*cw, words) {
+	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(apmfm.KeywordCheckTarget(*cw), words) {
 		return ErrContainsProhibitedWords
 	}
-	if text != nil && *text != "" && keyword.IsKeyWordIncluded(*text, words) {
+	if text != nil && *text != "" && keyword.IsKeyWordIncluded(apmfm.KeywordCheckTarget(*text), words) {
 		return ErrContainsProhibitedWords
 	}
 	for _, choice := range pollChoices {

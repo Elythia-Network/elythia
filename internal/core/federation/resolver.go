@@ -888,16 +888,17 @@ func (r *Resolver) prohibitedWords() []string {
 // `matchesSensitiveWords` が使うのと同じ実装) に委ねる。`/regex/flags` と
 // スペース区切り AND、case-sensitive の扱いをローカル投稿経路と揃えるため。
 // 検査対象の 3 つ (cw / text / poll choices) も upstream の
-// `checkProhibitedWordsContain` と同じ。
+// `checkProhibitedWordsContain` と同じ。cw と text は、欄の中の URL を表示される形に
+// 直したもの (mfm.KeywordCheckTarget) も同じ欄の一部として判定する (本家と同じ)。
 func (r *Resolver) containsProhibitedWords(text, cw *string, pollChoices []string) bool {
 	words := r.prohibitedWords()
 	if len(words) == 0 {
 		return false
 	}
-	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(*cw, words) {
+	if cw != nil && *cw != "" && keyword.IsKeyWordIncluded(mfm.KeywordCheckTarget(*cw), words) {
 		return true
 	}
-	if text != nil && *text != "" && keyword.IsKeyWordIncluded(*text, words) {
+	if text != nil && *text != "" && keyword.IsKeyWordIncluded(mfm.KeywordCheckTarget(*text), words) {
 		return true
 	}
 	for _, choice := range pollChoices {

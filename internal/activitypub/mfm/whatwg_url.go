@@ -28,6 +28,77 @@ import (
 // する (Node 22 はしない)。非 ASCII のホストは x/net/idna の UTS #46 に任せるので、
 // Unicode の版や IDNA の実装の細部で Node と違うことがある (docs/divergence.md)。
 func whatwgHref(raw string) (string, bool) {
+	u, ok := parseWhatwgURL(raw)
+	if !ok {
+		return "", false
+	}
+	return u.href(), true
+}
+
+// whatwgURL holds the serialized components of an http or https URL as the
+// WHATWG URL parser produces them.
+type whatwgURL struct {
+	// scheme is "http" or "https", without the colon.
+	scheme string
+	// userinfo is the serialized "user[:pass]@" part, or "" when there is none.
+	userinfo string
+	// host is the serialized host (ASCII, IPv4 dotted or bracketed IPv6).
+	host string
+	// port is the port when it is not the scheme's default, otherwise "".
+	port string
+	// path is the serialized path, always starting with "/".
+	path string
+	// query and fragment are the serialized values without "?" / "#";
+	// hasQuery / hasFragment tell whether the separator was present.
+	query, fragment       string
+	hasQuery, hasFragment bool
+}
+
+// href returns what JavaScript's URL.prototype.href returns.
+func (u whatwgURL) href() string {
+	var b strings.Builder
+	b.WriteString(u.scheme)
+	b.WriteString("://")
+	b.WriteString(u.userinfo)
+	b.WriteString(u.host)
+	if u.port != "" {
+		b.WriteByte(':')
+		b.WriteString(u.port)
+	}
+	b.WriteString(u.path)
+	if u.hasQuery {
+		b.WriteByte('?')
+		b.WriteString(u.query)
+	}
+	if u.hasFragment {
+		b.WriteByte('#')
+		b.WriteString(u.fragment)
+	}
+	return b.String()
+}
+
+// search returns what JavaScript's URL.prototype.search returns: "" for an
+// empty query, otherwise "?" and the query.
+func (u whatwgURL) search() string {
+	if u.query == "" {
+		return ""
+	}
+	return "?" + u.query
+}
+
+// hash returns what JavaScript's URL.prototype.hash returns: "" for an empty
+// fragment, otherwise "#" and the fragment.
+func (u whatwgURL) hash() string {
+	if u.fragment == "" {
+		return ""
+	}
+	return "#" + u.fragment
+}
+
+// parseWhatwgURL parses raw like `new URL(raw)` for an http or https URL. ok is
+// false when the WHATWG URL parser would throw, and also for every other scheme.
+func parseWhatwgURL(raw string) (whatwgURL, bool) {
+	var u whatwgURL
 	// 前後の C0 制御文字と空白を外し、途中のタブと改行を取り除く
 	s := strings.TrimFunc(raw, func(r rune) bool { return r <= 0x20 })
 	if strings.ContainsAny(s, "\t\n\r") {
@@ -36,12 +107,12 @@ func whatwgHref(raw string) (string, bool) {
 
 	colon := strings.IndexByte(s, ':')
 	if colon <= 0 || !isASCIIAlpha(s[0]) {
-		return "", false
+		return u, false
 	}
 	for i := 1; i < colon; i++ {
 		c := s[i]
 		if !isASCIIAlpha(c) && !isASCIIDigit(c) && c != '+' && c != '-' && c != '.' {
-			return "", false
+			return u, false
 		}
 	}
 	scheme := strings.ToLower(s[:colon])
@@ -52,7 +123,7 @@ func whatwgHref(raw string) (string, bool) {
 	case "https":
 		defaultPort = "443"
 	default:
-		return "", false
+		return u, false
 	}
 
 	// special な scheme では、scheme の後ろの / と \ を何個でも読み飛ばす
@@ -63,15 +134,13 @@ func whatwgHref(raw string) (string, bool) {
 	}
 	authority, rest := rest[:authEnd], rest[authEnd:]
 
-	var b strings.Builder
-	b.WriteString(scheme)
-	b.WriteString("://")
+	u.scheme = scheme
 
 	hostPort := authority
 	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
 		hostPort = authority[at+1:]
 		if hostPort == "" {
-			return "", false
+			return u, false
 		}
 		// userinfo の中の `@` は userinfo の集合で %40 になる。`:` は最初の 1 つが
 		// ユーザー名とパスワードの区切りで、残りはパスワードの中で %3A になる
@@ -79,12 +148,11 @@ func whatwgHref(raw string) (string, bool) {
 		user = percentEncode(user, inUserinfoSet)
 		pass = percentEncode(pass, inUserinfoSet)
 		if user != "" || pass != "" {
-			b.WriteString(user)
+			u.userinfo = user
 			if pass != "" {
-				b.WriteByte(':')
-				b.WriteString(pass)
+				u.userinfo += ":" + pass
 			}
-			b.WriteByte('@')
+			u.userinfo += "@"
 		}
 	}
 
@@ -105,45 +173,43 @@ func whatwgHref(raw string) (string, bool) {
 		}
 	}
 	if hostEnd == 0 {
-		return "", false
+		return u, false
 	}
 	host, ok := parseURLHost(hostPort[:hostEnd])
 	if !ok {
-		return "", false
+		return u, false
 	}
-	b.WriteString(host)
+	u.host = host
 	if hostEnd < len(hostPort) {
 		port, ok := parseURLPort(hostPort[hostEnd+1:])
 		if !ok {
-			return "", false
+			return u, false
 		}
 		if port != "" && port != defaultPort {
-			b.WriteByte(':')
-			b.WriteString(port)
+			u.port = port
 		}
 	}
 
 	pathPart, query, fragment := rest, "", ""
-	hasQuery, hasFragment := false, false
 	if i := strings.IndexByte(pathPart, '#'); i >= 0 {
-		pathPart, fragment, hasFragment = pathPart[:i], pathPart[i+1:], true
+		pathPart, fragment, u.hasFragment = pathPart[:i], pathPart[i+1:], true
 	}
 	if i := strings.IndexByte(pathPart, '?'); i >= 0 {
-		pathPart, query, hasQuery = pathPart[:i], pathPart[i+1:], true
+		pathPart, query, u.hasQuery = pathPart[:i], pathPart[i+1:], true
 	}
+	var path strings.Builder
 	for _, seg := range parseURLPath(pathPart) {
-		b.WriteByte('/')
-		b.WriteString(seg)
+		path.WriteByte('/')
+		path.WriteString(seg)
 	}
-	if hasQuery {
-		b.WriteByte('?')
-		b.WriteString(percentEncode(query, inSpecialQuerySet))
+	u.path = path.String()
+	if u.hasQuery {
+		u.query = percentEncode(query, inSpecialQuerySet)
 	}
-	if hasFragment {
-		b.WriteByte('#')
-		b.WriteString(percentEncode(fragment, inFragmentSet))
+	if u.hasFragment {
+		u.fragment = percentEncode(fragment, inFragmentSet)
 	}
-	return b.String(), true
+	return u, true
 }
 
 // parseURLPort parses the digits after the host's port separator. It returns
@@ -343,12 +409,27 @@ func domainToASCII(domain string) (string, bool) {
 	// RFC 3492 では基本文字が空というだけで正しく、Node も読むが、x/net/idna の
 	// decode は失敗にする。区切りを外したラベル (`xn--abc`、同じ文字列に decode
 	// される) を代わりに検査し、出力では元の綴りに戻す
+	// ラベルの区切りになる全角・半角・和文の句点 (UTS #46 で `.` に対応付く) を先に
+	// `.` に直してから分ける。直さないと、それらで区切ったホストではラベルの数が
+	// 対応付けの前後で変わり、下の綴りを戻す処理が URL ごと拒否してしまう。直した
+	// 文字列を、分けるのにも idna にも使う
+	domain = fullStopReplacer.Replace(domain)
 	labels := strings.Split(domain, ".")
 	bare := make([]bool, len(labels))
+	// `xn--badword-` のように、区切りの `-` が末尾にあって拡張部分が空のラベルは、
+	// 基本文字だけ (`badword`) に decode される。Node は読み、href ではそのままの
+	// 綴りを保つが、x/net/idna は decode 後が ASCII だけのラベルを不正にする。
+	// 検査には無害な ASCII のラベルを代わりに渡し、出力では元の綴り (小文字) に戻す
+	trailing := make([]string, len(labels))
 	for i, label := range labels {
 		if len(label) > 5 && strings.EqualFold(label[:5], "xn---") && !strings.Contains(label[5:], "-") {
 			labels[i] = label[:4] + label[5:]
 			bare[i] = true
+			continue
+		}
+		if basic, ok := emptyExtensionPunycodeBasic(label); ok && basic != "" {
+			trailing[i] = strings.ToLower(label)
+			labels[i] = "a"
 		}
 	}
 	out, err := urlIDNA.ToASCII(strings.Join(labels, "."))
@@ -365,6 +446,16 @@ func domainToASCII(domain string) (string, bool) {
 		}
 	}
 	restored := false
+	for i, orig := range trailing {
+		if orig == "" {
+			continue
+		}
+		if len(outLabels) != len(labels) || outLabels[i] != "a" {
+			return "", false
+		}
+		outLabels[i] = orig
+		restored = true
+	}
 	for i, b := range bare {
 		if !b {
 			continue
@@ -383,6 +474,28 @@ func domainToASCII(domain string) (string, bool) {
 	return out, true
 }
 
+// fullStopReplacer maps the full stops UTS #46 maps to U+002E (ideographic,
+// fullwidth and halfwidth) to '.'.
+var fullStopReplacer = strings.NewReplacer("\u3002", ".", "\uff0e", ".", "\uff61", ".")
+
+// emptyExtensionPunycodeBasic reports whether label is an ACE label
+// ("xn--" + basic code points + "-") whose punycode extension is empty, and
+// returns the basic code points it decodes to. Only ASCII letters, digits and
+// hyphens are accepted as basic code points.
+func emptyExtensionPunycodeBasic(label string) (string, bool) {
+	if len(label) < 5 || !strings.EqualFold(label[:4], "xn--") || label[len(label)-1] != '-' {
+		return "", false
+	}
+	basic := label[4 : len(label)-1]
+	for i := 0; i < len(basic); i++ {
+		c := basic[i]
+		if !isASCIIAlpha(c) && !isASCIIDigit(c) && c != '-' {
+			return "", false
+		}
+	}
+	return strings.ToLower(basic), true
+}
+
 // roughUTS46Map approximates the UTS #46 mapping closely enough to see which
 // labels start with "xn--" after mapping: the full stops that map to `.`,
 // NFKC (fullwidth forms), full lowercasing (U+0130 becomes "i" + U+0307) and
@@ -394,7 +507,7 @@ func roughUTS46Map(domain string) string {
 	if isASCIIString(domain) {
 		return strings.ToLower(domain)
 	}
-	s := strings.NewReplacer("\u3002", ".", "\uff0e", ".", "\uff61", ".").Replace(domain)
+	s := fullStopReplacer.Replace(domain)
 	s = strings.Map(func(r rune) rune {
 		switch {
 		case r == 0x00AD, r == 0x034F, r == 0x200B, r == 0x2060, r == 0xFEFF,
