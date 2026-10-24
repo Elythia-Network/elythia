@@ -57,7 +57,6 @@ func newServerWithConfig(t *testing.T, mutate func(*config.Config)) *Server {
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
 	mutate(cfg)
-	restoreProcessGlobals(t)
 	srv, err := New(cfg, serverIntegrationDB, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

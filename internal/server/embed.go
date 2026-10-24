@@ -50,12 +50,13 @@ type embedHandlers struct {
 	chunkedUpload        meta.ChunkedUploadCapability
 	setup                *meta.SetupDetector
 	entry                frontendutil.ClientEntryInfo
+	loader               frontendutil.LoaderAssets
 	deps                 EmbedDeps
 }
 
 // newEmbedHandlers builds the embed route handlers.
 //
-// entry は起動時に 1 度だけ manifest から解決する (通常シェルと同じ方針)。
+// entry と loader は組み立てのときに 1 度だけ読む (通常シェルと同じ方針、#3803)。
 func newEmbedHandlers(
 	cfg *config.Config,
 	metaRepo repository.MetaRepository,
@@ -71,6 +72,7 @@ func newEmbedHandlers(
 		chunkedUpload:        chunkedUpload,
 		setup:                setup,
 		entry:                embedEntryFor(cfg),
+		loader:               embedLoaderAssetsFor(cfg),
 		deps:                 deps,
 	}
 }
@@ -271,7 +273,7 @@ func (h *embedHandlers) buildHTML(instanceName, iconURL, appleTouchIconURL, them
 
 	// SPA シェルと同じく loader は埋め込む (#2551)。embed も同じファイル名 (ハッシュ
 	// 無し) を参照していたので、同じ形で古い版が居座る。
-	loader := embedLoaderAssetsFor(h.cfg)
+	loader := h.loader
 	loaderCSSTag := inlineOrLinkCSS(loader.CSS, "/embed_vite/loader/style.css")
 	loaderJSTag := inlineOrLinkJS(loader.JS, "/embed_vite/loader/boot.js")
 

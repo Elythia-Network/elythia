@@ -121,7 +121,6 @@ func TestCacheList_DropAllInOrder(t *testing.T) {
 // the rollback releases the list.
 func TestNewServer_InvalidCacheFailsTheConstruction(t *testing.T) {
 	db, clients, _, cfg := constructionFixture(t)
-	restoreProcessGlobals(t)
 	var dropped []string
 	var built *Server
 	_, err := newServer(cfg, db, clients, nil, noopStorage, func(s *Server) {

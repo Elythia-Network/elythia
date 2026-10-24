@@ -214,8 +214,6 @@ func TestSetupRoutesRegistersChannelsOnTheManagersRegistry(t *testing.T) {
 		Redis:            redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	// newServer はプロセス共有の状態を張り替える (#2795)。2 回作っても戻すのは 1 回でよい。
-	restoreProcessGlobals(t)
 
 	for _, withInspector := range []bool{true, false} {
 		var hooks []func(*Server)

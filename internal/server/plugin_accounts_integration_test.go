@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	apimeta "github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -88,7 +87,6 @@ func newPluginAccountsHarnessDB(t *testing.T, db *gorm.DB, settings map[string]m
 			},
 		}
 	}
-	restoreProcessGlobals(t)
 	srv, err := newServer(cfg, h.db, redisClients,
 		[]plugin.Definition{def("bot-a", &h.ctxA), def("bot-b", &h.ctxB)}, noopStorage)
 	require.NoError(t, err)
@@ -566,7 +564,6 @@ func TestPluginAccounts_InitialSetupIgnoresManagedAccounts_RealDB(t *testing.T) 
 	t.Cleanup(reset)
 
 	h := newPluginAccountsHarnessDB(t, db, nil)
-	apimeta.ResetSetupLatchForTest()
 	ctx := context.Background()
 	_, err = h.ctxA.Accounts().Create(ctx, "setup_bot")
 	require.NoError(t, err)
@@ -596,7 +593,6 @@ func TestPluginAccounts_InitialSetupIgnoresManagedAccounts_RealDB(t *testing.T) 
 
 	// 普通のローカル利用者が居るときは、今までどおり窓を閉じる。
 	reset()
-	apimeta.ResetSetupLatchForTest()
 	createLocalUser(t, db, "setup-plain", "setup_plain", "setupplaintok016", "plain-pass", false)
 	assert.False(t, requireSetup())
 	rec = h.do(http.MethodPost, "/api/admin/accounts/create", "", map[string]any{"username": "setup_admin2", "password": "admin-pass"})

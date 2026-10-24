@@ -119,7 +119,6 @@ func newMetaRuntimeHarnessWith(t *testing.T, opts metaRuntimeOptions, beforeSetu
 	t.Cleanup(h.cleanupUsers)
 	h.createUser(h.rootID, "metart_root", h.rootToken, true)
 
-	restoreProcessGlobals(t)
 	srv, err := newServer(cfg, db, redisClients, nil, noopStorage, beforeSetup...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

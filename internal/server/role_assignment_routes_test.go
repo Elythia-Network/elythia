@@ -55,9 +55,6 @@ func TestSetupRoutes_RoleAssignmentShowAuthorization(t *testing.T) {
 		Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	// **`New` はプロセス共有の状態を張り替える。** 戻さないと後続のテストが
-	// 署名付きプロキシ URL を受け取って落ちる (#2795)。
-	restoreProcessGlobals(t)
 	srv, err := New(cfg, db, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })

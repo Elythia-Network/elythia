@@ -52,8 +52,6 @@ func TestSetupRoutes_AuthCacheInvalidationReachesOtherProcess(t *testing.T) {
 		Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	// New はプロセス共有の状態を張り替える (#2795)。2 つ作っても戻すのは 1 回でよい。
-	restoreProcessGlobals(t)
 	srvA, err := New(cfg, db, redisClients)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srvA.Shutdown(context.Background())) })

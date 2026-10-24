@@ -79,9 +79,6 @@ func newLifecycleEnv(t *testing.T) *lifecycleEnv {
 		Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
 		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	// newServer はプロセス共有の状態を張り替える (#2795)。世代を作り直すたびに
-	// 張り替わるので、テストの終わりに 1 度戻せば足りる。
-	restoreProcessGlobals(t)
 	return &lifecycleEnv{
 		cfg: cfg, redis: clients, rdb: tr.Client, schema: schema, appName: appName,
 		observer: observer,

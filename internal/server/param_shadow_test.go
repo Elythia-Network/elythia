@@ -176,7 +176,6 @@ func newParamShadowServers(t *testing.T) (off, on *Server, logs *syncBuffer) {
 			RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 			DisableParamShadow: disable, ParamShadowLogSeconds: 3600,
 		}
-		restoreProcessGlobals(t)
 		srv, err := New(cfg, serverIntegrationDB, redisClients)
 		require.NoError(t, err)
 		return srv

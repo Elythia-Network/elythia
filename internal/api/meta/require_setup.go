@@ -15,25 +15,24 @@ import (
 // (`internal/server/setup_detector_wiring_test.go`) が両方を見る。
 //
 // nil の `*SetupDetector` と、数え方を持たない値は「数えない」として扱う。
+//
+// 利用者を一度でも観測した印 (seen) も、この値が持つ (#3803)。以前はパッケージの
+// 変数だったので、DB を戻してメンテナンスから抜け、組み立て直した後の世代にも
+// 前の DB で観測した印が残った。組み立てるたびに NewSetupDetector で作り直すので、
+// 新しい世代は最初のリクエストで 1 回だけ数え直す。
 type SetupDetector struct {
 	count func() (int64, error)
+	// seen remembers that local users were once observed.
+	//
+	// **一度 true になったら戻らない。** 利用者は増える一方なので、観測した
+	// 時点で確定してよい。以後 COUNT を発行しないための掛け金。
+	seen atomic.Bool
 }
 
 // NewSetupDetector returns a detector that counts local users with fn.
 // A nil fn yields a detector that judges by rootUserId alone.
 func NewSetupDetector(fn func() (int64, error)) *SetupDetector {
 	return &SetupDetector{count: fn}
-}
-
-// setupLatch remembers that local users were once observed.
-//
-// **一度 false になったら戻らない。** 利用者は増える一方なので、観測した
-// 時点で確定してよい。以後 COUNT を発行しないための掛け金。
-//
-// 数え方と違い、まだパッケージの変数のまま残す。世代ごとに持たせると、DB を
-// 差し替えたときに数え直すようになり動きが変わるので、段階 (6) で扱う (#3666)。
-var setupLatch struct {
-	seen atomic.Bool
 }
 
 // RequireSetup reports whether the client should show the initial setup screen.
@@ -54,11 +53,12 @@ func (d *SetupDetector) RequireSetup(m *model.Meta) bool {
 	if m == nil || m.RootUserID != nil {
 		return false
 	}
-	if setupLatch.seen.Load() {
-		return false
-	}
+	// nil の値には印を置く場所が無いが、数えないので印も要らない。
 	if d == nil || d.count == nil {
 		return true
+	}
+	if d.seen.Load() {
+		return false
 	}
 	n, err := d.count()
 	if err != nil {
@@ -67,11 +67,8 @@ func (d *SetupDetector) RequireSetup(m *model.Meta) bool {
 		return false
 	}
 	if n > 0 {
-		setupLatch.seen.Store(true)
+		d.seen.Store(true)
 		return false
 	}
 	return true
 }
-
-// ResetSetupLatchForTest clears the latch so tests can observe both states.
-func ResetSetupLatchForTest() { setupLatch.seen.Store(false) }

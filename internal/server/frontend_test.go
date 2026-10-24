@@ -692,7 +692,7 @@ func TestRenderFrontendShell_Overrides(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, ov))
+		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, frontendutil.LoaderAssets{}, ov))
 		return rec.Body.String()
 	}
 
@@ -757,7 +757,7 @@ func TestRenderFrontendShell_CacheControl(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, ov))
+		require.NoError(t, renderFrontendShell(c, cfg, repo, nil, nil, nil, frontendutil.ClientEntryInfo{}, frontendutil.LoaderAssets{}, ov))
 		return rec
 	}
 
@@ -852,8 +852,6 @@ func TestFrontendHTML_InlinesLoaderAssets(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"),
 		[]byte("window.__markerInlinedJs = 1;"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_DIR", dir)
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
 	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
@@ -875,8 +873,6 @@ func TestFrontendHTML_InlinesLoaderAssets(t *testing.T) {
 // シェルになり、スプラッシュどころか起動しない。**
 func TestFrontendHTML_FallsBackToLoaderReferences(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_DIR", t.TempDir())
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
 	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
@@ -891,6 +887,76 @@ func TestFrontendHTML_FallsBackToLoaderReferences(t *testing.T) {
 	assert.Contains(t, body, `<script src="/vite/loader/boot.js"></script>`)
 }
 
+// **loader は組み立てのときに読み、組み立て直した世代は読み直す (#3803)。**
+//
+// 以前はプロセスで 1 回だけ読んでいたので、メンテナンスの間に frontend を作り
+// 直すと、組み立て直した世代は新しい entry (組み立てのたびに読む) と古い loader を
+// 組み合わせた。#2551 と同じ形で表示が崩れる。逆に、リクエストのたびに読むと、
+// 同じ世代の中で entry と loader の読んだ時点がずれる。shell を描画する 4 つの
+// 経路 (通常・OAuth の同意画面・permalink の SSR・埋め込み) それぞれで、
+// (a) 組み立てた後にファイルを変えても同じ世代は組み立てのときの loader のまま、
+// (b) 組み立て直すと新しい loader を読む、を見る。
+func TestShells_ReadLoaderAtConstruction(t *testing.T) {
+	spa := t.TempDir()
+	embedDir := t.TempDir()
+	t.Setenv("MISSKEY_FRONTEND_DIR", spa)
+	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", embedDir)
+	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
+	repo := testutil.NewMockMetaRepository()
+
+	writeLoader := func(t *testing.T, dir, css string) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "loader"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "style.css"), []byte(css), 0o644))
+	}
+
+	for _, tt := range []struct {
+		name  string
+		dir   string
+		build func() echo.HandlerFunc
+	}{
+		{name: "SPA shell", dir: spa, build: func() echo.HandlerFunc {
+			return frontendHTML(cfg, repo, nil, nil, nil)
+		}},
+		{name: "OAuth consent", dir: spa, build: func() echo.HandlerFunc {
+			render := frontendConsentHTML(cfg, repo, nil, nil, nil)
+			return func(c echo.Context) error {
+				return render(c, oauth.ConsentMeta{TransactionID: "tx", ClientName: "client", Scope: "read:account"})
+			}
+		}},
+		{name: "permalink SSR", dir: spa, build: func() echo.HandlerFunc {
+			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, ssrMetaDeps{})
+			return func(c echo.Context) error { return h.render(c, shellOverrides{}) }
+		}},
+		{name: "embed", dir: embedDir, build: func() echo.HandlerFunc {
+			h := newEmbedHandlers(cfg, repo, nil, nil, nil, EmbedDeps{})
+			return func(c echo.Context) error { return h.render(c, nil) }
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := func(h echo.HandlerFunc) string {
+				t.Helper()
+				rec := httptest.NewRecorder()
+				c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+				require.NoError(t, h(c))
+				return rec.Body.String()
+			}
+
+			writeLoader(t, tt.dir, "#splash{--marker:generation-1}")
+			first := tt.build()
+			writeLoader(t, tt.dir, "#splash{--marker:generation-2}")
+
+			got := body(first)
+			assert.Contains(t, got, "--marker:generation-1", "同じ世代の中で、組み立てのときの loader から変わった")
+			assert.NotContains(t, got, "--marker:generation-2")
+
+			got = body(tt.build())
+			assert.Contains(t, got, "--marker:generation-2", "組み立て直した世代が loader を読み直していない")
+			assert.NotContains(t, got, "--marker:generation-1")
+		})
+	}
+}
+
 // **dev では埋め込まない (#2477 と同じ理由)。** ビルド成果物が残っているだけの
 // 状態で埋め込むと、dev server が返す新しい loader ではなく古い built を読む。
 func TestFrontendHTML_DevModeKeepsReferences(t *testing.T) {
@@ -899,8 +965,6 @@ func TestFrontendHTML_DevModeKeepsReferences(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "style.css"),
 		[]byte("#splash{--marker:stale}"), 0o644))
 	t.Setenv("MISSKEY_FRONTEND_DIR", dir)
-	frontendutil.ResetLoaderCacheForTest()
-	t.Cleanup(frontendutil.ResetLoaderCacheForTest)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test", Dev: true}
 	handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
@@ -1089,7 +1153,7 @@ func TestRenderFrontendShell_ClientPreloads(t *testing.T) {
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-		require.NoError(t, renderFrontendShell(c, cfg, testutil.NewMockMetaRepository(), nil, nil, nil, entry, shellOverrides{}))
+		require.NoError(t, renderFrontendShell(c, cfg, testutil.NewMockMetaRepository(), nil, nil, nil, entry, frontendutil.LoaderAssets{}, shellOverrides{}))
 		return rec.Body.String(), rec.Header().Get("Content-Security-Policy")
 	}
 	scriptHash := func(t *testing.T, body string) string {

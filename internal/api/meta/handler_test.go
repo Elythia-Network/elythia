@@ -178,8 +178,6 @@ func TestMeta_RequireSetupFalseWhenRootExists(t *testing.T) {
 // requireSetup は SetSetupDetector で渡した数え方で判定する (#3782)。
 // 利用者が居れば、rootUserId が nil でもセットアップ画面を出さない。
 func TestMeta_RequireSetupUsesWiredDetector(t *testing.T) {
-	ResetSetupLatchForTest()
-	t.Cleanup(ResetSetupLatchForTest)
 	h, repo := newTestHandler()
 	repo.Meta = &model.Meta{ID: "x"}
 	calls := 0

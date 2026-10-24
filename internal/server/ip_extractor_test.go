@@ -245,7 +245,6 @@ func TestBuildIPExtractor_BareIP(t *testing.T) {
 func TestNew_InvalidTrustProxyFailsStartup(t *testing.T) {
 	t.Setenv(config.EnvOnlyServer, "")
 	t.Setenv(config.EnvOnlyQueue, "")
-	restoreProcessGlobals(t)
 	cfg := &config.Config{URL: "http://example.test", TrustProxy: []string{"not-an-ip"}}
 	srv, err := New(cfg, nil, nil)
 	require.Error(t, err)

@@ -248,9 +248,9 @@ func TestCacheTypeScanFindsEveryBranch(t *testing.T) {
 	if ct := scan.Types["internal/core/captcha.Service"]; ct == nil || !slices.Contains(ct.Fingerprint, "client") {
 		t.Error("the fingerprint of internal/core/captcha.Service does not have its field client")
 	}
-	// パッケージの変数: 宣言の型の名前の無いstruct、値の形から引く型、ポインタ。
+	// パッケージの変数: 値の形から引く型、ポインタ。宣言の型が名前の無いstructの形は、
+	// 実在した`meta.setupLatch`を#3803で消したので、TestScanCacheTypesShapesのfixtureで見る。
 	vars := map[string]string{
-		"internal/api/meta.setupLatch":            SyncPartAtomic,
 		"internal/core/federation.versionRegexps": SyncPartMutex,
 		"internal/core/wordmute.parsedCache":      SyncPartLRU,
 		// sync.OnceValueの呼び出しは型を値の形から引けないので、別に数える。
@@ -431,9 +431,14 @@ type Unaliased struct {
 
 import (
 	"sync"
+	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
+
+var declared struct {
+	seen atomic.Bool
+}
 
 var latch = struct {
 	sync.Mutex
@@ -504,6 +509,7 @@ var called = newLeaf
 		"internal/a.table":                {"rows"},
 		"internal/a/otherfixture.Scanned": {"mu"},
 		"internal/a.latch":                {"Mutex", "m"},
+		"internal/a.declared":             {"seen"},
 		"internal/a.mu":                   {"var:guarded"},
 		"internal/a.memo":                 nil,
 		"internal/a.held":                 nil,
@@ -548,7 +554,8 @@ var called = newLeaf
 	}
 	for key, part := range map[string]string{
 		"internal/a.latch": SyncPartMutex, "internal/a.mu": SyncPartMutex,
-		"internal/a.memo": SyncPartLRU, "internal/a.held": SyncPartScannedType,
+		"internal/a.declared": SyncPartAtomic,
+		"internal/a.memo":     SyncPartLRU, "internal/a.held": SyncPartScannedType,
 		"internal/a.hot": SyncPartOnce,
 	} {
 		if ct := scan.Types[key]; ct != nil && (!ct.Var || !ct.Parts[part]) {

@@ -51,9 +51,10 @@ func sameOriginURL(base, u string) bool {
 func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) echo.HandlerFunc {
 	// ビルド済みアセットからCLIENT_ENTRYを取得 (dev モードでは常に dev server を見る)
 	clientEntry := clientEntryFor(cfg)
+	loader := loaderAssetsFor(cfg)
 
 	return func(c echo.Context) error {
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, shellOverrides{})
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, loader, shellOverrides{})
 	}
 }
 
@@ -135,7 +136,11 @@ const splashMarkup = `<div id="splash">
 </div>`
 
 // renderFrontendShell renders the Misskey frontend SPA shell.
-func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, clientEntry frontendutil.ClientEntryInfo, ov shellOverrides) error {
+//
+// clientEntry and loader are read at construction (clientEntryFor /
+// loaderAssetsFor) and passed in, so each generation renders the frontend it
+// was built with.
+func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, clientEntry frontendutil.ClientEntryInfo, loader frontendutil.LoaderAssets, ov shellOverrides) error {
 	instanceName := config.DisplayName
 	// og:description の既定値は upstream views/_.ts の defaultDescription。
 	// `<meta name="description">` の方は upstream と同じく meta.description が
@@ -308,7 +313,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 	// ので、参照のままだと内容を変えても URL が変わらず、CDN の手前で古い版が
 	// 居座る。HTML だけが新しくなると「新しいマークアップに古い CSS が当たる」
 	// 状態になり、スプラッシュが静止したまま表示されなくなる。
-	loader := loaderAssetsFor(cfg)
+	// loader は組み立てのときに読んだもの (#3803)。
 	loaderCSSTag := inlineOrLinkCSS(loader.CSS, "/vite/loader/style.css")
 	loaderJSTag := inlineOrLinkJS(loader.JS, "/vite/loader/boot.js")
 
@@ -383,6 +388,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 // HTML-escaped (client name/logo are attacker-suppliable via discovery).
 func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) oauth.ConsentRenderer {
 	clientEntry := clientEntryFor(cfg)
+	loader := loaderAssetsFor(cfg)
 	return func(c echo.Context, m oauth.ConsentMeta) error {
 		var sb strings.Builder
 		sb.WriteString(`<meta name="misskey:oauth:transaction-id" content="` + stdhtml.EscapeString(m.TransactionID) + `">` + "\n")
@@ -394,7 +400,7 @@ func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository,
 		// **同意画面は共有キャッシュに載せない。** transaction id を含む HTML が
 		// CDN に載ると別の利用者に配られる。upstream も OAuth 側で no-store を
 		// 出している (OAuth2ProviderService.ts:322)。
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, shellOverrides{
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, loader, shellOverrides{
 			Head:         sb.String(),
 			CacheControl: "no-store",
 		})
