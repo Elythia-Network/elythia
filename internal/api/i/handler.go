@@ -2065,6 +2065,10 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_BANNER", "No such banner file.", "0d8f5629-f210-41c2-9433-735831a58595"))
 		case errors.Is(err, user.ErrBannerNotImage):
 			return c.JSON(http.StatusBadRequest, apierr.Error("BANNER_NOT_AN_IMAGE", "The file specified as a banner is not an image.", "75aedb19-2afd-4e6d-87fc-67941256fa60"))
+		case errors.Is(err, user.ErrAvatarIsSensitive):
+			return c.JSON(http.StatusBadRequest, apierr.Error("AVATAR_IS_SENSITIVE", "The file specified as an avatar is marked as sensitive.", "71bb5e53-4742-4609-b465-36081e131208"))
+		case errors.Is(err, user.ErrBannerIsSensitive):
+			return c.JSON(http.StatusBadRequest, apierr.Error("BANNER_IS_SENSITIVE", "The file specified as a banner is marked as sensitive.", "e148b34c-9f33-4300-93e0-7817008fb366"))
 		}
 		return apierr.JSONInternalError(c)
 	}

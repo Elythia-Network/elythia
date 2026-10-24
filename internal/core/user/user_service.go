@@ -54,6 +54,11 @@ var (
 	// ErrBannerNotFound / ErrBannerNotImage are the banner counterparts.
 	ErrBannerNotFound = errors.New("banner drive file not found")
 	ErrBannerNotImage = errors.New("banner drive file is not an image")
+	// ErrAvatarIsSensitive / ErrBannerIsSensitive are returned when the
+	// drive_file is marked as sensitive. Mirrors upstream 2026.10.1's
+	// AVATAR_IS_SENSITIVE / BANNER_IS_SENSITIVE.
+	ErrAvatarIsSensitive = errors.New("avatar drive file is sensitive")
+	ErrBannerIsSensitive = errors.New("banner drive file is sensitive")
 )
 
 // MainStreamPublisher emits real-time events to a single target user's `main`
@@ -803,10 +808,10 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 	// avatarId / bannerId 更新 (#467)。driveFileRepo 未配線時は media
 	// 更新経路を skip して旧 behaviour に戻す (テスト互換維持)。
 	if s.driveFileRepo != nil {
-		if err := s.applyMediaUpdate(userID, in.AvatarID, "avatar", userFields, ErrAvatarNotFound, ErrAvatarNotImage); err != nil {
+		if err := s.applyMediaUpdate(userID, in.AvatarID, "avatar", userFields, ErrAvatarNotFound, ErrAvatarNotImage, ErrAvatarIsSensitive); err != nil {
 			return nil, err
 		}
-		if err := s.applyMediaUpdate(userID, in.BannerID, "banner", userFields, ErrBannerNotFound, ErrBannerNotImage); err != nil {
+		if err := s.applyMediaUpdate(userID, in.BannerID, "banner", userFields, ErrBannerNotFound, ErrBannerNotImage, ErrBannerIsSensitive); err != nil {
 			return nil, err
 		}
 	}
@@ -907,7 +912,7 @@ func (s *Service) profileEmojis(userID string, existing *model.User, in UpdateIn
 // `prefix` is "avatar" or "banner". notFoundErr / notImageErr are the
 // specific sentinel errors callers want surfaced (handler maps them to
 // distinct API error codes).
-func (s *Service) applyMediaUpdate(userID string, idPtr *string, prefix string, userFields map[string]any, notFoundErr, notImageErr error) error {
+func (s *Service) applyMediaUpdate(userID string, idPtr *string, prefix string, userFields map[string]any, notFoundErr, notImageErr, sensitiveErr error) error {
 	if idPtr == nil {
 		return nil
 	}
@@ -937,6 +942,12 @@ func (s *Service) applyMediaUpdate(userID string, idPtr *string, prefix string, 
 	}
 	if !strings.HasPrefix(file.Type, "image/") {
 		return notImageErr
+	}
+	// センシティブと印を付けた画像は、アイコンとバナーにできない (本家 2026.10.1)。
+	// どちらもタイムライン・プロフィール・連合の actor にそのまま出るため。
+	// 判定の順は本家と同じく、存在・所有 → 画像か → センシティブか。
+	if file.IsSensitive {
+		return sensitiveErr
 	}
 	userFields[prefix+"Id"] = file.ID
 	// **原本 (`file.URL`) を入れない。** あれは所有者にしか渡さない値で
