@@ -483,6 +483,9 @@ func TestCustomJSONMarshalersAreKnown(t *testing.T) {
 	assert.Equal(t, []string{
 		// `[]Multikey` をそのまま出すだけ。IP は持たない。
 		"internal/activitypub/types.go#MultikeyList.MarshalJSON",
+		// /api.jsonの項目の順を保つためのJSONのobject (#3810)。中身は埋め込みの
+		// 本家のgoldenとEchoのルートから組み、利用者のデータは入らない。
+		"internal/api/openapi/ordered.go#object.MarshalJSON",
 		// 以下は走査そのものを固定するための人工ソース。
 		"internal/entitycompat/marshalerfixture/marshalers.go#Generic.MarshalJSON",
 		"internal/entitycompat/marshalerfixture/marshalers.go#Plain.MarshalJSON",

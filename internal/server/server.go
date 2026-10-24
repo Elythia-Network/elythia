@@ -82,6 +82,8 @@ type Server struct {
 	queueRuntimeStats *runtimestats.Recorder
 	// startedAt は admin/server-metrics が返す uptime の起点 (#2395)。
 	startedAt time.Time
+	// apiSpecは/api.jsonの本文。ルートが揃った後に初めて読まれたときに作る(#3810)。
+	apiSpec apiSpecCache
 	// peerDeps はプラグイン同士の通信 (#2537) に要る一式。setupRoutes が
 	// 署名・解決・ブロック判定を組み立ててから setupPlugins に渡す。
 	// 未配線 (nil) のときは peer を宣言したプラグインも受け口を張らない。
@@ -593,10 +595,12 @@ func accessLogConfig(out io.Writer) echomw.RequestLoggerConfig {
 //   - `/vite/*` / `/embed_vite/*`: 事前圧縮の .br / .gz を返し、無ければ
 //     自前で gzip する (serveFrontendBuild、dev では frontendDynamicGzip)
 //   - `/api/emojis`: 一覧が変わるまで gzip 済みの本文を使い回す (#3593)
+//   - `/api.json`: 1 度だけ作った gzip 済みの本文を使い回す (#3810)
 var selfEncodedRoutes = map[string]bool{
 	"/vite/*":       true,
 	"/embed_vite/*": true,
 	"/api/emojis":   true,
+	"/api.json":     true,
 }
 
 // gzipConfig returns the GzipConfig used by the global middleware stack.
