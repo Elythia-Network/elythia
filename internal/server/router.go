@@ -2497,6 +2497,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/robots.txt", webResHandler.RobotsTxt)
 	s.echo.GET("/opensearch.xml", webResHandler.OpenSearchXML)
 	s.echo.GET("/api.json", s.OpenAPISpec)
+	// /api.jsonを表示するAPIの説明のページ(#3810)。本家と同じくScalarを使う。
+	s.echo.GET("/api-doc", s.APIDoc)
 	// Web Push の通知バッジ (#2345)。twemoji SVG を単色 PNG に焼いて返す。
 	// 焼いた PNG をキャッシュの一覧に登録するので (#3776)、handler を変数に取り出す。
 	twemojiBadge := newTwemojiBadgeHandler(frontendutil.TwemojiDir())
