@@ -31,7 +31,7 @@ func TestRemoteUserResolver_LocalHostShortCircuit(t *testing.T) {
 			repo := testutil.NewMockUserRepository()
 			repo.Users["me"] = &model.User{ID: "me", Username: "Alice", UsernameLower: "alice"}
 			// webfinger / resolver は nil。短絡できなければ panic か error になる。
-			r := NewRemoteUserResolver(nil, nil, repo, tc.localHost)
+			r := NewRemoteUserResolver(nil, nil, repo, tc.localHost, nil)
 
 			got, err := r.ResolveByUsernameHost("alice", tc.asked)
 			require.NoError(t, err, "localHost=%q に対し host=%q が短絡すること", tc.localHost, tc.asked)

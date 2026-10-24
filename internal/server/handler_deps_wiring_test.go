@@ -39,6 +39,10 @@ var handlerNilAllowed = map[string]string{
 	// テストだけが SetClockForTest (export_test.go) で入れる。本番では常に nil で、
 	// now() は time.Now を使う。
 	"admin.clock": "テスト専用の seam。setupRoutes は入れず、nil のとき time.Now を使う",
+	// 1:1 のメッセージをプラグインへ届ける口 (#3469)。setupRoutes は
+	// newPluginNotificationDispatcher が nil でないとき (通知を受け取るプラグインが
+	// 居るとき) だけ SetMessageObserver を呼ぶ。テストの組み立てはプラグインを登録しない。
+	"chatService.messageObserver": "通知を受け取るプラグインが居ないときは配線しない (newPluginNotificationDispatcher が nil)",
 }
 
 // **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823)。**
@@ -195,6 +199,16 @@ var requiredDepChecks = []string{
 	"oauth.authInvalidator",
 	"emojiApplication.policies", "emojiApplication.resets",
 	"abuseCreated.background", "abuseCreated.entityPacker",
+	"chat.entityPacker", "chat.fileRepo", "chat.lites",
+	"chatService.entityPacker", "chatService.lites", "chatService.blockingRepo",
+	"reversi.entityPacker", "reversi.lites",
+	"bubbleVersus.entityPacker", "bubbleVersusPublisher.entityPacker",
+	"announcements.entityPacker", "announcementCreator.entityPacker",
+	"url.entityPacker", "ssrMeta.entityPacker", "driveURLUploader.entityPacker", "webhookSignup.entityPacker",
+	"accountMover.blockingRepo", "accountMover.mutingRepo", "accountMover.userListRepo", "accountMover.idGen",
+	// 以前の表の述語 (HasCarryOverRepos) は setter のままの blockQueue も見ていた。
+	"accountMover.blockQueue",
+	"remoteStatsFetcher.hostAllowed", "remoteUserResolver.softwareBlocker",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

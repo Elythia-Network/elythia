@@ -191,7 +191,7 @@ func (m *mockReversiRepo) DeleteOutdatedGames(thresholdID string) (int64, error)
 func newTestHandler() (*Handler, *mockReversiRepo) {
 	repo := newMock()
 	idGen, _ := id.NewGenerator("aidx")
-	return NewHandler(repo, idGen), repo
+	return NewHandler(repo, idGen, nil, nil), repo
 }
 
 func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {

@@ -141,7 +141,7 @@ func TestRemoteStatsFetcher_Fetch_NilOrEmpty(t *testing.T) {
 	var f *RemoteStatsFetcher
 	assert.Nil(t, f.Fetch(context.Background(), "h", "u"))
 
-	f = NewRemoteStatsFetcher(nil, "")
+	f = NewRemoteStatsFetcher(nil, "", nil)
 	assert.Nil(t, f.Fetch(context.Background(), "", "u"))
 	assert.Nil(t, f.Fetch(context.Background(), "h", ""))
 }
@@ -336,10 +336,10 @@ func TestRemoteStatsFetcher_Fetch_SkipsDisallowedHost(t *testing.T) {
 
 	f := newRemoteStatsFetcherWithTransport(redirectTransport{target: srv.URL})
 	var asked []string
-	f.SetHostAllowedChecker(func(host string) bool {
+	f.hostAllowed = func(host string) bool {
 		asked = append(asked, host)
 		return host != "blocked.example"
-	})
+	}
 
 	assert.Nil(t, f.Fetch(context.Background(), "blocked.example", "alice"),
 		"連合していない相手の統計を返さないこと")
@@ -369,7 +369,7 @@ func TestRemoteStatsFetcher_Fetch_GateRunsBeforeCache(t *testing.T) {
 	require.NotNil(t, f.Fetch(context.Background(), "remote.example", "alice"))
 
 	// 取得済み (= cache に載っている) 相手を後からブロックする。
-	f.SetHostAllowedChecker(func(string) bool { return false })
+	f.hostAllowed = func(string) bool { return false }
 	assert.Nil(t, f.Fetch(context.Background(), "remote.example", "alice"),
 		"ブロック後は cache 済みの統計も返さないこと")
 }

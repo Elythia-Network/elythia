@@ -38,7 +38,7 @@ func TestCheck_AllInactive_PublishesAnnouncementCreatedPerModerator(t *testing.T
 	repo := &fakeAnnounce{}
 	pub := &fakeMainPublisher{}
 	// idGen=nil でも Creator は publish する (packed createdAt が空になるだけ)。
-	creator := coreannouncement.NewCreator(repo, nil, pub, nil)
+	creator := coreannouncement.NewCreator(repo, nil, pub, nil, nil)
 	s := NewService(mods, meta, &fakeProfiles{}, creator, &fakeWebhook{}, &fakeIDGen{}, nil)
 	s.now = func() time.Time { return now }
 

@@ -121,7 +121,7 @@ func TestURLUploader_GenerationStopAfterTheDownload(t *testing.T) {
 		up := &mockDriveUploader{ret: &model.DriveFile{ID: "f1"}}
 		pub := &mockMainPublisher{}
 		client := &http.Client{Transport: cancelAfterBodyTransport{cancel: cancel}}
-		NewURLUploader(client, up, pub, idGen, "mk-go-test", 0).Process(ctx, in)
+		NewURLUploader(client, up, pub, idGen, "mk-go-test", 0, nil).Process(ctx, in)
 		assert.Nil(t, up.gotInput, "世代が止まり始めた後に取得したファイルを保存した")
 		assert.Empty(t, pub.events, "保存していないのに urlUploadFinished を送った")
 	})
@@ -130,7 +130,7 @@ func TestURLUploader_GenerationStopAfterTheDownload(t *testing.T) {
 		defer cancel()
 		up := &cancelingUploader{cancel: cancel}
 		pub := &mockMainPublisher{}
-		NewURLUploader(http.DefaultClient, up, pub, idGen, "mk-go-test", 0).Process(ctx, in)
+		NewURLUploader(http.DefaultClient, up, pub, idGen, "mk-go-test", 0, nil).Process(ctx, in)
 		require.Equal(t, 1, up.calls)
 		assert.NoError(t, up.ctxErrIn, "保存の途中で世代の停止の取り消しが届いた (劣化したファイルが確定しうる)")
 		assert.Len(t, pub.events, 1)

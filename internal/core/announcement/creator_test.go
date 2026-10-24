@@ -71,7 +71,7 @@ func TestCreate_PerUserPublishesAnnouncementCreated(t *testing.T) {
 	a, idGen := newAnnouncement(t, ptr("mod1"))
 	repo := &fakeRepo{}
 	pub := &fakePublisher{}
-	c := NewCreator(repo, idGen, pub, nil)
+	c := NewCreator(repo, idGen, pub, nil, nil)
 
 	require.NoError(t, c.Create(a))
 	require.Len(t, repo.created, 1)
@@ -100,7 +100,7 @@ func TestCreate_GlobalAnnouncementBroadcasts(t *testing.T) {
 	repo := &fakeRepo{}
 	pub := &fakePublisher{}
 	bc := &fakeBroadcast{}
-	c := NewCreator(repo, idGen, pub, bc)
+	c := NewCreator(repo, idGen, pub, bc, nil)
 
 	require.NoError(t, c.Create(a))
 	assert.Len(t, repo.created, 1)
@@ -120,7 +120,7 @@ func TestCreate_PerUserDoesNotBroadcast(t *testing.T) {
 	repo := &fakeRepo{}
 	pub := &fakePublisher{}
 	bc := &fakeBroadcast{}
-	c := NewCreator(repo, idGen, pub, bc)
+	c := NewCreator(repo, idGen, pub, bc, nil)
 
 	require.NoError(t, c.Create(a))
 	assert.Len(t, pub.events, 1, "per-user は main へ出す")
@@ -130,7 +130,7 @@ func TestCreate_PerUserDoesNotBroadcast(t *testing.T) {
 func TestCreate_NilPublisherStillPersists(t *testing.T) {
 	a, idGen := newAnnouncement(t, ptr("mod1"))
 	repo := &fakeRepo{}
-	c := NewCreator(repo, idGen, nil, nil)
+	c := NewCreator(repo, idGen, nil, nil, nil)
 
 	require.NoError(t, c.Create(a))
 	assert.Len(t, repo.created, 1)
@@ -140,7 +140,7 @@ func TestCreate_RepoErrorPropagatesWithoutPublish(t *testing.T) {
 	a, idGen := newAnnouncement(t, ptr("mod1"))
 	repo := &fakeRepo{err: errors.New("db down")}
 	pub := &fakePublisher{}
-	c := NewCreator(repo, idGen, pub, nil)
+	c := NewCreator(repo, idGen, pub, nil, nil)
 
 	err := c.Create(a)
 	assert.Error(t, err)

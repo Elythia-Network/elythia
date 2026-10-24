@@ -99,14 +99,6 @@ type URLUploader struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this URLUploader packs entities with (#3796).
-func (u *URLUploader) SetEntityPacker(p *entity.Packer) { u.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (u *URLUploader) HasEntityPacker() bool { return u.entityPacker.HasMediaURL() }
-
 // userSlot is the per-user semaphore and the number of requests holding or
 // waiting for it (the entry is dropped when that reaches zero).
 type userSlot struct {
@@ -116,20 +108,23 @@ type userSlot struct {
 
 // NewURLUploader builds a URLUploader. maxBytes <= 0 falls back to the 250 MiB
 // default; pass cfg.MaxFileSize so a download never exceeds what the drive
-// would accept anyway.
-func NewURLUploader(httpClient *http.Client, uploader driveUploader, publisher mainEventPublisher, idGen id.Generator, userAgent string, maxBytes int64) *URLUploader {
+// would accept anyway. entityPacker is the Packer this URLUploader packs
+// entities with (#3796); 無いと urlUploadFinished のファイルの url などを生のまま
+// 流すので、構築子の必須の引数で受ける (#3823)。
+func NewURLUploader(httpClient *http.Client, uploader driveUploader, publisher mainEventPublisher, idGen id.Generator, userAgent string, maxBytes int64, entityPacker *entity.Packer) *URLUploader {
 	if maxBytes <= 0 {
 		maxBytes = defaultURLUploadMaxBytes
 	}
 	return &URLUploader{
-		httpClient: httpClient,
-		uploader:   uploader,
-		publisher:  publisher,
-		idGen:      idGen,
-		userAgent:  userAgent,
-		maxBytes:   maxBytes,
-		slots:      make(chan struct{}, maxConcurrentURLUploads),
-		userSlots:  make(map[string]*userSlot),
+		httpClient:   httpClient,
+		uploader:     uploader,
+		publisher:    publisher,
+		idGen:        idGen,
+		userAgent:    userAgent,
+		maxBytes:     maxBytes,
+		slots:        make(chan struct{}, maxConcurrentURLUploads),
+		userSlots:    make(map[string]*userSlot),
+		entityPacker: entityPacker,
 	}
 }
 

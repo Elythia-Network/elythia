@@ -34,17 +34,11 @@ type VersusHandler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this VersusHandler packs entities with (#3794).
-func (h *VersusHandler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *VersusHandler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// NewVersusHandler constructs a VersusHandler.
-func NewVersusHandler(svc *bubbleversus.Service, users UserFinder) *VersusHandler {
-	return &VersusHandler{svc: svc, users: users}
+// NewVersusHandler constructs a VersusHandler. entityPacker is the Packer this
+// VersusHandler packs entities with (#3794); 無いとメディアの URL を生のまま返すので、
+// 構築子の必須の引数で受ける (#3823)。
+func NewVersusHandler(svc *bubbleversus.Service, users UserFinder, entityPacker *entity.Packer) *VersusHandler {
+	return &VersusHandler{svc: svc, users: users, entityPacker: entityPacker}
 }
 
 // 対戦 ID は id.Generator の出力 (英数字。ulid は大文字を使う)。Redis のキーに

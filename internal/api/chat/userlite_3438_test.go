@@ -73,8 +73,7 @@ func TestRoomsOwned_ReturnsOwnerAsUserLite(t *testing.T) {
 func TestRoomTimeline_UserLitesFilledInOneBatch(t *testing.T) {
 	h, repo := newTestHandler()
 	filler := &recordingLiteFiller{}
-	h.SetLiteFiller(filler)
-	require.True(t, h.HasLiteFiller())
+	h.lites = filler
 
 	room := &model.ChatRoom{ID: "r1", Name: "Room", OwnerID: u1.ID, Owner: u1}
 	repo.Rooms["r1"] = room
@@ -131,7 +130,7 @@ func TestMessagesShow_ToUserIsUserLite(t *testing.T) {
 func TestPackInvitationByID_UserIsFilled(t *testing.T) {
 	h, repo := newTestHandler()
 	filler := &recordingLiteFiller{}
-	h.SetLiteFiller(filler)
+	h.lites = filler
 	require.NoError(t, repo.CreateRoom(&model.ChatRoom{ID: "r1", Name: "General", OwnerID: u1.ID, Owner: u1}))
 	require.NoError(t, repo.CreateInvitation(&model.ChatRoomInvitation{ID: "inv1", UserID: u2.ID, RoomID: "r1"}))
 
@@ -216,9 +215,9 @@ func TestInvitationsInbox_ShapeIsChatRoomInvitation(t *testing.T) {
 		MockChatRepository: testutil.NewMockChatRepository(),
 		rows:               []*model.ChatRoomInvitation{{ID: invID, UserID: u2.ID, RoomID: roomID, Room: room}},
 	}
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
 	filler := &recordingLiteFiller{}
-	h.SetLiteFiller(filler)
+	h.lites = filler
 
 	rec := post(h.InvitationsInbox, `{}`, u2)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -353,7 +352,7 @@ func (r *detailedOnlyRepo) FindMessageByID(id string) (*model.ChatMessage, error
 func TestMessagesShow_UsesDetailedLookup(t *testing.T) {
 	repo := &detailedOnlyRepo{MockChatRepository: testutil.NewMockChatRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil, nil)
 	to := u2.ID
 	repo.Messages["m1"] = &model.ChatMessage{ID: "m1", FromUserID: u1.ID, FromUser: u1, ToUserID: &to, ToUser: u2}
 

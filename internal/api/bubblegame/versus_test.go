@@ -67,7 +67,7 @@ func newVersus(t *testing.T) *versusEnv {
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	svc.SetClockForTest(func() time.Time { return now })
 	users := &fakeUsers{users: map[string]*model.User{"alice": vAlice, "bob": vBob, "carol": vCarol}}
-	return &versusEnv{h: NewVersusHandler(svc, users), svc: svc, users: users, now: &now, mr: mr}
+	return &versusEnv{h: NewVersusHandler(svc, users, nil), svc: svc, users: users, now: &now, mr: mr}
 }
 
 func decode(t *testing.T, body []byte) map[string]any {
@@ -274,7 +274,7 @@ func TestVersus_ULIDMatchID(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 	gen, err := id.NewGenerator("ulid")
 	require.NoError(t, err)
-	e.h = NewVersusHandler(bubbleversus.NewService(rdb, nopPub{}, nil, gen), e.users)
+	e.h = NewVersusHandler(bubbleversus.NewService(rdb, nopPub{}, nil, gen), e.users, nil)
 	mid := e.invite(t)
 	require.Regexp(t, `[A-Z]`, mid)
 	assert.Equal(t, http.StatusOK, post(e.h.Show, matchBody(mid), vAlice).Code)

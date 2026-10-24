@@ -63,8 +63,7 @@ func requireStreamUserLite(t *testing.T, v any, wantID string) map[string]any {
 func TestStreamMessage_UsersAreUserLiteFilledInOneBatch(t *testing.T) {
 	svc, repo, pub := newSvc(t)
 	filler := &streamLiteFiller{}
-	svc.SetLiteFiller(filler)
-	require.True(t, svc.HasLiteFiller())
+	svc.SetLiteFillerForTest(filler)
 
 	alice := &model.User{ID: "alice", Username: "alice"}
 	bob := &model.User{ID: "bob", Username: "bob"}
@@ -92,7 +91,7 @@ func TestStreamMessage_UsersAreUserLiteFilledInOneBatch(t *testing.T) {
 // UserLite does not fit the Web Push size limit), and toUser is dropped.
 func TestPushNewChatMessage_BodyIsNarrowed(t *testing.T) {
 	svc, _, _ := newSvc(t)
-	svc.SetLiteFiller(&streamLiteFiller{})
+	svc.SetLiteFillerForTest(&streamLiteFiller{})
 	push := &stubChatPusher{}
 	svc.SetMainStreamPublisher(&stubMainPublisher{})
 	svc.SetChatPusher(push)
@@ -155,7 +154,7 @@ func TestRoomMessage_StreamAndNewChatMessageShapes(t *testing.T) {
 	users := newCountingUsers()
 	svc.SetUserRepo(users)
 	filler := &streamLiteFiller{}
-	svc.SetLiteFiller(filler)
+	svc.SetLiteFillerForTest(filler)
 	main := &stubMainPublisher{}
 	push := &stubChatPusher{}
 	svc.SetMainStreamPublisher(main)
@@ -211,7 +210,7 @@ func TestRoomMessage_StreamAndNewChatMessageShapes(t *testing.T) {
 func TestDirectMessage_NewChatMessageIsDetailed(t *testing.T) {
 	svc, _, pub := newSvc(t)
 	filler := &streamLiteFiller{}
-	svc.SetLiteFiller(filler)
+	svc.SetLiteFillerForTest(filler)
 	main := &stubMainPublisher{}
 	svc.SetMainStreamPublisher(main)
 	svc.SetChatPusher(&stubChatPusher{})

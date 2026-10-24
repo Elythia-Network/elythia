@@ -54,26 +54,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetLiteFiller wires the batch resolver of instance / emojis for the
-// inviters of reversi/invitations (#3330).
-func (h *Handler) SetLiteFiller(f userpack.LiteFiller) {
-	h.lites = f
-}
-
-// HasLiteFiller reports whether the lite filler was wired.
-//
-// 未配線だと reversi/invitations のリモートの招待者に instance と絵文字が載らない。
-// 起動時検査に使う。
-func (h *Handler) HasLiteFiller() bool { return h.lites != nil }
-
 // FederationAvailabilityChecker determines whether a remote host advertises
 // a compatible reversiVersion via its nodeinfo.
 // 実装は core/reversi.FederationChecker。
@@ -89,8 +69,14 @@ type RemoteUserLookup interface {
 }
 
 // NewHandler creates a new reversi handler.
-func NewHandler(repo repository.ReversiRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
+//
+// entityPacker is the Packer this Handler packs entities with (#3794); lites
+// is the batch resolver of instance / emojis for the inviters of
+// reversi/invitations (#3330). どちらも無いと黙って劣化する (メディアの URL が
+// 生のまま / リモートの招待者に instance と絵文字が載らない) ので、構築子の必須の
+// 引数で受ける (#3823)。
+func NewHandler(repo repository.ReversiRepository, idGen id.Generator, entityPacker *entity.Packer, lites userpack.LiteFiller) *Handler {
+	return &Handler{repo: repo, idGen: idGen, entityPacker: entityPacker, lites: lites}
 }
 
 // SetService attaches the core reversi service. 必須ではないが設定されていれば

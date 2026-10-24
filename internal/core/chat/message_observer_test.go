@@ -56,7 +56,7 @@ func TestMessageObserver_NotCalledForRejectedMessages(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	blocks := testutil.NewMockBlockingRepository()
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "bob", BlockeeID: "alice"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 	obs := &recordingMessageObserver{}
 	svc.SetMessageObserver(obs)
 

@@ -1522,7 +1522,7 @@ func TestShowByUsername_LocalHostShortCircuit(t *testing.T) {
 			repo.Users["me"] = &model.User{ID: "me", Username: "Alice", UsernameLower: "alice"}
 			svc := user.NewService(repo, nil, nil, nil)
 			// resolver は「呼ばれたら失敗する」ので、短絡できないと error になる。
-			svc.SetRemoteUserResolver(federation.NewRemoteUserResolver(nil, nil, repo, tc.localHost))
+			svc.SetRemoteUserResolver(federation.NewRemoteUserResolver(nil, nil, repo, tc.localHost, nil))
 
 			h := tc.asked
 			got, err := svc.ShowByUsername("alice", &h)

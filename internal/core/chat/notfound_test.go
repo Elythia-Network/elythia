@@ -42,7 +42,8 @@ func TestChatService_DBFailureIsNotNotFound(t *testing.T) {
 		return corechat.NewService(&failingChatRepo{
 			MockChatRepository: testutil.NewMockChatRepository(),
 			err:                dbErr,
-		}, idGen)
+		}, idGen, nil, nil, nil)
+
 	}
 
 	for _, tt := range []struct {

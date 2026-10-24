@@ -19,7 +19,7 @@ func newChatSvc(t *testing.T) (*corechat.Service, *testutil.MockChatRepository) 
 	t.Helper()
 	repo := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	return corechat.NewService(repo, idGen), repo
+	return corechat.NewService(repo, idGen, nil, nil, nil), repo
 }
 
 // --- conformance ---

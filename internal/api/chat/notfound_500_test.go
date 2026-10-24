@@ -40,8 +40,8 @@ func TestChat_DBFailureIsNot4xx(t *testing.T) {
 	newFailing := func() *Handler {
 		repo := &failingChatRepo{MockChatRepository: testutil.NewMockChatRepository(), err: dbErr}
 		idGen, _ := id.NewGenerator("aidx")
-		h := NewHandler(repo, idGen)
-		h.SetService(corechat.NewService(repo, idGen))
+		h := NewHandler(repo, idGen, nil, nil, nil)
+		h.SetService(corechat.NewService(repo, idGen, nil, nil, nil))
 		return h
 	}
 

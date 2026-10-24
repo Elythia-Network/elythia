@@ -92,7 +92,7 @@ func newSvc(t *testing.T) (*corechat.Service, *testutil.MockChatRepository, *cap
 	repo := newFakeRepo()
 	pub := &capturePublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(repo, idGen)
+	svc := corechat.NewService(repo, idGen, nil, nil, nil)
 	svc.SetStreamingPublisher(pub)
 	// push の body に fromUser を載せるため (#2840)。production は router が
 	// 同じものを配線する。
@@ -154,7 +154,7 @@ func TestCreateMessageToUser_BlockedByRecipient(t *testing.T) {
 	blocks := testutil.NewMockBlockingRepository()
 	// blocker=bob, blockee=alice。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "bob", BlockeeID: "alice"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	_, err := svc.CreateMessageToUser(context.Background(), "alice", "bob", "hi", "")
 	assert.ErrorIs(t, err, corechat.ErrChatBlocked)
@@ -167,7 +167,7 @@ func TestCreateMessageToUser_NotBlockedPasses(t *testing.T) {
 	blocks := testutil.NewMockBlockingRepository()
 	// alice が bob を block していても、bob→alice は送れる(逆方向 block は無関係)。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "alice", BlockeeID: "bob"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	_, err := svc.CreateMessageToUser(context.Background(), "alice", "bob", "hi", "")
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestCreateMessageToUser_BlockCheckFailClosed(t *testing.T) {
 	svc, _, pub := newSvc(t)
 	blocks := testutil.NewMockBlockingRepository()
 	blocks.ExistsErr = errors.New("db down")
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	_, err := svc.CreateMessageToUser(context.Background(), "alice", "bob", "hi", "")
 	require.Error(t, err)
@@ -192,7 +192,7 @@ func TestCreateMessageViaAP_BlockedByRecipient(t *testing.T) {
 	blocks := testutil.NewMockBlockingRepository()
 	// blocker=bob (local recipient), blockee=alice (remote sender)。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "bob", BlockeeID: "alice"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	remoteSender := &model.User{ID: "alice"}
 	_, err := svc.CreateMessageViaAP(context.Background(), "https://remote/notes/1", remoteSender, "bob", "hi", "")
@@ -232,7 +232,7 @@ func TestCreateMessageToRoom_BlockDoesNotAffectRoom(t *testing.T) {
 	// alice と bob が相互 block していても room メッセージは通る。
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: "alice", BlockeeID: "bob"}))
 	require.NoError(t, blocks.Create(&model.Blocking{ID: "b2", BlockerID: "bob", BlockeeID: "alice"}))
-	svc.SetBlockingRepo(blocks)
+	svc.SetBlockingRepoForTest(blocks)
 
 	_, err := svc.CreateMessageToRoom(context.Background(), "bob", "r1", "hi room", "")
 	require.NoError(t, err, "room message must not be blocked by 1-on-1 block")
@@ -585,7 +585,7 @@ func TestIsRoomMember_NonMember(t *testing.T) {
 
 func TestService_NilPublisherStillWorks(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	svc := corechat.NewService(newFakeRepo(), idGen)
+	svc := corechat.NewService(newFakeRepo(), idGen, nil, nil, nil)
 	// No publisher set; operations should still succeed (no panic)
 	_, err := svc.CreateMessageToUser(context.Background(), "alice", "bob", "hi", "")
 	assert.NoError(t, err)

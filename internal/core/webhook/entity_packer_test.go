@@ -75,17 +75,15 @@ func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 	})
 }
 
-// userCreated の本文 (UserLite) は、SignupHook に渡した Packer で包む (#3794)。
+// userCreated の本文 (UserLite) は、SignupHook の構築子に渡した Packer で包む
+// (#3794)。構築子が引数を捨てる変異 (#3823) もここで落ちる。
 func TestSignupHook_PacksWithTheGivenPacker(t *testing.T) {
 	svc, enq, _, sysRepo := newTestService(t)
 	sysRepo.hooks["sh1"] = &model.SystemWebhook{
 		ID: "sh1", IsActive: true, On: model.StringArray{"userCreated"},
 	}
-	h := webhook.NewSignupHook(svc)
-	assert.False(t, h.HasEntityPacker())
-	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+	h := webhook.NewSignupHook(svc, entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
-	assert.True(t, h.HasEntityPacker())
 
 	avatar := "https://remote.example/avatar.png"
 	h.OnUserCreated(&model.User{ID: "alice", Username: "alice", UsernameLower: "alice", AvatarURL: &avatar})

@@ -23,7 +23,7 @@ func newTestHandler(t *testing.T) (*announcements.Handler, *testutil.MockAnnounc
 	t.Helper()
 	repo := testutil.NewMockAnnouncementRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	return announcements.NewHandler(repo, idGen), repo
+	return announcements.NewHandler(repo, idGen, nil), repo
 }
 
 func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -634,14 +634,14 @@ func (f *failingListAnnouncementRepo) ListForAdmin(_, _ string, _, _ int, _, _ s
 
 func TestList_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(&failingListAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen)
+	h := announcements.NewHandler(&failingListAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.List, `{}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestAdminList_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(&failingListAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen)
+	h := announcements.NewHandler(&failingListAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.AdminList, `{}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -654,7 +654,7 @@ func (f *failingCreateAnnouncementRepo) Create(_ *model.Announcement) error { re
 
 func TestAdminCreate_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(&failingCreateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen)
+	h := announcements.NewHandler(&failingCreateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.AdminCreate, `{"title":"x","text":"y","imageUrl":null}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -675,7 +675,7 @@ func (f *failingUpdateAnnouncementRepo) UpdateFields(_ string, _ map[string]any)
 
 func TestAdminUpdate_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(&failingUpdateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen)
+	h := announcements.NewHandler(&failingUpdateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.AdminUpdate, `{"id":"x","title":"y"}`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -688,7 +688,7 @@ func (f *failingDeleteAnnouncementRepo) Delete(_ string) error { return assert.A
 
 func TestAdminDelete_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(&failingDeleteAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen)
+	h := announcements.NewHandler(&failingDeleteAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.AdminDelete, `{"id":"x"}`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -697,7 +697,7 @@ func TestReadAnnouncement_MarkReadError(t *testing.T) {
 	repo := &failingMarkReadRepo{testutil.NewMockAnnouncementRepository()}
 	repo.Items["a1"] = &model.Announcement{ID: "a1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := announcements.NewHandler(repo, idGen)
+	h := announcements.NewHandler(repo, idGen, nil)
 	rec := doPost(h.ReadAnnouncement, `{"announcementId":"a1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }

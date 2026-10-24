@@ -70,29 +70,24 @@ func (r *RemoteUserResolver) SetHostBlockChecker(c HostBlockChecker) {
 	r.hostBlocker = c
 }
 
-// SetSoftwareSuspensionChecker makes ResolveByUsernameHost skip hosts running
-// software listed in meta.inboxSuspendedSoftware without sending the WebFinger
-// request (#3563). ドメインブロックと同じ止め方に揃える。
-func (r *RemoteUserResolver) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
-	r.softwareBlocker = c
-}
-
-// HasSoftwareSuspensionChecker reports whether a non-nil checker was attached
-// with SetSoftwareSuspensionChecker (startup wiring check).
-func (r *RemoteUserResolver) HasSoftwareSuspensionChecker() bool { return r.softwareBlocker != nil }
-
 // NewRemoteUserResolver constructs a RemoteUserResolver.
 //
 // localHost は自インスタンスのホスト (例: "example.com")。呼び出し側が
 // host = 自ホストで誤って resolver 経由にしてしまった際、WebFinger で自分に
 // HTTP 往復するのを避けるための短絡路。空文字なら短絡しない。
-func NewRemoteUserResolver(webfinger WebFinger, resolver actorResolver, userRepo repository.UserRepository, localHost string) *RemoteUserResolver {
+//
+// softwareBlocker makes ResolveByUsernameHost skip hosts running software
+// listed in meta.inboxSuspendedSoftware without sending the WebFinger request
+// (#3563)。ドメインブロックと同じ止め方に揃える。無いと拒否したソフトウェアの
+// ホストにも黙って WebFinger を投げるので、構築子の必須の引数で受ける (#3823)。
+func NewRemoteUserResolver(webfinger WebFinger, resolver actorResolver, userRepo repository.UserRepository, localHost string, softwareBlocker SoftwareSuspensionChecker) *RemoteUserResolver {
 	return &RemoteUserResolver{
-		webfinger: webfinger,
-		resolver:  resolver,
-		userRepo:  userRepo,
-		localHost: localHost,
-		now:       time.Now,
+		webfinger:       webfinger,
+		resolver:        resolver,
+		userRepo:        userRepo,
+		localHost:       localHost,
+		softwareBlocker: softwareBlocker,
+		now:             time.Now,
 	}
 }
 

@@ -30,7 +30,7 @@ func newMatchAnyHandler(t *testing.T) (*Handler, *mockReversiRepo, *stubStreamPu
 	apiReversiRedis.FlushAll(context.Background())
 	repo := newMock()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil)
 	h.SetService(corereversi.NewService(repo, nil, apiReversiRedis.Client))
 	pub := &stubStreamPub{}
 	h.SetStreamPublisher(pub)
@@ -240,7 +240,7 @@ func TestMatchAny_ListFailureFallsThroughToQueue(t *testing.T) {
 func TestMatchAny_QueueFailureReturns500(t *testing.T) {
 	repo := newMock()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil)
 	// 閉じた client を渡して redis 操作を必ず失敗させる。
 	h.SetService(corereversi.NewService(repo, nil, closedRedisClient(t)))
 
@@ -253,7 +253,7 @@ func TestMatchAny_QueueFailureReturns500(t *testing.T) {
 func TestCancelMatch_QueueFailureStillCleansGames(t *testing.T) {
 	repo := newMock()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(repo, idGen)
+	h := NewHandler(repo, idGen, nil, nil)
 	h.SetService(corereversi.NewService(repo, nil, closedRedisClient(t)))
 
 	rec := post(h.CancelMatch, `{}`, u1)

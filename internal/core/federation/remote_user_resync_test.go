@@ -80,7 +80,7 @@ func newResyncFixture(t *testing.T, age *time.Duration, uri string) (*corefedera
 	repo.Users[u.ID] = u
 	wf := &countingWebFinger{uri: uri}
 	ar := &refreshingActorResolver{repo: repo}
-	r := corefederation.NewRemoteUserResolver(wf, ar, repo, "local.example")
+	r := corefederation.NewRemoteUserResolver(wf, ar, repo, "local.example", nil)
 	r.SetClock(resyncClock(t))
 	return r, wf, ar, repo, u
 }
@@ -224,7 +224,7 @@ func TestResyncIfStale_DBFailures(t *testing.T) {
 	})
 	t.Run("unconfigured", func(t *testing.T) {
 		repo := testutil.NewMockUserRepository()
-		r := corefederation.NewRemoteUserResolver(nil, nil, repo, "")
+		r := corefederation.NewRemoteUserResolver(nil, nil, repo, "", nil)
 		host := "remote.example"
 		_, err := r.ResyncIfStale(&model.User{ID: "x", Host: &host})
 		require.Error(t, err)
@@ -279,7 +279,7 @@ func TestResyncIfStale_ConcurrentCallsShareOneRequest(t *testing.T) {
 	repo := &barrierUserRepo{MockUserRepository: mock, want: n, all: make(chan struct{})}
 	wf := &countingWebFinger{uri: aliceURI}
 	ar := &refreshingActorResolver{repo: mock}
-	r := corefederation.NewRemoteUserResolver(wf, ar, repo, "local.example")
+	r := corefederation.NewRemoteUserResolver(wf, ar, repo, "local.example", nil)
 	r.SetClock(resyncClock(t))
 
 	var wg sync.WaitGroup
@@ -347,7 +347,7 @@ func TestResolveByUsernameHost_ConcurrentCallsShareOneRequest(t *testing.T) {
 	host := "remote.example"
 	wf := &countingWebFinger{uri: aliceURI, gate: make(chan struct{})}
 	ar := &fakeActorResolver{user: &model.User{ID: "uR", Host: &host}}
-	r := corefederation.NewRemoteUserResolver(wf, ar, testutil.NewMockUserRepository(), "local.example")
+	r := corefederation.NewRemoteUserResolver(wf, ar, testutil.NewMockUserRepository(), "local.example", nil)
 	const n = 8
 	var wg sync.WaitGroup
 	for i := range n {
@@ -383,7 +383,7 @@ func TestResolveByUsernameHost_SelfLinkToLocalUser(t *testing.T) {
 		repo.Users["uR"] = &model.User{ID: "uR", Username: "r", UsernameLower: "r", Host: &remoteHost}
 		repo.Users["uD"] = &model.User{ID: "uD", Username: "gone", UsernameLower: "gone", IsDeleted: true}
 		ar := &fakeActorResolver{err: errors.New("must not resolve a local URI remotely")}
-		r := corefederation.NewRemoteUserResolver(&fakeWebFinger{uri: href}, ar, repo, "local.example")
+		r := corefederation.NewRemoteUserResolver(&fakeWebFinger{uri: href}, ar, repo, "local.example", nil)
 		return r, ar, repo
 	}
 	t.Run("existing local user", func(t *testing.T) {
@@ -418,7 +418,7 @@ func TestResolveByUsernameHost_SelfLinkToLocalUser(t *testing.T) {
 	})
 	t.Run("no user repo", func(t *testing.T) {
 		ar := &fakeActorResolver{}
-		r := corefederation.NewRemoteUserResolver(&fakeWebFinger{uri: "https://local.example/users/uL"}, ar, nil, "local.example")
+		r := corefederation.NewRemoteUserResolver(&fakeWebFinger{uri: "https://local.example/users/uL"}, ar, nil, "local.example", nil)
 		_, err := r.ResolveByUsernameHost("alias", "remote.example")
 		require.ErrorIs(t, err, corefederation.ErrLocalUserNotFound)
 	})

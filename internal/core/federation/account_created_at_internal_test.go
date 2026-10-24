@@ -162,7 +162,7 @@ func TestRemoteStatsFetcher_FetchAccountCreatedAt_RejectsBadPayloads(t *testing.
 func TestRemoteStatsFetcher_FetchAccountCreatedAt_Guards(t *testing.T) {
 	srv, hits := newCreatedAtServer(t, `{"username":"alice","createdAt":"2019-05-06T07:08:09.123Z"}`, http.StatusOK)
 	f := newRemoteStatsFetcherWithTransport(redirectTransport{target: srv.URL})
-	f.SetHostAllowedChecker(func(host string) bool { return host != "blocked.example" })
+	f.hostAllowed = func(host string) bool { return host != "blocked.example" }
 
 	var nilFetcher *RemoteStatsFetcher
 	assert.Nil(t, nilFetcher.FetchAccountCreatedAt(context.Background(), "remote.example", "alice"))

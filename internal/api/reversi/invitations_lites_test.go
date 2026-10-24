@@ -26,10 +26,8 @@ func (s *stubLiteFiller) FillLites(users []*model.User, lites []*entity.UserLite
 // instance と絵文字をまとめて埋める (#3330)。
 func TestInvitations_FillsLitesInOneBatch(t *testing.T) {
 	h, repo := newTestHandler()
-	assert.False(t, h.HasLiteFiller())
 	f := &stubLiteFiller{}
-	h.SetLiteFiller(f)
-	assert.True(t, h.HasLiteFiller())
+	h.lites = f
 	g := sampleGame()
 	g.IsStarted = false
 	repo.games["g1"] = g

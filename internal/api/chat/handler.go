@@ -90,24 +90,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetLiteFiller wires the batch resolver of instance / emojis for the UserLite
-// values embedded in chat responses (#3438).
-func (h *Handler) SetLiteFiller(f userpack.LiteFiller) { h.lites = f }
-
-// HasLiteFiller reports whether the lite filler was wired.
-//
-// 未配線だと chat の応答に含まれるリモートの利用者に instance と絵文字が載らない。
-// 起動時検査に使う。
-func (h *Handler) HasLiteFiller() bool { return h.lites != nil }
-
 // maxChatMessageTextRunes is the upstream paramDef maxLength of the chat
 // message text (create-to-user / create-to-room). messages/update uses the same
 // limit.
@@ -123,9 +105,6 @@ const maxRoomMembers = 50
 type ModeratorChecker interface {
 	IsModerator(userID string) bool
 }
-
-// SetDriveFileRepo wires the drive file repository for attached-chat-messages.
-func (h *Handler) SetDriveFileRepo(r repository.DriveFileRepository) { h.fileRepo = r }
 
 // SetModeratorChecker wires a moderator checker for attached-chat-messages.
 func (h *Handler) SetModeratorChecker(m ModeratorChecker) { h.moderatorChecker = m }
@@ -199,8 +178,18 @@ func (h *Handler) PackInvitationByID(invitationID, viewerID string) (map[string]
 }
 
 // NewHandler creates a new chat handler.
-func NewHandler(repo repository.ChatRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
+//
+// entityPacker is the Packer this Handler packs entities with (#3794).
+// fileRepo is the drive file repository for attached-chat-messages and the
+// owner check of the attached file (#1218, #2708). lites is the batch
+// resolver of instance / emojis for the UserLite values embedded in chat
+// responses (#3438).
+//
+// どれも無いと黙って劣化する (メディアの URL が生のまま / 他人の drive ファイルを
+// 添付できる / リモートの利用者に instance と絵文字が載らない) ので、構築子の必須の
+// 引数で受ける (#3823)。
+func NewHandler(repo repository.ChatRepository, idGen id.Generator, entityPacker *entity.Packer, fileRepo repository.DriveFileRepository, lites userpack.LiteFiller) *Handler {
+	return &Handler{repo: repo, idGen: idGen, entityPacker: entityPacker, fileRepo: fileRepo, lites: lites}
 }
 
 // SetService wires a chat Service so that state-changing message endpoints
@@ -2135,9 +2124,3 @@ func (h *Handler) UnreadCount(c echo.Context) error {
 	count, _ := h.repo.CountUnread(user.ID)
 	return c.JSON(http.StatusOK, map[string]any{"count": count})
 }
-
-// HasDriveFileRepo reports whether the drive file repository was wired.
-//
-// 未配線だと NO_SUCH_FILE の所有者チェックが素通しになり、他人の drive ファイルを
-// チャットに添付できる (IDOR)。起動時検査に使う (#2708)。
-func (h *Handler) HasDriveFileRepo() bool { return h.fileRepo != nil }

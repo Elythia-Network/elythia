@@ -20,17 +20,11 @@ type BubbleVersusPublisher struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this BubbleVersusPublisher packs entities with (#3794).
-func (p *BubbleVersusPublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (p *BubbleVersusPublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
-
-// NewBubbleVersusPublisher constructs a BubbleVersusPublisher.
-func NewBubbleVersusPublisher(pub PubSubPublisher) *BubbleVersusPublisher {
-	return &BubbleVersusPublisher{pub: pub}
+// NewBubbleVersusPublisher constructs a BubbleVersusPublisher. entityPacker is
+// the Packer this BubbleVersusPublisher packs entities with (#3794); 無いと
+// 招待者の avatarUrl などを生のまま流すので、構築子の必須の引数で受ける (#3823)。
+func NewBubbleVersusPublisher(pub PubSubPublisher, entityPacker *entity.Packer) *BubbleVersusPublisher {
+	return &BubbleVersusPublisher{pub: pub, entityPacker: entityPacker}
 }
 
 var _ bubbleversus.Publisher = (*BubbleVersusPublisher)(nil)

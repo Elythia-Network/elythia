@@ -329,17 +329,12 @@ type SignupHook struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this SignupHook packs entities with (#3794).
-func (h *SignupHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと webhook の本文の avatarUrl がリモートの生の URL に
-// なり、ほかの経路 (media proxy を通す) と形が変わる。
-func (h *SignupHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// NewSignupHook constructs a SignupHook.
-func NewSignupHook(svc *Service) *SignupHook {
-	return &SignupHook{svc: svc}
+// NewSignupHook constructs a SignupHook. entityPacker is the Packer this
+// SignupHook packs entities with (#3794); 無いと webhook の本文の avatarUrl が
+// リモートの生の URL になり、ほかの経路 (media proxy を通す) と形が変わるので、
+// 構築子の必須の引数で受ける (#3823)。
+func NewSignupHook(svc *Service, entityPacker *entity.Packer) *SignupHook {
+	return &SignupHook{svc: svc, entityPacker: entityPacker}
 }
 
 // OnUserCreated fires the `userCreated` system webhook event.

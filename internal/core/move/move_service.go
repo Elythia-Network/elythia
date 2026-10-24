@@ -144,6 +144,11 @@ func (s *Service) SetProxyAccountResolver(f ProxyAccountIDResolver) { s.proxyAcc
 // NewService constructs a Service. resolver / deliverer may be nil in tests;
 // Move returns ErrNoSuchUser early if resolver is missing, and skips delivery
 // if deliverer is missing.
+//
+// blockingRepo / mutingRepo / userListRepo / idGen are the repositories used
+// by the post-move carry-over (#2419). 未設定の系統は skip する (移行そのものは
+// 成立させる)。無いと移行先アカウントにブロック / ミュート / リストが黙って
+// 引き継がれないので、構築子の必須の引数で受ける (#3823)。
 func NewService(
 	userRepo repository.UserRepository,
 	followingRepo repository.FollowingRepository,
@@ -151,6 +156,10 @@ func NewService(
 	renderer *activitypub.Renderer,
 	resolver Resolver,
 	deliverer Deliverer,
+	blockingRepo repository.BlockingRepository,
+	mutingRepo repository.MutingRepository,
+	userListRepo repository.UserListRepository,
+	idGen id.Generator,
 ) *Service {
 	return &Service{
 		userRepo:      userRepo,
@@ -159,6 +168,10 @@ func NewService(
 		renderer:      renderer,
 		resolver:      resolver,
 		deliverer:     deliverer,
+		blockingRepo:  blockingRepo,
+		mutingRepo:    mutingRepo,
+		userListRepo:  userListRepo,
+		idGen:         idGen,
 	}
 }
 
@@ -510,20 +523,6 @@ type AntennaMover interface {
 	OnMoveAccount(src, dst *model.User)
 }
 
-// SetCarryOverRepos wires the repositories used by the post-move carry-over
-// (#2419). 未設定の系統は skip する (移行そのものは成立させる)。
-func (s *Service) SetCarryOverRepos(
-	blockingRepo repository.BlockingRepository,
-	mutingRepo repository.MutingRepository,
-	userListRepo repository.UserListRepository,
-	idGen id.Generator,
-) {
-	s.blockingRepo = blockingRepo
-	s.mutingRepo = mutingRepo
-	s.userListRepo = userListRepo
-	s.idGen = idGen
-}
-
 // SetBlockQueue wires the queue used to schedule block carry-over jobs.
 func (s *Service) SetBlockQueue(q BlockEnqueuer) { s.blockQueue = q }
 
@@ -788,18 +787,4 @@ func (s *Service) lookupByURI(uri string) *model.User {
 		}
 	}
 	return nil
-}
-
-// HasCarryOverRepos reports whether the post-move carry-over repositories were
-// wired.
-//
-// 未配線だと移行先アカウントにブロック / ミュート / リストが引き継がれない。
-// 移行そのものは成立するので、利用者からは「引き継がれなかった」ことしか
-// 見えない。起動時検査に使う (#2683)。
-func (s *Service) HasCarryOverRepos() bool {
-	// **blockQueue も含める。** ブロックの引き継ぎは `blockingRepo == nil ||
-	// blockQueue == nil` の**両方**で止まるので、queue だけ消えても検査が
-	// 通ってしまうと effect に書いたブロック引き継ぎが黙って止まる。
-	return s.blockingRepo != nil && s.mutingRepo != nil && s.userListRepo != nil &&
-		s.idGen != nil && s.blockQueue != nil
 }
