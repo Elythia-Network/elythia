@@ -120,6 +120,20 @@ func (s *Scheduler) RegisterCheckExpiredMutingsJob() error {
 	)
 }
 
+// RegisterArchiveAnnouncementsJob registers the per-minute archive of
+// announcements whose autoArchiveAt has passed (#3809). The archive is
+// implemented by processors.ArchiveAnnouncementsProcessor.
+//
+// 毎分にするのは、落とした時刻が updatedAt に残り、本家 (期限ちょうどの遅延ジョブ) と
+// の差を小さくするため。対象は isActive が true で期限を過ぎた行だけの UPDATE 1 本。
+func (s *Scheduler) RegisterArchiveAnnouncementsJob() error {
+	return s.register("* * * * *", TaskTypeArchiveAnnouncements, nil,
+		driver.WithQueue(MaintenanceQueueName),
+		driver.WithMaxRetry(0),
+		driver.WithUnique(time.Minute),
+	)
+}
+
 // RegisterResendQuoteRequestsJob registers the per-minute resend of pending
 // QuoteRequests (#3238)。送り直しの予定は 1 分単位なので毎分回す。
 func (s *Scheduler) RegisterResendQuoteRequestsJob() error {

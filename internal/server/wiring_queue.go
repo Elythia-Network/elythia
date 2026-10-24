@@ -34,6 +34,7 @@ type queueProcs struct {
 	orphanUserProcessor          *processors.OrphanUserCleanupProcessor
 	orphanAttachmentProcessor    *processors.OrphanAttachmentCleanupProcessor
 	checkExpiredMutingsProcessor *processors.CheckExpiredMutingsProcessor
+	archiveAnnouncementsProc     *processors.ArchiveAnnouncementsProcessor
 	cleanGenericProcessor        *processors.CleanProcessor
 	chunkedUploadGCProcessor     *processors.ChunkedUploadGCProcessor
 	objectStorageProcessor       *processors.ObjectStorageProcessor
@@ -149,6 +150,10 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	// user mute と channel mute の両方の期限切れ行を prune する。
 	checkExpiredMutingsProcessor := processors.NewCheckExpiredMutingsProcessor(mutingRepo, channelMutingRepo)
 
+	// お知らせの自動アーカイブ (#3809): scheduler の cron (毎分) が enqueue する。
+	// 期限を過ぎた行の isActive を false に落とす。
+	archiveAnnouncementsProc := processors.NewArchiveAnnouncementsProcessor(w.repos.announcement)
+
 	// Daily generic clean (#1563): scheduler の cron (0 0 * * *) が enqueue する。
 	// user_ip 90 日 prune / 期限切れ role_assignment 削除 / reversi outdated game 削除 /
 	// 未使用 antenna の deactivate (#1604, deactivateAntennaThreshold ミリ秒)。
@@ -206,6 +211,7 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 		orphanUserProcessor:          orphanUserProcessor,
 		orphanAttachmentProcessor:    orphanAttachmentProcessor,
 		checkExpiredMutingsProcessor: checkExpiredMutingsProcessor,
+		archiveAnnouncementsProc:     archiveAnnouncementsProc,
 		cleanGenericProcessor:        cleanGenericProcessor,
 		chunkedUploadGCProcessor:     chunkedUploadGCProcessor,
 		objectStorageProcessor:       objectStorageProcessor,
@@ -240,6 +246,7 @@ type queueHandlerProcs struct {
 	orphanUserCleanup       *processors.OrphanUserCleanupProcessor
 	orphanAttachmentCleanup *processors.OrphanAttachmentCleanupProcessor
 	checkExpiredMutings     *processors.CheckExpiredMutingsProcessor
+	archiveAnnouncements    *processors.ArchiveAnnouncementsProcessor
 	clean                   *processors.CleanProcessor
 	chunkedUploadGC         *processors.ChunkedUploadGCProcessor
 	objectStorage           *processors.ObjectStorageProcessor
@@ -282,6 +289,7 @@ func builtinQueueHandlers(p queueHandlerProcs) []queueHandler {
 		{queue.TaskTypeOrphanUserCleanup, p.orphanUserCleanup.Handle},
 		{queue.TaskTypeOrphanAttachmentCleanup, p.orphanAttachmentCleanup.Handle},
 		{queue.TaskTypeCheckExpiredMutings, p.checkExpiredMutings.Handle},
+		{queue.TaskTypeArchiveAnnouncements, p.archiveAnnouncements.Handle},
 		{queue.TaskTypeClean, p.clean.Handle},
 		{queue.TaskTypeChunkedUploadGC, p.chunkedUploadGC.Handle},
 		{queue.TaskTypeObjectStorageDeleteFile, p.objectStorage.HandleDeleteFile},

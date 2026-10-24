@@ -1511,6 +1511,23 @@ func TestRegisterSchedulerJobs_PrunesAfterEveryRegistration(t *testing.T) {
 		"全ての登録が撤去より前にあること")
 }
 
+// お知らせの自動アーカイブの定期処理 (#3809) が毎分の cron として登録されること。
+// 登録が抜けても読むときの絞り込みで見え方は変わらないので、ほかのテストでは
+// 気付けない (DB の isActive が落ちなくなるだけ)。
+func TestRegisterSchedulerJobs_RegistersArchiveAnnouncements(t *testing.T) {
+	drv := newFakeQueueDriver()
+	s := &Server{queueScheduler: queue.NewScheduler(drv)}
+	s.registerSchedulerJobs()
+
+	var crons []string
+	for _, c := range drv.scheduler.calls {
+		if c.taskType == queue.TaskTypeArchiveAnnouncements {
+			crons = append(crons, c.cron)
+		}
+	}
+	assert.Equal(t, []string{"* * * * *"}, crons)
+}
+
 // 配線が `def.Jobs != nil` を渡していること。**pluginQueue を直接組み立てる
 // テストだけだと、この行を消しても緑になる。**
 func TestSetupPlugins_QueueRefusesWithoutJobsDeclaration(t *testing.T) {

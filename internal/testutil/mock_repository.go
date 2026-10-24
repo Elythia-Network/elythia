@@ -7051,7 +7051,7 @@ func (m *MockAnnouncementRepository) FindByID(id string) (*model.Announcement, e
 func (m *MockAnnouncementRepository) List(activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
 	var result []*model.Announcement
 	for _, a := range m.Items {
-		if activeOnly && !a.IsActive {
+		if announcementActiveNow(a) != activeOnly {
 			continue
 		}
 		if sinceID != "" && a.ID <= sinceID {
@@ -7084,7 +7084,7 @@ func (m *MockAnnouncementRepository) ListGlobal(activeOnly bool, limit int, sinc
 		if a.UserID != nil {
 			continue // per-user announcementは除外
 		}
-		if activeOnly && !a.IsActive {
+		if announcementActiveNow(a) != activeOnly {
 			continue
 		}
 		if sinceID != "" && a.ID <= sinceID {
@@ -7111,7 +7111,7 @@ func (m *MockAnnouncementRepository) ListForUser(userID string, activeOnly bool,
 		if a.UserID != nil && *a.UserID != userID {
 			continue
 		}
-		if activeOnly && !a.IsActive {
+		if announcementActiveNow(a) != activeOnly {
 			continue
 		}
 		if sinceID != "" && a.ID <= sinceID {
@@ -7131,7 +7131,7 @@ func (m *MockAnnouncementRepository) ListForUser(userID string, activeOnly bool,
 	return result[:limit], nil
 }
 
-func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
+func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
 	var result []*model.Announcement
 	for _, a := range m.Items {
 		if userID != "" {
@@ -7145,13 +7145,13 @@ func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit, 
 		}
 		switch status {
 		case "archived":
-			if a.IsActive {
+			if announcementActiveAt(a, now) {
 				continue
 			}
 		case "all":
 			// no filter
 		default:
-			if !a.IsActive {
+			if !announcementActiveAt(a, now) {
 				continue
 			}
 		}
@@ -7236,6 +7236,14 @@ func (m *MockAnnouncementRepository) UpdateFields(id string, fields map[string]a
 	if v, ok := fields["isActive"]; ok {
 		a.IsActive = v.(bool)
 	}
+	if v, ok := fields["autoArchiveAt"]; ok {
+		switch t := v.(type) {
+		case nil:
+			a.AutoArchiveAt = nil
+		case time.Time:
+			a.AutoArchiveAt = &t
+		}
+	}
 	return nil
 }
 
@@ -7260,11 +7268,37 @@ func (m *MockAnnouncementRepository) UnreadForUser(userID string) ([]*model.Anno
 		if a.UserID != nil && *a.UserID != userID {
 			continue
 		}
-		if a.IsActive && !m.Reads[userID+":"+a.ID] {
+		if announcementActiveNow(a) && !m.Reads[userID+":"+a.ID] {
 			result = append(result, a)
 		}
 	}
 	return result, nil
+}
+
+// ArchiveExpired mirrors the repository: active announcements whose
+// autoArchiveAt is at or before now become inactive.
+func (m *MockAnnouncementRepository) ArchiveExpired(now time.Time) (int64, error) {
+	var n int64
+	for _, a := range m.Items {
+		if a.IsActive && a.AutoArchiveAt != nil && !a.AutoArchiveAt.After(now) {
+			a.IsActive = false
+			updated := now
+			a.UpdatedAt = &updated
+			n++
+		}
+	}
+	return n, nil
+}
+
+// announcementActiveNow mirrors the repository's read-time rule (#3809): an
+// announcement whose autoArchiveAt has passed counts as archived.
+func announcementActiveNow(a *model.Announcement) bool {
+	return announcementActiveAt(a, time.Now())
+}
+
+// announcementActiveAt is announcementActiveNow at now.
+func announcementActiveAt(a *model.Announcement, now time.Time) bool {
+	return a.IsActive && (a.AutoArchiveAt == nil || a.AutoArchiveAt.After(now))
 }
 
 // ---------------------------------------------------------------------------

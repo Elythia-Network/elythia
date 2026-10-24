@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 )
@@ -27,7 +29,7 @@ type AnnouncementRepository interface {
 	// user announcements only). When empty, restricts to "userId" IS NULL
 	// (global only), matching upstream Misskey's semantics. status is one
 	// of "all" / "active" / "archived"; empty defaults to "active".
-	ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error)
+	ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error)
 	// CountReadsByAnnouncementIDs returns reads count keyed by
 	// announcementId. IDs not present have count 0 (caller should default
 	// to 0 when absent).
@@ -38,6 +40,25 @@ type AnnouncementRepository interface {
 	MarkRead(read *model.AnnouncementRead) error
 	IsRead(userID, announcementID string) (bool, error)
 	UnreadForUser(userID string) ([]*model.Announcement, error)
+	// ArchiveExpired sets isActive to false on every active announcement
+	// whose autoArchiveAt is at or before now, and returns how many rows it
+	// changed (#3809).
+	ArchiveExpired(now time.Time) (int64, error)
+}
+
+// whereAnnouncementActive narrows q to the announcements that are active at
+// now (active) or archived at now (!active), counting an announcement whose
+// autoArchiveAt has passed as archived even while its isActive is still true.
+//
+// 本家 2026.10.1 (#17704) の announcements / admin/announcements/list /
+// getUnreadAnnouncements と同じ条件 (#3809)。isActive を false に落とすのは定期処理
+// (ArchiveExpired) で、遅れても見え方が変わらないよう、読むときにも期限を見る。
+// OR は括弧で囲む (呼び出し側の他の条件と AND で結ぶため)。
+func whereAnnouncementActive(q *gorm.DB, active bool, now time.Time) *gorm.DB {
+	if active {
+		return q.Where(`"isActive" = true AND ("autoArchiveAt" IS NULL OR "autoArchiveAt" > ?)`, now)
+	}
+	return q.Where(`("isActive" = false OR "autoArchiveAt" <= ?)`, now)
 }
 
 type announcementRepository struct {
@@ -49,7 +70,19 @@ func NewAnnouncementRepository(db *gorm.DB) AnnouncementRepository {
 }
 
 func (r *announcementRepository) Create(a *model.Announcement) error {
-	return r.db.Create(a).Error
+	// isActive の既定値は true なので、GORM は false を zero value として省いて DB の
+	// 既定値を入れ、構造体にも true を書き戻す。作成の検査から INSERT までの間に期限が
+	// 来たお知らせを、本家と同じく非アクティブで作るため、作る前の値を控えて、false なら
+	// その列だけ書き直す (#3809)。UpdateColumn なので updatedAt は変えない。
+	inactive := !a.IsActive
+	if err := r.db.Create(a).Error; err != nil {
+		return err
+	}
+	if inactive {
+		a.IsActive = false
+		return r.db.Model(&model.Announcement{}).Where("id = ?", a.ID).UpdateColumn("isActive", false).Error
+	}
+	return nil
 }
 
 func (r *announcementRepository) FindByID(id string) (*model.Announcement, error) {
@@ -66,9 +99,9 @@ func (r *announcementRepository) FindByID(id string) (*model.Announcement, error
 func (r *announcementRepository) List(activeOnly bool, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
 	q := r.db.Order(paginationOrder(sinceID, untilID, "id"))
 	// #2106 N7: activeOnly は upstream announcements.ts の ps.isActive (default true)
-	// に相当する「フィルタ値」。常に等値比較を当てる (true=active のみ / false=inactive
+	// に相当する「フィルタ値」。常に片側だけを返す (true=active のみ / false=archived
 	// のみ)。false を「フィルタ無し」と解釈して active+inactive 両方返す regression を修正。
-	q = q.Where("\"isActive\" = ?", activeOnly)
+	q = whereAnnouncementActive(q, activeOnly, time.Now())
 	if limit <= 0 {
 		limit = 10
 	}
@@ -96,9 +129,9 @@ func (r *announcementRepository) List(activeOnly bool, limit, offset int, sinceI
 func (r *announcementRepository) ListGlobal(activeOnly bool, limit int, sinceID, untilID string) ([]*model.Announcement, error) {
 	q := r.db.Where(`"userId" IS NULL`).Order(paginationOrder(sinceID, untilID, "id"))
 	// #2106 N7: activeOnly は upstream announcements.ts の ps.isActive (default true)
-	// に相当する「フィルタ値」。常に等値比較を当てる (true=active のみ / false=inactive
+	// に相当する「フィルタ値」。常に片側だけを返す (true=active のみ / false=archived
 	// のみ)。false を「フィルタ無し」と解釈して active+inactive 両方返す regression を修正。
-	q = q.Where("\"isActive\" = ?", activeOnly)
+	q = whereAnnouncementActive(q, activeOnly, time.Now())
 	if limit <= 0 {
 		limit = 10
 	}
@@ -125,9 +158,9 @@ func (r *announcementRepository) ListForUser(userID string, activeOnly bool, lim
 	// バイパスしてしまう(SQL優先順位: AND > OR)。note.go:423と同じ gotcha。
 	q := r.db.Where(`("userId" IS NULL OR "userId" = ?)`, userID).Order(paginationOrder(sinceID, untilID, "id"))
 	// #2106 N7: activeOnly は upstream announcements.ts の ps.isActive (default true)
-	// に相当する「フィルタ値」。常に等値比較を当てる (true=active のみ / false=inactive
+	// に相当する「フィルタ値」。常に片側だけを返す (true=active のみ / false=archived
 	// のみ)。false を「フィルタ無し」と解釈して active+inactive 両方返す regression を修正。
-	q = q.Where("\"isActive\" = ?", activeOnly)
+	q = whereAnnouncementActive(q, activeOnly, time.Now())
 	if limit <= 0 {
 		limit = 10
 	}
@@ -148,7 +181,7 @@ func (r *announcementRepository) ListForUser(userID string, activeOnly bool, lim
 	return announcements, nil
 }
 
-func (r *announcementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string) ([]*model.Announcement, error) {
+func (r *announcementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
 	q := r.db.Order(paginationOrder(sinceID, untilID, "id"))
 	// upstreamはuserId指定時にannouncement.userId = ?を、未指定時に
 	// announcement.userId IS NULLを当てる。前者がユーザーモデレーション画面
@@ -160,12 +193,12 @@ func (r *announcementRepository) ListForAdmin(userID, status string, limit, offs
 	}
 	switch status {
 	case "archived":
-		q = q.Where(`"isActive" = false`)
+		q = whereAnnouncementActive(q, false, now)
 	case "all":
 		// no filter
 	default:
 		// "" / "active" / unknownはupstreamと同じくactiveのみ
-		q = q.Where(`"isActive" = true`)
+		q = whereAnnouncementActive(q, true, now)
 	}
 	if limit <= 0 {
 		limit = 10
@@ -238,8 +271,10 @@ func (r *announcementRepository) UnreadForUser(userID string) ([]*model.Announce
 	var announcements []*model.Announcement
 	// per-user announcement(userId!=null)はその対象ユーザーのみ含める。
 	// global announcement(userId IS NULL)は全ユーザーに見せる。
-	err := r.db.Where(
-		`"isActive" = true AND ("userId" IS NULL OR "userId" = ?) AND id NOT IN (?)`,
+	// 自動アーカイブの期限を過ぎたものは未読に数えない (本家 2026.10.1 の
+	// getUnreadAnnouncements、#3809)。
+	err := whereAnnouncementActive(r.db, true, time.Now()).Where(
+		`("userId" IS NULL OR "userId" = ?) AND id NOT IN (?)`,
 		userID,
 		r.db.Model(&model.AnnouncementRead{}).Select("\"announcementId\"").Where("\"userId\" = ?", userID),
 	).Order("id DESC").Find(&announcements).Error
@@ -247,4 +282,15 @@ func (r *announcementRepository) UnreadForUser(userID string) ([]*model.Announce
 		return nil, err
 	}
 	return announcements, nil
+}
+
+func (r *announcementRepository) ArchiveExpired(now time.Time) (int64, error) {
+	// 本家の archiveAnnouncement ジョブと同じく、isActive が true のままで期限を
+	// 過ぎた行だけを落とし、updatedAt も更新する。期限は UPDATE の時点で保存されて
+	// いる値と比べるので、管理者が期限を先へ延ばした行は落とさない (本家がジョブの
+	// 予約時刻と保存値を照合するのと同じ意味)。何度流しても同じ結果になる。
+	res := r.db.Model(&model.Announcement{}).
+		Where(`"isActive" = true AND "autoArchiveAt" IS NOT NULL AND "autoArchiveAt" <= ?`, now).
+		Updates(map[string]any{"isActive": false, "updatedAt": now})
+	return res.RowsAffected, res.Error
 }

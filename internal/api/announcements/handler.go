@@ -44,6 +44,16 @@ type Handler struct {
 	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3796)。組み立てで渡す。
 	entityPacker *entity.Packer
+	// clock は自動アーカイブの期限と比べる現在時刻 (#3809)。テストで差し替える。
+	clock func() time.Time
+}
+
+// SetClock overrides the time source the auto-archive checks compare
+// against (#3809). Intended for tests; nil keeps the current one.
+func (h *Handler) SetClock(now func() time.Time) {
+	if now != nil {
+		h.clock = now
+	}
 }
 
 // SetEntityPacker wires the Packer this Handler packs entities with (#3796).
@@ -56,7 +66,7 @@ func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // NewHandler creates a new announcements Handler.
 func NewHandler(repo repository.AnnouncementRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
+	return &Handler{repo: repo, idGen: idGen, clock: time.Now}
 }
 
 // SetMainStreamPublisher attaches a publisher used to emit `main` channel
@@ -261,6 +271,8 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 		Silence                *bool           `json:"silence"`
 		NeedConfirmationToRead *bool           `json:"needConfirmationToRead"`
 		UserID                 *string         `json:"userId"`
+		// 本家 2026.10.1 の autoArchiveAt (ミリ秒の整数、nullable、既定 null、#3809)。
+		AutoArchiveAt *jsnum.Int `json:"autoArchiveAt"`
 	}
 	if err := c.Bind(&req); err != nil || req.Title == "" || req.Text == "" || req.ImageURL == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "title, text and imageUrl are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -282,6 +294,16 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	if !isValidAnnouncementDisplay(req.Display) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "display must be 'normal', 'banner', or 'dialog'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	// 本家 create.ts: 現在以前の日時と、Date にできない値 (NaN) を断る (#3809)。
+	var autoArchiveAt *time.Time
+	if req.AutoArchiveAt != nil {
+		ms := int64(*req.AutoArchiveAt)
+		if ms <= h.clock().UnixMilli() || !validDateMillis(ms) {
+			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_AUTO_ARCHIVE_AT", "Invalid auto archive date.", "2a892bd5-487d-46a2-a5fe-3d85ad51defe"))
+		}
+		t := time.UnixMilli(ms).UTC()
+		autoArchiveAt = &t
+	}
 	a := &model.Announcement{
 		ID:       h.idGen.Generate(time.Now()),
 		Title:    req.Title,
@@ -289,8 +311,12 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 		ImageURL: imageURL,
 		Icon:     req.Icon,
 		Display:  req.Display,
-		IsActive: true,
-		UserID:   req.UserID,
+		// 本家 AnnouncementService.create と同じく、作成の時点で期限を過ぎていれば
+		// 非アクティブとして作る。上で未来の日時に絞っているので、検査から INSERT までの
+		// 間に期限が来たときだけ false になる (repository の Create が false をそのまま書く)。
+		IsActive:      autoArchiveAt == nil || autoArchiveAt.After(h.clock()),
+		UserID:        req.UserID,
+		AutoArchiveAt: autoArchiveAt,
 	}
 	if req.ForExistingUsers != nil {
 		a.ForExistingUsers = *req.ForExistingUsers
@@ -307,13 +333,16 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	// upstream AnnouncementService.create: per-user (userId 指定) は main へ、
 	// global (userId 無し) は broadcast stream へ announcementCreated を流す (#2056)。
 	// #2106 L24/L52: create event は upstream 同様 me-less で pack する (viewerID="" → forYou=false)。
-	body := map[string]any{"announcement": h.entityPacker.PackAnnouncement(a, h.idGen, false, "")}
-	if a.UserID != nil {
-		if h.mainStreamPublisher != nil {
-			h.mainStreamPublisher.PublishMainEvent(*a.UserID, "announcementCreated", body)
+	// 本家 2026.10.1 と同じく、作成の時点で非アクティブなものは流さない (#3809)。
+	if a.IsActive {
+		body := map[string]any{"announcement": h.entityPacker.PackAnnouncement(a, h.idGen, false, "")}
+		if a.UserID != nil {
+			if h.mainStreamPublisher != nil {
+				h.mainStreamPublisher.PublishMainEvent(*a.UserID, "announcementCreated", body)
+			}
+		} else if h.broadcastPublisher != nil {
+			h.broadcastPublisher.PublishBroadcast("announcementCreated", body)
 		}
-	} else if h.broadcastPublisher != nil {
-		h.broadcastPublisher.PublishBroadcast("announcementCreated", body)
 	}
 	h.logAnnouncementAction(c, moderationlog.LogCreateGlobalAnnouncement, moderationlog.LogCreateUserAnnouncement, a, map[string]any{
 		"announcementId": a.ID,
@@ -329,6 +358,15 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	resp := h.entityPacker.PackAnnouncement(a, h.idGen, false, "")
 	resp["imageUrl"] = a.ImageURL // upstream wire は raw imageUrl
 	return c.JSON(http.StatusOK, resp)
+}
+
+// maxDateMillis is the largest absolute millisecond value a JavaScript Date
+// holds (8.64e15). 本家は new Date(ms) が NaN になる値を INVALID_AUTO_ARCHIVE_AT で断る。
+const maxDateMillis = 8_640_000_000_000_000
+
+// validDateMillis reports whether ms is a time a JavaScript Date can hold.
+func validDateMillis(ms int64) bool {
+	return ms >= -maxDateMillis && ms <= maxDateMillis
 }
 
 // isValidAnnouncementIcon reports whether v matches upstream's
@@ -373,9 +411,33 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 		Silence                *bool   `json:"silence"`
 		NeedConfirmationToRead *bool   `json:"needConfirmationToRead"`
 		IsActive               *bool   `json:"isActive"`
+		// 本家 2026.10.1 の autoArchiveAt (ミリ秒の整数、nullable、省略可、#3809)。
+		// 省略 (変えない) と null (期限を外す) を分けるため RawMessage で受ける。
+		AutoArchiveAt json.RawMessage `json:"autoArchiveAt"`
 	}
 	if err := c.Bind(&req); err != nil || req.ID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "id is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	// 引数の形の検査 (本家では ajv) は、autoArchiveAt の値の検査より先に行う。
+	if req.Icon != nil && !isValidAnnouncementIcon(*req.Icon) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "icon must be 'info', 'warning', 'error', or 'success'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Display != nil && !isValidAnnouncementDisplay(*req.Display) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "display must be 'normal', 'banner', or 'dialog'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	// 本家 update.ts は、お知らせを引く前に負の値と Date にできない値 (NaN) を断る。
+	// create と違い、過去の日時は受け付ける (保存した時点でアーカイブ扱いになる)。
+	var autoArchiveAt any
+	setAutoArchiveAt := req.AutoArchiveAt != nil
+	if setAutoArchiveAt && string(req.AutoArchiveAt) != "null" {
+		var ms jsnum.Int
+		if err := json.Unmarshal(req.AutoArchiveAt, &ms); err != nil {
+			return apierr.JSONInvalidParam(c)
+		}
+		if ms < 0 || !validDateMillis(int64(ms)) {
+			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_AUTO_ARCHIVE_AT", "Invalid auto archive date.", "01b83d7b-2fd5-4d7c-86c4-d03144d16355"))
+		}
+		autoArchiveAt = time.UnixMilli(int64(ms)).UTC()
 	}
 	// before snapshot for moderation log + global/user 分岐判定
 	before, err := h.repo.FindByID(req.ID)
@@ -403,15 +465,9 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 		}
 	}
 	if req.Icon != nil {
-		if !isValidAnnouncementIcon(*req.Icon) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "icon must be 'info', 'warning', 'error', or 'success'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
-		}
 		fields["icon"] = *req.Icon
 	}
 	if req.Display != nil {
-		if !isValidAnnouncementDisplay(*req.Display) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "display must be 'normal', 'banner', or 'dialog'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
-		}
 		fields["display"] = *req.Display
 	}
 	if req.ForExistingUsers != nil {
@@ -425,6 +481,9 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 	}
 	if req.IsActive != nil {
 		fields["isActive"] = *req.IsActive
+	}
+	if setAutoArchiveAt {
+		fields["autoArchiveAt"] = autoArchiveAt
 	}
 	if len(fields) == 0 {
 		return c.NoContent(http.StatusNoContent)
@@ -498,7 +557,9 @@ func (h *Handler) AdminList(c echo.Context) error {
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, req.Offset, sinceID, untilID)
+	// 絞り込みと isActive の計算は同じ「今」で行う (本家も 1 つの now を使う)。
+	now := h.clock()
+	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, req.Offset, sinceID, untilID, now)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -528,6 +589,14 @@ func (h *Handler) AdminList(c echo.Context) error {
 			s := a.UpdatedAt.UTC().Format(tsFormat)
 			updatedAt = &s
 		}
+		// 本家 2026.10.1: isActive は期限を過ぎていれば false として返し、
+		// autoArchiveAt は ISO 文字列か null (#3809)。
+		var autoArchiveAt *string
+		if a.AutoArchiveAt != nil {
+			s := a.AutoArchiveAt.UTC().Format(tsFormat)
+			autoArchiveAt = &s
+		}
+		isActive := a.IsActive && (a.AutoArchiveAt == nil || a.AutoArchiveAt.After(now))
 		out = append(out, map[string]any{
 			"id":                     a.ID,
 			"createdAt":              createdAt,
@@ -537,7 +606,8 @@ func (h *Handler) AdminList(c echo.Context) error {
 			"imageUrl":               a.ImageURL, // raw (*string, nullable) — proxy しない
 			"icon":                   a.Icon,
 			"display":                a.Display,
-			"isActive":               a.IsActive,
+			"isActive":               isActive,
+			"autoArchiveAt":          autoArchiveAt,
 			"forExistingUsers":       a.ForExistingUsers,
 			"silence":                a.Silence,
 			"needConfirmationToRead": a.NeedConfirmationToRead,

@@ -83,6 +83,15 @@ const TaskTypeChartClean = "chart:clean"
 // 残るため hygiene)。channel-mute erase は mk-go に expiresAt 列が無いため別 issue。
 const TaskTypeCheckExpiredMutings = "maintenance:checkExpiredMutings"
 
+// TaskTypeArchiveAnnouncements is the task type for the per-minute job that
+// sets isActive to false on announcements whose autoArchiveAt has passed
+// (#3809).
+//
+// 本家 2026.10.1 は system queue の遅延ジョブ (archiveAnnouncement) をお知らせごとに
+// 予約するが、Elythia はそれを消費しないので、期限を過ぎた行をまとめて落とす定期処理に
+// した。読むときに期限を見ているので、落とすのが遅れても API の見え方は変わらない。
+const TaskTypeArchiveAnnouncements = "maintenance:archiveAnnouncements"
+
 // TaskTypeResendQuoteRequests is the task type for the per-minute resend of
 // QuoteRequests that are still pending (FEP-044f、#3238)。Mastodon が取り込みと
 // 競合して黙って捨てた QuoteRequest を、保留中か確かめてから送り直す。

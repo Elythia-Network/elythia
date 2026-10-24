@@ -628,7 +628,7 @@ func (f *failingListAnnouncementRepo) ListForUser(_ string, _ bool, _ int, _, _ 
 	return nil, assert.AnError
 }
 
-func (f *failingListAnnouncementRepo) ListForAdmin(_, _ string, _, _ int, _, _ string) ([]*model.Announcement, error) {
+func (f *failingListAnnouncementRepo) ListForAdmin(_, _ string, _, _ int, _, _ string, _ time.Time) ([]*model.Announcement, error) {
 	return nil, assert.AnError
 }
 

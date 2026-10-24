@@ -994,6 +994,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	orphanUserProcessor := queueSvcs.orphanUserProcessor
 	orphanAttachmentProcessor := queueSvcs.orphanAttachmentProcessor
 	checkExpiredMutingsProcessor := queueSvcs.checkExpiredMutingsProcessor
+	archiveAnnouncementsProc := queueSvcs.archiveAnnouncementsProc
 	cleanGenericProcessor := queueSvcs.cleanGenericProcessor
 	chunkedUploadGCProcessor := queueSvcs.chunkedUploadGCProcessor
 	objectStorageProcessor := queueSvcs.objectStorageProcessor
@@ -3384,6 +3385,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		orphanUserCleanup:       orphanUserProcessor,
 		orphanAttachmentCleanup: orphanAttachmentProcessor,
 		checkExpiredMutings:     checkExpiredMutingsProcessor,
+		archiveAnnouncements:    archiveAnnouncementsProc,
 		clean:                   cleanGenericProcessor,
 		chunkedUploadGC:         chunkedUploadGCProcessor,
 		objectStorage:           objectStorageProcessor,

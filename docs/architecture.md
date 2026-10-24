@@ -1559,7 +1559,7 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
   起動せずに`errGenerationStopped`を返す(1度きりの起動の結果なので、後の呼び出しも同じエラーを返す)。
   起動の途中で停止が始まったときは、停止は起動が済むのを待ってから印を立て、その起動が起動したもの
   をすべて止める。起動の間はmutexを握ったままにした。起動は部品のgoroutineを立てるほか、cronの登録
-  (`registerSchedulerJobs`の11個の登録の関数)と撤去(`PruneUnregistered`)でRedisを
+  (`registerSchedulerJobs`の12個の登録の関数)と撤去(`PruneUnregistered`)でRedisを
   `context.Background()`のまま呼ぶので、その分だけ長くかかりうる
   - **本番の経路に足す待ちは無い。** Supervisorは`StartBackground`と`StopBackground`をどちらも`genMu`の
     下で呼ぶので、固まった起動は#3709の前から停止を止めていた(`Supervisor.Shutdown`は
@@ -2517,11 +2517,11 @@ upstream に無い、または cherrypick 由来の加算機能（wire 互換を
 
 `MK_` プレフィックスの環境変数でオーバーライド可（例 `MK_DB_HOST`）。詳細は [configuration.md](configuration.md)。
 
-マイグレーション（`migration/`、golang-migrate、現在 133 本）:
+マイグレーション（`migration/`、golang-migrate、現在 134 本）:
 
 - TS Misskey の既存テーブルへは原則**追加のみ**。例外が 20 件あり、うち 15 件は Elythia が自分で作ったものの除去・初期化か upstream 追随 ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。Go 固有の追加列・テーブルは `IF NOT EXISTS`。
 - drop-in テストで発見した補完列は専用マイグレーションで追加。
-- down スクリプトは必須（data loss する場合は `-- data loss:` で明記する）。**ただしこれは今後の規約で、既存の down は守れていない** — 宣言があるのは 29 本だけで、宣言が無いまま `DROP TABLE` / `DROP COLUMN` する down が 51 本ある（[migration-from-ts.md](migration-from-ts.md#elythia-内での切り戻し)）。
+- down スクリプトは必須（data loss する場合は `-- data loss:` で明記する）。**ただしこれは今後の規約で、既存の down は守れていない** — 宣言があるのは 30 本だけで、宣言が無いまま `DROP TABLE` / `DROP COLUMN` する down が 51 本ある（[migration-from-ts.md](migration-from-ts.md#elythia-内での切り戻し)）。
 
 ```bash
 make migrate-up      # 最新まで
