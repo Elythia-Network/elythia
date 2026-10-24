@@ -257,7 +257,7 @@ func (c *fakeCreator) deletedEmojiIDs() []string {
 
 func newService(t *testing.T, apps *fakeApps, emojis *fakeEmojis, creator EmojiCreator) *Service {
 	t.Helper()
-	return NewService(apps, emojis, &okFiles{}, &fixedID{}, creator, nil)
+	return NewService(apps, emojis, &okFiles{}, &fixedID{}, creator, nil, nil, nil)
 }
 
 func validInput() CreateInput {
@@ -404,7 +404,7 @@ func TestNotFound(t *testing.T) {
 func TestCreateRejectsForeignFile(t *testing.T) {
 	other := "someone-else"
 	files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &other, Type: "image/png"}}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(validInput())
 	// **「他人のもの」とは答えない。** 区別できると ID の存在確認に使える。
@@ -415,7 +415,7 @@ func TestCreateRejectsForeignFile(t *testing.T) {
 // 申請の素材にしない (applyMediaUpdate と同じ判断)。
 func TestCreateRejectsUnownedFile(t *testing.T) {
 	files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: nil, Type: "image/png"}}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, ErrFileGone)
 }
@@ -425,7 +425,7 @@ func TestCreateRejectsUnownedFile(t *testing.T) {
 func TestCreateRejectsNonImage(t *testing.T) {
 	owner := "u1"
 	files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &owner, Type: "video/mp4"}}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, ErrUnsupportedFileType)
 }
@@ -440,7 +440,7 @@ func TestCreateRejectsFileLargerThanCopyLimit(t *testing.T) {
 		ID: "f1", UserID: &owner, Type: "image/png",
 		Size: int(MaxEmojiCopyBytes) + 1,
 	}}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, ErrImageTooLarge, "承認できない大きさの申請が通っている")
 }
@@ -452,7 +452,7 @@ func TestCreateAcceptsFileAtCopyLimit(t *testing.T) {
 		ID: "f1", UserID: &owner, Type: "image/png",
 		Size: int(MaxEmojiCopyBytes),
 	}}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.NoError(t, err, "上限ちょうどの申請が弾かれている")
 }
@@ -460,7 +460,7 @@ func TestCreateAcceptsFileAtCopyLimit(t *testing.T) {
 // **未配線なら通さない (fail-closed)。** 検証できないものを通すと、配線を
 // 落とした瞬間に穴が開く。
 func TestCreateRejectsWhenFilesUnwired(t *testing.T) {
-	svc := NewService(newFakeApps(), &fakeEmojis{}, nil, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, nil, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, ErrFileGone)
 }
@@ -468,7 +468,7 @@ func TestCreateRejectsWhenFilesUnwired(t *testing.T) {
 // DB 障害を not-found に丸めない (#2792)。
 func TestCreateSurfacesFileLookupFailure(t *testing.T) {
 	boom := errors.New("db down")
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{err: boom}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{err: boom}, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, boom)
 }
@@ -476,7 +476,7 @@ func TestCreateSurfacesFileLookupFailure(t *testing.T) {
 // **申請者は入力ではなく呼び出し元で決まる (レビュー H7)。**
 func TestCreateRecordsCallerAsApplicant(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	app, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -604,7 +604,7 @@ func TestCreateUsesTheSameAllowlistAsApproval(t *testing.T) {
 		t.Run(mime, func(t *testing.T) {
 			owner := "u1"
 			files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &owner, Type: mime}}
-			svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+			svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 			_, err := svc.Create(validInput())
 			require.ErrorIs(t, err, ErrUnsupportedFileType,
 				"%s が申請で通っている (承認で必ず落ちる)", mime)
@@ -614,7 +614,7 @@ func TestCreateUsesTheSameAllowlistAsApproval(t *testing.T) {
 	for _, mime := range []string{"image/png", "image/gif", "image/webp"} {
 		owner := "u1"
 		files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &owner, Type: mime}}
-		svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+		svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 		_, err := svc.Create(validInput())
 		require.NoError(t, err, "%s が申請で弾かれている", mime)
 	}
@@ -624,7 +624,7 @@ func TestCreateUsesTheSameAllowlistAsApproval(t *testing.T) {
 // バイト数なので、バイトで数えると日本語は列の約 1/3 しか使えない。
 func TestCreateCountsLengthInRunes(t *testing.T) {
 	svc := func(apps *fakeApps) *Service {
-		return NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+		return NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	}
 
 	// 1024 文字 (3072 バイト) は列に入るので通ること。
@@ -703,7 +703,7 @@ func TestReviewNotifiesApplicant(t *testing.T) {
 			apps := newFakeApps()
 			apps.rows["a1"] = &model.EmojiApplication{ID: "a1", UserID: "u1", Status: model.EmojiApplicationPending}
 			notifier := &recordingNotifier{}
-			svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, &fakeCreator{id: "e1"}, notifier)
+			svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, &fakeCreator{id: "e1"}, notifier, nil, nil)
 
 			require.NoError(t, tc.call(svc))
 			require.Len(t, notifier.sent, 1, "申請者に通知していない")
@@ -717,7 +717,7 @@ func TestCancelDoesNotNotify(t *testing.T) {
 	apps := newFakeApps()
 	apps.rows["a1"] = &model.EmojiApplication{ID: "a1", UserID: "u1", Status: model.EmojiApplicationPending}
 	notifier := &recordingNotifier{}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, notifier)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, notifier, nil, nil)
 
 	require.NoError(t, svc.Cancel("a1", "u1"))
 	require.Empty(t, notifier.sent)
@@ -753,7 +753,7 @@ func remoteInput() CreateInput {
 func TestCreateRemote(t *testing.T) {
 	apps := newFakeApps()
 	emojis := &fakeEmojis{remote: &model.Emoji{ID: "e-remote", Name: "sushi_remote"}}
-	svc := NewService(apps, emojis, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	app, err := svc.Create(remoteInput())
 	require.NoError(t, err)
@@ -777,7 +777,7 @@ func TestCreateRemoteRequiresHostAndName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			in := remoteInput()
 			tc.mutate(&in)
-			_, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil).Create(in)
+			_, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Create(in)
 			require.ErrorIs(t, err, ErrRemoteRequired)
 		})
 	}
@@ -786,7 +786,7 @@ func TestCreateRemoteRequiresHostAndName(t *testing.T) {
 // **知らないリモート絵文字は受け付けない。** 承認時に取り直せないので、
 // 申請の時点で引けることを確かめる。
 func TestCreateRemoteRejectsUnknownEmoji(t *testing.T) {
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(remoteInput())
 	require.ErrorIs(t, err, ErrNoSuchRemoteEmoji)
 }
@@ -798,7 +798,7 @@ func TestCreateRemoteRejectsDuplicateLocalName(t *testing.T) {
 		existing: &model.Emoji{ID: "e-local"},
 		remote:   &model.Emoji{ID: "e-remote"},
 	}
-	svc := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(remoteInput())
 	require.ErrorIs(t, err, ErrDuplicateName)
 }
@@ -814,7 +814,7 @@ func TestCreateRejectsUnknownKind(t *testing.T) {
 		in := remoteInput()
 		in.Kind = "whatever"
 		in.License = license
-		_, err := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).Create(in)
+		_, err := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Create(in)
 		require.ErrorIsf(t, err, ErrInvalidKind, "license=%q", license)
 	}
 }
@@ -824,14 +824,14 @@ func TestCreateRemoteChecksLength(t *testing.T) {
 	emojis := &fakeEmojis{remote: &model.Emoji{ID: "e1"}}
 	in := remoteInput()
 	in.RemoteHost = strings.Repeat("あ", 129)
-	_, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil).Create(in)
+	_, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Create(in)
 	require.ErrorIs(t, err, ErrTooLong)
 }
 
 // **DB 障害を「知らない絵文字」に丸めない (#2792)。**
 func TestCreateRemoteSurfacesLookupFailure(t *testing.T) {
 	boom := errors.New("db down")
-	svc := NewService(newFakeApps(), &fakeEmojis{err: boom}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{err: boom}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	_, err := svc.Create(remoteInput())
 	require.ErrorIs(t, err, boom)
 	require.NotErrorIs(t, err, ErrNoSuchRemoteEmoji)
@@ -847,7 +847,7 @@ func TestCreateRemotePassesArgumentsInOrder(t *testing.T) {
 		remoteName: "sushi_remote",
 		remoteHost: "example.com",
 	}
-	svc := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(remoteInput())
 	require.NoError(t, err, "name と host が入れ替わっている")
@@ -859,7 +859,7 @@ func TestCreateRemoteAllowsEmptyLicense(t *testing.T) {
 	in := remoteInput()
 	in.License = ""
 
-	app, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil).Create(in)
+	app, err := NewService(newFakeApps(), emojis, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Create(in)
 	require.NoError(t, err, "リモートでライセンスが必須になっている")
 	require.Equal(t, "", app.License)
 }
@@ -868,7 +868,7 @@ func TestCreateRemoteAllowsEmptyLicense(t *testing.T) {
 func TestCreateOwnStillRequiresLicense(t *testing.T) {
 	in := validInput()
 	in.License = ""
-	_, err := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).Create(in)
+	_, err := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Create(in)
 	require.ErrorIs(t, err, ErrLicenseRequired)
 }
 
@@ -887,13 +887,13 @@ func (s *stubPolicies) GetUserPolicies(userID string) map[string]any {
 // その期間の上限だけが黙って効かなくなる。
 func TestCreateBuildsQuotaWindowsFromPolicies(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	pol := &stubPolicies{p: map[string]any{
 		"emojiApplicationMaxPerDay":   3,
 		"emojiApplicationMaxPerWeek":  float64(10),
 		"emojiApplicationMaxPerMonth": int64(20),
 	}}
-	svc.SetPolicyProvider(pol)
+	svc.policies = pol
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -910,12 +910,11 @@ func TestCreateBuildsQuotaWindowsFromPolicies(t *testing.T) {
 }
 
 // **未配線なら上限を掛けない (#2958)。** 掛けられないのに掛けたつもりに
-// なるより、既定 (0 = 無制限) と同じ挙動に倒す。配線の欠落は criticalWiring
-// が起動時に落とす。
+// なるより、既定 (0 = 無制限) と同じ挙動に倒す。本番の配線では構築子の必須の
+// 引数で渡す (#3823)。
 func TestCreateWithoutPolicyProviderAppliesNoQuota(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	require.False(t, svc.HasPolicyProvider())
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -927,8 +926,8 @@ func TestCreateWithoutPolicyProviderAppliesNoQuota(t *testing.T) {
 // nil を返しうる)。
 func TestCreateWithNilPoliciesAppliesNoQuota(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: nil})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: nil}
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -959,10 +958,10 @@ func TestCreateTreatsNonPositivePoliciesAsUnlimited(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			apps := newFakeApps()
-			svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-			svc.SetPolicyProvider(&stubPolicies{p: map[string]any{
+			svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+			svc.policies = &stubPolicies{p: map[string]any{
 				"emojiApplicationMaxPerDay": tc.val,
-			}})
+			}}
 
 			_, err := svc.Create(validInput())
 			require.NoError(t, err)
@@ -983,8 +982,8 @@ func TestCreateTranslatesQuotaExceeded(t *testing.T) {
 		Used:    7,
 		RetryAt: retryAt,
 	}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{"emojiApplicationMaxPerWeek": 5}})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{"emojiApplicationMaxPerWeek": 5}}
 
 	_, err := svc.Create(validInput())
 	var qe *QuotaExceededError
@@ -999,7 +998,7 @@ func TestCreateTranslatesQuotaExceeded(t *testing.T) {
 func TestCreateKeepsOtherQuotaPathErrors(t *testing.T) {
 	apps := newFakeApps()
 	apps.quotaErr = errors.New("db down")
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(validInput())
 	require.EqualError(t, err, "db down")
@@ -1018,7 +1017,7 @@ func TestQuotaExceededErrorMessage(t *testing.T) {
 func TestCreateKeepsDuplicatePendingThroughQuotaPath(t *testing.T) {
 	apps := newFakeApps()
 	apps.quotaErr = repository.ErrEmojiApplicationDuplicatePending
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(validInput())
 	require.ErrorIs(t, err, ErrAlreadyPending)
@@ -1028,10 +1027,10 @@ func TestCreateKeepsDuplicatePendingThroughQuotaPath(t *testing.T) {
 // 渡さないと、設定しても効かないまま気付けない。
 func TestCreateBuildsPendingLimitFromPolicies(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{
 		"emojiApplicationMaxPending": 4,
-	}})
+	}}
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1041,7 +1040,7 @@ func TestCreateBuildsPendingLimitFromPolicies(t *testing.T) {
 // 未配線・ポリシーなしなら審査待ちの上限も掛けない。
 func TestCreateWithoutPolicyProviderAppliesNoPendingLimit(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1053,8 +1052,8 @@ func TestCreateWithoutPolicyProviderAppliesNoPendingLimit(t *testing.T) {
 func TestCreateTranslatesPendingLimitExceeded(t *testing.T) {
 	apps := newFakeApps()
 	apps.quotaErr = &repository.PendingLimitExceededError{Used: 5, Limit: 3}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{"emojiApplicationMaxPending": 3}})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{"emojiApplicationMaxPending": 3}}
 
 	_, err := svc.Create(validInput())
 	var pe *PendingLimitExceededError
@@ -1100,7 +1099,7 @@ func TestCreateSnapshotsFileHash(t *testing.T) {
 	owner := "u1"
 	apps := newFakeApps()
 	files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &owner, Type: "image/png", MD5: "d41d8cd98f00b204e9800998ecf8427e"}}
-	svc := NewService(apps, &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 
 	app, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1117,7 +1116,7 @@ func TestCreateOmitsEmptyFileHash(t *testing.T) {
 	owner := "u1"
 	apps := newFakeApps()
 	files := &okFiles{file: &model.DriveFile{ID: "f1", UserID: &owner, Type: "image/png", MD5: ""}}
-	svc := NewService(apps, &fakeEmojis{}, files, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 
 	app, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1127,7 +1126,7 @@ func TestCreateOmitsEmptyFileHash(t *testing.T) {
 // リモート絵文字の申請には drive のファイルが無いので、ハッシュも載らない。
 func TestCreateRemoteHasNoFileHash(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{remote: &model.Emoji{ID: "e1"}}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{remote: &model.Emoji{ID: "e1"}}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	in := validInput()
 	in.Kind = model.EmojiApplicationKindRemote
@@ -1186,12 +1185,12 @@ var errBoom = errors.New("boom")
 // 判断する。作成側 (#2958) と同じ policy から組む。
 func TestUserSummaryBuildsWindowsFromPolicies(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{
 		"emojiApplicationMaxPerDay":   3,
 		"emojiApplicationMaxPerWeek":  float64(10),
 		"emojiApplicationMaxPerMonth": int64(20),
-	}})
+	}}
 
 	got, err := svc.UserSummary("u1")
 	require.NoError(t, err)
@@ -1227,7 +1226,7 @@ func TestUserSummaryReportsCountsAndUsage(t *testing.T) {
 		{Window: repository.QuotaWindow{Name: "week", Max: 20}, Used: 8},
 		{Window: repository.QuotaWindow{Name: "month", Max: 0}, Used: 24},
 	}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	got, err := svc.UserSummary("u1")
 	require.NoError(t, err)
@@ -1248,7 +1247,7 @@ func TestUserSummaryReportsCountsAndUsage(t *testing.T) {
 // 「期間上限の設定が無い」と描くので、上限が効いているのに無いと見える。
 func TestUserSummaryWithoutPolicyProviderStillReturnsWindows(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 
 	got, err := svc.UserSummary("u1")
 	require.NoError(t, err)
@@ -1276,11 +1275,11 @@ func TestUserSummaryWithoutPolicyProviderStillReturnsWindows(t *testing.T) {
 func TestUserSummaryPassesPendingLimit(t *testing.T) {
 	apps := newFakeApps()
 	apps.usagePending = 2
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{
 		"emojiApplicationMaxPerDay":  10,
 		"emojiApplicationMaxPending": 2,
-	}})
+	}}
 
 	got, err := svc.UserSummary("u1")
 	require.NoError(t, err)
@@ -1294,12 +1293,12 @@ func TestUserSummaryPassesPendingLimit(t *testing.T) {
 func TestUserSummarySurfacesErrors(t *testing.T) {
 	countFail := newFakeApps()
 	countFail.countErr = errBoom
-	_, err := NewService(countFail, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).UserSummary("u1")
+	_, err := NewService(countFail, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).UserSummary("u1")
 	require.ErrorIs(t, err, errBoom, "件数の取得失敗を握り潰している")
 
 	usageFail := newFakeApps()
 	usageFail.usageErr = errBoom
-	_, err = NewService(usageFail, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).UserSummary("u1")
+	_, err = NewService(usageFail, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).UserSummary("u1")
 	require.ErrorIs(t, err, errBoom, "使用状況の取得失敗を握り潰している")
 }
 
@@ -1314,9 +1313,9 @@ func TestQuotaLimitsCarriesResetBoundary(t *testing.T) {
 		{ID: "r2", UserID: "u1", ResetByID: "m2", Reason: "新しい", CreatedAt: at},
 		{ID: "r3", UserID: "other", ResetByID: "m1", Reason: "別人", CreatedAt: at.Add(time.Hour)},
 	}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
+	svc.policies = &stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}}
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1327,8 +1326,8 @@ func TestQuotaLimitsCarriesResetBoundary(t *testing.T) {
 // 枠が勝手に広がる。
 func TestQuotaLimitsWithoutResetRepoIsZero(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.policies = &stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}}
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err)
@@ -1339,9 +1338,9 @@ func TestQuotaLimitsWithoutResetRepoIsZero(t *testing.T) {
 // DB 障害のたびに上限が消える。
 func TestQuotaLimitsToleratesResetLookupFailure(t *testing.T) {
 	apps := newFakeApps()
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(&fakeResets{latestErr: errBoom})
-	svc.SetPolicyProvider(&stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}})
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = &fakeResets{latestErr: errBoom}
+	svc.policies = &stubPolicies{p: map[string]any{"emojiApplicationMaxPerDay": 3}}
 
 	_, err := svc.Create(validInput())
 	require.NoError(t, err, "リセットが引けないだけで申請が落ちている")
@@ -1357,8 +1356,8 @@ func TestResetQuotaReturnsUsageBeforeReset(t *testing.T) {
 		{Window: repository.QuotaWindow{Name: "week", Max: 20}, Used: 8},
 	}
 	resets := &fakeResets{}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
 
 	// **順序を固定する。** 使用状況を後から採ると必ず 0 になり、監査ログの
 	// 「何件使っていた人を戻したか」が意味を失う。fake の戻り値は固定なので、
@@ -1386,8 +1385,8 @@ func TestResetQuotaReturnsUsageBeforeReset(t *testing.T) {
 // **理由は必須。** 監査ログに残る唯一の文脈。
 func TestResetQuotaRequiresReason(t *testing.T) {
 	resets := &fakeResets{}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
 
 	for _, reason := range []string{"", "   ", "\t\n"} {
 		_, _, err := svc.ResetQuota("u1", "mod1", reason)
@@ -1398,15 +1397,15 @@ func TestResetQuotaRequiresReason(t *testing.T) {
 
 // 未配線なら明示的に失敗する (黙って何もしない、にしない)。
 func TestResetQuotaWithoutRepoFails(t *testing.T) {
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
 	_, _, err := svc.ResetQuota("u1", "mod1", "理由")
 	require.ErrorIs(t, err, ErrQuotaResetUnavailable)
 }
 
 // 記録に失敗したら握り潰さない (成功したように見せない)。
 func TestResetQuotaSurfacesCreateFailure(t *testing.T) {
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(&fakeResets{createErr: errBoom})
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = &fakeResets{createErr: errBoom}
 	_, _, err := svc.ResetQuota("u1", "mod1", "理由")
 	require.ErrorIs(t, err, errBoom)
 }
@@ -1420,8 +1419,8 @@ func TestUserSummaryReadsResetOnce(t *testing.T) {
 	resets.rows = []model.EmojiApplicationQuotaReset{
 		{ID: "r1", UserID: "u1", ResetByID: "m1", Reason: "理由", CreatedAt: at},
 	}
-	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
+	svc := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
 
 	got, err := svc.UserSummary("u1")
 	require.NoError(t, err)
@@ -1436,8 +1435,8 @@ func TestUserSummaryReadsResetOnce(t *testing.T) {
 // 「もう一度お試しください」と案内するが、何度やっても同じ結果になる。
 func TestResetQuotaRejectsTooLongReason(t *testing.T) {
 	resets := &fakeResets{}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
 
 	// 1024 文字ちょうどは通る (列の幅と同じ)。
 	_, _, err := svc.ResetQuota("u1", "mod1", strings.Repeat("あ", 1024))
@@ -1446,17 +1445,6 @@ func TestResetQuotaRejectsTooLongReason(t *testing.T) {
 	_, _, err = svc.ResetQuota("u1", "mod1", strings.Repeat("あ", 1025))
 	require.ErrorIs(t, err, ErrTooLong)
 	require.Len(t, resets.created, 1, "弾いたのに記録が残っている")
-}
-
-// **配線の述語を固定する (レビュー L2)。** これは起動時の自己診断
-// (`criticalWiring`) が読む値で、`return true` に潰れると「nil 相当の値を
-// 渡した構成」を実行時にも検出できなくなる (静的ゲートは `nil` リテラルしか
-// 見ない)。sibling の `HasPolicyProvider` と同じ扱い。
-func TestHasQuotaResetRepoReflectsWiring(t *testing.T) {
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	require.False(t, svc.HasQuotaResetRepo(), "未配線なのに配線済みと報告している")
-	svc.SetQuotaResetRepo(&fakeResets{})
-	require.True(t, svc.HasQuotaResetRepo())
 }
 
 // **書き込みが障害で失敗したときも作ったものを片付けること (#2966 / レビュー M1)。**

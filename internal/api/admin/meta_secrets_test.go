@@ -321,7 +321,7 @@ func TestUpdateMeta_DestinationChangeFailsClosedWithoutCheckedUpdate(t *testing.
 	repo := uncheckedMetaRepo{metaRepo}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen), nil, repo, userRepo, idGen)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen), nil, repo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.example.com"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

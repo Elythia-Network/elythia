@@ -129,7 +129,7 @@ func TestEmojiAdd_RejectsBodyBeforeCopy(t *testing.T) {
 		ID: "f_img", UserID: &owner, Type: "image/png", URL: "https://example/user/orig.png",
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sysfit1", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	body, err := json.Marshal(map[string]any{
 		"name": "happy", "fileId": "f_img", "category": runes(catAtLimit+1, "あ"),
@@ -323,7 +323,7 @@ func TestEmojiUpdate_RejectsBodyBeforeCopy(t *testing.T) {
 		ID: "f_img", UserID: &owner, Type: "image/png", URL: "https://example/user/orig.png",
 	})
 	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sysfit2", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	body, err := json.Marshal(map[string]any{
 		"id": "e1", "fileId": "f_img", "license": runes(licAtLimit+1, "い"),

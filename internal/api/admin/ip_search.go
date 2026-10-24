@@ -295,12 +295,6 @@ func formatIPTimePtr(t *time.Time) *string {
 	return &s
 }
 
-// SetIPLookupAudit wires the audit recorder used by admin/ip/* (#3106).
-func (h *Handler) SetIPLookupAudit(s *iplookuplog.Service) { h.ipLookupAudit = s }
-
-// HasIPLookupAudit reports whether the audit recorder was wired. 起動時検査に使う。
-func (h *Handler) HasIPLookupAudit() bool { return h.ipLookupAudit.Wired() }
-
 // noStoreIPLookup marks an IP lookup response as uncacheable.
 //
 // **共有キャッシュに残さない** (#3106 / #3066 §8)。POST + Authorization なので

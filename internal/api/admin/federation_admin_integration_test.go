@@ -74,7 +74,7 @@ func newIntegrationHandler(t *testing.T) (*apiadmin.Handler, *model.User, *modLo
 	signupSvc := signup.NewService(userRepo, metaRepo, idGen)
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 
-	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, userRepo, idGen)
+	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetInstanceRepo(repository.NewInstanceRepository(integrationDB))
 	logs := newModLogRecorder(repository.NewModerationLogRepository(integrationDB))
 	h.SetModLogService(moderationlog.New(logs, idGen))

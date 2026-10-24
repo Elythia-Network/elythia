@@ -236,7 +236,7 @@ func newCreatorHandler(t *testing.T, emojis *testutil.MockEmojiRepository, files
 	t.Helper()
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h := apiadmin.NewHandler(nil, nil, nil, nil, gen)
+	h := apiadmin.NewHandler(nil, nil, nil, nil, gen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetEmojiRepo(emojis)
 	h.SetDriveFileRepo(files)
 	return h
@@ -594,7 +594,7 @@ func TestCreateFromRemoteApplicationRequiresReference(t *testing.T) {
 func TestCreateFromRemoteApplicationStoresInDrive(t *testing.T) {
 	emojis := newRemoteEmojiRepo(t)
 	h := newCreatorHandler(t, emojis, newDriveRepoWith(pngFile()))
-	h.SetEmojiImageFetcher(&stubFetcher{file: &model.DriveFile{
+	h.SetEmojiImageFetcherForTest(&stubFetcher{file: &model.DriveFile{
 		ID: "df1", URL: "https://local/drive/df1.png", Type: "image/png",
 	}})
 
@@ -729,7 +729,7 @@ func (s *stubFetcher) DeleteSystemFile(_ context.Context, fileID string) error {
 func TestCreateFromRemoteApplicationChecksStoredMIME(t *testing.T) {
 	emojis := newRemoteEmojiRepo(t)
 	h := newCreatorHandler(t, emojis, newDriveRepoWith(pngFile()))
-	h.SetEmojiImageFetcher(&stubFetcher{file: &model.DriveFile{
+	h.SetEmojiImageFetcherForTest(&stubFetcher{file: &model.DriveFile{
 		ID: "df1", URL: "https://local/drive/df1.bin", Type: "application/octet-stream",
 	}})
 
@@ -742,7 +742,7 @@ func TestCreateFromRemoteApplicationChecksStoredMIME(t *testing.T) {
 // 生の err だと汎用 500 になり、審査画面では「何か問題が」としか出ない。
 func TestCreateFromRemoteApplicationMapsFetchFailure(t *testing.T) {
 	h := newCreatorHandler(t, newRemoteEmojiRepo(t), newDriveRepoWith(pngFile()))
-	h.SetEmojiImageFetcher(&stubFetcher{err: errors.New("timeout")})
+	h.SetEmojiImageFetcherForTest(&stubFetcher{err: errors.New("timeout")})
 
 	_, err := h.CreateFromApplication(context.Background(), remoteApplication())
 	require.ErrorIs(t, err, emojiapplication.ErrRemoteFetchFailed)
@@ -769,7 +769,7 @@ func TestCreateFromRemoteApplicationUsesStoredType(t *testing.T) {
 	emojis.Emojis["sushi_remote@example.com"].Type = &srcType
 
 	h := newCreatorHandler(t, emojis, newDriveRepoWith(pngFile()))
-	h.SetEmojiImageFetcher(&stubFetcher{file: &model.DriveFile{
+	h.SetEmojiImageFetcherForTest(&stubFetcher{file: &model.DriveFile{
 		ID: "df1", URL: "https://local/drive/df1.png", Type: "image/png",
 	}})
 
@@ -787,7 +787,7 @@ func TestCreateFromRemoteApplicationPrefersWebpublicType(t *testing.T) {
 	emojis := newRemoteEmojiRepo(t)
 	webType := "image/webp"
 	h := newCreatorHandler(t, emojis, newDriveRepoWith(pngFile()))
-	h.SetEmojiImageFetcher(&stubFetcher{file: &model.DriveFile{
+	h.SetEmojiImageFetcherForTest(&stubFetcher{file: &model.DriveFile{
 		ID: "df1", URL: "https://local/drive/df1.png", Type: "image/png",
 		WebpublicURL:  func() *string { u := "https://local/drive/df1.webp"; return &u }(),
 		WebpublicType: &webType,
@@ -1350,7 +1350,7 @@ func newCreatorHandlerWithFetcher(t *testing.T, emojis *testutil.MockEmojiReposi
 ) *apiadmin.Handler {
 	t.Helper()
 	h := newCreatorHandler(t, emojis, files)
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 	return h
 }
 
@@ -1559,17 +1559,6 @@ func TestCreateFromApplicationCopyTooLarge(t *testing.T) {
 		CreateFromApplication(context.Background(), ownApplication())
 	require.ErrorIs(t, err, emojiapplication.ErrImageTooLarge)
 	require.NotErrorIs(t, err, emojiapplication.ErrFileGone)
-}
-
-// **起動時の自己診断が依存する述語なので、定数化されると診断が静かに止まる。**
-// 兄弟の `HasQuotaResetRepo` には同じ形のテストがあるのに、こちらだけ
-// カバレッジ 0% で `return true` にしても全緑だった (2 周目レビュー L1)。
-func TestHasEmojiImageFetcherReflectsWiring(t *testing.T) {
-	h := &apiadmin.Handler{}
-	require.False(t, h.HasEmojiImageFetcher(), "未配線なのに配線済みと報告している")
-
-	h.SetEmojiImageFetcher(&stubFetcher{})
-	require.True(t, h.HasEmojiImageFetcher(), "配線したのに未配線と報告している")
 }
 
 // **申請の sensitive 指定が複製へ渡ることを固定する (2 周目レビュー L2)。**

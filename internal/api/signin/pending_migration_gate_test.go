@@ -45,7 +45,7 @@ func TestSigninFlow_DoesNotStageMigrationForUnverifiedPassword(t *testing.T) {
 		UsePasswordLessLogin: true,
 		TwoFactorEnabled:     true,
 	}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 
 	// ctx をキャンセルすると Argon2id 経路が OutcomeUnavailable になる。
 	// tolerate 条件が成立するので 503 ではなく credential 分岐へ落ちる。

@@ -3,36 +3,9 @@ package admin
 import (
 	"context"
 
-	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 )
-
-// SetDetailExtras wires the filler of pinnedNotes / pinnedPage / movedTo /
-// alsoKnownAs for admin/accounts/find-by-email and admin/update-proxy-account
-// (#3330).
-func (h *Handler) SetDetailExtras(x userpack.DetailExtras) {
-	h.detailExtras = x
-}
-
-// HasDetailExtras reports whether the detail extras filler was wired.
-//
-// 未配線だと admin/accounts/find-by-email と admin/update-proxy-account の利用者の
-// pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る。起動時検査に使う。
-func (h *Handler) HasDetailExtras() bool { return h.detailExtras != nil }
-
-// SetListPacker wires the packer of the users embedded in admin/show-users,
-// admin/roles/users, admin/abuse-user-reports and admin/show-moderation-logs,
-// and of the instance / emojis of admin/accounts/find-by-email (#3330).
-func (h *Handler) SetListPacker(p userpack.ListPacker) {
-	h.listPacker = p
-}
-
-// HasListPacker reports whether the list packer was wired.
-//
-// 未配線だと admin の一覧の利用者にピン留め・移行先・instance・絵文字が載らず、
-// モデレーター向けの項目や関係も欠ける。起動時検査に使う。
-func (h *Handler) HasListPacker() bool { return h.listPacker != nil }
 
 // packUsersMany packs users as upstream packMany(users, viewer, {schema:
 // 'UserDetailed'}), in order. viewer is nil for upstream packMany(users, null).

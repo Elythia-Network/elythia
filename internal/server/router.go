@@ -1798,12 +1798,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupService.SetTicketRepo(signupTicketRepo)
 	// パスワードをハッシュする5つの部品へ、設定のbcryptCostから作ったHasherを渡す(#3780)。
 	signupService.SetPasswordHasher(s.passwordHasher)
-	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen)
-	signupHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
-	signupHandler.SetEntityPacker(entityPacker) // #3792: 作成直後の利用者を MeDetailed で包む
-	// #2673: signup も upstream と同じく実効 policy を返す (meta の base override /
-	// role 集約 / server cap 込み)。素の default を返すと /api/i と食い違う。
-	signupHandler.SetUserPolicyResolver(roleService)
+	// **入れ忘れると黙って劣化する依存は、構築子の必須の引数で渡す (#3823)。**
+	signupHandler := apisignup.NewHandler(signupService, metaRepo, idGen,
+		s.background, // #3661: 世代の停止で待つ
+		entityPacker, // #3792: 作成直後の利用者を MeDetailed で包む
+		// #2673: signup も upstream と同じく実効 policy を返す (meta の base override /
+		// role 集約 / server cap 込み)。素の default を返すと /api/i と食い違う。
+		roleService,
+	)
 	if captchaSvc != nil {
 		signupHandler.SetCaptcha(captchaSvc)
 	}
@@ -1862,8 +1864,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupHandler.SetUsernameLookups(userRepo, usedUsernameRepo)
 
 	// Signin (Phase 6)
-	signinHandler := apisignin.NewHandler(userRepo)
-	signinHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	signinHandler := apisignin.NewHandler(userRepo,
+		s.background, // #3661: 世代の停止で待つ
+		// new-login メールの instance lang fallback に使う。
+		metaRepo,
+		// 有効な TOTP コードを window 内で再利用させない (RFC 6238 §5.2)。
+		totpReplayGuard,
+	)
 	signinHandler.SetMainStreamPublisher(mainStreamPublisher)
 	if captchaSvc != nil {
 		signinHandler.SetCaptcha(captchaSvc)
@@ -1885,18 +1892,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// new-login 通知メール (#2454)。SenderFromMeta が per-call で meta を読み直すので
 	// admin UI の SMTP 設定変更が再起動なしで効く。SMTP 未設定なら no-op。
 	signinHandler.SetEmailSender(s.config.URL, miscsmtp.SenderFromMeta(metaRepo, s.config.ProxySMTP))
-	signinHandler.SetMetaRepo(metaRepo)
 	// アカウント作成時も signin 副作用 (履歴 / login 通知 / main publish) を通す (#1804)。
 	signupHandler.SetSigninRecorder(signinHandler)
 
 	// パスワードリセット (認証不要)
-	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen)
-	resetHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
+	resetHandler := apiresetpassword.NewHandler(userRepo, resetReqRepo, idGen,
+		s.background, // #3661: 世代の停止で待つ
+		metaRepo,     // リセットのメールの instance lang fallback に使う
+	)
 	resetHandler.SetServerURL(s.config.URL)
 	resetHandler.SetPasswordHasher(s.passwordHasher)
 	// password reset の確認メール送信。配線パターンは signup と同じく
 	// SenderFromMeta で per-call 再 Fetch、runtime 設定変更追従 (#1112)。
-	resetHandler.SetMetaRepo(metaRepo)
 	resetHandler.SetEmailSender(miscsmtp.SenderFromMeta(metaRepo, s.config.ProxySMTP))
 
 	// WebAuthn / 2FA (issue #42)
@@ -1909,8 +1916,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	} else {
 		signinHandler.SetWebAuthn(webauthnSvc, userSecurityKeyRepo)
 	}
-
-	signinHandler.SetTOTPReplayGuard(totpReplayGuard)
 
 	// Emojis endpoints (public)
 	emojisHandler := apiemojis.NewHandler(emojiRepo)
@@ -2533,10 +2538,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// client_id を許可する (本番は https のみ)。TestMode を同じ用途で使う。
 		s.config.TestMode,
 		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector),
+		// code 再利用で token を revoke したとき、auth cache に残った entry で
+		// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。構築子の必須の引数 (#3823)。
+		s.auth,
 	)
-	// code 再利用で token を revoke したとき、auth cache に残った entry で
-	// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。
-	oauthHandler.SetAuthInvalidator(s.auth)
 	// 匿名で外部への取得と Redis への保存を起こせるので、接続元ごとに絞る。
 	s.echo.GET("/oauth/authorize", oauthHandler.Authorize, middleware.RequireIPRateLimit(rateLimiter, middleware.OAuthAuthorizeRateLimitKey))
 	s.echo.POST("/oauth/decision", oauthHandler.Decision)
@@ -3071,9 +3076,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 配線していたので Flag の経路だけ admin stream と webhook が抜けていた
 	// (#3256)。連打の絞り (#3200) も通報の出どころで変わらない。webhook は
 	// recipientRepo (無効にした通知先の除外に使う) が揃う後段で SetWebhook する。
-	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub))
-	abuseCreatedNotifier.SetBackground(s.background) // #3661: 世代の停止で待つ
-	abuseCreatedNotifier.SetEntityPacker(entityPacker)
+	// 世代の箱 (#3661) と Packer (#3794) は構築子の必須の引数で渡す (#3823)。
+	abuseCreatedNotifier := coreabuse.NewCreatedNotifier(abuseInAppNotifier, roleService, stream.NewAdminStreamPublisher(streamPubSub),
+		s.background, entityPacker)
 	usersHandler.SetAbuseReportCreatedNotifier(abuseCreatedNotifier)
 
 	// server / queue stats publishers (#344)。起動時から tick を回して
@@ -3360,31 +3365,39 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	abuseCreatedNotifier.SetMail(miscsmtp.SubjectBodySenderFromMeta(metaRepo, s.config.ProxySMTP), recipientRepo, userRepo, metaRepo)
 	// 通知の lookup が先に作った実体を使い回す (2 つ作らない)。
 	emojiApplicationRepo := emojiApplicationRepoForNotif
-	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen)
-	adminHandler.SetBackground(s.background)     // #3661: 世代の停止で待つ
-	adminHandler.SetEntityPacker(entityPacker)   // #3792: 利用者の詳細を包む
-	adminHandler.SetSelfPacker(selfPacker)       // #3784: show-users・roles/users・update-proxy-account で自分を MeDetailed に
-	adminHandler.SetDetailExtras(usersHandler)   // #3330: find-by-email・update-proxy-account のピン留め・移行先
-	adminHandler.SetListPacker(sharedUserPacker) // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
+	// **入れ忘れると黙って劣化する依存は、構築子の必須の引数で渡す (#3823)。**
+	adminHandler := apiadmin.NewHandler(signupService, roleService, metaRepo, userRepo, idGen,
+		s.background,     // #3661: 世代の停止で待つ
+		entityPacker,     // #3792: 利用者の詳細を包む
+		usersHandler,     // #3330: find-by-email・update-proxy-account のピン留め・移行先
+		sharedUserPacker, // #3330: show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者を本家 packMany と同じ形に
+		// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
+		suspensionOriginRepo,
+		// admin/suspend-user / admin/unsuspend-user / admin/accounts/delete が
+		// target user の全 token cache entry を即時 invalidate するために、
+		// auth middleware を inject する (#965)。未配線時は 30 秒 cache TTL 待ち
+		// で stale な user が auth 通過する security regression が残る。
+		// i/regenerate-token (#884) と同じく AuthMiddleware が duck-typed で
+		// UserTokenInvalidator interface を満たしている。
+		s.auth,
+		// 凍結・削除した利用者の WebSocket を閉じる (tokenCache の失効とは独立)。
+		streamRevokePublisher,
+		// IP 照会の監査 (#3106)。**未配線だと照会が記録されないまま通る** — 照会は
+		// 成立するので誰も気付けない。
+		iplookuplog.NewService(ipLookupLogRepo, idGen),
+		// admin/emoji/copy で remote 画像を local drive に保存するための fetcher
+		// (#670)。outboundClient 経由なので SSRF / proxy / outgoing address が他の
+		// outbound 経路と同じ設定で適用される。
+		apiadmin.NewEmojiImageFetcher(s.outboundClient(10*time.Second), driveService, s.config.UserAgent),
+	)
+	adminHandler.SetSelfPacker(selfPacker) // #3784: show-users・roles/users・update-proxy-account で自分を MeDetailed に
 	adminHandler.SetPasswordHasher(s.passwordHasher)
-	// モデレーターの suspend / unsuspend を local 由来として刻む (#2973)。
-	adminHandler.SetSuspensionOriginRepo(suspensionOriginRepo)
 	// catalog 更新を entity 側 packer に即時反映する (#2258)。TTL 任せだと
 	// 作成直後に装着された decoration が lookup miss で silent drop される。
 	adminHandler.SetAvatarDecorationInvalidator(avatarDecorationResolver)
 	adminHandler.SetEmojiDecorationInvalidator(emojiDecorationResolver)
 	// admin/ad/* の変更を /api/meta の response cache に反映する (#2649)。
 	adminHandler.SetMetaResponseInvalidator(metaHandler)
-	// admin/suspend-user / admin/unsuspend-user / admin/accounts/delete が
-	// target user の全 token cache entry を即時 invalidate するために、
-	// auth middleware を inject する (#965)。未配線時は 30 秒 cache TTL 待ち
-	// で stale な user が auth 通過する security regression が残るので
-	// production では必ず wire する。i/regenerate-token (#884) と同じく
-	// AuthMiddleware が duck-typed で UserTokenInvalidator interface を
-	// 満たしている。
-	adminHandler.SetUserTokenInvalidator(s.auth)
-	// 凍結・削除した利用者の WebSocket を閉じる (tokenCache の失効とは独立)。
-	adminHandler.SetUserStreamRevoker(streamRevokePublisher)
 	adminHandler.SetInstanceRepo(instanceRepo)
 	adminHandler.SetDeliveryHealthProvider(deliveryHealth)
 	if deliveryBreaker != nil {
@@ -3395,9 +3408,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 500 を返す** — 空の結果は「その IP を使ったアカウントは無い」という誤った
 	// 事実になり、調査の結論を反転させる。
 	adminHandler.SetIPSearchRepo(repository.NewUserIPSearchRepository(s.db))
-	// IP 照会の監査 (#3106)。**未配線だと照会が記録されないまま通る** — 照会は
-	// 成立するので誰も気付けない。critical wiring 検査で落とす。
-	adminHandler.SetIPLookupAudit(iplookuplog.NewService(ipLookupLogRepo, idGen))
 	adminHandler.SetIPLookupLogRepo(ipLookupLogRepo)
 	// ドライブ使用量の集計 (#3053)。**この行を落とすと admin/drive/usage が
 	// 500 を返す** — 0 バイトを返して「使っていない」と誤認させるよりよい。
@@ -3416,23 +3426,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		idGen,
 		adminHandler,
 		emojiapplication.NewResultNotifier(notificationService),
+		// 期間上限をロールから引く (#2958)。無いと上限が丸ごと効かなくなるので、
+		// 構築子の必須の引数で渡す (#3823)。
+		roleService,
+		// 申請枠の手動リセット (#2962)。**無いとリセットは 500 で失敗する**
+		// (`ErrQuotaResetUnavailable`) ので、戻したつもりで戻っていない状態にはならない。
+		// ただし既存のリセットも読めなくなる = 過去に戻した枠が再び満杯に見える。
+		// 渡し忘れはコンパイルで、nil リテラルは静的ゲート
+		// (`emoji_application_gate_test.go`) で、変数経由の nil は組み立てたサーバーを
+		// 見る TestBuiltHandlersHaveNoNilDependencies で落とす。
+		repository.NewEmojiApplicationQuotaResetRepository(s.db),
 	)
-	// 期間上限をロールから引く (#2958)。未配線だと上限が丸ごと効かなくなる
-	// ので criticalWiring に載せてある。
-	emojiApplicationService.SetPolicyProvider(roleService)
 	// 申請が出されたことを**審査できる人**へ知らせる (#2987)。モデレーターでは
 	// なく `canManageCustomEmojis` を持つ人 — 審査 endpoint の gate と揃える。
 	emojiApplicationService.SetReceivedNotifier(
 		emojiapplication.NewReceivedNotifier(notificationService, roleService))
-	// 申請枠の手動リセット (#2962)。**未配線ならリセットは 500 で失敗する**
-	// (`ErrQuotaResetUnavailable`) ので、戻したつもりで戻っていない状態にはならない。
-	// ただし既存のリセットも読めなくなる = 過去に戻した枠が再び満杯に見えるので、
-	// 配線の有無は静的ゲート (`emoji_application_gate_test.go`) と**起動時の
-	// 自己診断 (`criticalWiring`) の両方**で見る。**片方では足りない** — 静的
-	// ゲートは `nil` リテラルしか見ないので変数経由で渡す形を素通りし、自己診断は
-	// 呼び出しを消した構成を起動するまで気付けない。
-	emojiApplicationService.SetQuotaResetRepo(
-		repository.NewEmojiApplicationQuotaResetRepository(s.db))
 	emojiApplicationHandler := apiemojiapplications.NewHandler(
 		emojiApplicationService, emojiApplicationRepo, driveFileRepo)
 	// 「自分の申請」の画像プレビュー (#2989)。承認済みは `emojiId`、未承認の
@@ -3512,10 +3520,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetUserIPRepo(userIPRepo)
 	adminHandler.SetSecurityKeyRepo(userSecurityKeyRepo)
 	adminHandler.SetEmojiImportEnqueuer(s.queueClient)
-	// admin/emoji/copy で remote 画像を local drive に保存するための fetcher
-	// を wire する (#670)。outboundClient 経由なので SSRF / proxy / outgoing
-	// address が他の outbound 経路と同じ設定で適用される。
-	adminHandler.SetEmojiImageFetcher(apiadmin.NewEmojiImageFetcher(s.outboundClient(10*time.Second), driveService, s.config.UserAgent))
 	// admin/emoji/fetch-remote-meta が使うメタデータ取得 (#2698)。**取得先の host は
 	// 絵文字の host = 相手が決める値**なので、SSRF ガード付きの transport を組む。
 	// **outbound の共通設定を渡す (#3037)。** 渡し忘れるとこの経路だけが
@@ -3981,6 +3985,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//     制約は無く、重複チェックはこの endpoint だけが持つので、劣化しても
 	//     防げるのは事前の案内だけという点で他の項目と tier が違う。
 	//     移設で新しく生まれた面なので、棚卸し (#2674) の対象には入れる
+	s.builtRouteParts = routeParts{
+		admin:            adminHandler,
+		signup:           signupHandler,
+		signin:           signinHandler,
+		resetPassword:    resetHandler,
+		oauth:            oauthHandler,
+		emojiApplication: emojiApplicationService,
+		abuseCreated:     abuseCreatedNotifier,
+	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
 		// ugcVisibilityForVisitor='none' を効かせない。
@@ -3996,8 +4009,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
 		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
-		{"admin.entityPacker", adminHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"signup.entityPacker", signupHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"userService.entityPacker", userService.HasEntityPacker(), entityPackerMissingEffect},
 		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
@@ -4007,7 +4018,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"reversi.entityPacker", reversiHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"chatService.entityPacker", chatService.HasEntityPacker(), entityPackerMissingEffect},
 		{"webhookSignup.entityPacker", webhookSignupHook.HasEntityPacker(), entityPackerMissingEffect},
-		{"abuseCreated.entityPacker", abuseCreatedNotifier.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"bubbleVersusPublisher.entityPacker", bubbleVersusPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
@@ -4031,12 +4041,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"HTTP 署名検証・連合ブロック・actor 一致・replay 判定が同時に飛ぶ"},
 		{"signup.ticketConsumption", signupService.HasTicketConsumption(),
 			"招待 ticket の行ロックが飛び、1 枚から複数アカウントを作る窓が開く"},
-		{"signin.totpReplayGuard", signinHandler.HasTOTPReplayGuard(),
-			"有効な TOTP コードを window 内で再利用できる"},
-		{"signin.metaRepo", signinHandler.HasMetaRepo(),
-			"new-login メールの instance lang fallback が空のまま進み、profile.lang 未設定時に併記ではなく英語だけになる"},
-		{"resetpassword.metaRepo", resetHandler.HasMetaRepo(),
-			"パスワードリセットメールの instance lang fallback が空のまま進む"},
 		{"instance.hostBoundNodeinfoFetcher", metadataFetcher.HasHostBoundFetcher(),
 			"nodeinfo の取得が redirect の飛び先に縛られなくなり、任意の host が返した JSON を instance 行へ書き戻せる"},
 		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
@@ -4061,16 +4065,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"enableServerMachineStats を有効にしても serverStats に値が流れない"},
 		{"i.authInvalidator", iHandler.HasAuthInvalidator(),
 			"revoke-token / regenerate-token / delete-account / update の後も古い token が auth cache の TTL のあいだ通る"},
-		{"admin.userTokenInvalidator", adminHandler.HasUserTokenInvalidator(),
-			"凍結・削除した利用者の session が auth cache の TTL のあいだ生き残る"},
 		{"i.accessTokenRepo", iHandler.HasAccessTokenRepo(),
 			"i/revoke-token が成功と同じ 204 を返したまま token を消さない (恒久)"},
-		{"oauth.authInvalidator", oauthHandler.HasAuthInvalidator(),
-			"authorization code 再利用を検出して失効させた token が TTL のあいだ通る"},
 		{"i.streamRevoker", iHandler.HasStreamRevoker(),
 			"regenerate-token / revoke-token / delete-account の後も、失効した token で張られた WebSocket が通知・DM を受け取り続ける"},
-		{"admin.userStreamRevoker", adminHandler.HasUserStreamRevoker(),
-			"凍結・削除した利用者の WebSocket が通知・DM・フォロワー限定投稿を受け取り続ける"},
 		{"oauth.streamRevoker", oauthHandler.HasStreamRevoker(),
 			"authorization code 再利用で失効させた token の WebSocket が開いたまま残る"},
 		{"signup.applicationSettlement", signupService.HasApplicationSettlement(),
@@ -4081,19 +4079,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"処理済み activity の再投函を検出できない (isReplay が常に false)"},
 		{"postScheduledNote.lock", postScheduledNoteProcessor.HasLock(),
 			"job が二度 fire したとき予約投稿が 2 回 publish される"},
-		{"emojiApplication.policyProvider", emojiApplicationService.HasPolicyProvider(),
-			"カスタム絵文字申請の日次・週次・月次の上限が丸ごと効かなくなる"},
-		{"emojiApplication.quotaResetRepo", emojiApplicationService.HasQuotaResetRepo(),
-			"申請枠の手動リセットが常に失敗し、過去に戻した枠も再び満杯に見える"},
-		{"admin.emojiImageFetcher", adminHandler.HasEmojiImageFetcher(),
-			"承認した絵文字と admin/emoji/add で登録した絵文字 / admin/emoji/update で差し替えた絵文字が申請者 / 操作者 / 相手サーバーのファイルを参照し続け、消された時点で壊れる"},
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"signup.userPolicies", signupHandler.HasUserPolicyResolver(),
-			"素の default policy を返すので、meta の base policy override も server cap も反映されない"},
 		{"reaction.userRolesProvider", reactionService.HasUserRolesProvider(),
 			"ロール限定カスタム絵文字を誰でも使える"},
 		{"drive.roleChecker", driveService.HasRoleChecker(),
@@ -4145,8 +4135,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"受信を拒否するソフトウェアのホストにも、メンションの解決や users/show で WebFinger を投げる (#3563)"},
 		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
 			"block / federation mode は enqueue 時チェックの第 2 の関門が外れ (積み残しと retry 中が漏れる)、suspend は enqueue 側に検査が無いので新規ジョブごと配送し続ける"},
-		{"admin.suspensionOriginRepo", adminHandler.HasSuspensionOriginRepo(),
-			"モデレーターの suspend / unsuspend が由来を刻まないので、解除が次の actor refresh で無言で戻る (#2973)"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
 		{"inboxProcessor.softwareBlocker", inboxProcessor.HasSoftwareSuspensionChecker(),
@@ -4194,8 +4182,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"blocking.roomInvitationRemover", blockingService.HasRoomInvitationRemover(),
 			"ブロックしても互いのチャットルームへの招待が残り、ブロックした相手のルームに参加できる"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
-		{"admin.detailExtras", adminHandler.HasDetailExtras(),
-			"admin/accounts/find-by-email と admin/update-proxy-account の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
@@ -4204,12 +4190,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"chat の応答 (メッセージの fromUser・toUser・reactions[].user、ルームの owner、招待の user) のリモートの利用者に instance・絵文字が載らない"},
 		{"chat.streamLiteFiller", chatService.HasLiteFiller(),
 			"stream と Web Push で流す chat のメッセージ (fromUser・toUser) のリモートの利用者に instance・絵文字が載らない"},
-		{"admin.listPacker", adminHandler.HasListPacker(),
-			"admin/show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者にピン留め・移行先・instance・絵文字が載らない"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
-		{"admin.ipLookupAudit", adminHandler.HasIPLookupAudit(),
-			"IP 照会が監査に残らない (照会そのものは成立するので誰も気付けない)"},
 		{"blocking.followRequestCanceller", blockingService.HasFollowRequestCanceller(),
 			"block しても保留中の follow request が双方向に残り、block 中に承認されるとフォロー関係が成立する"},
 		{"reaction.blockingChecker", reactionService.HasBlockingChecker(),
@@ -4253,18 +4235,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"moderationlog.background", modLogService.HasBackground(),
 			"世代を止めてもモデレーションログのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"signin.background", signinHandler.HasBackground(),
-			"世代を止めてもサインインの記録・通知・メールのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"i.background", iHandler.HasBackground(),
 			"世代を止めてもrel=meの検証と確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"signup.background", signupHandler.HasBackground(),
-			"世代を止めても確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"resetpassword.background", resetHandler.HasBackground(),
-			"世代を止めてもリセットのメールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"admin.background", adminHandler.HasBackground(),
-			"世代を止めてもテストメールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"abuse.background", abuseCreatedNotifier.HasBackground(),
-			"世代を止めても通報のメールのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"notification.background", notificationService.HasBackground(),
 			"世代を止めても遅らせて送るunreadNotificationとWeb Pushを待たず、閉じたDBとqueueを使う"},
 	})

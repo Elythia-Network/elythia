@@ -181,7 +181,7 @@ func Test2FA_TOTP_ReplayRejected(t *testing.T) {
 	h, repo := newTestHandler(t)
 	secret := "JBSWY3DPEHPK3PXP"
 	newTestUserWithTOTP(repo, "alice", "pass", secret, nil)
-	h.SetTOTPReplayGuard(&twofactor.RedisReplayGuard{
+	h.SetTOTPReplayGuardForTest(&twofactor.RedisReplayGuard{
 		Client:    redisClientFromTest(t),
 		KeyPrefix: "test:" + t.Name(),
 	})

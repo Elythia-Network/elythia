@@ -152,11 +152,11 @@ func newHarness(t *testing.T) *testHarness {
 	users := &fakeUserRepo{byToken: map[string]*model.User{}}
 	tokens := &fakeTokenStore{}
 	hn := &testHarness{store: store, users: users, tokens: tokens, clientID: srv.URL + "/", redirect: srv.URL + "/cb"}
-	hn.h = NewHandler(store, srv.Client(), users, tokens, &fakeIDGen{}, "https://mk.example", true,
-		func(c echo.Context, m ConsentMeta) error {
-			hn.consent = &m
-			return c.HTML(http.StatusOK, "<html>consent</html>")
-		})
+	hn.h = NewHandler(store, srv.Client(), users, tokens, &fakeIDGen{}, "https://mk.example", true, func(c echo.Context, m ConsentMeta) error {
+		hn.consent = &m
+		return c.HTML(http.StatusOK, "<html>consent</html>")
+	}, nil)
+
 	return hn
 }
 
@@ -397,7 +397,7 @@ func TestToken_JSONBody(t *testing.T) {
 func TestToken_ReplayRevokesAndRejects(t *testing.T) {
 	hn := newHarness(t)
 	inv := &fakeInvalidator{}
-	hn.h.SetAuthInvalidator(inv)
+	hn.h.authInvalidator = inv
 	seedGrant(hn, "code1")
 	// 1 回目: 成功。
 	rec1 := hn.post(t, hn.h.Token, validTokenForm(hn, "code1"))
@@ -576,8 +576,8 @@ func TestAuthorize_DiscoveryFailure(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	h := NewHandler(newFakeStore(), srv.Client(), &fakeUserRepo{}, &fakeTokenStore{}, &fakeIDGen{}, "https://mk.example", true,
-		func(c echo.Context, _ ConsentMeta) error { return c.HTML(http.StatusOK, "x") })
+	h := NewHandler(newFakeStore(), srv.Client(), &fakeUserRepo{}, &fakeTokenStore{}, &fakeIDGen{}, "https://mk.example", true, func(c echo.Context, _ ConsentMeta) error { return c.HTML(http.StatusOK, "x") }, nil)
+
 	e := echo.New()
 	q := url.Values{
 		"response_type": {"code"},

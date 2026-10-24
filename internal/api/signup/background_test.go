@@ -29,12 +29,10 @@ func TestSignup_MailRunsInTheBackgroundGroup(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	g := bgwork.New()
+	h := apisignup.NewHandler(svc, metaRepo, idGen, g, nil, nil)
 	var sent atomic.Int32
 	h.SetEmailSender("https://example.test", func(string, miscsmtp.Message) { sent.Add(1) })
-	g := bgwork.New()
-	h.SetBackground(g)
-	assert.True(t, h.HasBackground())
 	require.Zero(t, g.Stop(context.Background()))
 
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","emailAddress":"alice@example.com"}`)

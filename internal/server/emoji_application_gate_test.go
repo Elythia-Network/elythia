@@ -387,40 +387,31 @@ func TestEmojiApplicationIsWired(t *testing.T) {
 	require.Lessf(t, relatedIdx, approveIdx,
 		"関連履歴が承認ボタンより後ろにある。押した後に出しても判断材料にならない (#2960)")
 
-	// **枠のリセットの配線 (#2962)。** 未配線だと `SetQuotaResetRepo` が呼ばれず、
-	// **リセットが無かったことにされる** — モデレーターは戻したつもりなのに
-	// 申請者は弾かれ続ける。service は fail-closed に倒すので気付けない。
-	// **`nil` を渡す形も弾く (レビュー M2)。** 呼び出しの存在だけを見ると
-	// `SetQuotaResetRepo(nil)` が素通りし、リセットは 500 で失敗し続ける
-	// (過去に戻した枠も読めなくなり、再び満杯に見える)。起動時の自己診断
-	// (`criticalWiring`) にも載せてあるので、実行時にも気付ける。
-	require.Containsf(t, src, "SetQuotaResetRepo(",
-		"%s が申請枠のリセットを配線していない (#2962)", router)
-	// **`nil` を明示的に弾く。** 「識別子が続くこと」だけを見る形にしたら
-	// `nil` の `n` が一致して素通りした (実測)。
-	// **`nil` そのものだけを弾く (レビュー L6)。** 語境界が無いと
-	// `SetQuotaResetRepo(nilSafeRepo)` のような正当な識別子でも落ち、
-	// 診断が「nil を渡している」と事実と逆になる。
-	// **語境界で見る (レビュー L-1)。** 閉じ括弧を要求すると
-	// `SetQuotaResetRepo(\n\tnil,\n)` を取り逃がす (gofmt も通る)。
-	require.NotRegexpf(t, `SetQuotaResetRepo\(\s*nil\b`, src,
-		"%s が申請枠のリセットに nil を渡している。リセットが常に失敗する (#2962)", router)
-	// **ローカル変数の名前は固定しない (レビュー L7)。** `emojiApplicationService`
-	// を rename しただけで落ち、しかも診断が「自己診断していない」と事実と逆に
-	// なる。
-	require.Containsf(t, src, `.HasQuotaResetRepo()`,
-		"%s が申請枠のリセットの配線を起動時に自己診断していない (#2962)", router)
-	// **絵文字の画像を drive へ取り込む配線 (#2966 / #670)。** 未配線だと、
+	// **枠のリセットの配線 (#2962)。** 無いと**リセットが無かったことにされる** —
+	// モデレーターは戻したつもりなのに申請者は弾かれ続ける。service は
+	// fail-closed に倒すので気付けない。
+	//
+	// #3823 で構築子の必須の引数にしたので、渡し忘れはコンパイルで落ちる。ただし
+	// nil は渡せる。変数経由の nil は組み立てたサーバーを見る
+	// TestBuiltHandlersHaveNoNilDependencies が落とすが、ここでは**渡しているのが
+	// repository の構築であること**まで見る (以前は `SetQuotaResetRepo(nil)` を
+	// 弾いていた、レビュー M2)。**ローカル変数の名前は固定しない (レビュー L7)** ので、
+	// 受け手の変数ではなく構築子の呼び出しから引数を取る。
+	resetArgs := callArgs(t, src, "emojiapplication.NewService(")
+	require.Lenf(t, resetArgs, 8, "%s の emojiapplication.NewService の引数の数が変わった", router)
+	require.Equalf(t, "repository.NewEmojiApplicationQuotaResetRepository(s.db)", resetArgs[7],
+		"%s が申請枠のリセットの repository を渡していない。リセットが常に失敗する (#2962)", router)
+	require.NotEqualf(t, "nil", resetArgs[6],
+		"%s が申請の期間上限の policy に nil を渡している。上限が丸ごと効かない (#2958)", router)
+	// **絵文字の画像を drive へ取り込む配線 (#2966 / #670)。** 無いと、
 	// 自作画像の申請を承認した絵文字が**申請者所有のファイルを参照し続け**
 	// (申請者が消すと壊れる)、リモート絵文字の複製は相手サーバーの URL を
-	// 参照し続ける。どちらも「動いているように見えて後から壊れる」ので、
-	// 起動時に気付ける形にしておく。
-	require.Containsf(t, src, "SetEmojiImageFetcher(",
-		"%s が絵文字画像の取り込みを配線していない (#2966)", router)
-	require.NotRegexpf(t, `SetEmojiImageFetcher\(\s*nil\b`, src,
-		"%s が絵文字画像の取り込みに nil を渡している (#2966)", router)
-	require.Containsf(t, src, `.HasEmojiImageFetcher()`,
-		"%s が絵文字画像の取り込みの配線を起動時に自己診断していない (#2966)", router)
+	// 参照し続ける。どちらも「動いているように見えて後から壊れる」。
+	// admin の handler の構築子の最後の引数 (#3823)。
+	adminArgs := callArgs(t, src, "apiadmin.NewHandler(")
+	require.Lenf(t, adminArgs, 14, "%s の apiadmin.NewHandler の引数の数が変わった", router)
+	require.Truef(t, strings.HasPrefix(adminArgs[13], "apiadmin.NewEmojiImageFetcher("),
+		"%s が絵文字画像の取り込みを配線していない (#2966): %q", router, adminArgs[13])
 
 	// **理由の上限が列の幅と一致すること (レビュー L7)。** 3 箇所 (migration の
 	// `varchar`、Go の定数、ダイアログの `maxLength`) に散っていて、どれか 1 つ
@@ -814,6 +805,53 @@ func TestEmojiApplicationIsWired(t *testing.T) {
 	spec := findSpec(t, filepath.Join(root, "internal", "core", "emojiapplication"), "service_test.go")
 	require.Containsf(t, readFileString(t, spec), "ErrForbidden",
 		"%s が所有者の確認を試していない。他人の申請を取り下げられる回帰が無検査になる", spec)
+}
+
+// callArgs returns the top-level arguments of the only call to callee (which
+// ends with "(") in src, with the whitespace of each argument folded.
+//
+// 呼び出しが 1 つでないときは落とす。2 つあると、どちらを見たのかで結果が変わる。
+// 文字列リテラルの中の括弧とカンマは数えない。
+func callArgs(t *testing.T, src, callee string) []string {
+	t.Helper()
+	require.Equalf(t, 1, strings.Count(src, callee), "%s の呼び出しが 1 つではない", callee)
+	start := strings.Index(src, callee) + len(callee)
+	var args []string
+	depth := 0
+	var quote byte
+	begin := start
+	for i := start; i < len(src); i++ {
+		c := src[i]
+		if quote != 0 {
+			if c == '\\' && quote == '"' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '`', '\'':
+			quote = c
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth == 0 {
+				if a := strings.Join(strings.Fields(src[begin:i]), " "); a != "" {
+					args = append(args, a)
+				}
+				return args
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.Join(strings.Fields(src[begin:i]), " "))
+				begin = i + 1
+			}
+		}
+	}
+	t.Fatalf("%s の呼び出しの閉じ括弧が無い", callee)
+	return nil
 }
 
 // readFileString reads a file and fails the test when it cannot.

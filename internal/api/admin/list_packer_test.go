@@ -44,20 +44,13 @@ func (r *recordingListPacker) FillLites(users []*model.User, lites []*entity.Use
 	}
 }
 
-func TestHasListPacker(t *testing.T) {
-	h, _, _, _ := newTestHandler(t)
-	assert.False(t, h.HasListPacker())
-	h.SetListPacker(&recordingListPacker{})
-	assert.True(t, h.HasListPacker())
-}
-
 // 本家 admin/show-users は packMany(users, me) で、自分自身は MeDetailed (#3330)。
 func TestShowUsers_UsesListPackerWithViewer(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["admin1"] = &model.User{ID: "admin1", Username: "admin"}
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "a"}
 	p := &recordingListPacker{}
-	h.SetListPacker(p)
+	h.SetListPackerForTest(p)
 
 	rec := doPost(h.ShowUsers, `{"limit":10}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -82,7 +75,7 @@ func TestRolesUsers_UsesListPackerWithViewer(t *testing.T) {
 	require.NoError(t, userRepo.Create(&model.User{ID: adminUser.ID, Username: "admin"}))
 	require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "9c2bw9q5fb0000000000000000", UserID: adminUser.ID, RoleID: "r1"}))
 	p := &recordingListPacker{}
-	h.SetListPacker(p)
+	h.SetListPackerForTest(p)
 
 	rec := doPost(h.RolesUsers, `{"roleId":"r1","limit":10}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -112,7 +105,7 @@ func TestAbuseReports_PacksUsersOnceAsAnonymous(t *testing.T) {
 	abuseRepo.Reports["r2"] = &model.AbuseUserReport{ID: "r2", ReporterID: "rep", Reporter: reporter, TargetUserID: "tgt", TargetUser: target}
 	h.SetAbuseRepo(abuseRepo)
 	p := &recordingListPacker{}
-	h.SetListPacker(p)
+	h.SetListPackerForTest(p)
 
 	rec := doPost(h.AbuseReports, `{"state":"all"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -143,7 +136,7 @@ func TestShowModerationLogs_PacksActorsOnceAsAnonymous(t *testing.T) {
 	gen, _ := id.NewGenerator("aidx")
 	h.SetModLogService(moderationlog.New(modLogRepo, gen))
 	p := &recordingListPacker{}
-	h.SetListPacker(p)
+	h.SetListPackerForTest(p)
 
 	rec := doPost(h.ShowModerationLogs, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -165,7 +158,7 @@ func TestAccountsFindByEmail_FillsLites(t *testing.T) {
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "a"}
 	userRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Email: &email}
 	p := &recordingListPacker{}
-	h.SetListPacker(p)
+	h.SetListPackerForTest(p)
 
 	rec := doPost(h.AccountsFindByEmail, `{"email":"x@example.test"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -184,7 +177,7 @@ func TestUpdateProxyAccount_PacksAsProxySelf(t *testing.T) {
 	require.NoError(t, userRepo.CreateProfile(&model.UserProfile{UserID: proxy.ID}))
 	h.SetSystemAccountFetcher(&stubSystemAccountFetcher{user: proxy})
 	extras := &recordingExtras{}
-	h.SetDetailExtras(extras)
+	h.SetDetailExtrasForTest(extras)
 
 	rec := doPost(h.UpdateProxyAccount, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)

@@ -43,7 +43,7 @@ func (m *mockIPRecorder) Record(userID, ip string) {
 func newTestHandler(t *testing.T) (*signin.Handler, *testutil.MockUserRepository) {
 	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
-	return signin.NewHandler(userRepo), userRepo
+	return signin.NewHandler(userRepo, nil, nil, nil), userRepo
 }
 
 func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {

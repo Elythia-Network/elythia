@@ -23,8 +23,7 @@ func TestSuspendUser_RevokesTargetStreams(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "target"}
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
-	assert.True(t, h.HasUserStreamRevoker())
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.SuspendUser, `{"userId":"u1"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -36,7 +35,7 @@ func TestSuspendUser_RejectedDoesNotRevokeStreams(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["root"] = &model.User{ID: "root", IsRoot: true}
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.SuspendUser, `{"userId":"root"}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -48,7 +47,7 @@ func TestUnsuspendUser_DoesNotRevokeStreams(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "target", IsSuspended: true}
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.UnsuspendUser, `{"userId":"u1"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -59,7 +58,7 @@ func TestAccountsDelete_RevokesTargetStreams(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1"}
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.AccountsDelete, `{"userId":"u1"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -70,7 +69,7 @@ func TestDeleteAccount_RevokesTargetStreams(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u9"] = &model.User{ID: "u9"}
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.DeleteAccount, `{"userId":"u9"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -81,14 +80,9 @@ func TestDeleteAccount_RevokesTargetStreams(t *testing.T) {
 func TestAccountsDelete_EmptyUserIDDoesNotRevokeStreams(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	rev := &stubUserStreamRevoker{}
-	h.SetUserStreamRevoker(rev)
+	h.SetUserStreamRevokerForTest(rev)
 
 	rec := doPost(h.AccountsDelete, `{}`, adminUser)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, rev.calls)
-}
-
-func TestHasUserStreamRevoker_Unwired(t *testing.T) {
-	h, _, _, _ := newTestHandler(t)
-	assert.False(t, h.HasUserStreamRevoker())
 }

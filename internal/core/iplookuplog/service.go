@@ -46,7 +46,8 @@ type Service struct {
 }
 
 // NewService wires the recorder. どちらかが nil なら Record は黙って何もしない
-// (部分配線のテスト向け)。**本番の未配線は起動時の critical wiring 検査が知らせる。**
+// (部分配線のテスト向け)。**本番で nil を渡した配線は、組み立てたサーバーを見る
+// TestBuiltHandlersHaveNoNilDependencies (internal/server) が落とす (#3823)。**
 func NewService(repo repository.IPLookupLogRepository, idGen id.Generator) *Service {
 	return &Service{repo: repo, idGen: idGen, now: time.Now}
 }
@@ -75,9 +76,4 @@ func (s *Service) Record(e Entry) {
 		slog.Error("ip lookup audit: record failed",
 			"kind", e.Kind, "moderator", e.UserID, "error", err)
 	}
-}
-
-// Wired reports whether the recorder can actually write. 起動時検査に使う。
-func (s *Service) Wired() bool {
-	return s != nil && s.repo != nil && s.idGen != nil
 }

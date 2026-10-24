@@ -39,27 +39,19 @@ type Handler struct {
 	passwordHasher password.Hasher
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new password reset Handler.
-func NewHandler(userRepo repository.UserRepository, resetRepo repository.PasswordResetRequestRepository, idGen id.Generator) *Handler {
-	return &Handler{userRepo: userRepo, resetRepo: resetRepo, idGen: idGen}
+// background is the group the work after a response (the reset mail) runs
+// in, so stopping the server generation waits for it (#3661); metaRepo is the
+// meta lookup for the mail's locale fallback.
+func NewHandler(userRepo repository.UserRepository, resetRepo repository.PasswordResetRequestRepository, idGen id.Generator,
+	background *bgwork.Group, metaRepo repository.MetaRepository,
+) *Handler {
+	return &Handler{userRepo: userRepo, resetRepo: resetRepo, idGen: idGen, background: background, metaRepo: metaRepo}
 }
 
 // SetPasswordHasher sets the Hasher that the new password is hashed with.
 // Unset, the default cost is used.
 func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
-
-// SetMetaRepo wires meta lookup for email locale fallback.
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) { h.metaRepo = r }
-
-// HasMetaRepo reports whether the meta repository was wired for email l10n.
-func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
 
 // SetEmailSender attaches an EmailSender for sending reset emails.
 func (h *Handler) SetEmailSender(s EmailSender) { h.email = s }

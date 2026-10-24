@@ -112,27 +112,20 @@ func (h *Handler) SetEmailSender(serverURL string, send func(to string, msg misc
 	h.emailSender = send
 }
 
-// SetMetaRepo wires meta lookup for email locale fallback.
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) { h.metaRepo = r }
-
-// HasMetaRepo reports whether the meta repository was wired for email l10n.
-func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
-
 // SetIPRecorder attaches the IP recorder. 未設定なら記録しない。
 func (h *Handler) SetIPRecorder(rec IPRecorder) {
 	h.ipRecorder = rec
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new signin Handler.
-func NewHandler(userRepo repository.UserRepository) *Handler {
-	return &Handler{userRepo: userRepo}
+//
+// background is the group the work after a response (the signin record, the
+// notification and the mail) runs in, so stopping the server generation
+// waits for it (#3661). metaRepo is the meta lookup for the new-login mail's
+// locale fallback. totpReplayGuard is the per-user replay guard that refuses
+// a TOTP code already consumed within its acceptance window (RFC 6238 §5.2).
+func NewHandler(userRepo repository.UserRepository, background *bgwork.Group, metaRepo repository.MetaRepository, totpReplayGuard twofactor.ReplayGuard) *Handler {
+	return &Handler{userRepo: userRepo, background: background, metaRepo: metaRepo, totpReplayGuard: totpReplayGuard}
 }
 
 // SetSigninRepo attaches a SigninRepository for recording login history.
@@ -170,14 +163,6 @@ func (h *Handler) SetWebAuthn(svc *twofactor.WebAuthnService, repo repository.Us
 // event after a successful login. Optional — nil disables emit.
 func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 	h.mainStreamPublisher = p
-}
-
-// SetTOTPReplayGuard wires the per-user replay guard used to refuse a
-// TOTP code that was already consumed within its acceptance window
-// (RFC 6238 §5.2). nil disables the protection (= upstream-compatible
-// fallback for unit tests / dev environments without Redis).
-func (h *Handler) SetTOTPReplayGuard(g twofactor.ReplayGuard) {
-	h.totpReplayGuard = g
 }
 
 // Signin handles POST /api/signin.
@@ -1011,10 +996,3 @@ func (h *Handler) maybeRehashPassword(userID, storedHash, plain string) {
 		slog.Info("signin: skipped password rehash (concurrent update)", "userId", userID)
 	}
 }
-
-// HasTOTPReplayGuard reports whether the TOTP one-time-use guard is wired.
-//
-// 未配線だと ValidateWithReplay が guard 無しで true を返し、**有効な TOTP
-// コードを window 内で再利用できる** (コード自体の検証は残る)。本番では必ず
-// 配線される (#2682)。
-func (h *Handler) HasTOTPReplayGuard() bool { return h.totpReplayGuard != nil }

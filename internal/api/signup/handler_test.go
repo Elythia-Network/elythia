@@ -115,7 +115,7 @@ func newTestHandler(t *testing.T) (*apisignup.Handler, *testutil.MockUserReposit
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	signupSvc := coresignup.NewService(userRepo, metaRepo, idGen)
-	h := apisignup.NewHandler(signupSvc, metaRepo, idGen)
+	h := apisignup.NewHandler(signupSvc, metaRepo, idGen, nil, nil, nil)
 	return h, userRepo, metaRepo
 }
 
@@ -319,7 +319,7 @@ func TestSignup_EmailRequired_CreatesPendingAndSendsEmail(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	var sentTo string
 	var sent miscsmtp.Message
@@ -357,7 +357,7 @@ func TestSignup_EmailRequired_SendsJapaneseEmailFromAcceptLanguage(t *testing.T)
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	var sent miscsmtp.Message
 	done := make(chan struct{})
@@ -390,7 +390,7 @@ func TestSignup_EmailRequired_SendsJapaneseEmailFromAcceptLanguageWithoutMetaLan
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	var sent miscsmtp.Message
 	done := make(chan struct{})
@@ -425,7 +425,7 @@ func TestSignup_EmailRequired_PasswordTooLong(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	longPw := strings.Repeat("a", 73)
 	body := `{"username":"alice","password":"` + longPw + `","emailAddress":"alice@example.com"}`
@@ -444,7 +444,7 @@ func TestSignup_EmailRequired_DuplicateUsername(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass","emailAddress":"a@example.com"}`)
 	// upstream 整合 (#798): duplicate は 400 + DUPLICATED_USERNAME。
@@ -462,7 +462,7 @@ func TestSignupPending_Success(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	row, err := svc.CreatePending("bob", "bob@example.com", "secret", nil)
 	require.NoError(t, err)
@@ -504,7 +504,7 @@ func TestSignupPending_FiresSigninSideEffects(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	rec := &stubSigninRecorder{}
 	h.SetSigninRecorder(rec)
 
@@ -527,7 +527,7 @@ func TestSignup_DoesNotFireSigninSideEffects(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	h.SetTestMode(true)
 	rec := &stubSigninRecorder{}
 	h.SetSigninRecorder(rec)
@@ -553,7 +553,7 @@ func TestSignupPending_NotFound(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.SignupPending, `{"code":"ghost"}`)
 	// upstream に揃えて 400 + NO_SUCH_CODE (旧 mk-go は 404)。#809 で
@@ -722,7 +722,7 @@ func TestSignup_InternalError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	failRepo := &failingCreateUserRepo{userRepo}
 	signupSvc := coresignup.NewService(failRepo, metaRepo, idGen)
-	h := apisignup.NewHandler(signupSvc, metaRepo, idGen)
+	h := apisignup.NewHandler(signupSvc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass"}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -759,7 +759,7 @@ func TestSignup_EmailRequired_BannedDomain(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass","emailAddress":"x@bad.example"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -775,7 +775,7 @@ func TestSignup_EmailRequired_DefaultURL(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	var sent miscsmtp.Message
 	done := make(chan struct{})
@@ -803,7 +803,7 @@ func TestSignupPending_Expired(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	row, err := svc.CreatePending("expu", "exp@example.com", "pw", nil)
 	require.NoError(t, err)
@@ -828,7 +828,7 @@ func TestSignupPending_UsernameClash(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	row, err := svc.CreatePending("clash2", "c2@example.com", "pw", nil)
 	require.NoError(t, err)
@@ -849,7 +849,7 @@ func TestSignup_EmailRequired_NoSender(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.Signup, `{"username":"ns","password":"pw","emailAddress":"ns@example.com"}`)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -886,7 +886,7 @@ func TestSignupPending_MarksInvitationTicketUsed(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
 	tickets := newMockTicketStore()
 	tickets.tickets["INV1"] = &model.RegistrationTicket{ID: "ticket_inv1"}
@@ -953,7 +953,7 @@ func TestSignup_EmailRequired_TicketResendWindow(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coresignup.NewService(userRepo, metaRepo, idGen)
 	svc.SetUserPendingRepo(pendingRepo)
-	h := apisignup.NewHandler(svc, metaRepo, idGen)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	store := newMockTicketStore()
 	store.tickets["code1"] = &model.RegistrationTicket{ID: "t1", Code: "code1"}
 	h.SetTicketStore(store)
@@ -1030,7 +1030,7 @@ func TestSignup_PoliciesAreEffectiveNotRawDefaults(t *testing.T) {
 			if tc.serverMaxFile > 0 {
 				roleSvc.SetServerMaxFileSizeMb(tc.serverMaxFile)
 			}
-			h.SetUserPolicyResolver(roleSvc)
+			h.SetUserPolicyResolverForTest(roleSvc)
 
 			rec := doPost(h.Signup, `{"username":"effective","password":"password123"}`)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

@@ -99,7 +99,7 @@ func auditedHandler(t *testing.T, stub *stubIPSearch) (*apiadmin.Handler, *testu
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 	return h, users, meta, audit
 }
 
@@ -164,7 +164,7 @@ func TestGetUserIPs_RecordsAudit(t *testing.T) {
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 
 	rec := doPost(h.GetUserIPs, `{"userId":"u1"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -188,7 +188,7 @@ func TestGetUserIPs_FailedLookupIsNotRecorded(t *testing.T) {
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 
 	rec := doPost(h.GetUserIPs, `{"userId":"u1"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -206,7 +206,7 @@ func TestGetUserIPs_NulIDIsRejectedBeforeQuery(t *testing.T) {
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 
 	rec := doPost(h.GetUserIPs, `{"userId":"u\u00001"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -221,7 +221,7 @@ func TestGetUserIPs_RejectedLookupIsNotRecorded(t *testing.T) {
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 
 	require.Equal(t, http.StatusBadRequest, doPost(h.GetUserIPs, `{}`, adminUser).Code)
 	assert.Empty(t, audit.written)
@@ -239,7 +239,7 @@ func TestIPRelated_RecordsAudit(t *testing.T) {
 	audit := &stubAuditRepo{}
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetIPLookupAudit(iplookuplog.NewService(audit, gen))
+	h.SetIPLookupAuditForTest(iplookuplog.NewService(audit, gen))
 	users.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 
 	rec := doPost(h.IPRelatedAccounts, `{"userId":"target","sinceDays":30}`, adminUser)

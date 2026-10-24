@@ -225,6 +225,9 @@ type Server struct {
 	// 渡せる。TestBuiltHandlersHaveNoNilDependencies が組み立てた後の handler の
 	// フィールドを見て、nil を渡した配線を落とすために持つ。
 	builtHandlers apiHandlers
+	// builtRouteParts is what setupRoutes built in its own body for this
+	// generation (#3823). 本番では読まない。builtHandlers と同じ理由で持つ。
+	builtRouteParts routeParts
 }
 
 func runReactionFlushWorker(ctx context.Context, enqueue func() error) {

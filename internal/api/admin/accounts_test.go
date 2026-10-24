@@ -171,7 +171,7 @@ func TestAccountsDelete_InvalidatesTargetTokenCache(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1"}
 	inv := &stubUserTokenInvalidator{}
-	h.SetUserTokenInvalidator(inv)
+	h.SetUserTokenInvalidatorForTest(inv)
 
 	rec := doPost(h.AccountsDelete, `{"userId":"u1"}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -183,7 +183,7 @@ func TestDeleteAccount_InvalidatesTargetTokenCache(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	userRepo.Users["u9"] = &model.User{ID: "u9"}
 	inv := &stubUserTokenInvalidator{}
-	h.SetUserTokenInvalidator(inv)
+	h.SetUserTokenInvalidatorForTest(inv)
 
 	rec := doPost(h.DeleteAccount, `{"userId":"u9"}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -196,7 +196,7 @@ func TestDeleteAccount_InvalidatesTargetTokenCache(t *testing.T) {
 func TestAccountsDelete_EmptyUserIDDoesNotInvalidate(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	inv := &stubUserTokenInvalidator{}
-	h.SetUserTokenInvalidator(inv)
+	h.SetUserTokenInvalidatorForTest(inv)
 
 	rec := doPost(h.AccountsDelete, `{}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)

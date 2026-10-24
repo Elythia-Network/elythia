@@ -31,7 +31,7 @@ func TestFinishPasskeySignin_PluginManagedRefused(t *testing.T) {
 			user := &model.User{ID: "u1", Token: &tok, ManagedByPlugin: tc.managed}
 			repo.Users["u1"] = user
 			repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: true}
-			h := NewHandler(repo)
+			h := NewHandler(repo, nil, nil, nil)
 			c := newCtx()
 			rec := c.Response().Writer.(*httptest.ResponseRecorder)
 			require.NoError(t, h.finishPasskeySignin(c, user, makeStubWebauthnCred()))

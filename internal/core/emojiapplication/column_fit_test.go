@@ -206,8 +206,8 @@ func TestResetQuotaRejectsUnstorableReason(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resets := &fakeResets{}
-			svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-			svc.SetQuotaResetRepo(resets)
+			svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+			svc.resets = resets
 
 			_, _, err := svc.ResetQuota("u1", "mod1", tc.reason)
 			require.ErrorIs(t, err, ErrTooLong)
@@ -219,8 +219,8 @@ func TestResetQuotaRejectsUnstorableReason(t *testing.T) {
 // 上限ちょうどのリセット理由は通る。
 func TestResetQuotaAcceptsReasonAtLimit(t *testing.T) {
 	resets := &fakeResets{}
-	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil)
-	svc.SetQuotaResetRepo(resets)
+	svc := NewService(newFakeApps(), &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil)
+	svc.resets = resets
 
 	_, row, err := svc.ResetQuota("u1", "mod1", runesOf(quotaResetReasonMaxLen, "あ"))
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestCreateRejectsUnstorableFileID(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			files := &countingFiles{}
-			svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil)
+			svc := NewService(newFakeApps(), &fakeEmojis{}, files, &fixedID{}, nil, nil, nil, nil)
 			in := validInput()
 			in.FileID = tc.fileID
 
@@ -291,18 +291,18 @@ func TestApplicationIDNULIsNotFound(t *testing.T) {
 
 	t.Run("cancel", func(t *testing.T) {
 		apps := newApps()
-		err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).Cancel(bad, "u1")
+		err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Cancel(bad, "u1")
 		require.ErrorIs(t, err, ErrNotFound)
 	})
 	t.Run("reject", func(t *testing.T) {
 		apps := newApps()
-		_, err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).
+		_, err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).
 			Reject(context.Background(), bad, "mod1", "理由")
 		require.ErrorIs(t, err, ErrNotFound)
 	})
 	t.Run("approve", func(t *testing.T) {
 		apps := newApps()
-		_, err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).
+		_, err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).
 			Approve(context.Background(), bad, "mod1")
 		require.ErrorIs(t, err, ErrNotFound)
 	})
@@ -319,7 +319,7 @@ func TestApplicationIDAtLimitReachesLookup(t *testing.T) {
 	apps := &countingApps{fakeApps: newFakeApps()}
 	id := strings.Repeat("a", applicationIDMaxRunes)
 
-	err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).Cancel(id, "u1")
+	err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Cancel(id, "u1")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Equal(t, []string{id}, apps.findCalls, "上限ちょうどの id を引く前に弾いている")
 }
@@ -328,7 +328,7 @@ func TestApplicationIDAtLimitReachesLookup(t *testing.T) {
 func TestApplicationIDNULDoesNotReachLookup(t *testing.T) {
 	apps := &countingApps{fakeApps: newFakeApps()}
 
-	err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil).Cancel("a\x00b", "u1")
+	err := NewService(apps, &fakeEmojis{}, &okFiles{}, &fixedID{}, nil, nil, nil, nil).Cancel("a\x00b", "u1")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Empty(t, apps.findCalls, "存在しえない id で申請を引いている")
 }

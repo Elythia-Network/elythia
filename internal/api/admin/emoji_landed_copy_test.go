@@ -67,7 +67,7 @@ func TestEmojiAdd_KeepsCopyWhenCreateLanded(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{
 		copyDF: systemCopy("sys_l1", "https://example/system/copy.png", "https://example/system/copy.webp", "image/webp"),
 	}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	// **warn を固定する。** 500 を返したのに絵文字は実在する、という食い違いは
 	// ここでしか伝わらない (運用側はこれを見ないと「失敗したはずなのに
@@ -99,7 +99,7 @@ func TestEmojiAdd_KeepsCopyWhenRereadFails(t *testing.T) {
 	fetcher := &fakeEmojiImageFetcher{
 		copyDF: systemCopy("sys_l2", "https://example/system/copy.png", "https://example/system/copy.webp", "image/webp"),
 	}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiAdd, `{"name":"happy","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -120,7 +120,7 @@ func TestEmojiCopy_KeepsDriveFileWhenCreateLanded(t *testing.T) {
 		ID: "df1", URL: "https://local.example/files/x.png", Type: "image/png",
 		WebpublicURL: &webURL, WebpublicType: &webType,
 	}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiCopy, `{"emojiId":"src1"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -236,7 +236,7 @@ func TestEmojiAdd_KeepsCopyWhenCopiedURLIsEmpty(t *testing.T) {
 	})
 	// 複製の URL が空 = 実体の URL を決められなかった状態。
 	fetcher := &fakeEmojiImageFetcher{copyDF: &model.DriveFile{ID: "sys_l7", Type: "image/png"}}
-	h.SetEmojiImageFetcher(fetcher)
+	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiAdd, `{"name":"happy","fileId":"f_img"}`, adminUser)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)

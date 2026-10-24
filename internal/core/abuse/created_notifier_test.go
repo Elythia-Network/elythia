@@ -87,7 +87,7 @@ func TestCreatedNotifier_NotifiesEveryChannel(t *testing.T) {
 	// 方法が email の通知先は、無効でも webhook の除外に入れない (指す webhook が無い)。
 	emailHookID := "wh_email"
 	require.NoError(t, recipients.Create(&model.AbuseReportNotificationRecipient{ID: "rc3", Method: "email", IsActive: false, SystemWebhookID: &emailHookID}))
-	n := abuse.NewCreatedNotifier(inApp, cnMods{mods: []*model.User{{ID: "mod1"}, {ID: "mod2"}}}, admin)
+	n := abuse.NewCreatedNotifier(inApp, cnMods{mods: []*model.User{{ID: "mod1"}, {ID: "mod2"}}}, admin, nil, nil)
 	instName := "Remote"
 	lookups := abuse.UserLookups{Instances: wpInstances{rows: []*model.Instance{{Host: "remote.example", Name: &instName}}}}
 	n.SetWebhook(hook, recipients, lookups, idGen)
@@ -136,7 +136,7 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 
 	// webhook だけ配線した (admin stream と通知欄が無い)。
 	hook := &cnWebhook{}
-	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n := abuse.NewCreatedNotifier(nil, nil, nil, nil, nil)
 	n.SetWebhook(hook, nil, abuse.UserLookups{}, idGen)
 	n.NotifyCreated(context.Background(), report, nil, nil)
 	require.Len(t, hook.calls, 1, "通知欄と admin stream が無くても webhook は出す")
@@ -148,7 +148,7 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 	inApp := &cnInApp{}
 	admin := &cnAdmin{}
 	hook2 := &cnWebhook{}
-	n2 := abuse.NewCreatedNotifier(inApp, cnMods{err: errors.New("db down")}, admin)
+	n2 := abuse.NewCreatedNotifier(inApp, cnMods{err: errors.New("db down")}, admin, nil, nil)
 	n2.SetWebhook(hook2, nil, abuse.UserLookups{}, idGen)
 	n2.NotifyCreated(context.Background(), report, nil, nil)
 	assert.Empty(t, admin.calls)
@@ -157,7 +157,7 @@ func TestCreatedNotifier_ChannelsAreIndependent(t *testing.T) {
 
 	// webhook が未配線なら何もしない (通知欄は出す)。
 	inApp3 := &cnInApp{}
-	abuse.NewCreatedNotifier(inApp3, nil, nil).NotifyCreated(context.Background(), report, nil, nil)
+	abuse.NewCreatedNotifier(inApp3, nil, nil, nil, nil).NotifyCreated(context.Background(), report, nil, nil)
 	assert.Len(t, inApp3.reports, 1)
 
 	// nil の notifier / 通報は何もしない。
@@ -224,7 +224,7 @@ func TestCreatedNotifier_SendsMailToRecipients(t *testing.T) {
 	mods := cnMods{mods: []*model.User{{ID: "mod_ok"}, {ID: "mod_inactive"}, {ID: "mod_unverified"}, {ID: "mod_noemail"}, {ID: "mod_hook"}}}
 	mail := &cnMail{}
 
-	n := abuse.NewCreatedNotifier(nil, mods, nil)
+	n := abuse.NewCreatedNotifier(nil, mods, nil, nil, nil)
 	n.SetMail(mail.send, recipients, users, cnMeta{meta: &model.Meta{Email: ptr("instance@example.test")}})
 	report := cnReport(t, idGen)
 	n.NotifyCreated(context.Background(), report, nil, nil)
@@ -247,7 +247,7 @@ func TestCreatedNotifier_NoMailWithoutAddresses(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	mail := &cnMail{}
-	n := abuse.NewCreatedNotifier(nil, cnMods{}, nil)
+	n := abuse.NewCreatedNotifier(nil, cnMods{}, nil, nil, nil)
 	n.SetMail(mail.send, testutil.NewMockAbuseReportNotificationRecipientRepository(), testutil.NewMockUserRepository(), cnMeta{meta: &model.Meta{}})
 	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
 	time.Sleep(50 * time.Millisecond)
@@ -266,7 +266,7 @@ func TestCreatedNotifier_MailDoesNotBlock(t *testing.T) {
 		<-release
 	}
 	email := "instance@example.test"
-	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n := abuse.NewCreatedNotifier(nil, nil, nil, nil, nil)
 	n.SetMail(blocking, nil, nil, cnMeta{meta: &model.Meta{Email: &email}})
 
 	done := make(chan struct{})
@@ -297,7 +297,7 @@ func TestCreatedNotifier_SkipsEmptyAddresses(t *testing.T) {
 	users := testutil.NewMockUserRepository()
 	users.Profiles[uid] = &model.UserProfile{UserID: uid, Email: &empty, EmailVerified: true}
 	mail := &cnMail{}
-	n := abuse.NewCreatedNotifier(nil, cnMods{mods: []*model.User{{ID: uid}}}, nil)
+	n := abuse.NewCreatedNotifier(nil, cnMods{mods: []*model.User{{ID: uid}}}, nil, nil, nil)
 	n.SetMail(mail.send, recipients, users, cnMeta{meta: &model.Meta{Email: &empty}})
 	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)
 	time.Sleep(50 * time.Millisecond)
@@ -312,7 +312,7 @@ func TestCreatedNotifier_SetMailKeepsWebhookRecipients(t *testing.T) {
 	hookRecipients := testutil.NewMockAbuseReportNotificationRecipientRepository()
 	require.NoError(t, hookRecipients.Create(&model.AbuseReportNotificationRecipient{ID: "h", Method: "webhook", IsActive: false, SystemWebhookID: &inactive}))
 	hook := &cnWebhook{}
-	n := abuse.NewCreatedNotifier(nil, nil, nil)
+	n := abuse.NewCreatedNotifier(nil, nil, nil, nil, nil)
 	n.SetWebhook(hook, hookRecipients, abuse.UserLookups{}, idGen)
 	n.SetMail((&cnMail{}).send, testutil.NewMockAbuseReportNotificationRecipientRepository(), testutil.NewMockUserRepository(), cnMeta{meta: &model.Meta{}})
 
@@ -327,11 +327,9 @@ func TestCreatedNotifier_MailRunsInTheBackgroundGroup(t *testing.T) {
 	require.NoError(t, err)
 	mail := &cnMail{}
 	email := "instance@example.test"
-	n := abuse.NewCreatedNotifier(nil, nil, nil)
-	n.SetMail(mail.send, nil, nil, cnMeta{meta: &model.Meta{Email: &email}})
 	g := bgwork.New()
-	n.SetBackground(g)
-	assert.True(t, n.HasBackground())
+	n := abuse.NewCreatedNotifier(nil, nil, nil, g, nil)
+	n.SetMail(mail.send, nil, nil, cnMeta{meta: &model.Meta{Email: &email}})
 	require.Zero(t, g.Stop(context.Background()))
 
 	n.NotifyCreated(context.Background(), cnReport(t, idGen), nil, nil)

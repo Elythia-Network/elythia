@@ -98,7 +98,7 @@ func newResolveHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	t.Helper()
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1"}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	h.SetWebAuthn(nil, &inMemorySKInternal{keys: map[string][]*model.UserSecurityKey{
 		"u1": {{ID: "AAEC", UserID: "u1"}, {ID: "AwQF", UserID: "u1"}},
 	}})
@@ -135,7 +135,7 @@ func TestResolvePasskeyKey_UnknownKey(t *testing.T) {
 		"invalid utf8": "AA\xffEC",
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := NewHandler(testutil.NewMockUserRepository())
+			h := NewHandler(testutil.NewMockUserRepository(), nil, nil, nil)
 			h.SetWebAuthn(nil, errSecurityKeyRepo{})
 			_, _, _, err := h.resolvePasskeyKey(id, credentialIDString)
 			assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
@@ -146,7 +146,7 @@ func TestResolvePasskeyKey_UnknownKey(t *testing.T) {
 		assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
 	})
 	t.Run("no key repository", func(t *testing.T) {
-		h := NewHandler(testutil.NewMockUserRepository())
+		h := NewHandler(testutil.NewMockUserRepository(), nil, nil, nil)
 		_, _, _, err := h.resolvePasskeyKey("AAEC", credentialIDString)
 		assert.ErrorIs(t, err, twofactor.ErrWebAuthnUnknownKey)
 	})
@@ -164,7 +164,7 @@ func TestResolvePasskeyKey_MissingIDIsVerificationFailure(t *testing.T) {
 
 func TestResolvePasskeyKey_DatabaseErrorsAreNotAuthFailures(t *testing.T) {
 	t.Run("key lookup", func(t *testing.T) {
-		h := NewHandler(testutil.NewMockUserRepository())
+		h := NewHandler(testutil.NewMockUserRepository(), nil, nil, nil)
 		h.SetWebAuthn(nil, errSecurityKeyRepo{})
 		_, _, _, err := h.resolvePasskeyKey("AAEC", credentialIDString)
 		assert.ErrorIs(t, err, assert.AnError)
@@ -309,7 +309,7 @@ func TestFinishPasskeySignin_NoProfile(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1"}
 	// プロフィールを登録しない → FindProfileByUserID が err
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
 	rec := c.Response().Writer.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1"}
@@ -321,7 +321,7 @@ func TestFinishPasskeySignin_PasswordlessNotEnabled(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1"}
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: false}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
 	rec := c.Response().Writer.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1"}
@@ -353,7 +353,7 @@ func TestFinishPasskeySignin_FailuresDoNotRecordIP(t *testing.T) {
 		if withProfile {
 			repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: passwordless}
 		}
-		h := NewHandler(repo)
+		h := NewHandler(repo, nil, nil, nil)
 		rec := &countingIPRecorder{}
 		h.SetIPRecorder(rec)
 		return h, rec
@@ -443,7 +443,7 @@ func TestFinishPasskeySignin_Success(t *testing.T) {
 	tok := "Tk-1"
 	repo.Users["u1"] = &model.User{ID: "u1", Token: &tok}
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: true}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
 	rec := c.Response().Writer.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1", Token: &tok}
@@ -464,7 +464,7 @@ func TestFinishPasskeySignin_DoesNotMigrateArgon2(t *testing.T) {
 	stored := "$argon2id$v=19$m=65536,t=3,p=4$unchanged$unchanged"
 	repo.Users["u1"] = &model.User{ID: "u1", Token: &tok}
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &stored, UsePasswordLessLogin: true}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
 	c.Set(pendingPasswordMigrationKey, pendingPasswordMigration{stored: stored, plain: "argon-pass"})
 	user := &model.User{ID: "u1", Token: &tok}
@@ -533,7 +533,7 @@ func TestFinishPasskeySignin_HooksFire(t *testing.T) {
 	tok := "Tk-2"
 	repo.Users["u1"] = &model.User{ID: "u1", Token: &tok}
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: true}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil, nil, nil)
 	skRepo := &recCounterRepo{}
 	h.SetWebAuthn(nil, skRepo) // WebAuthn nil でも skRepo だけ注入できる
 

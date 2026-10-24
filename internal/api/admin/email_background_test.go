@@ -16,8 +16,7 @@ import (
 func TestSendEmail_RunsInTheBackgroundGroup(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	g := bgwork.New()
-	h.SetBackground(g)
-	assert.True(t, h.HasBackground())
+	h.SetBackgroundForTest(g)
 	require.Zero(t, g.Stop(context.Background()))
 
 	assert.Equal(t, http.StatusNoContent, doPost(h.SendEmail, `{"to":"a@example.com","subject":"s","text":"t"}`, adminUser).Code)

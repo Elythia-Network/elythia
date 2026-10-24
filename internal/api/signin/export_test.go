@@ -1,5 +1,10 @@
 package signin
 
+import (
+	"github.com/elythia-network/elythia/internal/core/twofactor"
+	"github.com/elythia-network/elythia/internal/repository"
+)
+
 // SwapReadRandomBytes lets external tests stub the random source for the
 // passkey-context generator. Returns the previous value so callers can
 // restore it.
@@ -21,3 +26,13 @@ func NewPasskeyContextForTest() (string, error) { return newPasskeyContext() }
 
 // ValidPasskeyContextForTest exposes the format check.
 func ValidPasskeyContextForTest(s string) bool { return validPasskeyContext(s) }
+
+// 下の …ForTest は、構築子の必須の引数にした依存 (#3823) を、補助関数が作った
+// handler へ後から入れるための seam。同じパッケージのテストならフィールドへ直接
+// 代入するところを、外部パッケージ (signin_test) のテストから行う。
+
+// SetTOTPReplayGuardForTest replaces the TOTP replay guard.
+func (h *Handler) SetTOTPReplayGuardForTest(g twofactor.ReplayGuard) { h.totpReplayGuard = g }
+
+// SetMetaRepoForTest replaces the meta lookup for the mail locale fallback.
+func (h *Handler) SetMetaRepoForTest(r repository.MetaRepository) { h.metaRepo = r }

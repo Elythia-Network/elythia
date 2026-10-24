@@ -173,7 +173,7 @@ func newTestHandler() (*Handler, *mockUserRepo, *mockResetRepo) {
 	idGen, _ := id.NewGenerator("aidx")
 	userRepo := newMockUserRepo()
 	resetRepo := newMockResetRepo()
-	h := NewHandler(userRepo, resetRepo, idGen)
+	h := NewHandler(userRepo, resetRepo, idGen, nil, nil)
 	h.SetServerURL("https://example.com")
 	return h, userRepo, resetRepo
 }
@@ -231,7 +231,7 @@ func TestRequestReset_SendsJapaneseEmailFromMetaLangsWhenProfileLangUnset(t *tes
 	h, userRepo, resetRepo := newTestHandler()
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x", Langs: []string{"ja-JP"}}
-	h.SetMetaRepo(metaRepo)
+	h.metaRepo = metaRepo
 
 	email := "test@example.com"
 	userRepo.users["u1"] = &model.User{ID: "u1", Username: "testuser", UsernameLower: "testuser"}
@@ -259,7 +259,7 @@ func TestRequestReset_SendsJapaneseEmailWhenProfileLangIsJa(t *testing.T) {
 	h, userRepo, resetRepo := newTestHandler()
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x", Langs: []string{"en-US", "ja-JP"}}
-	h.SetMetaRepo(metaRepo)
+	h.metaRepo = metaRepo
 
 	email := "test@example.com"
 	ja := "ja-JP"
@@ -472,7 +472,7 @@ func TestReset_DBFailureIsNot4xx(t *testing.T) {
 	h := NewHandler(newMockUserRepo(), &failingResetRepo{
 		mockResetRepo: newMockResetRepo(),
 		err:           errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
-	}, idGen)
+	}, idGen, nil, nil)
 
 	rec := post(h.Reset, `{"token":"t","password":"newpassword"}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

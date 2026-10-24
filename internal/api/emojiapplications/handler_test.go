@@ -159,7 +159,7 @@ func TestListMineSurfacesFailure(t *testing.T) {
 // 先に見るので、nil のままでは認証も検証も一度も通らない — 名前だけ合っている
 // 空のテストになる。
 func wiredHandler(apps *stubApps) *emojiapplications.Handler {
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	return emojiapplications.NewHandler(svc, apps, nil)
 }
 
@@ -281,7 +281,7 @@ func TestCreateErrorMapping(t *testing.T) {
 			apps := &stubApps{}
 			lookup := &stubEmojiLookupWithHit{}
 			tc.setup(apps, lookup)
-			svc := emojiapplication.NewService(apps, lookup, ownedFile(), &stubIDGen{}, nil, nil)
+			svc := emojiapplication.NewService(apps, lookup, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 			h := emojiapplications.NewHandler(svc, apps, nil)
 
 			rec := doPost(h.Create, tc.body, alice)
@@ -303,7 +303,7 @@ func (s *stubEmojiLookupWithHit) FindByNameAndHost(string, *string) (*model.Emoj
 // DB 障害は 500 のまま残す (#2792)。not-found に丸めない。
 func TestCreateSurfacesInternalError(t *testing.T) {
 	apps := &stubApps{createErr: gorm.ErrInvalidDB}
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"name":"sushi","license":"自作","fileId":"f1"}`, alice)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -385,8 +385,8 @@ func TestCreateErrorMappingForFileAndLength(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			apps := &stubApps{}
-			svc := emojiapplication.NewService(apps, &stubEmojiLookup{},
-				&stubFiles{file: tc.file}, &stubIDGen{}, nil, nil)
+			svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, &stubFiles{file: tc.file}, &stubIDGen{}, nil, nil, nil, nil)
+
 			rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create, tc.body, alice)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Contains(t, rec.Body.String(), tc.expect)
@@ -434,8 +434,8 @@ func TestCreateRemoteErrorMapping(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			apps := &stubApps{}
-			svc := emojiapplication.NewService(apps, &stubRemoteLookup{known: tc.known},
-				ownedFile(), &stubIDGen{}, nil, nil)
+			svc := emojiapplication.NewService(apps, &stubRemoteLookup{known: tc.known}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
+
 			rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create, tc.body, alice)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Contains(t, rec.Body.String(), tc.expect)
@@ -447,8 +447,8 @@ func TestCreateRemoteErrorMapping(t *testing.T) {
 // リモートの申請が成功すると、取り込み元が応答に出ること。
 func TestCreateRemoteSucceeds(t *testing.T) {
 	apps := &stubApps{}
-	svc := emojiapplication.NewService(apps, &stubRemoteLookup{known: true},
-		ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubRemoteLookup{known: true}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
+
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"kind":"remote","name":"sushi","license":"x","remoteHost":"example.com","remoteName":"sushi_remote"}`, alice)
 
@@ -478,7 +478,7 @@ func TestCreateQuotaExceededReturns429(t *testing.T) {
 	}}
 	// **policy provider は配線しない。** stub が windows を無視するので、
 	// 配線しても何も検証していない。ここで見るのは HTTP の形だけ。
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"name":"sushi","license":"自作","fileId":"f1"}`, alice)
 
@@ -526,7 +526,7 @@ func TestCreateQuotaExceededClampsRetryAfter(t *testing.T) {
 		Used:    1,
 		RetryAt: time.Now().Add(-time.Hour),
 	}}
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"name":"sushi","license":"自作","fileId":"f1"}`, alice)
 
@@ -541,7 +541,7 @@ func TestCreateQuotaExceededClampsRetryAfter(t *testing.T) {
 // 誤解させる。実際に空くのはモデレーターが処理したときか、取り下げたとき。
 func TestCreatePendingLimitExceededReturns400(t *testing.T) {
 	apps := &stubApps{quotaErr: &repository.PendingLimitExceededError{Used: 5, Limit: 3}}
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"name":"sushi","license":"自作","fileId":"f1"}`, alice)
 
@@ -579,7 +579,7 @@ func TestCreateQuotaExceededWithoutRetryAtOmitsTime(t *testing.T) {
 		Used:   4,
 		// RetryAt はゼロ値 (審査待ちも満杯)。
 	}}
-	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil)
+	svc := emojiapplication.NewService(apps, &stubEmojiLookup{}, ownedFile(), &stubIDGen{}, nil, nil, nil, nil)
 	rec := doPost(emojiapplications.NewHandler(svc, apps, nil).Create,
 		`{"name":"sushi","license":"自作","fileId":"f1"}`, alice)
 

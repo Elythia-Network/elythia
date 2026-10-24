@@ -80,23 +80,12 @@ func TestRecord_FailureIsSwallowed(t *testing.T) {
 	assert.Len(t, repo.rows, 1, "書き込みは試みている")
 }
 
-// 未配線でも panic しない。**本番の未配線は起動時検査が知らせる。**
+// 未配線でも panic しない。**本番の未配線は TestBuiltHandlersHaveNoNilDependencies
+// (internal/server) が落とす (#3823)。**
 func TestRecord_UnwiredIsNoOp(t *testing.T) {
 	assert.NotPanics(t, func() {
 		iplookuplog.NewService(nil, nil).Record(iplookuplog.Entry{UserID: "m"})
 	})
 	var nilSvc *iplookuplog.Service
 	assert.NotPanics(t, func() { nilSvc.Record(iplookuplog.Entry{UserID: "m"}) })
-}
-
-// Wired は起動時検査が読む。片方だけ配線した状態も未配線として扱う。
-func TestWired(t *testing.T) {
-	gen, err := id.NewGenerator("aidx")
-	require.NoError(t, err)
-
-	assert.True(t, iplookuplog.NewService(&stubRepo{}, gen).Wired())
-	assert.False(t, iplookuplog.NewService(nil, gen).Wired())
-	assert.False(t, iplookuplog.NewService(&stubRepo{}, nil).Wired())
-	var nilSvc *iplookuplog.Service
-	assert.False(t, nilSvc.Wired())
 }
