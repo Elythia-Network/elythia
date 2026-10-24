@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
@@ -81,13 +82,15 @@ func noteRuleFacts(actor *model.User, text, cw *string, apNote *activitypub.Note
 	if actor != nil && actor.Host != nil {
 		in.Host = strings.ToLower(*actor.Host)
 	}
+	// 本文と CW のパターンは、禁止語 (containsProhibitedWords) と同じく、中の URL を
+	// 表示される形に直したものも同じ欄の一部として見る。タグは元の本文から取る。
 	sources := extractHashtagTagNames(apNote.Tag)
 	if text != nil {
-		in.Text = *text
+		in.Text = mfm.KeywordCheckTarget(*text)
 		sources = append(sources, *text)
 	}
 	if cw != nil {
-		in.CW = *cw
+		in.CW = mfm.KeywordCheckTarget(*cw)
 		sources = append(sources, *cw)
 	}
 	// **件数で打ち切らない。** note.tags は 32 個までしか持たないが、判定にそれを

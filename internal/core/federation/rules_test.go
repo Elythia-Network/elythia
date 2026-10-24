@@ -449,3 +449,39 @@ func TestIngestNote_RuleSensitiveDuplicateAttachmentsDoNotFold(t *testing.T) {
 	assert.Nil(t, note.CW)
 	assert.True(t, files.Files[note.FileIDs[0]].IsSensitive)
 }
+
+// 本文と CW のパターンは、禁止語と同じく URL を表示される形に直したものにも当たる。
+func TestIngestNote_RulePatternSeesNormalizedURL(t *testing.T) {
+	tests := []struct{ name, extra string }{
+		{name: "text", extra: `"content": "x", "_misskey_content": "see https://%62anned.example/"`},
+		{name: "cw", extra: `"content": "clean", "summary": "https://%62anned.example/"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, hits := newRules(t, &model.FederationRule{ID: "r1", Patterns: model.StringArray{"banned.example"}, Reject: true})
+			r, noteRepo, _ := newRuleResolver(t, svc)
+
+			note, _, err := r.IngestNoteWithCreated([]byte(remoteNoteBody(tc.extra)), "")
+			require.NoError(t, err)
+			assert.Nil(t, note)
+			assert.Empty(t, noteRepo.Notes)
+			require.Len(t, hits.hits, 1)
+		})
+	}
+}
+
+// 編集の取り込みでも同じ。
+func TestUpdateRemoteNote_RulePatternSeesNormalizedURL(t *testing.T) {
+	svc, hits := newRules(t, &model.FederationRule{ID: "r1", Patterns: model.StringArray{"banned.example"}, Reject: true})
+	r, noteRepo, _ := newRuleUpdateResolver(t, svc)
+
+	body := `{"@context":"https://www.w3.org/ns/activitystreams",
+		"id":"https://remote.example/notes/n1","type":"Note",
+		"attributedTo":"https://remote.example/users/alice",
+		"content":"x","_misskey_content":"see https://%62anned.example/"}`
+	_, err := r.UpdateRemoteNote([]byte(body), "")
+	require.NoError(t, err)
+	assert.Empty(t, noteRepo.UpdateFieldsCalls)
+	assert.Equal(t, "original", *noteRepo.Notes["n1"].Text)
+	require.Len(t, hits.hits, 1)
+}
