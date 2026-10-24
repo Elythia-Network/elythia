@@ -171,11 +171,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (wiring-check などのゲートが照合する文字列を変えないため)。repository は作っても
 	// DB に触らないので、作る位置が下の EnsureInitial などより前に移っても、DB の文の
 	// 順は変わらない。
-	// lifecycle は Server が持つ部品の一覧 (#3699) を指す。登録は s.addStartCloser などの
-	// 値から作る登録か、値を持たない s.addWorker で行う (docs/architecture.md 4.3)。構築では
-	// 登録するだけで、起動はStartBackgroundが一覧の順に行う(#3703)。
-	// caches はキャッシュの一覧 (#3721) を指す。登録は s.addCache で行う。
-	w := &wiring{repos: s.buildRepos(), lifecycle: &s.lifecycle, caches: &s.caches}
+	// 部品の一覧 (#3699) への登録は s.addStartCloser などの値から作る登録か、値を持たない
+	// s.addWorker で行う (docs/architecture.md 4.3)。構築では登録するだけで、起動は
+	// StartBackground が一覧の順に行う (#3703)。キャッシュの一覧 (#3721) への登録は
+	// s.addCache で行う。
+	w := &wiring{repos: s.buildRepos()}
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
 	cachedMeta := w.repos.cachedMeta

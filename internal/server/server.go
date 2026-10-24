@@ -148,7 +148,7 @@ type Server struct {
 	// ポインタではなく値で持つ (ゼロ値が空の一覧)。
 	lifecycle lifecycle
 	// caches は、この世代のキャッシュの名前付きの一覧 (#3721)。登録した順に捨てる。
-	// 本番ではまだ誰も捨てない (段階 (6) で使う)。lifecycle と同じく値で持つ。
+	// 本番では捨てない (#3802)。登録漏れの検査 (#3777) の土台。lifecycle と同じく値で持つ。
 	caches       cacheList
 	shutdownOnce sync.Once
 	shutdownErr  error

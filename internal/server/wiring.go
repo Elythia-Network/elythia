@@ -19,27 +19,20 @@ package server
 // argument, from the variable that holds the earlier builder's result, never
 // by reading the earlier field back from w (docs/architecture.md 4.2).
 //
-// lifecycle points at the Server's ordered list of the named parts that have
-// to be stopped, and started when they have a start (#3699, #3703,
-// docs/architecture.md 4.3), set in the literal that defines w. Nothing reads
-// it yet: the parts are added through the registrations of Server
-// (s.addStartCloser and the others built from the part value, or
-// s.addWorker) and started and stopped through s.lifecycle. It is kept for
-// stage 6 of #3666, which narrows what a maintenance rebuild recreates.
+// The ordered lists of the parts to start and stop (#3699, #3703,
+// docs/architecture.md 4.3) and of the caches that can drop what they hold
+// (#3721, docs/architecture.md 4.4) live on the Server, not here: the parts
+// are added through s.addStartCloser and the other registrations and the
+// caches through s.addCache.
 //
-// caches points at the Server's ordered list of the named caches that can
-// drop what they hold in this process (#3721, docs/architecture.md 4.4), the
-// same way. The caches are added through s.addCache.
-//
-// 今は誰も読まないので、消してもテストは落ちない。段階 (6) で、作り直す範囲を
-// 部品の単位に絞るときに使う。
+// 以前は 2 つの一覧を指す lifecycle / caches も持っていた。メンテナンスで作り直す
+// 範囲を部品の単位に絞るとき (#3666 段階 (6)) に使う予定だったが、作り直しが短いので
+// 狭めないと決め (#3802)、読まれないまま残っていたので消した (#3808)。
 type wiring struct {
-	repos     repos
-	core      core
-	fed       fed
-	queue     queueProcs
-	stream    streamParts
-	handlers  apiHandlers
-	lifecycle *lifecycle
-	caches    *cacheList
+	repos    repos
+	core     core
+	fed      fed
+	queue    queueProcs
+	stream   streamParts
+	handlers apiHandlers
 }
