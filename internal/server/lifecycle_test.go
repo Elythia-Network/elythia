@@ -256,7 +256,8 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		env.requireNoPatterns(t, "cycle %d: 古い世代の購読が残っている", cycle)
 		assert.Equal(t, http.StatusServiceUnavailable, serveStatus(t, sup, http.MethodGet, "/healthz"))
 
-		require.NoError(t, sup.startGeneration(), "cycle %d", cycle)
+		_, err := sup.startGeneration()
+		require.NoError(t, err, "cycle %d", cycle)
 		sup.genMu.Lock()
 		newSrv := sup.gen.srv
 		sup.genMu.Unlock()

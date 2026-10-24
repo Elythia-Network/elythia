@@ -209,7 +209,7 @@ func TestSupervisor_FailedStartStopsEveryPart(t *testing.T) {
 	failStart = true
 	mu.Unlock()
 	started := time.Now()
-	err = sup.startGeneration()
+	_, err = sup.startGeneration()
 	elapsed := time.Since(started)
 	require.ErrorIs(t, err, errLifecycleStart)
 	assert.ErrorContains(t, err, `part "deliveryHealth" panicked`)

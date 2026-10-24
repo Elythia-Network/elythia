@@ -37,6 +37,11 @@ type fakeGenerations struct {
 	closeDB  func(*gorm.DB) error
 	// hook, when set, is registered as a shutdown hook of every generation.
 	hook func(context.Context)
+	// start, when set, is registered as the start of a part of every
+	// generation.
+	start func()
+	// openDelay and buildDelay make OpenDB and NewServer take that long.
+	openDelay, buildDelay time.Duration
 }
 
 func newFakeGenerations(t *testing.T) *fakeGenerations {
@@ -46,12 +51,14 @@ func newFakeGenerations(t *testing.T) *fakeGenerations {
 func (f *fakeGenerations) deps(drain time.Duration) SupervisorDeps {
 	return SupervisorDeps{
 		OpenDB: func(*config.Config) (*gorm.DB, error) {
+			time.Sleep(f.openDelay)
 			if f.openErr != nil {
 				return nil, f.openErr
 			}
 			return &gorm.DB{}, nil
 		},
 		NewServer: func(cfg *config.Config, _ *gorm.DB, _ *cache.RedisClients) (*Server, error) {
+			time.Sleep(f.buildDelay)
 			if f.buildErr != nil {
 				return nil, f.buildErr
 			}
@@ -67,6 +74,9 @@ func (f *fakeGenerations) deps(drain time.Duration) SupervisorDeps {
 			srv := &Server{echo: e, config: cfg, role: config.RoleServer}
 			if f.hook != nil {
 				srv.addPart("testPart", nil, f.hook)
+			}
+			if f.start != nil {
+				srv.addPartWithStart("testStartPart", nil, f.start, func(context.Context) {})
 			}
 			return srv, nil
 		},
@@ -259,17 +269,20 @@ func TestSupervisor_FailedRebuildKeepsStandbyAndCanRetry(t *testing.T) {
 	sup.stopGeneration(http.HandlerFunc(unavailable))
 
 	f.openErr = errors.New("db down")
-	assert.ErrorContains(t, sup.startGeneration(), "db down")
+	_, err = sup.startGeneration()
+	assert.ErrorContains(t, err, "db down")
 	code, _ := getBody(t, sup, "/healthz")
 	assert.Equal(t, http.StatusServiceUnavailable, code)
 
 	f.openErr = nil
-	require.NoError(t, sup.startGeneration())
+	_, err = sup.startGeneration()
+	require.NoError(t, err)
 	code, body := getBody(t, sup, "/gen")
 	assert.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "2\n", body, "作り直した世代が応答していない")
 	// 動いている世代があるときは作り直さない。
-	require.NoError(t, sup.startGeneration())
+	_, err = sup.startGeneration()
+	require.NoError(t, err)
 	assert.EqualValues(t, 2, f.built.Load())
 }
 

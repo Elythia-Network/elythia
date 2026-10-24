@@ -303,6 +303,7 @@ func TestMaintenance_StartingDuringMaintenanceDoesNotOpenTheDB(t *testing.T) {
 // back by itself once the database is reachable again.
 func TestMaintenance_FailedResumeKeepsMaintenanceAndRetries(t *testing.T) {
 	r := newMaintenanceRig(t)
+	logs := captureDefaultLog(t)
 	deps := r.deps("proc-a")
 	var failOpen atomic.Bool
 	open := deps.OpenDB
@@ -325,6 +326,12 @@ func TestMaintenance_FailedResumeKeepsMaintenanceAndRetries(t *testing.T) {
 		return err == nil && len(reports) == 1 && reports[0].State == maintmode.ProcResumeFailed &&
 			reports[0].Error != ""
 	}, 5*time.Second, 20*time.Millisecond)
+	// 失敗したときも、走った段の時間をログに出す (#3802)。
+	failed := logLines(logs.String(), `"msg":"maintenance: failed to build a new server generation; will retry"`)
+	require.NotEmpty(t, failed)
+	for _, key := range []string{`"openDB":`, `"construct":`, `"startBackground":`} {
+		assert.Contains(t, failed[0], key)
+	}
 
 	failOpen.Store(false)
 	waitProc(t, sup, maintmode.ProcRunning)

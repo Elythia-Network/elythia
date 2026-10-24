@@ -434,7 +434,8 @@ func (m *maintTracker) enter(ctx context.Context) {
 	m.retryAt = time.Time{}
 	m.retryWait = 0
 	m.mu.Unlock()
-	slog.Info("maintenance: drained", "inFlight", rep.InFlight, "openConns", rep.OpenConns, "err", rep.Err)
+	slog.Info("maintenance: drained", "inFlight", rep.InFlight, "openConns", rep.OpenConns, "err", rep.Err,
+		"drain", rep.Drain, "stopBackground", rep.StopBackground, "closeDB", rep.CloseDB)
 }
 
 func (m *maintTracker) resume(ctx context.Context) {
@@ -447,7 +448,7 @@ func (m *maintTracker) resume(ctx context.Context) {
 	m.mu.Unlock()
 	m.report(ctx)
 	slog.Info("maintenance: over; building a new server generation")
-	err := m.sup.startGeneration()
+	rep, err := m.sup.startGeneration()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err != nil {
@@ -461,7 +462,8 @@ func (m *maintTracker) resume(ctx context.Context) {
 			m.retryWait = min(m.retryWait*2, resumeRetryMax)
 		}
 		m.retryAt = time.Now().Add(m.retryWait)
-		slog.Error("maintenance: failed to build a new server generation; will retry", "err", err, "retryIn", m.retryWait)
+		slog.Error("maintenance: failed to build a new server generation; will retry", "err", err, "retryIn", m.retryWait,
+			"openDB", rep.OpenDB, "construct", rep.Construct, "startBackground", rep.StartBackground)
 		return
 	}
 	m.proc = maintmode.ProcRunning
@@ -469,7 +471,7 @@ func (m *maintTracker) resume(ctx context.Context) {
 	m.lastErr = ""
 	m.retryAt = time.Time{}
 	m.retryWait = 0
-	slog.Info("maintenance: serving again")
+	slog.Info("maintenance: serving again", "openDB", rep.OpenDB, "construct", rep.Construct, "startBackground", rep.StartBackground)
 }
 
 // report writes this process's report. Failures are logged only: the next
