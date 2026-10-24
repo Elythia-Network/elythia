@@ -818,6 +818,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// block で、ブロックされた側のリストからブロックした人を外す
 	// (本家 removeFromList、#3330)。
 	blockingService.SetUserListRepo(userListRepo)
+	// block で、互いの持つチャットルームへの招待を消す (本家 removeRoomInvitations)。
+	blockingService.SetRoomInvitationRemover(chatRepo)
 	mutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	renoteMutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetBlockingChecker(blockingService)
@@ -4317,6 +4319,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"ブロックしても既存のフォローが外れず、相手のサーバーへ Undo(Follow) / Reject(Follow) も届かない"},
 		{"blocking.userListRepo", blockingService.HasUserListRepo(),
 			"ブロックしても、ブロックされた側のリストにブロックした人が残り、リストのタイムラインに投稿が流れ続ける"},
+		{"blocking.roomInvitationRemover", blockingService.HasRoomInvitationRemover(),
+			"ブロックしても互いのチャットルームへの招待が残り、ブロックした相手のルームに参加できる"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
 		{"hashtags.detailExtras", hashtagsHandler.HasDetailExtras(),
 			"hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},

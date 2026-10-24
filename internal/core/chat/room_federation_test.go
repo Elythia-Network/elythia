@@ -180,6 +180,49 @@ func TestAddMemberViaAP_RoomFullKeepsInvitation(t *testing.T) {
 	assert.NoError(t, err, "招待を消した")
 }
 
+// owner とのあいだにどちらかの向きのブロックがあれば、Accept でも参加させず、
+// 招待を残す (ローカルの invitations/accept・rooms/join と同じ)。判定が引けない
+// ときも参加させず、ErrChatBlocked ではない (再送させる) エラーで返す。
+func TestAddMemberViaAP_BlockedEitherWayKeepsInvitation(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		blocker, blockee string
+	}{
+		{name: "member blocks owner", blocker: "remoteUser", blockee: "remoteOwner"},
+		{name: "owner blocks member", blocker: "remoteOwner", blockee: "remoteUser"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo := newRoomFedService(t)
+			seedRemoteRoom(t, repo, "room1", "remoteOwner")
+			require.NoError(t, repo.CreateInvitation(&model.ChatRoomInvitation{ID: "inv1", UserID: "remoteUser", RoomID: "room1"}))
+			blocks := testutil.NewMockBlockingRepository()
+			require.NoError(t, blocks.Create(&model.Blocking{ID: "b1", BlockerID: tc.blocker, BlockeeID: tc.blockee}))
+			svc.SetBlockingRepo(blocks)
+
+			err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
+			require.ErrorIs(t, err, corechat.ErrChatBlocked)
+			_, err = repo.FindMembership("remoteUser", "room1")
+			assert.Error(t, err, "ブロックの間柄で参加させた")
+			_, err = repo.FindInvitation("remoteUser", "room1")
+			assert.NoError(t, err, "招待を消した")
+		})
+	}
+	t.Run("lookup error", func(t *testing.T) {
+		svc, repo := newRoomFedService(t)
+		seedRemoteRoom(t, repo, "room1", "remoteOwner")
+		require.NoError(t, repo.CreateInvitation(&model.ChatRoomInvitation{ID: "inv1", UserID: "remoteUser", RoomID: "room1"}))
+		blocks := testutil.NewMockBlockingRepository()
+		blocks.ExistsErr = errors.New("db down")
+		svc.SetBlockingRepo(blocks)
+
+		err := svc.AddMemberViaAP(remoteRoomURI("room1"), "remoteUser")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, corechat.ErrChatBlocked, "一過性エラーを block 判定に丸めない")
+		_, err = repo.FindMembership("remoteUser", "room1")
+		assert.Error(t, err)
+	})
+}
+
 // owner 宛の Accept は membership 行を作らない (#2858)。owner は暗黙のメンバー
 // なので行を持たず、譲渡で招待が残っていた場合にここで実体化させない。
 func TestAddMemberViaAP_OwnerDoesNotCreateMembership(t *testing.T) {

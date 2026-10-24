@@ -49,7 +49,31 @@ type Service struct {
 	// userListRepo は block で、ブロックされた側のリストからブロックした人を
 	// 外すのに使う (#3330)。nil なら外さない。
 	userListRepo repository.UserListRepository
+	// roomInvitations は block で、互いの持つチャットルームへの招待を消すのに
+	// 使う。nil なら消さない。
+	roomInvitations RoomInvitationRemover
 }
+
+// RoomInvitationRemover deletes chat room invitations on behalf of a block.
+// repository.ChatRepository implements it.
+type RoomInvitationRemover interface {
+	// DeleteInvitationsToOwnedRooms deletes the invitations of userID to every
+	// room owned by ownerID.
+	DeleteInvitationsToOwnedRooms(ownerID, userID string) error
+}
+
+// SetRoomInvitationRemover wires the chat room invitation cleanup used by Block.
+//
+// 本家 UserBlockingService.block は removeRoomInvitations を双方向で呼び、
+// どちらかが持つルームへの、もう一方への招待を消す。消さないと、ブロックした
+// 後もブロックした人のルームの招待を受けて参加できてしまう (逆も同じ)。
+func (s *Service) SetRoomInvitationRemover(r RoomInvitationRemover) {
+	s.roomInvitations = r
+}
+
+// HasRoomInvitationRemover reports whether the room invitation cleanup was
+// wired. 起動時検査に使う。
+func (s *Service) HasRoomInvitationRemover() bool { return s.roomInvitations != nil }
 
 // SetUserListRepo wires the user list repository used by Block to remove the
 // blocker from the blockee's lists (#3330).
@@ -235,6 +259,10 @@ func (s *Service) block(blockerID, blockeeID string, silent bool) (*model.Blocki
 	// ブロックされた側のリストからブロックした人を外す。本家 removeFromList と
 	// 同じく、向きはこの 1 方向だけで、silent でも外し、イベントは出さない。
 	s.removeFromLists(blockeeID, blockerID)
+	// 互いの持つチャットルームへの招待を消す (本家 removeRoomInvitations)。
+	// リストと同じく、失敗しても block 自体は成立させる。
+	s.removeRoomInvitations(blockerID, blockeeID)
+	s.removeRoomInvitations(blockeeID, blockerID)
 
 	// 保留中の follow request を双方向で取り消す。upstream
 	// UserBlockingService.block の cancelRequest 相当。
@@ -296,6 +324,18 @@ func (s *Service) removeFromLists(listOwnerID, userID string) {
 			slog.Warn("block: remove from list failed",
 				"list", l.ID, "user", userID, "err", err)
 		}
+	}
+}
+
+// removeRoomInvitations deletes the invitations of userID to the chat rooms
+// owned by roomOwnerID.
+func (s *Service) removeRoomInvitations(roomOwnerID, userID string) {
+	if s.roomInvitations == nil {
+		return
+	}
+	if err := s.roomInvitations.DeleteInvitationsToOwnedRooms(roomOwnerID, userID); err != nil {
+		slog.Warn("block: remove chat room invitations failed",
+			"owner", roomOwnerID, "user", userID, "err", err)
 	}
 }
 

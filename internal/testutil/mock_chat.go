@@ -515,6 +515,20 @@ func (m *MockChatRepository) DeleteInvitation(id string) error {
 	return nil
 }
 
+func (m *MockChatRepository) DeleteInvitationsToOwnedRooms(ownerID, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, inv := range m.Invitations {
+		if inv.UserID != userID {
+			continue
+		}
+		if room, ok := m.Rooms[inv.RoomID]; ok && room.OwnerID == ownerID {
+			delete(m.Invitations, id)
+		}
+	}
+	return nil
+}
+
 func (m *MockChatRepository) UpdateInvitation(inv *model.ChatRoomInvitation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

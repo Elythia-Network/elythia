@@ -24,7 +24,7 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 206
+const criticalWiringCount = 207
 
 // noteHiderMissingEffect is the effect shared by the per-handler noteHider
 // entries (#3786).

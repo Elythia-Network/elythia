@@ -876,11 +876,8 @@ func (s *Service) localRoomIDFromAPURI(roomURI string) string {
 // room の実在 / owner 自身への招待でない / 既存メンバーでない / 既存招待で
 // ない / 定員 (upstream MAX_ROOM_MEMBERS)。
 //
-// 加えて **invitee が room owner (= 招待者) を block していれば招待ごと拒否する**。
-// upstream の createRoomInvitation は `// TODO: cehck block` のまま block を見ないが、
-// 1-on-1 DM の受信 (CreateMessageViaAP) は見ており、同じ chat 機能の中で AP 経路の
-// 招待だけが無制限に通っていた (通知も発火する)。向きは DM と揃えて
-// `Exists(invitee, owner)` = 受け手が送り手を block しているか。
+// 加えて **invitee と room owner (= 招待者) のどちらかが相手を block していれば
+// 招待ごと拒否する** (本家 createRoomInvitation と同じく両方の向きを見る)。
 //
 // **chatScope (canChat) は見ない。** upstream で chatScope を評価するのは
 // createMessageToUser だけで、room の招待は対象外 (createRoomInvitation にも
@@ -924,17 +921,15 @@ func (s *Service) CreateInvitationViaAP(roomURI, inviteeUserID string) error {
 	} else if !repository.IsNotFound(err) {
 		return err
 	}
-	// invitee が owner を block していれば招待を作らない (通知も出さない)。
-	// CreateMessageViaAP の checkBlocked(to, from) gate と同じ形。
-	if s.blockingRepo != nil {
-		blocked, berr := s.blockingRepo.Exists(inviteeUserID, room.OwnerID)
-		if berr != nil {
-			// fail-closed: block 判定が引けない間は招待を作らない。
-			return fmt.Errorf("chat block check: %w", berr)
-		}
-		if blocked {
-			return ErrChatBlocked
-		}
+	// invitee と owner のどちらかが相手を block していれば招待を作らない (通知も
+	// 出さない)。本家 createRoomInvitation が両方の向きを見るのと揃える。
+	blocked, berr := s.BlockedEitherWay(inviteeUserID, room.OwnerID)
+	if berr != nil {
+		// fail-closed: block 判定が引けない間は招待を作らない。
+		return fmt.Errorf("chat block check: %w", berr)
+	}
+	if blocked {
+		return ErrChatBlocked
 	}
 	// 定員 (upstream MAX_ROOM_MEMBERS)。列挙の失敗は fail-closed にする
 	// (数えられないまま作ると定員判定が素通りする)。
@@ -1000,6 +995,16 @@ func (s *Service) AddMemberViaAP(roomURI, userID string) error {
 	if room.OwnerID == userID {
 		_ = s.repo.DeleteInvitation(inv.ID)
 		return nil
+	}
+	// owner とのあいだにどちらかの向きのブロックがあれば参加させない (ローカルの
+	// invitations/accept・rooms/join と同じ)。招待は残し、ErrChatBlocked は再送しない。
+	// 判定が引けないときは参加させずに返す (再送で直りうるので生のエラーのまま)。
+	blocked, berr := s.BlockedEitherWay(userID, room.OwnerID)
+	if berr != nil {
+		return fmt.Errorf("chat block check: %w", berr)
+	}
+	if blocked {
+		return ErrChatBlocked
 	}
 	if _, err := s.repo.FindMembership(userID, roomID); err != nil {
 		// **DB 障害を「まだメンバーでない」に丸めない** (#2792)。丸めると満員の
@@ -2190,6 +2195,24 @@ func (s *Service) packUsersStream(users ...*model.User) []*entity.UserLite {
 		s.lites.FillLites(present, lites)
 	}
 	return out
+}
+
+// BlockedEitherWay reports whether either user blocks the other. It is false
+// when the blocking repository is unwired.
+//
+// 本家 createRoomInvitation は招待を作る前に、招待される側が招待する側を
+// ブロックしているか (blocked)、招待する側が招待される側をブロックしているか
+// (blocking) の両方を見る。どちらも素の Error で、応答は同じ 500 になるので、
+// 向きを区別せずに返す。
+func (s *Service) BlockedEitherWay(userA, userB string) (bool, error) {
+	if s.blockingRepo == nil {
+		return false, nil
+	}
+	blocked, err := s.blockingRepo.Exists(userB, userA)
+	if err != nil || blocked {
+		return blocked, err
+	}
+	return s.blockingRepo.Exists(userA, userB)
 }
 
 // HasBlockingRepo reports whether the blocking repository was wired.
