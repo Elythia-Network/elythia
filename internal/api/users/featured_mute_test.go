@@ -22,11 +22,18 @@ func fmStr(s string) *string { return &s }
 func TestFeaturedNotes_MuteIgnoresAuthorLikeUpstream(t *testing.T) {
 	for _, path := range []string{"ranking", "sql"} {
 		t.Run(path, func(t *testing.T) {
-			h, userRepo, noteRepo := newExtraHandler(t)
+			ch := "ch1"
+			mutingRepo := testutil.NewMockMutingRepository()
+			require.NoError(t, mutingRepo.Create(&model.Muting{ID: "mu1", MuterID: "v", MuteeID: "t"}))
+			require.NoError(t, mutingRepo.Create(&model.Muting{ID: "mu2", MuterID: "v", MuteeID: "m"}))
+			blockingRepo := testutil.NewMockBlockingRepository()
+			require.NoError(t, blockingRepo.Create(&model.Blocking{ID: "bl1", BlockerID: "b", BlockeeID: "v"}))
+			channelMutingRepo := testutil.NewMockChannelMutingRepository()
+			require.NoError(t, channelMutingRepo.Create(&model.ChannelMuting{ID: "cm1", UserID: "v", ChannelID: ch}))
+			h, userRepo, noteRepo := newExtraHandlerWith(t, extraRepos{channelMuting: channelMutingRepo, muting: mutingRepo, blocking: blockingRepo})
 			h.SetUserRepo(userRepo)
 			host := "remote.example"
 			target := &model.User{ID: "t", Host: &host}
-			ch := "ch1"
 			notes := []*model.Note{
 				// 本人のノート: 出る。
 				{ID: "n1", UserID: "t", Visibility: "public", User: target},
@@ -55,16 +62,6 @@ func TestFeaturedNotes_MuteIgnoresAuthorLikeUpstream(t *testing.T) {
 				h.SetFeaturedRanking(&fakePerUserReader{perUser: map[string][]string{"t": ids}})
 			}
 
-			mutingRepo := testutil.NewMockMutingRepository()
-			require.NoError(t, mutingRepo.Create(&model.Muting{ID: "mu1", MuterID: "v", MuteeID: "t"}))
-			require.NoError(t, mutingRepo.Create(&model.Muting{ID: "mu2", MuterID: "v", MuteeID: "m"}))
-			h.SetMutingRepo(mutingRepo)
-			blockingRepo := testutil.NewMockBlockingRepository()
-			require.NoError(t, blockingRepo.Create(&model.Blocking{ID: "bl1", BlockerID: "b", BlockeeID: "v"}))
-			h.SetBlockingRepo(blockingRepo)
-			channelMutingRepo := testutil.NewMockChannelMutingRepository()
-			require.NoError(t, channelMutingRepo.Create(&model.ChannelMuting{ID: "cm1", UserID: "v", ChannelID: ch}))
-			h.SetChannelMutingRepo(channelMutingRepo)
 			userRepo.Profiles["v"] = &model.UserProfile{UserID: "v", MutedInstances: datatypes.JSON([]byte(fmt.Sprintf("[%q]", host)))}
 
 			rec := postExtra(h.FeaturedNotes, `{"userId":"t"}`, &model.User{ID: "v"})
@@ -79,12 +76,11 @@ func TestFeaturedNotes_MuteIgnoresAuthorLikeUpstream(t *testing.T) {
 // userId の本人なので、先の早期 return (isBlockedByTarget) と、ブロックの
 // DropUserRelated(..., false) のどちらか一方が残っていれば通る。両方を外すと落ちる。
 func TestFeaturedNotes_BlockStillChecksAuthor(t *testing.T) {
-	h, _, noteRepo := newExtraHandler(t)
-	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "t", Visibility: "public", User: &model.User{ID: "t"}}
-	h.SetFeaturedRanking(&fakePerUserReader{perUser: map[string][]string{"t": {"n1"}}})
 	blockingRepo := testutil.NewMockBlockingRepository()
 	require.NoError(t, blockingRepo.Create(&model.Blocking{ID: "bl1", BlockerID: "t", BlockeeID: "v"}))
-	h.SetBlockingRepo(blockingRepo)
+	h, _, noteRepo := newExtraHandlerWith(t, extraRepos{blocking: blockingRepo})
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "t", Visibility: "public", User: &model.User{ID: "t"}}
+	h.SetFeaturedRanking(&fakePerUserReader{perUser: map[string][]string{"t": {"n1"}}})
 	rec := postExtra(h.FeaturedNotes, `{"userId":"t"}`, &model.User{ID: "v"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Empty(t, featRespIDs(t, rec.Body.Bytes()))

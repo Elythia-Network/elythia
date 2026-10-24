@@ -36,7 +36,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	h := NewHandler(svc, fSvc, noteRepo, idGen)
+	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// followingRepo + followRequestRepo を service と共有する形で wire
 	// しておく (#1144 で users/{followers,following} の relation flag +
 	// pending request flag の batch lookup が handler 直配線の repo 経由に
@@ -346,7 +346,7 @@ func newTestHandlerWithRemoteResolver(t *testing.T, resolver coreuser.RemoteUser
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	svc.SetRemoteUserResolver(resolver)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	return NewHandler(svc, fSvc, noteRepo, idGen), userRepo
+	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil), userRepo
 }
 
 func TestShow_ByUsernameWithHost_RemoteResolveSucceeds(t *testing.T) {
@@ -658,11 +658,11 @@ func TestShow_ViewerDependentFields(t *testing.T) {
 	// blockingリポジトリをセット (viewerがtargetをブロック)
 	blockingRepo := testutil.NewMockBlockingRepository()
 	blockingRepo.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "viewer1", BlockeeID: "target1"}
-	h.SetBlockingRepo(blockingRepo)
+	h.blockingRepo = blockingRepo
 
 	// mutingリポジトリをセット
 	mutingRepo := testutil.NewMockMutingRepository()
-	h.SetMutingRepo(mutingRepo)
+	h.mutingRepo = mutingRepo
 
 	// followRequestリポジトリをセット
 	followRequestRepo := testutil.NewMockFollowRequestRepository()
@@ -871,7 +871,7 @@ func TestSearch_BatchFetchesProfiles(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen)
-	h := NewHandler(svc, fSvc, noteRepo, idGen)
+	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	for i := 0; i < 5; i++ {
 		uid := fmt.Sprintf("searchuser-%d", i)
@@ -978,7 +978,7 @@ func TestNotes_ExcludesTargetFromMute(t *testing.T) {
 	// viewer1 が target (user1) を mute している。
 	mutingRepo := testutil.NewMockMutingRepository()
 	require.NoError(t, mutingRepo.Create(&model.Muting{ID: "m1", MuterID: "viewer1", MuteeID: "user1"}))
-	h.SetMutingRepo(mutingRepo)
+	h.mutingRepo = mutingRepo
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"userId":"user1"}`))
@@ -1274,8 +1274,8 @@ func TestFollowers_PopulatesIsFollowedFromViewer(t *testing.T) {
 	require.NoError(t, err)
 	// 本番と同じく関係の repo をすべて配線する (未配線の関係は、一覧共通の
 	// packer が項目ごと出さない)。
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
-	h.SetMutingRepo(testutil.NewMockMutingRepository())
+	h.blockingRepo = testutil.NewMockBlockingRepository()
+	h.mutingRepo = testutil.NewMockMutingRepository()
 	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
 
 	rec := postStub(h.Followers, `{"userId":"user1"}`, repo.Users["bob"])
@@ -1573,7 +1573,7 @@ func TestFollowers_BatchFetchesUsers(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen)
-	h := NewHandler(svc, fSvc, noteRepo, idGen)
+	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// target user (followee)
 	repo.Users["target"] = &model.User{
@@ -2116,7 +2116,7 @@ func newHandlerWithFailingNoteRepo(t *testing.T) *Handler {
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
 	addTestUser(userRepo)
-	return NewHandler(svc, fSvc, noteRepo, idGen)
+	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newHandlerWithFailingSearch(t *testing.T) *Handler {
@@ -2131,7 +2131,7 @@ func newHandlerWithFailingSearch(t *testing.T) *Handler {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	return NewHandler(svc, fSvc, noteRepo, idGen)
+	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newHandlerWithFailingFollowing(t *testing.T) *Handler {
@@ -2145,7 +2145,7 @@ func newHandlerWithFailingFollowing(t *testing.T) *Handler {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	return NewHandler(svc, fSvc, noteRepo, idGen)
+	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func TestSearch_InternalError(t *testing.T) {
@@ -2615,10 +2615,10 @@ func TestFollowers_PopulatesBlockMute(t *testing.T) {
 	// viewer(bob) が alice を block + mute。
 	blockRepo := testutil.NewMockBlockingRepository()
 	require.NoError(t, blockRepo.Create(&model.Blocking{ID: "bl1", BlockerID: "bob", BlockeeID: "alice"}))
-	h.SetBlockingRepo(blockRepo)
+	h.blockingRepo = blockRepo
 	muteRepo := testutil.NewMockMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.Muting{ID: "mu1", MuterID: "bob", MuteeID: "alice"}))
-	h.SetMutingRepo(muteRepo)
+	h.mutingRepo = muteRepo
 	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
 
 	rec := postStub(h.Followers, `{"userId":"user1"}`, repo.Users["bob"])
@@ -2669,12 +2669,12 @@ func TestPinnedPageVisibleTo(t *testing.T) {
 	require.True(t, pinnedPageVisibleTo(def, nil))
 }
 
-// viewerRelationRepos hands the reader wired by SetUserRelationReader to the
+// viewerRelationRepos hands the reader NewHandler received to the
 // relation bundle, so users/show reads the relation in one statement (#3608).
 func TestViewerRelationReposCarriesRelationReader(t *testing.T) {
 	h, _ := newTestHandler(t)
 	assert.Nil(t, h.viewerRelationRepos().Relation)
 	reader := repository.NewUserRelationRepository(nil)
-	h.SetUserRelationReader(reader)
+	h.relationReader = reader
 	assert.Equal(t, reader, h.viewerRelationRepos().Relation)
 }

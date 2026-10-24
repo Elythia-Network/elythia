@@ -46,7 +46,7 @@ func newFrequentlyRepliedHandler(t *testing.T) (*Handler, *countingUserRepo, *te
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(repo, noteRepo, testutil.NewMockUserNotePiningRepository(), idGen)
 	fSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
-	return NewHandler(svc, fSvc, noteRepo, idGen), repo, noteRepo
+	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil), repo, noteRepo
 }
 
 // seedReplies makes author reply count times to each target.

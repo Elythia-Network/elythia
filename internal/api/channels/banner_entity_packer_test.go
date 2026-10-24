@@ -24,8 +24,8 @@ func TestChannelBannerPublicURL_UsesTheGivenPacker(t *testing.T) {
 // 引く経路の両方を見る。
 func TestHandler_BannerURLUsesItsPacker(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	h.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
 	h.SetDriveFileRepo(&stubBannerResolver{files: map[string]*model.DriveFile{
 		"b1": {ID: "b1", URL: "https://remote.example/banner.png"},
 	}})

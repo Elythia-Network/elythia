@@ -52,7 +52,7 @@ func newHandlerWithFollowing(t *testing.T) (
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	h.SetQueryService(corenote.NewQueryService(notes, followingRepo))
 	return h, repo, noteRepo, notes, followingRepo
 }
@@ -108,7 +108,7 @@ func TestCreate_RepoError(t *testing.T) {
 	repo := &failingClipRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"name":"alpha"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -247,7 +247,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	repo := &failingUpdateRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1","name":"x"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -304,7 +304,7 @@ func TestDelete_RepoError(t *testing.T) {
 	repo := &failingDeleteRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
@@ -434,7 +434,7 @@ func TestList_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockClipRepository: testutil.NewMockClipRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.List(c))
@@ -525,7 +525,7 @@ func TestAddNote_RepoError(t *testing.T) {
 	noteRepo := &failingClipNoteCreateRepo{MockClipNoteRepository: testutil.NewMockClipNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	// AddNote の visibility gate (#1456) を通過させるため queryService を wire。
 	h.SetQueryService(corenote.NewQueryService(notes, nil))
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
@@ -622,7 +622,7 @@ func TestAddNote_WorksWithoutQueryService(t *testing.T) {
 	notes.Notes["n1"] = &model.Note{ID: "n1", Visibility: model.NoteVisibilityPublic}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, clipNoteRepo, notes, idGen)
-	h := NewHandler(svc, idGen) // SetQueryService を意図的に呼ばない
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil) // SetQueryService を意図的に呼ばない
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.AddNote(c))
@@ -717,7 +717,7 @@ func TestRemoveNote_RepoError(t *testing.T) {
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
 	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.RemoveNote(c))
@@ -825,7 +825,7 @@ func TestNotes_RepoError(t *testing.T) {
 	noteRepo := &listFailNoteRepo{MockClipNoteRepository: testutil.NewMockClipNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreclip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Notes(c))

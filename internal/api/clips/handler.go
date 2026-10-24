@@ -61,42 +61,13 @@ type Handler struct {
 	// clips/notes の匿名 visitor への gate に使う。
 	ugcVisibilityFn func() string
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetUGCVisibilityLookup wires a live lookup of meta.ugcVisibilityForVisitor.
-//
-// **毎回読む。** 起動時に焼き込むと、運営者が管理画面で締めても
-// プロセスを再起動するまで反映されない。
-func (h *Handler) SetUGCVisibilityLookup(fn func() string) {
-	h.ugcVisibilityFn = fn
-}
-
-// HasUGCVisibility reports whether the visitor content visibility lookup was
-// wired. 未配線だと clips/notes の匿名 visitor への gate が素通しになる。
-// 起動時検査に使う。
-func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityFn != nil }
 
 // visitorHidesAllNotes reports whether ugcVisibilityForVisitor = none hides
 // every note from viewer. Mirrors upstream generateVisibilityQuery's
@@ -109,19 +80,6 @@ func (h *Handler) visitorHidesAllNotes(viewer *model.User) bool {
 // mute/block check (#1630).
 func (h *Handler) SetNoteRepo(r repository.NoteRepository) {
 	h.noteRepo = r
-}
-
-// SetMuteBlockRepos wires the muting / blocking repositories used by the
-// clips/notes muted-user / blocked-user filters (#1562).
-func (h *Handler) SetMuteBlockRepos(m repository.MutingRepository, b repository.BlockingRepository) {
-	h.mutingRepo = m
-	h.blockingRepo = b
-}
-
-// SetMetaRepo wires a MetaRepository used by the clips/notes blocked-host
-// filter (#1562).
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
-	h.metaRepo = r
 }
 
 // blockedHosts returns meta.blockedHosts, or nil when the meta repo is not
@@ -197,8 +155,32 @@ func (h *Handler) SetQueryService(qs *corenote.QueryService) {
 }
 
 // NewHandler creates a new clips Handler.
-func NewHandler(svc *coreclip.Service, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, idGen: idGen}
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// metaRepo backs the clips/notes blocked-host filter (#1562). ugcVisibilityFn
+// is a live lookup of meta.ugcVisibilityForVisitor, read on every request so
+// that changing the setting takes effect without a restart. mutingRepo and
+// blockingRepo back the clips/notes muted-user / blocked-user filters (#1562).
+func NewHandler(
+	svc *coreclip.Service,
+	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	metaRepo repository.MetaRepository,
+	ugcVisibilityFn func() string,
+	mutingRepo repository.MutingRepository,
+	blockingRepo repository.BlockingRepository,
+) *Handler {
+	return &Handler{
+		svc:             svc,
+		idGen:           idGen,
+		noteHider:       noteHider,
+		entityPacker:    entityPacker,
+		metaRepo:        metaRepo,
+		ugcVisibilityFn: ugcVisibilityFn,
+		mutingRepo:      mutingRepo,
+		blockingRepo:    blockingRepo,
+	}
 }
 
 // CreateRequest is the request body for clips/create.
@@ -648,22 +630,6 @@ func (h *Handler) materializeIfMissing(noteID string, lookupErr error) bool {
 // 解決しない。
 func (h *Handler) PackForEmbed(cl *model.Clip) map[string]any {
 	return h.clipToMap(cl, nil)
-}
-
-// HasMetaRepo reports whether the meta repository was wired.
-//
-// 未配線だと blocked-host の note が post-fetch 経路で漏れる。起動時検査に
-// 使う (#2708)。
-func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
-
-// HasMuteBlockRepos reports whether both mute/block repositories were wired.
-//
-// channelMuting は `LoadMuteBlockSets` へ意図的に nil を渡している
-// (clips に channel 次元が無い) ので対象外。残る 2 つは nil が**空集合として
-// 素通し**されるため、欠けるとその次元の filter が黙って消える。起動時検査に
-// 使う (#2709 review)。
-func (h *Handler) HasMuteBlockRepos() bool {
-	return h.mutingRepo != nil && h.blockingRepo != nil
 }
 
 // SetRelationCache wires the per-user relation cache used by the mute / block

@@ -25,12 +25,11 @@ func rolesBlockedHostNotes() []*model.Note {
 }
 
 func TestRolesNotes_DropsBlockedHostNotes(t *testing.T) {
-	h, roleRepo := newTestHandler(t)
-	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
-	h.SetNotesQuery(&mockRoleNotesQuery{Notes: rolesBlockedHostNotes()})
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
-	h.SetMetaRepo(meta)
+	h, roleRepo := newTestHandlerWithMeta(t, meta)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
+	h.SetNotesQuery(&mockRoleNotesQuery{Notes: rolesBlockedHostNotes()})
 
 	rec := doPost(h.Notes, `{"roleId":"r1"}`)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -46,22 +45,12 @@ func TestRolesNotes_DropsBlockedHostNotes(t *testing.T) {
 
 // **meta が読めないときは 500 に倒す** (#1544 と同じ fail-closed)。
 func TestRolesNotes_BlockedHostFetchErrorIsFatal(t *testing.T) {
-	h, roleRepo := newTestHandler(t)
-	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
-	h.SetNotesQuery(&mockRoleNotesQuery{Notes: rolesBlockedHostNotes()})
 	meta := testutil.NewMockMetaRepository()
 	meta.FetchErr = assert.AnError
-	h.SetMetaRepo(meta)
+	h, roleRepo := newTestHandlerWithMeta(t, meta)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "Public", IsPublic: true, IsExplorable: true}
+	h.SetNotesQuery(&mockRoleNotesQuery{Notes: rolesBlockedHostNotes()})
 
 	rec := doPost(h.Notes, `{"roleId":"r1"}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
-// **述語が配線を見ていること。** 起動時の critical wiring 検査はこれを読むので、
-// 常に true を返すようになると未配線を検出できなくなる。
-func TestRolesHandler_HasMetaRepo(t *testing.T) {
-	h, _ := newTestHandler(t)
-	assert.False(t, h.HasMetaRepo(), "未配線では false")
-	h.SetMetaRepo(testutil.NewMockMetaRepository())
-	assert.True(t, h.HasMetaRepo(), "配線後は true")
 }

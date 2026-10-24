@@ -101,29 +101,13 @@ type Handler struct {
 	// quoteAuthorizations は引用の承認の実体を配る (FEP-044f、#3234)。
 	quoteAuthorizations QuoteAuthorizationStore
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetFollowingRepo wires the repository used by the followers/following AP
 // collection endpoints (#1877)。
@@ -149,28 +133,11 @@ func (h *Handler) SetRemote(fetcher RemoteFetcher, resolver RemoteResolver) {
 	h.remoteResolver = resolver
 }
 
-// SetFederationGate wires the federation-policy checker and the local hostname
-// used by APIShow to reject lookups of blocked / non-federated hosts (#1557)。
-func (h *Handler) SetFederationGate(c HostBlockChecker, localHost string) {
-	h.hostBlocker = c
-	h.localHost = localHost
-}
-
 // SoftwareSuspensionChecker reports whether a host runs software listed in
 // meta.inboxSuspendedSoftware (#3362)。実装は core/federation.NewInboxSuspendedChecker。
 type SoftwareSuspensionChecker interface {
 	IsSuspended(host string) bool
 }
-
-// SetSoftwareSuspensionChecker wires the meta.inboxSuspendedSoftware checker
-// used by APIShow (#3563).
-func (h *Handler) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
-	h.softwareBlocker = c
-}
-
-// HasSoftwareSuspensionChecker reports whether SetSoftwareSuspensionChecker
-// was called with a non-nil checker (startup wiring check).
-func (h *Handler) HasSoftwareSuspensionChecker() bool { return h.softwareBlocker != nil }
 
 // federationDisabled reports whether the instance is fully isolated
 // (federation mode "none")。AP serve handler はこのとき 403 を返す
@@ -202,19 +169,39 @@ func (h *Handler) serveNonAP(c echo.Context) error {
 }
 
 // NewHandler constructs a Handler.
+//
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// hostBlocker and localHost are the federation-policy checker and the local
+// hostname APIShow uses to reject lookups of blocked / non-federated hosts
+// (#1557). softwareBlocker is the meta.inboxSuspendedSoftware checker APIShow
+// uses (#3563). detailExtras fills pinnedNotes / pinnedPage / movedTo /
+// alsoKnownAs for ap/show (#3330).
 func NewHandler(
 	renderer *activitypub.Renderer,
 	userService *coreuser.Service,
 	queryService *corenote.QueryService,
 	keypairRepo repository.UserKeypairRepository,
 	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	hostBlocker HostBlockChecker,
+	localHost string,
+	softwareBlocker SoftwareSuspensionChecker,
+	detailExtras userpack.DetailExtras,
 ) *Handler {
 	return &Handler{
-		renderer:     renderer,
-		userService:  userService,
-		queryService: queryService,
-		keypairRepo:  keypairRepo,
-		idGen:        idGen,
+		renderer:        renderer,
+		userService:     userService,
+		queryService:    queryService,
+		keypairRepo:     keypairRepo,
+		idGen:           idGen,
+		noteHider:       noteHider,
+		entityPacker:    entityPacker,
+		hostBlocker:     hostBlocker,
+		localHost:       localHost,
+		softwareBlocker: softwareBlocker,
+		detailExtras:    detailExtras,
 	}
 }
 
@@ -1203,10 +1190,3 @@ func (h *Handler) renoteTargetURI(targetID string) string {
 	}
 	return ""
 }
-
-// HasHostBlockChecker reports whether the federation gate was wired.
-//
-// 未配線だと `FederationDisabled` が常に false になり `federation: none` でも
-// Person を AP serve するうえ、`ap/show` の FEDERATION_NOT_ALLOWED gate ごと
-// skip される。起動時検査に使う (#2708)。
-func (h *Handler) HasHostBlockChecker() bool { return h.hostBlocker != nil }

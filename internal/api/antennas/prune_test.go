@@ -119,7 +119,7 @@ func TestNotes_DoesNotPruneFilteredNotes(t *testing.T) {
 	// いる側) を見るので、**bob が alice をブロック**する向きで作る。
 	blocking := testutil.NewMockBlockingRepository()
 	require.NoError(t, blocking.Create(&model.Blocking{ID: "b1", BlockerID: "bob", BlockeeID: "alice"}))
-	h.SetMuteBlockRepos(testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository())
+	h.mutingRepo, h.blockingRepo, h.channelMutingRepo = testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository()
 
 	for _, id := range []string{mine, blocked, followersOnly} {
 		seedAntennaNote(t, "antennaTimeline:a1", id)
@@ -192,7 +192,7 @@ func TestNotes_PruneOrderIsIndependentOfPrimaryCheck(t *testing.T) {
 
 	blocking := testutil.NewMockBlockingRepository()
 	require.NoError(t, blocking.Create(&model.Blocking{ID: "b1", BlockerID: "bob", BlockeeID: "alice"}))
-	h.SetMuteBlockRepos(testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository())
+	h.mutingRepo, h.blockingRepo, h.channelMutingRepo = testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository()
 
 	for _, id := range []string{mine, blocked, followersOnly} {
 		seedAntennaNote(t, "antennaTimeline:a1", id)

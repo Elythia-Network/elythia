@@ -36,7 +36,7 @@ func TestTimeline_UGCVisibilityForVisitor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h, repo, _, noteRepo := newHandler(t)
-			h.SetUGCVisibilityLookup(func() string { return tc.policy })
+			h.ugcVisibilityFn = func() string { return tc.policy }
 			repo.Channels["c1"] = &model.Channel{ID: "c1"}
 			cid := "c1"
 			host := "remote.example"
@@ -65,7 +65,7 @@ func TestTimeline_UGCVisibilityForVisitor(t *testing.T) {
 // 存在しないチャンネルは空配列ではなくエラーになる。
 func TestTimeline_UGCVisibilityNoneKeepsNoSuchChannel(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.SetUGCVisibilityLookup(func() string { return "none" })
+	h.ugcVisibilityFn = func() string { return "none" }
 	c, rec := newReq(t, `{"channelId":"missing"}`)
 	require.NoError(t, h.Timeline(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -86,19 +86,13 @@ func TestTimeline_UGCVisibilityNoneChannelLookupErrorIs500(t *testing.T) {
 	repo := &findFailChannelRepo{MockChannelRepository: testutil.NewMockChannelRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corechannel.NewService(repo, testutil.NewMockChannelFollowingRepository(), testutil.NewMockNoteRepository(), idGen)
-	h := NewHandler(svc, idGen)
-	h.SetUGCVisibilityLookup(func() string { return "none" })
+	h := NewHandler(svc, idGen, nil, nil, nil, func() string { return "none" })
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	require.NoError(t, h.Timeline(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-// 起動時の配線検査が見る述語。未配線で false、配線したら true。
-func TestHandler_HasUGCVisibility(t *testing.T) {
-	h := &Handler{}
-	assert.False(t, h.HasUGCVisibility(), "未配線なら false")
-	assert.Equal(t, "", h.ugcVisibilityNow(), "未配線なら空 (= all 扱い)")
-	h.SetUGCVisibilityLookup(func() string { return "local" })
-	assert.True(t, h.HasUGCVisibility(), "配線したら true")
-	assert.False(t, (&Handler{metaRepo: testutil.NewMockMetaRepository()}).HasUGCVisibility(), "他の配線では true にならない")
+// 未配線なら公開範囲は空 (= all 扱い)。
+func TestHandler_UGCVisibilityNowUnwired(t *testing.T) {
+	assert.Equal(t, "", (&Handler{}).ugcVisibilityNow(), "未配線なら空 (= all 扱い)")
 }

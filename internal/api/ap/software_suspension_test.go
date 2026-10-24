@@ -20,10 +20,9 @@ func (b apShowSoftwareBlocker) IsSuspended(host string) bool { return b.suspende
 // 取得した生の AP JSON をそのまま返してしまう。
 func TestAPIShow_InboxSuspendedSoftwareIsNotAllowed(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.SetFederationGate(apShowHostBlocker{}, "local.example")
+	h.hostBlocker, h.localHost = apShowHostBlocker{}, "local.example"
 	h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","id":"https://other.example/notes/1","content":"x"}`)}, &mockResolver{noteErr: assert.AnError})
-	h.SetSoftwareSuspensionChecker(apShowSoftwareBlocker{suspended: map[string]bool{"susp.example": true}})
-	assert.True(t, h.HasSoftwareSuspensionChecker())
+	h.softwareBlocker = apShowSoftwareBlocker{suspended: map[string]bool{"susp.example": true}}
 
 	// ホストは小文字にしてから判定する (instance の行は小文字で持つ)。
 	for _, uri := range []string{"https://susp.example/notes/1", "https://SUSP.example/notes/1"} {
@@ -36,9 +35,9 @@ func TestAPIShow_InboxSuspendedSoftwareIsNotAllowed(t *testing.T) {
 	// 判定する。IDN 表記・全角の句点・既定でないポートでも素通りしない。
 	idn := idnhost.Puny("例え.example")
 	require.NotEqual(t, "例え.example", idn)
-	h.SetSoftwareSuspensionChecker(apShowSoftwareBlocker{suspended: map[string]bool{
+	h.softwareBlocker = apShowSoftwareBlocker{suspended: map[string]bool{
 		"susp.example": true, idn: true, "port.example:8443": true,
-	}})
+	}}
 	for _, uri := range []string{
 		"https://例え.example/notes/1",
 		"https://例え。example/notes/1",
@@ -58,7 +57,7 @@ func TestAPIShow_InboxSuspendedSoftwareIsNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// 自ホストは判定しない。
-	h.SetSoftwareSuspensionChecker(apShowSoftwareBlocker{suspended: map[string]bool{"local.example": true}})
+	h.softwareBlocker = apShowSoftwareBlocker{suspended: map[string]bool{"local.example": true}}
 	rec = postJSON(h.APIShow, `{"uri":"https://local.example/notes/ghost"}`)
 	assert.NotContains(t, rec.Body.String(), "FEDERATION_NOT_ALLOWED", "自ホストは判定しない")
 }
@@ -82,8 +81,8 @@ func TestAPIShow_RawJSONIsGatedByDocumentIDHost(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, _, _ := newHandler(t)
-			h.SetFederationGate(apShowHostBlocker{blocked: tc.blocked}, "local.example")
-			h.SetSoftwareSuspensionChecker(apShowSoftwareBlocker{suspended: tc.software})
+			h.hostBlocker, h.localHost = apShowHostBlocker{blocked: tc.blocked}, "local.example"
+			h.softwareBlocker = apShowSoftwareBlocker{suspended: tc.software}
 			h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","id":"` + tc.id + `","content":"secret"}`)}, &mockResolver{noteErr: assert.AnError})
 
 			rec := postJSON(h.APIShow, `{"uri":"https://redirector.example/notes/1"}`)

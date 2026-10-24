@@ -57,7 +57,7 @@ func assignmentHandler(t *testing.T, roleRepo repository.RoleRepository, assignR
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return roles.NewHandler(corerole.NewService(roleRepo, assignRepo, metaRepo, idGen), idGen)
+	return roles.NewHandler(corerole.NewService(roleRepo, assignRepo, metaRepo, idGen), idGen, nil, nil, nil, nil)
 }
 
 func assignmentFixture(t *testing.T) (*roles.Handler, *assignmentExactRepo, *testutil.MockRoleRepository) {

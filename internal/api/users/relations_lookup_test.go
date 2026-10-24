@@ -56,7 +56,7 @@ func newRelationsLookupHandler(t *testing.T) (*Handler, *countingRemoteResolver)
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
 	svc.SetRemoteUserResolver(resolver)
 	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
-	h := NewHandler(svc, fSvc, noteRepo, idGen)
+	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetFollowingRepo(fRepo)
 	h.SetFollowRequestRepo(frRepo)
 	return h, resolver

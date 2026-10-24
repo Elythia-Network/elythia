@@ -50,7 +50,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockAntennaRepository, *testu
 	repo := testutil.NewMockAntennaRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	return NewHandler(svc, noteRepo, idGen), repo, noteRepo
+	return NewHandler(svc, noteRepo, idGen, nil, nil, nil, nil, nil, nil), repo, noteRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -140,7 +140,7 @@ func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
 	repo := &failingAntennaRepo{MockAntennaRepository: mock}
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"name":"alpha","src":"all","keywords":[["foo"]],"excludeKeywords":[],"users":[],"caseSensitive":false,"withReplies":false,"withFile":false}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -156,7 +156,7 @@ func newHandlerWithUserList(t *testing.T) (*Handler, *testutil.MockAntennaReposi
 	lists := testutil.NewMockUserListRepository()
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
 	svc.SetUserListRepo(lists)
-	return NewHandler(svc, testutil.NewMockNoteRepository(), idGen), repo, lists
+	return NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil), repo, lists
 }
 
 // upstream create.ts: keywords と excludeKeywords が両方空なら EMPTY_KEYWORD (#1544)。
@@ -333,7 +333,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	repo := &failingUpdateRepo{MockAntennaRepository: mock}
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1","name":"x"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -434,7 +434,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	repo := &failingDeleteRepo{MockAntennaRepository: mock}
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
@@ -470,7 +470,7 @@ func (r *listFailRepo) ListByUser(_ string) ([]*model.Antenna, error) {
 func TestList_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockAntennaRepository: testutil.NewMockAntennaRepository()}
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.List(c))
@@ -525,7 +525,7 @@ func TestNotes_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), closed, idGen)
-	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Notes(c))
@@ -582,7 +582,7 @@ func TestNotes_NoteRepoError(t *testing.T) {
 	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
 	noteRepo := &failingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository()}
-	h := NewHandler(svc, noteRepo, idGen)
+	h := NewHandler(svc, noteRepo, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Notes(c))
@@ -703,7 +703,7 @@ func TestNotes_MuteBlockChannelFiltered(t *testing.T) {
 	require.NoError(t, blocking.Create(&model.Blocking{ID: "b1", BlockerID: "blocker", BlockeeID: "alice"}))
 	channelMuting := testutil.NewMockChannelMutingRepository()
 	require.NoError(t, channelMuting.Create(&model.ChannelMuting{UserID: "alice", ChannelID: "ch-muted"}))
-	h.SetMuteBlockRepos(muting, blocking, channelMuting)
+	h.mutingRepo, h.blockingRepo, h.channelMutingRepo = muting, blocking, channelMuting
 
 	mutedCh := "ch-muted"
 	notes := map[string]*model.Note{
@@ -739,7 +739,7 @@ func TestNotes_MuteBlockLoadError(t *testing.T) {
 
 	blocking := testutil.NewMockBlockingRepository()
 	blocking.ExistsErr = errors.New("block boom") // ListBlockerIDs もこのエラーで失敗する
-	h.SetMuteBlockRepos(testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository())
+	h.mutingRepo, h.blockingRepo, h.channelMutingRepo = testutil.NewMockMutingRepository(), blocking, testutil.NewMockChannelMutingRepository()
 
 	c, rec := newReq(t, `{"antennaId":"a-err"}`)
 	setUser(c, "alice")
@@ -814,7 +814,7 @@ func TestNotes_FiltersBlockedHostAndSuspended(t *testing.T) {
 
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"blocked.example"}}
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	host := "blocked.example"
 	noteRepo.Notes["n-blocked"] = &model.Note{ID: "n-blocked", UserID: "remote1", UserHost: &host}

@@ -25,8 +25,8 @@ func TestNotes_FiltersMutedRenoteAuthor(t *testing.T) {
 
 	mutingRepo := testutil.NewMockMutingRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(blockingRepo)
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = blockingRepo
 	h.SetUserRepo(userRepo)
 
 	// viewer は muted1 を mute している
@@ -65,8 +65,8 @@ func TestNotes_FiltersBlockerRenoteAuthor(t *testing.T) {
 
 	mutingRepo := testutil.NewMockMutingRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(blockingRepo)
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = blockingRepo
 	h.SetUserRepo(userRepo)
 
 	// blocker が viewer を block している

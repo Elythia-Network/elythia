@@ -89,7 +89,7 @@ func TestListPaths_PackLikeUpstreamPackMany(t *testing.T) {
 			if tc.meta {
 				meta := testutil.NewMockMetaRepository()
 				meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@tgtuser"}}
-				h.SetMetaRepo(meta)
+				h.metaRepo = meta
 			}
 
 			row := func(viewerID string) map[string]any {
@@ -129,7 +129,7 @@ func TestPinnedUsers_SelfIsMeDetailed(t *testing.T) {
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@alice"}}
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	rec := postStub(h.PinnedUsers, `{}`, repo.Users["u1"])
 	require.Equal(t, http.StatusOK, rec.Code)

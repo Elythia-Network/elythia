@@ -57,59 +57,17 @@ type Handler struct {
 	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
 	selfPacker *meself.Packer
 	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、NewHandler の
+	// 必須の引数で受ける (#3817)。
 	noteHider *notehide.Hider
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
 
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
 func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
-
-// HasMetaRepo reports whether the blocked-host filter can read meta.
-//
-// 未配線だと `blockedHosts` の除外が黙って no-op になる (ブロックしたはずの
-// インスタンスのノートが一覧に出続ける)。起動時の critical wiring 検査で落とす。
-func (h *Handler) HasMetaRepo() bool {
-	return h != nil && h.metaRepo != nil
-}
-
-// SetMetaRepo wires a MetaRepository used for the blocked-host filter on
-// roles/notes (upstream generateBlockedHostQueryForNote)。
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
-	h.metaRepo = r
-}
-
-// SetListPacker wires the packer of the users embedded in roles/users
-// (#1973, #3330).
-func (h *Handler) SetListPacker(p userpack.ListPacker) {
-	h.packer = p
-}
-
-// HasListPacker reports whether the list packer was wired.
-//
-// 未配線だと roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が
-// 載らない。起動時検査に使う。
-func (h *Handler) HasListPacker() bool { return h.packer != nil }
 
 // SetUserRepo wires a UserRepository so roles/notes filters out notes that
 // match the viewer's hardMutedWords (#787).
@@ -139,8 +97,27 @@ func (h *Handler) SetNoteFieldResolver(r *entity.NoteFieldResolver) {
 
 // NewHandler creates a new roles Handler. idGen is required for note packing
 // under /api/roles/notes.
-func NewHandler(roleService *role.Service, idGen id.Generator) *Handler {
-	return &Handler{roleService: roleService, idGen: idGen}
+// noteHider applies the per-viewer hideNote gate to the notes this handler
+// packs (#3786) and entityPacker is the Packer it packs entities with (#3790).
+// metaRepo backs the blocked-host filter on roles/notes (upstream
+// generateBlockedHostQueryForNote). packer packs the users embedded in
+// roles/users (#1973, #3330).
+func NewHandler(
+	roleService *role.Service,
+	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	metaRepo repository.MetaRepository,
+	packer userpack.ListPacker,
+) *Handler {
+	return &Handler{
+		roleService:  roleService,
+		idGen:        idGen,
+		noteHider:    noteHider,
+		entityPacker: entityPacker,
+		metaRepo:     metaRepo,
+		packer:       packer,
+	}
 }
 
 // SetNotesQuery attaches a RoleNotesQuery for the roles/notes endpoint.

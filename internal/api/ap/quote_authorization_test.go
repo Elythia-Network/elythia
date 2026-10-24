@@ -126,7 +126,7 @@ func TestQuoteAuthorization(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, code, "an author lookup failure is not a 404")
 	userRepo.FindErr = nil
 
-	h.SetFederationGate(qaGate{disabled: true}, "example.com")
+	h.hostBlocker, h.localHost = qaGate{disabled: true}, "example.com"
 	c, res = qaReq(t, "n1", "qa1")
 	require.NoError(t, h.QuoteAuthorization(c))
 	code, _, _ = res()

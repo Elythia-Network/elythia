@@ -26,7 +26,7 @@ func TestTimeline_DropsBlockedHostNotes(t *testing.T) {
 	noteRepo.Notes["n_ok"] = &model.Note{ID: "n_ok", ChannelID: &cid, UserID: "u_ok", Visibility: model.NoteVisibilityPublic, UserHost: &good}
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	require.NoError(t, h.Timeline(c))
@@ -50,18 +50,9 @@ func TestTimeline_BlockedHostFetchErrorIsFatal(t *testing.T) {
 	noteRepo.Notes["n_ok"] = &model.Note{ID: "n_ok", ChannelID: &cid, UserID: "u_ok", Visibility: model.NoteVisibilityPublic, UserHost: &good}
 	meta := testutil.NewMockMetaRepository()
 	meta.FetchErr = assert.AnError
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	c, rec := newReq(t, `{"channelId":"c1"}`)
 	require.NoError(t, h.Timeline(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
-// **述語が配線を見ていること。** 起動時の critical wiring 検査はこれを読むので、
-// 常に true を返すようになると未配線を検出できなくなる。
-func TestChannelsHandler_HasMetaRepo(t *testing.T) {
-	h, _, _, _ := newHandler(t)
-	assert.False(t, h.HasMetaRepo(), "未配線では false")
-	h.SetMetaRepo(testutil.NewMockMetaRepository())
-	assert.True(t, h.HasMetaRepo(), "配線後は true")
 }

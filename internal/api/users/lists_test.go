@@ -323,8 +323,8 @@ func newListsHandlerFull(t *testing.T) (*Handler, *testutil.MockUserListReposito
 	policy := &stubListsPolicy{policies: map[string]any{}}
 	h.SetUserListRepo(listRepo)
 	h.SetUserRepo(userRepo)
-	h.SetBlockingRepo(blockRepo)
-	h.SetRolePolicyProvider(policy)
+	h.blockingRepo = blockRepo
+	h.rolePolicyProvider = policy
 	return h, listRepo, userRepo, blockRepo, policy
 }
 

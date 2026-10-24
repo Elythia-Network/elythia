@@ -199,7 +199,7 @@ func TestListEndpoints_CarryPinnedNotes(t *testing.T) {
 			addPinnedNote(t, h, pins, a, "pin1", "a-note")
 			meta := testutil.NewMockMetaRepository()
 			meta.Meta = &model.Meta{PinnedUsers: model.StringArray{"@alice"}}
-			h.SetMetaRepo(meta)
+			h.metaRepo = meta
 			// followers は bob をフォローしている alice、following は bob がフォロー
 			// している alice を返す。following service と同じ repo に入れる。
 			fRepo := h.followingRepo.(*testutil.MockFollowingRepository)

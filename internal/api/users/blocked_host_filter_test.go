@@ -39,7 +39,7 @@ func TestNotes_DropsBlockedHostNotes(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	userRepo.Users["user1"] = &model.User{ID: "user1", Username: "u1", UsernameLower: "u1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(blockedMeta())
+	h.metaRepo = blockedMeta()
 
 	noteRepo := h.noteRepo.(*testutil.MockNoteRepository)
 	noteRepo.Notes["n_bad"] = remoteNoteFrom("n_bad", "bad.example")
@@ -62,7 +62,7 @@ func TestNotes_BlockedHostFetchErrorIsFatal(t *testing.T) {
 	h.SetUserRepo(userRepo)
 	meta := testutil.NewMockMetaRepository()
 	meta.FetchErr = assert.AnError
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	noteRepo := h.noteRepo.(*testutil.MockNoteRepository)
 	noteRepo.Notes["n_ok"] = remoteNoteFrom("n_ok", "good.example")
@@ -76,7 +76,7 @@ func TestFeaturedNotes_DropsBlockedHostNotes(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	userRepo.Users["user1"] = &model.User{ID: "user1", Username: "u1", UsernameLower: "u1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(blockedMeta())
+	h.metaRepo = blockedMeta()
 
 	noteRepo := h.noteRepo.(*testutil.MockNoteRepository)
 	bad := remoteNoteFrom("f_bad", "bad.example")
@@ -99,7 +99,7 @@ func TestReactions_DropsBlockedHostNotes(t *testing.T) {
 	h, userRepo := newTestHandler(t)
 	userRepo.Users["user1"] = &model.User{ID: "user1", Username: "u1", UsernameLower: "u1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(blockedMeta())
+	h.metaRepo = blockedMeta()
 
 	reactionRepo := testutil.NewMockNoteReactionRepository()
 	h.SetNoteReactionRepo(reactionRepo)
@@ -140,13 +140,4 @@ func idSetOf(t *testing.T, body []byte) map[string]bool {
 		}
 	}
 	return ids
-}
-
-// **述語が配線を見ていること。** 起動時の critical wiring 検査はこれを読むので、
-// 常に true を返すようになると未配線を検出できなくなる。
-func TestUsersHandler_HasMetaRepo(t *testing.T) {
-	h, _ := newTestHandler(t)
-	assert.False(t, h.HasMetaRepo(), "未配線では false")
-	h.SetMetaRepo(testutil.NewMockMetaRepository())
-	assert.True(t, h.HasMetaRepo(), "配線後は true")
 }

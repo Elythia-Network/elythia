@@ -60,7 +60,7 @@ func TestRelation_SingleFormReturnsArray(t *testing.T) {
 func wireBlock(h *Handler, blockerID, blockeeID string) *testutil.MockBlockingRepository {
 	br := testutil.NewMockBlockingRepository()
 	_ = br.Create(&model.Blocking{ID: "b1", BlockerID: blockerID, BlockeeID: blockeeID})
-	h.SetBlockingRepo(br)
+	h.blockingRepo = br
 	return br
 }
 

@@ -15,18 +15,19 @@ import (
 // dependencies as required constructor arguments (#3817).
 //
 // i の handler は stream の節で作る値に依存するので、まだ setter で入れている
-// (#3812 の段 (4))。投稿を返す handler (users など 6 個) は、構築子の引数にする
-// ときに足す。それ以外の apiHandlers の欄 (wellknown・nodeinfo など) は #3817 の
-// 対象ではないので見ない。
+// (#3812 の段 (4))。それ以外の apiHandlers の欄 (wellknown・nodeinfo など) は
+// #3817 の対象ではないので見ない。
 var requiredDepHandlers = []string{
 	"webhook", "notifications", "hashtags", "gallery", "blocking", "mute", "renoteMute",
 	"drive", "federation", "flash", "following", "userList", "auth", "bubbleGame",
 	"invite", "pages",
+	"users", "channels", "antennas", "clips", "roles", "ap",
 }
 
 // handlerNilAllowed lists the handler fields that stay nil on a server built
 // by newServerWithConfig, keyed by "<apiHandlers field>.<handler field>".
 // The reason says on which path the field is actually nil.
+// 今は空。#3817 の作業中に clips.noteRepo の未配線が見つかり、#3818 で配線した。
 var handlerNilAllowed = map[string]string{}
 
 // **組み立てたサーバーの handler に、nil の依存が残っていないこと (#3817)。**
@@ -115,6 +116,16 @@ var requiredDepChecks = []string{
 	"bubbleGame.entityPacker",
 	"invite.entityPacker", "invite.rolePolicyProvider", "invite.moderatorChecker",
 	"pages.entityPacker", "pages.driveFileRepo", "pages.userPacker",
+	"users.noteHider", "users.entityPacker", "users.rolePolicyProvider", "users.metaRepo",
+	"users.ugcVisibilityFn", "users.channelMutingRepo", "users.mutingRepo", "users.blockingRepo",
+	"users.relationReader",
+	"channels.noteHider", "channels.entityPacker", "channels.metaRepo", "channels.ugcVisibilityFn",
+	"antennas.noteHider", "antennas.entityPacker", "antennas.metaRepo",
+	"antennas.mutingRepo", "antennas.blockingRepo", "antennas.channelMutingRepo",
+	"clips.noteHider", "clips.entityPacker", "clips.metaRepo", "clips.ugcVisibilityFn",
+	"clips.mutingRepo", "clips.blockingRepo",
+	"roles.noteHider", "roles.entityPacker", "roles.metaRepo", "roles.packer",
+	"ap.noteHider", "ap.entityPacker", "ap.hostBlocker", "ap.softwareBlocker", "ap.detailExtras",
 }
 
 // isNilDep reports whether v holds no dependency: v is nil, or v is an
