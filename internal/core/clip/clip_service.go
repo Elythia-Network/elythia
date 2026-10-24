@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -50,6 +51,128 @@ type Service struct {
 	// materializer はリレー由来で DB に無いノートを昇格させる (#2332)。
 	// clip_note.noteId が note への外部キー。
 	materializer NoteMaterializer
+	// streamPublisher は stream の clip チャンネルへ updated / deleted を流す (#3809)。
+	// nil なら流さない。
+	streamPublisher StreamPublisher
+	// updated の間引き (本家 2026.10.1 ClipService.publishUpdated と同じ 3 秒の先頭 +
+	// 末尾)。pendingUpdated は clip ごとの窓で、updatedMu で守る。
+	updatedMu      sync.Mutex
+	pendingUpdated map[string]*pendingUpdated
+	// afterFunc は窓のタイマーを張る。テストで差し替える。
+	afterFunc func(d time.Duration, f func()) (stop func() bool)
+}
+
+// StreamPublisher emits clip events to the `clip` WebSocket channel
+// (stream.ClipStreamPublisher). Accepted as an interface to avoid a hard
+// dependency on internal/stream.
+type StreamPublisher interface {
+	PublishClipEvent(clipID, eventType string)
+}
+
+// UpdatedThrottle is the window over which `updated` events for one clip are
+// coalesced: the first change is published at once and further changes within
+// the window are published once when the clip has been quiet for this long
+// (upstream ClipService.UPDATED_THROTTLE_MS).
+const UpdatedThrottle = 3 * time.Second
+
+// pendingUpdated is the open throttle window of one clip.
+type pendingUpdated struct {
+	// trailing は窓の中で 2 回目以降の更新があったか (末尾で 1 回流す)。
+	trailing bool
+	// seq は張り直すたびに増やす。止めそこねた古いタイマーが発火しても、
+	// seq が違えば何もしない。
+	seq  uint64
+	stop func() bool
+}
+
+// SetStreamPublisher wires the publisher that tells `clip` channel
+// subscribers about clip updates and deletion (#3809).
+func (s *Service) SetStreamPublisher(p StreamPublisher) {
+	s.streamPublisher = p
+}
+
+// HasStreamPublisher reports whether SetStreamPublisher received a publisher.
+// 未配線だとクリップのカラムが変更に追従しない。起動時検査に使う。
+func (s *Service) HasStreamPublisher() bool { return s.streamPublisher != nil }
+
+// publishUpdated publishes `updated` for clipID, coalescing bursts like
+// upstream: the first change goes out at once and opens a window; changes
+// inside the window are published once, UpdatedThrottle after the last one.
+//
+// 本家のコメントのとおり、多くの利用者がカラムで購読しているクリップを連続で
+// 更新すると、更新のたびに全員が読み直してリクエストが跳ねるのでまとめる。
+// 窓はプロセスごと (本家もプロセスのメモリに持つ)。
+func (s *Service) publishUpdated(clipID string) {
+	if s.streamPublisher == nil {
+		return
+	}
+	s.updatedMu.Lock()
+	if s.pendingUpdated == nil {
+		s.pendingUpdated = map[string]*pendingUpdated{}
+	}
+	p, ok := s.pendingUpdated[clipID]
+	if ok {
+		// 窓の中の追加の更新は、最後の更新から窓の長さだけ静かになったら 1 回流す。
+		p.trailing = true
+		p.stop()
+		s.armUpdatedLocked(clipID, p)
+		s.updatedMu.Unlock()
+		return
+	}
+	p = &pendingUpdated{}
+	s.pendingUpdated[clipID] = p
+	s.armUpdatedLocked(clipID, p)
+	s.updatedMu.Unlock()
+	// 先頭は即座に流す。
+	s.streamPublisher.PublishClipEvent(clipID, "updated")
+}
+
+// armUpdatedLocked (re)starts the window timer of p. updatedMu must be held.
+func (s *Service) armUpdatedLocked(clipID string, p *pendingUpdated) {
+	p.seq++
+	seq := p.seq
+	after := s.afterFunc
+	if after == nil {
+		after = timeAfterFunc
+	}
+	p.stop = after(UpdatedThrottle, func() { s.flushUpdated(clipID, p, seq) })
+}
+
+// flushUpdated closes the window of clipID and publishes the trailing
+// `updated` when changes arrived inside it.
+func (s *Service) flushUpdated(clipID string, p *pendingUpdated, seq uint64) {
+	s.updatedMu.Lock()
+	if s.pendingUpdated[clipID] != p || p.seq != seq {
+		// 張り直された窓か、削除で閉じた窓の古いタイマー。
+		s.updatedMu.Unlock()
+		return
+	}
+	delete(s.pendingUpdated, clipID)
+	trailing := p.trailing
+	s.updatedMu.Unlock()
+	if trailing {
+		s.streamPublisher.PublishClipEvent(clipID, "updated")
+	}
+}
+
+// publishDeleted cancels the open window of clipID and publishes `deleted`
+// at once, like upstream ClipService.delete.
+func (s *Service) publishDeleted(clipID string) {
+	if s.streamPublisher == nil {
+		return
+	}
+	s.updatedMu.Lock()
+	if p, ok := s.pendingUpdated[clipID]; ok {
+		p.stop()
+		delete(s.pendingUpdated, clipID)
+	}
+	s.updatedMu.Unlock()
+	s.streamPublisher.PublishClipEvent(clipID, "deleted")
+}
+
+// timeAfterFunc is the production timer for the updated window.
+func timeAfterFunc(d time.Duration, f func()) func() bool {
+	return time.AfterFunc(d, f).Stop
 }
 
 // SetRolePolicyProvider wires a role policy source so Create / AddNote
@@ -212,6 +335,8 @@ func (s *Service) Update(ownerID, clipID string, in UpdateInput) (*model.Clip, e
 	if err := s.repo.UpdateFields(clipID, fields); err != nil {
 		return nil, err
 	}
+	// 本家 ClipService.update と同じく、更新したら clip チャンネルへ流す (#3809)。
+	s.publishUpdated(clipID)
 	return s.repo.FindByID(clipID)
 }
 
@@ -229,7 +354,13 @@ func (s *Service) Delete(ownerID, clipID string) error {
 	if c.UserID != ownerID {
 		return ErrClipNotFound
 	}
-	return s.repo.Delete(c)
+	if err := s.repo.Delete(c); err != nil {
+		return err
+	}
+	// 本家 ClipService.delete と同じく、間引きの窓を閉じて deleted を即座に流す
+	// (#3809)。本家は DELETE の前に流すが、消せなかったときに流さないよう後にする。
+	s.publishDeleted(clipID)
+	return nil
 }
 
 // ListByUser returns the clips owned by userID with cursor (sinceID/untilID)
@@ -303,6 +434,7 @@ func (s *Service) AddNote(ownerID, clipID, noteID string) error {
 	// (#1768。これまで未維持で常に 0 だった)。
 	_ = s.notes.IncrementCount(noteID, "clippedCount", 1)
 	_ = s.repo.UpdateFields(clipID, map[string]any{"lastClippedAt": &now})
+	s.publishUpdated(clipID)
 	return nil
 }
 
@@ -336,6 +468,7 @@ func (s *Service) RemoveNote(ownerID, clipID, noteID string) error {
 	// notesCount は非正規化しない (AddNote 側のコメント参照、#2243)。
 	// upstream ClipService.removeNote は消せたときだけ clippedCount を decrement する。
 	_ = s.notes.IncrementCount(noteID, "clippedCount", -1)
+	s.publishUpdated(clipID)
 	return nil
 }
 

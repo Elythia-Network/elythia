@@ -1049,7 +1049,7 @@ var docChannelRowRe = regexp.MustCompile("^\\| `([a-zA-Z]+)` \\|")
 // 実在しない名前だった。人が目で照合すると通る類の誤り。
 //
 // **固定できるのは「doc の一覧 == mk-go の登録」だけ。** §4-1 のもう半分の主張
-// 「upstream は 18」「名前も upstream に揃えてある」は検証していない — test-shards は
+// 「upstream は 19」「名前も upstream に揃えてある」は検証していない — test-shards は
 // 本家のソースを取得しないため。doc と実装を同時に間違えれば通る。upstream 側の
 // 増減も検出できないので、本家の版を上げる PR で人が見る。
 func TestDivergenceDoc_StreamChannelsMatchRegistry(t *testing.T) {

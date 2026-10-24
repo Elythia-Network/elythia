@@ -640,6 +640,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Clips (Phase 4.4)
 	clipService.SetRolePolicyProvider(roleService) // #1029: clipLimit / noteEachClipsLimit
+	// クリップの更新・ノートの追加と削除・クリップの削除を stream の clip チャンネルへ
+	// 流す (本家 2026.10.1、#3809)。
+	clipService.SetStreamPublisher(stream.NewClipStreamPublisher(streamPubSub))
 
 	noteCreateService.SetFeaturedRanking(featuredService)
 
@@ -3248,6 +3251,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registerStreamChannels(streamRegistry, builtinStreamChannels(streamChannelDeps{
 		antennas:     antennaRepo,
 		userLists:    userListRepo,
+		clips:        clipRepo,
 		roles:        roleService,
 		serverStats:  serverStatsPub,
 		queueStats:   queueStatsPub,
@@ -4244,6 +4248,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"antennaLimit が効かずアンテナを無制限に作れる"},
 		{"clip.rolePolicyProvider", clipService.HasRolePolicyProvider(),
 			"clipLimit と noteEachClipsLimit が両方とも効かない"},
+		{"clip.streamPublisher", clipService.HasStreamPublisher(),
+			"クリップの変更と削除が clip チャンネルへ流れず、デッキのクリップのカラムが追従しない"},
 		{"webhooks.rolePolicyProvider", webhookHandler.HasRolePolicyProvider(),
 			"webhookLimit が効かず webhook を無制限に作れる"},
 		{"userlists.rolePolicyProvider", userListHandler.HasRolePolicyProvider(),

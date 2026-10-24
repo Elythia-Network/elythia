@@ -29,28 +29,33 @@
 
 | チャンネル | 内容 |
 |---|---|
-| `notifications` | **Elythia 独自**。upstream の 18 チャンネルに無い (upstream は `main` に通知を流す)。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、Misskey TS でも動かしたいクライアントは `main` を使うこと |
+| `notifications` | **Elythia 独自**。upstream の 19 チャンネルに無い (upstream は `main` に通知を流す)。通知だけを購読したいクライアント向け。**これに依存するクライアントは Misskey TS では動かない**ので、Misskey TS でも動かしたいクライアントは `main` を使うこと |
 | `bubbleVersus` | **Elythia 独自** (#3230)。バブルゲームの対戦の招待と、その返事 (受けた・断った・取り消した) を本人へ届ける。`read:account` |
 | `bubbleVersusMatch` | **Elythia 独自** (#3230)。対戦 1 つ分 (`matchId` を渡す)。**参加者しかつなげない** (観戦は無い)。準備・攻撃・盤面の要約・切断の申告を受け、開始・攻撃・終局を流す。終局の報告は記録が大きいので API (`bubble-game/versus/report`) で送る。`read:account` |
 
-Elythia 独自の 3 つを足して Elythia は 21 チャンネル。
+Elythia 独自の 3 つを足して Elythia は 22 チャンネル。
 
-upstream の 18 チャンネルは**すべて実装済み**で、名前も upstream に揃えてある。
+upstream の 19 チャンネルは**すべて実装済み**で、名前も upstream に揃えてある (`clip` は 2026.10.1 で増えた、#3809)。
 以下は wire 上のチャンネル名 (`connect` の `channel` に渡す値 = upstream の `chName`)。
 **ソースのファイル名は kebab-case だが、チャンネル名は camelCase** なので取り違えないこと
 (`chat-room.ts` の `chName` は `chatRoom`)。
 
 ```text
-admin antenna channel chatRoom chatUser drive globalTimeline hashtag
+admin antenna channel chatRoom chatUser clip drive globalTimeline hashtag
 homeTimeline hybridTimeline localTimeline main queueStats reversi
 reversiGame roleTimeline serverStats userList
 ```
 
 この一覧と上の表の合計が `internal/server` の登録名 (`builtinStreamChannels()` の一覧、#3692) と一致すること
 は `TestDivergenceDoc_StreamChannelsMatchRegistry` が固定する。ただし固定できるのは
-**Elythia 側だけ**で、「upstream は 18」「名前も upstream に揃えてある」の検証は入って
+**Elythia 側だけ**で、「upstream は 19」「名前も upstream に揃えてある」の検証は入って
 いない (`test-shards` は本家のソースを取得しない)。upstream が増減した場合は
 本家の版を上げる PR で人が見る。
+
+`clip` チャンネル (#3809) の振る舞いは本家と同じ (公開クリップは未ログインでも、非公開は持ち主だけが
+購読でき、`updated` / `deleted` を body `null` で流す。`updated` はクリップごとに 3 秒の窓で先頭と末尾の
+1 回ずつに間引く。窓はプロセスごと)。違いは 1 つで、**`deleted` はクリップを消せた後に流す**。本家は
+DELETE の前に流すので、DELETE が失敗しても購読者には `deleted` が届く。
 
 ## 4-3. job queue の構成差分
 

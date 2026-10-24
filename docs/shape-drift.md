@@ -494,9 +494,9 @@ doc 側は §4-1 の表 (Elythia 独自) と ```text フェンス (upstream 由�
 一致することも見る (名前が定数経由だったり英字以外を含むと registry から丸ごと消えるため)。
 
 **固定できるのは「doc の一覧 == Elythia の登録」だけ。** §4-1 のもう半分の主張
-「upstream は 18」「名前も upstream に揃えてある」は検証していない — `test-shards`
+「upstream は 19」「名前も upstream に揃えてある」は検証していない — `test-shards`
 job は本家のソースを取得しないため。doc と実装を同時に間違った名前へ変えれば
-この gate は通る。upstream が 19 個目を足した / 名前を変えた場合も検出できないので、
+この gate は通る。upstream が 20 個目を足した / 名前を変えた場合も検出できないので、
 **本家の版を上げる PR で人が見る**。
 
 ### `TestAPICompatDoc_MatchesRouter`

@@ -94,6 +94,7 @@ func buildStream(streamPubSub *event.PubSubService, idGen id.Generator) streamPa
 type streamChannelDeps struct {
 	antennas     repository.AntennaRepository
 	userLists    repository.UserListRepository
+	clips        repository.ClipRepository
 	roles        *corerole.Service
 	serverStats  *stream.ServerStatsPublisher
 	queueStats   *stream.QueueStatsPublisher // nil when the server has no queue inspector
@@ -145,6 +146,8 @@ func builtinStreamChannels(d streamChannelDeps) []streamChannel {
 		{"channel", channels.NewChannelTimeline, anyone},
 		// userList は membership lookup を渡して per-member withReplies gate を有効化 (#2020)。
 		{"userList", channels.NewUserListFactory(d.userLists).New, anyone},
+		// clip は本家と同じく未ログインでも公開クリップを購読できる (#3809)。
+		{"clip", channels.NewClipFactory(d.clips).New, anyone},
 		{"roleTimeline", channels.NewRoleTimelineFactory(d.roles).New, anyone},
 		{"admin", channels.NewAdminFactory(d.roles).New, credentialed},
 		// publisher が ring buffer を持つので、StatsLogProvider として渡して requestLog
