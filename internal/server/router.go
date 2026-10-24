@@ -2029,8 +2029,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 入れる辺が増える handler (admin など) は、元の位置で作る (docs/architecture.md 4.2)。
 	// **別名は変数 hSvcs から取る。** w.handlers から取ると、別名を代入より前に書いても
 	// コンパイルが通り、ゼロ値を黙って受け取る (docs/architecture.md 4.2)。
-	hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen)
+	// **入れ忘れると黙って劣化する依存は、構築子の必須の引数で渡す (#3817)。** 以前は
+	// 下で setter を呼び、recordCriticalWiring が起動時に入れ忘れを見ていた。ここで
+	// 渡す値は、どれもこの位置より前で作ってある。通報と申請の受付の通知は、
+	// abuseNotifStates・roleService・signupApplicationNotifLookup のどれかが欠けると
+	// 一覧に出なくなる (fail-closed)。
+	hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo,
+		abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup)
 	w.handlers = hSvcs
+	s.builtHandlers = hSvcs
 	usersHandler := hSvcs.users
 	iHandler := hSvcs.i
 	webhookHandler := hSvcs.webhook
@@ -2068,9 +2075,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apHandler.SetNoteHider(noteHider)
 	channelsHandler.SetNoteHider(noteHider)
 	clipsHandler.SetNoteHider(noteHider)
-	driveHandler.SetNoteHider(noteHider)
 	iHandler.SetNoteHider(noteHider)
-	notificationsHandler.SetNoteHider(noteHider)
 	rolesHandler.SetNoteHider(noteHider)
 	usersHandler.SetNoteHider(noteHider)
 	// 投稿を包む handler に Packer を渡す (#3790)。
@@ -2078,27 +2083,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	apHandler.SetEntityPacker(entityPacker)
 	channelsHandler.SetEntityPacker(entityPacker)
 	clipsHandler.SetEntityPacker(entityPacker)
-	driveHandler.SetEntityPacker(entityPacker)
 	iHandler.SetEntityPacker(entityPacker)
 	notesHandler.SetEntityPacker(entityPacker)
 	rolesHandler.SetEntityPacker(entityPacker)
 	usersHandler.SetEntityPacker(entityPacker)
-	// 利用者の詳細を包む handler にも渡す (#3792)。
-	authHandler.SetEntityPacker(entityPacker)
-	blockingHandler.SetEntityPacker(entityPacker)
-	federationHandler.SetEntityPacker(entityPacker)
-	followingHandler.SetEntityPacker(entityPacker)
-	hashtagsHandler.SetEntityPacker(entityPacker)
-	muteHandler.SetEntityPacker(entityPacker)
-	pagesHandler.SetEntityPacker(entityPacker)
-	renoteMuteHandler.SetEntityPacker(entityPacker)
-	// UserLite を包む handler にも渡す (#3794)。
-	bubbleGameHandler.SetEntityPacker(entityPacker)
-	flashHandler.SetEntityPacker(entityPacker)
-	galleryHandler.SetEntityPacker(entityPacker)
-	inviteHandler.SetEntityPacker(entityPacker)
-	userListHandler.SetEntityPacker(entityPacker)
-	notificationsHandler.SetEntityPacker(entityPacker) // #3796
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -2268,7 +2256,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// i/webhooks/* — Webhook管理 (実データ)
 	webhookHandler.SetDispatcher(webhookService)
-	webhookHandler.SetRolePolicyProvider(roleService) // #1029: webhookLimit
 
 	// Notifications endpoints
 	notificationsHandler.SetRepos(userRepo, noteRepo)
@@ -2276,17 +2263,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notificationsHandler.SetFollowRequestRepo(followRequestRepo)
 	notificationsHandler.SetInstanceRepo(instanceRepo)
 	notificationsHandler.SetEmojiRepo(emojiRepo)
-	// abuseReport 通知は read 時に権限を再確認する (#2868)。**未配線だと
-	// fail-closed で abuseReport が誰にも返らない** ので、機能ごと死ぬ。
-	notificationsHandler.SetModeratorChecker(roleService)
 	// read 時 valid-notifier filter (now-muted notifier の除外) 用 (#1775)。
 	notificationsHandler.SetMutingRepo(mutingRepo)
 	notificationsHandler.SetTestNotifier(notificationHook)
 	notificationsHandler.SetRoleLookup(roleNotifLookup)
-	notificationsHandler.SetAbuseReportLookup(abuseNotifStates)
-	notificationsHandler.SetAbuseReportUnresolvedCounter(abuseReportRepoForNotif.CountUnresolved)
 	notificationsHandler.SetEmojiApplicationLookup(emojiApplicationNotifLookup)
-	notificationsHandler.SetSignupApplicationLookup(signupApplicationNotifLookup)
 	// 通知に埋め込む note の files / channel / myReaction を埋める (#2735)。
 	notificationsHandler.SetNoteFieldResolver(noteFieldResolver)
 	// notifications/create の 'app' 通知で header/icon を token.name/iconUrl に
@@ -2302,18 +2283,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// route override 経由で active 実装を蹴る悪影響があった。#1031 で削除済。
 
 	// Hashtags endpoints (Phase 6)
-	hashtagsHandler.SetDetailExtras(usersHandler)       // #3330: hashtags/users のピン留め・移行先
 	hashtagsHandler.SetIDGen(idGen)                     // #2106 L25: 設定済 ID generator を共有 (毎回 aidx 生成を廃止)
 	hashtagsHandler.SetRelationRepos(listRelationRepos) // #1957-a: hashtags/users の embed user に relation
-	hashtagsHandler.SetModeratorChecker(roleService)    // #3330: hashtags/users のモデレーター向けの項目とカウントのゲート
-	hashtagsHandler.SetMetaRepo(metaRepo)               // #3628: hashtags/trend から hiddenTags / sensitiveWords のタグを外す
 
 	// Gallery endpoints (Phase 6)
 	galleryHandler.SetRanking(featuredService) // #1548: like/unlike/featured ランキング
 	galleryHandler.SetRoleChecker(roleService) // #1548: posts/delete モデレータ削除
 
 	// Blocking endpoints
-	blockingHandler.SetDetailExtras(usersHandler) // #3330: blocking/list のピン留め・移行先
 	// blocking/create・delete のレスポンスに viewer→blockee の relation block
 	// (isBlocking 等) を載せるための共有 resolver 依存 (#1802)。
 	blockingHandler.SetRelationRepos(userrelation.Repos{
@@ -2326,20 +2303,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		Relation:      userRelationRepo,
 	})
 	blockingHandler.SetModeratorChecker(roleService) // #1985: blocking/list の count gate で moderator viewer 判定
-	blockingHandler.SetUserPacker(sharedUserPacker)  // #3330: create・delete の応答を本家の UserDetailedNotMe に揃える
 
 	// Mute endpoints
-	muteHandler.SetDetailExtras(usersHandler) // #3330: mute/list のピン留め・移行先
 	muteHandler.SetRelationRepos(listRelationRepos)
 	muteHandler.SetModeratorChecker(roleService) // #1985: mute/list の count gate で moderator viewer 判定
 
 	// Renote mute endpoints
-	renoteMuteHandler.SetDetailExtras(usersHandler) // #3330: renote-mute/list のピン留め・移行先
 	renoteMuteHandler.SetRelationRepos(listRelationRepos)
 	renoteMuteHandler.SetModeratorChecker(roleService) // #1985: renote-mute/list の count gate で moderator viewer 判定
 
 	// Drive endpoints
-	driveHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// /drive/files/upload-from-url: SSRF-safe client で URL を download し、
 	// drive へ保存後 urlUploadFinished を main stream に流す (#1217)。download は
 	// 大きめになりうるので 60s timeout、cap は cfg.MaxFileSize に揃える。
@@ -2654,7 +2627,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationHandler.SetUserRepo(userRepo)
 	federationHandler.SetIDGen(idGen)
 	federationHandler.SetResolver(federationResolver)
-	federationHandler.SetListPacker(sharedUserPacker) // #1957-a / #3330: followers/following/users の embed user を本家 packMany と同じ形に
 	// moderationNote は公開エンドポイントで moderator にのみ返す (情報漏洩対策)。
 	federationHandler.SetModeratorChecker(roleService)
 	// instance 一覧 / show-instance の signatureCapability field (#2393)。
@@ -2710,10 +2682,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Pages endpoints (Phase 4.5)
 	pagesHandler.SetMainStreamPublisher(mainStreamPublisher)
-	pagesHandler.SetUserPacker(sharedUserPacker) // #3330: pageEvent の利用者を持ち主から見た本家 pack と同じ形に
-	// page content の image block / eyeCatchingImageId から drive file を解決して
-	// attachedFiles / eyeCatchingImage を埋める (#1662)。
-	pagesHandler.SetDriveFileRepo(driveFileRepo)
 
 	// Flash endpoints (Phase 4.5)
 	flashHandler.SetRoleChecker(roleService) // #1548: flash/delete モデレータ削除
@@ -3325,7 +3293,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Following endpoints
 	followingHandler.SetIDGen(idGen)
-	followingHandler.SetListPacker(sharedUserPacker) // #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に
 	// federation の残ルートは上で登録済 (federationHandler 初期化直後)
 
 	// Public roles (Phase 6)
@@ -3342,7 +3309,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	rolesHandler.SetListPacker(sharedUserPacker)                                // #1973 / #3330: roles/users の embed user を本家 packMany と同じ形に
 
 	// User lists (Phase 6)
-	userListHandler.SetRolePolicyProvider(roleService)                 // #1029: userListLimit / userEachUserListsLimit
 	userListHandler.SetUserRepo(userRepo)                              // #1550: push NO_SUCH_USER check
 	userListHandler.SetBlockingRepo(blockingRepo)                      // #1550: push YOU_HAVE_BEEN_BLOCKED check
 	userListHandler.SetFavoriteRepo(userListFavoriteRepo)              // #1550: show forPublic likedCount/isLiked
@@ -3675,9 +3641,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// --- Phase 7.6b: chat/*, auth/*, ap/*, sw/*, reversi/*, bubble-game/*, misc ---
 
 	// auth/* — MiAuth/OAuth セッション
-	authHandler.SetBackground(s.background)   // #3661: 世代の停止で待つ
-	authHandler.SetDetailExtras(usersHandler) // #3330: auth/session/userkey・miauth check のピン留め・移行先
-
 	// miauth/:session/check — 3rd-party client が session 紐付き token を取得する
 	// (#1224)。token をまだ持たない client が叩くため RequireAuth は付けない。
 	authHandler.SetUserRepo(userRepo)
@@ -3755,14 +3718,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (#1020) + inviteLimit / inviteLimitCycle / inviteExpirationTime (#1029
 	// PR-2) は handler 側で enforcement。handler 抽出後の unit test は
 	// internal/api/invite/handler_test.go を参照。
-	inviteHandler.SetRolePolicyProvider(roleService)
 	// invite/list が createdBy / usedBy を UserLite で解決するため (#1776)。
 	inviteHandler.SetUserRepo(userRepo)
-	// モデレーターが他人の / createdById が NULL の招待を消せるようにする (#2812)。
-	// 未配線なら bypass が効かないだけなので `recordCriticalWiring` には載せない
-	// (緩む側ではなく厳しい側に倒れる)。この行が消えていないことは
-	// `TestInviteModeratorCheckerIsWired` が見る。
-	inviteHandler.SetModeratorChecker(roleService)
 
 	// fetch-external-resources — external JSON resource を hash 検証付きで取得
 	// (#1222)。外部 theme/plugin 等を integrity-check して返す。SSRF-safe client
@@ -4072,10 +4029,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"ap.noteHider", apHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"channels.noteHider", channelsHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"clips.noteHider", clipsHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"drive.noteHider", driveHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"i.noteHider", iHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"notes.noteHider", notesHandler.HasNoteHider(), noteHiderMissingEffect},
-		{"notifications.noteHider", notificationsHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"roles.noteHider", rolesHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"users.noteHider", usersHandler.HasNoteHider(), noteHiderMissingEffect},
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4083,7 +4038,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"ap.entityPacker", apHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"channels.entityPacker", channelsHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"clips.entityPacker", clipsHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"drive.entityPacker", driveHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"i.entityPacker", iHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"roles.entityPacker", rolesHandler.HasEntityPacker(), entityPackerMissingEffect},
@@ -4096,27 +4050,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
 		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
 		{"admin.entityPacker", adminHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"auth.entityPacker", authHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"blocking.entityPacker", blockingHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"federation.entityPacker", federationHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"following.entityPacker", followingHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"hashtags.entityPacker", hashtagsHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"mute.entityPacker", muteHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"pages.entityPacker", pagesHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"renoteMute.entityPacker", renoteMuteHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"signup.entityPacker", signupHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"userService.entityPacker", userService.HasEntityPacker(), entityPackerMissingEffect},
 		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		// UserLite を包む部品 (#3794)。
-		{"bubbleGame.entityPacker", bubbleGameHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"bubbleVersus.entityPacker", bubbleVersusHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"chat.entityPacker", chatHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"flash.entityPacker", flashHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"gallery.entityPacker", galleryHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"invite.entityPacker", inviteHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"reversi.entityPacker", reversiHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"userList.entityPacker", userListHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"chatService.entityPacker", chatService.HasEntityPacker(), entityPackerMissingEffect},
 		{"webhookSignup.entityPacker", webhookSignupHook.HasEntityPacker(), entityPackerMissingEffect},
 		{"abuseCreated.entityPacker", abuseCreatedNotifier.HasEntityPacker(), entityPackerMissingEffect},
@@ -4125,7 +4066,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 残りの Pack を呼ぶ部品 (#3796)。
 		{"announcements.entityPacker", announcementHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"notifications.entityPacker", notificationsHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"announcementCreator.entityPacker", announcementCreator.HasEntityPacker(), entityPackerMissingEffect},
 		{"driveService.entityPacker", driveService.HasEntityPacker(), entityPackerMissingEffect},
 		{"ssrMeta.entityPacker", ssrMeta.HasEntityPacker(), entityPackerMissingEffect},
@@ -4205,10 +4145,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"pages.driveFileRepo", pagesHandler.HasDriveFileRepo(),
-			"eyecatching image の所有者チェックが素通しになり、他人の drive ファイルを貼れる (IDOR)"},
-		{"invite.rolePolicyProvider", inviteHandler.HasRolePolicyProvider(),
-			"policy が空になり招待の上限が無制限になる"},
 		{"signup.userPolicies", signupHandler.HasUserPolicyResolver(),
 			"素の default policy を返すので、meta の base policy override も server cap も反映されない"},
 		{"reaction.userRolesProvider", reactionService.HasUserRolesProvider(),
@@ -4251,10 +4187,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"clipLimit と noteEachClipsLimit が両方とも効かない"},
 		{"clip.streamPublisher", clipService.HasStreamPublisher(),
 			"クリップの変更と削除が clip チャンネルへ流れず、デッキのクリップのカラムが追従しない"},
-		{"webhooks.rolePolicyProvider", webhookHandler.HasRolePolicyProvider(),
-			"webhookLimit が効かず webhook を無制限に作れる"},
-		{"userlists.rolePolicyProvider", userListHandler.HasRolePolicyProvider(),
-			"userListLimit と userEachUserListsLimit が両方とも効かない"},
 		{"users.rolePolicyProvider", usersHandler.HasRolePolicyProvider(),
 			"users/lists/create-from-public の userListLimit / userEachUserListsLimit が効かない"},
 
@@ -4322,8 +4254,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"follow / unfollow の Webhook が送られなくなり、followed は instance と絵文字を欠く"},
 		{"userPacker.detailExtras", sharedUserPacker.HasDetailExtras(),
 			"follow 系の main stream / Webhook と blocking/create・delete で pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"blocking.userPacker", blockingHandler.HasUserPacker(),
-			"blocking/create・delete の応答が instance・絵文字・ピン留め・移行先・モデレーター向けの項目を欠く"},
 		{"following.meUpdatedPublisher", followingService.HasMeUpdatedPublisher(),
 			"フォロー申請の作成・承認・取り消しで meUpdated が流れず、受け取った申請の印がリロードまで変わらない"},
 		{"blocking.unfollower", blockingService.HasUnfollower(),
@@ -4333,31 +4263,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"blocking.roomInvitationRemover", blockingService.HasRoomInvitationRemover(),
 			"ブロックしても互いのチャットルームへの招待が残り、ブロックした相手のルームに参加できる"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
-		{"hashtags.detailExtras", hashtagsHandler.HasDetailExtras(),
-			"hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"hashtags.moderatorChecker", hashtagsHandler.HasModeratorChecker(),
-			"hashtags/users でモデレーターにも moderationNote などが出ず、非公開のカウントが 0 のまま返る"},
-		// #3628: 本家の updateHashtagsRanking と同じく、隠したタグをトレンドから外す。
-		{"hashtags.metaRepo", hashtagsHandler.HasMetaRepo(),
-			"管理画面で隠したタグとセンシティブな語のタグが hashtags/trend に出る"},
-		{"blocking.detailExtras", blockingHandler.HasDetailExtras(),
-			"blocking/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"mute.detailExtras", muteHandler.HasDetailExtras(),
-			"mute/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"renoteMute.detailExtras", renoteMuteHandler.HasDetailExtras(),
-			"renote-mute/list の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"ap.detailExtras", apHandler.HasDetailExtras(),
 			"ap/show の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"pages.userPacker", pagesHandler.HasUserPacker(),
-			"pageEvent の利用者に、ページの持ち主から見た関係・カウント・ピン留め・移行先が載らない"},
 		{"admin.detailExtras", adminHandler.HasDetailExtras(),
 			"admin/accounts/find-by-email と admin/update-proxy-account の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
-		{"federation.listPacker", federationHandler.HasListPacker(),
-			"federation/users・followers・following の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
-		{"following.listPacker", followingHandler.HasListPacker(),
-			"following/list の followee に関係・ピン留め・instance などが載らず、following/requests/* の利用者に instance・絵文字が載らない"},
 		{"roles.listPacker", rolesHandler.HasListPacker(),
 			"roles/users の利用者に関係・ピン留め・移行先・instance・絵文字が載らない"},
 		{"reversi.liteFiller", reversiHandler.HasLiteFiller(),
@@ -4368,8 +4279,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"stream と Web Push で流す chat のメッセージ (fromUser・toUser) のリモートの利用者に instance・絵文字が載らない"},
 		{"admin.listPacker", adminHandler.HasListPacker(),
 			"admin/show-users・roles/users・abuse-user-reports・show-moderation-logs の利用者にピン留め・移行先・instance・絵文字が載らない"},
-		{"auth.detailExtras", authHandler.HasDetailExtras(),
-			"auth/session/userkey と miauth の check の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
 		{"admin.ipLookupAudit", adminHandler.HasIPLookupAudit(),
@@ -4435,12 +4344,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"世代を止めてもモデレーションログのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"signin.background", signinHandler.HasBackground(),
 			"世代を止めてもサインインの記録・通知・メールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"auth.background", authHandler.HasBackground(),
-			"世代を止めてもtokenの作成の通知のgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"i.background", iHandler.HasBackground(),
 			"世代を止めてもrel=meの検証と確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"drive.background", driveHandler.HasBackground(),
-			"世代を止めてもURLからのアップロードのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"signup.background", signupHandler.HasBackground(),
 			"世代を止めても確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"resetpassword.background", resetHandler.HasBackground(),

@@ -62,7 +62,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockRegistrationTicketRep
 	repo := testutil.NewMockRegistrationTicketRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return NewHandler(repo, idGen), repo
+	return NewHandler(repo, idGen, nil, nil, nil), repo
 }
 
 func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -101,10 +101,10 @@ func TestCreate_LimitExceeded(t *testing.T) {
 	user := "u1"
 	repo.Tickets["t1"] = &model.RegistrationTicket{ID: "z_t1", CreatedByID: &user}
 	repo.Tickets["t2"] = &model.RegistrationTicket{ID: "z_t2", CreatedByID: &user}
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      2,
 		"inviteLimitCycle": 60 * 24, // 1 day, ensure sinceID is well before now
-	}})
+	}}
 	rec := post(h.Create, `{}`, &model.User{ID: user})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "EXCEEDED_LIMIT_OF_CREATE_INVITE_CODE")
@@ -113,10 +113,10 @@ func TestCreate_LimitExceeded(t *testing.T) {
 
 func TestCreate_LimitPassesUnderLimit(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      10,
 		"inviteLimitCycle": 60,
-	}})
+	}}
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code, "limit 内なら通常成功")
 }
@@ -131,11 +131,10 @@ func TestCreate_MinInt64InviteCycleUsesSaturatingCutoff(t *testing.T) {
 		MockRegistrationTicketRepository: testutil.NewMockRegistrationTicketRepository(),
 	}
 	idGen := &recordingIDGenerator{}
-	h := NewHandler(repo, idGen)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h := NewHandler(repo, idGen, nil, &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      1,
 		"inviteLimitCycle": cycleMinutes,
-	}})
+	}}, nil)
 
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -147,18 +146,18 @@ func TestCreate_MinInt64InviteCycleUsesSaturatingCutoff(t *testing.T) {
 
 func TestCreate_LimitZeroOrUnsetIsUnlimited(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit": 0, // upstream falsy = skip
-	}})
+	}}
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code, "policy 0 は upstream falsy 相当で gate skip")
 }
 
 func TestCreate_ExpiresAtSetFromPolicy(t *testing.T) {
 	h, repo := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteExpirationTime": 60, // 60 minutes
-	}})
+	}}
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Len(t, repo.Tickets, 1)
@@ -178,8 +177,7 @@ func (r *countErrRepo) CountByCreatorSince(_, _ string) (int64, error) { return 
 
 func TestCreate_CountErrorReturns500(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&countErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{"inviteLimit": 5}})
+	h := NewHandler(&countErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen, nil, &stubInvitePolicy{policies: map[string]any{"inviteLimit": 5}}, nil)
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -193,7 +191,7 @@ func (r *failCreateRepo) Create(_ *model.RegistrationTicket) error { return errS
 
 func TestCreate_RepoCreateError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failCreateRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
+	h := NewHandler(&failCreateRepo{testutil.NewMockRegistrationTicketRepository()}, idGen, nil, nil, nil)
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -295,7 +293,7 @@ func (r *listErrRepo) ListByCreator(_, _, _ string, _ int) ([]*model.Registratio
 
 func TestList_RepoErrorReturnsEmptyArray(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&listErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
+	h := NewHandler(&listErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen, nil, nil, nil)
 	rec := post(h.List, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code, "DB error 時も 200 + 空 array で graceful degrade する")
 	assert.Equal(t, "[]", strings.TrimSpace(rec.Body.String()))
@@ -446,7 +444,7 @@ func TestDelete_ModeratorBypass(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newTestHandler(t)
-			h.SetModeratorChecker(tt.moderators)
+			h.moderatorChecker = tt.moderators
 			repo.Tickets["t1"] = tt.ticket
 
 			rec := post(h.Delete, `{"inviteId":"t1"}`, &model.User{ID: tt.actor})
@@ -492,7 +490,7 @@ func TestDelete_RepoErrorReturns500(t *testing.T) {
 	mock := testutil.NewMockRegistrationTicketRepository()
 	user := "u1"
 	mock.Tickets["t1"] = &model.RegistrationTicket{ID: "t1", CreatedByID: &user}
-	h := NewHandler(&failDeleteRepo{mock}, idGen)
+	h := NewHandler(&failDeleteRepo{mock}, idGen, nil, nil, nil)
 	rec := post(h.Delete, `{"inviteId":"t1"}`, &model.User{ID: user})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -510,7 +508,7 @@ func TestLimit_UnlimitedWhenNoPolicy(t *testing.T) {
 
 func TestLimit_UnlimitedWhenInviteLimitZero(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{"inviteLimit": 0}})
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{"inviteLimit": 0}}
 	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var out map[string]any
@@ -522,7 +520,7 @@ func TestLimit_UnlimitedWhenInviteLimitZero(t *testing.T) {
 // null (無制限) を返すと、作れないのに画面には無制限と出る。
 func TestLimit_NegativeInviteLimitIsZero(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{"inviteLimit": -1, "inviteLimitCycle": 60}})
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{"inviteLimit": -1, "inviteLimitCycle": 60}}
 	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var out map[string]any
@@ -537,10 +535,10 @@ func TestLimit_ReturnsRemaining(t *testing.T) {
 	repo.Tickets["t1"] = &model.RegistrationTicket{ID: "z_a1", CreatedByID: &user}
 	repo.Tickets["t2"] = &model.RegistrationTicket{ID: "z_a2", CreatedByID: &user}
 	repo.Tickets["t3"] = &model.RegistrationTicket{ID: "z_a3", CreatedByID: &user}
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      10,
 		"inviteLimitCycle": 60 * 24,
-	}})
+	}}
 	rec := post(h.Limit, `{}`, &model.User{ID: user})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var out map[string]any
@@ -559,11 +557,10 @@ func TestLimit_MinInt64InviteCycleUsesSaturatingCutoff(t *testing.T) {
 		MockRegistrationTicketRepository: testutil.NewMockRegistrationTicketRepository(),
 	}
 	idGen := &recordingIDGenerator{}
-	h := NewHandler(repo, idGen)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h := NewHandler(repo, idGen, nil, &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      1,
 		"inviteLimitCycle": cycleMinutes,
-	}})
+	}}, nil)
 
 	before := time.Now()
 	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
@@ -590,10 +587,9 @@ func inviteRemaining(t *testing.T, limit float64, count int64) int64 {
 		count:                            count,
 	}
 	idGen := &recordingIDGenerator{}
-	h := NewHandler(repo, idGen)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h := NewHandler(repo, idGen, nil, &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit": limit,
-	}})
+	}}, nil)
 	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var out struct {
@@ -625,10 +621,10 @@ func TestLimit_RemainingClampedToZero(t *testing.T) {
 			CreatedByID: &user,
 		}
 	}
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      3,
 		"inviteLimitCycle": 60 * 24,
-	}})
+	}}
 	rec := post(h.Limit, `{}`, &model.User{ID: user})
 	require.Equal(t, http.StatusOK, rec.Code)
 	var out map[string]any
@@ -638,8 +634,7 @@ func TestLimit_RemainingClampedToZero(t *testing.T) {
 
 func TestLimit_CountErrorReturns500(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&countErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{"inviteLimit": 5}})
+	h := NewHandler(&countErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen, nil, &stubInvitePolicy{policies: map[string]any{"inviteLimit": 5}}, nil)
 	rec := post(h.Limit, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -651,9 +646,9 @@ func TestLimit_CountErrorReturns500(t *testing.T) {
 // 掛けてから変換しないと、招待コードが発行直後に失効する (#2613)。
 func TestCreate_ExpiresAtFractionalMinutes(t *testing.T) {
 	h, repo := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteExpirationTime": 0.5, // 30 秒
-	}})
+	}}
 	before := time.Now()
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -672,10 +667,10 @@ func TestCreate_ExpiresAtFractionalMinutes(t *testing.T) {
 // 小数の inviteLimit でもゲートが効くこと。
 func TestCreate_InviteLimitFractional(t *testing.T) {
 	h, repo := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit":      1.5,
 		"inviteLimitCycle": 60 * 24,
-	}})
+	}}
 	// 判定は「作成前の件数」に対して行う。0 >= 1.5 は false なので 1 件目は通る。
 	require.Equal(t, http.StatusOK, post(h.Create, `{}`, &model.User{ID: "u1"}).Code)
 	// 1 >= 1.5 も false なので 2 件目も通る。
@@ -730,7 +725,7 @@ func (r *findErrRepo) FindByID(_ string) (*model.RegistrationTicket, error) { re
 // idempotent に 204 (TestDelete_NotFoundReturnsNoContent)。
 func TestDelete_LookupFailureIsNot204(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&findErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen)
+	h := NewHandler(&findErrRepo{testutil.NewMockRegistrationTicketRepository()}, idGen, nil, nil, nil)
 	rec := post(h.Delete, `{"inviteId":"t1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code, "DB 障害を 204 に潰さない")
 }
@@ -738,9 +733,9 @@ func TestDelete_LookupFailureIsNot204(t *testing.T) {
 // 負の inviteLimit は「作れない」こと。0 は upstream と同じく上限なし (上のテスト)。
 func TestCreate_NegativeLimitDenies(t *testing.T) {
 	h, repo := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubInvitePolicy{policies: map[string]any{
+	h.rolePolicyProvider = &stubInvitePolicy{policies: map[string]any{
 		"inviteLimit": -1,
-	}})
+	}}
 	rec := post(h.Create, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, repo.Tickets)

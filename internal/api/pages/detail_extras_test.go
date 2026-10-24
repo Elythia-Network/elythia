@@ -44,9 +44,7 @@ func pagePushFixture(t *testing.T, p *recordingPacker) (*Handler, *stubMainStrea
 	t.Helper()
 	h, repo, _ := newHandler(t)
 	if p != nil {
-		assert.False(t, h.HasUserPacker())
-		h.SetUserPacker(p)
-		assert.True(t, h.HasUserPacker())
+		h.userPacker = p
 	}
 	pub := &stubMainStreamPublisher{}
 	h.SetMainStreamPublisher(pub)

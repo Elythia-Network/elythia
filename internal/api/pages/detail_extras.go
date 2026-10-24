@@ -14,18 +14,6 @@ type UserPacker interface {
 	DetailedNotMe(ctx context.Context, target, viewer *model.User) (entity.UserDetailed, bool)
 }
 
-// SetUserPacker wires the packer of the user embedded in the page-push
-// pageEvent (#3330).
-func (h *Handler) SetUserPacker(p UserPacker) {
-	h.userPacker = p
-}
-
-// HasUserPacker reports whether the user packer was wired.
-//
-// 未配線だと page-push の pageEvent の利用者に、持ち主から見た関係・カウント・
-// ピン留め・移行先が載らない。起動時検査に使う。
-func (h *Handler) HasUserPacker() bool { return h.userPacker != nil }
-
 // packPusher packs the page-push caller as upstream
 // pack(me.id, {id: page.userId}, {schema: 'UserDetailed'}) does: the page
 // owner is the viewer. When the caller owns the page the result is MeDetailed

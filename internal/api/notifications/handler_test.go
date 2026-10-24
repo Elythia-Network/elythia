@@ -54,7 +54,7 @@ func newTestHandler(t *testing.T) (*Handler, *notification.Service) {
 	svc := notification.NewService(testRedis.Client, idGen, "")
 	// テストは AfterFunc 待ちを避けるため同期 publish にする。
 	svc.SetUnreadPublishDelay(0)
-	return NewHandler(svc, idGen), svc
+	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil), svc
 }
 
 func newJSONRequest(t *testing.T, path, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -214,7 +214,7 @@ func TestShow_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
 	svc := notification.NewService(closed, idGen, "")
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/i/notifications", `{}`)
 	setAuth(c, &model.User{ID: "alice"})
@@ -363,7 +363,7 @@ func TestMarkAllAsRead_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
 	svc := notification.NewService(closed, idGen, "")
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/notifications/mark-all-as-read", `{}`)
 	setAuth(c, &model.User{ID: "alice"})
@@ -501,7 +501,7 @@ func TestCreate_EmptyBodyAccepted(t *testing.T) {
 
 func TestCreate_NilService(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(nil, idGen)
+	h := NewHandler(nil, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newJSONRequest(t, "/api/notifications/create", `{"body":"x"}`)
 	setAuth(c, &model.User{ID: "alice"})
 	require.NoError(t, h.Create(c))
@@ -531,7 +531,7 @@ func TestFlush_Success(t *testing.T) {
 
 func TestFlush_NilService(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(nil, idGen)
+	h := NewHandler(nil, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newJSONRequest(t, "/api/notifications/flush", `{}`)
 	setAuth(c, &model.User{ID: "alice"})
 	require.NoError(t, h.Flush(c))
@@ -542,7 +542,7 @@ func TestFlush_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
 	svc := notification.NewService(closed, idGen, "")
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/notifications/flush", `{}`)
 	setAuth(c, &model.User{ID: "alice"})

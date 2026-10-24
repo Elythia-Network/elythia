@@ -18,7 +18,7 @@ import (
 func TestRanking_FallbackIsNotPublic(t *testing.T) {
 	get := func(repo repository.BubbleGameRepository) string {
 		idGen, _ := id.NewGenerator("aidx")
-		h := NewHandler(repo, idGen)
+		h := NewHandler(repo, idGen, nil)
 		e := echo.New()
 		e.GET("/api/bubble-game/ranking", h.Ranking, middleware.APICacheControl())
 		rec := httptest.NewRecorder()

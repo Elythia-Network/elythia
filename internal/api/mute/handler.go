@@ -47,26 +47,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
-// alsoKnownAs for the embedded users of mute/list (#3330).
-func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
-	h.extras = x
-}
-
-// HasDetailExtras reports whether the detail extras filler was wired.
-//
-// 未配線だと mute/list の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が
-// null のまま返る。起動時検査に使う。
-func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
-
 // SetRelationRepos wires the repositories used to populate viewer-relation flags
 // on the embedded mutee in mute/list (#1912)。
 func (h *Handler) SetRelationRepos(r userrelation.Repos) {
@@ -84,8 +64,11 @@ func (h *Handler) SetModeratorChecker(m ModeratorChecker) {
 // `mutee` user object that the upstream Misskey frontend uses for
 // rendering. They are optional (nil) only in legacy tests; production
 // must wire them.
-func NewHandler(svc *coremuting.Service, userRepo repository.UserRepository, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen}
+// entityPacker is the Packer this handler packs entities with (#3792); extras
+// fills pinnedNotes / pinnedPage / movedTo / alsoKnownAs for the embedded users
+// of mute/list (#3330).
+func NewHandler(svc *coremuting.Service, userRepo repository.UserRepository, idGen id.Generator, entityPacker *entity.Packer, extras userpack.DetailExtrasMany) *Handler {
+	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen, entityPacker: entityPacker, extras: extras}
 }
 
 // CreateRequest is the request body for mute/create.

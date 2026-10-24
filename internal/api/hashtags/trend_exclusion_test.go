@@ -52,9 +52,7 @@ func TestTrend_ExcludesHiddenAndSensitiveTags(t *testing.T) {
 	insertNote(t, gen, "tu_2", model.StringArray{"hidden_tag", "nsfw_art", "r18", "plain_tag"}, now.Add(-2*time.Minute))
 
 	meta := newTrendMeta(t)
-	h := newHandler()
-	h.SetMetaRepo(meta)
-	require.True(t, h.HasMetaRepo())
+	h := newHandlerWith(nil, nil, meta)
 
 	all := model.StringArray{`"hidden_tag"`, `"nsfw_art"`, `"r18"`, `"plain_tag"`}
 	rec := doPost(h.Trend, `{}`)
@@ -96,8 +94,7 @@ func TestTrend_MetaFetchFailureIsNotFailOpen(t *testing.T) {
 
 	meta := testutil.NewMockMetaRepository()
 	meta.FetchErr = errors.New("injected meta failure")
-	h := newHandler()
-	h.SetMetaRepo(meta)
+	h := newHandlerWith(nil, nil, meta)
 	rec := doPost(h.Trend, `{}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotContains(t, rec.Body.String(), `"hidden_tag"`)
@@ -145,9 +142,8 @@ func TestTrend_CallAfterSettingChangeDoesNotJoinOldAggregation(t *testing.T) {
 					<-release
 				}
 			}))
-			h := hashtags.NewHandler(db)
+			h := hashtags.NewHandler(db, nil, nil, nil, meta)
 			h.SetIDGen(gen)
-			h.SetMetaRepo(meta)
 
 			first := make(chan string, 1)
 			go func() { first <- doPost(h.Trend, `{}`).Body.String() }()

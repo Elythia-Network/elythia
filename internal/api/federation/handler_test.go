@@ -35,7 +35,7 @@ func newHandlerWithMeta(t *testing.T) (*Handler, *testutil.MockInstanceRepositor
 	metaRepo.Meta = &model.Meta{}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreinstance.NewService(repo, metaRepo, idGen)
-	return NewHandler(svc), repo, metaRepo
+	return NewHandler(svc, nil, nil), repo, metaRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -384,7 +384,7 @@ func TestInstances_RepoError(t *testing.T) {
 	metaRepo.Meta = &model.Meta{}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreinstance.NewService(repo, metaRepo, idGen)
-	h := NewHandler(svc)
+	h := NewHandler(svc, nil, nil)
 	c, rec := newReq(t, `{}`)
 	require.NoError(t, h.Instances(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

@@ -31,9 +31,8 @@ func (m *manyExtras) FillDetailedExtrasMany(_ context.Context, viewer *model.Use
 // 本家 MutingEntityService は相手を packMany (UserDetailedNotMe) で組むので、mute/list の
 // 利用者にもピン留めと移行先が乗る。まとめて 1 回で埋める (#3330)。
 func TestList_FillsDetailExtrasInOneBatch(t *testing.T) {
-	h, repo := newHandler(t)
 	extras := &manyExtras{}
-	h.SetDetailExtras(extras)
+	h, repo := newHandlerWithExtras(t, extras)
 	addUser(repo, "alice")
 	addUser(repo, "bob")
 	addUser(repo, "carol")
@@ -57,11 +56,4 @@ func TestList_FillsDetailExtrasInOneBatch(t *testing.T) {
 	assert.Equal(t, 1, extras.calls, "N+1 にしない")
 	assert.ElementsMatch(t, []string{"bob", "carol"}, extras.users)
 	assert.Equal(t, "alice", extras.viewerID)
-}
-
-func TestHandler_HasDetailExtras(t *testing.T) {
-	h, _ := newHandler(t)
-	assert.False(t, h.HasDetailExtras())
-	h.SetDetailExtras(&manyExtras{})
-	assert.True(t, h.HasDetailExtras())
 }

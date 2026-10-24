@@ -81,7 +81,7 @@ func TestPeers_EmptyReturnsArrayNotNull(t *testing.T) {
 
 // service 未配線 (= 最小構成の unit test) でも panic せず [] を返すこと。
 func TestPeers_NilServiceReturnsEmpty(t *testing.T) {
-	h := NewHandler(nil)
+	h := NewHandler(nil, nil, nil)
 	rec := getStub(h.Peers)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `[]`, rec.Body.String())

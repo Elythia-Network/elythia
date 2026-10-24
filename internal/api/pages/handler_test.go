@@ -27,7 +27,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockPageRepository, *testutil
 	likeRepo := testutil.NewMockPageLikeRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, likeRepo, idGen)
-	return NewHandler(svc, idGen), repo, likeRepo
+	return NewHandler(svc, idGen, nil, nil, nil), repo, likeRepo
 }
 
 func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -73,7 +73,7 @@ func TestCreate_NameInvalidPattern(t *testing.T) {
 // #1548: eyeCatchingImageId が自分の drive file でなければ NO_SUCH_FILE。
 func TestCreate_EyeCatchingImageNoSuchFile(t *testing.T) {
 	h, _, _ := newHandler(t)
-	h.SetDriveFileRepo(testutil.NewMockDriveFileRepository()) // 空 = 不在
+	h.driveFileRepo = testutil.NewMockDriveFileRepository() // 空 = 不在
 	c, rec := newReq(t, `{"title":"t","name":"alpha","eyeCatchingImageId":"f_ghost","content":[],"variables":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -87,7 +87,7 @@ func TestCreate_EyeCatchingImageForeignFile(t *testing.T) {
 	dr := testutil.NewMockDriveFileRepository()
 	other := "bob"
 	dr.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &other}
-	h.SetDriveFileRepo(dr)
+	h.driveFileRepo = dr
 	c, rec := newReq(t, `{"title":"t","name":"alpha","eyeCatchingImageId":"f1","content":[],"variables":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -100,7 +100,7 @@ func TestCreate_EyeCatchingImageOwned(t *testing.T) {
 	dr := testutil.NewMockDriveFileRepository()
 	owner := "alice"
 	dr.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
-	h.SetDriveFileRepo(dr)
+	h.driveFileRepo = dr
 	c, rec := newReq(t, `{"title":"t","name":"alpha","eyeCatchingImageId":"f1","content":[],"variables":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -111,7 +111,7 @@ func TestCreate_EyeCatchingImageOwned(t *testing.T) {
 func TestUpdate_EyeCatchingImageNoSuchFile(t *testing.T) {
 	h, repo, _ := newHandler(t)
 	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "alpha"}
-	h.SetDriveFileRepo(testutil.NewMockDriveFileRepository())
+	h.driveFileRepo = testutil.NewMockDriveFileRepository()
 	c, rec := newReq(t, `{"pageId":"p1","eyeCatchingImageId":"f_ghost"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -157,7 +157,7 @@ func TestCreate_RepoError(t *testing.T) {
 	repo := &failingPageRepo{MockPageRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[]}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
@@ -391,7 +391,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	repo := &failingUpdateRepo{MockPageRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"pageId":"p1","title":"x"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
@@ -447,7 +447,7 @@ func TestDelete_RepoError(t *testing.T) {
 	repo := &failingDeleteRepo{MockPageRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
@@ -506,7 +506,7 @@ func TestMy_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockPageRepository: testutil.NewMockPageRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
 	require.NoError(t, h.My(c))
@@ -633,7 +633,7 @@ func TestFeatured_IgnoresRequestParams(t *testing.T) {
 	repo := &featuredSpyRepo{MockPageRepository: testutil.NewMockPageRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"limit":3,"offset":5,"sinceId":"aaa","untilId":"zzz"}`)
 	require.NoError(t, h.Featured(c))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -656,7 +656,7 @@ func TestFeatured_RepoError(t *testing.T) {
 	repo := &featuredFailRepo{MockPageRepository: testutil.NewMockPageRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	require.NoError(t, h.Featured(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -750,7 +750,7 @@ func TestLike_RepoError(t *testing.T) {
 	likeRepo := &failingCreateLikeRepo{MockPageLikeRepository: testutil.NewMockPageLikeRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, likeRepo, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	setUser(c, "bob")
 	require.NoError(t, h.Like(c))
@@ -813,7 +813,7 @@ func TestUnlike_RepoError(t *testing.T) {
 	likeRepo := &failingDeleteLikeRepo{MockPageLikeRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := corepage.NewService(repo, likeRepo, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newReq(t, `{"pageId":"p1"}`)
 	setUser(c, "bob")
 	require.NoError(t, h.Unlike(c))
@@ -960,7 +960,7 @@ func TestShow_ResolvesAttachedFilesAndEyeCatchingImage(t *testing.T) {
 	driveRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "b.png", Type: "image/png"}
 	driveRepo.Files["f3"] = &model.DriveFile{ID: "f3", UserID: &bob, Name: "c.png", Type: "image/png"} // owner mismatch
 	driveRepo.Files["eye1"] = &model.DriveFile{ID: "eye1", UserID: &alice, Name: "eye.png", Type: "image/png"}
-	h.SetDriveFileRepo(driveRepo)
+	h.driveFileRepo = driveRepo
 	h.SetUserSource(&stubUserSource{bundle: &coreuser.UserWithProfile{User: &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}}})
 
 	c, rec := newReq(t, `{"pageId":"`+pageID+`"}`)

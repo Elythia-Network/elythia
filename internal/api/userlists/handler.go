@@ -34,14 +34,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Handler packs entities with (#3794).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // UserListFavoriteReader abstracts the favorite count / exists lookup for
 // users/lists/show forPublic の likedCount/isLiked (#1550)。実装は
 // repository.UserListFavoriteRepository。
@@ -51,14 +43,11 @@ type UserListFavoriteReader interface {
 }
 
 // NewHandler creates a new userlists Handler.
-func NewHandler(repo repository.UserListRepository, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, idGen: idGen}
-}
-
-// SetRolePolicyProvider wires a role policy source so Create / Push enforce
-// the userListLimit / userEachUserListsLimit role policies (#1029).
-func (h *Handler) SetRolePolicyProvider(p role.PolicyProvider) {
-	h.rolePolicyProvider = p
+// entityPacker is the Packer this Handler packs entities with (#3794);
+// rolePolicyProvider enforces the userListLimit / userEachUserListsLimit role
+// policies (#1029).
+func NewHandler(repo repository.UserListRepository, idGen id.Generator, entityPacker *entity.Packer, rolePolicyProvider role.PolicyProvider) *Handler {
+	return &Handler{repo: repo, idGen: idGen, entityPacker: entityPacker, rolePolicyProvider: rolePolicyProvider}
 }
 
 // SetUserRepo wires a UserRepository so Push can validate the target user's
@@ -472,9 +461,3 @@ func (h *Handler) Delete(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusNoContent)
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと `userListLimit` と `userEachUserListsLimit` が両方とも効かない。
-// 起動時検査に使う (#2683)。
-func (h *Handler) HasRolePolicyProvider() bool { return h.rolePolicyProvider != nil }

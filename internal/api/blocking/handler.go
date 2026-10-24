@@ -47,49 +47,21 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
-// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
-// alsoKnownAs for the embedded users of blocking/list (#3330).
-func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
-	h.extras = x
-}
-
-// HasDetailExtras reports whether the detail extras filler was wired.
-//
-// 未配線だと blocking/list の利用者の pinnedNotes などが空、movedTo / alsoKnownAs が
-// null のまま返る。起動時検査に使う。
-func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
-
 // UserPacker packs a user as UserDetailedNotMe seen by viewer.
 // *userpack.Packer satisfies it.
 type UserPacker interface {
 	DetailedNotMe(ctx context.Context, target, viewer *model.User) (entity.UserDetailed, bool)
 }
 
-// SetUserPacker wires the packer used by blocking/create・delete. Unwired, the
-// response is built from the user row, profile and relation block only.
-func (h *Handler) SetUserPacker(p UserPacker) {
-	h.packer = p
-}
-
-// HasUserPacker reports whether the user packer was wired.
-//
-// 未配線だと create / delete の応答が instance・絵文字・ピン留め・移行先・
-// モデレーター向けの項目を欠いた形に落ちる。起動時検査に使う。
-func (h *Handler) HasUserPacker() bool { return h.packer != nil }
-
 // NewHandler creates a new blocking Handler.
 // userRepo / idGen are required by blocking/list to embed the
 // `blockee` user object that the upstream Misskey frontend renders.
-func NewHandler(svc *coreblocking.Service, userRepo repository.UserRepository, idGen id.Generator) *Handler {
-	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen}
+// entityPacker is the Packer this handler packs entities with (#3792); extras
+// fills pinnedNotes / pinnedPage / movedTo / alsoKnownAs for the embedded users
+// of blocking/list (#3330); packer builds the create / delete response as the
+// upstream UserDetailedNotMe (#3330).
+func NewHandler(svc *coreblocking.Service, userRepo repository.UserRepository, idGen id.Generator, entityPacker *entity.Packer, extras userpack.DetailExtrasMany, packer UserPacker) *Handler {
+	return &Handler{svc: svc, userRepo: userRepo, idGen: idGen, entityPacker: entityPacker, extras: extras, packer: packer}
 }
 
 // SetRelationRepos wires the repositories used to compute the viewer->blockee

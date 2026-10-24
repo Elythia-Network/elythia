@@ -29,10 +29,8 @@ func (r *recordingExtras) FillDetailedExtras(_ context.Context, viewer, _ *model
 // 'UserDetailedNotMe'}) なので、ピン留めと移行先を匿名の閲覧者として埋める (#3330)。
 func TestSessionUserkey_FillsDetailExtras(t *testing.T) {
 	h, repo := newTestHandler()
-	assert.False(t, h.HasDetailExtras())
 	extras := &recordingExtras{}
-	h.SetDetailExtras(extras)
-	assert.True(t, h.HasDetailExtras())
+	h.detailExtras = extras
 	repo.apps["s1"] = &model.App{ID: "a1", Secret: "s1"}
 	userID := "u1"
 	user := &model.User{ID: "u1", Username: "alice"}
@@ -57,7 +55,7 @@ func TestSessionUserkey_FillsDetailExtras(t *testing.T) {
 func TestMiAuthCheck_FillsDetailExtras(t *testing.T) {
 	h, repo := newTestHandler()
 	extras := &recordingExtras{}
-	h.SetDetailExtras(extras)
+	h.detailExtras = extras
 	sess := "sess-abc"
 	repo.accessTokens["k"] = &model.AccessToken{ID: "at1", Token: "secret-token", UserID: "u1", Session: &sess}
 	userRepo := testutil.NewMockUserRepository()

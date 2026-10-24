@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -116,9 +117,14 @@ func (m *mockWebhookRepo) Delete(id, userID string) error {
 }
 
 func newTestHandler() (*Handler, *mockWebhookRepo) {
+	return newTestHandlerWithPolicy(nil)
+}
+
+// newTestHandlerWithPolicy builds the handler with p as the role policy source.
+func newTestHandlerWithPolicy(p role.PolicyProvider) (*Handler, *mockWebhookRepo) {
 	repo := newMockRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	return NewHandler(repo, idGen), repo
+	return NewHandler(repo, idGen, p), repo
 }
 
 func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -195,13 +201,12 @@ type stubRolePolicyProvider struct {
 func (s *stubRolePolicyProvider) GetUserPolicies(_ string) map[string]any { return s.policies }
 
 func TestCreate_WebhookLimitExceeded(t *testing.T) {
-	h, repo := newTestHandler()
+	h, repo := newTestHandlerWithPolicy(&stubRolePolicyProvider{policies: map[string]any{
+		"webhookLimit": 2,
+	}})
 	// 既に 2 webhook 保有
 	repo.webhooks["w1"] = &model.Webhook{ID: "w1", UserID: "u1", On: model.StringArray{}}
 	repo.webhooks["w2"] = &model.Webhook{ID: "w2", UserID: "u1", On: model.StringArray{}}
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
-		"webhookLimit": 2,
-	}})
 	rec := post(h.Create, `{"name":"test","url":"https://example.com","on":["note"]}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_WEBHOOKS")
@@ -209,8 +214,7 @@ func TestCreate_WebhookLimitExceeded(t *testing.T) {
 }
 
 func TestCreate_WebhookLimit_PassesUnderLimit(t *testing.T) {
-	h, _ := newTestHandler()
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	h, _ := newTestHandlerWithPolicy(&stubRolePolicyProvider{policies: map[string]any{
 		"webhookLimit": 10,
 	}})
 	rec := post(h.Create, `{"name":"test","url":"https://example.com","on":["note"]}`, &model.User{ID: "u1"})
@@ -226,8 +230,7 @@ func (f *failCountRepo) CountByUserID(_ string) (int64, error) { return 0, errBo
 func TestCreate_WebhookLimit_CountError(t *testing.T) {
 	repo := newMockRepo()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failCountRepo{repo}, idGen)
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	h := NewHandler(&failCountRepo{repo}, idGen, &stubRolePolicyProvider{policies: map[string]any{
 		"webhookLimit": 5,
 	}})
 	rec := post(h.Create, `{"name":"test","url":"https://example.com","on":["note"]}`, &model.User{ID: "u1"})
@@ -278,7 +281,7 @@ func (f *failListRepo) ListByUserID(_ string) ([]*model.Webhook, error) { return
 
 func TestList_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failListRepo{newMockRepo()}, idGen)
+	h := NewHandler(&failListRepo{newMockRepo()}, idGen, nil)
 	rec := post(h.List, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -549,8 +552,7 @@ func TestCreate_OnRequired(t *testing.T) {
 
 // 負の webhookLimit は upstream と同じく「1 件も作れない」こと (上限なしにしない)。
 func TestCreate_WebhookLimit_NegativeDenies(t *testing.T) {
-	h, _ := newTestHandler()
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	h, _ := newTestHandlerWithPolicy(&stubRolePolicyProvider{policies: map[string]any{
 		"webhookLimit": -1,
 	}})
 	rec := post(h.Create, `{"name":"test","url":"https://example.com","on":["note"]}`, &model.User{ID: "u1"})

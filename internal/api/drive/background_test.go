@@ -30,8 +30,7 @@ func TestFilesUploadFromURL_RunsInTheBackgroundGroup(t *testing.T) {
 	rp := &ctxProcessor{ctxs: make(chan context.Context, 1)}
 	h.SetURLUploader(rp)
 	g := bgwork.New()
-	h.SetBackground(g)
-	assert.True(t, h.HasBackground())
+	h.background = g
 
 	upload := func() {
 		c, rec := newJSONReq(t, `{"url":"https://example.com/a.png"}`)

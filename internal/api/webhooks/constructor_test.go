@@ -1,0 +1,16 @@
+package webhooks
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+// NewHandler は受け取った依存を handler に持たせる (#3817)。依存を構築子の必須の
+// 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
+// 構築子が引数を捨てても build は通るので、ここで固定する。
+func TestNewHandlerKeepsDependencies(t *testing.T) {
+	policies := &stubRolePolicyProvider{}
+	h := NewHandler(nil, nil, policies)
+	assert.Same(t, policies, h.rolePolicyProvider)
+}

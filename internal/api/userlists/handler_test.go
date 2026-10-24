@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/userlists"
+	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -22,9 +23,15 @@ import (
 
 func newTestHandler(t *testing.T) (*userlists.Handler, *testutil.MockUserListRepository) {
 	t.Helper()
+	return newTestHandlerWithPolicy(t, nil)
+}
+
+// newTestHandlerWithPolicy builds the handler with p as the role policy source.
+func newTestHandlerWithPolicy(t *testing.T, p role.PolicyProvider) (*userlists.Handler, *testutil.MockUserListRepository) {
+	t.Helper()
 	repo := testutil.NewMockUserListRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	return userlists.NewHandler(repo, idGen), repo
+	return userlists.NewHandler(repo, idGen, nil, p), repo
 }
 
 func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
@@ -264,7 +271,7 @@ func TestPush_NoPublishOnAlreadyAdded(t *testing.T) {
 	repo := &duplicateAddMemberRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "owner"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	userRepo := testutil.NewMockUserRepository()
 	require.NoError(t, userRepo.Create(&model.User{ID: "u2"}))
 	h.SetUserRepo(userRepo)
@@ -332,7 +339,7 @@ func (f *failingListRepo) ListByUser(_ string) ([]*model.UserList, error) { retu
 
 func TestList_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(&failingListRepo{testutil.NewMockUserListRepository()}, idGen)
+	h := userlists.NewHandler(&failingListRepo{testutil.NewMockUserListRepository()}, idGen, nil, nil)
 	rec := doPost(h.List, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -353,7 +360,7 @@ func TestList_MembersErrorFallsBackToEmptyUserIds(t *testing.T) {
 	repo := &failingMembersRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1", Name: "broken-members"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.List, `{}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -395,7 +402,7 @@ func TestShow_MembersErrorFallsBackToEmptyUserIds(t *testing.T) {
 	repo := &failingMembersRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l2"] = &model.UserList{ID: "l2", UserID: "u1", Name: "show-broken"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.Show, `{"listId":"l2"}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -413,7 +420,7 @@ func (f *failingCreateRepo) Create(_ *model.UserList) error { return assert.AnEr
 
 func TestCreate_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(&failingCreateRepo{testutil.NewMockUserListRepository()}, idGen)
+	h := userlists.NewHandler(&failingCreateRepo{testutil.NewMockUserListRepository()}, idGen, nil, nil)
 	rec := doPost(h.Create, `{"name":"x"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -428,7 +435,7 @@ func TestPush_Error(t *testing.T) {
 	repo := &failingAddMemberRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.Push, `{"listId":"l1","userId":"u2"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -453,13 +460,12 @@ func (s *stubRolePolicyProvider) GetUserPolicies(_ string) map[string]any {
 }
 
 func TestCreate_UserListLimitExceeded(t *testing.T) {
-	h, repo := newTestHandler(t)
+	h, repo := newTestHandlerWithPolicy(t, &stubRolePolicyProvider{policies: map[string]any{
+		"userListLimit": 2,
+	}})
 	// 既に 2 list 保有
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	repo.Lists["l2"] = &model.UserList{ID: "l2", UserID: "u1"}
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
-		"userListLimit": 2,
-	}})
 	rec := doPost(h.Create, `{"name":"third"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_USERLISTS")
@@ -467,8 +473,7 @@ func TestCreate_UserListLimitExceeded(t *testing.T) {
 }
 
 func TestCreate_UserListLimit_PassesUnderLimit(t *testing.T) {
-	h, _ := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	h, _ := newTestHandlerWithPolicy(t, &stubRolePolicyProvider{policies: map[string]any{
 		"userListLimit": 10,
 	}})
 	rec := doPost(h.Create, `{"name":"My List"}`, &model.User{ID: "u1"})
@@ -476,15 +481,14 @@ func TestCreate_UserListLimit_PassesUnderLimit(t *testing.T) {
 }
 
 func TestPush_UserEachUserListsLimitExceeded(t *testing.T) {
-	h, repo := newTestHandler(t)
+	h, repo := newTestHandlerWithPolicy(t, &stubRolePolicyProvider{policies: map[string]any{
+		"userEachUserListsLimit": 2,
+	}})
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	repo.Members = []*model.UserListMembership{
 		{ID: "m1", UserListID: "l1", UserID: "u_a"},
 		{ID: "m2", UserListID: "l1", UserID: "u_b"},
 	}
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
-		"userEachUserListsLimit": 2,
-	}})
 	rec := doPost(h.Push, `{"listId":"l1","userId":"u_c"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_USERS")
@@ -495,7 +499,7 @@ func TestPush_AlreadyAdded(t *testing.T) {
 	repo := &duplicateAddMemberRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.Push, `{"listId":"l1","userId":"u2"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	body := rec.Body.String()
@@ -612,7 +616,7 @@ func TestPull_Error(t *testing.T) {
 	repo := &failingRemoveMemberRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.Pull, `{"listId":"l1","userId":"u2"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -627,7 +631,7 @@ func TestDelete_Error(t *testing.T) {
 	repo := &failingDeleteRepo{testutil.NewMockUserListRepository()}
 	repo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := userlists.NewHandler(repo, idGen)
+	h := userlists.NewHandler(repo, idGen, nil, nil)
 	rec := doPost(h.Delete, `{"listId":"l1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -796,8 +800,7 @@ func TestDelete_ListNotFound(t *testing.T) {
 
 // 負の userListLimit / userEachUserListsLimit は「作れない / 足せない」こと。
 func TestCreateAndPush_NegativeLimitsDeny(t *testing.T) {
-	h, repo := newTestHandler(t)
-	h.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	h, repo := newTestHandlerWithPolicy(t, &stubRolePolicyProvider{policies: map[string]any{
 		"userListLimit":          -1,
 		"userEachUserListsLimit": -1,
 	}})

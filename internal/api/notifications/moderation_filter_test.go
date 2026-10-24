@@ -39,13 +39,13 @@ func (s stubModeratorChecker) HasRolePolicy(userID, policyKey string) bool {
 // **未配線だと abuseReport が drop される** (fail-closed) ので、通報の通知を
 // 期待するテストは必ず通す。
 func wireAbuseLookup(h *Handler, resolved bool) {
-	h.SetAbuseReportLookup(func(ids []string) (map[string]model.AbuseReportState, error) {
+	h.abuseReportStates = func(ids []string) (map[string]model.AbuseReportState, error) {
 		out := make(map[string]model.AbuseReportState, len(ids))
 		for _, id := range ids {
 			out[id] = model.AbuseReportState{Resolved: resolved}
 		}
 		return out, nil
-	})
+	}
 }
 
 func seedAbuseReport(t *testing.T, svc *notification.Service, notifieeID string) {
@@ -71,7 +71,7 @@ func listNotifications(t *testing.T, h *Handler, userID string) []map[string]any
 // #2868: モデレーターには通報の通知が見える。
 func TestShow_AbuseReportVisibleToModerator(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, false)
 	seedAbuseReport(t, svc, "mod1")
 
@@ -84,7 +84,7 @@ func TestShow_AbuseReportVisibleToModerator(t *testing.T) {
 // administrator も通す (upstream の iAmModerator と同じ扱い)。
 func TestShow_AbuseReportVisibleToAdministrator(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{admins: map[string]bool{"root": true}})
+	h.moderatorChecker = stubModeratorChecker{admins: map[string]bool{"root": true}}
 	wireAbuseLookup(h, false)
 	seedAbuseReport(t, svc, "root")
 
@@ -97,7 +97,7 @@ func TestShow_AbuseReportVisibleToAdministrator(t *testing.T) {
 // 読み続けられてはいけない。
 func TestShow_AbuseReportHiddenAfterPrivilegeLoss(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{})
+	h.moderatorChecker = stubModeratorChecker{}
 	seedAbuseReport(t, svc, "exmod")
 
 	out := listNotifications(t, h, "exmod")
@@ -116,7 +116,7 @@ func TestShow_AbuseReportHiddenWithoutChecker(t *testing.T) {
 // 他の型は権限に関係なく返る (filter が広すぎないこと)。
 func TestShow_OtherTypesUnaffectedByModerationFilter(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{})
+	h.moderatorChecker = stubModeratorChecker{}
 	_, err := svc.Create(context.Background(), notification.CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: notification.TypeFollow,
 	})
@@ -132,7 +132,7 @@ func TestShow_OtherTypesUnaffectedByModerationFilter(t *testing.T) {
 // 通報が通知欄に一切現れなくなる。
 func TestShow_AbuseReportSurvivesNotifierMute(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	userRepo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	mutingRepo := testutil.NewMockMutingRepository()
@@ -152,7 +152,7 @@ func TestShow_AbuseReportSurvivesNotifierMute(t *testing.T) {
 // 同じ通報に二重で当たることになる。
 func TestShow_AbuseReportCarriesResolvedState(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, true)
 	seedAbuseReport(t, svc, "mod1")
 
@@ -164,10 +164,10 @@ func TestShow_AbuseReportCarriesResolvedState(t *testing.T) {
 // 通報が削除されていたら通知ごと落とす。
 func TestShow_AbuseReportDroppedWhenReportGone(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
-	h.SetAbuseReportLookup(func([]string) (map[string]model.AbuseReportState, error) {
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
+	h.abuseReportStates = func([]string) (map[string]model.AbuseReportState, error) {
 		return map[string]model.AbuseReportState{}, nil
-	})
+	}
 	seedAbuseReport(t, svc, "mod1")
 
 	out := listNotifications(t, h, "mod1")
@@ -178,11 +178,11 @@ func TestShow_AbuseReportDroppedWhenReportGone(t *testing.T) {
 // 1 件ずつ引くとリクエストごとに数百 SELECT が直列に走る。
 func TestShow_AbuseReportStatesAreFetchedInOneBatch(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 
 	var calls int
 	var askedIDs []string
-	h.SetAbuseReportLookup(func(ids []string) (map[string]model.AbuseReportState, error) {
+	h.abuseReportStates = func(ids []string) (map[string]model.AbuseReportState, error) {
 		calls++
 		askedIDs = append(askedIDs, ids...)
 		out := make(map[string]model.AbuseReportState, len(ids))
@@ -190,7 +190,7 @@ func TestShow_AbuseReportStatesAreFetchedInOneBatch(t *testing.T) {
 			out[id] = model.AbuseReportState{}
 		}
 		return out, nil
-	})
+	}
 
 	ctx := context.Background()
 	for _, rid := range []string{"r1", "r2", "r3"} {
@@ -211,10 +211,10 @@ func TestShow_AbuseReportStatesAreFetchedInOneBatch(t *testing.T) {
 func TestShow_NoAbuseReportMeansNoStateQuery(t *testing.T) {
 	h, svc := newTestHandler(t)
 	var calls int
-	h.SetAbuseReportLookup(func(ids []string) (map[string]model.AbuseReportState, error) {
+	h.abuseReportStates = func(ids []string) (map[string]model.AbuseReportState, error) {
 		calls++
 		return map[string]model.AbuseReportState{}, nil
-	})
+	}
 	_, err := svc.Create(context.Background(), notification.CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: notification.TypeFollow,
 	})
@@ -228,10 +228,10 @@ func TestShow_NoAbuseReportMeansNoStateQuery(t *testing.T) {
 // 通報の通知だけが消え、しかも既読位置は進むので未読の合図が失われる。
 func TestShow_AbuseReportStateErrorIs500(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
-	h.SetAbuseReportLookup(func([]string) (map[string]model.AbuseReportState, error) {
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
+	h.abuseReportStates = func([]string) (map[string]model.AbuseReportState, error) {
 		return nil, assertAnError{}
-	})
+	}
 	pub := &stubMainPublisher{}
 	svc.SetMainStreamPublisher(pub)
 	seedAbuseReport(t, svc, "mod1")

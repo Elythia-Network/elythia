@@ -38,7 +38,7 @@ func TestListSilent(t *testing.T) {
 	require.NoError(t, err)
 	h.SetIDGen(gen)
 	p := &stubListPacker{}
-	h.SetListPacker(p)
+	h.packer = p
 	bob := addUser(repo, "bob", false)
 	addUser(repo, "alice", false)
 	at := time.Date(2026, 10, 9, 1, 2, 3, 4_000_000, time.UTC)

@@ -43,14 +43,6 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // TokenNotifier records a 'createToken' notification when a token is generated
 // (#1559)。循環依存を避けるため interface で受け取る (実装は
 // core/notification.Hook)。
@@ -58,16 +50,14 @@ type TokenNotifier interface {
 	OnCreateToken(userID string)
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new auth handler.
-func NewHandler(repo repository.AuthSessionRepository, cfg *config.Config, idGen id.Generator) *Handler {
-	return &Handler{repo: repo, cfg: cfg, idGen: idGen}
+// entityPacker is the Packer this handler packs entities with (#3792);
+// detailExtras fills pinnedNotes / pinnedPage / movedTo / alsoKnownAs for
+// auth/session/userkey and the miauth check (#3330); background is the group
+// the work after a response runs in, so stopping the server generation waits
+// for it (#3661).
+func NewHandler(repo repository.AuthSessionRepository, cfg *config.Config, idGen id.Generator, entityPacker *entity.Packer, detailExtras userpack.DetailExtras, background *bgwork.Group) *Handler {
+	return &Handler{repo: repo, cfg: cfg, idGen: idGen, entityPacker: entityPacker, detailExtras: detailExtras, background: background}
 }
 
 // SetUserRepo wires the user repository used by MiAuthCheck to pack the

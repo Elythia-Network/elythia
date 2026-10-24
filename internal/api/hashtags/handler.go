@@ -49,7 +49,7 @@ type Handler struct {
 	trendFlight singleflight.Group
 	// meta は hashtags/trend から meta.hiddenTags / meta.sensitiveWords に当たる
 	// タグを外すのに使う (#3628)。キャッシュ付きの meta (metaUpdated で無効化される)
-	// を渡す。未配線なら外さない (起動時検査が production の配線漏れを拾う)。
+	// を渡す。nil なら外さない (NewHandler の必須の引数で受ける。#3817)。
 	meta repository.MetaRepository
 	// selfPacker は閲覧者自身を MeDetailed へ昇格させ、/api/i の handler で未読・
 	// role・ピン留めを埋める (#3784)。未配線なら補完せずに昇格だけする。
@@ -59,56 +59,18 @@ type Handler struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this handler packs entities with (#3792).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
-
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.
 func (h *Handler) SetSelfPacker(p *meself.Packer) { h.selfPacker = p }
 
-// SetMetaRepo wires the meta repository whose hiddenTags / sensitiveWords are
-// kept out of hashtags/trend (#3628).
-func (h *Handler) SetMetaRepo(m repository.MetaRepository) {
-	h.meta = m
-}
-
-// HasMetaRepo reports whether the meta repository was wired.
-//
-// 未配線だと、管理画面で隠したタグとセンシティブな語のタグがトレンドに出る。
-// 起動時検査に使う。
-func (h *Handler) HasMetaRepo() bool { return h.meta != nil }
-
-// SetModeratorChecker wires the moderator check of hashtags/users (#3330).
-func (h *Handler) SetModeratorChecker(m userpack.ModeratorChecker) {
-	h.moderators = m
-}
-
-// HasModeratorChecker reports whether the moderator check was wired.
-//
-// 未配線だとモデレーターにも moderationNote などが出ず、非公開のカウントも
-// 0 のまま返る。起動時検査に使う。
-func (h *Handler) HasModeratorChecker() bool { return h.moderators != nil }
-
-// SetDetailExtras wires the batch filler of pinnedNotes / pinnedPage / movedTo /
-// alsoKnownAs for hashtags/users (#3330).
-func (h *Handler) SetDetailExtras(x userpack.DetailExtrasMany) {
-	h.extras = x
-}
-
-// HasDetailExtras reports whether the detail extras filler was wired.
-//
-// 未配線だと hashtags/users の pinnedNotes などが空、movedTo / alsoKnownAs が
-// null のまま返る。起動時検査に使う。
-func (h *Handler) HasDetailExtras() bool { return h.extras != nil }
-
 // NewHandler creates a new hashtags Handler.
-func NewHandler(db *gorm.DB) *Handler {
-	return &Handler{db: db}
+// entityPacker is the Packer this handler packs entities with (#3792); extras
+// fills pinnedNotes / pinnedPage / movedTo / alsoKnownAs for hashtags/users
+// (#3330); moderators gates the moderator-only fields and counts of
+// hashtags/users; meta supplies the hidden tags and sensitive words kept out of
+// hashtags/trend (#3628).
+func NewHandler(db *gorm.DB, entityPacker *entity.Packer, extras userpack.DetailExtrasMany, moderators userpack.ModeratorChecker, meta repository.MetaRepository) *Handler {
+	return &Handler{db: db, entityPacker: entityPacker, extras: extras, moderators: moderators, meta: meta}
 }
 
 // SetIDGen wires the configured ID generator so Trend / Users use the operator's

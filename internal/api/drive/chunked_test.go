@@ -60,7 +60,7 @@ func newChunkedHandler(t *testing.T) (*Handler, *mockChunkedSessionRepo, *testut
 			MaxPendingBytesPerUser: 2048 * 1024 * 1024,
 		}
 	})
-	return NewHandler(svc, idGen), sessions, folderRepo
+	return NewHandler(svc, idGen, nil, nil, nil), sessions, folderRepo
 }
 
 // newChunkReq builds the multipart request the append endpoint expects.

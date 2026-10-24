@@ -41,10 +41,8 @@ func (s *stubListPacker) FillLites(users []*model.User, lites []*entity.UserLite
 // {populateFollowee: true}) で followee を packMany で組む (#3330)。
 func TestList_UsesListPacker(t *testing.T) {
 	h, repo := newTestHandler(t)
-	assert.False(t, h.HasListPacker())
 	p := &stubListPacker{}
-	h.SetListPacker(p)
-	assert.True(t, h.HasListPacker())
+	h.packer = p
 	addUser(repo, "alice", false)
 	addUser(repo, "carol", false)
 	bob := addUser(repo, "bob", false)
@@ -69,7 +67,7 @@ func TestList_UsesListPacker(t *testing.T) {
 func TestListRequestsAndSent_FillLites(t *testing.T) {
 	h, repo := newTestHandler(t)
 	p := &stubListPacker{}
-	h.SetListPacker(p)
+	h.packer = p
 	bob := addUser(repo, "bob", true)
 	alice := addUser(repo, "alice", false)
 	_, _ = h.followingService.Follow("alice", bob.ID, corefollowing.FollowOptions{})

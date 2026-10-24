@@ -14,13 +14,13 @@ import (
 // 件数はインスタンス全体の値なので、ページで 1 回だけ引く。
 func TestShow_AbuseReportCarriesUnresolvedCount(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, true)
 	calls := 0
-	h.SetAbuseReportUnresolvedCounter(func() (int64, error) {
+	h.abuseUnresolvedCount = func() (int64, error) {
 		calls++
 		return 3, nil
-	})
+	}
 	seedAbuseReport(t, svc, "mod1")
 	seedAbuseReport(t, svc, "mod1")
 
@@ -36,7 +36,7 @@ func TestShow_AbuseReportCarriesUnresolvedCount(t *testing.T) {
 // 未配線なら件数を出さない。0 を出すと「未対応なし」と読めてしまう。
 func TestShow_AbuseReportWithoutCounterOmitsCount(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, false)
 	seedAbuseReport(t, svc, "mod1")
 
@@ -48,9 +48,9 @@ func TestShow_AbuseReportWithoutCounterOmitsCount(t *testing.T) {
 // 件数の取得失敗も 500 にする (#2792)。状態の lookup と同じ扱い。
 func TestShow_AbuseReportCountErrorIs500(t *testing.T) {
 	h, svc := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, false)
-	h.SetAbuseReportUnresolvedCounter(func() (int64, error) { return 0, assertAnError{} })
+	h.abuseUnresolvedCount = func() (int64, error) { return 0, assertAnError{} }
 	seedAbuseReport(t, svc, "mod1")
 
 	c, rec := newJSONRequest(t, "/api/i/notifications", `{}`)
@@ -62,11 +62,11 @@ func TestShow_AbuseReportCountErrorIs500(t *testing.T) {
 // 通報の通知が無いページでは件数を引かない。
 func TestShow_NoAbuseReportSkipsCount(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetModeratorChecker(stubModeratorChecker{moderators: map[string]bool{"mod1": true}})
+	h.moderatorChecker = stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	wireAbuseLookup(h, false)
-	h.SetAbuseReportUnresolvedCounter(func() (int64, error) {
+	h.abuseUnresolvedCount = func() (int64, error) {
 		t.Fatal("must not count without abuseReport notifications")
 		return 0, nil
-	})
+	}
 	assert.Empty(t, listNotifications(t, h, "mod1"))
 }

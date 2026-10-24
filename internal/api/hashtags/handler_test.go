@@ -14,6 +14,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/hashtags"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -37,7 +38,13 @@ func init() {
 }
 
 func newHandler() *hashtags.Handler {
-	h := hashtags.NewHandler(testDB)
+	return newHandlerWith(nil, nil, nil)
+}
+
+// newHandlerWith builds the handler with the given detail extras filler,
+// moderator checker and meta repository.
+func newHandlerWith(extras userpack.DetailExtrasMany, moderators userpack.ModeratorChecker, meta repository.MetaRepository) *hashtags.Handler {
+	h := hashtags.NewHandler(testDB, nil, extras, moderators, meta)
 	// #2106 L25: 設定済 ID generator を共有する経路を test でも通す。
 	gen, _ := id.NewGenerator("aidx")
 	h.SetIDGen(gen)
@@ -48,7 +55,7 @@ func brokenHandler() *hashtags.Handler {
 	db := testutil.MustOpenTestDB()
 	sqlDB, _ := db.DB()
 	_ = sqlDB.Close()
-	return hashtags.NewHandler(db)
+	return hashtags.NewHandler(db, nil, nil, nil, nil)
 }
 
 func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
@@ -450,7 +457,7 @@ func TestTrend_ConcurrentCallsShareOneQuery(t *testing.T) {
 		// 最初の集計を止めておき、その間に他の呼び出しを全部到着させる。
 		<-release
 	}))
-	h := hashtags.NewHandler(db)
+	h := hashtags.NewHandler(db, nil, nil, nil, nil)
 	h.SetIDGen(gen)
 
 	const callers = 8
@@ -529,7 +536,7 @@ func TestTrend_FailureIsNotKept(t *testing.T) {
 			_ = tx.AddError(errors.New("injected failure"))
 		}
 	}))
-	h := hashtags.NewHandler(db)
+	h := hashtags.NewHandler(db, nil, nil, nil, nil)
 	h.SetIDGen(gen)
 
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.Trend, `{}`).Code)
@@ -628,7 +635,7 @@ func TestUsers_EmbedsViewerRelation(t *testing.T) {
 	}))
 	t.Cleanup(func() { testDB.Exec(`DELETE FROM "following" WHERE id = ?`, "f_htu_rel") })
 
-	h := hashtags.NewHandler(testDB)
+	h := hashtags.NewHandler(testDB, nil, nil, nil, nil)
 	h.SetRelationRepos(userrelation.Repos{Following: repository.NewFollowingRepository(testDB)})
 
 	// 認証 viewer: isFollowing=true。

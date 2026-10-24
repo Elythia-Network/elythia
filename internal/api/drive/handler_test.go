@@ -34,7 +34,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockDriveFileRepository, *tes
 	storage := coredrive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coredrive.NewService(fileRepo, folderRepo, storage, idGen)
-	return NewHandler(svc, idGen), fileRepo, folderRepo
+	return NewHandler(svc, idGen, nil, nil, nil), fileRepo, folderRepo
 }
 
 func setUser(c echo.Context, id string) {
@@ -213,7 +213,7 @@ func TestFilesCreate_RepoError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	storage := coredrive.NewLocalStorage(t.TempDir(), "")
 	svc := coredrive.NewService(repo, folderRepo, storage, idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 
 	c, rec := newMultipartReq(t, "hello.txt", "hello", nil)
 	setUser(c, "u1")
@@ -241,7 +241,7 @@ func newHandlerWithPolicy(t *testing.T, policies map[string]any) (*Handler, *tes
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coredrive.NewService(fileRepo, folderRepo, storage, idGen)
 	svc.SetRoleChecker(&driveRoleStub{policies: policies})
-	return NewHandler(svc, idGen), fileRepo
+	return NewHandler(svc, idGen, nil, nil, nil), fileRepo
 }
 
 // maxFileSizeMb 超過は 400 MAX_FILE_SIZE_EXCEEDED で upstream UUID と完全一致。
@@ -472,7 +472,7 @@ func TestFilesUpdate_RepoError(t *testing.T) {
 	repo := &failingUpdateFileRepo{MockDriveFileRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coredrive.NewService(repo, testutil.NewMockDriveFolderRepository(), coredrive.NewLocalStorage(t.TempDir(), ""), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 
 	c, rec := newJSONReq(t, `{"fileId":"f1","name":"x"}`)
 	setUser(c, "u1")
@@ -661,7 +661,7 @@ func TestFoldersCreate_RepoError(t *testing.T) {
 	repo := &failingFolderRepo{MockDriveFolderRepository: testutil.NewMockDriveFolderRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coredrive.NewService(testutil.NewMockDriveFileRepository(), repo, coredrive.NewLocalStorage(t.TempDir(), ""), idGen)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
 	c, rec := newJSONReq(t, `{"name":"x"}`)
 	setUser(c, "u1")
 	require.NoError(t, h.FoldersCreate(c))
