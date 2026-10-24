@@ -1464,7 +1464,7 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 	}
 	// upstream createRoomInvitation は room 確認後に各 soft-reject を plain Error
 	// (= generic 500) で投げる: yourself / already-member / already-invited /
-	// room-full。owner が inviter のため invitee==owner のケースは yourself に
+	// room-full / blocked / blocking。owner が inviter のため invitee==owner のケースは yourself に
 	// 収束する (upstream isRoomMember(ownerId===inviteeId) 相当は到達不能)。
 	if user.ID == req.UserID {
 		return apierr.JSONInternalError(c) // 'yourself'
@@ -1484,6 +1484,14 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 	}
 	if len(members) >= maxRoomMembers {
 		return apierr.JSONInternalError(c) // 'room is full'
+	}
+	// どちらかが相手をブロックしていれば招待しない。本家も定員の後に両方の向きを
+	// 見て素の Error ('blocked' / 'blocking') を投げるので、同じく 500 にする。
+	// 判定が引けないときも作らない (fail-closed)。
+	if h.svc != nil {
+		if blocked, err := h.svc.BlockedEitherWay(user.ID, req.UserID); err != nil || blocked {
+			return apierr.JSONInternalError(c) // 'blocked' / 'blocking'
+		}
 	}
 	// upstream packRoomInvitation は invitee を必須 UserLite として pack し、解決
 	// 失敗時は throw (= 500)。invitee を永続化前に解決し、存在しない user への
@@ -1591,6 +1599,9 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 		_ = h.repo.DeleteInvitation(inv.ID)
 		return c.NoContent(http.StatusNoContent)
 	}
+	if rerr == nil && h.blockedWithRoomOwner(user.ID, room) {
+		return apierr.JSONInternalError(c) // 'blocked' / 'blocking'
+	}
 	// メンバーシップを作成して招待を消費する。
 	//
 	// **人数の上限を rooms/join と同じく見る。** 招待の作成は今の人数しか数えない
@@ -1622,6 +1633,21 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 		h.svc.FederateInvitationResponse(req.RoomID, user.ID, true)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// blockedWithRoomOwner reports whether userID and the room owner block each
+// other in either direction. A failed lookup counts as blocked (fail-closed).
+//
+// 本家の joinToRoom (rooms/join) はブロックを見ないが、招待の作成はどちらの向きの
+// ブロックも見る。ブロックの時に招待を消すのが失敗すると招待が残るので、Elythia
+// は承諾 (invitations/accept) と参加 (rooms/join) でも同じ判定を掛ける。応答は
+// 招待の作成と同じ 500 で、招待は残す。
+func (h *Handler) blockedWithRoomOwner(userID string, room *model.ChatRoom) bool {
+	if h.svc == nil {
+		return false
+	}
+	blocked, err := h.svc.BlockedEitherWay(userID, room.OwnerID)
+	return err != nil || blocked
 }
 
 // InvitationsReject handles POST /api/chat/rooms/invitations/reject.
@@ -1923,6 +1949,9 @@ func (h *Handler) RoomsJoin(c echo.Context) error {
 	if rerr == nil && joinRoom.OwnerID == user.ID {
 		_ = h.repo.DeleteInvitation(inv.ID)
 		return c.NoContent(http.StatusNoContent)
+	}
+	if rerr == nil && h.blockedWithRoomOwner(user.ID, joinRoom) {
+		return apierr.JSONInternalError(c) // 'blocked' / 'blocking'
 	}
 	// UNIQUE 制約違反を避けるため既存メンバーは冪等に扱う。新規 join 時のみ
 	// MAX_ROOM_MEMBERS=50 を超える room を拒否する (upstream 'room is full')。

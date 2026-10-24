@@ -45,9 +45,9 @@ func (p *Processor) SetChatRoomReceiver(r ChatRoomReceiver) {
 // 使い切って dead になる。
 //
 // 満員 (ErrRoomFull) も送り直しで直らない (空いたら相手が承諾し直す)。招待を
-// 作る側と同じく受け取って捨てる。
+// 作る側と同じく受け取って捨てる。ブロックの間柄 (ErrChatBlocked) も同じ。
 func nonRetryableChatRoomErr(err error) error {
-	if errors.Is(err, corechat.ErrNotFound) || errors.Is(err, corechat.ErrInvalidTarget) || errors.Is(err, corechat.ErrRoomFull) {
+	if errors.Is(err, corechat.ErrNotFound) || errors.Is(err, corechat.ErrInvalidTarget) || errors.Is(err, corechat.ErrRoomFull) || errors.Is(err, corechat.ErrChatBlocked) {
 		return ErrUnsupportedActivity
 	}
 	return err

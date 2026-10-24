@@ -61,6 +61,9 @@ type ChatRepository interface {
 	// Invitation operations
 	CreateInvitation(inv *model.ChatRoomInvitation) error
 	DeleteInvitation(id string) error
+	// DeleteInvitationsToOwnedRooms deletes the invitations of userID to every
+	// room owned by ownerID. Used when one of the two blocks the other.
+	DeleteInvitationsToOwnedRooms(ownerID, userID string) error
 	FindInvitation(userID, roomID string) (*model.ChatRoomInvitation, error)
 	// FindInvitationByID looks up an invitation by its primary key. Used to
 	// pack chatRoomInvitationReceived notifications at read time (#1559)。
@@ -514,6 +517,14 @@ func (r *chatRepository) CreateInvitation(inv *model.ChatRoomInvitation) error {
 
 func (r *chatRepository) DeleteInvitation(id string) error {
 	return r.db.Where(`"id" = ?`, id).Delete(&model.ChatRoomInvitation{}).Error
+}
+
+func (r *chatRepository) DeleteInvitationsToOwnedRooms(ownerID, userID string) error {
+	if !storable(ownerID) || !storable(userID) {
+		return nil
+	}
+	return r.db.Where(`"userId" = ? AND "roomId" IN (SELECT "id" FROM "chat_room" WHERE "ownerId" = ?)`, userID, ownerID).
+		Delete(&model.ChatRoomInvitation{}).Error
 }
 
 func (r *chatRepository) UpdateInvitation(inv *model.ChatRoomInvitation) error {

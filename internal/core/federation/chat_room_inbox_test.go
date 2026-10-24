@@ -582,6 +582,7 @@ func TestProcess_ChatRoomAcceptReject_UnknownRoomIsAcked(t *testing.T) {
 		{"Accept / room が無い", acceptBody, &fakeChatRoomReceiver{memberErr: corechat.ErrNotFound}},
 		{"Accept / URI が収まらない", acceptBody, &fakeChatRoomReceiver{memberErr: corechat.ErrInvalidTarget}},
 		{"Accept / room が満員", acceptBody, &fakeChatRoomReceiver{memberErr: corechat.ErrRoomFull}},
+		{"Accept / owner とブロックの間柄", acceptBody, &fakeChatRoomReceiver{memberErr: corechat.ErrChatBlocked}},
 		{"Reject / room が無い", rejectBody, &fakeChatRoomReceiver{removeErr: corechat.ErrNotFound}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
