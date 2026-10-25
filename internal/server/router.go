@@ -983,7 +983,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// queue の processor (#3690)。作るのは buildQueue (wiring_queue.go) で、ここでは
 	// 今までと同じ名前の別名を置く。呼ぶ位置は、移した processor の中で最初に作って
 	// いた importProcessor の位置。移した processor は作るだけで副作用を持たないので、
-	// cleanProcessor や deleteAccountProcessor を作る位置が前へ移っても、DB と Redis の
+	// cleanProcessor や objectStorageProcessor を作る位置が前へ移っても、DB と Redis の
 	// 文の順は変わらない。setter はそれぞれ元の位置のまま。outbound client を使うもの
 	// (webPush・webhook) と、setupRoutes で作る部品に依存するもの (export・deliver・
 	// inbox など) は、下の元の位置で作る。
@@ -1000,13 +1000,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	cleanGenericProcessor := queueSvcs.cleanGenericProcessor
 	chunkedUploadGCProcessor := queueSvcs.chunkedUploadGCProcessor
 	objectStorageProcessor := queueSvcs.objectStorageProcessor
-	deleteAccountProcessor := queueSvcs.deleteAccountProcessor
 	unfollowProcessor := queueSvcs.unfollowProcessor
 	followProcessor := queueSvcs.followProcessor
 	blockProcessor := queueSvcs.blockProcessor
 	unblockProcessor := queueSvcs.unblockProcessor
 	retentionProc := queueSvcs.retentionProc
-	postScheduledNoteProcessor := queueSvcs.postScheduledNoteProcessor
 
 	// Phase 9.9: admin/emoji/import-zip を非同期で処理するワーカー。
 	// driveReader と driveService を再利用し ZIP 展開→Drive 保存→emoji 行作成。
@@ -1365,7 +1363,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Reaction flush (issue #57): buffered writer 使用時は 30 秒ごとに flush。
 	flushProcessor := processors.NewReactionFlushProcessor(reactionCountWriter)
 
-	// Account cascade deletion (issue #187)。processor は buildQueue で作る (#3690)。
+	// Account cascade deletion (issue #187): admin/accounts/delete の後続
+	// バックグラウンド処理。note / drive_file / following 関連行を掃除する。
+	// #3690 で buildQueue へ移したが、setupRoutes で作る webPushCache を構築子へ渡す
+	// 準備として #3829 でここへ戻した。
+	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo)
 	// #2230: local user の物理削除に userRepo を配線。未配線だと soft 削除止まりで行が残る。
 	deleteAccountProcessor.SetUserRepo(userRepo)
 	// #3293: ページを 1 件ずつ消して、参照するノートの pageCount を減らす。
@@ -1965,7 +1967,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetDraftRepo(noteDraftRepo)
 	notesHandler.SetScheduledNoteEnqueuer(s.queueClient)
 
-	// PostScheduledNote processor (#1040)。processor は buildQueue で作る (#3690)。
+	// PostScheduledNote processor (#1040): delayed queue 経由で draft を
+	// note 化する。dependencies は既存 noteCreateService + userRepo +
+	// noteDraftRepo を共有する。#3690 で buildQueue へ移したが、Redis の lock を
+	// 構築子へ渡す準備として #3829 でここへ戻した。
+	postScheduledNoteProcessor := processors.NewPostScheduledNoteProcessor(noteDraftRepo, userRepo, noteCreateService)
 	// idempotency lock を Redis SETNX で配線 (#1045 Phase 2-A)。queue の
 	// at-least-once delivery で job が二重 fire しても重複 publish を防ぐ。
 	postScheduledNoteProcessor.SetLock(processors.NewRedisScheduledNoteLock(
