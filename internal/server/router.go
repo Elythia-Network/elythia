@@ -1890,7 +1890,22 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteHider := notehide.NewHider(followingRepo, func() string { return metaUGCVisibility(metaRepo) })
 
 	// Notes endpoints
-	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
+	// **入れ忘れると黙って劣化する依存は、構築子の必須の引数で渡す (#3831)。** 以前は
+	// 下で setter を呼び、recordCriticalWiring が起動時に入れ忘れを見ていた。
+	//   - noteHider と entityPacker: 投稿を返すときに、閲覧者の見てはいけない中身を
+	//     隠し、メディアの URL をプロキシへ書き換える (#3786 / #3790)
+	//   - roleService: LocalTimeline / GlobalTimeline / HybridTimeline で
+	//     ltlAvailable / gtlAvailable role policy を gate する (#1026)。匿名 viewer に
+	//     対しては GetUserPolicies("") が base policies を返すので、admin が
+	//     meta.policies で全 user に対して TL を無効化できる
+	//   - ugcVisibilityForVisitor の lookup: **無条件に配線する。** 以前は Fetch
+	//     成功時だけ設定していたので、起動時に DB が一時的に応答しないと空文字の
+	//     ままになり、gate が**丸ごと消えていた** (空文字は "none" でも "local" でも
+	//     ないので素通し)。列は NOT NULL DEFAULT 'local' なので、失敗時も制限側の
+	//     既定へ倒す (#2708)。**毎回読む。** 起動時に焼き込むと、運営者が管理画面で
+	//     締めてもプロセスを再起動するまで API に反映されない
+	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen,
+		noteHider, entityPacker, roleService, func() string { return metaUGCVisibility(metaRepo) })
 	notesHandler.SetPiningRepo(piningRepo)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
@@ -1934,20 +1949,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetUserListRepo(userListRepo)
 	notesHandler.SetClipRepos(clipRepo, clipNoteRepo, clipFavoriteRepo) // #1554: notes/clips
 
-	notesHandler.SetNoteHider(noteHider)
-	// LocalTimeline / GlobalTimeline / HybridTimeline で ltlAvailable /
-	// gtlAvailable role policy を gate するために配線 (#1026)。匿名 viewer に
-	// 対しては GetUserPolicies("") が base policies を返すので、admin が
-	// meta.policies で全 user に対して TL を無効化できる。
-	notesHandler.SetPolicyProvider(roleService)
-	// **無条件に配線する。** 以前は Fetch 成功時だけ設定していたので、起動時に
-	// DB が一時的に応答しないと空文字のままになり、`ugcVisibilityForVisitor` の
-	// gate が**丸ごと消えていた** (空文字は "none" でも "local" でもないので
-	// 素通し)。列は NOT NULL DEFAULT 'local' なので、失敗時も制限側の既定へ
-	// 倒す (#2708)。
-	// **毎回読む。** 起動時に焼き込むと、運営者が管理画面で締めても
-	// プロセスを再起動するまで API に反映されない。
-	notesHandler.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	// **キーと Pro は翻訳のたびに読む (#3663)。** 起動時の値で翻訳器を作ると、
 	// 管理画面でキーを入れても外しても、プロセスか世代を作り直すまで変わら
 	// なかった。metaRepo はキャッシュだが、`internal:metaUpdated` で全プロセスの
@@ -2074,11 +2075,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	promoHandler := hSvcs.promo
 	inviteHandler := hSvcs.invite
 	echoTestHandler := hSvcs.echoTest
-	// 投稿を返す handler へ、上で作った noteHider と Packer を渡す (#3786 / #3790)。
-	// buildHandlers で作る handler は構築子の引数で受ける (#3817、i は #3827)。notes の
-	// handler は setter で入れる。渡し忘れると、その経路だけ匿名の閲覧者に
-	// ugcVisibilityForVisitor が効かないので、下の recordCriticalWiring が検査する。
-	notesHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
 	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
@@ -4001,13 +3997,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		postScheduledNoteProcessor: postScheduledNoteProcessor,
 		deliverProcessor:           deliverProcessor,
 		inboxProcessor:             inboxProcessor,
+
+		notes: notesHandler,
 	}
 	s.recordCriticalWiring([]criticalWiring{
-		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
-		// ugcVisibilityForVisitor='none' を効かせない。
-		{"notes.noteHider", notesHandler.HasNoteHider(), noteHiderMissingEffect},
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
-		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
 		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
 		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
@@ -4040,8 +4034,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
-		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
-			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
 		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),
 			"federation: none 設定でも inbox が受け付ける"},
 		{"deliver.hostBlockChecker", deliverService.HasHostBlockChecker(),
@@ -4088,8 +4080,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"チャンネルミュートが一切効かない (別ソースが無いので in-memory・SQL・user-list timeline・HTL の全経路)"},
 		{"notes.userFollowingRepo", notesHandler.HasUserFollowingRepo(),
 			"followers 限定投稿への返信が非フォロワーの HTL / STL に出る"},
-		{"notes.ugcVisibility", notesHandler.HasUGCVisibility(),
-			"匿名 visitor への note 露出を ugcVisibilityForVisitor で gate できない"},
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。

@@ -30,7 +30,7 @@ func newQueryHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	searchSvc := search.NewService(search.NewSQLLikeProvider(noteRepo, nil))
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
 	return h, noteRepo
 }
 
@@ -470,7 +470,7 @@ func TestSearch_UserIDOverridesChannelID(t *testing.T) {
 // #1783: canSearchNotes policy が false の viewer (匿名含む) は UNAVAILABLE。
 func TestSearch_CanSearchNotesDenied(t *testing.T) {
 	h, _ := newQueryHandler(t)
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{"canSearchNotes": false}})
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{"canSearchNotes": false}}
 	c, rec := newJSONRequest(t, "/api/notes/search", `{"query":"x"}`)
 	require.NoError(t, h.Search(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -484,7 +484,7 @@ func TestSearch_CanSearchNotesAllowed(t *testing.T) {
 	hello := "hello"
 	n := seedPublicNote(repo, "n1")
 	n.Text = &hello
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{"canSearchNotes": true}})
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{"canSearchNotes": true}}
 	c, rec := newJSONRequest(t, "/api/notes/search", `{"query":"hello"}`)
 	require.NoError(t, h.Search(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -523,7 +523,7 @@ func TestSearch_NoopProviderReturnsUnavailable(t *testing.T) {
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	searchSvc := search.NewService(search.NewNoopProvider())
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/search", `{"query":"hello"}`)
 	require.NoError(t, h.Search(c))
@@ -542,7 +542,7 @@ func TestSearch_NoSearchService(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/search", `{"query":"hello"}`)
 	require.NoError(t, h.Search(c))
@@ -703,7 +703,7 @@ func newFailingQueryHandler(t *testing.T) *Handler {
 	deleteSvc := corenote.NewDeleteService(repo)
 	querySvc := corenote.NewQueryService(repo, nil)
 	searchSvc := search.NewService(search.NewSQLLikeProvider(repo, nil))
-	return NewHandler(repo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
+	return newHandlerNilDeps(repo, createSvc, deleteSvc, querySvc, nil, nil, nil, searchSvc, idGen)
 }
 
 func TestRenotes_RepoError(t *testing.T) {
@@ -787,7 +787,7 @@ func TestBulkShow_NoQueryServiceRejects(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, nil, nil, nil, nil, nil, idGen)
 
 	seedPublicNote(noteRepo, "n1")
 	seedPublicNote(noteRepo, "n2")
@@ -812,7 +812,7 @@ func TestShow_NoQueryServiceRejects(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, nil, nil, nil, nil, nil, idGen)
 
 	seedPublicNote(noteRepo, "n1")
 	c, rec := newJSONRequest(t, "/api/notes/show", `{"noteId":"n1"}`)

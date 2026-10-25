@@ -1661,13 +1661,38 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   受けるため。`notehide.NewHider(followingRepo, …)`は値を作るだけで、DBにもRedisにも触らない。
   使う`followingRepo`と`metaRepo`は、どちらも`setupRoutes()`の先頭で作ってある。
   `notesHandler.SetNoteHider`は元の位置のまま残した
+- **2段目は投稿の見え方を決める4行。** `notes.NewHandler`は、元の9個の引数に続けて`noteHider`・
+  `entityPacker`・`policyProvider`・`ugcVisibility`(ugcVisibilityForVisitorを毎回引く関数)を受ける
+  (`notes.NewHandler(…, idGen, noteHider, entityPacker, roleService, func() string { return
+  metaUGCVisibility(metaRepo) })`)。関数は元の`SetUGCVisibilityLookup`と同じ式。どれも
+  `notesHandler`より前で作ってある(`noteHider`は1段目で動かした)
+- **依存を入れる時点が、元のsetterの位置から構築子の位置へ前へ移っただけ。** 一番後ろにあった
+  `SetEntityPacker`は`buildHandlers()`の呼び出しの後にあり、間には`buildStream()`がある。
+  `buildStream()`と`buildHandlers()`は`notesHandler`を受け取らないので、notesのhandlerに触れる
+  行は無い。notesのhandlerはHTTPのリクエストからしか呼ばれず、リクエストは構築の後にしか来ない
+- **固定値の`ugcVisibility`の欄は消し、毎回引く関数(`ugcVisibilityFn`)の1本にした。** 固定値を
+  入れていたのは`SetUGCVisibility`(Deprecated)を呼ぶテストの2か所だけで、どちらも
+  `h.ugcVisibilityFn = func() string { return "none" }`に置き換えた。関数がnilのときは空文字
+  (`all`と同じ扱い)を返すので、挙動は変わらない
+- **置き換えたsetter(`SetUGCVisibility`を含む5本)と、起動時の検査に使っていた`Has…`の4本は消した。**
+  使われなくなった`noteHiderMissingEffect`(`wiring_check.go`)も消した。テストの`NewHandler`の
+  呼び出し(66か所。`internal/api/notes`の`_test.go`に`grep -c 'NewHandler('`を当てた)は、
+  置き換えた引数にnilを補う補助関数`newHandlerNilDeps`(`constructor_test.go`)に寄せた。
+  置き換えたsetterを呼んでいたテスト(21か所)は、フィールドへ直接代入する。`entity_packer_test.go`
+  (`HasEntityPacker`のテスト)と、`wiring_predicate_test.go`の`HasPolicyProvider`・`HasUGCVisibility`の
+  テストは消した。構築子が引数を捨てないことは`TestNewHandlerKeepsDependencies`が見る
+- **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `routeParts`に`notes`
+  (notesのhandler)を足し、`requiredDepChecks`に置き換えた4つの欄を足した。setterで入れる欄も
+  同じ規則で見る。テストの組み立て(test mode・miniredis)でnilだったのは`timelineCache`の1つで、
+  許可リストに足した。`enableTimelineCache`(`MK_ENABLETIMELINECACHE`)を有効にしたときだけ
+  `EnableTimelineJSONCache`で作り、既定は無効
 
-| | #3831の前(`988d002543`) | 1段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 39 | 39 |
-| `setupRoutes()`の本文で、行頭が`notesHandler.Set`の行 | 33 | 33 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 331 | 331 |
-| そのsetterを呼ぶhandler(受け手) | 39 | 39 |
+| | #3831の前(`988d002543`) | 1段目の後 | 2段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 39 | 39 | 35 |
+| `setupRoutes()`の本文で、行頭が`notesHandler.Set`の行 | 33 | 33 | 29 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 331 | 331 | 327 |
+| そのsetterを呼ぶhandler(受け手) | 39 | 39 | 39 |
 
 数え方: 段(1)の表と同じ。`notesHandler.Set`の行は、同じ本文で行頭の空白の後が`notesHandler.Set`の行。
 

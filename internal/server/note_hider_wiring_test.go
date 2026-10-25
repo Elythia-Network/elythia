@@ -19,12 +19,17 @@ import (
 // 以前は`notehide.SetUGCVisibilityLookup`でパッケージの変数に1度登録していた。
 // 組み立てで作るHiderに公開範囲の読み方を持たせたので、Hiderにその読み方を
 // 渡し忘れると、匿名の閲覧者に投稿の中身が見える(未配線は隠さない側に倒れる)。
-// handlerがHiderを受け取ったかは起動時の検査(criticalWiring)が見るが、Hider
-// そのものの中身はそこでは見えないので、実際の経路で確かめる。
+// handlerがHiderを受け取ったかは、構築子の必須の引数(#3817、notesは#3831)と
+// `TestBuiltHandlersHaveNoNilDependencies`が見るが、Hiderそのものの中身は
+// そこでは見えないので、実際の経路で確かめる。
 //
 // 匿名で`none`のとき、notes/showや一覧はhandler自身が拒否するか空を返すので、
 // notehideまで届かない。届くのは、ローカルの利用者のプロフィール(users/show)の
 // ピン留めの投稿で、プロフィールは返り、投稿の中身だけが隠れる。
+//
+// notes/showの拒否もあわせて見る。notesのhandlerは公開範囲の読み方を構築子で
+// 受ける(#3831)。nilでないことは`TestBuiltHandlersHaveNoNilDependencies`が見るが、
+// 空文字を返す読み方は`all`と同じ扱いになって拒否が消えるので、実際の経路で確かめる。
 func TestNewServer_NoteHiderAppliesTheVisitorPolicy(t *testing.T) {
 	db := serverIntegrationDB
 	if db == nil {
@@ -87,6 +92,14 @@ func TestNewServer_NoteHiderAppliesTheVisitorPolicy(t *testing.T) {
 				assert.Nil(t, n["text"], "the content must be blanked")
 			} else {
 				assert.Equal(t, text, n["text"])
+			}
+
+			rec := postJSON(t, srv, "/api/notes/show", tt.token, map[string]any{"noteId": noteID})
+			if tt.hidden {
+				assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "CONTENT_RESTRICTED_BY_SERVER")
+			} else {
+				assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			}
 		})
 	}

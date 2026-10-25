@@ -117,7 +117,7 @@ func newRelationTimelineEnv(t *testing.T, prefix string, fanout bool) *relationT
 		tl = timeline.NewService(nil, noteRepo, e.following)
 		tl.SetFanoutToggle(relationFanoutOff{})
 	}
-	e.h = NewHandler(noteRepo, nil, nil, nil, tl, nil, nil, nil, idGen)
+	e.h = newHandlerNilDeps(noteRepo, nil, nil, nil, tl, nil, nil, nil, idGen)
 	e.h.SetUserRepo(userRepo)
 	e.h.SetMutingRepo(e.muting)
 	e.h.SetRenoteMutingRepo(e.renoteMuting)

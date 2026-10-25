@@ -114,10 +114,10 @@ func newUGCFixture(t *testing.T) *ugcFixture {
 	tl := coretimeline.NewService(nil, repo, testutil.NewMockFollowingRepository())
 	tl.SetFanoutToggle(fttOff{})
 	provider := &countingProvider{Provider: search.NewSQLLikeProvider(repo, nil)}
-	h := NewHandler(repo, createSvc, deleteSvc, querySvc, tl, nil, nil, search.NewService(provider), idGen)
+	h := newHandlerNilDeps(repo, createSvc, deleteSvc, querySvc, tl, nil, nil, search.NewService(provider), idGen)
 
 	f := &ugcFixture{h: h, repo: repo, provider: provider, policy: ugcvisibility.All}
-	h.SetUGCVisibilityLookup(func() string { return f.policy })
+	h.ugcVisibilityFn = func() string { return f.policy }
 	return f
 }
 

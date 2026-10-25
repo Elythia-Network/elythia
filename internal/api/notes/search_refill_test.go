@@ -109,7 +109,7 @@ func newRefillFixture(t *testing.T, meili bool, hidden []bool) *refillFixture {
 	}
 	pollRepo := testutil.NewMockPollRepository()
 	createSvc := corenote.NewCreateService(repo, pollRepo, gen, nil, nil, nil, nil, nil, nil, nil)
-	f.h = NewHandler(repo, createSvc, corenote.NewDeleteService(repo), corenote.NewQueryService(repo, nil), nil, nil, nil, search.NewService(provider), gen)
+	f.h = newHandlerNilDeps(repo, createSvc, corenote.NewDeleteService(repo), corenote.NewQueryService(repo, nil), nil, nil, nil, search.NewService(provider), gen)
 	return f
 }
 

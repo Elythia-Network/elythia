@@ -32,7 +32,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 	return h, noteRepo
 }
 
@@ -99,7 +99,7 @@ func TestCreate_WithPoll(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{
 		ID:                "user1",
@@ -637,7 +637,7 @@ func TestCreate_WithPollExpiresAt(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{
 		ID:                "user1",
@@ -672,7 +672,7 @@ func TestCreate_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 
@@ -696,7 +696,7 @@ func TestCreate_FindByIDWithRelationsFails(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{
 		ID:                "user1",
@@ -733,7 +733,7 @@ func TestCreate_RenoteTargetNotFound(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 
@@ -774,7 +774,7 @@ func TestCreate_CannotReplyToInvisibleNote(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 
@@ -807,7 +807,7 @@ func TestCreate_ChannelNotFound(t *testing.T) {
 	createSvc.SetChannelHook(channelErrHook{err: corechannel.ErrChannelNotFound})
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 
@@ -835,7 +835,7 @@ func TestCreate_ChannelLookupErrorIsInternal(t *testing.T) {
 	createSvc.SetChannelHook(channelErrHook{err: errors.New("connection refused")})
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	body := `{"text": "to channel", "channelId": "c1"}`
 	e := echo.New()
@@ -866,7 +866,7 @@ func TestCreate_ArchivedChannel(t *testing.T) {
 	createSvc.SetChannelHook(corechannel.NewNoteCreateHook(channelSvc))
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 	e := echo.New()
@@ -1030,7 +1030,7 @@ func TestDelete_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	user := &model.User{ID: "user1", Username: "testuser"}
 	body := `{"noteId": "note1"}`
@@ -1128,7 +1128,7 @@ func TestCreate_PollExpiredAfterTakesPriority(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 	user := &model.User{ID: "user1", Username: "testuser", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
 	farFutureMs := time.Now().Add(30 * 24 * time.Hour).UnixMilli() // expiresAt: 30 日後
@@ -1177,7 +1177,7 @@ func TestCreate_PollExpiryRange(t *testing.T) {
 			pollRepo := testutil.NewMockPollRepository()
 			idGen, _ := id.NewGenerator("aidx")
 			createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
-			h := NewHandler(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
+			h := newHandlerNilDeps(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
 			user := &model.User{ID: "user1", Username: "testuser", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
 			body := `{"text": "Vote!", "poll": {"choices": ["A", "B"], ` + tt.poll + `}}`

@@ -72,9 +72,14 @@ var handlerNilAllowed = map[string]string{
 	"deliverProcessor.telemetry": "queue ロール (s.role.RunsQueue()) でだけ配線する。テストの組み立ては MK_ONLY_SERVER=1",
 	"deliverProcessor.breaker":   "queue ロール (s.role.RunsQueue()) で、buildFederation が breaker を作ったときだけ配線する。テストの組み立ては MK_ONLY_SERVER=1",
 	"inboxProcessor.telemetry":   "queue ロール (s.role.RunsQueue()) でだけ配線する。テストの組み立ては MK_ONLY_SERVER=1",
+	// 依存ではなく、設定で有効にする first-page の timeline の応答のキャッシュ。setupRoutes は
+	// enableTimelineCache (MK_ENABLETIMELINECACHE) が true のときだけ EnableTimelineJSONCache で
+	// 作る。既定は無効で、テストの組み立ても有効にしない。nil のとき timeline はキャッシュを
+	// 通らない (#3831)。
+	"notes.timelineCache": "enableTimelineCache を有効にしたときだけ EnableTimelineJSONCache で作る (既定は無効)",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -86,7 +91,7 @@ var handlerNilAllowed = map[string]string{
 // 対象は、buildHandlers が作った handler のうち requiredDepHandlers に並べたもの
 // (#3817、i は #3827) と、setupRoutes の本文 (と buildStream) で作る部品のうち
 // routeParts に持たせたもの全部 (#3823、stream の部品と feed・peer は #3827、queue の
-// processor は #3829)、
+// processor は #3829、notes の handler は #3831)、
 // buildCore が作る部品のうち coreParts に持たせたもの全部 (#3825)。
 //
 // フィールドは unexported だが、同じ型の値を reflect で辿り IsNil を見るだけなので
@@ -210,8 +215,8 @@ func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.V
 	assert.Positive(t, n, "%s.%s に nil になりうるフィールドが 1 つも無い (抽出が空振りしていないか)", container, name)
 }
 
-// requiredDepChecks names fields that #3817, #3823, #3825, #3827 and #3829 turned
-// into constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
+// requiredDepChecks names fields that #3817, #3823, #3825, #3827, #3829 and #3831
+// turned into constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
 var requiredDepChecks = []string{
 	"webhook.rolePolicyProvider",
 	"notifications.entityPacker", "notifications.noteHider", "notifications.moderatorChecker",
@@ -291,6 +296,8 @@ var requiredDepChecks = []string{
 	"deliverProcessor.metadataRefresher", "deliverProcessor.statsEnabled",
 	"inboxProcessor.verifier", "inboxProcessor.hostBlocker", "inboxProcessor.softwareBlocker",
 	"inboxProcessor.metadataRefresher", "inboxProcessor.replayGuard",
+	// ここから #3831 (notes の handler)。
+	"notes.noteHider", "notes.entityPacker", "notes.policyProvider", "notes.ugcVisibilityFn",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,
