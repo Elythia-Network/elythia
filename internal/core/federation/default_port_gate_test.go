@@ -32,9 +32,8 @@ func TestNormalizeGateHost_MatchesBlockedHostsEntry(t *testing.T) {
 // 配送側の block 判定が既定ポート付きの inbox でも効くこと。stubBlocker は
 // 完全一致の map なので、正規化しないと `bad.example:443` は素通りする。
 func TestDeliverActivity_SkipsBlockedHostSpelledWithDefaultPort(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{blocked: map[string]bool{"bad.example": true}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{blocked: map[string]bool{"bad.example": true}})
 
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{
 		"https://bad.example:443/inbox",
@@ -47,9 +46,8 @@ func TestDeliverActivity_SkipsBlockedHostSpelledWithDefaultPort(t *testing.T) {
 
 // federation: specified (allowlist) 側も同じこと。blocked とは独立した経路。
 func TestDeliverActivity_SkipsDisallowedHostSpelledWithDefaultPort(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{disallowed: map[string]bool{"other.example": true}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{disallowed: map[string]bool{"other.example": true}})
 
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{
 		"https://other.example:443/inbox",
@@ -65,9 +63,8 @@ func TestDeliverActivity_SkipsDisallowedHostSpelledWithDefaultPort(t *testing.T)
 // ブロックに当てるのは blocker 本体 (`instance.HostMatchesAny`) の仕事で、
 // そちらは TestNormalizeGateHost_MatchesBlockedHostsEntry が見る。
 func TestDeliverActivity_NonDefaultPortIsADifferentHost(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{blocked: map[string]bool{"bad.example": true}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{blocked: map[string]bool{"bad.example": true}})
 
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{"https://bad.example:8443/inbox"}))
 	require.Len(t, enq.calls, 1)

@@ -19,7 +19,7 @@ func newBlockingHook(t *testing.T) (*federation.BlockingDeliveryHook, *stubEnque
 	followingRepo := testutil.NewMockFollowingRepository()
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
 	renderer := activitypub.NewRenderer(urls)
 	hook := federation.NewBlockingDeliveryHook(deliver, userRepo, renderer)
 	return hook, enq, userRepo, keypairRepo
@@ -68,7 +68,7 @@ func newProfileUpdateHook(t *testing.T) (*federation.ProfileUpdateDeliveryHook, 
 	followingRepo := testutil.NewMockFollowingRepository()
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
 	renderer := activitypub.NewRenderer(urls)
 	hook := federation.NewProfileUpdateDeliveryHook(deliver, renderer, userRepo, keypairRepo)
 	return hook, enq, userRepo, followingRepo, keypairRepo

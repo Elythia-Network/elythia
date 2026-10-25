@@ -25,7 +25,7 @@ func newUserModHook(t *testing.T) (
 	followingRepo := testutil.NewMockFollowingRepository()
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
 	renderer := activitypub.NewRenderer(urls)
 	hook := federation.NewUserModerationDeliveryHook(deliver, renderer, userRepo)
 	return hook, enq, userRepo, followingRepo, keypairRepo
