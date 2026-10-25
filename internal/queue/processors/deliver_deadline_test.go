@@ -20,7 +20,7 @@ import (
 // 期限付きの配送 (#3238、引用の承認の QuoteRequest) は、期限を過ぎていれば送らない。
 func TestDeliverProcessor_Deadline_ExpiredIsDropped(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	payload := makePayload(t)
 	payload.NotAfter = time.Now().Add(-time.Second).UnixMilli()
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -37,7 +37,7 @@ func TestDeliverProcessor_Deadline_ExpiredIsDropped(t *testing.T) {
 // 消費しないまま、状態が変わった後に届きうる)。期限の無い配送は今までどおり後へ回す。
 func TestDeliverProcessor_Deadline_HeldIsDropped(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetDeliveryBreaker(&fakeBreaker{decision: deliveryhealth.BreakerDelay, wait: time.Minute, hasState: true})
 	payload := makePayload(t)
 	payload.NotAfter = time.Now().Add(time.Minute).UnixMilli()
@@ -52,7 +52,7 @@ func TestDeliverProcessor_Deadline_HeldIsDropped(t *testing.T) {
 		"5xx":       {resp: okResponse(http.StatusBadGateway)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := processors.NewDeliverProcessor(s)
+			p := processors.NewDeliverProcessor(s, nil, nil, nil, nil, nil)
 			p.SetDeliveryBreaker(&fakeBreaker{openAfterFailure: true})
 			err := p.Handle(context.Background(), makeTask(t, payload))
 			assert.ErrorIs(t, err, driver.ErrSkipRetry)
@@ -77,7 +77,7 @@ func TestDeliverProcessor_Deadline_RSARetryHeldIsDropped(t *testing.T) {
 		{resp: okResponse(http.StatusBadRequest)},
 		{err: errors.New("connection refused")},
 	}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}))
 	p.SetDeliveryBreaker(&fakeBreaker{openAfterFailure: true})
 	payload := makePayload(t)

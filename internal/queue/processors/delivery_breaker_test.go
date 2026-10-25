@@ -82,7 +82,7 @@ func (f *fakeBreaker) Throttle(_ context.Context, host string, d time.Duration) 
 // 遅延で返す。
 func TestDeliverProcessor_Breaker_HoldsWithoutSending(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{decision: deliveryhealth.BreakerDelay, wait: 42 * time.Second, hasState: true}
 	p.SetDeliveryBreaker(b)
 
@@ -99,7 +99,7 @@ func TestDeliverProcessor_Breaker_HoldsWithoutSending(t *testing.T) {
 // 起きるたびに同じキーを渡す (429 の予約を覚えておくため)。違うジョブには
 // 違うキーを渡す (同じキーだと予約を取り合う)。
 func TestDeliverProcessor_Breaker_PassesAStableJobKey(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{decision: deliveryhealth.BreakerDelay, wait: time.Second}
 	p.SetDeliveryBreaker(b)
 
@@ -123,7 +123,7 @@ func TestDeliverProcessor_Breaker_CountsTransportAndServerErrors(t *testing.T) {
 		"5xx":       {resp: okResponse(http.StatusServiceUnavailable)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := processors.NewDeliverProcessor(signer)
+			p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 			b := &fakeBreaker{}
 			p.SetDeliveryBreaker(b)
 			_ = p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -142,7 +142,7 @@ func TestDeliverProcessor_Breaker_FailureWhileOpenIsHeld(t *testing.T) {
 		"5xx":       {resp: okResponse(http.StatusBadGateway)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := processors.NewDeliverProcessor(signer)
+			p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 			b := &fakeBreaker{openAfterFailure: true}
 			p.SetDeliveryBreaker(b)
 			err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -155,7 +155,7 @@ func TestDeliverProcessor_Breaker_FailureWhileOpenIsHeld(t *testing.T) {
 
 // 閉じている間の失敗は今までどおり retry (試行回数を消費する)。
 func TestDeliverProcessor_Breaker_FailureWhileClosedRetries(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{err: errors.New("connection refused")})
+	p := processors.NewDeliverProcessor(&stubSigner{err: errors.New("connection refused")}, nil, nil, nil, nil, nil)
 	p.SetDeliveryBreaker(&fakeBreaker{})
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
@@ -169,7 +169,7 @@ func TestDeliverProcessor_Breaker_ReportsWhetherItWasTheProbe(t *testing.T) {
 		decision deliveryhealth.BreakerDecision
 		token    string
 	}{{deliveryhealth.BreakerProbe, "t-1"}, {deliveryhealth.BreakerAllow, ""}} {
-		p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusServiceUnavailable)})
+		p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusServiceUnavailable)}, nil, nil, nil, nil, nil)
 		b := &fakeBreaker{decision: tc.decision, token: "t-1"}
 		p.SetDeliveryBreaker(b)
 		_ = p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -183,8 +183,7 @@ func TestDeliverProcessor_Breaker_LocalFailuresAreNotCounted(t *testing.T) {
 	payload := makePayload(t)
 	payload.KeyPEM = ""
 	payload.SignerUserID = "u1"
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
-	p.SetSigningKeySource(failingKeySource{})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, failingKeySource{}, nil, nil, nil)
 	b := &fakeBreaker{openAfterFailure: true}
 	p.SetDeliveryBreaker(b)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -199,8 +198,7 @@ func TestDeliverProcessor_Breaker_PermanentKeyErrorIsNotCounted(t *testing.T) {
 	payload := makePayload(t)
 	payload.KeyPEM = ""
 	payload.SignerUserID = "u1"
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
-	p.SetSigningKeySource(missingKeySource{})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, missingKeySource{}, nil, nil, nil)
 	b := &fakeBreaker{openAfterFailure: true}
 	p.SetDeliveryBreaker(b)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -213,8 +211,7 @@ func TestDeliverProcessor_Breaker_LocalFailureReleasesTheProbe(t *testing.T) {
 	payload := makePayload(t)
 	payload.KeyPEM = ""
 	payload.SignerUserID = "u1"
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
-	p.SetSigningKeySource(failingKeySource{})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, failingKeySource{}, nil, nil, nil)
 	b := &fakeBreaker{decision: deliveryhealth.BreakerProbe, token: "t-9"}
 	p.SetDeliveryBreaker(b)
 	_ = p.Handle(context.Background(), makeTask(t, payload))
@@ -230,8 +227,7 @@ func TestDeliverProcessor_Breaker_RSARetryLocalFailureIsNotCounted(t *testing.T)
 	payload.SignerUserID = "u1"
 	payload.Ed25519KeyID = "https://example.com/users/u1#ed25519-key"
 	payload.Ed25519PrivPEM = generateTestEd25519Key(t)
-	p := processors.NewDeliverProcessor(&sequenceSigner{steps: []signerStep{{resp: okResponse(http.StatusUnauthorized)}}})
-	p.SetSigningKeySource(failingKeySource{})
+	p := processors.NewDeliverProcessor(&sequenceSigner{steps: []signerStep{{resp: okResponse(http.StatusUnauthorized)}}}, nil, failingKeySource{}, nil, nil, nil)
 	b := &fakeBreaker{openAfterFailure: true}
 	p.SetDeliveryBreaker(b)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -251,7 +247,7 @@ func TestDeliverProcessor_Breaker_RSARetryPathCountsAndHolds(t *testing.T) {
 		{resp: okResponse(http.StatusUnauthorized)},
 		{err: errors.New("connection reset")},
 	}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{openAfterFailure: true}
 	p.SetDeliveryBreaker(b)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -265,7 +261,7 @@ func TestDeliverProcessor_Breaker_RSARetryPathCountsAndHolds(t *testing.T) {
 func TestDeliverProcessor_Breaker_AnyResponseCloses(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusForbidden, http.StatusGone, http.StatusNotFound, http.StatusTooManyRequests} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(status)})
+			p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(status)}, nil, nil, nil, nil, nil)
 			b := &fakeBreaker{hasState: true}
 			p.SetDeliveryBreaker(b)
 			_ = p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -277,7 +273,7 @@ func TestDeliverProcessor_Breaker_AnyResponseCloses(t *testing.T) {
 
 // 状態の無いホストの成功で Redis を叩かない (健全なホストへの配送が大半なので)。
 func TestDeliverProcessor_Breaker_HealthyHostSkipsRecordSuccess(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{}
 	p.SetDeliveryBreaker(b)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
@@ -287,7 +283,7 @@ func TestDeliverProcessor_Breaker_HealthyHostSkipsRecordSuccess(t *testing.T) {
 // 半開の試行は状態が無く見えても (Check の後で閉じられた等)、結果を必ず返す。
 // 返さないと、試行が成功しても閉じない。
 func TestDeliverProcessor_Breaker_ProbeAlwaysReports(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{decision: deliveryhealth.BreakerProbe}
 	p.SetDeliveryBreaker(b)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
@@ -299,7 +295,7 @@ func TestDeliverProcessor_Breaker_ProbeAlwaysReports(t *testing.T) {
 func TestDeliverProcessor_Breaker_TooManyRequestsThrottles(t *testing.T) {
 	resp := okResponse(http.StatusTooManyRequests)
 	resp.Header = http.Header{"Retry-After": []string{"120"}}
-	p := processors.NewDeliverProcessor(&stubSigner{resp: resp})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: resp}, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{}
 	p.SetDeliveryBreaker(b)
 
@@ -312,7 +308,7 @@ func TestDeliverProcessor_Breaker_TooManyRequestsThrottles(t *testing.T) {
 }
 
 func TestDeliverProcessor_Breaker_TooManyRequestsWithoutRetryAfter(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusTooManyRequests)})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusTooManyRequests)}, nil, nil, nil, nil, nil)
 	b := &fakeBreaker{}
 	p.SetDeliveryBreaker(b)
 	_ = p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -321,8 +317,7 @@ func TestDeliverProcessor_Breaker_TooManyRequestsWithoutRetryAfter(t *testing.T)
 
 // 止められた / ブロックされたホストへは、ブレーカーより先に配送自体を止める。
 func TestDeliverProcessor_Breaker_GateRunsFirst(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)})
-	p.SetDeliveryGate(skipAllGate{})
+	p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(http.StatusOK)}, skipAllGate{}, nil, nil, nil, nil)
 	b := &fakeBreaker{decision: deliveryhealth.BreakerDelay, wait: time.Minute}
 	p.SetDeliveryBreaker(b)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))),
@@ -377,7 +372,7 @@ func TestDeliverProcessor_Breaker_EndToEnd(t *testing.T) {
 	breaker := deliveryhealth.NewBreaker(rdb)
 
 	down := &stubSigner{err: errors.New("connection refused")}
-	p := processors.NewDeliverProcessor(down)
+	p := processors.NewDeliverProcessor(down, nil, nil, nil, nil, nil)
 	p.SetDeliveryBreaker(breaker)
 	ctx := context.Background()
 	for i := range deliveryhealth.BreakerThreshold {
@@ -402,7 +397,7 @@ func TestDeliverProcessor_Breaker_EndToEnd(t *testing.T) {
 	// 手で閉じれば (または試行が通れば) また送る。
 	require.NoError(t, breaker.Close(ctx, "remote.example"))
 	up := &stubSigner{resp: okResponse(http.StatusOK)}
-	p2 := processors.NewDeliverProcessor(up)
+	p2 := processors.NewDeliverProcessor(up, nil, nil, nil, nil, nil)
 	p2.SetDeliveryBreaker(breaker)
 	require.NoError(t, p2.Handle(ctx, makeTask(t, makePayload(t))))
 	assert.NotEmpty(t, up.gotURL)

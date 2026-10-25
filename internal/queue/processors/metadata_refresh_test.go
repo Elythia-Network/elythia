@@ -146,9 +146,7 @@ func TestDeliverProcessor_RefreshesMetadata(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			refresher := &stubMetadataRefresher{}
-			p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(tc.status)})
-			p.SetSuspendedChecker(stubSoftwareSuspension{suspended: map[string]bool{"remote.example": tc.suspended}})
-			p.SetMetadataRefresher(refresher, tc.statsEnabled)
+			p := processors.NewDeliverProcessor(&stubSigner{resp: okResponse(tc.status)}, nil, nil, stubSoftwareSuspension{suspended: map[string]bool{"remote.example": tc.suspended}}, refresher, tc.statsEnabled)
 			_ = p.Handle(context.Background(), makeTask(t, makePayload(t)))
 			assert.Equal(t, tc.want, refresher.hosts)
 		})

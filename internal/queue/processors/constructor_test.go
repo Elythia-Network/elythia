@@ -10,8 +10,14 @@ import (
 
 // 構築子の引数に渡すだけの値。どれも呼ばれないので、interface を埋め込んで型を満たす。
 type (
-	ctorPushCache struct{ PushSubscriptionCacheInvalidator }
-	ctorLock      struct{ ScheduledNoteLock }
+	ctorPushCache struct {
+		PushSubscriptionCacheInvalidator
+	}
+	ctorLock         struct{ ScheduledNoteLock }
+	ctorDeliveryGate struct{ DeliveryGate }
+	ctorKeySource    struct{ SigningKeySource }
+	ctorSuspended    struct{ SuspendedChecker }
+	ctorRefresher    struct{ InstanceMetadataRefresher }
 )
 
 // 下の構築子は、受け取った依存を processor に持たせる (#3829)。依存を構築子の必須の
@@ -30,4 +36,23 @@ func TestNewPostScheduledNoteProcessorKeepsDependencies(t *testing.T) {
 	lock := &ctorLock{}
 	p := NewPostScheduledNoteProcessor(nil, nil, nil, lock)
 	assert.Same(t, lock, p.lock)
+}
+
+func TestNewDeliverProcessorKeepsDependencies(t *testing.T) {
+	gate := &ctorDeliveryGate{}
+	keys := &ctorKeySource{}
+	suspended := &ctorSuspended{}
+	refresher := &ctorRefresher{}
+	called := false
+	stats := func() bool { called = true; return false }
+	p := NewDeliverProcessor(nil, gate, keys, suspended, refresher, stats)
+	assert.Same(t, gate, p.deliveryGate)
+	assert.Same(t, keys, p.keySource)
+	assert.Same(t, suspended, p.suspendedChecker)
+	assert.Same(t, refresher, p.metadataRefresher)
+	// func は比べられないので、呼んで渡したものか確かめる。
+	if assert.NotNil(t, p.statsEnabled) {
+		assert.False(t, p.statsEnabled())
+		assert.True(t, called, "statsEnabled が渡した関数でない")
+	}
 }

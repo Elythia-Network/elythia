@@ -46,7 +46,7 @@ func TestDeliverTelemetry_ClassMatchesResponseSwitch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			signer := &stubSigner{resp: okResponse(tc.status)}
-			p := processors.NewDeliverProcessor(signer)
+			p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 			tel := &recordingTelemetry{}
 			p.SetDeliveryTelemetry(tel)
 
@@ -63,7 +63,7 @@ func TestDeliverTelemetry_ClassMatchesResponseSwitch(t *testing.T) {
 // HTTP 応答に至らなかった失敗は transport。status は 0 になる。
 func TestDeliverTelemetry_TransportError(t *testing.T) {
 	signer := &stubSigner{err: errors.New("dial tcp: i/o timeout")}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -80,7 +80,7 @@ func TestDeliverTelemetry_TransportError(t *testing.T) {
 // 負値やゼロ値の未設定を避ける)。
 func TestDeliverTelemetry_RecordsLatency(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusAccepted)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -92,7 +92,7 @@ func TestDeliverTelemetry_RecordsLatency(t *testing.T) {
 // telemetry 未配線でも配送は動く。観測のために配送を落とさない。
 func TestDeliverTelemetry_UnwiredDoesNotBreakDelivery(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusAccepted)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
 }

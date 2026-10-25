@@ -20,7 +20,7 @@ func TestDeliverProcessor_Ed25519Degraded(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	p := processors.NewDeliverProcessor(&stubSigner{})
+	p := processors.NewDeliverProcessor(&stubSigner{}, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	d, err := p.Ed25519Degraded(ctx, "remote.example")

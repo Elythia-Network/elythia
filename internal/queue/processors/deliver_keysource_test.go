@@ -48,8 +48,7 @@ func (s *stubKeySource) SigningKeyPEM(userID, kind string) (string, error) {
 // **payload に鍵が無ければ SignerUserID から引く。**
 func TestResolveSigningKey_FetchesWhenPayloadHasNoPEM(t *testing.T) {
 	src := &stubKeySource{rsa: newTestKeyPEM(t)}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 
 	key, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID:        "https://example.com/users/u1#main-key",
@@ -66,8 +65,7 @@ func TestResolveSigningKey_FetchesWhenPayloadHasNoPEM(t *testing.T) {
 // なので、ここを外すと配送のたびに DB を引く。
 func TestResolveSigningKey_CachesLookup(t *testing.T) {
 	src := &stubKeySource{rsa: newTestKeyPEM(t)}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 	payload := queue.DeliverPayload{
 		KeyID:        "https://example.com/users/u2#main-key",
 		SignerUserID: "u2",
@@ -84,8 +82,7 @@ func TestResolveSigningKey_CachesLookup(t *testing.T) {
 // job は SignerUserID を持たないので、DB を引きに行くと配送できない。
 func TestResolveSigningKey_PrefersInlinePEM(t *testing.T) {
 	src := &stubKeySource{err: errors.New("引いてはいけない")}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 
 	key, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID:  "https://example.com/users/u3#main-key",
@@ -99,8 +96,7 @@ func TestResolveSigningKey_PrefersInlinePEM(t *testing.T) {
 // **DB 障害を「鍵が無い」にしない** (#2792)。
 func TestResolveSigningKey_PropagatesSourceError(t *testing.T) {
 	src := &stubKeySource{err: errors.New("connection refused")}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 
 	_, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID:        "https://example.com/users/u4#main-key",
@@ -112,8 +108,7 @@ func TestResolveSigningKey_PropagatesSourceError(t *testing.T) {
 // 鍵が無いユーザーは、空文字ではなく明示のエラーにする。
 func TestResolveSigningKey_EmptyPEMIsError(t *testing.T) {
 	src := &stubKeySource{rsa: ""}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 
 	_, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID:        "https://example.com/users/u5#main-key",
@@ -126,7 +121,7 @@ func TestResolveSigningKey_EmptyPEMIsError(t *testing.T) {
 
 // **source 未配線でも「鍵が無い」ではなく設定漏れとして落とす。**
 func TestResolveSigningKey_NoSourceConfigured(t *testing.T) {
-	p := NewDeliverProcessor(nil)
+	p := NewDeliverProcessor(nil, nil, nil, nil, nil, nil)
 	_, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID:        "https://example.com/users/u6#main-key",
 		SignerUserID: "u6",
@@ -139,8 +134,7 @@ func TestResolveSigningKey_NoSourceConfigured(t *testing.T) {
 // ユーザーでも keyID が違えば引き直す。
 func TestResolveSigningKey_CacheSeparatesByKeyID(t *testing.T) {
 	src := &stubKeySource{rsa: newTestKeyPEM(t)}
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(src)
+	p := NewDeliverProcessor(nil, nil, src, nil, nil, nil)
 
 	_, err := p.resolveSigningKey(keyKindRSA, queue.DeliverPayload{
 		KeyID: "https://old.example/users/u1#main-key", SignerUserID: "u1",

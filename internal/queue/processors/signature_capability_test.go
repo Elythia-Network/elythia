@@ -165,7 +165,7 @@ func TestInboxProcessor_RecordsLDSignature(t *testing.T) {
 // Ed25519 で署名した配送が 2xx を返したら記録する (= 同期的に拒否されなかった)。
 func TestDeliverProcessor_RecordsEd25519Accepted(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	recorder := newCapabilityRecorderStub()
 	p.SetSignatureCapabilityRecorder(recorder)
 
@@ -180,7 +180,7 @@ func TestDeliverProcessor_RecordsEd25519Accepted(t *testing.T) {
 // RSA で送った 2xx は Ed25519 の成功として数えない。
 func TestDeliverProcessor_DoesNotRecordEd25519OnRSADelivery(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	recorder := newCapabilityRecorderStub()
 	p.SetSignatureCapabilityRecorder(recorder)
 
@@ -192,7 +192,7 @@ func TestDeliverProcessor_DoesNotRecordEd25519OnRSADelivery(t *testing.T) {
 // (useEd25519) ではなく実際に署名した方式を見ていないと、ここが誤記録になる。
 func TestDeliverProcessor_DoesNotRecordEd25519WhenKeyParseFails(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	recorder := newCapabilityRecorderStub()
 	p.SetSignatureCapabilityRecorder(recorder)
 
@@ -215,7 +215,7 @@ func TestDeliverProcessor_DoesNotRecordEd25519AfterRSARetry(t *testing.T) {
 		okResponse(http.StatusBadRequest), // Ed25519 で 4xx
 		okResponse(http.StatusOK),         // RSA 再送で 2xx
 	}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetRedis(redis.NewClient(&redis.Options{Addr: mr.Addr()}))
 	recorder := newCapabilityRecorderStub()
 	p.SetSignatureCapabilityRecorder(recorder)

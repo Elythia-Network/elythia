@@ -45,8 +45,11 @@ func TestInstanceStatsGateIsWired(t *testing.T) {
 		"accountMover.SetInstanceStats(instanceRepo, corefollowing.MetaInstanceStatsGate(metaRepo), chartHooks)",
 		"リモートアカウントが移行しても、その instance の followersCount と\n"+
 			"chart が減らない (#3330)")
+	// 配送の nodeinfo の取り直しの判定は、#3829 から deliver の processor の構築子の
+	// 最後の引数。判定を反転させた関数も同じ型で渡せるので、型でも nil の検査でも
+	// 捕まらない。構築子の呼び出しを引数まで照合する。
 	assertWired(t, serverPkg,
-		"deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))",
+		"deliverProcessor := processors.NewDeliverProcessor(apClient, instanceService, processors.NewRepoSigningKeySource(keypairRepo, keypairExtraRepo), corefederation.NewSuspendedChecker(metaRepo, instanceRepo), metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))",
 		"enableStatsForFederatedInstances を切っても、配送のたびに相手の nodeinfo を\n"+
 			"取り直し続ける (本家は切ると取りに行かない) (#3564)")
 }

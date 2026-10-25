@@ -79,7 +79,7 @@ func okResponse(status int) *http.Response {
 
 func TestDeliverProcessor_Success(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -91,13 +91,13 @@ func TestDeliverProcessor_Success(t *testing.T) {
 
 func TestDeliverProcessor_Accepted(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusAccepted)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
 }
 
 func TestDeliverProcessor_Gone_SkipsRetry(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusGone)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, driver.ErrSkipRetry)
@@ -105,7 +105,7 @@ func TestDeliverProcessor_Gone_SkipsRetry(t *testing.T) {
 
 func TestDeliverProcessor_NotFound_SkipsRetry(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusNotFound)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, driver.ErrSkipRetry)
@@ -113,7 +113,7 @@ func TestDeliverProcessor_NotFound_SkipsRetry(t *testing.T) {
 
 func TestDeliverProcessor_Forbidden_SkipsRetry(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusForbidden)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, driver.ErrSkipRetry)
@@ -121,7 +121,7 @@ func TestDeliverProcessor_Forbidden_SkipsRetry(t *testing.T) {
 
 func TestDeliverProcessor_ServerError_RetriesByReturningError(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusInternalServerError)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, driver.ErrSkipRetry)
@@ -130,7 +130,7 @@ func TestDeliverProcessor_ServerError_RetriesByReturningError(t *testing.T) {
 func TestDeliverProcessor_NetworkError_Retries(t *testing.T) {
 	netErr := errors.New("connection refused")
 	signer := &stubSigner{err: netErr}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, netErr)
@@ -138,7 +138,7 @@ func TestDeliverProcessor_NetworkError_Retries(t *testing.T) {
 }
 
 func TestDeliverProcessor_BadPayload_SkipsRetry(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{})
+	p := processors.NewDeliverProcessor(&stubSigner{}, nil, nil, nil, nil, nil)
 	task := driver.RawTask{TypeName: queue.TaskTypeDeliver, Body: []byte(`{not json`)}
 	err := p.Handle(context.Background(), task)
 	require.Error(t, err)
@@ -146,7 +146,7 @@ func TestDeliverProcessor_BadPayload_SkipsRetry(t *testing.T) {
 }
 
 func TestDeliverProcessor_BadKey_SkipsRetry(t *testing.T) {
-	p := processors.NewDeliverProcessor(&stubSigner{})
+	p := processors.NewDeliverProcessor(&stubSigner{}, nil, nil, nil, nil, nil)
 	payload := queue.DeliverPayload{
 		Inbox:  "https://remote.example/inbox",
 		Body:   []byte(`{}`),
@@ -203,7 +203,7 @@ func generateTestEd25519Key(t *testing.T) string {
 // payload に Ed25519 鍵情報がある場合、processor は Ed25519 で sign する。
 func TestDeliverProcessor_Ed25519_PreferredWhenPayloadHasKey(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.Ed25519KeyID = "https://example.com/users/u1#ed25519-key"
@@ -217,7 +217,7 @@ func TestDeliverProcessor_Ed25519_PreferredWhenPayloadHasKey(t *testing.T) {
 // payload に Ed25519 鍵情報がない場合は従来通り RSA で sign される。
 func TestDeliverProcessor_Ed25519_AbsentFallbackToRSA(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t) // Ed25519KeyID / Ed25519PrivPEM は空
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
@@ -228,7 +228,7 @@ func TestDeliverProcessor_Ed25519_AbsentFallbackToRSA(t *testing.T) {
 // Ed25519 PEM が壊れていれば RSA に fallback する (fail-soft)。
 func TestDeliverProcessor_Ed25519_MalformedKeyFallsBackToRSA(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.Ed25519KeyID = "https://example.com/users/u1#ed25519-key"
@@ -254,7 +254,7 @@ func TestDeliverProcessor_Ed25519_4xxIncrementsCounterButNoDegrade(t *testing.T)
 			okResponse(http.StatusOK),
 		},
 	}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetRedis(rdb)
 
 	payload := makePayload(t)
@@ -292,7 +292,7 @@ func TestDeliverProcessor_Ed25519_3xFailureTripsDegrade(t *testing.T) {
 			okResponse(http.StatusBadRequest), okResponse(http.StatusOK),
 		},
 	}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetRedis(rdb)
 
 	payload := makePayload(t)
@@ -321,7 +321,7 @@ func TestDeliverProcessor_Ed25519_DegradeFlagSkipsEd25519(t *testing.T) {
 	require.NoError(t, rdb.Set(context.Background(), "ed25519:degrade:remote.example", "1", 0).Err())
 
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	p.SetRedis(rdb)
 
 	payload := makePayload(t)
@@ -357,7 +357,7 @@ func (s *stubResponseHook) MarkGoneSuspended(host string) error {
 
 func TestDeliverProcessor_ResponseHook_Success(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
@@ -367,7 +367,7 @@ func TestDeliverProcessor_ResponseHook_Success(t *testing.T) {
 
 func TestDeliverProcessor_ResponseHook_Gone_RecordsSuccess(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusGone)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -378,7 +378,7 @@ func TestDeliverProcessor_ResponseHook_Gone_RecordsSuccess(t *testing.T) {
 // #1811: shared inbox が 410 Gone を返したらインスタンス全体を goneSuspended にする。
 func TestDeliverProcessor_SharedInbox_Gone_SuspendsInstance(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusGone)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	payload := makePayload(t)
@@ -391,7 +391,7 @@ func TestDeliverProcessor_SharedInbox_Gone_SuspendsInstance(t *testing.T) {
 // 個別 inbox の 410 はインスタンスを suspend しない (個別 actor 不在の可能性)。
 func TestDeliverProcessor_PersonalInbox_Gone_NoSuspend(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusGone)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	payload := makePayload(t) // IsSharedInbox=false
@@ -403,7 +403,7 @@ func TestDeliverProcessor_PersonalInbox_Gone_NoSuspend(t *testing.T) {
 // shared inbox でも 404 は suspend しない (410 Gone のみが「消滅」シグナル)。
 func TestDeliverProcessor_SharedInbox_NotFound_NoSuspend(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusNotFound)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	payload := makePayload(t)
@@ -415,7 +415,7 @@ func TestDeliverProcessor_SharedInbox_NotFound_NoSuspend(t *testing.T) {
 
 func TestDeliverProcessor_ResponseHook_ClientError_RecordsSuccess(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusForbidden)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -425,7 +425,7 @@ func TestDeliverProcessor_ResponseHook_ClientError_RecordsSuccess(t *testing.T) 
 
 func TestDeliverProcessor_ResponseHook_ServerError_RecordsError(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusInternalServerError)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -435,7 +435,7 @@ func TestDeliverProcessor_ResponseHook_ServerError_RecordsError(t *testing.T) {
 
 func TestDeliverProcessor_ResponseHook_NetworkError_RecordsError(t *testing.T) {
 	signer := &stubSigner{err: errors.New("net down")}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -445,7 +445,7 @@ func TestDeliverProcessor_ResponseHook_NetworkError_RecordsError(t *testing.T) {
 
 func TestDeliverProcessor_ResponseHook_UnparseableInboxSuccess(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	payload := queue.DeliverPayload{
@@ -460,7 +460,7 @@ func TestDeliverProcessor_ResponseHook_UnparseableInboxSuccess(t *testing.T) {
 
 func TestDeliverProcessor_ResponseHook_UnparseableInboxError(t *testing.T) {
 	signer := &stubSigner{err: errors.New("net down")}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubResponseHook{}
 	p.SetResponseHook(hook)
 	payload := queue.DeliverPayload{
@@ -491,7 +491,7 @@ func (s *stubChartHook) OnDelivered(host string, succeeded bool) {
 
 func TestDeliverProcessor_ChartHook_Success(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubChartHook{}
 	p.SetChartHook(hook)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, makePayload(t))))
@@ -502,7 +502,7 @@ func TestDeliverProcessor_ChartHook_Success(t *testing.T) {
 
 func TestDeliverProcessor_ChartHook_NetworkError(t *testing.T) {
 	signer := &stubSigner{err: errors.New("net down")}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubChartHook{}
 	p.SetChartHook(hook)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
@@ -515,7 +515,7 @@ func TestDeliverProcessor_ChartHook_UnparseableInbox(t *testing.T) {
 	// 不正な inbox URL でも chart hook は host="" で発火し、route 別に
 	// no-op で扱われる (charthook 側のテストでカバー)。
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	hook := &stubChartHook{}
 	p.SetChartHook(hook)
 	payload := queue.DeliverPayload{
@@ -546,7 +546,7 @@ func (s *keyCapturingSigner) PostSigned(_ string, _ []byte, key *activitypub.Pri
 // 別 entry で再パースされること。
 func TestDeliverProcessor_RSAKeyCacheReuse(t *testing.T) {
 	signer := &keyCapturingSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t) // KeyID + KeyPEM 固定
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
@@ -564,7 +564,7 @@ func TestDeliverProcessor_RSAKeyCacheReuse(t *testing.T) {
 // Ed25519 経路も同様に parsed-key がメモ化されること (#1425)。
 func TestDeliverProcessor_Ed25519KeyCacheReuse(t *testing.T) {
 	signer := &keyCapturingSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.Ed25519KeyID = "https://example.com/users/u1#ed25519-key"
@@ -579,7 +579,7 @@ func TestDeliverProcessor_Ed25519KeyCacheReuse(t *testing.T) {
 // #2106 N30: 429 (rate limited) は 4xx だが upstream 同様 retryable (ErrSkipRetry を付けない)。
 func TestDeliverProcessor_RateLimited_Retries(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusTooManyRequests)}
-	p := processors.NewDeliverProcessor(signer)
+	p := processors.NewDeliverProcessor(signer, nil, nil, nil, nil, nil)
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, driver.ErrSkipRetry)
@@ -611,11 +611,10 @@ func (s *keySourceStub) SigningKeyPEM(_ string, kind string) (string, error) {
 // それは相手サーバー側でしか分からない。Ed25519 / RSA の両方を固定する。
 func TestDeliverProcessor_SignsWithoutKeyInPayload_Ed25519(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
-	p.SetSigningKeySource(&keySourceStub{
+	p := processors.NewDeliverProcessor(signer, nil, &keySourceStub{
 		rsa: generateTestKey(t),
 		ed:  generateTestEd25519Key(t),
-	})
+	}, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.KeyPEM = ""
@@ -631,8 +630,7 @@ func TestDeliverProcessor_SignsWithoutKeyInPayload_Ed25519(t *testing.T) {
 
 func TestDeliverProcessor_SignsWithoutKeyInPayload_RSA(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
-	p.SetSigningKeySource(&keySourceStub{rsa: generateTestKey(t)})
+	p := processors.NewDeliverProcessor(signer, nil, &keySourceStub{rsa: generateTestKey(t)}, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.KeyPEM = ""
@@ -646,8 +644,7 @@ func TestDeliverProcessor_SignsWithoutKeyInPayload_RSA(t *testing.T) {
 // Ed25519 の鍵が引けないときは RSA へ落ちる (配送を止めない)。
 func TestDeliverProcessor_FallsBackToRSAWhenEd25519KeyMissing(t *testing.T) {
 	signer := &recordingSigner{responses: []*http.Response{okResponse(http.StatusOK)}}
-	p := processors.NewDeliverProcessor(signer)
-	p.SetSigningKeySource(&keySourceStub{rsa: generateTestKey(t)}) // ed は無し
+	p := processors.NewDeliverProcessor(signer, nil, &keySourceStub{rsa: generateTestKey(t)}, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.KeyPEM = ""

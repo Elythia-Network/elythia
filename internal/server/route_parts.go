@@ -74,4 +74,5 @@ type routeParts struct {
 	// queue の processor (#3829)。欄の名前は setupRoutes の別名にする。
 	deleteAccountProcessor     *processors.DeleteAccountProcessor
 	postScheduledNoteProcessor *processors.PostScheduledNoteProcessor
+	deliverProcessor           *processors.DeliverProcessor
 }
