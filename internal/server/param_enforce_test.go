@@ -143,6 +143,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM access_token WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM app WHERE "userId" = ?`, userID).Error)
+		// users/* の受理の入力で実際に書き込むのは users/lists/create だけ (#3837)。ほかの
+		// 書き込み系は、corpus の id の利用者やリストが無いので、書き込みや外向きの通信の前に
+		// NO_SUCH_USER / NO_SUCH_LIST で止まる。user_list は利用者の削除で消える (ON DELETE
+		// CASCADE) が、何を作るかが読めるように明示して消す。
+		require.NoError(t, db.Exec(`DELETE FROM user_list WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -224,9 +229,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 }
 
 // TestEnforcedGETMatchesUpstream sends GET queries to the enforced allowGet
-// endpoints of a real server (charts/*, bubble-game/ranking, federation/stats
-// and the top-level emoji, emojis, fetch-rss, get-online-users-count,
-// retention and server-info) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
+// endpoints of a real server (charts/*, bubble-game/ranking, federation/stats,
+// the top-level emoji, emojis, fetch-rss, get-online-users-count,
+// retention and server-info, and users/featured-notes) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
 // are written out here (#3744).
 func TestEnforcedGETMatchesUpstream(t *testing.T) {
@@ -301,6 +306,23 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "get-online-users-count", ok: true},
 		{query: "retention", ok: true},
 		{query: "server-info", ok: true},
+		// users/featured-notesは本家もallowGetで、存在しない利用者には空の配列を返す(#3837)。
+		{query: "users/featured-notes?userId=abc123", ok: true},
+		{query: "users/featured-notes?userId=abc123&limit=10.0", ok: true},
+		{query: "users/featured-notes?userId=abc123&limit=1e1", ok: true},
+		{query: "users/featured-notes?userId=abc123&limit=100e0", ok: true},
+		{query: "users/featured-notes?userId=abc123&untilId=abc124", ok: true},
+		{query: "users/featured-notes?userId=abc123&unknown=1", ok: true},
+		{query: "users/featured-notes?userId=abc123&limit=abc", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "users/featured-notes?userId=abc123&limit=", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "users/featured-notes?userId=abc123&limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "users/featured-notes?userId=abc123&limit=10.5", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "users/featured-notes?userId=abc123&limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
+		{query: "users/featured-notes?userId=abc123&limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
+		{query: "users/featured-notes", id: ajvID, param: "#/required", reason: "must have required property 'userId'"},
+		{query: "users/featured-notes?userId=", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
+		{query: "users/featured-notes?userId=a&userId=b", id: ajvID, param: "#/properties/userId/type", reason: "must be string"},
+		{query: "users/featured-notes?userId=abc123&untilId=x-y", id: ajvID, param: "#/properties/untilId/format", reason: `must match format "misskey:id"`},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
 		rec := httptest.NewRecorder()
