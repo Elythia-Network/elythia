@@ -48,7 +48,7 @@ func ingestCWEnv(t *testing.T) (*Resolver, *testutil.MockNoteRepository) {
 	fetcher := &countingFetcher{docs: map[string]string{
 		"https://remote.example/users/cw": featuredActorDoc("remote.example", "cw", ""),
 	}}
-	r := NewResolver(testutil.NewMockUserRepository(), noteRepo,
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), noteRepo,
 		activitypub.NewURLBuilder("https://example.com"), fetcher, idGen)
 	return r, noteRepo
 }

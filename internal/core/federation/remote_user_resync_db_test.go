@@ -61,7 +61,7 @@ func TestResyncIfStale_DB_FixesURIAndRefreshes(t *testing.T) {
 	f := newRouteFetcher()
 	f.bodies[newURI] = doc[:len(doc)-1] + `,"name":"Resynced Alice"}`
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := corefederation.NewResolver(userRepo, repository.NewNoteRepository(db), activitypub.NewURLBuilder("https://local.example"), f, idGen)
+	resolver := corefederation.NewResolverNilDeps(userRepo, repository.NewNoteRepository(db), activitypub.NewURLBuilder("https://local.example"), f, idGen)
 	wf := &countingWebFinger{uri: newURI}
 	r := corefederation.NewRemoteUserResolver(wf, resolver, userRepo, "local.example", nil)
 
@@ -107,7 +107,7 @@ func TestIngestNote_DB_FetchesUnknownMentionedActor(t *testing.T) {
 	f.bodies[mentionAuthorURI] = actorDoc(mentionAuthorURI, "alice")
 	f.bodies[carol] = actorDoc(carol, "rs_carol")
 	idGen, _ := id.NewGenerator("aidx")
-	r := corefederation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://local.example"), f, idGen)
+	r := corefederation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://local.example"), f, idGen)
 
 	note, err := r.IngestNote(noteBody(t, "rsdb1", []string{carol}, []string{activitypub.Public}, nil))
 	require.NoError(t, err)

@@ -28,10 +28,10 @@ func newProcForInbound1560(t *testing.T, fetcherBody string) (
 	blockingRepo := testutil.NewMockBlockingRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(fetcherBody)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(fetcherBody)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen, followingSvc, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 	p.SetBlockingService(blockingSvc)
 	p.SetLocalBaseURL("https://example.com")
 	return p, repo, noteRepo, followingRepo

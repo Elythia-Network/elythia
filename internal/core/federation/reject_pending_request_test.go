@@ -41,7 +41,7 @@ func TestProcess_RejectPendingFollowRequest(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	requestRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen, nil, nil, nil, nil)
 	events := &rejectMainEvents{}
 	webhooks := &rejectWebhooks{}
@@ -49,7 +49,7 @@ func TestProcess_RejectPendingFollowRequest(t *testing.T) {
 	followingSvc.SetMainStreamPublisher(events)
 	followingSvc.SetWebhookHook(webhooks)
 	followingSvc.SetFederationHook(delivery)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURL("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"
@@ -81,11 +81,11 @@ func TestProcess_RejectFollow_RemoteFollowerIsIgnored(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	requestRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen, nil, nil, nil, nil)
 	events := &rejectMainEvents{}
 	followingSvc.SetMainStreamPublisher(events)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURL("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"

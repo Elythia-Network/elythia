@@ -40,7 +40,7 @@ func TestIngestNote_PinnedNoteViaInboxKeepsCreated(t *testing.T) {
 			`","type":"OrderedCollection","orderedItems":["` + noteURI + `"]}`,
 		noteURI: plainNoteDoc(noteURI, actorURI),
 	}}
-	r := NewResolver(userRepo, noteRepo, urls, fetcher, idGen)
+	r := NewResolverNilDeps(userRepo, noteRepo, urls, fetcher, idGen)
 	// **pinningRepo を配線しないと updateFeatured が即 return する。**
 	// 配線を忘れると featured 経路そのものが走らず、テストが素通りする。
 	r.SetPinningRepo(testutil.NewMockUserNotePiningRepository(), idGen)
@@ -108,7 +108,7 @@ func TestIngestNote_PinnedNoteViaInboxKeepsCreated_AliasURI(t *testing.T) {
 		// **別名で引いても document の id は canonical。** ここが両者を食い違わせる。
 		aliasURI: plainNoteDoc(noteURI, actorURI),
 	}}
-	r := NewResolver(userRepo, noteRepo, urls, fetcher, idGen)
+	r := NewResolverNilDeps(userRepo, noteRepo, urls, fetcher, idGen)
 	// pinningRepo が無いと updateFeatured が即 return してテストが素通りする。
 	r.SetPinningRepo(pins, idGen)
 
@@ -152,7 +152,7 @@ func newAliasEnv(t *testing.T, actorURI, name, aliasURI, noteURI string) (*Resol
 		actorURI: featuredActorDoc("remote.example", name, ""),
 		aliasURI: plainNoteDoc(noteURI, actorURI),
 	}}
-	r := NewResolver(testutil.NewMockUserRepository(), noteRepo,
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), noteRepo,
 		activitypub.NewURLBuilder("https://example.com"), fetcher, idGen)
 	return r, noteRepo
 }
@@ -319,7 +319,7 @@ func TestIngestNote_PinnedNoteQuotingTheIngestedNoteUnderAnAliasKeepsRenoteID(t 
 		// いる N の id と**取得後に**一致する。
 		aliasN: plainNoteDoc(noteN, actorURI),
 	}}
-	r := NewResolver(testutil.NewMockUserRepository(), noteRepo,
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), noteRepo,
 		activitypub.NewURLBuilder("https://example.com"), fetcher, idGen)
 	r.SetPinningRepo(testutil.NewMockUserNotePiningRepository(), idGen)
 
@@ -420,7 +420,7 @@ func TestUpdateFeatured_PinWhoseIDEqualsAncestorFetchURI(t *testing.T) {
 		outerURI: plainNoteDoc(outerDoc, actorURI),
 		pinFetch: plainNoteDoc(pinDocURI, actorURI),
 	}}
-	r := NewResolver(testutil.NewMockUserRepository(), noteRepo,
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), noteRepo,
 		activitypub.NewURLBuilder("https://example.com"), fetcher, idGen)
 	r.SetPinningRepo(pins, idGen)
 

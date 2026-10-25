@@ -177,7 +177,7 @@ func TestUpdateRemoteNote_UpdatesURL(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := []byte(`{"id":"https://remote.example/notes/n1","type":"Note",
 		"attributedTo":"https://remote.example/users/alice","content":"x",
@@ -210,7 +210,7 @@ func TestUpdateRemoteNote_SameURLIsNotWrittenAgain(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := []byte(`{"id":"https://remote.example/notes/n1","type":"Note",
 		"attributedTo":"https://remote.example/users/alice","content":"x",
@@ -244,7 +244,7 @@ func TestUpdateRemoteNote_KeepsURLWhenNewOneIsDropped(t *testing.T) {
 			}
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 			body := []byte(`{"id":"https://remote.example/notes/n1","type":"Note",
 				"attributedTo":"https://remote.example/users/alice","content":"x",
@@ -270,7 +270,7 @@ func ingestNoteURLByRawFetch(t *testing.T, urlJSON string) *model.Note {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	got, err := r.IngestNote([]byte(`{
 		"type": "Note",
 		"id": "https://remote.example/users/alice/statuses/1",

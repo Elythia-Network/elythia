@@ -34,7 +34,7 @@ func newGatedResolver(t *testing.T, body string, blocker federation.HostBlockChe
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	if blocker != nil {
 		r.SetHostBlockChecker(blocker)
 	}
@@ -140,10 +140,10 @@ func TestProcessCreate_NonFederatedHostIsDroppedNotRetried(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{"type":"Create","actor":"https://remote.example/users/alice","object":` + sampleRemoteNote + `}`)
 	// permanent skip = ack。err を返すと queue が無駄に retry してしまう。
@@ -176,11 +176,11 @@ func TestProcessCreate_AllowedSenderNonFederatedAttributedToIsDropped(t *testing
 			"publicKeyPem": "-----BEGIN PUBLIC KEY-----\nFAKE\n-----END PUBLIC KEY-----"
 		}
 	}`
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(relayActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(relayActor)}, idGen)
 	// note の attributedTo (remote.example) のみ非連合。送信者 host は許可。
 	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{"type":"Create","actor":"https://relay.allowed/users/relay","object":` + sampleRemoteNote + `}`)
 	require.NoError(t, p.Process(body))

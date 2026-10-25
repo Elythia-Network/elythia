@@ -77,7 +77,7 @@ func TestResolveNoteOnce_LedgerDoesNotCoverTheFetchWindow(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(userRepo, &syncNoteRepo{NoteRepository: noteRepo}, urls, fetcher, idGen)
+	r := NewResolverNilDeps(userRepo, &syncNoteRepo{NoteRepository: noteRepo}, urls, fetcher, idGen)
 
 	// **どの経路で抜けても leader を解放する。** 解放し損ねると leader が
 	// gate で止まったまま singleflight の entry を握り続け、テストバイナリの
@@ -184,7 +184,7 @@ func TestResolveQuoteURI_UsesExistingRowWhenTheKeyIsInFlight(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), noteRepo, urls, emptyDocFetcher{}, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), noteRepo, urls, emptyDocFetcher{}, idGen)
 
 	nURI := storedAs
 	require.NoError(t, noteRepo.Create(&model.Note{ID: "9patnote000000000000", UserID: "9patuser000000000000", URI: &nURI}))
@@ -209,7 +209,7 @@ func TestResolveQuoteURI_UsesEphemeralRowWhenTheKeyIsInFlight(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, emptyDocFetcher{}, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, emptyDocFetcher{}, idGen)
 	r.SetEphemeralSink(ledgerSink{byURI: map[string]*model.Note{
 		storedAs: {ID: "9quinnnote0000000000", UserID: "9quinnuser0000000000"},
 	}})
@@ -253,7 +253,7 @@ func TestResolveChain_ConcurrentIngestOfSameTargetStillLinksQuote(t *testing.T) 
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), &syncNoteRepo{NoteRepository: testutil.NewMockNoteRepository()}, urls, fetcher, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), &syncNoteRepo{NoteRepository: testutil.NewMockNoteRepository()}, urls, fetcher, idGen)
 
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(fetcher.release) }) }

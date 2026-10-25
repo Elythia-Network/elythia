@@ -30,9 +30,9 @@ func newIDOnlyFixture(t *testing.T) idOnlyFixture {
 	reqRepo := testutil.NewMockFollowRequestRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	svc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, svc, nil, nil, repo, testutil.NewMockNoteRepository())
+	p := federation.NewProcessorNilDeps(resolver, svc, nil, nil, repo, testutil.NewMockNoteRepository())
 	p.SetLocalBaseURL("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	evilURI := "https://remote.example/users/evil"

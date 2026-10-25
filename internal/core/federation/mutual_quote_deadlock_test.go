@@ -68,7 +68,7 @@ func TestResolveNote_MutualQuoteAcrossGoroutinesDoesNotDeadlock(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, f, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, f, idGen)
 
 	done := make(chan error, 2)
 	for _, u := range []string{noteA, noteB} {

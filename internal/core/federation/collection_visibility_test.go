@@ -92,7 +92,7 @@ func newCollectionResolver(t *testing.T, f *collectionFetcher) (*federation.Reso
 	repo := testutil.NewMockUserRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), f, idGen)
 	return r, repo
 }

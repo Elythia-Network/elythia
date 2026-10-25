@@ -37,7 +37,7 @@ func TestCachePublicKey_OversizedKeyIDNotPersisted(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	body := oversizedKeyActor(strings.Repeat("k", 256),
 		"-----BEGIN PUBLIC KEY-----\\nFAKE\\n-----END PUBLIC KEY-----")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	pkRepo := testutil.NewMockUserPublickeyRepository()
 	r.SetPublickeyRepo(pkRepo)
 
@@ -57,7 +57,7 @@ func TestCachePublicKey_OversizedPEMNotPersisted(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	body := oversizedKeyActor("main-key", strings.Repeat("A", 4097))
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	pkRepo := testutil.NewMockUserPublickeyRepository()
 	r.SetPublickeyRepo(pkRepo)
 
@@ -75,7 +75,7 @@ func TestCachePublicKey_MaxLengthKeyIDPersisted(t *testing.T) {
 	// "https://remote.example/users/alice#" は 35 文字。
 	body := oversizedKeyActor(strings.Repeat("k", 256-35),
 		"-----BEGIN PUBLIC KEY-----\\nFAKE\\n-----END PUBLIC KEY-----")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	pkRepo := testutil.NewMockUserPublickeyRepository()
 	r.SetPublickeyRepo(pkRepo)
 

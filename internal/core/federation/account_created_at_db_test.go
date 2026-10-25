@@ -33,7 +33,7 @@ func actorDocWithPublished(t *testing.T, uri, username, publishedLiteral string)
 func newAccountCreatedAtResolver(t *testing.T, db *gorm.DB, f corefederation.HTTPFetcher) *corefederation.Resolver {
 	t.Helper()
 	idGen, _ := id.NewGenerator("aidx")
-	return corefederation.NewResolver(repository.NewUserRepository(db), repository.NewNoteRepository(db),
+	return corefederation.NewResolverNilDeps(repository.NewUserRepository(db), repository.NewNoteRepository(db),
 		activitypub.NewURLBuilder("https://local.example"), f, idGen)
 }
 

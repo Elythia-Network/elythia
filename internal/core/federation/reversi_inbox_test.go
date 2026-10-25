@@ -203,9 +203,9 @@ func newReversiProcessor(t *testing.T) *reversiFedBundle {
 	followingRepo := testutil.NewMockFollowingRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	processor := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	fedCache := corereversi.NewFederationIDCache(fedTestRedis.Client)
 	gameRepo := newFedFakeReversiRepo()
@@ -872,9 +872,9 @@ func TestReversiInbox_Unwired_Unsupported(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	for _, typ := range []string{"Invite", "Join", "Leave"} {
 		body := []byte(`{"type":"` + typ + `","actor":"https://remote.example/users/alice","object":{}}`)

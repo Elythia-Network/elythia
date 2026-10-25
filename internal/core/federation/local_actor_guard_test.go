@@ -33,7 +33,7 @@ func newLocalGuardResolver(t *testing.T, f federation.HTTPFetcher) (*federation.
 	userRepo := testutil.NewMockUserRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(userRepo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), f, idGen)
 	tracker := &stubInstanceTracker{}
 	r.SetInstanceTracker(tracker)
@@ -170,7 +170,7 @@ func TestResolveActor_UnwiredURLBuilderDoesNotRejectEverything(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(userRepo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder(""), &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	_, err = r.ResolveActor("https://remote.example/users/alice")
@@ -201,7 +201,7 @@ func TestForceResolveActor_DoesNotRefetchSelfHostActor(t *testing.T) {
 			idGen, err := id.NewGenerator("aidx")
 			require.NoError(t, err)
 			f := &countingFetcher{body: []byte(localActorBody)}
-			r := federation.NewResolver(userRepo, testutil.NewMockNoteRepository(),
+			r := federation.NewResolverNilDeps(userRepo, testutil.NewMockNoteRepository(),
 				activitypub.NewURLBuilder("https://example.com"), f, idGen)
 
 			host := "example.com"

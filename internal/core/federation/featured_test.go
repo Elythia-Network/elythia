@@ -108,7 +108,7 @@ func newFeaturedEnv(t *testing.T, docs map[string]string) *featuredEnv {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	f := &countingDocFetcher{docs: docs}
-	r := federation.NewResolver(userRepo, noteRepo, urls, f, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, f, idGen)
 	r.SetPinningRepo(pinRepo, idGen)
 	return &featuredEnv{resolver: r, users: userRepo, notes: noteRepo, pins: pinRepo, fetcher: f}
 }
@@ -598,7 +598,7 @@ func TestUpdateFeatured_NotWiredIsNoop(t *testing.T) {
 	f := &countingDocFetcher{docs: map[string]string{
 		actorURI: featuredActor("remote.example", "nina", featured),
 	}}
-	r := federation.NewResolver(userRepo, noteRepo, urls, f, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, f, idGen)
 
 	_, err = r.ResolveActor(actorURI)
 	require.NoError(t, err)

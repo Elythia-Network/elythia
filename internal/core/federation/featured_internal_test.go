@@ -113,7 +113,7 @@ func TestResolveFeaturedNotes_UsesExistingRowWhenTheKeyIsInFlight(t *testing.T) 
 			idGen, err := id.NewGenerator("aidx")
 			require.NoError(t, err)
 			// fetch してはいけない経路なので、fetcher は必ず失敗する。
-			r := NewResolver(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
+			r := NewResolverNilDeps(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
 
 			host := "remote.example"
 			uri := actorURI
@@ -190,7 +190,7 @@ func TestResolveFeaturedNotes_UsesExistingRowWhenIngesting(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	// fetch してはいけない経路なので、fetcher は必ず失敗する。
-	r := NewResolver(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
+	r := NewResolverNilDeps(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
 
 	host := "remote.example"
 	uri := actorURI
@@ -240,7 +240,7 @@ func TestResolveFeaturedNotes_DoesNotWaitForAnotherChain(t *testing.T) {
 			idGen, err := id.NewGenerator("aidx")
 			require.NoError(t, err)
 			// 待たない経路なので fetch は起きてはいけない。
-			r := NewResolver(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
+			r := NewResolverNilDeps(userRepo, noteRepo, urls, emptyDocFetcher{}, idGen)
 
 			host := "remote.example"
 			uri := actorURI
@@ -304,7 +304,7 @@ func TestResolveFeaturedNotes_DoesNotWaitInNestedResolves(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(userRepo, noteRepo, urls,
+	r := NewResolverNilDeps(userRepo, noteRepo, urls,
 		fixtureDocFetcher{docs: map[string]string{noteURI: plainNoteDoc(noteURI, actorURI)}}, idGen)
 
 	host := "remote.example"

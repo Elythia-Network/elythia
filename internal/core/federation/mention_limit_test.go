@@ -56,7 +56,7 @@ func newMentionLimitResolver(t *testing.T) (*federation.Resolver, *testutil.Mock
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit+5)
 	author, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)

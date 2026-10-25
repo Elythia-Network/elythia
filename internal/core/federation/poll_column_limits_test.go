@@ -23,11 +23,11 @@ func newQuestionProcessor(t *testing.T) (*federation.Processor, *testutil.MockNo
 	pollRepo := testutil.NewMockPollRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	resolver.SetPollRepo(pollRepo)
 	followingSvc := corefollowing.NewService(
 		userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 	return p, noteRepo, pollRepo
 }
 

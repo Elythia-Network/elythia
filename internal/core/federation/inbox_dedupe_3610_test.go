@@ -378,7 +378,7 @@ func TestResolveActor_UnsuspendWriteFailureKeepsReturnedRowSuspended(t *testing.
 	repo := &failingUpdateUserRepo{MockUserRepository: mock}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"),
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(actorWithSuspended(t, "false"))}, idGen)
 	origins := newStubOriginRepo()
 	r.SetSuspensionOriginRepo(origins)
@@ -430,11 +430,11 @@ func TestResolveActor_RefreshSuspensionIsVisibleToProcessWithSigner(t *testing.T
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
+	r := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(actorWithSuspended(t, "true"))}, idGen)
 	r.SetSuspensionOriginRepo(newStubOriginRepo())
 	followingSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(r, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(r, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURL("https://example.com")
 
 	signer := seedLiveAlice(mock) // lastFetchedAt が無いので次の解決で読み直す

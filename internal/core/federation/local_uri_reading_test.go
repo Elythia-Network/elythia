@@ -22,7 +22,7 @@ import (
 func TestExtractLocalUserID_FetchPersonPrefix(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 
 	cases := []struct {
 		uri  string
@@ -56,7 +56,7 @@ func TestIngestNote_LocalMentionReadsFetchPersonPrefix(t *testing.T) {
 	plantLocalUsers(repo, "bob", "carol")
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/prefix-mention",
@@ -191,9 +191,9 @@ func newAcceptFamilyFixture(t *testing.T) *acceptFamilyFixture {
 	reqRepo := testutil.NewMockFollowRequestRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"

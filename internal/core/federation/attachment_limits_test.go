@@ -44,7 +44,7 @@ func TestUpsertAttachments_TruncatesLongAltText(t *testing.T) {
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 
@@ -82,7 +82,7 @@ func TestUpsertAttachments_FallsBackToUnownedOnForeignKeyViolation(t *testing.T)
 	drive := &fkOnceDriveRepo{MockDriveFileRepository: testutil.NewMockDriveFileRepository()}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 
@@ -125,7 +125,7 @@ func TestUpsertAttachments_OtherErrorsDoNotDropOwner(t *testing.T) {
 	drive := &nonFKOnOwnerDriveRepo{MockDriveFileRepository: testutil.NewMockDriveFileRepository()}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 
@@ -146,7 +146,7 @@ func TestUpsertAttachments_StripsNULFromAltText(t *testing.T) {
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 
@@ -174,7 +174,7 @@ func TestUpsertAttachments_DropsOversizedColumns(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	newResolver := func(drive *testutil.MockDriveFileRepository) *federation.Resolver {
-		r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+		r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 			activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 		r.SetDriveFileRepo(drive)
 		return r

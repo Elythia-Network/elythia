@@ -314,7 +314,7 @@ func newProbeTestResolver(t *testing.T, client *http.Client) (*Resolver, *testut
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), nopFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 	r.SetAttachmentProbeClient(client)

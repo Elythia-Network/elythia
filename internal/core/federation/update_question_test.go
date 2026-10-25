@@ -22,7 +22,7 @@ func newResolverWithPoll(t *testing.T) (*federation.Resolver, *testutil.MockUser
 	pollRepo := testutil.NewMockPollRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{}, idGen)
 	r.SetPollRepo(pollRepo)
 	return r, userRepo, noteRepo, pollRepo
 }
@@ -122,11 +122,11 @@ func TestProcess_UpdateQuestion_RefreshesVotes(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{}, idGen)
 	r.SetPollRepo(pollRepo)
 	authorURI, _ := seedRemotePoll(t, userRepo, noteRepo, pollRepo)
 
-	p := federation.NewProcessor(r, nil, nil, nil, userRepo, noteRepo)
+	p := federation.NewProcessorNilDeps(r, nil, nil, nil, userRepo, noteRepo)
 	body := []byte(`{"id":"https://remote.example/updates/1","type":"Update","actor":"` + authorURI + `","object":{"id":"https://remote.example/notes/q1","type":"Question","oneOf":[{"name":"A","replies":{"totalItems":8}},{"name":"B","replies":{"totalItems":4}}]}}`)
 	require.NoError(t, p.Process(body))
 
