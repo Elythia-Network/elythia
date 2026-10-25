@@ -91,6 +91,7 @@ func newDriveSvc(t *testing.T, storage drive.Storage) *emojiFixture {
 		repository.NewDriveFolderRepository(testDB),
 		storage,
 		idGen,
+		nil, nil, nil, nil,
 	)
 	svc.SetImageProcessor(drive.NewDefaultImageProcessor())
 	return &emojiFixture{svc: svc, storage: storage}

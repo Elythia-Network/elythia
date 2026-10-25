@@ -67,7 +67,7 @@ func TestPasswordGate_DBFailureIsNot4xx(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		piningRepo := testutil.NewMockUserNotePiningRepository()
 		idGen, _ := id.NewGenerator("aidx")
-		h := NewHandler(coreuser.NewService(userRepo, noteRepo, piningRepo, idGen), idGen)
+		h := NewHandler(coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil), idGen)
 		u := &model.User{ID: "u1", Username: "u1", UsernameLower: "u1",
 			AvatarDecorations: datatypes.JSON([]byte("[]"))}
 		require.NoError(t, userRepo.Create(u))

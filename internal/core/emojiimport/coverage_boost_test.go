@@ -42,7 +42,7 @@ func TestRun_OverwritesExistingEmoji(t *testing.T) {
 	folderRepo.FilesRef = fileRepo
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
-	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 
 	imp := emojiimport.NewImporter(emojiimport.Deps{
 		UserRepo:  userRepo,
@@ -79,7 +79,7 @@ func TestRun_EmojiRepoCreateError(t *testing.T) {
 	folderRepo.FilesRef = fileRepo
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
-	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 
 	imp := emojiimport.NewImporter(emojiimport.Deps{
 		UserRepo:  userRepo,

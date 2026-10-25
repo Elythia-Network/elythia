@@ -35,8 +35,10 @@ import (
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	coreuserlist "github.com/elythia-network/elythia/internal/core/userlist"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/stream"
@@ -50,10 +52,10 @@ import (
 // are listed: no DB or Redis access, no outbound call or log, no goroutine,
 // timer, shutdown hook or global write, and dependencies limited to the
 // repositories, the services built before them here and the values
-// buildCore receives as arguments (roleService from buildRole and the stream
-// pubsub, #3825). Services that need a stream publisher other than one built
-// from that pubsub, a handler, a federation part or a value read from the DB
-// at construction are not built here: the relay service is built by
+// buildCore receives as arguments (roleService from buildRole, the stream
+// pubsub and the two packers, #3825). Services that need a stream publisher
+// other than one built from that pubsub, a handler, a federation part or a
+// value read from the DB at construction are not built here: the relay service is built by
 // buildFederation (#3688), the others stay in setupRoutes
 // (docs/architecture.md 4.2).
 //
@@ -129,7 +131,11 @@ func (s *Server) buildRole(w *wiring, idGen id.Generator) *corerole.Service {
 // roleService is built by buildRole before it (#3825) and is stored in the
 // role field as is. streamPubSub is the stream pubsub setupRoutes creates
 // first; buildCore only builds publishers on it and never subscribes.
-func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.Service, streamPubSub *event.PubSubService) core {
+// entityPacker and sharedUserPacker are the packers setupRoutes builds right
+// after buildRole (#3825); the parts that pack entities take them as required
+// constructor arguments.
+func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.Service, streamPubSub *event.PubSubService,
+	entityPacker *entity.Packer, sharedUserPacker *userpack.Packer) core {
 	// 下の行は setupRoutes にあった行をそのまま移した。ゲートが構築の式を引数まで
 	// 含めて照合するので、repository も同じ名前の別名で受ける。
 	userRepo := w.repos.user
@@ -203,13 +209,24 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定もアカウント作成と
 	// 同じ tx に入れる (#2576)。
 	signupService := coresignup.NewService(userRepo, metaRepo, idGen, s.db, signupTicketRepo, signupApplicationRepo)
-	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
+	// 世代の箱 (#3661: 世代の停止で待つ)、main stream の投稿を包む Packer (#3790)、
+	// 本家互換の返信・引用のブロックの検査 (#254)、meta のセンシティブワードと禁止ワード、
+	// canPublicNote=false の利用者の public 投稿を home に降格させる silencing (#1024)、
+	// fileIds の所有者の検査。
+	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo,
+		s.background, entityPacker, blockingRepo, metaRepo, roleService, driveFileRepo)
 	// 投稿後のフックの同時実行の枠を設定の数で作り直す(#3780)。
 	noteCreateService.SetHookConcurrency(s.config.NoteHookConcurrency)
 	noteDeleteService := corenote.NewDeleteService(noteRepo)
 	noteQueryService := corenote.NewQueryService(noteRepo, followingRepo)
-	userService := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	followingService := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen)
+	// 利用者の詳細を包む Packer (#3792)。
+	userService := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, entityPacker)
+	// サイレンスしたホストからのフォローを承認制にする (upstream UserFollowingService の
+	// 4 つ目の OR 条件)。「静かに成立させる」(#3466) で通したフォローを記録する
+	// (following/silent/list が読む)。follow 系の main stream は共有の userpack の Packer で
+	// 本家の UserDetailedNotMe に揃える (#3330)。
+	followingService := corefollowing.NewService(userRepo, followingRepo, followRequestRepo, idGen,
+		entityPacker, instanceService, repository.NewSilentFollowRepository(s.db), sharedUserPacker)
 	// keyPrefix で TS 本家と同じ `<host>:list:*` 名前空間に揃える (#362)。
 	fanoutTimelineService := coretimeline.NewFanoutTimelineService(
 		s.redis.Timelines, idGen, s.config.RedisForTimelines.KeyPrefix())
@@ -257,9 +274,11 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 		s.background) // #3661: 世代の停止で送り切る
 	notificationHook := corenotification.NewHook(notificationService, userRepo)
 	webhookService := corewebhook.NewService(s.queueClient, webhookRepo, systemWebhookRepo, s.config.URL)
-	webhookNoteHook := corewebhook.NewNoteCreateHook(webhookService, idGen)
-	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen)
-	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService)
+	// payload の投稿を包む Packer (#3790)。follow / unfollow の Webhook は main stream と
+	// 同じ共有の userpack の Packer で包む (#3269、#3330)。
+	webhookNoteHook := corewebhook.NewNoteCreateHook(webhookService, idGen, entityPacker)
+	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen, entityPacker)
+	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService, sharedUserPacker)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
 	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
@@ -275,7 +294,12 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// される。指紋が変わらない限り backend は使い回すので、都度解決でも
 	// S3 client を作り直すコストはかからない。
 	driveStorage := coredrive.NewMetaStorage(metaRepo.Fetch, "./drive-files", s.config.DriveURL)
-	driveService := coredrive.NewService(driveFileRepo, driveFolderRepo, driveStorage, idGen)
+	// ファイルを包む Packer (#3796)。drive/files/show は moderator なら他人 / リモート
+	// ユーザー所有の file も返す (upstream の roleService.isModerator 経路と一致)。
+	// moderator が他人の drive ファイルのセンシティブを変えたとき・削除したときの
+	// 監査ログ (#3678)。
+	driveService := coredrive.NewService(driveFileRepo, driveFolderRepo, driveStorage, idGen,
+		entityPacker, roleService, modLogService, userRepo)
 	imgProcessor := coredrive.NewDefaultImageProcessor()
 	driveReader := coretransfer.NewRepoBackedDriveReader(driveFileRepo, driveStorage)
 	importer := coretransfer.NewImporter(coretransfer.ImporterDeps{

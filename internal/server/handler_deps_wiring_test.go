@@ -50,6 +50,10 @@ var handlerNilAllowed = map[string]string{
 	// テストだけが stream_publish_test.go で差し替える。setupRoutes は入れず、nil の
 	// とき armUpdatedLocked は time.AfterFunc を使う。
 	"clipService.afterFunc": "テスト専用の seam。setupRoutes は入れず、nil のとき time.AfterFunc を使う",
+	// NSFW の検出器 (nsfwDetectorUrl)。setupRoutes は s.config.NSFWDetectorURL が空なら
+	// nil の detector を SetSensitiveDetection に渡す (自動付与は走らず、手動の
+	// isSensitive だけが効く既定の構成)。テストの組み立ては URL を設定しない。
+	"driveService.sensitiveDetector": "nsfwDetectorUrl を設定しないときは nil を入れる (既定の構成)",
 }
 
 // **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825)。**
@@ -244,6 +248,13 @@ var requiredDepChecks = []string{
 	"clipService.rolePolicyProvider", "clipService.streamPublisher",
 	"antennaService.rolePolicyProvider", "pollService.blockingChecker",
 	"modLogService.background", "notificationService.background",
+	"noteCreateService.background", "noteCreateService.entityPacker", "noteCreateService.blockingRepo",
+	"noteCreateService.metaRepo", "noteCreateService.silencingProvider", "noteCreateService.driveFileRepo",
+	"followingService.entityPacker", "followingService.silencedChecker",
+	"followingService.silentFollowRepo", "followingService.userPacker",
+	"driveService.entityPacker", "driveService.roleChecker", "driveService.modLog", "driveService.modLogUsers",
+	"userService.entityPacker",
+	"webhookNoteHook.entityPacker", "webhookReactionHook.entityPacker", "webhookFollowingHook.packer",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

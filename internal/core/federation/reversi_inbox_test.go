@@ -204,7 +204,7 @@ func newReversiProcessor(t *testing.T) *reversiFedBundle {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	fedCache := corereversi.NewFederationIDCache(fedTestRedis.Client)
@@ -873,7 +873,7 @@ func TestReversiInbox_Unwired_Unsupported(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	for _, typ := range []string{"Invite", "Join", "Leave"} {

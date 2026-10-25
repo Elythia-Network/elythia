@@ -43,7 +43,7 @@ func newCreateSvcWithRanking(t *testing.T, alwaysSample bool) (*CreateService, *
 	noteRepo := testutil.NewMockNoteRepository()
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewCreateService(noteRepo, pollRepo, idGen, nil)
+	svc := NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	fake := newFakeRanking()
 	svc.SetFeaturedRanking(fake)
 	if alwaysSample {

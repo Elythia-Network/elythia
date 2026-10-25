@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // #1564 parity sweep の handler 層テスト群。
@@ -404,8 +405,8 @@ func TestFilesAttachedNotes_ModeratorCanQueryOthersFile(t *testing.T) {
 	// upstream attached-notes.ts は moderator のとき userId filter を外す
 	// (#1564)。非 moderator の他人 file は従来どおり NO_SUCH_FILE (#1470)。
 	// moderator 判定は core 側 RoleChecker (svc.IsModerator) に一本化。
-	h, fileRepo, _ := newHandlerWithRepos(t)
-	h.svc.SetRoleChecker(&fakeRoleChecker{mods: map[string]bool{"mod1": true}})
+	h, fileRepo, folderRepo := newHandlerWithRoleChecker(t, &fakeRoleChecker{mods: map[string]bool{"mod1": true}})
+	h.SetRepos(fileRepo, folderRepo, testutil.NewMockNoteRepository())
 	other := "u2"
 	fileRepo.Files["f-other"] = &model.DriveFile{ID: "f-other", UserID: &other}
 

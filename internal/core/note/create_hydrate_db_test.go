@@ -83,7 +83,7 @@ func TestCreateService_PlainNoteMatchesReread(t *testing.T) {
 	noteRepo := repository.NewNoteRepository(db)
 	pollRepo := repository.NewPollRepository(db)
 	userRepo := repository.NewCachedUserRepository(repository.NewUserRepository(db))
-	svc := note.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	svc := note.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	svc.SetUserRepo(userRepo)
 
 	const uid = "u_create3611"

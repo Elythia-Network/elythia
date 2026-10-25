@@ -471,7 +471,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
 	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
 	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
-	coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)
+	coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub, entityPacker, sharedUserPacker)
 	w.core = coreSvcs
 	featuredService := coreSvcs.featured
 	hashtagService := coreSvcs.hashtag
@@ -577,18 +577,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	signupService.SetKeypairRepo(keypairRepo)
 	// FEP-521a Multikey 対応で Ed25519 鍵対も併発行 (#1067 / #1068)。
 	signupService.SetKeypairExtraRepo(keypairExtraRepo)
-	noteCreateService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	noteCreateService.SetMainStreamPublisher(mainStreamPublisher)
 	noteCreateService.SetChartHook(chartHooks)
 	// Phase 7-1 follow-up (#254): 本家互換の残存 error 検出ロジック用依存を注入。
-	// Setter経由なのでテストでは任意に省略可能。既存の同repository変数を再利用。
-	noteCreateService.SetBlockingRepo(blockingRepo)
-	noteCreateService.SetDriveFileRepo(driveFileRepo)
-	noteCreateService.SetMetaRepo(metaRepo)
+	// blockingRepo・driveFileRepo・metaRepo と silencing (#1024) は、buildCore で
+	// 構築子に渡す (#3825)。
 	noteCreateService.SetChannelRepo(channelRepo)
-	// canPublicNote=false の user の public note を home に降格させる
-	// silencing 機構 (#1024)。
-	noteCreateService.SetSilencingProvider(roleService)
 	// mentionLimit を role policy から引く (#2321)。未配線だと
 	// DefaultMentionLimit 固定になり、ロールで設定した値が効かない。
 	noteCreateService.SetRolePolicyProvider(roleService)
@@ -816,18 +810,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webhookNoteHook.SetThreadMutingRepo(noteThreadMutingRepo)
 	// note payload の embed (renote/reply/引用先) を受信者の可視性で gate する。
 	webhookNoteHook.SetFollowingRepo(followingRepo)
-	webhookNoteHook.SetEntityPacker(entityPacker)
 	noteCreateService.SetWebhookHook(webhookNoteHook)
 	webhookReactionHook.SetFollowingRepo(followingRepo)
-	webhookReactionHook.SetEntityPacker(entityPacker)
-	noteCreateService.SetEntityPacker(entityPacker)
-	// 利用者の詳細を包む core の部品にも渡す (#3792)。
-	userService.SetEntityPacker(entityPacker)
-	followingService.SetEntityPacker(entityPacker)
-	// UserLite を包む部品にも渡す (#3794)。
+	// UserLite を包む部品にも渡す (#3794)。投稿・利用者・ドライブのファイルを包む core の
+	// 部品 (#3790、#3792、#3796) には、buildCore で構築子に渡す (#3825)。
 	reversiPublisher.SetEntityPacker(entityPacker)
-	// 残りの Pack (ドライブのファイル・ページ・クリップ・お知らせ・通知) を呼ぶ部品 (#3796)。
-	driveService.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	webhookSignupHook := corewebhook.NewSignupHook(webhookService, entityPacker) // #3823: Packer は構築子の必須の引数
@@ -879,10 +866,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	driveService.SetLocalStorage(localDriveStorage)
 	// ファイル削除時の object storage 実体削除を queue に逃がす (#2325)。
 	driveService.SetObjectDeleteEnqueuer(s.queueClient)
-	// drive/files/show は moderator なら他人 / リモートユーザー所有の file
-	// も返せるようにする (upstream Misskey の roleService.isModerator 経路
-	// と一致)。リモート添付メディアの詳細閲覧に必要。
-	driveService.SetRoleChecker(roleService)
 	// 分割アップロード (#2313)。設定も backend (#2315) も meta から都度読むので、
 	// admin の変更は再起動なしで効く。オブジェクトストレージ未使用の構成では
 	// backend が MultipartStorage を満たさず、配線しても機能は無効のままになる。
@@ -1167,13 +1150,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 片付ける候補を「いつから消えているか」で並べる。
 	instanceService.SetGoneRecorder(goneInstanceRepo)
 	federationResolver.SetInstanceTracker(instanceService)
-	// **サイレンスしたホストからのフォローを承認制にする。** 未配線だと
-	// 未施錠アカウントが承認なしでフォローされ、followers 限定ノートが
-	// 配送される (upstream UserFollowingService の 4 つ目の OR 条件)。
-	followingService.SetSilencedHostChecker(instanceService)
-	// 「静かに成立させる」(#3466) で通したフォローを記録する。following/silent/list
-	// が読む。
-	followingService.SetSilentFollowRepo(repository.NewSilentFollowRepository(s.db))
 	// ホワイトリスト連合 (federation: specified) / blockedHosts に対する gate を
 	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
 	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
@@ -1744,10 +1720,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesChart := chartCharts.Notes
 	usersChart := chartCharts.Users
 	statsHandler := stats.NewHandler(s.db, notesChart, usersChart)
-
-	// 共有の userpack の Packer は buildCore より前で作る (#3825)。setter は元の位置のまま。
-	webhookFollowingHook.SetUserPacker(sharedUserPacker)
-	followingService.SetUserPacker(sharedUserPacker)
 
 	// CAPTCHA service — meta から有効な provider を選択して構築する。
 	// meta 取得失敗時は captcha 無効として動作する (ログイン不能を避けるため)。
@@ -3472,8 +3444,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	announcementHandler.SetUserRepo(userRepo)
 	galleryHandler.SetModLog(modLogService) // #1548: moderator による gallery post 削除の監査ログ
 	flashHandler.SetModLog(modLogService)   // #1548: moderator による flash 削除の監査ログ
-	// #3678: moderator が他人の drive ファイルのセンシティブを変えたとき・削除したときの監査ログ。
-	driveService.SetModerationLog(modLogService, userRepo)
 	adminHandler.SetEmojiRepo(emojiRepo)
 	// emoji の add/update/delete を broadcast stream へ流し emoji picker を live-refresh (#2046)。
 	adminHandler.SetBroadcastPublisher(broadcastPublisher)
@@ -3963,6 +3933,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		pollService:         pollService,
 		modLogService:       modLogService,
 		notificationService: notificationService,
+
+		noteCreateService:    noteCreateService,
+		followingService:     followingService,
+		driveService:         driveService,
+		userService:          userService,
+		webhookNoteHook:      webhookNoteHook,
+		webhookReactionHook:  webhookReactionHook,
+		webhookFollowingHook: webhookFollowingHook,
 	}
 	s.builtRouteParts = routeParts{
 		admin:            adminHandler,
@@ -3996,21 +3974,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
 		{"i.entityPacker", iHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
-		{"noteCreate.entityPacker", noteCreateService.HasEntityPacker(), entityPackerMissingEffect},
-		{"webhookNote.entityPacker", webhookNoteHook.HasEntityPacker(), entityPackerMissingEffect},
-		{"webhookReaction.entityPacker", webhookReactionHook.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
 		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
-		{"userService.entityPacker", userService.HasEntityPacker(), entityPackerMissingEffect},
-		{"followingService.entityPacker", followingService.HasEntityPacker(), entityPackerMissingEffect},
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		// UserLite を包む部品 (#3794)。
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 残りの Pack を呼ぶ部品 (#3796)。
-		{"driveService.entityPacker", driveService.HasEntityPacker(), entityPackerMissingEffect},
 		{"notificationPublisher.entityPacker", notificationPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// メディアのプロキシ URL を作る部品 (#3798)。/avatar・/emoji・フィードと
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
@@ -4061,16 +4033,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"drive.roleChecker", driveService.HasRoleChecker(),
-			"MIME 許可リスト・NSFW 強制・ファイルサイズ上限・容量上限が同時に無効になる"},
-		{"drive.moderationLog", driveService.HasModerationLog(),
-			"moderator が他人のファイルのセンシティブを変えても削除しても、モデレーションログに残らない"},
-		{"note.blockingRepo", noteCreateService.HasBlockingRepo(),
-			"自分をブロックしている相手への返信・引用が通る"},
-		{"note.metaRepo", noteCreateService.HasMetaRepo(),
-			"meta のセンシティブワードと禁止ワードが両方とも効かない"},
-		{"note.silencingProvider", noteCreateService.HasSilencingProvider(),
-			"silenced な利用者の public 投稿が home へ降格されない"},
 		{"stream.hardMuteLookup", streamManager.HasHardMuteLookup(),
 			"配信ごとのハードミュート filter が無効になる"},
 		{"stream.muteBlockLookup", streamManager.HasMuteBlockSnapshotLookup(),
@@ -4089,13 +4051,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"federation 設定を無視してリモートを解決する"},
 		{"streamChannels.chatRoom.service", chatRoomFactory.HasService(),
 			"chatRoom channel の購読でメンバーシップ検査が skip され、誰でも任意の room を購読できる"},
-		{"note.driveFileRepo", noteCreateService.HasDriveFileRepo(),
-			"他人の drive file ID を notes/create の fileIds に指定して自分の note に貼れる (IDOR)"},
 
 		// ここから #2708。#2683 で「既存 entry と基準上区別できない」まで取り込み、
 		// 残していた同クラスの依存。
 		{"notes.driveFileRepo", notesHandler.HasDriveFileRepo(),
-			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
+			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.CreateService の driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
 		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
 			"block / federation mode は enqueue 時チェックの第 2 の関門が外れ (積み残しと retry 中が漏れる)、suspend は enqueue 側に検査が無いので新規ジョブごと配送し続ける"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
@@ -4116,10 +4076,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"blocked-host の note が post-fetch 経路で漏れる"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
 			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
-		{"following.silencedHostChecker", followingService.HasSilencedHostChecker(),
-			"サイレンスしたホストからのフォローが承認なしで通り、followers 限定ノートが配送される"},
-		{"following.silentFollowRepo", followingService.HasSilentFollowRepo(),
-			"通知を出さずに成立させたフォロー (#3466) が記録されず、following/silent/list に出ない"},
 		{"i.followRequestBulkAccepter", iHandler.HasFollowRequestBulkAccepter(),
 			"鍵を外しても溜まっていたフォローリクエストが承認されずに残る"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
@@ -4127,11 +4083,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),
 			"受信した note の mentionLimit が既定値 20 固定になり、base policy やリモートに当たるロールで絞った上限が効かない (#3330)"},
 		// #3330: follow 系の main stream / Webhook と blocking/create・delete の
-		// 利用者を本家の UserDetailedNotMe に揃える packer。外すと従来の形に落ちる。
-		{"following.userPacker", followingService.HasUserPacker(),
-			"main stream の follow / unfollow が profile を読まない形に落ち、unfollow の後もフォロワー限定のカウントが見える"},
-		{"webhookFollowing.userPacker", webhookFollowingHook.HasUserPacker(),
-			"follow / unfollow の Webhook が送られなくなり、followed は instance と絵文字を欠く"},
+		// 利用者を本家の UserDetailedNotMe に揃える共有の packer の、ピン留めと移行先を
+		// 埋める側 (users の handler)。packer そのものを following と webhook へ渡すのは、
+		// #3825 から構築子の必須の引数。
 		{"userPacker.detailExtras", sharedUserPacker.HasDetailExtras(),
 			"follow 系の main stream / Webhook と blocking/create・delete で pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.meUpdatedPublisher", followingService.HasMeUpdatedPublisher(),
@@ -4168,8 +4122,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 起動する。配線が外れると素の goroutine に戻り、世代の停止で待たれない。
 		// 制限が緩む種類の劣化ではないが、外れても起動もテストも通り、メンテナンスで
 		// 世代を作り直すときにだけ表に出るので、ここで起動時に落とす。
-		{"note.background", noteCreateService.HasBackground(),
-			"世代を止めても投稿後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"federation.processor.background", federationProcessor.HasBackground(),
 			"世代を止めても受信後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"federation.resolver.background", federationResolver.HasBackground(),

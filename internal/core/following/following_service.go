@@ -150,29 +150,10 @@ type Service struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this service packs entities with (#3792).
-func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
-
 // SilencedHostChecker reports whether a remote host is silenced.
 type SilencedHostChecker interface {
 	IsSilenced(host string) bool
 }
-
-// SetSilencedHostChecker wires the silenced-host lookup.
-func (s *Service) SetSilencedHostChecker(c SilencedHostChecker) {
-	s.silencedChecker = c
-}
-
-// HasSilencedHostChecker reports whether the silenced-host lookup was wired.
-//
-// 未配線だとサイレンスしたホストからのフォローが承認なしで通り、followers
-// 限定ノートがそのまま配送される。起動時検査に使う。
-func (s *Service) HasSilencedHostChecker() bool { return s != nil && s.silencedChecker != nil }
 
 // RelationReloadPublisher notifies streaming connections that a viewer's
 // following snapshot changed (#2400)。実装は stream 側の adapter。
@@ -201,17 +182,38 @@ func (s *Service) publishFollowingReload(followerID string) {
 }
 
 // NewService creates a new following Service.
+//
+// entityPacker packs users and notes (#3792). silencedChecker is the
+// meta.silencedHosts lookup. silentFollowRepo stores the follows that
+// succeeded silently (#3466). userPacker packs the user carried by the main
+// stream follow / unfollow / followed / receiveFollowRequest bodies; nil
+// keeps the legacy shape built from the user row alone (test fixtures).
+//
+// どれも無いと黙って劣化する (avatarUrl などを media proxy を通さずに返す /
+// サイレンスしたホストからのフォローが承認なしで通り、followers 限定ノートが
+// 配送される / 「静かに成立させる」で通ったフォローが following/silent/list に
+// 残らない / main stream の follow / unfollow が profile を読まない形に落ち、
+// unfollow の後もフォロワー限定のカウントが見える) ので、構築子の必須の引数で
+// 受ける (#3825)。
 func NewService(
 	userRepo repository.UserRepository,
 	followingRepo repository.FollowingRepository,
 	followRequestRepo repository.FollowRequestRepository,
 	idGen id.Generator,
+	entityPacker *entity.Packer,
+	silencedChecker SilencedHostChecker,
+	silentFollowRepo repository.SilentFollowRepository,
+	userPacker UserPacker,
 ) *Service {
 	return &Service{
 		userRepo:          userRepo,
 		followingRepo:     followingRepo,
 		followRequestRepo: followRequestRepo,
 		idGen:             idGen,
+		entityPacker:      entityPacker,
+		silencedChecker:   silencedChecker,
+		silentFollowRepo:  silentFollowRepo,
+		userPacker:        userPacker,
 	}
 }
 
@@ -255,19 +257,6 @@ type UserPacker interface {
 	Lite(u *model.User) entity.UserLite
 	DetailedNotMe(ctx context.Context, target, viewer *model.User) (entity.UserDetailed, bool)
 }
-
-// SetUserPacker wires the packer for the main stream follow / unfollow /
-// followed / receiveFollowRequest bodies. Unwired, the events carry the
-// legacy shape built from the user row alone (test fixtures).
-func (s *Service) SetUserPacker(p UserPacker) {
-	s.userPacker = p
-}
-
-// HasUserPacker reports whether the user packer was wired.
-//
-// 未配線だと main stream の follow / unfollow が profile を読まない従来の形に
-// 落ち、unfollow の後もフォロワー限定のカウントが見える。起動時検査に使う。
-func (s *Service) HasUserPacker() bool { return s.userPacker != nil }
 
 // MeUpdatedPublisher emits `meUpdated` (the user's own MeDetailed) to a local
 // user's main stream. The `i` API handler satisfies it.

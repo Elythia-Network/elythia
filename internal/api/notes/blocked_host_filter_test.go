@@ -28,7 +28,7 @@ func newUserListTimelineHandler(t *testing.T, rows []*model.Note) *Handler {
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository())
 	h := NewHandler(noteRepo,
-		corenote.NewCreateService(noteRepo, testutil.NewMockPollRepository(), idGen, nil),
+		corenote.NewCreateService(noteRepo, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil),
 		corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 	listRepo := testutil.NewMockUserListRepository()
 	listRepo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1", Name: "my list"}

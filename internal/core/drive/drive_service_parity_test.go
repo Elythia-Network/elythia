@@ -83,7 +83,7 @@ func TestShowByURL_OtherOwnerDenied_ModeratorAllowed(t *testing.T) {
 	_, err := svc.ShowByURL(&model.User{ID: "u1"}, "https://example.com/files/x")
 	require.ErrorIs(t, err, drive.ErrAccessDenied)
 
-	svc.SetRoleChecker(&fakeMod{moderators: map[string]bool{"u1": true}})
+	svc.SetRoleCheckerForTest(&fakeMod{moderators: map[string]bool{"u1": true}})
 	got, err := svc.ShowByURL(&model.User{ID: "u1"}, "https://example.com/files/x")
 	require.NoError(t, err)
 	assert.Equal(t, "f1", got.ID)

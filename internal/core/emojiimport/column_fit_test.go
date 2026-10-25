@@ -153,7 +153,7 @@ func readOnlyUploader(t *testing.T) *drive.Service {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	return drive.NewService(fileRepo, folderRepo,
-		drive.NewLocalStorage(dir, "https://example.com/files"), idGen)
+		drive.NewLocalStorage(dir, "https://example.com/files"), idGen, nil, nil, nil, nil)
 }
 
 // `Create` が失敗したら、消した行を戻す。
@@ -465,7 +465,7 @@ func TestRun_RejectedRecordUploadsNothing(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	deps.Uploader = drive.NewService(files, folders,
-		drive.NewLocalStorage(t.TempDir(), "https://example.com/files"), idGen)
+		drive.NewLocalStorage(t.TempDir(), "https://example.com/files"), idGen, nil, nil, nil, nil)
 
 	res, err := emojiimport.NewImporter(deps).Run(context.Background(), "admin", "f1")
 	require.NoError(t, err)
@@ -542,7 +542,7 @@ func TestRun_ChecksStoredURLAgainstEmojiColumns(t *testing.T) {
 			const prefix = "https://s3.example/"
 			base := prefix + strings.Repeat("a", tc.urlRunes-len(prefix)-1-accessKeyLen)
 			deps.Uploader = drive.NewService(files, folders,
-				drive.NewLocalStorage(t.TempDir(), base), idGen)
+				drive.NewLocalStorage(t.TempDir(), base), idGen, nil, nil, nil, nil)
 			require.NoError(t, repo.Create(&model.Emoji{
 				ID: "old", Name: existingName, OriginalURL: "https://example/old.png",
 			}))
@@ -588,7 +588,7 @@ func TestRun_SkipsWhenEitherStoredURLDoesNotFit(t *testing.T) {
 			svc := drive.NewService(files, folders, &varyingStorage{
 				Storage: drive.NewLocalStorage(t.TempDir(), "https://example.com/files"),
 				urls:    tc.urls,
-			}, idGen)
+			}, idGen, nil, nil, nil, nil)
 			svc.SetImageProcessor(webpublicOnlyProcessor{drive.NewDefaultImageProcessor()})
 			deps.Uploader = svc
 			require.NoError(t, repo.Create(&model.Emoji{

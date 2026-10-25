@@ -23,7 +23,7 @@ func TestFollow_SilencedRemoteFollowerNeedsApproval(t *testing.T) {
 	host := "silenced.example"
 	userRepo.Users["remote"] = &model.User{ID: "remote", Username: "r", Host: &host}
 	addUser(t, userRepo, "local", false) // 未施錠のローカル
-	svc.SetSilencedHostChecker(stubSilenced{hosts: map[string]bool{host: true}})
+	svc.SetSilencedHostCheckerForTest(stubSilenced{hosts: map[string]bool{host: true}})
 
 	res, err := svc.Follow("remote", "local", following.FollowOptions{})
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestFollow_NonSilencedRemoteFollowerStillAutoAccepts(t *testing.T) {
 	host := "ok.example"
 	userRepo.Users["remote"] = &model.User{ID: "remote", Username: "r", Host: &host}
 	addUser(t, userRepo, "local", false)
-	svc.SetSilencedHostChecker(stubSilenced{hosts: map[string]bool{"other.example": true}})
+	svc.SetSilencedHostCheckerForTest(stubSilenced{hosts: map[string]bool{"other.example": true}})
 
 	res, err := svc.Follow("remote", "local", following.FollowOptions{})
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func TestFollow_LocalFollowerUnaffectedBySilence(t *testing.T) {
 	svc, userRepo, fRepo, _ := newSvc(t)
 	addUser(t, userRepo, "alice", false)
 	addUser(t, userRepo, "bob", false)
-	svc.SetSilencedHostChecker(stubSilenced{hosts: map[string]bool{"": true}})
+	svc.SetSilencedHostCheckerForTest(stubSilenced{hosts: map[string]bool{"": true}})
 
 	res, err := svc.Follow("alice", "bob", following.FollowOptions{})
 	require.NoError(t, err)

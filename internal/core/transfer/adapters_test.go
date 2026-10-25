@@ -45,7 +45,7 @@ func TestFollowingServiceAdapter_PassesSilent(t *testing.T) {
 		userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
 		userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
 		idGen, _ := id.NewGenerator("aidx")
-		svc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+		svc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 		events := &adapterMainEvents{}
 		svc.SetMainStreamPublisher(events)
 		_, err := transfer.NewFollowingServiceAdapter(svc).Follow("alice", "bob", transfer.FollowOptions{Silent: tc.silent})

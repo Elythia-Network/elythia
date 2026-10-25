@@ -34,8 +34,8 @@ func TestFollowingHook_SharedPackerFillsPinnedAndMoveTargets(t *testing.T) {
 	l.Extras = extras
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h := webhook.NewFollowingHook(svc)
-	h.SetUserPacker(userpack.New(nil, l, idGen))
+	// 構築子で渡した packer で包む。構築子が引数を捨てる変異 (#3825) もここで落ちる。
+	h := webhook.NewFollowingHook(svc, userpack.New(nil, l, idGen))
 
 	h.OnFollow(follower, followee)
 
@@ -52,7 +52,7 @@ func TestFollowingHook_PackedUsesSharedValue(t *testing.T) {
 	userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: localUser().ID, Active: true,
 		On: model.StringArray{webhook.EventFollow, webhook.EventUnfollow}}
 	profiles := &fakeProfileLookup{profiles: map[string]*model.UserProfile{}}
-	h := webhook.NewFollowingHook(svc)
+	h := webhook.NewFollowingHook(svc, nil)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	h.SetUserLookups(nil, followLookups(profiles, nil, nil), idGen)
@@ -84,21 +84,13 @@ func TestFollowingHook_PackedUsesSharedValue(t *testing.T) {
 	assert.Empty(t, enq.userCalls)
 }
 
-func TestFollowingHook_HasUserPacker(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
-	h := webhook.NewFollowingHook(svc)
-	assert.False(t, h.HasUserPacker())
-	h.SetUserPacker(userpack.New(nil, userpack.Lookups{}, nil))
-	assert.True(t, h.HasUserPacker())
-}
-
 // packer を配線していなければ、UserDetailedNotMe は組めないので送らない。
 // UserLite の followed は送る。
 func TestFollowingHook_UnwiredPacker(t *testing.T) {
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: localUser().ID, Active: true,
 		On: model.StringArray{webhook.EventFollow, webhook.EventFollowed}}
-	h := webhook.NewFollowingHook(svc)
+	h := webhook.NewFollowingHook(svc, nil)
 
 	h.OnFollow(localUser(), remoteUser())
 	assert.Empty(t, enq.userCalls)

@@ -73,3 +73,15 @@ func (s *Service) MediaProcessingSlotsForTest() int { return s.mediaSlotCap }
 
 // DefaultMediaProcessingConcurrencyForTest exposes the default pool size.
 func DefaultMediaProcessingConcurrencyForTest() int { return defaultMediaProcessingConcurrency() }
+
+// SetRoleCheckerForTest replaces the role checker after construction. 本番は
+// NewService の必須の引数で渡す (#3825)。外部パッケージのテストが補助関数で作った
+// service に後から入れるための口で、テストのビルドでだけ見える。
+func (s *Service) SetRoleCheckerForTest(rc RoleChecker) { s.roleChecker = rc }
+
+// SetModerationLogForTest replaces the moderation log dependencies after
+// construction (see SetRoleCheckerForTest).
+func (s *Service) SetModerationLogForTest(l ModerationLogger, users ModerationLogUserLookup) {
+	s.modLog = l
+	s.modLogUsers = users
+}

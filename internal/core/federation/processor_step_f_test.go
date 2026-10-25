@@ -57,7 +57,7 @@ func newFullProcessorFetcher(t *testing.T, fetcher federation.HTTPFetcher) *full
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, fetcher, idGen)
 	resolver.SetEmojiRepo(emojiRepo)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
@@ -1125,7 +1125,7 @@ func TestProcess_UpdateNote_RepoErrorPropagates(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
@@ -1548,7 +1548,7 @@ func TestProcess_UndoLikeDeleteError(t *testing.T) {
 	aliceURI := "https://remote.example/users/alice"
 	userRepo.Users["alice-id"] = &model.User{ID: "alice-id", Username: "alice", URI: &aliceURI}
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
@@ -1571,7 +1571,7 @@ func TestProcess_UndoAnnounceListError(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 
 	undo := []byte(`{
@@ -1605,7 +1605,7 @@ func TestProcess_UndoAnnounceSkipsAndDeleteError(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 
 	undo := []byte(`{
@@ -1657,7 +1657,7 @@ func TestProcess_LikeTransientFetchError(t *testing.T) {
 	fetcher := &stubFetcher{err: &activitypub.StatusError{StatusCode: 502, Status: "502 Bad Gateway"}}
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, fetcher, idGen)
 	resolver.SetEmojiRepo(emojiRepo)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
@@ -1708,7 +1708,7 @@ func TestProcess_RejectUnfollowError(t *testing.T) {
 	userRepo.Users["alice-id"] = &model.User{ID: "alice-id", Username: "alice", URI: &aliceURI}
 
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 
 	body := []byte(`{
@@ -1741,7 +1741,7 @@ func TestProcess_RejectCancelError(t *testing.T) {
 	userRepo.Users["alice-id"] = &model.User{ID: "alice-id", Username: "alice", URI: &aliceURI}
 
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, mockFR, frRepo, idGen)
+	followingSvc := corefollowing.NewService(userRepo, mockFR, frRepo, idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 
 	body := []byte(`{
@@ -1829,7 +1829,7 @@ func TestProcess_AnnounceCreateError(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	reactionSvc := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	p := federation.NewProcessor(resolver, followingSvc, reactionSvc, deleteSvc, userRepo, noteRepo)
@@ -2068,7 +2068,7 @@ func TestProcess_UpdateNote_AuthorLookupFailureDoesNotUpdate(t *testing.T) {
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
 			resolver := federation.NewResolver(effective, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-			followingSvc := corefollowing.NewService(effective, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+			followingSvc := corefollowing.NewService(effective, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 			p := federation.NewProcessor(resolver, followingSvc, nil, nil, effective, noteRepo)
 
 			body := []byte(`{

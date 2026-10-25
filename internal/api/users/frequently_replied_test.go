@@ -44,8 +44,8 @@ func newFrequentlyRepliedHandler(t *testing.T) (*Handler, *countingUserRepo, *te
 	repo := &countingUserRepo{MockUserRepository: testutil.NewMockUserRepository()}
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(repo, noteRepo, testutil.NewMockUserNotePiningRepository(), idGen)
-	fSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+	svc := coreuser.NewService(repo, noteRepo, testutil.NewMockUserNotePiningRepository(), idGen, nil)
+	fSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil), repo, noteRepo
 }
 

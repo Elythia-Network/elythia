@@ -100,7 +100,7 @@ func (f *failingFollowRequestRepo) Delete(r *model.FollowRequest) error {
 // newSvcWith builds a Service from explicit repositories.
 func newSvcWith(userRepo repository.UserRepository, fRepo repository.FollowingRepository, frRepo repository.FollowRequestRepository) *following.Service {
 	idGen, _ := id.NewGenerator("aidx")
-	return following.NewService(userRepo, fRepo, frRepo, idGen)
+	return following.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 }
 
 func newSvc(t *testing.T) (*following.Service, *testutil.MockUserRepository, *testutil.MockFollowingRepository, *testutil.MockFollowRequestRepository) {
@@ -109,7 +109,7 @@ func newSvc(t *testing.T) (*following.Service, *testutil.MockUserRepository, *te
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := following.NewService(userRepo, fRepo, frRepo, idGen)
+	svc := following.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	return svc, userRepo, fRepo, frRepo
 }
 
@@ -1772,21 +1772,6 @@ func TestUnfollow_SkipsCountAdjustmentWhenMoved(t *testing.T) {
 		})
 	}
 }
-
-// **述語が配線を見ていること。** 起動時の critical wiring 検査はこれを読むので、
-// 常に true を返すようになると未配線を検出できなくなる。
-func TestHasSilencedHostChecker(t *testing.T) {
-	idGen, _ := id.NewGenerator("aidx")
-	svc := following.NewService(testutil.NewMockUserRepository(), testutil.NewMockFollowingRepository(),
-		testutil.NewMockFollowRequestRepository(), idGen)
-	assert.False(t, svc.HasSilencedHostChecker(), "未配線では false")
-	svc.SetSilencedHostChecker(silencedHostFunc(func(string) bool { return false }))
-	assert.True(t, svc.HasSilencedHostChecker(), "配線後は true")
-}
-
-type silencedHostFunc func(string) bool
-
-func (f silencedHostFunc) IsSilenced(host string) bool { return f(host) }
 
 // #3067: UnfollowQuiet は upstream の silent と同じく、main stream と利用者の
 // webhook を出さず、Undo(Follow) も配送しない。数と集計は通常どおり減らす。

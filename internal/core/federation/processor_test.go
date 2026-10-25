@@ -40,7 +40,7 @@ func newProcessor(t *testing.T, fetcherBody string) (*federation.Processor, *tes
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(fetcherBody)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	return processor, repo, followingRepo, noteRepo
 }
@@ -278,7 +278,7 @@ func TestProcess_UndoFollowCancelsPendingRequest(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, followReqRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, followReqRepo, idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURL("https://example.com")
 	p.SetInboundFollowAcceptor(&stubInboundFollowAcceptor{})
@@ -557,7 +557,7 @@ func TestProcess_UndoFollowDeleteError(t *testing.T) {
 
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	// Setup followee bob
@@ -608,7 +608,7 @@ func newProcessorWithBlocking(t *testing.T) (*federation.Processor, *testutil.Mo
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen, followingSvc, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	processor.SetBlockingService(blockingSvc)
@@ -934,7 +934,7 @@ func newProcessorWithPinning(t *testing.T) (*federation.Processor, *testutil.Moc
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	processor.SetPinningRepo(piningRepo, idGen)
 	return processor, repo, noteRepo, piningRepo
@@ -1274,7 +1274,7 @@ func TestProcess_AcceptFollow_InnerActorEmbeddedObject(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	// remote followee alice と local follower bob。**承認待ちの request を
@@ -1321,7 +1321,7 @@ func TestProcess_AcceptFollow_BlockedSwallowsError(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
 	followingSvc.SetBlockingChecker(&stubAcceptBlockingChecker{blockerID: "bob", blockeeID: "alice1"})
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
@@ -1679,7 +1679,7 @@ func TestProcess_CreateQuestion(t *testing.T) {
 	idGen2, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen2)
 	resolver.SetPollRepo(pollRepo)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen2)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen2, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{
@@ -1720,7 +1720,7 @@ func TestProcess_CreateQuestionAnyOf(t *testing.T) {
 	idGen2, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen2)
 	resolver.SetPollRepo(pollRepo)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen2)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen2, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{

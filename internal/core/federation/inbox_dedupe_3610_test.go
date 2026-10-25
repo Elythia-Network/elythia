@@ -433,7 +433,7 @@ func TestResolveActor_RefreshSuspensionIsVisibleToProcessWithSigner(t *testing.T
 	r := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(actorWithSuspended(t, "true"))}, idGen)
 	r.SetSuspensionOriginRepo(newStubOriginRepo())
-	followingSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(r, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURL("https://example.com")
 

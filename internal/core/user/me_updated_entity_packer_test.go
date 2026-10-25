@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// meUpdated の本体は、SetEntityPacker で渡された Packer で包む (#3792)。
+// meUpdated の本体は、構築子で渡された Packer で包む (#3792、#3825)。
 // 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
 // URL になって落ちる。
 func TestService_MeUpdatedPacksWithTheGivenEntityPacker(t *testing.T) {
@@ -22,7 +22,7 @@ func TestService_MeUpdatedPacksWithTheGivenEntityPacker(t *testing.T) {
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
-	svc.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+	svc.SetEntityPackerForTest(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
 
 	_, err := svc.UpdateProfile("u1", user.UpdateInput{Name: ptr(ptr("Alice"))})

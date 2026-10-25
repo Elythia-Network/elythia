@@ -34,10 +34,10 @@ func newApprovalEnv(t *testing.T) *approvalEnv {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	frRepo := repository.NewFollowRequestRepository(db)
-	svc := following.NewService(repository.NewUserRepository(db), repository.NewFollowingRepository(db), frRepo, idGen)
+	svc := following.NewService(repository.NewUserRepository(db), repository.NewFollowingRepository(db), frRepo, idGen, nil, nil, nil, nil)
 	hook := &recordingHook{}
 	svc.SetNotificationHook(hook)
-	svc.SetSilentFollowRepo(repository.NewSilentFollowRepository(db))
+	svc.SetSilentFollowRepoForTest(repository.NewSilentFollowRepository(db))
 	return &approvalEnv{t: t, db: db, idGen: idGen, svc: svc, hook: hook, frRepo: frRepo}
 }
 
@@ -355,8 +355,8 @@ func TestAcceptAllRequests_DB(t *testing.T) {
 			require.NoError(t, e.db.Exec(`UPDATE "user" SET "isLocked" = false WHERE id = ?`, followee).Error)
 
 			svc := following.NewService(repository.NewUserRepository(e.db), repository.NewFollowingRepository(e.db),
-				&cancellingRequestRepo{FollowRequestRepository: e.frRepo, db: e.db, cancelFollowerID: cancelled}, e.idGen)
-			svc.SetSilentFollowRepo(repository.NewSilentFollowRepository(e.db))
+				&cancellingRequestRepo{FollowRequestRepository: e.frRepo, db: e.db, cancelFollowerID: cancelled}, e.idGen, nil, nil, nil, nil)
+			svc.SetSilentFollowRepoForTest(repository.NewSilentFollowRepository(e.db))
 			require.NoError(t, svc.AcceptAllRequests(followee))
 
 			assert.True(t, e.isFollowing(oldUser, followee), "期間を過ぎた人は承認する")

@@ -89,19 +89,6 @@ func (s *Service) checkFollowApproval(follower, followee *model.User) (followApp
 	}
 }
 
-// SetSilentFollowRepo wires the store of follows that succeeded silently
-// (#3466). Without it the follows still succeed without a notification but
-// are not listed in following/silent/list.
-func (s *Service) SetSilentFollowRepo(r repository.SilentFollowRepository) {
-	s.silentFollowRepo = r
-}
-
-// HasSilentFollowRepo reports whether the silent follow store was wired.
-//
-// 未配線だと「静かに成立させる」で通ったフォローが一覧に残らず、受け手が後から
-// 確かめられない。起動時検査に使う。
-func (s *Service) HasSilentFollowRepo() bool { return s != nil && s.silentFollowRepo != nil }
-
 // recordSilentFollow stores a silent follow. Failures are logged only: the
 // follow itself has already been created.
 func (s *Service) recordSilentFollow(followerID, followeeID string) {

@@ -86,7 +86,7 @@ func newUploader(t *testing.T) *drive.Service {
 	folderRepo.FilesRef = fileRepo
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
-	return drive.NewService(fileRepo, folderRepo, storage, idGen)
+	return drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 }
 
 func newDeps(t *testing.T, body []byte) (emojiimport.Deps, *testutil.MockUserRepository, *testutil.MockEmojiRepository, *drive.Service) {
@@ -282,7 +282,7 @@ func TestRun_UploaderError(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	folderRepo := testutil.NewMockDriveFolderRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 	deps := emojiimport.Deps{
 		UserRepo:  userRepo,
 		EmojiRepo: emojiRepo,
@@ -318,7 +318,7 @@ func newDepsWithFileRepo(t *testing.T, body []byte) (emojiimport.Deps, *testutil
 	folderRepo.FilesRef = fileRepo
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
-	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 	reader := &fakeDriveReader{body: body}
 	return emojiimport.Deps{
 		UserRepo:  userRepo,

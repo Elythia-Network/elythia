@@ -108,7 +108,7 @@ func newUGCFixture(t *testing.T) *ugcFixture {
 	repo.Notes[ugcQuoteID] = quote
 
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(repo, testutil.NewMockPollRepository(), idGen, nil)
+	createSvc := corenote.NewCreateService(repo, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(repo)
 	querySvc := corenote.NewQueryService(repo, nil)
 	tl := coretimeline.NewService(nil, repo, testutil.NewMockFollowingRepository())

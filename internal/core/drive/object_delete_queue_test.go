@@ -46,7 +46,7 @@ func svcWithEnqueuer(t *testing.T, f *model.DriveFile) (*drive.Service, *countin
 	storage := &countingStorage{LocalStorage: drive.NewLocalStorage(t.TempDir(), "")}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc := drive.NewService(repo, testutil.NewMockDriveFolderRepository(), storage, idGen)
+	svc := drive.NewService(repo, testutil.NewMockDriveFolderRepository(), storage, idGen, nil, nil, nil, nil)
 	enq := &recordingObjectDeleteEnqueuer{}
 	svc.SetObjectDeleteEnqueuer(enq)
 	return svc, storage, enq, repo

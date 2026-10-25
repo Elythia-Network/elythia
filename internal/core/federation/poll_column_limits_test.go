@@ -26,7 +26,7 @@ func newQuestionProcessor(t *testing.T) (*federation.Processor, *testutil.MockNo
 	resolver := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	resolver.SetPollRepo(pollRepo)
 	followingSvc := corefollowing.NewService(
-		userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen)
+		userRepo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 	return p, noteRepo, pollRepo
 }

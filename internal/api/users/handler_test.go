@@ -34,8 +34,8 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// followingRepo + followRequestRepo を service と共有する形で wire
 	// しておく (#1144 で users/{followers,following} の relation flag +
@@ -343,9 +343,9 @@ func newTestHandlerWithRemoteResolver(t *testing.T, resolver coreuser.RemoteUser
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	svc.SetRemoteUserResolver(resolver)
-	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
+	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil), userRepo
 }
 
@@ -869,8 +869,8 @@ func TestSearch_BatchFetchesProfiles(t *testing.T) {
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	for i := 0; i < 5; i++ {
@@ -1571,8 +1571,8 @@ func TestFollowers_BatchFetchesUsers(t *testing.T) {
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(repo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(repo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// target user (followee)
@@ -2113,8 +2113,8 @@ func newHandlerWithFailingNoteRepo(t *testing.T) *Handler {
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	addTestUser(userRepo)
 	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
@@ -2129,8 +2129,8 @@ func newHandlerWithFailingSearch(t *testing.T) *Handler {
 	fRepo := testutil.NewMockFollowingRepository()
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
@@ -2143,8 +2143,8 @@ func newHandlerWithFailingFollowing(t *testing.T) *Handler {
 	fRepo := &failingFollowingRepo{MockFollowingRepository: testutil.NewMockFollowingRepository()}
 	frRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
-	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
+	fSvc := corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil)
 	return NewHandler(svc, fSvc, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 

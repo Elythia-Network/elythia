@@ -245,7 +245,7 @@ func TestUnfollowForBlock_NotFollowingIsNoop(t *testing.T) {
 func TestService_HasMeUpdatedPublisher(t *testing.T) {
 	svc, _, _, _ := newSvc(t)
 	assert.False(t, svc.HasMeUpdatedPublisher())
-	svc.SetUserPacker(&countingPacker{})
+	svc.SetUserPackerForTest(&countingPacker{})
 	assert.False(t, svc.HasMeUpdatedPublisher(), "別の依存だけを配線しても false")
 	svc.SetMeUpdatedPublisher(&recordingMeUpdated{})
 	assert.True(t, svc.HasMeUpdatedPublisher())

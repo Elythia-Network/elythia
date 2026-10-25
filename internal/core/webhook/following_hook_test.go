@@ -129,7 +129,7 @@ func newFollowingHook(t *testing.T, owner, event string, l webhook.UserLookups) 
 	t.Helper()
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: owner, Active: true, On: model.StringArray{event}}
-	h := webhook.NewFollowingHook(svc)
+	h := webhook.NewFollowingHook(svc, nil)
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	h.SetUserLookups(nil, l, idGen)

@@ -14,7 +14,8 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// webhook の payload の投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
+// webhook の payload の投稿は、構築子で渡した Packer で包む (#3790)。構築子が引数を
+// 捨てる変異 (#3825) もここで落ちる。
 //
 // 作者の avatarUrl が渡した Packer の media proxy を通ることを、投稿とリアクションの
 // 両方の hook で確かめる。
@@ -45,8 +46,7 @@ func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 	t.Run("note", func(t *testing.T) {
 		svc, enq, userRepo, _ := newTestService(t)
 		userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"note"}}
-		h := webhook.NewNoteCreateHook(svc, idGen)
-		h.SetEntityPacker(pk)
+		h := webhook.NewNoteCreateHook(svc, idGen, pk)
 		h.OnNoteCreated(&model.Note{ID: "n1", UserID: "alice", Visibility: model.NoteVisibilityPublic}, author, nil, nil)
 		require.Len(t, enq.userCalls, 1)
 		got := avatarOf(t, enq.userCalls[0].Body)
@@ -55,23 +55,12 @@ func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 	t.Run("reaction", func(t *testing.T) {
 		svc, enq, userRepo, _ := newTestService(t)
 		userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"reaction"}}
-		h := webhook.NewReactionCreateHook(svc, idGen)
-		h.SetEntityPacker(pk)
+		h := webhook.NewReactionCreateHook(svc, idGen, pk)
 		h.OnReactionCreated(&model.Note{ID: "n1", UserID: "alice", User: author, Visibility: model.NoteVisibilityPublic},
 			&model.User{ID: "bob", Username: "bob", UsernameLower: "bob"}, "\U0001F44D")
 		require.Len(t, enq.userCalls, 1)
 		got := avatarOf(t, enq.userCalls[0].Body)
 		assert.True(t, strings.HasPrefix(got, "/avatar.webp?"), "avatarUrl must go through the proxy: %s", got)
-	})
-	t.Run("HasEntityPacker", func(t *testing.T) {
-		n := webhook.NewNoteCreateHook(nil, idGen)
-		r := webhook.NewReactionCreateHook(nil, idGen)
-		assert.False(t, n.HasEntityPacker())
-		assert.False(t, r.HasEntityPacker())
-		n.SetEntityPacker(pk)
-		r.SetEntityPacker(pk)
-		assert.True(t, n.HasEntityPacker())
-		assert.True(t, r.HasEntityPacker())
 	})
 }
 

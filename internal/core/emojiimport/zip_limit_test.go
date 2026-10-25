@@ -134,7 +134,7 @@ func newLimitDeps(t *testing.T, body []byte) Deps {
 		UserRepo:  userRepo,
 		EmojiRepo: testutil.NewMockEmojiRepository(),
 		Drive:     &stubDriveReader{body: body},
-		Uploader:  drive.NewService(fileRepo, folderRepo, drive.NewLocalStorage(t.TempDir(), "https://example.com/files"), idGen),
+		Uploader:  drive.NewService(fileRepo, folderRepo, drive.NewLocalStorage(t.TempDir(), "https://example.com/files"), idGen, nil, nil, nil, nil),
 		IDGen:     idGen,
 	}
 }

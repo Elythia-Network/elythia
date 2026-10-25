@@ -526,7 +526,7 @@ func relayProcessor(t *testing.T, docs map[string]string, relayURI string) (
 	t.Helper()
 	r, sink, noteRepo, userRepo := ephResolverDocs(t, docs)
 	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(),
-		testutil.NewMockFollowRequestRepository(), mustIDGen(t))
+		testutil.NewMockFollowRequestRepository(), mustIDGen(t), nil, nil, nil, nil)
 	p := federation.NewProcessor(r, followingSvc, nil, nil, userRepo, noteRepo)
 	p.SetRelayActorChecker(&stubRelayChecker{relays: map[string]bool{relayURI: true}})
 	return p, sink, noteRepo, userRepo

@@ -42,7 +42,7 @@ func newExtraHandlerWithFollowing(t *testing.T) (*Handler, *testutil.MockNoteRep
 	followingRepo := testutil.NewMockFollowingRepository()
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, followingRepo)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
@@ -657,7 +657,7 @@ func TestUserListTimeline_Success(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository())
-	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
+	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 	listRepo := testutil.NewMockUserListRepository()
 	listRepo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1", Name: "my list"}
 	h.SetUserListRepo(listRepo)
@@ -734,7 +734,7 @@ func TestUserListTimeline_PassesFilterToRepo(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, fRepo)
-	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
+	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 	h.SetUserListRepo(listRepo)
 
 	rec := postExtra(h.UserListTimeline,
@@ -1158,7 +1158,7 @@ func TestShowPartialBulk_Success(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)

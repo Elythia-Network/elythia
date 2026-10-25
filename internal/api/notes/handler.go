@@ -1511,7 +1511,7 @@ func (h *Handler) HasPolicyProvider() bool { return h.policyProvider != nil }
 //   - driveFileRepo: 下書きの添付で他人の drive ファイル ID を指定でき
 //     (`handler_drafts.go` の所有権検査が nil で true を返す)、加えて
 //     `fieldResolver()` が drive を引けなくなるので **全 note の files が
-//     空配列**になる。下書きから note への昇格は `note.driveFileRepo` の
+//     空配列**になる。下書きから note への昇格は `note.CreateService` の driveFileRepo の
 //     checkFileIDs を通るので、他人のファイルの実体までは出ない
 //   - metaRepo: blocked-host の note が post-fetch 経路で漏れる
 //   - blockingRepo: ブロック / ミュート / チャンネルミュートの post-fetch

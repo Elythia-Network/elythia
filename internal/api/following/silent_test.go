@@ -33,7 +33,8 @@ func (f *fakeSilentFollowRepo) ListByFollowee(followeeID string, limit int, sinc
 // `{id, createdAt, follower}` で返す。follower は UserLite で、消えた人の行は
 // 落とす (#3466)。
 func TestListSilent(t *testing.T) {
-	h, repo := newTestHandler(t)
+	fake := &fakeSilentFollowRepo{}
+	h, repo := newTestHandlerWithSilentFollows(t, fake)
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	h.SetIDGen(gen)
@@ -42,11 +43,10 @@ func TestListSilent(t *testing.T) {
 	bob := addUser(repo, "bob", false)
 	addUser(repo, "alice", false)
 	at := time.Date(2026, 10, 9, 1, 2, 3, 4_000_000, time.UTC)
-	fake := &fakeSilentFollowRepo{rows: []*model.SilentFollow{
+	fake.rows = []*model.SilentFollow{
 		{ID: gen.Generate(at), FollowerID: "alice", FolloweeID: "bob"},
 		{ID: gen.Generate(at.Add(-time.Hour)), FollowerID: "gone", FolloweeID: "bob"},
-	}}
-	h.followingService.SetSilentFollowRepo(fake)
+	}
 
 	rec := postJSON(h.ListSilent, `{"limit":5,"untilId":"zzz"}`, bob)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -70,9 +70,8 @@ func TestListSilent(t *testing.T) {
 }
 
 func TestListSilent_InvalidParams(t *testing.T) {
-	h, repo := newTestHandler(t)
+	h, repo := newTestHandlerWithSilentFollows(t, &fakeSilentFollowRepo{})
 	bob := addUser(repo, "bob", false)
-	h.followingService.SetSilentFollowRepo(&fakeSilentFollowRepo{})
 	for _, body := range []string{`{"limit":0}`, `{"limit":101}`, `{"limit":"x"}`, `{"sinceDate":"x"}`} {
 		rec := postJSON(h.ListSilent, body, bob)
 		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
@@ -80,9 +79,8 @@ func TestListSilent_InvalidParams(t *testing.T) {
 }
 
 func TestListSilent_InternalError(t *testing.T) {
-	h, repo := newTestHandler(t)
+	h, repo := newTestHandlerWithSilentFollows(t, &fakeSilentFollowRepo{err: errStub})
 	bob := addUser(repo, "bob", false)
-	h.followingService.SetSilentFollowRepo(&fakeSilentFollowRepo{err: errStub})
 	rec := postJSON(h.ListSilent, `{}`, bob)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }

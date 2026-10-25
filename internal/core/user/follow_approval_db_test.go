@@ -21,7 +21,7 @@ func TestUpdateProfile_DB_FollowApproval(t *testing.T) {
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	repo := repository.NewUserRepository(db)
-	svc := user.NewService(repo, repository.NewNoteRepository(db), repository.NewUserNotePiningRepository(db), gen)
+	svc := user.NewService(repo, repository.NewNoteRepository(db), repository.NewUserNotePiningRepository(db), gen, nil)
 
 	const uid = "fauser0001"
 	require.NoError(t, db.Exec(`INSERT INTO "user" (id, "updatedAt", username, "usernameLower") VALUES (?, NOW(), ?, ?)`, uid, uid, uid).Error)

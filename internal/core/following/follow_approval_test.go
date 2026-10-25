@@ -120,15 +120,13 @@ func TestAcceptAllRequests_Failures(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// 未配線なら記録せず、一覧は空。配線の有無は起動時検査が見る。
+// 未配線なら記録せず、一覧は空。本番の配線は TestBuiltHandlersHaveNoNilDependencies
+// (internal/server) が見る (#3825)。
 func TestSilentFollowRepo_Unwired(t *testing.T) {
 	svc, _, _, _ := newSvc(t)
-	assert.False(t, svc.HasSilentFollowRepo())
 	rows, err := svc.ListSilentFollows("alice", 10, "", "")
 	require.NoError(t, err)
 	assert.Empty(t, rows)
-	svc.SetSilentFollowRepo(nopSilentFollowRepo{})
-	assert.True(t, svc.HasSilentFollowRepo())
 }
 
 // failingListRequestRepo fails ListReceived while err is set.
@@ -170,7 +168,7 @@ func TestFollow_SilentFollowRecordFailureKeepsFollow(t *testing.T) {
 	userRepo.Profiles[followee] = &model.UserProfile{UserID: followee, FollowApprovalLocalSeconds: new(3600), FollowApprovalAction: model.FollowApprovalActionSilentFollow}
 	hook := &recordingHook{}
 	svc.SetNotificationHook(hook)
-	svc.SetSilentFollowRepo(failingSilentFollowRepo{})
+	svc.SetSilentFollowRepoForTest(failingSilentFollowRepo{})
 
 	res, err := svc.Follow(follower, followee, following.FollowOptions{})
 	require.NoError(t, err)

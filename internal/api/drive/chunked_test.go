@@ -48,8 +48,7 @@ func newChunkedHandler(t *testing.T) (*Handler, *mockChunkedSessionRepo, *testut
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 
-	svc := coredrive.NewService(fileRepo, folderRepo, storage, idGen)
-	svc.SetRoleChecker(&chunkedRoleChecker{})
+	svc := coredrive.NewService(fileRepo, folderRepo, storage, idGen, nil, &chunkedRoleChecker{}, nil, nil)
 	sessions := newMockChunkedSessionRepo()
 	svc.SetChunkedUpload(sessions, func() coredrive.ChunkedUploadSettings {
 		return coredrive.ChunkedUploadSettings{

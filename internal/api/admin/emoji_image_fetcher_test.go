@@ -62,7 +62,7 @@ func newDriveService(t *testing.T) (*drive.Service, *testutil.MockDriveFileRepos
 	require.NoError(t, err)
 	fileRepo := testutil.NewMockDriveFileRepository()
 	folderRepo := testutil.NewMockDriveFolderRepository()
-	return drive.NewService(fileRepo, folderRepo, newRecordingStorage(), idGen), fileRepo
+	return drive.NewService(fileRepo, folderRepo, newRecordingStorage(), idGen, nil, nil, nil, nil), fileRepo
 }
 
 func TestEmojiImageFetcher_FetchAndStore_Success(t *testing.T) {

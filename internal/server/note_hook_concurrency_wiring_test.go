@@ -23,7 +23,7 @@ func TestBuildCore_WiresTheConfiguredNoteHookConcurrency(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	// 既定の数はcore/noteが決める。配線しないCreateServiceの枠で取る。
-	def := corenote.NewCreateService(nil, nil, nil, nil).HookConcurrency()
+	def := corenote.NewCreateService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil).HookConcurrency()
 
 	for _, tt := range []struct {
 		name       string
@@ -38,7 +38,7 @@ func TestBuildCore_WiresTheConfiguredNoteHookConcurrency(t *testing.T) {
 				config: &config.Config{URL: "https://example.tld", Host: "example.tld", NoteHookConcurrency: tt.configured},
 				redis:  &cache.RedisClients{},
 			}
-			c := s.buildCore(&wiring{}, idGen, nil, nil)
+			c := s.buildCore(&wiring{}, idGen, nil, nil, nil, nil)
 			assert.Equal(t, tt.want, c.noteCreate.HookConcurrency())
 		})
 	}
