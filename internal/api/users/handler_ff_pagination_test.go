@@ -152,10 +152,11 @@ func TestRelationList_CursorIgnoresOffset(t *testing.T) {
 	require.Len(t, withOffset, 2)
 	assert.Equal(t, noOffset, withOffset, "cursor と併用した offset が効いている")
 
-	// cursor 未指定なら offset は効く (offset 版の呼び出し元が依存している挙動)。
+	// cursor 未指定でも offset は読まない。本家の paramDef に offset は無く、
+	// 知らない項目として無視される (#3837)。
 	all := relationPage(t, h.Followers, `{"userId":"user1","limit":100}`)
 	require.Len(t, all, 5)
-	shifted := relationPage(t, h.Followers, `{"userId":"user1","limit":2,"offset":1}`)
-	require.Len(t, shifted, 2)
-	assert.Equal(t, []string{all[1], all[2]}, shifted)
+	unshifted := relationPage(t, h.Followers, `{"userId":"user1","limit":2,"offset":1}`)
+	require.Len(t, unshifted, 2)
+	assert.Equal(t, []string{all[0], all[1]}, unshifted)
 }

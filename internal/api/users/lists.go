@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -373,13 +374,13 @@ func (h *Handler) ListsUpdateMembership(c echo.Context) error {
 func (h *Handler) ListsGetMemberships(c echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
-		ListID    string `json:"listId"`
-		ForPublic bool   `json:"forPublic"`
-		Limit     int    `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		ListID    string     `json:"listId"`
+		ForPublic bool       `json:"forPublic"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.ListID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -387,9 +388,9 @@ func (h *Handler) ListsGetMemberships(c echo.Context) error {
 	if h.userListRepo == nil {
 		return apierr.JSONInternalError(c)
 	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 30
+	limit := 30
+	if p := req.Limit.IntPtr(); p != nil && *p > 0 {
+		limit = *p
 	}
 	if limit > 100 {
 		limit = 100
@@ -413,7 +414,7 @@ func (h *Handler) ListsGetMemberships(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_LIST", "No such list.", noSuchList))
 	}
 
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

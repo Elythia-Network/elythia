@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/reaction"
@@ -293,23 +294,23 @@ func (h *Handler) ReportAbuse(c echo.Context) error {
 func (h *Handler) Reactions(c echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "userId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	req.SinceID, req.UntilID = cursorSince, cursorUntil
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -498,9 +499,9 @@ func (h *Handler) Reactions(c echo.Context) error {
 func (h *Handler) FeaturedNotes(c echo.Context) error {
 	var req struct {
 		// GET でも受ける (本家は allowGet: true) ので query の名前も付ける (#3593)。
-		UserID  string `json:"userId" query:"userId"`
-		Limit   *int   `json:"limit" query:"limit"`
-		UntilID string `json:"untilId" query:"untilId"`
+		UserID  string     `json:"userId" query:"userId"`
+		Limit   *jsnum.Int `json:"limit" query:"limit"`
+		UntilID string     `json:"untilId" query:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		// GET の query で数値に読めない値 (limit=abc) は、本家と同じ cast の
@@ -510,7 +511,7 @@ func (h *Handler) FeaturedNotes(c echo.Context) error {
 	if req.UserID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "userId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -628,9 +629,9 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 		// upstream の paramDef は username / host の anyOf で、どちらか一方の
 		// キーがあればよい (値は null 可)。username 省略時は username で
 		// 絞らずに host だけで検索する。両方欠けたときだけ 400。
-		Username *string `json:"username"`
-		Host     *string `json:"host"`
-		Limit    *int    `json:"limit"`
+		Username *string    `json:"username"`
+		Host     *string    `json:"host"`
+		Limit    *jsnum.Int `json:"limit"`
 		// Detail は upstream search-by-username-and-host.ts:52 と同じく default
 		// true。false のとき UserLite を返す (#1547)。
 		Detail *bool `json:"detail"`
@@ -652,7 +653,7 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 	if req.Username != nil {
 		username = *req.Username
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}

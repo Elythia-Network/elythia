@@ -11,8 +11,10 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/notehide"
+	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
@@ -730,12 +732,12 @@ func (h *Handler) Show(c echo.Context) error {
 
 // SearchRequest is the request body for users/search.
 type SearchRequest struct {
-	Query string `json:"query"`
-	Limit *int   `json:"limit"`
+	Query string     `json:"query"`
+	Limit *jsnum.Int `json:"limit"`
 	// Origin は upstream Misskey TS と同じ enum: "local" / "remote" /
 	// "combined" (default)。空 / 不明値は "combined" 扱い (#763)。
-	Origin string `json:"origin"`
-	Offset int    `json:"offset"`
+	Origin string    `json:"origin"`
+	Offset jsnum.Int `json:"offset"`
 	// Detail は upstream search.ts:38 と同じく default true。false のとき
 	// UserLite を返す (#1547)。
 	Detail *bool `json:"detail"`
@@ -747,7 +749,7 @@ func (h *Handler) Search(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -769,7 +771,7 @@ func (h *Handler) Search(c echo.Context) error {
 	if viewer != nil {
 		meID = viewer.ID
 	}
-	users, err := h.userService.Search(req.Query, meID, limit, req.Offset, req.Origin)
+	users, err := h.userService.Search(req.Query, meID, limit, int(req.Offset), req.Origin)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -794,16 +796,16 @@ func (h *Handler) Search(c echo.Context) error {
 // "未指定" を upstream paramDef のデフォルトに置き換える経路を確保する
 // (#1021)。
 type NotesRequest struct {
-	UserID           string `json:"userId"`
-	Limit            *int   `json:"limit"`
-	SinceID          string `json:"sinceId"`
-	UntilID          string `json:"untilId"`
-	SinceDate        *int64 `json:"sinceDate"`
-	UntilDate        *int64 `json:"untilDate"`
-	WithFiles        *bool  `json:"withFiles"`
-	WithReplies      *bool  `json:"withReplies"`
-	WithRenotes      *bool  `json:"withRenotes"`
-	WithChannelNotes *bool  `json:"withChannelNotes"`
+	UserID           string     `json:"userId"`
+	Limit            *jsnum.Int `json:"limit"`
+	SinceID          string     `json:"sinceId"`
+	UntilID          string     `json:"untilId"`
+	SinceDate        *jsnum.Int `json:"sinceDate"`
+	UntilDate        *jsnum.Int `json:"untilDate"`
+	WithFiles        *bool      `json:"withFiles"`
+	WithReplies      *bool      `json:"withReplies"`
+	WithRenotes      *bool      `json:"withRenotes"`
+	WithChannelNotes *bool      `json:"withChannelNotes"`
 	// AllowPartial は upstream notes.ts:67 の fanout TL hint。mk-go は fanout TL
 	// を持たないため挙動には影響しないが、param を受理して 400 を出さないために
 	// 受ける (#1547)。
@@ -816,7 +818,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -856,7 +858,7 @@ func (h *Handler) Notes(c echo.Context) error {
 	}
 
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -925,16 +927,22 @@ func (h *Handler) Notes(c echo.Context) error {
 
 // FollowersRequest is the request body for users/followers and users/following.
 // upstream paramDef anyOf で {userId} または {username, host} を受ける (#1547)。
+// offset は本家の paramDef に無いので、本家と同じく読まない (#3837)。
 type FollowersRequest struct {
-	UserID    string  `json:"userId"`
-	Username  string  `json:"username"`
-	Host      *string `json:"host"`
-	Limit     *int    `json:"limit"`
-	Offset    int     `json:"offset"`
-	SinceID   string  `json:"sinceId"`
-	UntilID   string  `json:"untilId"`
-	SinceDate *int64  `json:"sinceDate"`
-	UntilDate *int64  `json:"untilDate"`
+	// UserID は、本家と同じくキーがあるかで経路を分けるので、欠けと null と値を
+	// 見分ける (#3837)。
+	UserID    optional.Nullable[string] `json:"userId"`
+	Username  *string                   `json:"username"`
+	Host      *string                   `json:"host"`
+	Limit     *jsnum.Int                `json:"limit"`
+	SinceID   string                    `json:"sinceId"`
+	UntilID   string                    `json:"untilId"`
+	SinceDate *jsnum.Int                `json:"sinceDate"`
+	UntilDate *jsnum.Int                `json:"untilDate"`
+	// limit は listRelations が解決して埋める件数。
+	limit int
+	// userID は listRelations が解決して埋める対象の利用者の id。
+	userID string
 }
 
 // Followers handles POST /api/users/followers.
@@ -963,10 +971,23 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	viewer := middleware.GetUser(c)
-	// userId 指定が無ければ username(+host) から解決する (upstream followers.ts:60-71、
-	// #1547)。usernameLower + host で findOne。
-	if req.UserID == "" {
-		if req.Username == "" {
+	// userId のキーが無ければ username(+host) から解決する (upstream followers.ts:60-71、
+	// #1547)。usernameLower + host で findOne。本家は `'userId' in ps` で分岐するので、
+	// 空の userId を送ったら、username があっても userId の経路で引いて見つからない
+	// (#3837。以前は空を欠けと同じに扱い、username の利用者の一覧を返していた)。
+	switch {
+	case req.UserID.Present && req.UserID.Value == nil:
+		// userId: null は本家の paramDef を通り、本家は findOneBy({ id: null }) を引く。
+		// 本家は TypeORM の invalidWhereValuesBehavior.null を 'ignore' にしている
+		// (postgres.ts) ので条件が落ち、順序の決まらない任意の利用者に当たる。意味のある
+		// 結果ではないので、見つからない扱いにする (#3837、docs/divergence/approximations.md)。
+		return jsonNoSuchUserForRelations(c, followers)
+	case req.UserID.Present:
+		req.userID = *req.UserID.Value
+	default:
+		// 空の username は本家と同じく受け、該当する利用者がいないので
+		// 下の NO_SUCH_USER になる (#3837)。欠けだけを拒否する。
+		if req.Username == nil {
 			return apierr.JSONInvalidParam(c)
 		}
 		// **DB だけを引く。** 本家 followers.ts / following.ts は usersRepository.findOneBy
@@ -976,7 +997,7 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 		// 匿名の visitor だけ host 指定を弾く gate を置いていたが、DB だけを引くなら
 		// 外向きの通信は起きないので、本家と同じく gate も置かない)。
 		// #2106 L10: Followers/Following も Show と同じく lookup 前に trim する。
-		bundle, err := h.userService.ShowByUsernameDB(strings.ToLower(strings.TrimSpace(req.Username)), req.Host)
+		bundle, err := h.userService.ShowByUsernameDB(strings.ToLower(strings.TrimSpace(*req.Username)), req.Host)
 		if err != nil || bundle == nil {
 			// Show と同じく DB 障害は 500 に倒す (#2792 / #2996)。見つからなければ
 			// 本家と同じ NO_SUCH_USER (endpoint ごとの id)。
@@ -985,20 +1006,20 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 			}
 			return jsonNoSuchUserForRelations(c, followers)
 		}
-		req.UserID = bundle.User.ID
+		req.userID = bundle.User.ID
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// collectFollowers / collectFollowing が req 経由で参照するので書き戻す。
-	req.Limit = &limit
+	req.limit = limit
 
-	if _, err := h.userService.ShowByID(req.UserID); err != nil {
+	if _, err := h.userService.ShowByID(req.userID); err != nil {
 		return jsonNoSuchUserForRelations(c, followers)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1010,7 +1031,7 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 	// bypass 経路に乗せる (upstream: `!await roleService.isModerator(me)`)。
 	// profile 行が無い (= 古いデータ / remote 未同期) 場合は upstream の
 	// default 値 'public' を採用して素通りさせる。
-	if denied, err := h.gateRelationVisibility(c, req.UserID, viewer, followers); denied {
+	if denied, err := h.gateRelationVisibility(c, req.userID, viewer, followers); denied {
 		return err
 	}
 
@@ -1112,7 +1133,7 @@ type relationItem struct {
 }
 
 func (h *Handler) collectFollowers(ctx context.Context, req FollowersRequest, viewer *model.User) ([]relationItem, error) {
-	rows, err := h.followingService.ListReceivedFollowing(req.UserID, req.SinceID, req.UntilID, *req.Limit, req.Offset)
+	rows, err := h.followingService.ListReceivedFollowing(req.userID, req.SinceID, req.UntilID, req.limit, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1120,7 +1141,7 @@ func (h *Handler) collectFollowers(ctx context.Context, req FollowersRequest, vi
 }
 
 func (h *Handler) collectFollowing(ctx context.Context, req FollowersRequest, viewer *model.User) ([]relationItem, error) {
-	rows, err := h.followingService.ListSentFollowing(req.UserID, req.SinceID, req.UntilID, *req.Limit, req.Offset)
+	rows, err := h.followingService.ListSentFollowing(req.userID, req.SinceID, req.UntilID, req.limit, 0)
 	if err != nil {
 		return nil, err
 	}
