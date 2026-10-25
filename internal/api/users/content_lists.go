@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -23,27 +24,25 @@ import (
 // ようにする (#487 兄弟ケース)。
 func (h *Handler) Clips(c echo.Context) error {
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	if h.clipRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -53,7 +52,8 @@ func (h *Handler) Clips(c echo.Context) error {
 	// upstream clips.ts:54 は viewer に関係なく公開 clip のみ返す (clip.isPublic=true)。
 	// owner の非公開 clip は i/clips 等で取得する設計 (#1784)。notesCount は owner
 	// 閲覧時のみ出すため isSelf は下の ClipExtras で引き続き使う。
-	rows, err := h.clipRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, req.Offset)
+	// offset は本家の paramDef に無いので、本家と同じく読まない (#3837)。
+	rows, err := h.clipRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -101,34 +101,33 @@ func (h *Handler) Clips(c echo.Context) error {
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
 func (h *Handler) Flashs(c echo.Context) error {
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	if h.flashRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	req.SinceID, req.UntilID = cursorSince, cursorUntil
 	// upstream flashs.ts:54 は viewer に関係なく公開 flash のみ返す
 	// (visibility='public')。owner の非公開 flash は i/* 系で取得する設計 (#1784)。
-	rows, err := h.flashRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, req.Offset)
+	// offset は本家の paramDef に無いので、本家と同じく読まない (#3837)。
+	rows, err := h.flashRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -170,32 +169,31 @@ func (h *Handler) Flashs(c echo.Context) error {
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
 func (h *Handler) GalleryPosts(c echo.Context) error {
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	if h.galleryRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	req.SinceID, req.UntilID = cursorSince, cursorUntil
-	rows, err := h.galleryRepo.ListByUser(req.UserID, req.SinceID, req.UntilID, limit, req.Offset)
+	// offset は本家の paramDef に無いので、本家と同じく読まない (#3837)。
+	rows, err := h.galleryRepo.ListByUser(req.UserID, req.SinceID, req.UntilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -279,34 +277,33 @@ func (h *Handler) resolveGalleryFiles(fileIDs []string) []any {
 // を起こしていた。
 func (h *Handler) Pages(c echo.Context) error {
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	if h.pageRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	req.SinceID, req.UntilID = cursorSince, cursorUntil
 	// upstream pages.ts:54 は viewer に関係なく公開 page のみ返す
 	// (visibility='public')。owner の非公開 page は i/pages 等で取得する設計 (#1784)。
-	rows, err := h.pageRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, req.Offset)
+	// offset は本家の paramDef に無いので、本家と同じく読まない (#3837)。
+	rows, err := h.pageRepo.ListPublicByUser(req.UserID, req.SinceID, req.UntilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

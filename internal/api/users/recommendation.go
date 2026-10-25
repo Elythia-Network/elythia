@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
@@ -21,17 +22,16 @@ import (
 // のみに絞る (#1486)。匿名 viewer は public/home のみ集計する。
 func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 	var req struct {
-		UserID string `json:"userId"`
-		Limit  *int   `json:"limit"`
+		UserID string     `json:"userId"`
+		Limit  *jsnum.Int `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	if _, err := h.userService.ShowByID(req.UserID); err != nil {
 		return c.JSON(http.StatusNotFound, apierr.Error("NO_SUCH_USER", "No such user.", "e6965129-7b2a-40a4-bae2-cd84cd434822"))
 	}
@@ -95,19 +95,19 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 // JSON で受け取るための共通形。oneOf は Bind では表現できないため、
 // すべて optional にして後段で検証する。
 type birthdayRange struct {
-	Month *int `json:"month,omitempty"`
-	Day   *int `json:"day,omitempty"`
+	Month *jsnum.Int `json:"month,omitempty"`
+	Day   *jsnum.Int `json:"day,omitempty"`
 	Begin *struct {
-		Month int `json:"month"`
-		Day   int `json:"day"`
+		Month jsnum.Int `json:"month"`
+		Day   jsnum.Int `json:"day"`
 	} `json:"begin,omitempty"`
 	End *struct {
-		Month int `json:"month"`
-		Day   int `json:"day"`
+		Month jsnum.Int `json:"month"`
+		Day   jsnum.Int `json:"day"`
 	} `json:"end,omitempty"`
 }
 
-func isValidMMDD(m, d int) bool {
+func isValidMMDD(m, d jsnum.Int) bool {
 	return m >= 1 && m <= 12 && d >= 1 && d <= 31
 }
 
@@ -119,18 +119,17 @@ func isValidMMDD(m, d int) bool {
 func (h *Handler) GetFollowingUsersByBirthday(c echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
-		Limit    *int           `json:"limit"`
-		Offset   int            `json:"offset"`
+		Limit    *jsnum.Int     `json:"limit"`
+		Offset   jsnum.Int      `json:"offset"`
 		Birthday *birthdayRange `json:"birthday"`
 	}
 	if err := c.Bind(&req); err != nil || req.Birthday == nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
 	var begin, end int
 	switch {
 	case req.Birthday.Begin != nil && req.Birthday.End != nil:
@@ -138,13 +137,13 @@ func (h *Handler) GetFollowingUsersByBirthday(c echo.Context) error {
 			!isValidMMDD(req.Birthday.End.Month, req.Birthday.End.Day) {
 			return apierr.JSONInvalidParam(c)
 		}
-		begin = req.Birthday.Begin.Month*100 + req.Birthday.Begin.Day
-		end = req.Birthday.End.Month*100 + req.Birthday.End.Day
+		begin = int(req.Birthday.Begin.Month*100 + req.Birthday.Begin.Day)
+		end = int(req.Birthday.End.Month*100 + req.Birthday.End.Day)
 	case req.Birthday.Month != nil && req.Birthday.Day != nil:
 		if !isValidMMDD(*req.Birthday.Month, *req.Birthday.Day) {
 			return apierr.JSONInvalidParam(c)
 		}
-		begin = *req.Birthday.Month*100 + *req.Birthday.Day
+		begin = int(*req.Birthday.Month*100 + *req.Birthday.Day)
 		end = begin
 	default:
 		return apierr.JSONInvalidParam(c)
@@ -152,7 +151,7 @@ func (h *Handler) GetFollowingUsersByBirthday(c echo.Context) error {
 	if h.followingRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	rows, err := h.followingRepo.ListFollowingByBirthday(viewer.ID, begin, end, limit, req.Offset)
+	rows, err := h.followingRepo.ListFollowingByBirthday(viewer.ID, begin, end, limit, int(req.Offset))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -222,18 +221,17 @@ func nextBirthdayDate(bday string, now time.Time) string {
 func (h *Handler) UserRecommendation(c echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
-		Limit  *int `json:"limit"`
-		Offset int  `json:"offset"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset jsnum.Int  `json:"offset"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	req.Limit = &limit
-	users, err := h.userService.ListRecommendations(viewer.ID, time.Now().AddDate(0, 0, -7), limit, req.Offset)
+	users, err := h.userService.ListRecommendations(viewer.ID, time.Now().AddDate(0, 0, -7), limit, int(req.Offset))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
