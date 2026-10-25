@@ -45,10 +45,7 @@ func TestInboxProcessor_SoftwareSuspendedKeyIDSpellings(t *testing.T) {
 			verifier := &countingVerifier{stubVerifier: &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}}
 
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(verifier)
-			p.SetHostBlockChecker(&stubBlocker{})
-			p.SetSoftwareSuspensionChecker(federation.NewInboxSuspendedChecker(meta, instances))
+			p := processors.NewInboxProcessor(stub, verifier, &stubBlocker{}, federation.NewInboxSuspendedChecker(meta, instances), nil, nil)
 
 			payload := signedInboxPayload(t, key, []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`))
 			require.NoError(t, p.Handle(context.Background(), driver.RawTask{

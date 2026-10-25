@@ -161,13 +161,26 @@ type SignatureCapabilityRecorder interface {
 }
 
 type InboxProcessor struct {
-	processor  FederationProcessor
+	processor FederationProcessor
+	// verifier は受信の HTTP 署名を worker で検証し直す。**無くても payload は落ちない。**
+	// Handle の `len(payload.Headers) > 0 && p.verifier != nil` が偽になり、署名検証・
+	// 連合ブロック・actor 一致 (authorizeActor)・replay 判定を**まとめて飛ばしたまま
+	// dispatch へ進む** (#2682)。連合ブロック・replay・LD-Signature はそれぞれ別の依存も
+	// 持つので、どれか 1 つだけを外しても個別に無効化される。LD-Signature の検証器
+	// (SetLDSignatureVerifier) は setter のまま残っていて、外すと大半は fail-closed
+	// (signer != actor で error) だが、JSON-LD の term 再定義検査
+	// (CheckForbiddenDirectivesIfPresent) と Headers 無しの経路の検証が黙って飛ぶ
+	// (#2682 review L-E)。
 	verifier   SignatureVerifier
 	ldVerifier LDSignatureVerifier
 	// relayChecker は LD-Signature 検証で解決する著者に「リレー由来」の印を
 	// 付けるかどうかの判定に使う (#2340)。
-	relayChecker    RelayActorChecker
-	hostBlocker     HostBlockChecker
+	relayChecker RelayActorChecker
+	// hostBlocker は署名検証の後で、連合をブロックした host / 許可外の host からの
+	// activity を弾く。無いと isBlocked が常に false になる (#2683)。
+	hostBlocker HostBlockChecker
+	// softwareBlocker は meta.inboxSuspendedSoftware の判定。設定は判定のたびに読む
+	// ので、設定が空でも常に渡す (#3362)。
 	softwareBlocker SoftwareSuspensionChecker
 	instanceTracker InstanceTracker
 	// metadataRefresher は受信のたびに相手の nodeinfo を 24 時間より古ければ
@@ -178,8 +191,16 @@ type InboxProcessor struct {
 	// telemetry は受信結果をホストごとに記録する (#2471)。未配線なら記録
 	// しないだけで、inbox 処理そのものには影響しない。
 	telemetry DeliveryTelemetry
-	// replayGuard は処理済み activity を覚えて再投函を弾く。未配線なら
-	// 保護しないだけ (従来どおり冪等性に委ねる)。
+	// replayGuard は処理済み activity を覚えて再投函を弾く。未配線だと isReplay が
+	// 常に false を返し (fail-open)、**一度処理した activity を Date skew の窓の内側で
+	// 何度でも再投函できる**。各 activity handler は冪等な前提で書かれているが、
+	// 冪等性は handler ごとの性質であって保証ではない。signin / i の TOTP guard と
+	// 同じ一回性の tier なので、構築子の必須の引数にした (#2682 review M-4、#3829)。
+	//
+	// **署名検証を通った経路にしか効かせない。** activity.id は body の値なので、
+	// 署名で本文が縛られていて、かつ authorizeActor が id の host と actor の host の
+	// 一致を確かめた後でなければ信用できない。信用できない id を覚えると、他人の
+	// activity id を先に登録して**本物を落とす**ことができてしまう。
 	replayGuard InboxReplayGuard
 	// keyCache は受信 HTTP Signature verify の公開鍵パースをメモ化する (#1426)。
 	// InboxProcessor は worker 間共有の単一インスタンス (router.go:616) なので、
@@ -189,10 +210,26 @@ type InboxProcessor struct {
 }
 
 // NewInboxProcessor constructs an InboxProcessor wrapping the supplied
-// federation.Processor. Set* メソッドで verify / block / track / chart の
-// 各 dep を別途配線する。未配線の dep は no-op として扱われる。
-func NewInboxProcessor(p FederationProcessor) *InboxProcessor {
-	return &InboxProcessor{processor: p, keyCache: activitypub.NewPublicKeyCache(0)}
+// federation.Processor.
+//
+// verifier re-verifies the inbound HTTP signature in the worker. hostBlocker
+// rejects activities from federation-blocked hosts after signature
+// verification. softwareBlocker is the checker for meta.inboxSuspendedSoftware
+// (#3362). metadataRefresher refetches the sender's nodeinfo in the background
+// (#3564). replayGuard drops re-posted activities. The remaining dependencies
+// (LD-Signature verifier, relay checker, instance tracker, chart hook,
+// telemetry, capability recorder) are wired with setters; an unwired one is a
+// no-op.
+func NewInboxProcessor(p FederationProcessor, verifier SignatureVerifier, hostBlocker HostBlockChecker, softwareBlocker SoftwareSuspensionChecker, metadataRefresher InstanceMetadataRefresher, replayGuard InboxReplayGuard) *InboxProcessor {
+	return &InboxProcessor{
+		processor:         p,
+		verifier:          verifier,
+		hostBlocker:       hostBlocker,
+		softwareBlocker:   softwareBlocker,
+		metadataRefresher: metadataRefresher,
+		replayGuard:       replayGuard,
+		keyCache:          activitypub.NewPublicKeyCache(0),
+	}
 }
 
 // SetLDSignatureVerifier wires an optional LD-Signature verifier that runs
@@ -203,53 +240,11 @@ func (p *InboxProcessor) SetLDSignatureVerifier(v LDSignatureVerifier) {
 	p.ldVerifier = v
 }
 
-// SetInboxReplayGuard wires the guard that drops re-posted activities.
-//
-// **署名検証を通った経路にしか効かせない。** activity.id は body の値なので、
-// 署名で本文が縛られていて、かつ authorizeActor が id の host と actor の host の
-// 一致を確かめた後でなければ信用できない。信用できない id を覚えると、他人の
-// activity id を先に登録して**本物を落とす**ことができてしまう。
-func (p *InboxProcessor) SetInboxReplayGuard(g InboxReplayGuard) {
-	p.replayGuard = g
-}
-
-// SetSignatureVerifier wires a verifier used to re-verify the inbound
-// HTTP signature in the worker.
-//
-// **未配線でも payload は落ちない。** Handle の
-// `if len(payload.Headers) > 0 && p.verifier != nil` が偽になり、
-// 署名検証・連合ブロック・actor 一致 (authorizeActor)・replay 判定を
-// **まとめて飛ばしたまま dispatch へ進む**。以前ここには "payloads carrying
-// Headers are dropped" と書いてあったが誤りで、fail-closed に読める分だけ
-// 危険だった (#2682)。起動時の配線検査は HasSignatureVerifier を見る。
-func (p *InboxProcessor) SetSignatureVerifier(v SignatureVerifier) {
-	p.verifier = v
-}
-
-// SetHostBlockChecker wires a checker used to reject activities from
-// federation-blocked hosts after signature verification.
-func (p *InboxProcessor) SetHostBlockChecker(c HostBlockChecker) {
-	p.hostBlocker = c
-}
-
-// SetSoftwareSuspensionChecker wires the checker for meta.inboxSuspendedSoftware.
-func (p *InboxProcessor) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
-	p.softwareBlocker = c
-}
-
 // SetInstanceTracker wires the InstanceTracker used to update
 // latestRequestReceivedAt for a verified actor's host.
 func (p *InboxProcessor) SetInstanceTracker(t InstanceTracker) {
 	p.instanceTracker = t
 }
-
-// SetMetadataRefresher attaches the background nodeinfo refresher (#3564).
-func (p *InboxProcessor) SetMetadataRefresher(r InstanceMetadataRefresher) {
-	p.metadataRefresher = r
-}
-
-// HasMetadataRefresher reports whether the nodeinfo refresher is wired (#3564).
-func (p *InboxProcessor) HasMetadataRefresher() bool { return p.metadataRefresher != nil }
 
 // SetChartHook wires the InboxChartHook used to record federation /
 // inbox / request charts for a verified actor's host.
@@ -909,46 +904,6 @@ func (p *InboxProcessor) resolveLDCreator(uri string, signer *model.User) (*mode
 	}
 	return p.verifier.ResolveActor(uri)
 }
-
-// HasSignatureVerifier reports whether the inbound signature verifier is wired.
-//
-// 未配線だと Handle の `len(payload.Headers) > 0 && p.verifier != nil` が偽になり、
-// **署名検証・連合ブロック・actor 一致 (authorizeActor)・replay 判定が
-// まとめて飛ぶ**。本番では必ず配線されるので、起動時にここを検査する (#2682)。
-//
-// **この検査が見るのは「4 つがまとめて飛ぶ」場合だけ。** 連合ブロック・replay・
-// LD-Signature は `SetHostBlockChecker` / `SetInboxReplayGuard` /
-// `SetLDSignatureVerifier` という独立の setter も持っており、そちらだけを
-// 消すと本検査は通ったまま個別に無効化できる。replay 側は
-// [InboxProcessor.HasInboxReplayGuard] で個別に検査する。連合ブロック側は
-// moderation の tier なので #2683。LD-Signature は大半が fail-closed
-// (signer != actor で error) だが、JSON-LD の term 再定義検査
-// (CheckForbiddenDirectivesIfPresent) と Headers 無し経路の検証が黙って
-// 飛ぶ (#2682 review L-E)。
-func (p *InboxProcessor) HasSignatureVerifier() bool { return p.verifier != nil }
-
-// HasInboxReplayGuard reports whether the inbound activity replay guard is
-// wired.
-//
-// 未配線だと isReplay が常に false を返す (fail-open)。**一度処理した
-// activity を何度でも再投函できる**。各 activity handler は冪等な前提で
-// 書かれているので単純な二重適用にはならないが、冪等性は handler ごとの
-// 性質であって保証ではなく、Date skew の窓の内側で好きなだけ再送できる
-// 状態は一回性の tier そのもの。signin / i の TOTP guard を検査しながら
-// inbox の replay guard だけ外すのは筋が通らないので載せる
-// (#2682 review M-4)。
-func (p *InboxProcessor) HasInboxReplayGuard() bool { return p.replayGuard != nil }
-
-// HasSoftwareSuspensionChecker reports whether the inboxSuspendedSoftware
-// checker was wired. 設定は判定のたびに読むので常に配線する。起動時検査に使う
-// (#3362)。
-func (p *InboxProcessor) HasSoftwareSuspensionChecker() bool { return p.softwareBlocker != nil }
-
-// HasHostBlockChecker reports whether the host block checker was wired.
-//
-// 未配線だと `isBlocked` が常に false になり、ブロック済み host / 許可外 host
-// からの activity を受け入れる。起動時検査に使う (#2683)。
-func (p *InboxProcessor) HasHostBlockChecker() bool { return p.hostBlocker != nil }
 
 // signerURIOf returns the signer's actor URI, or "" when unresolved.
 //

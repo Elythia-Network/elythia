@@ -927,7 +927,7 @@ setupRoutes()
 |---|---|
 | outbound の HTTP client を使う | `webPushProcessor` (`webPushSender` の `s.outboundClient(...)`)、`webhookProcessor` |
 | `setupRoutes()` で作る部品に依存する | `exportProcessor` (`exporter`)、`emojiImportProcessor` (`emojiImporter`)、`resendQuoteRequestsProcessor` (`quoteOutbox`)、`deliverProcessor` (`apClient`)、`inboxProcessor` (`federationProcessor`)、`flushProcessor` (`reactionCountWriter`)、`chartProcessor` (chart の engine `chartCharts`)、`instanceRefreshProc` (`metadataFetcher`)、`checkModeratorsActivityProcessor` (`modActivitySvc`。stream の publisher に依存する) |
-| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` (#3829 から `NewRedisScheduledNoteLock` と `NewRepoSigningKeySource` は構築子の引数の中) |
+| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` (#3829 から 3 つとも構築子の引数の中) |
 | `buildQueue()` に無い値 (Web Push の購読キャッシュ・Redis の lock) を受ける (#3829 で戻した) | `deleteAccountProcessor` (`webPushCache`)、`postScheduledNoteProcessor` (`NewRedisScheduledNoteLock`) |
 
 | | #3690 の前 (`53475bb41`) | 後 |
@@ -1611,18 +1611,46 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   (`statsEnabled`を含む)を足した。許可リストに足したのは`deliverProcessor.telemetry`と
   `deliverProcessor.breaker`の2つ。`setupRoutes()`はqueueロール(`s.role.RunsQueue()`)でだけ
   配線し、テストの組み立ては`MK_ONLY_SERVER=1`でqueueロールを持たない
+- **4段目は`inbox`(1構築子・5行)。** `NewInboxProcessor`は`verifier`・`hostBlocker`・
+  `softwareBlocker`・`metadataRefresher`・`replayGuard`を受ける
+  (`inboxProcessor := processors.NewInboxProcessor(federationProcessor, federationResolver,
+  instanceService, inboxSoftwareChecker, metadataRefresher,
+  processors.NewRedisInboxReplayGuard(s.redis.Default))`)。replay guardは元のsetterと同じ式で、
+  構築子の引数の中で作る。guardの構築子はRedisに触らない。`s.redis.Default`(`*redis.Client`)がnilのときも、
+  `redis.UniversalClient`で受けた値はnilでないので、中のclientがnilのguardを返す。interfaceの
+  引数としてはnilでない。これは元の`SetInboxReplayGuard`と同じで、以前の
+  `HasInboxReplayGuard`も見分けていなかった。`SetChartHook`・`SetRelayActorChecker`・
+  `SetInstanceTracker`・`SetSignatureCapabilityRecorder`・`SetLDSignatureVerifier`と、queueロールで
+  だけ呼ぶ`SetDeliveryTelemetry`は表に無いので、setterのまま残した。`api/inbox`のhandlerと
+  `core/federation`のresolverの`HasHostBlockChecker`・`HasSoftwareSuspensionChecker`は段(7)で扱うので
+  残した
+- **依存を入れる時点は、元のsetterの位置から構築子の位置へ前へ移っただけ。** 構築子から最後に
+  置き換えたsetter(`SetInboxReplayGuard`)までの間は、同じprocessorの残したsetterだけ。
+  processorを呼ぶのはqueueのworkerで、workerは組み立ての後に始まる
+- **外部パッケージのテストは構築子で渡す。** `NewInboxProcessor`を呼ぶテスト(70か所。`_test.go`に
+  `grep -c 'NewInboxProcessor('`を当てた。`inbox_bench_test.go`を含む)は、置き換えたsetterを直後で
+  呼んでいたものは引数へ移し、それ以外はnilを渡す。`wiring_predicate_test.go`は、`Has…`のテストが
+  無くなったので消した(使っていた`stubKeySource`は`deliver_keysource_test.go`にある)
+- **wiring-checkの照合も足した。** `TestQueueProcessorSoftwareCheckersAreWired`に、`NewInboxProcessor`の
+  呼び出しの照合と、`internal/server`の中で`inboxSoftwareChecker`へ代入する文の右辺が、どれも
+  `NewInboxSuspendedChecker(...)`(`buildFederation()`)か`fedSvcs.inboxSoftwareChecker`(別名)である
+  ことの検査を足した(3段目の配送の照合と合わせて、2つの判定の取り違えを落とす)。別名は`router.go`と
+  `wiring_handlers.go`にあり、ファイルを名指ししないよう(#3672)パッケージ全体の代入を見る。どちらの
+  形も1つ以上あることを下限にした
+- **`routeParts`に`inboxProcessor`を足した。** `requiredDepChecks`に置き換えた5つの欄を足した。
+  許可リストに足したのは`inboxProcessor.telemetry`の1つで、理由は`deliverProcessor.telemetry`と同じ
 
-| | #3829の前(`7ec218bbfd`) | 1段目の後 | 2段目の後 | 3段目の後 |
-|---|---|---|---|---|
-| `criticalWiringCount` | 51 | 51 | 48 | 44 |
-| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 | 16 | 16 |
-| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 | 14 | 14 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 | 625 | 621 |
-| その受け手 | 107 | 107 | 107 | 107 |
+| | #3829の前(`7ec218bbfd`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 |
+|---|---|---|---|---|---|
+| `criticalWiringCount` | 51 | 51 | 48 | 44 | 39 |
+| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 | 16 | 16 | 16 |
+| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 | 14 | 14 | 14 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 | 625 | 621 | 616 |
+| その受け手 | 107 | 107 | 107 | 107 | 107 |
 
 数え方: `criticalWiringCount`と`<変数>.Set`の行は上の表と同じ。`processors.New…`の呼び出しは、
 上の「queue の processor (#3690)」の表と同じく、本文に`grep -oE '\bprocessors\.New[A-Z]'`を当てた。
-2段目と3段目で受け手が減らないのは、置き換えたprocessorのどれにも表に無いsetterが残っているため。
+2段目から4段目で受け手が減らないのは、置き換えたprocessorのどれにも表に無いsetterが残っているため。
 `processors.New…`の数には、構築子の引数の中で作る`NewRepoSigningKeySource`なども入る。
 
 #### /api のルートの登録 (#3697)

@@ -112,7 +112,7 @@ func TestDeliverProcessor_SetSignatureCapabilityRecorder(t *testing.T) {
 
 func TestInboxProcessor_SetSignatureCapabilityRecorder(t *testing.T) {
 	recorder := newInternalCapabilityRecorder()
-	p := NewInboxProcessor(nil)
+	p := NewInboxProcessor(nil, nil, nil, nil, nil, nil)
 	p.SetSignatureCapabilityRecorder(recorder)
 	host := "remote.example"
 	p.recordSignatureCapability(&model.User{Host: &host}, activitypub.KeyTypeRSA, nil)

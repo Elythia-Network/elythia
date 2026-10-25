@@ -18,6 +18,10 @@ type (
 	ctorKeySource    struct{ SigningKeySource }
 	ctorSuspended    struct{ SuspendedChecker }
 	ctorRefresher    struct{ InstanceMetadataRefresher }
+	ctorVerifier     struct{ SignatureVerifier }
+	ctorHostBlocker  struct{ HostBlockChecker }
+	ctorSoftware     struct{ SoftwareSuspensionChecker }
+	ctorReplayGuard  struct{ InboxReplayGuard }
 )
 
 // 下の構築子は、受け取った依存を processor に持たせる (#3829)。依存を構築子の必須の
@@ -55,4 +59,19 @@ func TestNewDeliverProcessorKeepsDependencies(t *testing.T) {
 		assert.False(t, p.statsEnabled())
 		assert.True(t, called, "statsEnabled が渡した関数でない")
 	}
+}
+
+func TestNewInboxProcessorKeepsDependencies(t *testing.T) {
+	verifier := &ctorVerifier{}
+	hosts := &ctorHostBlocker{}
+	software := &ctorSoftware{}
+	refresher := &ctorRefresher{}
+	guard := &ctorReplayGuard{}
+	p := NewInboxProcessor(nil, verifier, hosts, software, refresher, guard)
+	assert.Same(t, verifier, p.verifier)
+	assert.Same(t, hosts, p.hostBlocker)
+	assert.Same(t, software, p.softwareBlocker)
+	assert.Same(t, refresher, p.metadataRefresher)
+	assert.Same(t, guard, p.replayGuard)
+	assert.NotNil(t, p.keyCache, "公開鍵のキャッシュを作っていない")
 }

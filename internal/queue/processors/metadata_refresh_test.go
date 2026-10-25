@@ -56,14 +56,13 @@ func TestInboxProcessor_RefreshesMetadata(t *testing.T) {
 			require.NoError(t, err)
 			stub := &stubFedProcessor{}
 			refresher := &stubMetadataRefresher{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub})
-			p.SetHostBlockChecker(&stubBlocker{
-				blocked: func(string) bool { return tc.blocked },
-				allowed: func(string) bool { return tc.allowed },
-			})
-			p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: tc.suspended})
-			p.SetMetadataRefresher(refresher)
+			p := processors.NewInboxProcessor(stub, &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub},
+				&stubBlocker{
+					blocked: func(string) bool { return tc.blocked },
+					allowed: func(string) bool { return tc.allowed },
+				},
+				stubSoftwareBlocker{suspended: tc.suspended},
+				refresher, nil)
 
 			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 				TypeName: queue.TaskTypeInbox,
@@ -87,11 +86,7 @@ func TestInboxProcessor_RefreshesMetadataWhenRefusedAfterVerification(t *testing
 
 	stub := &stubFedProcessor{}
 	refresher := &stubMetadataRefresher{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub})
-	p.SetHostBlockChecker(&stubBlocker{})
-	p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{host: true}})
-	p.SetMetadataRefresher(refresher)
+	p := processors.NewInboxProcessor(stub, &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}, &stubBlocker{}, stubSoftwareBlocker{suspended: map[string]bool{host: true}}, refresher, nil)
 
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
@@ -113,10 +108,7 @@ func TestInboxProcessor_NoMetadataRefreshOnSignatureFailure(t *testing.T) {
 	aliceURI := "https://remote.example/users/alice"
 
 	refresher := &stubMetadataRefresher{}
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: otherPub})
-	p.SetHostBlockChecker(&stubBlocker{})
-	p.SetMetadataRefresher(refresher)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: otherPub}, &stubBlocker{}, nil, refresher, nil)
 
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,

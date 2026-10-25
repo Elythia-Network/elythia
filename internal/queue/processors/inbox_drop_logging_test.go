@@ -75,8 +75,7 @@ func forwardedDropFixture(t *testing.T, ldErr error) (*processors.InboxProcessor
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, err: ldErr})
 
 	body := []byte(`{"id":"https://origin.example/notes/1/activity","type":"Create","actor":"https://origin.example/users/mal","signature":{"type":"RsaSignature2017","creator":"https://origin.example/users/mal#main-key"},"object":{"id":"https://origin.example/notes/1","type":"Note"}}`)
@@ -136,8 +135,7 @@ func TestInboxProcessor_SignatureFailureLogHasHost(t *testing.T) {
 			"https://relay.example/actor": {ID: "relay", Host: &relayHost, URI: uptr("https://relay.example/actor")},
 		},
 	}
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, verifier, nil, nil, nil, nil)
 
 	body := []byte(`{"id":"https://relay.example/a/1","type":"Follow","actor":"https://relay.example/actor"}`)
 	payload := signedInboxPayload(t, key, body)

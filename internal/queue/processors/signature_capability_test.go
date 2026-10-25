@@ -51,8 +51,7 @@ func TestInboxProcessor_RecordsSignatureCapabilityAfterVerify(t *testing.T) {
 	}
 	recorder := newCapabilityRecorderStub()
 
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, verifier, nil, nil, nil, nil)
 	p.SetSignatureCapabilityRecorder(recorder)
 
 	body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`)
@@ -84,8 +83,7 @@ func TestInboxProcessor_DoesNotRecordCapabilityOnVerifyFailure(t *testing.T) {
 	}
 	recorder := newCapabilityRecorderStub()
 
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, verifier, nil, nil, nil, nil)
 	p.SetSignatureCapabilityRecorder(recorder)
 
 	body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`)
@@ -115,9 +113,7 @@ func TestInboxProcessor_DoesNotRecordCapabilityForBlockedHost(t *testing.T) {
 	}
 	recorder := newCapabilityRecorderStub()
 
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(verifier)
-	p.SetHostBlockChecker(&stubBlocker{blocked: func(h string) bool { return h == host }})
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, verifier, &stubBlocker{blocked: func(h string) bool { return h == host }}, nil, nil, nil)
 	p.SetSignatureCapabilityRecorder(recorder)
 
 	body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`)
@@ -145,8 +141,7 @@ func TestInboxProcessor_RecordsLDSignature(t *testing.T) {
 	}
 	recorder := newCapabilityRecorderStub()
 
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, verifier, nil, nil, nil, nil)
 	p.SetSignatureCapabilityRecorder(recorder)
 
 	body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow",` +

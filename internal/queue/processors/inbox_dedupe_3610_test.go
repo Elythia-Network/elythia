@@ -51,9 +51,7 @@ func TestInboxProcessor_DirectActivityIsDispatchedNormalized(t *testing.T) {
 	verifier, payload := signedReplayFixture(t, body)
 	rec := &normalizedRecorder{}
 	guard := newMemReplayGuard()
-	p := processors.NewInboxProcessor(rec)
-	p.SetSignatureVerifier(verifier)
-	p.SetInboxReplayGuard(guard)
+	p := processors.NewInboxProcessor(rec, verifier, nil, nil, nil, guard)
 
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 	require.NoError(t, p.Handle(context.Background(), task))
@@ -92,9 +90,7 @@ func TestInboxProcessor_ForwardedActivityIsDispatchedFromCompactedBody(t *testin
 	compacted := []byte(`{"id":"https://origin.example/creates/1#signed","type":"Create","actor":"https://origin.example/users/alice"}`)
 	rec := &normalizedRecorder{}
 	guard := newMemReplayGuard()
-	p := processors.NewInboxProcessor(rec)
-	p.SetSignatureVerifier(verifier)
-	p.SetInboxReplayGuard(guard)
+	p := processors.NewInboxProcessor(rec, verifier, nil, nil, nil, guard)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://origin.example/users/alice#main-key", compactedBody: compacted})
 
 	body := []byte(`{"id":"https://origin.example/creates/1","type":"Create","actor":"https://origin.example/users/alice","_misskey_content":"unsigned","signature":{"type":"RsaSignature2017","creator":"https://origin.example/users/alice#main-key"}}`)
@@ -114,7 +110,7 @@ func TestInboxProcessor_ForwardedActivityIsDispatchedFromCompactedBody(t *testin
 // 署名の無い経路 (Headers 無し) は gate を通らないので、今どおり本文を渡す。
 func TestInboxProcessor_LegacyPayloadDispatchesRawBody(t *testing.T) {
 	rec := &normalizedRecorder{}
-	p := processors.NewInboxProcessor(rec)
+	p := processors.NewInboxProcessor(rec, nil, nil, nil, nil, nil)
 	body := []byte(`{"id":"https://remote.example/follows/8","type":"Follow","actor":"https://remote.example/users/alice"}`)
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,

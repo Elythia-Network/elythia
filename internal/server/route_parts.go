@@ -75,4 +75,5 @@ type routeParts struct {
 	deleteAccountProcessor     *processors.DeleteAccountProcessor
 	postScheduledNoteProcessor *processors.PostScheduledNoteProcessor
 	deliverProcessor           *processors.DeliverProcessor
+	inboxProcessor             *processors.InboxProcessor
 }

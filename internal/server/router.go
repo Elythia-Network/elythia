@@ -1313,28 +1313,28 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// する。これにより handler 同期の RSA-2048 verify (~1-2ms) が消えて
 	// inbound throughput が ~2x に改善する (#565)。順序保証は各 activity
 	// handler の冪等性で吸収する Misskey TS 互換戦略。
-	inboxProcessor := processors.NewInboxProcessor(federationProcessor)
+	// 第 4 引数は受信を拒否するソフトウェア (#3362)。設定は判定のたびに meta から読む。
+	// 第 5 引数で、受信のたびに相手の nodeinfo を取り直す (#3564)。受信を拒否した相手も
+	// 取り直し、拒否の判定を新しい版で行えるようにする。
+	// 第 6 引数は処理済み activity の再投函を弾く guard。署名の Date に窓を入れても、
+	// 窓の内側はまだ投げ直せる。**Default インスタンスを使う** — 2FA の replay guard と
+	// 同じ用途 (短命の使用済みマーカー) で、timelines / reactions のような
+	// 用途別インスタンスに載せる理由が無い。
+	inboxProcessor := processors.NewInboxProcessor(federationProcessor,
+		federationResolver,
+		instanceService,
+		inboxSoftwareChecker,
+		metadataRefresher,
+		processors.NewRedisInboxReplayGuard(s.redis.Default))
 	inboxProcessor.SetChartHook(chartHooks)
 	// LD-Signature 検証で解決する著者に「リレー由来」の印を付ける (#2340)。
 	inboxProcessor.SetRelayActorChecker(relaySvc)
-	inboxProcessor.SetSignatureVerifier(federationResolver)
-	inboxProcessor.SetHostBlockChecker(instanceService)
-	// 受信を拒否するソフトウェア (#3362)。設定は判定のたびに meta から読む。
-	inboxProcessor.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	inboxProcessor.SetInstanceTracker(instanceTouchBuffer)
-	// 受信のたびに相手の nodeinfo を取り直す (#3564)。受信を拒否した相手も
-	// 取り直し、拒否の判定を新しい版で行えるようにする。
-	inboxProcessor.SetMetadataRefresher(metadataRefresher)
 	inboxProcessor.SetSignatureCapabilityRecorder(sigCapBuffer)
 	// LD-Signature verifier (#1164 Phase D)。inbound activity body に signature
 	// field があれば RsaSignature2017 + 2026.5.4 hardening を実行する。signature
 	// 無し / verify pass の activity は素通し、verify fail は drop。
 	inboxProcessor.SetLDSignatureVerifier(corefederation.NewLDSignatureVerifier(publickeyRepo))
-	// 処理済み activity の再投函を弾く。署名の Date に窓を入れても、窓の内側は
-	// まだ投げ直せる。**Default インスタンスを使う** — 2FA の replay guard と
-	// 同じ用途 (短命の使用済みマーカー) で、timelines / reactions のような
-	// 用途別インスタンスに載せる理由が無い。
-	inboxProcessor.SetInboxReplayGuard(processors.NewRedisInboxReplayGuard(s.redis.Default))
 
 	// Remote notes cleaning (issue #46)。processor と、設定を毎回 meta から読む
 	// 関数は buildQueue で作る (#3690)。cursor の setter はここ。
@@ -3996,6 +3996,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		deleteAccountProcessor:     deleteAccountProcessor,
 		postScheduledNoteProcessor: postScheduledNoteProcessor,
 		deliverProcessor:           deliverProcessor,
+		inboxProcessor:             inboxProcessor,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -4014,8 +4015,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
 		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
-		{"inbox.signatureVerifier", inboxProcessor.HasSignatureVerifier(),
-			"HTTP 署名検証・連合ブロック・actor 一致・replay 判定が同時に飛ぶ"},
 		{"instance.hostBoundNodeinfoFetcher", metadataFetcher.HasHostBoundFetcher(),
 			"nodeinfo の取得が redirect の飛び先に縛られなくなり、任意の host が返した JSON を instance 行へ書き戻せる"},
 		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
@@ -4034,15 +4033,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"同期 fallback へ落ち、actor 一致検査・LD-Signature 検証・replay guard を通らない"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
-		{"inbox.replayGuard", inboxProcessor.HasInboxReplayGuard(),
-			"処理済み activity の再投函を検出できない (isReplay が常に false)"},
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"inboxProcessor.hostBlockChecker", inboxProcessor.HasHostBlockChecker(),
-			"ブロック済み host / 許可外 host からの activity を受け入れる"},
 		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),
 			"federation: none 設定でも inbox が受け付ける"},
 		{"deliver.hostBlockChecker", deliverService.HasHostBlockChecker(),
@@ -4058,12 +4053,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.CreateService の driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
-		{"inboxProcessor.softwareBlocker", inboxProcessor.HasSoftwareSuspensionChecker(),
-			"管理画面の受信を拒否するソフトウェアが効かず、その相手の activity を受け付ける (#3362)"},
 		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
 			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
-		{"inboxProcessor.metadataRefresher", inboxProcessor.HasMetadataRefresher(),
-			"受信で相手の nodeinfo を取り直さず、受信を拒否した相手が版を上げても拒否が続く (#3564)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),
 			"blocked-host の note が post-fetch 経路で漏れる"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
