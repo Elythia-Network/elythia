@@ -1282,30 +1282,30 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteHook.SetUserRepo(userRepo)
 	noteDeleteHook.SetNoteRepo(noteRepo)
 	noteDeleteService.SetFederationHook(noteDeleteHook)
-	deliverProcessor := processors.NewDeliverProcessor(apClient)
+	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404。第 2 引数)。
+	// enqueue 時の isBlockedInbox を通り抜ける retry-backoff 中・積み残しジョブも弾く。
+	// **署名鍵は payload に載せず、配送時に引く (第 3 引数)。** queue の job は
+	// `admin/queue/jobs` が moderator へ返すので、載せると鍵がそこから読める。
+	// deliverSuspendedSoftware: 対象インスタンスへの配送をスキップする (第 4 引数)。設定は
+	// 判定のたびに meta から読むので、常に配線する (#3558。以前は起動時に設定が
+	// 空なら配線せず、後から設定しても再起動するまで効かなかった)。
+	// 配送に成功した相手の nodeinfo を取り直す (#3564。第 5・第 6 引数)。本家と同じく
+	// enableStatsForFederatedInstances が有効なときだけ。
+	deliverProcessor := processors.NewDeliverProcessor(apClient,
+		instanceService,
+		processors.NewRepoSigningKeySource(keypairRepo, keypairExtraRepo),
+		corefederation.NewSuspendedChecker(metaRepo, instanceRepo),
+		metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))
 	deliverProcessor.SetChartHook(chartHooks)
 	// 配信結果に応じて instance.isNotResponding を更新する
 	deliverProcessor.SetResponseHook(instanceService)
-	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404)。
-	// enqueue 時の isBlockedInbox を通り抜ける retry-backoff 中・積み残しジョブも弾く。
-	deliverProcessor.SetDeliveryGate(instanceService)
 	// FEP-521a Multikey 対応で host 単位の Ed25519 degrade flag を Redis に
 	// 持つ (#1067 / #1071)。Ed25519 sign 失敗時 5min 同 host を RSA only に
 	// 縮退する safety net。
 	deliverProcessor.SetRedis(s.redis.Default)
-	// **署名鍵は payload に載せず、配送時に引く。** queue の job は
-	// `admin/queue/jobs` が moderator へ返すので、載せると鍵がそこから読める。
-	deliverProcessor.SetSigningKeySource(processors.NewRepoSigningKeySource(keypairRepo, keypairExtraRepo))
 	// Ed25519 署名の配送が 2xx を返した (= 同期的には拒否されなかった) ことを
 	// 記録する (#2393)。
 	deliverProcessor.SetSignatureCapabilityRecorder(sigCapBuffer)
-	// deliverSuspendedSoftware: 対象インスタンスへの配送をスキップする。設定は
-	// 判定のたびに meta から読むので、常に配線する (#3558。以前は起動時に設定が
-	// 空なら配線せず、後から設定しても再起動するまで効かなかった)。
-	deliverProcessor.SetSuspendedChecker(corefederation.NewSuspendedChecker(metaRepo, instanceRepo))
-	// 配送に成功した相手の nodeinfo を取り直す (#3564)。本家と同じく
-	// enableStatsForFederatedInstances が有効なときだけ。
-	deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))
 
 	// Inbox (#534 / #565): HTTP handler は body+signature 関連 header を
 	// payload に詰めて 202 即返し。worker 側 (本 processor) で signature
@@ -3995,6 +3995,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		deleteAccountProcessor:     deleteAccountProcessor,
 		postScheduledNoteProcessor: postScheduledNoteProcessor,
+		deliverProcessor:           deliverProcessor,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -4055,22 +4056,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 残していた同クラスの依存。
 		{"notes.driveFileRepo", notesHandler.HasDriveFileRepo(),
 			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.CreateService の driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
-		{"deliverProcessor.deliveryGate", deliverProcessor.HasDeliveryGate(),
-			"block / federation mode は enqueue 時チェックの第 2 の関門が外れ (積み残しと retry 中が漏れる)、suspend は enqueue 側に検査が無いので新規ジョブごと配送し続ける"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
 		{"inboxProcessor.softwareBlocker", inboxProcessor.HasSoftwareSuspensionChecker(),
 			"管理画面の受信を拒否するソフトウェアが効かず、その相手の activity を受け付ける (#3362)"},
 		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
 			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
-		{"deliverProcessor.suspendedChecker", deliverProcessor.HasSuspendedChecker(),
-			"管理画面の配送停止中のソフトウェアが配送に効かない (画面には配送停止と出る、#3558)"},
 		{"inboxProcessor.metadataRefresher", inboxProcessor.HasMetadataRefresher(),
 			"受信で相手の nodeinfo を取り直さず、受信を拒否した相手が版を上げても拒否が続く (#3564)"},
-		{"deliverProcessor.metadataRefresher", deliverProcessor.HasMetadataRefresher(),
-			"配送で相手の nodeinfo を取り直さず、配信停止の判定が古い版のまま続く (#3564)"},
-		{"deliverProcessor.signingKeySource", deliverProcessor.HasSigningKeySource(),
-			"署名鍵は payload に載せず配送時に引くので、未配線だと全ての AP 配送が POST されないまま失敗する (連合が止まる)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),
 			"blocked-host の note が post-fetch 経路で漏れる"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),

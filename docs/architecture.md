@@ -927,7 +927,7 @@ setupRoutes()
 |---|---|
 | outbound の HTTP client を使う | `webPushProcessor` (`webPushSender` の `s.outboundClient(...)`)、`webhookProcessor` |
 | `setupRoutes()` で作る部品に依存する | `exportProcessor` (`exporter`)、`emojiImportProcessor` (`emojiImporter`)、`resendQuoteRequestsProcessor` (`quoteOutbox`)、`deliverProcessor` (`apClient`)、`inboxProcessor` (`federationProcessor`)、`flushProcessor` (`reactionCountWriter`)、`chartProcessor` (chart の engine `chartCharts`)、`instanceRefreshProc` (`metadataFetcher`)、`checkModeratorsActivityProcessor` (`modActivitySvc`。stream の publisher に依存する) |
-| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` (#3829 から `NewRedisScheduledNoteLock` は構築子の引数の中) |
+| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` (#3829 から `NewRedisScheduledNoteLock` と `NewRepoSigningKeySource` は構築子の引数の中) |
 | `buildQueue()` に無い値 (Web Push の購読キャッシュ・Redis の lock) を受ける (#3829 で戻した) | `deleteAccountProcessor` (`webPushCache`)、`postScheduledNoteProcessor` (`NewRedisScheduledNoteLock`) |
 
 | | #3690 の前 (`53475bb41`) | 後 |
@@ -1579,19 +1579,51 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `deleteAccountProcessor`と`postScheduledNoteProcessor`を足し、`requiredDepChecks`に置き換えた3つの
   欄を足した。テストの組み立て(test mode・miniredis)では、2つのnilになりうるフィールドはどれも
   nilでなかったので、許可リストには足していない
+- **3段目は`deliver`(1構築子・4行)。** `NewDeliverProcessor`は`deliveryGate`・`keySource`・
+  `suspendedChecker`・`metadataRefresher`と統計の判定`statsEnabled`を受ける
+  (`deliverProcessor := processors.NewDeliverProcessor(apClient, instanceService,
+  processors.NewRepoSigningKeySource(keypairRepo, keypairExtraRepo),
+  corefederation.NewSuspendedChecker(metaRepo, instanceRepo), metadataRefresher,
+  corefollowing.MetaInstanceStatsGate(metaRepo))`)。渡す値はどれも元の`NewDeliverProcessor`の
+  呼び出しより前で作ってあり、引数の中で作る3つ(署名鍵の解決元・配送停止の判定・統計の判定)は
+  構造体かclosureを作るだけで、DBにもRedisにも触らない。`SetChartHook`・`SetResponseHook`・
+  `SetRedis`・`SetSignatureCapabilityRecorder`と、queueロールでだけ呼ぶ`SetDeliveryTelemetry`・
+  `SetDeliveryBreaker`は表に無いので、setterのまま残した
+- **依存を入れる時点が、元のsetterの位置から構築子の位置へ前へ移っただけ。** 構築子から最後に
+  置き換えたsetter(`SetMetadataRefresher`)までの間は、同じprocessorの残したsetterだけで、
+  `Subscribe`・`Connect…`・`Start`・goroutineの起動は無い。processorを呼ぶのはqueueのworkerで、
+  workerは組み立ての後に始まる
+- **外部パッケージのテストは構築子で渡す。** `NewDeliverProcessor`を呼ぶテスト(87か所。
+  `processors`の86と`core/cachebus`の1。`_test.go`に`grep -c 'NewDeliverProcessor('`を当て、
+  `internal/server/wiring_queue_test.go`のコメントの1行を除いた)は、置き換えたsetterを直後で呼んでいたものは引数へ移し、
+  それ以外はnilを渡す。同じパッケージの`deliver_keysource_test.go`なども構築子で渡す。
+  `wiring_predicate_test.go`から`deliver`の`Has…`のテストを消した。構築子が引数を捨てないことは
+  `constructor_test.go`が見る
+- **wiring-checkの照合も直した。** `TestInstanceStatsGateIsWired`の
+  `deliverProcessor.SetMetadataRefresher(metadataRefresher, corefollowing.MetaInstanceStatsGate(metaRepo))`は、
+  構築子の呼び出しを引数まで照合する形に直して残した(判定を反転させた関数も同じ型で渡せる)。
+  配送停止の判定(`NewSuspendedChecker`)と受信の拒否の判定(`NewInboxSuspendedChecker`、
+  `inboxSoftwareChecker`)は同じ型`*corefederation.SuspendedChecker`を返し、取り違えは型でも
+  nilの検査でも捕まらないので、`TestQueueProcessorSoftwareCheckersAreWired`
+  (`internal/entitycompat/software_suspension_wiring_test.go`)を足して、同じ呼び出しを照合する。
+  `make wiring-check`の`-run`にも足した
+- **`routeParts`に`deliverProcessor`を足した。** `requiredDepChecks`に置き換えた5つの欄
+  (`statsEnabled`を含む)を足した。許可リストに足したのは`deliverProcessor.telemetry`と
+  `deliverProcessor.breaker`の2つ。`setupRoutes()`はqueueロール(`s.role.RunsQueue()`)でだけ
+  配線し、テストの組み立ては`MK_ONLY_SERVER=1`でqueueロールを持たない
 
-| | #3829の前(`7ec218bbfd`) | 1段目の後 | 2段目の後 |
-|---|---|---|---|
-| `criticalWiringCount` | 51 | 51 | 48 |
-| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 | 16 |
-| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 | 14 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 | 625 |
-| その受け手 | 107 | 107 | 107 |
+| | #3829の前(`7ec218bbfd`) | 1段目の後 | 2段目の後 | 3段目の後 |
+|---|---|---|---|---|
+| `criticalWiringCount` | 51 | 51 | 48 | 44 |
+| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 | 16 | 16 |
+| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 | 14 | 14 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 | 625 | 621 |
+| その受け手 | 107 | 107 | 107 | 107 |
 
 数え方: `criticalWiringCount`と`<変数>.Set`の行は上の表と同じ。`processors.New…`の呼び出しは、
 上の「queue の processor (#3690)」の表と同じく、本文に`grep -oE '\bprocessors\.New[A-Z]'`を当てた。
-2段目で受け手が減らないのは、`deleteAccountProcessor`と`postScheduledNoteProcessor`に表に無いsetterが
-残っているため。
+2段目と3段目で受け手が減らないのは、置き換えたprocessorのどれにも表に無いsetterが残っているため。
+`processors.New…`の数には、構築子の引数の中で作る`NewRepoSigningKeySource`なども入る。
 
 #### /api のルートの登録 (#3697)
 

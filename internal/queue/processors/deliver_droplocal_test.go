@@ -42,9 +42,8 @@ func newDropProcessor(t *testing.T) (*processors.DeliverProcessor, *countingKeyS
 	for i := range responses {
 		responses[i] = okResponse(http.StatusOK)
 	}
-	p := processors.NewDeliverProcessor(&recordingSigner{responses: responses})
 	src := &countingKeySource{keySourceStub: keySourceStub{rsa: generateTestKey(t)}}
-	p.SetSigningKeySource(src)
+	p := processors.NewDeliverProcessor(&recordingSigner{responses: responses}, nil, src, nil, nil, nil)
 	return p, src
 }
 

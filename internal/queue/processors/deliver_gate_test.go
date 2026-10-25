@@ -25,9 +25,8 @@ func (g *stubDeliveryGate) ShouldSkipDelivery(host string) bool {
 // signer は呼ばれず success 扱いで完了する (#1404)。
 func TestDeliverProcessor_DeliveryGate_SkipsBlockedHost(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
 	gate := &stubDeliveryGate{skip: map[string]bool{"remote.example": true}}
-	p.SetDeliveryGate(gate)
+	p := processors.NewDeliverProcessor(signer, gate, nil, nil, nil, nil)
 
 	err := p.Handle(context.Background(), makeTask(t, makePayload(t)))
 	require.NoError(t, err)
@@ -38,9 +37,8 @@ func TestDeliverProcessor_DeliveryGate_SkipsBlockedHost(t *testing.T) {
 // gate が false を返す host へは従来どおり配送される。
 func TestDeliverProcessor_DeliveryGate_AllowsActiveHost(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
 	gate := &stubDeliveryGate{skip: map[string]bool{}}
-	p.SetDeliveryGate(gate)
+	p := processors.NewDeliverProcessor(signer, gate, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	err := p.Handle(context.Background(), makeTask(t, payload))
@@ -62,14 +60,12 @@ func TestDeliverProcessor_SuspendedSoftware_SkipsDelivery(t *testing.T) {
 	payload := makePayload(t)
 
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
-	p.SetSuspendedChecker(stubSoftwareSuspension{suspended: map[string]bool{"remote.example": true}})
+	p := processors.NewDeliverProcessor(signer, nil, nil, stubSoftwareSuspension{suspended: map[string]bool{"remote.example": true}}, nil, nil)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
 	assert.Empty(t, signer.gotURL, "配送停止中のソフトウェアの相手へは POST しない")
 
 	signer = &stubSigner{resp: okResponse(http.StatusOK)}
-	p = processors.NewDeliverProcessor(signer)
-	p.SetSuspendedChecker(stubSoftwareSuspension{suspended: map[string]bool{}})
+	p = processors.NewDeliverProcessor(signer, nil, nil, stubSoftwareSuspension{suspended: map[string]bool{}}, nil, nil)
 	require.NoError(t, p.Handle(context.Background(), makeTask(t, payload)))
 	assert.Equal(t, payload.Inbox, signer.gotURL)
 }

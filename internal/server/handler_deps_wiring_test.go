@@ -65,6 +65,11 @@ var handlerNilAllowed = map[string]string{
 	// テストだけが httptest のサーバーへ向けるために入れる。newPluginPeerDeps は入れず、
 	// nil のとき peerURL は https の既定の URL を作る (#3827)。
 	"peer.urlFor": "テスト専用の seam。newPluginPeerDeps は入れず、nil のとき https の既定の URL を作る",
+	// 配送の結果の記録 (#2461) と、落ちた相手への配送を止める breaker (#3048)。setupRoutes は
+	// queue ロール (s.role.RunsQueue()) でだけ SetDeliveryTelemetry / SetDeliveryBreaker を呼ぶ。
+	// テストの組み立ては MK_ONLY_SERVER=1 で、queue ロールを持たない (#3829)。
+	"deliverProcessor.telemetry": "queue ロール (s.role.RunsQueue()) でだけ配線する。テストの組み立ては MK_ONLY_SERVER=1",
+	"deliverProcessor.breaker":   "queue ロール (s.role.RunsQueue()) で、buildFederation が breaker を作ったときだけ配線する。テストの組み立ては MK_ONLY_SERVER=1",
 }
 
 // **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829)。**
@@ -280,6 +285,8 @@ var requiredDepChecks = []string{
 	// ここから #3829 (queue の processor)。
 	"deleteAccountProcessor.pageRepo", "deleteAccountProcessor.pushCache",
 	"postScheduledNoteProcessor.lock",
+	"deliverProcessor.deliveryGate", "deliverProcessor.keySource", "deliverProcessor.suspendedChecker",
+	"deliverProcessor.metadataRefresher", "deliverProcessor.statsEnabled",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

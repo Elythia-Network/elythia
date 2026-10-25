@@ -87,8 +87,7 @@ func TestRepoSigningKeySource_NilRepos(t *testing.T) {
 // (本来は既定 12 回・約 32 時間かけて再送する)。
 func TestSendOnce_TransientKeyErrorIsRetryable(t *testing.T) {
 	outage := errors.New("dial tcp: connection refused")
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(&failingKeypairSource{err: outage})
+	p := NewDeliverProcessor(nil, nil, &failingKeypairSource{err: outage}, nil, nil, nil)
 
 	_, _, err := p.sendOnce(queue.DeliverPayload{
 		Inbox:        "https://remote.example/inbox",
@@ -103,8 +102,7 @@ func TestSendOnce_TransientKeyErrorIsRetryable(t *testing.T) {
 
 // 逆に、鍵が無いことは retry しても直らないので ErrSkipRetry でよい。
 func TestSendOnce_MissingKeyIsPermanent(t *testing.T) {
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(&failingKeypairSource{err: ErrSigningKeyMissing})
+	p := NewDeliverProcessor(nil, nil, &failingKeypairSource{err: ErrSigningKeyMissing}, nil, nil, nil)
 
 	_, _, err := p.sendOnce(queue.DeliverPayload{
 		Inbox:        "https://remote.example/inbox",
@@ -116,8 +114,7 @@ func TestSendOnce_MissingKeyIsPermanent(t *testing.T) {
 
 // 壊れた PEM も retry しても直らない。
 func TestSendOnce_UnparsablePEMIsPermanent(t *testing.T) {
-	p := NewDeliverProcessor(nil)
-	p.SetSigningKeySource(&failingKeypairSource{pem: "not-a-pem"})
+	p := NewDeliverProcessor(nil, nil, &failingKeypairSource{pem: "not-a-pem"}, nil, nil, nil)
 
 	_, _, err := p.sendOnce(queue.DeliverPayload{
 		Inbox:        "https://remote.example/inbox",
@@ -129,7 +126,7 @@ func TestSendOnce_UnparsablePEMIsPermanent(t *testing.T) {
 
 // **配線漏れは job を捨てない。** 再起動で直るので retry させる。
 func TestSendOnce_UnwiredSourceIsRetryable(t *testing.T) {
-	p := NewDeliverProcessor(nil)
+	p := NewDeliverProcessor(nil, nil, nil, nil, nil, nil)
 	_, _, err := p.sendOnce(queue.DeliverPayload{
 		Inbox:        "https://remote.example/inbox",
 		KeyID:        "https://example.com/users/u1#main-key",

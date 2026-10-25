@@ -107,14 +107,21 @@ type Ed25519AcceptanceRecorder interface {
 // DeliverProcessor handles ap:deliver tasks by posting the activity body to
 // the recipient inbox with an HTTP signature.
 type DeliverProcessor struct {
-	signer           HTTPSigner
-	responseHook     ResponseHook
-	chartHook        ChartHook
-	telemetry        DeliveryTelemetry
-	breaker          DeliveryBreaker
+	signer       HTTPSigner
+	responseHook ResponseHook
+	chartHook    ChartHook
+	telemetry    DeliveryTelemetry
+	breaker      DeliveryBreaker
+	// suspendedChecker は deliverSuspendedSoftware の判定。設定は判定のたびに読むので、
+	// 設定が空でも常に渡す (#3558)。deliveryGate とは別の関門。enqueue 側にはこの検査が
+	// 無いので、無いと管理画面で配送停止にしたソフトウェアへ新しいジョブごと配送し続ける
+	// (画面には配送停止と出る)。
 	suspendedChecker SuspendedChecker
-	deliveryGate     DeliveryGate
-	capabilities     Ed25519AcceptanceRecorder
+	// deliveryGate は enqueue 時のチェックを通り抜けたジョブ (ブロック前に積まれたもの・
+	// retry-backoff 中のもの) を弾く第 2 の関門 (#1404)。deliver.hostBlockChecker では
+	// 代替できない。
+	deliveryGate DeliveryGate
+	capabilities Ed25519AcceptanceRecorder
 	// metadataRefresher は配送に成功した相手の nodeinfo を取り直す (#3564)。
 	// statsEnabled は meta.enableStatsForFederatedInstances を判定のたびに読む。
 	// nil なら有効として扱う。
@@ -134,13 +141,28 @@ type DeliverProcessor struct {
 	// (kind, keyID, PEM) で引く entry は解析の結果だけで古くならないので守らない。
 	keyMu  sync.Mutex
 	keyGen uint64
-	// keySource は payload に鍵が無いとき (= 新しい job) に引く先。
+	// keySource は payload に鍵が無いとき (= 新しい job) に引く先。鍵を payload に
+	// 載せなくなったので、無いと全ての AP 配送が POST されないまま失敗する。
 	keySource SigningKeySource
 }
 
 // NewDeliverProcessor constructs a DeliverProcessor.
-func NewDeliverProcessor(signer HTTPSigner) *DeliverProcessor {
-	p := &DeliverProcessor{signer: signer}
+//
+// deliveryGate is consulted at dispatch time to skip delivery to blocked /
+// suspended instances (#1404). keySource resolves the signing keys when a
+// payload carries none. suspendedChecker skips hosts running software listed
+// in deliverSuspendedSoftware (#3558). metadataRefresher refreshes the nodeinfo
+// of hosts that accepted a delivery (#3564); statsEnabled gates it like
+// upstream's enableStatsForFederatedInstances, and nil means always enabled.
+func NewDeliverProcessor(signer HTTPSigner, deliveryGate DeliveryGate, keySource SigningKeySource, suspendedChecker SuspendedChecker, metadataRefresher InstanceMetadataRefresher, statsEnabled func() bool) *DeliverProcessor {
+	p := &DeliverProcessor{
+		signer:            signer,
+		deliveryGate:      deliveryGate,
+		keySource:         keySource,
+		suspendedChecker:  suspendedChecker,
+		metadataRefresher: metadataRefresher,
+		statsEnabled:      statsEnabled,
+	}
 	// lru.New は size>0 で error を返さない実装だが、防御的に握って nil
 	// fallback (= 都度パース) に倒す。
 	if c, err := lru.New[string, *activitypub.PrivateKey](deliverKeyCacheSize); err == nil {
@@ -191,15 +213,6 @@ type SigningKeySource interface {
 	SigningKeyPEM(userID, kind string) (string, error)
 }
 
-// SetSigningKeySource attaches the resolver used when a payload carries no key.
-func (p *DeliverProcessor) SetSigningKeySource(s SigningKeySource) {
-	p.keySource = s
-}
-
-// HasSigningKeySource reports whether the resolver is wired.
-// **未配線だと全ての AP 配送が失敗する**ので criticalWiring 表で見る。
-func (p *DeliverProcessor) HasSigningKeySource() bool { return p.keySource != nil }
-
 // resolveSigningKey returns the parsed key for kind, preferring the payload's
 // inline PEM when present.
 //
@@ -221,7 +234,8 @@ func (p *DeliverProcessor) resolveSigningKey(kind string, payload queue.DeliverP
 	}
 	if p.keySource == nil {
 		// **恒久扱いにしない。** 配線漏れは再起動で直るので、job を捨てるより
-		// retry させて運用者が気付ける形にする (criticalWiring 表でも見る)。
+		// retry させて運用者が気付ける形にする。構築子の必須の引数で、本番の組み立てで
+		// nil でないことは TestBuiltHandlersHaveNoNilDependencies が見る (#3829)。
 		return nil, fmt.Errorf("no signing key source configured for %s", kind)
 	}
 	// **fetch に使う値 (SignerUserID) でメモ化する。** keyID を使うと、
@@ -419,29 +433,6 @@ func (p *DeliverProcessor) recordEd25519Failure(host string) {
 			"host", host, "count", n)
 		p.markEd25519Degraded(host)
 	}
-}
-
-// SetMetadataRefresher attaches the background nodeinfo refresher (#3564).
-// statsEnabled gates it like upstream's enableStatsForFederatedInstances; nil
-// means always enabled.
-func (p *DeliverProcessor) SetMetadataRefresher(r InstanceMetadataRefresher, statsEnabled func() bool) {
-	p.metadataRefresher = r
-	p.statsEnabled = statsEnabled
-}
-
-// HasMetadataRefresher reports whether the nodeinfo refresher is wired (#3564).
-func (p *DeliverProcessor) HasMetadataRefresher() bool { return p.metadataRefresher != nil }
-
-// SetSuspendedChecker attaches a checker for deliverSuspendedSoftware.
-func (p *DeliverProcessor) SetSuspendedChecker(c SuspendedChecker) {
-	p.suspendedChecker = c
-}
-
-// SetDeliveryGate attaches a gate consulted at dispatch time to skip delivery
-// to blocked / suspended instances. 未配線なら従来どおりゲート無しで配送する
-// (#1404)。
-func (p *DeliverProcessor) SetDeliveryGate(g DeliveryGate) {
-	p.deliveryGate = g
 }
 
 // SetResponseHook attaches a ResponseHook used to update instance health flags.
@@ -813,21 +804,6 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 	}
 	return resp, false, nil
 }
-
-// HasDeliveryGate reports whether the dispatch-time delivery gate was wired.
-//
-// **enqueue 時のチェックを通り抜けたジョブを弾く第 2 の関門**なので、
-// `deliver.hostBlockChecker` では代替できない。ブロック前に積まれたジョブや
-// retry-backoff 中のジョブが該当する (#1404)。起動時検査に使う (#2708)。
-//
-// `SetSuspendedChecker` (deliverSuspendedSoftware) は別の関門なので
-// HasSuspendedChecker で見る。
-func (p *DeliverProcessor) HasDeliveryGate() bool { return p.deliveryGate != nil }
-
-// HasSuspendedChecker reports whether the deliverSuspendedSoftware checker
-// was wired. 設定は判定のたびに読むので、設定が空でも常に配線する (#3558)。
-// 起動時検査に使う。
-func (p *DeliverProcessor) HasSuspendedChecker() bool { return p.suspendedChecker != nil }
 
 // parseRetryAfter reads an HTTP Retry-After value (delay-seconds or an
 // HTTP-date). It returns 0 when the header is absent or unusable; the

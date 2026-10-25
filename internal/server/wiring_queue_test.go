@@ -312,9 +312,10 @@ func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
 
 // **登録する processor は、setter を呼んだのと同じ変数であること (#3690)。**
 //
-// queueHandlerProcs の欄に構築の式 (`deliver: processors.NewDeliverProcessor(apClient)`)
-// を書くと、ビルドも上のテストも通るのに、署名鍵・配送の関門・replay guard などの
-// setter を通っていない processor が job を受ける。なので欄の値は setupRoutes の
+// queueHandlerProcs の欄に構築の式 (`deliver: processors.NewDeliverProcessor(apClient, …)`)
+// を書くと、ビルドも上のテストも通るのに、chart の hook や Redis などの setter を
+// 通っていない processor が job を受ける (署名鍵・配送の関門などは #3829 から構築子の
+// 引数)。なので欄の値は setupRoutes の
 // 本文で `:=` で 1 回だけ定義し、どこでも `=` で入れ替えていない名前に限る
 // (入れ替えると、setter を呼んだ値と登録する値が分かれうる)。欄の書き忘れ
 // (nil の processor) も落とす。

@@ -69,41 +69,6 @@ func (stubProcHostBlock) IsBlocked(string) bool    { return false }
 func (stubProcHostBlock) IsAllowed(string) bool    { return true }
 func (stubProcHostBlock) FederationDisabled() bool { return false }
 
-// #2708: dispatch 時の配送 gate。enqueue 時チェックを通り抜けたジョブ
-// (ブロック前に積まれた / retry-backoff 中) を弾く第 2 の関門なので、
-// deliver.hostBlockChecker では代替できない。
-func TestDeliverProcessor_HasDeliveryGate(t *testing.T) {
-	assert.False(t, (&DeliverProcessor{}).HasDeliveryGate(), "未配線なら false")
-
-	p := &DeliverProcessor{}
-	p.SetDeliveryGate(stubWiringDeliveryGate{})
-	assert.True(t, p.HasDeliveryGate(), "配線したら true")
-}
-
-type stubWiringDeliveryGate struct{}
-
-func (stubWiringDeliveryGate) ShouldSkipDelivery(string) bool { return false }
-
-// 署名鍵の解決元。**未配線だと全ての AP 配送が POST されないまま失敗する**
-// (鍵を payload に載せなくなったので、これが無いと署名できない)。
-func TestDeliverProcessor_HasSigningKeySource(t *testing.T) {
-	assert.False(t, (&DeliverProcessor{}).HasSigningKeySource(), "未配線なら false")
-
-	p := &DeliverProcessor{}
-	p.SetSigningKeySource(&stubKeySource{})
-	assert.True(t, p.HasSigningKeySource())
-}
-
-// #3558: 配送停止中のソフトウェアの判定。以前は起動時に設定が空だと配線されず、
-// 後から設定しても再起動するまで効かなかった。
-func TestDeliverProcessor_HasSuspendedChecker(t *testing.T) {
-	assert.False(t, (&DeliverProcessor{}).HasSuspendedChecker(), "未配線なら false")
-
-	p := &DeliverProcessor{}
-	p.SetSuspendedChecker(stubSuspendedChecker{})
-	assert.True(t, p.HasSuspendedChecker(), "配線したら true")
-}
-
 type stubSuspendedChecker struct{}
 
 func (stubSuspendedChecker) IsSuspended(string) bool { return false }
@@ -120,14 +85,10 @@ func TestInboxProcessor_HasSoftwareSuspensionChecker(t *testing.T) {
 // #3564: 受信と配送のたびに nodeinfo を取り直す。
 func TestProcessors_HasMetadataRefresher(t *testing.T) {
 	assert.False(t, (&InboxProcessor{}).HasMetadataRefresher(), "未配線なら false")
-	assert.False(t, (&DeliverProcessor{}).HasMetadataRefresher(), "未配線なら false")
 
 	ip := &InboxProcessor{}
 	ip.SetMetadataRefresher(stubRefresher{})
 	assert.True(t, ip.HasMetadataRefresher(), "配線したら true")
-	dp := &DeliverProcessor{}
-	dp.SetMetadataRefresher(stubRefresher{}, nil)
-	assert.True(t, dp.HasMetadataRefresher(), "配線したら true")
 }
 
 type stubRefresher struct{}

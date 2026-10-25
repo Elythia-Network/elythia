@@ -102,8 +102,7 @@ func TestInstanceSuspension_StopsDeliveryInOtherProcess(t *testing.T) {
 	waitSubscribed(t, busWeb, busQueue)
 
 	signer := &countingSigner{}
-	p := processors.NewDeliverProcessor(signer)
-	p.SetDeliveryGate(queueSide)
+	p := processors.NewDeliverProcessor(signer, queueSide, nil, nil, nil, nil)
 	payload := queue.DeliverPayload{
 		Inbox:  "https://" + host + "/inbox",
 		Body:   []byte(`{"type":"Create"}`),

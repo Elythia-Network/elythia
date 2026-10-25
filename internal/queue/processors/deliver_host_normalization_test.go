@@ -31,9 +31,8 @@ func TestDeliverProcessor_DeliveryGate_NormalizesInboxHost(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			signer := &stubSigner{resp: okResponse(http.StatusOK)}
-			p := processors.NewDeliverProcessor(signer)
 			gate := &stubDeliveryGate{skip: map[string]bool{"bad.example": true}}
-			p.SetDeliveryGate(gate)
+			p := processors.NewDeliverProcessor(signer, gate, nil, nil, nil, nil)
 
 			payload := makePayload(t)
 			payload.Inbox = tc.inbox
@@ -53,9 +52,8 @@ func TestDeliverProcessor_DeliveryGate_NormalizesInboxHost(t *testing.T) {
 // (POST 自体が失敗するので、ここで fail-closed にする必要は無い)。
 func TestDeliverProcessor_DeliveryGate_UnparseableInboxHost(t *testing.T) {
 	signer := &stubSigner{resp: okResponse(http.StatusOK)}
-	p := processors.NewDeliverProcessor(signer)
 	gate := &stubDeliveryGate{skip: map[string]bool{"bad.example": true}}
-	p.SetDeliveryGate(gate)
+	p := processors.NewDeliverProcessor(signer, gate, nil, nil, nil, nil)
 
 	payload := makePayload(t)
 	payload.Inbox = "://bad-url"
