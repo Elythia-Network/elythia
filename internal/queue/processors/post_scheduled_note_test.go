@@ -97,7 +97,7 @@ func newProcessorFull(drafts map[string]*model.NoteDraft, users map[string]*mode
 	dr := &stubDraftRepo{drafts: drafts}
 	ur := &stubUserRepo{users: users}
 	pub := &stubPublisher{}
-	return NewPostScheduledNoteProcessor(dr, ur, pub), dr, ur, pub
+	return NewPostScheduledNoteProcessor(dr, ur, pub, nil), dr, ur, pub
 }
 
 func taskFor(draftID string) driver.Task {
@@ -165,7 +165,7 @@ func TestPostScheduledNote_LockTakenOnlyAtPublish(t *testing.T) {
 	t.Run("draft の lookup が引けないときは取らない", func(t *testing.T) {
 		p, draftRepo, pub := newProcessor(draftsOf(), map[string]*model.User{"u1": {ID: "u1"}})
 		lock := &stubLock{acquired: true}
-		p.SetLock(lock)
+		p.lock = lock
 		draftRepo.findErr = errors.New("connection refused")
 
 		require.Error(t, p.Handle(context.Background(), taskFor("d1")))
@@ -176,7 +176,7 @@ func TestPostScheduledNote_LockTakenOnlyAtPublish(t *testing.T) {
 	t.Run("利用者の lookup が引けないときも取らない", func(t *testing.T) {
 		p, _, userRepo, pub := newProcessorFull(draftsOf(), map[string]*model.User{"u1": {ID: "u1"}})
 		lock := &stubLock{acquired: true}
-		p.SetLock(lock)
+		p.lock = lock
 		userRepo.err = errors.New("connection refused")
 
 		require.Error(t, p.Handle(context.Background(), taskFor("d1")))
@@ -187,7 +187,7 @@ func TestPostScheduledNote_LockTakenOnlyAtPublish(t *testing.T) {
 	t.Run("publish するときだけ取る", func(t *testing.T) {
 		p, _, pub := newProcessor(draftsOf(), map[string]*model.User{"u1": {ID: "u1"}})
 		lock := &stubLock{acquired: true}
-		p.SetLock(lock)
+		p.lock = lock
 
 		require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
 		assert.Equal(t, 1, lock.calls, "publish の手前で取っていない")
@@ -199,7 +199,7 @@ func TestPostScheduledNote_LockTakenOnlyAtPublish(t *testing.T) {
 	t.Run("利用者が消えていたら ack", func(t *testing.T) {
 		p, _, pub := newProcessor(draftsOf(), map[string]*model.User{})
 		lock := &stubLock{acquired: true}
-		p.SetLock(lock)
+		p.lock = lock
 
 		require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
 		assert.Equal(t, 0, lock.calls)
@@ -278,7 +278,7 @@ func TestPostScheduledNote_LockAcquired_PublishesOnce(t *testing.T) {
 	users := map[string]*model.User{"u1": {ID: "u1"}}
 	p, _, pub := newProcessor(drafts, users)
 	lock := &stubLock{acquired: true}
-	p.SetLock(lock)
+	p.lock = lock
 
 	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
 	assert.Equal(t, 1, lock.calls, "lock は 1 度だけ取得試行")
@@ -293,7 +293,7 @@ func TestPostScheduledNote_LockBusy_SkipsPublish(t *testing.T) {
 		"d1": {ID: "d1", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &scheduledAt},
 	}
 	p, _, pub := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
-	p.SetLock(&stubLock{acquired: false})
+	p.lock = &stubLock{acquired: false}
 
 	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
 	assert.Empty(t, pub.calls, "lock 占有失敗時は publish しない")
@@ -305,7 +305,7 @@ func TestPostScheduledNote_LockError_Retries(t *testing.T) {
 		"d1": {ID: "d1", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &scheduledAt},
 	}
 	p, _, _ := newProcessor(drafts, map[string]*model.User{"u1": {ID: "u1"}})
-	p.SetLock(&stubLock{err: errors.New("redis down")})
+	p.lock = &stubLock{err: errors.New("redis down")}
 
 	err := p.Handle(context.Background(), taskFor("d1"))
 	require.Error(t, err, "lock backend error は retry 用に伝播")

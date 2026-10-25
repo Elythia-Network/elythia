@@ -927,7 +927,7 @@ setupRoutes()
 |---|---|
 | outbound の HTTP client を使う | `webPushProcessor` (`webPushSender` の `s.outboundClient(...)`)、`webhookProcessor` |
 | `setupRoutes()` で作る部品に依存する | `exportProcessor` (`exporter`)、`emojiImportProcessor` (`emojiImporter`)、`resendQuoteRequestsProcessor` (`quoteOutbox`)、`deliverProcessor` (`apClient`)、`inboxProcessor` (`federationProcessor`)、`flushProcessor` (`reactionCountWriter`)、`chartProcessor` (chart の engine `chartCharts`)、`instanceRefreshProc` (`metadataFetcher`)、`checkModeratorsActivityProcessor` (`modActivitySvc`。stream の publisher に依存する) |
-| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` |
+| setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` (#3829 から `NewRedisScheduledNoteLock` は構築子の引数の中) |
 | `buildQueue()` に無い値 (Web Push の購読キャッシュ・Redis の lock) を受ける (#3829 で戻した) | `deleteAccountProcessor` (`webPushCache`)、`postScheduledNoteProcessor` (`NewRedisScheduledNoteLock`) |
 
 | | #3690 の前 (`53475bb41`) | 後 |
@@ -1556,17 +1556,42 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   新しい位置までの間に、2つを使う行は無い(`setupRoutes()`の本文をgrepで確かめた)。handlerの
   登録(`queueHandlerProcs`)はどちらよりも後にある。`queueProcs`の欄と`setupRoutes()`の別名を消し、
   setterは元の位置のまま残した。構築は副作用を持たないので、DBとRedisの文の順は変わらない
+- **2段目は`deleteAccount`と`postScheduledNote`(2構築子・3行)。** `NewDeleteAccountProcessor`は
+  `pageRepo`と`pushCache`を、`NewPostScheduledNoteProcessor`はRedisのlockを受ける
+  (`processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo, pageRepo,
+  webPushCache)`、`processors.NewPostScheduledNoteProcessor(noteDraftRepo, userRepo,
+  noteCreateService, processors.NewRedisScheduledNoteLock(s.redis.Default, s.config.Redis.KeyPrefix(),
+  0))`)。lockは`setupRoutes()`で作る。構築子は構造体を作るだけで、Redisに触らない。
+  `deleteAccountProcessor.SetUserRepo`と`postScheduledNoteProcessor.SetNotifier`は表に無いので、
+  setterのまま残した
+- **依存を入れる時点は変わらない。** 1段目で、構築子を元のsetterの位置(の直前)へ動かしてある
+- **置き換えたsetterと、起動時の検査に使っていた`Has…`は消した。** 外部パッケージ
+  (`processors_test`)の`delete_account_test.go`は構築子で渡す(`processors.NewDeleteAccountProcessor(`を
+  呼ぶ行は25から23。`delete_account_test.go`に`grep -c`を当てた。`HasPageRepo`と`HasPushSubscriptionCache`だけを見ていた2か所を消した)。
+  同じパッケージの`post_scheduled_note_test.go`はフィールドへ直接代入する(#3817と同じ)。
+  `wiring_predicate_test.go`から`HasLock`のテストを消した。構築子が引数を捨てないことは、
+  `internal/queue/processors/constructor_test.go`が見る
+- **wiring-checkの照合も直した。** `TestPushSubscriptionCacheIsShared`(`internal/entitycompat`)は、
+  `deleteAccountProcessor.SetPushSubscriptionCache`の引数の照合をやめ、`processors.NewDeleteAccountProcessor`の
+  最後の引数を照合する(購読キャッシュをもう1つ作って渡す形は、型でもnilの検査でも捕まらない)。
+  補助関数の単体テスト`TestPushSubscriptionCacheProblemsRequireOneFile`の合成のソースも直した
+- **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `routeParts`に
+  `deleteAccountProcessor`と`postScheduledNoteProcessor`を足し、`requiredDepChecks`に置き換えた3つの
+  欄を足した。テストの組み立て(test mode・miniredis)では、2つのnilになりうるフィールドはどれも
+  nilでなかったので、許可リストには足していない
 
-| | #3829の前(`7ec218bbfd`) | 1段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 51 | 51 |
-| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 |
-| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 |
-| その受け手 | 107 | 107 |
+| | #3829の前(`7ec218bbfd`) | 1段目の後 | 2段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 51 | 51 | 48 |
+| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 | 16 |
+| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 | 14 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 | 625 |
+| その受け手 | 107 | 107 | 107 |
 
 数え方: `criticalWiringCount`と`<変数>.Set`の行は上の表と同じ。`processors.New…`の呼び出しは、
 上の「queue の processor (#3690)」の表と同じく、本文に`grep -oE '\bprocessors\.New[A-Z]'`を当てた。
+2段目で受け手が減らないのは、`deleteAccountProcessor`と`postScheduledNoteProcessor`に表に無いsetterが
+残っているため。
 
 #### /api のルートの登録 (#3697)
 

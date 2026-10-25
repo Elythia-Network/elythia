@@ -1365,16 +1365,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Account cascade deletion (issue #187): admin/accounts/delete の後続
 	// バックグラウンド処理。note / drive_file / following 関連行を掃除する。
-	// #3690 で buildQueue へ移したが、setupRoutes で作る webPushCache を構築子へ渡す
-	// 準備として #3829 でここへ戻した。
-	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo)
+	// #3690 で buildQueue へ移したが、setupRoutes で作る webPushCache を構築子で受ける
+	// ため #3829 でここへ戻した。
+	// pageRepo (#3293): ページを 1 件ずつ消して、参照するノートの pageCount を減らす。
+	// webPushCache (#3207): 消した sw_subscription が購読キャッシュに残って push され
+	// 続けないよう、Web Push の配送が読むのと同じキャッシュを渡す。
+	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo, pageRepo, webPushCache)
 	// #2230: local user の物理削除に userRepo を配線。未配線だと soft 削除止まりで行が残る。
 	deleteAccountProcessor.SetUserRepo(userRepo)
-	// #3293: ページを 1 件ずつ消して、参照するノートの pageCount を減らす。
-	deleteAccountProcessor.SetPageRepo(pageRepo)
-	// #3207: 消した sw_subscription が購読キャッシュに残って push され続けないよう、
-	// Web Push の配送が読むのと同じキャッシュを渡す。
-	deleteAccountProcessor.SetPushSubscriptionCache(webPushCache)
 
 	// 30s ごとに buffered reaction count を DB へ drain する。30s ticker は
 	// upstream の日次 cron より高頻度で反映遅延を抑える mk-go の運用。
@@ -1970,12 +1968,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// PostScheduledNote processor (#1040): delayed queue 経由で draft を
 	// note 化する。dependencies は既存 noteCreateService + userRepo +
 	// noteDraftRepo を共有する。#3690 で buildQueue へ移したが、Redis の lock を
-	// 構築子へ渡す準備として #3829 でここへ戻した。
-	postScheduledNoteProcessor := processors.NewPostScheduledNoteProcessor(noteDraftRepo, userRepo, noteCreateService)
+	// 構築子で受けるため #3829 でここへ戻した。
 	// idempotency lock を Redis SETNX で配線 (#1045 Phase 2-A)。queue の
 	// at-least-once delivery で job が二重 fire しても重複 publish を防ぐ。
-	postScheduledNoteProcessor.SetLock(processors.NewRedisScheduledNoteLock(
-		s.redis.Default, s.config.Redis.KeyPrefix(), 0))
+	postScheduledNoteProcessor := processors.NewPostScheduledNoteProcessor(noteDraftRepo, userRepo, noteCreateService,
+		processors.NewRedisScheduledNoteLock(s.redis.Default, s.config.Redis.KeyPrefix(), 0))
 	// publish 結果通知 (#1045 Phase 2-B): scheduledNotePosted (= 成功) /
 	// scheduledNotePostFailed (= 失敗) を user の通知 stream に発火する。
 	postScheduledNoteProcessor.SetNotifier(notificationService)
@@ -3995,6 +3992,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		feed: feedH,
 		peer: s.peerDeps,
+
+		deleteAccountProcessor:     deleteAccountProcessor,
+		postScheduledNoteProcessor: postScheduledNoteProcessor,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -4035,8 +4035,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 		{"inbox.replayGuard", inboxProcessor.HasInboxReplayGuard(),
 			"処理済み activity の再投函を検出できない (isReplay が常に false)"},
-		{"postScheduledNote.lock", postScheduledNoteProcessor.HasLock(),
-			"job が二度 fire したとき予約投稿が 2 回 publish される"},
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
@@ -4104,10 +4102,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"followers 限定投稿への返信が非フォロワーの HTL / STL に出る"},
 		{"notes.ugcVisibility", notesHandler.HasUGCVisibility(),
 			"匿名 visitor への note 露出を ugcVisibilityForVisitor で gate できない"},
-		{"deleteAccount.pageRepo", deleteAccountProcessor.HasPageRepo(),
-			"アカウント削除でページが user 行の CASCADE で消え、参照していたノートの pageCount が減らない (リモートのノートが掃除で消えなくなる)"},
-		{"deleteAccount.pushSubscriptionCache", deleteAccountProcessor.HasPushSubscriptionCache(),
-			"アカウント削除で sw_subscription を消しても購読キャッシュが残り、削除後の通知が最大 1 時間、消したはずの購読へ push され続ける"},
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。
