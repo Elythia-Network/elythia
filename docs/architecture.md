@@ -866,7 +866,9 @@ setupRoutes()
   `objectStorageProcessor`、`deleteAccountProcessor`、`unfollowProcessor`・
   `followProcessor`・`blockProcessor`・`unblockProcessor`、`retentionProc`、
   `postScheduledNoteProcessor`。meta を読む関数は job のたびに呼ばれるもので、作るときには
-  呼ばない
+  呼ばない。#3809 で `archiveAnnouncementsProc` を足して 16 個になり、#3829 で
+  `deleteAccountProcessor` と `postScheduledNoteProcessor` を `setupRoutes()` へ戻して 14 個
+  (下の「handlerの依存を構築子の必須の引数にする」の段(5))
 - **setter は 1 つも動かさない。** `buildQueue()` を呼ぶ位置は、移したものの中で最初に
   作っていた `importProcessor` の位置 (`exportProcessor` の直後)。移した構築は副作用を
   持たないので、DB と Redis の文の順は変わらない。起動時に 1 回だけ流す retention の集計
@@ -919,13 +921,14 @@ setupRoutes()
 使われていない項目を落とす検査も付けた)。`setupRoutes()` は `router.go` を名指しせず、
 `git ls-files` で列挙したファイルから探す。
 
-**`setupRoutes()` に残したもの** (`processors.New…` の 14 回の呼び出し):
+**`setupRoutes()` に残したもの** (`processors.New…` の 14 回の呼び出し。#3829 で 2 回戻して 16 回):
 
 | 理由 | 例 |
 |---|---|
 | outbound の HTTP client を使う | `webPushProcessor` (`webPushSender` の `s.outboundClient(...)`)、`webhookProcessor` |
 | `setupRoutes()` で作る部品に依存する | `exportProcessor` (`exporter`)、`emojiImportProcessor` (`emojiImporter`)、`resendQuoteRequestsProcessor` (`quoteOutbox`)、`deliverProcessor` (`apClient`)、`inboxProcessor` (`federationProcessor`)、`flushProcessor` (`reactionCountWriter`)、`chartProcessor` (chart の engine `chartCharts`)、`instanceRefreshProc` (`metadataFetcher`)、`checkModeratorsActivityProcessor` (`modActivitySvc`。stream の publisher に依存する) |
 | setter の引数の中で作る | `NewRepoSigningKeySource`、`NewRedisInboxReplayGuard`、`NewRedisScheduledNoteLock` |
+| `buildQueue()` に無い値 (Web Push の購読キャッシュ・Redis の lock) を受ける (#3829 で戻した) | `deleteAccountProcessor` (`webPushCache`)、`postScheduledNoteProcessor` (`NewRedisScheduledNoteLock`) |
 
 | | #3690 の前 (`53475bb41`) | 後 |
 |---|---|---|
@@ -1539,6 +1542,31 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 置き換えたsetterしか呼んでいなかった`oauthHandler`。3段目で減った受け手は`reversiPublisher`と
 `serverStatsPub`。4段目はsetterを置き換えていない(構造体リテラルを構築子に替えた)ので、setterの
 行は変わらない。
+
+##### 段(5): queueのprocessor(#3829)
+
+**queueのprocessorも、同じ形にした。** #3812の段(5)。置き換えたのは、表の行で見ていた依存だけ。
+
+- **1段目で、`deleteAccountProcessor`と`postScheduledNoteProcessor`を`buildQueue()`から出し、
+  `setupRoutes()`で作るようにした。** 置き換える依存のうち、Web Pushの購読キャッシュ
+  (`webPushCache`)とRedisのlock(`processors.NewRedisScheduledNoteLock(s.redis.Default, …)`)は、
+  `queueProcs`の規則(依存はrepository・core・設定・DB・ID生成器に限る。上の「queue の processor
+  (#3690)」)の外にあるため。作る位置は元のsetterの位置で、deleteAccountは`SetUserRepo`の直前、
+  postScheduledNoteは`SetLock`の直前。構築子は構造体を作るだけで、`buildQueue()`の呼び出しから
+  新しい位置までの間に、2つを使う行は無い(`setupRoutes()`の本文をgrepで確かめた)。handlerの
+  登録(`queueHandlerProcs`)はどちらよりも後にある。`queueProcs`の欄と`setupRoutes()`の別名を消し、
+  setterは元の位置のまま残した。構築は副作用を持たないので、DBとRedisの文の順は変わらない
+
+| | #3829の前(`7ec218bbfd`) | 1段目の後 |
+|---|---|---|
+| `criticalWiringCount` | 51 | 51 |
+| `setupRoutes()`の`processors.New…`の呼び出し | 14 | 16 |
+| `buildQueue()`の`processors.New…`の呼び出し | 16 | 14 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 628 | 628 |
+| その受け手 | 107 | 107 |
+
+数え方: `criticalWiringCount`と`<変数>.Set`の行は上の表と同じ。`processors.New…`の呼び出しは、
+上の「queue の processor (#3690)」の表と同じく、本文に`grep -oE '\bprocessors\.New[A-Z]'`を当てた。
 
 #### /api のルートの登録 (#3697)
 

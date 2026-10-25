@@ -23,7 +23,9 @@ import (
 // still builds itself (the exporter, the emoji importer, the AP client and
 // inbox processor, the reaction count writer, the chart engines, the metadata
 // fetcher, the moderator activity service, the quote outbox), stay in
-// setupRoutes (docs/architecture.md 4.2).
+// setupRoutes (docs/architecture.md 4.2). The account deletion and scheduled
+// note processors moved back to setupRoutes in #3829: they take the Web Push
+// subscription cache and the Redis lock, which buildQueue does not have.
 //
 // buildQueue only constructs. Every setter on these processors is still
 // called at its old position in setupRoutes. The handlers are registered in
@@ -38,13 +40,11 @@ type queueProcs struct {
 	cleanGenericProcessor        *processors.CleanProcessor
 	chunkedUploadGCProcessor     *processors.ChunkedUploadGCProcessor
 	objectStorageProcessor       *processors.ObjectStorageProcessor
-	deleteAccountProcessor       *processors.DeleteAccountProcessor
 	unfollowProcessor            *processors.UnfollowProcessor
 	followProcessor              *processors.FollowProcessor
 	blockProcessor               *processors.BlockProcessor
 	unblockProcessor             *processors.UnblockProcessor
 	retentionProc                *processors.RetentionAggregateProcessor
-	postScheduledNoteProcessor   *processors.PostScheduledNoteProcessor
 }
 
 // buildQueue builds the queue processors from w.repos and coreSvcs, in the
@@ -58,7 +58,6 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	userRepo := w.repos.user
 	noteRepo := w.repos.note
 	var metaRepo repository.MetaRepository = w.repos.cachedMeta
-	followingRepo := w.repos.following
 	mutingRepo := w.repos.muting
 	driveFileRepo := w.repos.driveFile
 	var antennaRepo repository.AntennaRepository = w.repos.cachedAntenna
@@ -66,7 +65,6 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	reversiRepo := w.repos.reversi
 	userIPRepo := w.repos.userIP
 	channelMutingRepo := w.repos.channelMuting
-	noteDraftRepo := w.repos.noteDraft
 	importer := coreSvcs.importer
 	ephemeralStore := coreSvcs.ephemeralStore
 	driveService := coreSvcs.drive
@@ -75,7 +73,6 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	followingService := coreSvcs.following
 	blockingService := coreSvcs.blocking
 	retentionSvc := coreSvcs.retention
-	noteCreateService := coreSvcs.noteCreate
 
 	importProcessor := processors.NewImportProcessor(importer)
 
@@ -175,10 +172,6 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	// 回す (件数ぶん job を積むと Redis を圧迫するため)。
 	objectStorageProcessor := processors.NewObjectStorageProcessor(driveStorage, localDriveStorage, driveFileRepo)
 
-	// Account cascade deletion (issue #187): admin/accounts/delete の後続
-	// バックグラウンド処理。note / drive_file / following 関連行を掃除する。
-	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo)
-
 	// Per-pair Unfollow job (#587): admin/federation/remove-all-following
 	// が enqueue するペアごとに Service.Unfollow を呼んで row 削除 + Reject
 	// 配送を行う。Misskey TS の relationshipQueue 'unfollow' job 相当。
@@ -200,11 +193,6 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	// 起動時に 1 回だけ流す集計は、setupRoutes の元の位置のまま。
 	retentionProc := processors.NewRetentionAggregateProcessor(retentionSvc)
 
-	// PostScheduledNote processor (#1040): delayed queue 経由で draft を
-	// note 化する。dependencies は既存 noteCreateService + userRepo +
-	// noteDraftRepo を共有する。lock と notifier の setter は setupRoutes の元の位置。
-	postScheduledNoteProcessor := processors.NewPostScheduledNoteProcessor(noteDraftRepo, userRepo, noteCreateService)
-
 	return queueProcs{
 		importProcessor:              importProcessor,
 		cleanProcessor:               cleanProcessor,
@@ -215,13 +203,11 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 		cleanGenericProcessor:        cleanGenericProcessor,
 		chunkedUploadGCProcessor:     chunkedUploadGCProcessor,
 		objectStorageProcessor:       objectStorageProcessor,
-		deleteAccountProcessor:       deleteAccountProcessor,
 		unfollowProcessor:            unfollowProcessor,
 		followProcessor:              followProcessor,
 		blockProcessor:               blockProcessor,
 		unblockProcessor:             unblockProcessor,
 		retentionProc:                retentionProc,
-		postScheduledNoteProcessor:   postScheduledNoteProcessor,
 	}
 }
 
