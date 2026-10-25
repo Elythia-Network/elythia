@@ -62,33 +62,6 @@ type RoomInvitationRemover interface {
 	DeleteInvitationsToOwnedRooms(ownerID, userID string) error
 }
 
-// SetRoomInvitationRemover wires the chat room invitation cleanup used by Block.
-//
-// 本家 UserBlockingService.block は removeRoomInvitations を双方向で呼び、
-// どちらかが持つルームへの、もう一方への招待を消す。消さないと、ブロックした
-// 後もブロックした人のルームの招待を受けて参加できてしまう (逆も同じ)。
-func (s *Service) SetRoomInvitationRemover(r RoomInvitationRemover) {
-	s.roomInvitations = r
-}
-
-// HasRoomInvitationRemover reports whether the room invitation cleanup was
-// wired. 起動時検査に使う。
-func (s *Service) HasRoomInvitationRemover() bool { return s.roomInvitations != nil }
-
-// SetUserListRepo wires the user list repository used by Block to remove the
-// blocker from the blockee's lists (#3330).
-//
-// 本家 UserBlockingService.block は removeFromList(blockee, blocker) で、
-// ブロックされた側が持つ全てのリストからブロックした人を外す。外さないと、
-// ブロックされた側のリストのタイムラインにブロックした人の投稿が流れ続ける。
-func (s *Service) SetUserListRepo(r repository.UserListRepository) {
-	s.userListRepo = r
-}
-
-// HasUserListRepo reports whether the user list repository was wired.
-// 起動時検査に使う。
-func (s *Service) HasUserListRepo() bool { return s.userListRepo != nil }
-
 // Unfollower removes a following on behalf of a block. 実装は
 // core/following.Service。
 type Unfollower interface {
@@ -98,23 +71,6 @@ type Unfollower interface {
 	// delivery (Undo(Follow) / Reject(Follow)) still happen.
 	UnfollowForBlock(followerID, followeeID string, silent bool) error
 }
-
-// SetUnfollower wires the following removal used by Block (#3330).
-//
-// 本家 UserBlockingService.block は UserFollowingService.unfollow を双方向で
-// 呼ぶ。解除の本体 (行の削除、移行済みならカウントを触らない規則、利用者と
-// インスタンスのカウント、チャート、Undo(Follow) / Reject(Follow) の配送、
-// unfollow のイベント、following snapshot の再読込) を following.Service の
-// 1 か所に寄せるため、block 側では行を消さずにこれへ委ねる。以前は block 側で
-// 行とカウントだけを直接いじっていたので、配送もチャートも抜けていた。
-func (s *Service) SetUnfollower(u Unfollower) {
-	s.unfollower = u
-}
-
-// HasUnfollower reports whether the unfollower was wired.
-//
-// 未配線だと、ブロックしても既存のフォローが残る。起動時検査に使う。
-func (s *Service) HasUnfollower() bool { return s.unfollower != nil }
 
 // FederationHook delivers Block / Undo(Block) AP activities to a remote
 // blockee on local block / unblock (#1560)。実装は core/federation。
@@ -143,37 +99,41 @@ type FollowRequestCanceller interface {
 	CancelFollowRequestsBetween(a, b string, silent bool) error
 }
 
-// SetFollowRequestCanceller wires the pending-follow-request cleanup used by
-// Block. upstream UserBlockingService.block は cancelRequest を双方向で呼び、
-// 保留中の申請を削除する (相手が remote なら Undo(Follow) / Reject を配送)。
-// 未配線だと block しても申請が残り、block 中に承認されるとフォロー関係が
-// 成立してしまう。
-func (s *Service) SetFollowRequestCanceller(h FollowRequestCanceller) {
-	s.followRequestCanceller = h
-}
-
-// HasFollowRequestCanceller reports whether the canceller was wired.
-// 起動時検査 (criticalWiring) に使う。
-func (s *Service) HasFollowRequestCanceller() bool {
-	return s.followRequestCanceller != nil
-}
-
 // SetFederationHook wires the AP delivery hook used by Block / Unblock (#1560)。
 func (s *Service) SetFederationHook(h FederationHook) {
 	s.federationHook = h
 }
 
 // NewService constructs a UserBlockingService.
-// ブロック時の既存フォローの解除は SetUnfollower で配線する。
+//
+// unfollower removes the existing followings in both directions on block
+// (#3330). followRequestCanceller cancels the pending follow requests in both
+// directions. userListRepo removes the blocker from the blockee's lists
+// (#3330). roomInvitations deletes the invitations to the chat rooms either
+// side owns.
+//
+// 本家 UserBlockingService.block は、フォローの解除 (unfollow)・保留中の申請の
+// 取り消し (cancelRequest)・リストからの除去 (removeFromList)・チャットルームの
+// 招待の削除 (removeRoomInvitations) を行う。4 つとも無いと黙って劣化する
+// (ブロックしてもフォロー・申請・リスト・招待が残る) ので、構築子の必須の引数で
+// 受ける (#3825)。
 func NewService(
 	userRepo repository.UserRepository,
 	blockingRepo repository.BlockingRepository,
 	idGen id.Generator,
+	unfollower Unfollower,
+	followRequestCanceller FollowRequestCanceller,
+	userListRepo repository.UserListRepository,
+	roomInvitations RoomInvitationRemover,
 ) *Service {
 	return &Service{
-		userRepo:     userRepo,
-		blockingRepo: blockingRepo,
-		idGen:        idGen,
+		userRepo:               userRepo,
+		blockingRepo:           blockingRepo,
+		idGen:                  idGen,
+		unfollower:             unfollower,
+		followRequestCanceller: followRequestCanceller,
+		userListRepo:           userListRepo,
+		roomInvitations:        roomInvitations,
 	}
 }
 

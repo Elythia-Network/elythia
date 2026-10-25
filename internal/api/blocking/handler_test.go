@@ -24,7 +24,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	userRepo := testutil.NewMockUserRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, blockingRepo, idGen)
+	svc := coreblocking.NewService(userRepo, blockingRepo, idGen, nil, nil, nil, nil)
 	return NewHandler(svc, userRepo, idGen, nil, nil, nil), userRepo
 }
 
@@ -64,7 +64,7 @@ func TestCreateDelete_ReturnsIsBlockingRelation(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, blockingRepo, idGen)
+	svc := coreblocking.NewService(userRepo, blockingRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, userRepo, idGen, nil, nil, nil)
 	// relation の Blocking は service と同一インスタンスを渡し、block 状態を反映させる。
 	h.SetRelationRepos(userrelation.Repos{Blocking: blockingRepo})
@@ -96,7 +96,7 @@ func TestList_BlockeeCarriesIsBlocking(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, blockingRepo, idGen)
+	svc := coreblocking.NewService(userRepo, blockingRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, userRepo, idGen, nil, nil, nil)
 	// relation の Blocking は service と同一インスタンスで block 状態を反映。
 	h.SetRelationRepos(userrelation.Repos{Blocking: blockingRepo})
@@ -132,7 +132,7 @@ func newGatedHandler(t *testing.T, mod ModeratorChecker) (*Handler, *httptest.Re
 	userRepo := testutil.NewMockUserRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, blockingRepo, idGen)
+	svc := coreblocking.NewService(userRepo, blockingRepo, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, userRepo, idGen, nil, nil, nil)
 	h.SetRelationRepos(userrelation.Repos{
 		Following: testutil.NewMockFollowingRepository(),
@@ -278,7 +278,7 @@ func TestCreate_RepoError(t *testing.T) {
 	addUser(userRepo, "alice")
 	addUser(userRepo, "bob")
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, &failingBlockingRepo{MockBlockingRepository: testutil.NewMockBlockingRepository()}, idGen)
+	svc := coreblocking.NewService(userRepo, &failingBlockingRepo{MockBlockingRepository: testutil.NewMockBlockingRepository()}, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, nil, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"userId":"bob"}`)
@@ -359,7 +359,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock := testutil.NewMockBlockingRepository()
 	mock.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "alice", BlockeeID: "bob"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, &failingDeleteBlockingRepo{MockBlockingRepository: mock}, idGen)
+	svc := coreblocking.NewService(userRepo, &failingDeleteBlockingRepo{MockBlockingRepository: mock}, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, nil, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"userId":"bob"}`)
@@ -415,7 +415,7 @@ func (f *failingListBlockingRepo) ListByBlocker(_, _, _ string, _, _ int) ([]*mo
 func TestList_RepoError(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreblocking.NewService(userRepo, &failingListBlockingRepo{MockBlockingRepository: testutil.NewMockBlockingRepository()}, idGen)
+	svc := coreblocking.NewService(userRepo, &failingListBlockingRepo{MockBlockingRepository: testutil.NewMockBlockingRepository()}, idGen, nil, nil, nil, nil)
 	h := NewHandler(svc, nil, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{}`)

@@ -170,7 +170,7 @@ func TestCredentialResets_SystemAccountStaysProtectedWhenLookupFails(t *testing.
 	require.NoError(t, err)
 	roleSvc := corerole.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	flaky := &flakyUserRepo{MockUserRepository: users}
-	h := apiadmin.NewHandler(signup.NewService(flaky, metaRepo, idGen), roleSvc, metaRepo, flaky, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(flaky, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, flaky, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := doPost(h.ResetPassword, `{"userId":"sys"}`, &model.User{ID: "mod1"})
 
@@ -235,7 +235,7 @@ func newTakeoverFixture(t *testing.T, target *model.User, breakAssignments bool)
 		assignments = &failingAssignmentRepo{MockRoleAssignmentRepository: assignRepo}
 	}
 	roleSvc := corerole.NewService(roleRepo, assignments, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(users, metaRepo, idGen), roleSvc, metaRepo, users, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(users, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, users, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetSecurityKeyRepo(newFakeSecurityKeyRepo())
 	return &takeoverFixture{h: h, metaRepo: metaRepo}
 }

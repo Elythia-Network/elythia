@@ -305,7 +305,7 @@ func TestDriveShowFile_HidesRequestHeadersWhenRoleLookupFails(t *testing.T) {
 	require.NoError(t, err)
 	flaky := &failingAssignmentRepo{MockRoleAssignmentRepository: assignRepo}
 	roleSvc := corerole.NewService(roleRepo, flaky, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	repo := testutil.NewMockDriveFileRepository()
 	owner := "admin2"

@@ -109,7 +109,7 @@ func TestUpdateMeta_ModerationLogHasNoSecrets(t *testing.T) {
 	logs := testutil.NewMockModerationLogRepository()
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetModLogService(moderationlog.New(logs, gen))
+	h.SetModLogService(moderationlog.New(logs, gen, nil))
 
 	rec := doPost(h.UpdateMeta, `{"name":"renamed","deeplAuthKey":"plain-new-deepl"}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -142,7 +142,7 @@ func TestShowModerationLogs_MasksSecretsOfOldRows(t *testing.T) {
 	require.NoError(t, logs.Create(&model.ModerationLog{ID: "l3", Type: "suspend"}))
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetModLogService(moderationlog.New(logs, gen))
+	h.SetModLogService(moderationlog.New(logs, gen, nil))
 
 	rec := doPost(h.ShowModerationLogs, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -321,7 +321,7 @@ func TestUpdateMeta_DestinationChangeFailsClosedWithoutCheckedUpdate(t *testing.
 	repo := uncheckedMetaRepo{metaRepo}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen), nil, repo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, repo, idGen, nil, nil, nil), nil, repo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := doPost(h.UpdateMeta, `{"smtpHost":"smtp.example.com"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

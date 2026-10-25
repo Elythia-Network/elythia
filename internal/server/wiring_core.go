@@ -11,6 +11,7 @@ import (
 	coreclip "github.com/elythia-network/elythia/internal/core/clip"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	coreephemeral "github.com/elythia-network/elythia/internal/core/ephemeral"
+	"github.com/elythia-network/elythia/internal/core/event"
 	corefeatured "github.com/elythia-network/elythia/internal/core/featured"
 	coreflash "github.com/elythia-network/elythia/internal/core/flash"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
@@ -38,6 +39,7 @@ import (
 	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // core holds the core services setupRoutes builds through buildCore (#3686).
@@ -47,15 +49,19 @@ import (
 // constructor returns. Only services whose constructor just builds a value
 // are listed: no DB or Redis access, no outbound call or log, no goroutine,
 // timer, shutdown hook or global write, and dependencies limited to the
-// repositories and the services built before them here. Services that need
-// a stream publisher, a handler, a federation part or a value read from the
-// DB at construction are not built here: the relay service is built by
+// repositories, the services built before them here and the values
+// buildCore receives as arguments (roleService from buildRole and the stream
+// pubsub, #3825). Services that need a stream publisher other than one built
+// from that pubsub, a handler, a federation part or a value read from the DB
+// at construction are not built here: the relay service is built by
 // buildFederation (#3688), the others stay in setupRoutes
 // (docs/architecture.md 4.2).
 //
-// buildCore only constructs. Every setter on these services is still called
-// at its old position in setupRoutes, because workers started during
+// buildCore only constructs. The setters on these services are still called
+// at their old positions in setupRoutes, because workers started during
 // construction must see the same wiring as before (docs/architecture.md 4.1).
+// The exception is the dependencies #3825 turned into required constructor
+// arguments: they are passed here instead of through a setter.
 type core struct {
 	featured             *corefeatured.Service
 	hashtag              *corehashtag.Service
@@ -118,10 +124,12 @@ func (s *Server) buildRole(w *wiring, idGen id.Generator) *corerole.Service {
 }
 
 // buildCore builds the core services from w.repos, in the order setupRoutes
-// used to build them. It reads s.redis, s.config, s.queueClient and s.db.
+// used to build them, except that blocking is built before reaction so that
+// reaction can take it as a constructor argument (#3825). It reads s.redis, s.config, s.queueClient and s.db.
 // roleService is built by buildRole before it (#3825) and is stored in the
-// role field as is.
-func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.Service) core {
+// role field as is. streamPubSub is the stream pubsub setupRoutes creates
+// first; buildCore only builds publishers on it and never subscribes.
+func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.Service, streamPubSub *event.PubSubService) core {
 	// 下の行は setupRoutes にあった行をそのまま移した。ゲートが構築の式を引数まで
 	// 含めて照合するので、repository も同じ名前の別名で受ける。
 	userRepo := w.repos.user
@@ -159,6 +167,9 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	hashtagRepo := w.repos.hashtag
 	modLogRepo := w.repos.modLog
 	systemAccountRepo := w.repos.systemAccount
+	chatRepo := w.repos.chat
+	signupTicketRepo := w.repos.signupTicket
+	signupApplicationRepo := w.repos.signupApplication
 
 	// featured engagement ランキング (#1687)。reaction / renote の hook が
 	// global / in-channel / per-user の Redis windowed ZSET を更新し、
@@ -170,7 +181,7 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	hashtagService := corehashtag.NewService(hashtagRepo, idGen)
 	// moderation log (#1548 / #1765)。admin / announcement / gallery / flash と、moderator の
 	// note 削除が同じ instance を共有する。
-	modLogService := coremodlog.New(modLogRepo, idGen)
+	modLogService := coremodlog.New(modLogRepo, idGen, s.background) // #3661: 世代の停止で待つ
 	// reversi の連合 (Phase 9.7)。FederationIDCache は本家 Misskey DB スキーマ互換の
 	// ため DB カラムを持たず Redis のみで session↔gameID の双方向 mapping を保持する。
 	// api handler と federation inbox で同じインスタンスを共有する。
@@ -187,7 +198,11 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// Instance management (Phase 3 Step H)。インスタンスの停止・サイレンスの判定を、
 	// 連合・following・reaction・配送が共有する。
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
-	signupService := coresignup.NewService(userRepo, metaRepo, idGen)
+	// PromotePending を transaction 化して partial failure rollback と invitation
+	// ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
+	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定もアカウント作成と
+	// 同じ tx に入れる (#2576)。
+	signupService := coresignup.NewService(userRepo, metaRepo, idGen, s.db, signupTicketRepo, signupApplicationRepo)
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
 	// 投稿後のフックの同時実行の枠を設定の数で作り直す(#3780)。
 	noteCreateService.SetHookConcurrency(s.config.NoteHookConcurrency)
@@ -217,22 +232,38 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 		})
 	timelineService := coretimeline.NewService(fanoutTimelineService, noteRepo, followingRepo)
 	channelService := corechannel.NewService(channelRepo, channelFollowingRepo, noteRepo, idGen)
-	antennaService := coreantenna.NewService(antennaRepo, userRepo, s.redis.Default, idGen)
-	clipService := coreclip.NewService(clipRepo, clipNoteRepo, noteRepo, idGen)
+	antennaService := coreantenna.NewService(antennaRepo, userRepo, s.redis.Default, idGen, roleService) // #1029: antennaLimit
+	// roleService は clipLimit / noteEachClipsLimit (#1029)。クリップの更新・ノートの追加と
+	// 削除・クリップの削除を stream の clip チャンネルへ流す (本家 2026.10.1、#3809)。
+	clipService := coreclip.NewService(clipRepo, clipNoteRepo, noteRepo, idGen,
+		roleService, stream.NewClipStreamPublisher(streamPubSub))
 	pageService := corepage.NewService(pageRepo, pageLikeRepo, idGen)
 	flashService := coreflash.NewService(flashRepo, flashLikeRepo, idGen)
-	reactionService := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen)
+	// block 時に保留中の follow request を双方向で取り消す (upstream
+	// UserBlockingService.block の cancelRequest 相当)。既存のフォローも双方向に解除する。
+	// following.Service の unfollow を通すので、カウント・チャート・Undo(Follow) /
+	// Reject(Follow) の配送・unfollow のイベントが通常の解除と同じになる (#3330)。
+	// ブロックされた側のリストからブロックした人を外し (本家 removeFromList、#3330)、
+	// 互いの持つチャットルームへの招待を消す (本家 removeRoomInvitations)。
+	// reactionService が blockingChecker に使うので、reactionService より前で作る (#3825)。
+	blockingService := coreblocking.NewService(userRepo, blockingRepo, idGen,
+		followingService, followingService, userListRepo, chatRepo)
+	// #1538: reactionAcceptance gate — role-gated emoji + media-silenced host。
+	// 自分をブロックしている相手の投稿へのリアクションも弾く。
+	reactionService := corereaction.NewService(noteRepo, reactionRepo, emojiRepo, followingRepo, idGen,
+		roleService, instanceService, blockingService)
 	// keyPrefix で TS 本家と同じ `<host>:notificationTimeline:*` 等に揃える (#362)。
-	notificationService := corenotification.NewService(s.redis.Default, idGen, s.config.Redis.KeyPrefix())
+	notificationService := corenotification.NewService(s.redis.Default, idGen, s.config.Redis.KeyPrefix(),
+		s.background) // #3661: 世代の停止で送り切る
 	notificationHook := corenotification.NewHook(notificationService, userRepo)
 	webhookService := corewebhook.NewService(s.queueClient, webhookRepo, systemWebhookRepo, s.config.URL)
 	webhookNoteHook := corewebhook.NewNoteCreateHook(webhookService, idGen)
 	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen)
 	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService)
-	blockingService := coreblocking.NewService(userRepo, blockingRepo, idGen)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
-	pollService := corepoll.NewService(noteRepo, pollRepo, pollVoteRepo, followingRepo, idGen)
+	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
+	pollService := corepoll.NewService(noteRepo, pollRepo, pollVoteRepo, followingRepo, idGen, blockingService)
 	// localDriveStorage は driveStorage が S3 に切り替わっても、
 	// storedInternal=true な drive_file を `/files/:accessKey` で提供する
 	// fallback として常に保持する (#1414)。

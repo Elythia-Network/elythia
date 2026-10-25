@@ -226,20 +226,34 @@ type Service struct {
 }
 
 // NewService creates a new SignupService.
-func NewService(userRepo repository.UserRepository, metaRepo repository.MetaRepository, idGen id.Generator) *Service {
-	return &Service{userRepo: userRepo, metaRepo: metaRepo, idGen: idGen}
+//
+// db runs PromotePending and SignupForApplication inside a transaction.
+// ticketRepo locks the invitation ticket (SELECT FOR UPDATE) and marks it used
+// in the same transaction (#604). appRepo settles the approved signup
+// application in the same transaction as the user creation (#2576). With a
+// nil db the service falls back to the repo-based path without a transaction
+// (mock tests).
+//
+// db と ticketRepo の片方でも無いと、招待 ticket の行ロックが飛び、1 枚から
+// 複数アカウントを作る TOCTOU の窓が開く (handler 側が非 tx 経路で best-effort に
+// MarkUsed するので、消費そのものは失われない)。db と appRepo の片方でも無いと、
+// 承認済みの申請の行ロックが飛び、1 承認から複数アカウントを作る窓が開く。
+// どちらも黙って劣化するので、構築子の必須の引数で受ける (#3825)。2 つは別の
+// 話で、片方が揃っていてももう片方は保証されない (#2682 review M-3)。
+func NewService(
+	userRepo repository.UserRepository,
+	metaRepo repository.MetaRepository,
+	idGen id.Generator,
+	db *gorm.DB,
+	ticketRepo repository.RegistrationTicketRepository,
+	appRepo repository.SignupApplicationRepository,
+) *Service {
+	return &Service{userRepo: userRepo, metaRepo: metaRepo, idGen: idGen, db: db, ticketRepo: ticketRepo, appRepo: appRepo}
 }
 
 // SetPasswordHasher sets the Hasher that signup hashes passwords with. Unset,
 // the default cost is used.
 func (s *Service) SetPasswordHasher(h passwordpkg.Hasher) { s.passwordHasher = h }
-
-// SetDB wires the GORM database handle so PromotePending can run inside a
-// transaction. production の router 配線時に呼ぶ。設定しない場合は repo-based
-// 非 tx パスで動作する (mock テスト用)。
-func (s *Service) SetDB(db *gorm.DB) {
-	s.db = db
-}
 
 // SetUsedUsernameRepo wires the UsedUsernameRepository so Signup / CreatePending
 // reject usernames of deleted accounts (#2080)。未設定なら used_usernames チェックを
@@ -270,21 +284,6 @@ func (s *Service) isUsedUsername(lower string) bool {
 	}
 	used, err := s.usedUsernameRepo.Exists(lower)
 	return err == nil && used
-}
-
-// SetTicketRepo wires the RegistrationTicketRepository so PromotePending tx
-// path で invitation ticket を SELECT FOR UPDATE ロックして MarkUsed まで
-// 同一 transaction で完結できる。emailRequiredForSignup + DisableRegistration
-// 併用時の race fix (#604) に必須。
-func (s *Service) SetTicketRepo(r repository.RegistrationTicketRepository) {
-	s.ticketRepo = r
-}
-
-// SetSignupApplicationRepo wires the approval application repository so
-// PromotePending can settle the application inside the same transaction
-// (#2576)。未配線なら handler 側の best-effort な MarkCompleted に委ねる。
-func (s *Service) SetSignupApplicationRepo(r repository.SignupApplicationRepository) {
-	s.appRepo = r
 }
 
 // SetUserPendingRepo wires the user_pending repository so CreatePending /
@@ -555,7 +554,7 @@ func (s *Service) CreatePluginManaged(pluginName, username string) (*model.User,
 		return nil, errors.New("signup: plugin name is required")
 	}
 	if s.db == nil {
-		return nil, errors.New("signup: plugin-managed accounts need the database handle (SetDB)")
+		return nil, errors.New("signup: plugin-managed accounts need the database handle (NewService db)")
 	}
 	username, err := normalizeAndValidateUsername(username)
 	if err != nil {
@@ -695,7 +694,7 @@ func (s *Service) CreatePendingForApplication(username, email, password string, 
 // row hasn't expired, then creates the user using the stored hashed password
 // (再 hash しない)。成功時に user_pending row を delete する。
 //
-// db が SetDB で wire されている場合は GORM transaction 内で処理し、partial
+// db が NewService で渡されている場合は GORM transaction 内で処理し、partial
 // failure を rollback で巻き戻す (#600 item 2)。さらに invitation 経由なら
 // ticket を SELECT FOR UPDATE で lock して concurrent burst による「1 招待で
 // 複数 user 作成」 race を完全に閉じる (#604)。MarkUsed も同 tx で完了する。
@@ -792,8 +791,9 @@ func (s *Service) checkApprovalGate(pending *model.UserPending) error {
 	if pending.SignupApplicationID != nil {
 		// 本番経路 (promotePendingTx) は settleApplicationTx で申請を確定させる
 		// (#2576)。noTx 経路は申請に触らないが、これは db 未配線の mock 用で、
-		// 本番では router の配線検査 (signup.applicationSettlement) が通ることを
-		// 保証している。
+		// 本番では router が NewService に db と appRepo を渡し、
+		// TestBuiltHandlersHaveNoNilDependencies (internal/server) がどちらも nil で
+		// ないことを見ている (#3825。以前は起動時の配線検査 signup.applicationSettlement)。
 		return nil
 	}
 	meta, err := s.metaRepo.Fetch()
@@ -917,7 +917,7 @@ func (s *Service) promotePendingTx(pending *model.UserPending) (*SignupResult, e
 }
 
 // promotePendingNoTx は db 未配線の mock テスト経路 (transaction 無し)。
-// production では使わない (router 配線時に SetDB 必須)。
+// production では使わない (router は NewService に db を必ず渡す)。
 //
 // IMPORTANT: promotePendingTx と mirror で維持すること。詳細は
 // promotePendingTx の doc コメント参照 (#610 item 3)。
@@ -1263,33 +1263,3 @@ func EffectiveMinimumUsernameLength(meta *model.Meta) int {
 func ViolatesMinimumUsernameLength(username string, meta *model.Meta, policy UsernamePolicy) bool {
 	return violatesMinimumUsernameLength(username, meta, policy)
 }
-
-// HasTicketConsumption reports whether the transactional promote path is wired.
-//
-// 未配線だと promotePending が `promotePendingNoTx` を選ぶ。**失われるのは
-// 消費そのものではなく直列化**: handler 側が非 tx 経路を検知して
-// best-effort に MarkUsed するので (`internal/api/signup/handler.go`)、
-// ticket は最終的に消費される。落ちるのは tx 内の `SELECT FOR UPDATE` と
-// usedById の再確認 (#604) で、その結果 promote 前に作られた複数の pending が
-// 全て通る TOCTOU の窓が開く。ErrInvitationAlreadyUsed も返らなくなる。
-// 本番では必ず配線される (#2682 review M-B)。
-//
-// **承認制 (#2571) の申請とは別の話**。こちらが見るのは
-// registration_ticket で、申請側は appRepo が要る
-// ([Service.HasApplicationSettlement])。片方が配線されていても
-// もう片方は保証されない (#2682 review M-3)。
-func (s *Service) HasTicketConsumption() bool { return s.db != nil && s.ticketRepo != nil }
-
-// HasApplicationSettlement reports whether approved signup applications are
-// settled in the same transaction as user creation.
-//
-// 未配線だと 2 経路が同時に緩む。PromotePending は申請行の
-// `FOR UPDATE` を飛ばし、SignupForApplication は通常の Signup へ落ちて
-// トランザクションの主張ごと捨てる。どちらも**承認 1 件から複数
-// アカウント**を作れる窓が開く (コードのコメントは
-// promotePendingTx / SignupForApplication の両方にある)。
-//
-// handler 側の事後 MarkCompleted が残るので不可逆な取り放題ではなく
-// TOCTOU に留まるが、承認制は「1 承認 = 1 アカウント」を売りにする機能
-// なので一回性の tier として検査する (#2682 review M-3)。
-func (s *Service) HasApplicationSettlement() bool { return s.db != nil && s.appRepo != nil }

@@ -71,13 +71,13 @@ func newIntegrationHandler(t *testing.T) (*apiadmin.Handler, *model.User, *modLo
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
-	signupSvc := signup.NewService(userRepo, metaRepo, idGen)
+	signupSvc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 
 	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetInstanceRepo(repository.NewInstanceRepository(integrationDB))
 	logs := newModLogRecorder(repository.NewModerationLogRepository(integrationDB))
-	h.SetModLogService(moderationlog.New(logs, idGen))
+	h.SetModLogService(moderationlog.New(logs, idGen, nil))
 
 	// admin 行を seed (moderation_log.userId FK)。`adminUser` は package
 	// 共有 (handler_test.go) の `&model.User{ID: "admin1"}` だが、ここでは

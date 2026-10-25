@@ -29,15 +29,16 @@ func TestCreatePluginManaged_RealDB(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x", PreservedUsernames: []string{prefix + "reserved"}, ProhibitedWordsForNameOfUser: []string{"forbidden"}, MinimumUsernameLength: 15}
-	svc := signup.NewService(repository.NewUserRepository(db), metaRepo, idGen)
+	// db を渡さない service は作らない (tx が無ければ作らない)。
+	noTx := signup.NewService(repository.NewUserRepository(db), metaRepo, idGen, nil, nil, nil)
+	_, err := noTx.CreatePluginManaged("bot-plugin", prefix+"bot")
+	require.ErrorContains(t, err, "database handle", "tx が無ければ作らない")
+
+	svc := signup.NewService(repository.NewUserRepository(db), metaRepo, idGen, db, nil, nil)
 	svc.SetUsedUsernameRepo(repository.NewUsedUsernameRepository(db))
 	svc.SetKeypairRepo(repository.NewUserKeypairRepository(db))
 	hook := &countingCreatedHook{}
 	svc.SetWebhookHook(hook)
-
-	_, err := svc.CreatePluginManaged("bot-plugin", prefix+"bot")
-	require.ErrorContains(t, err, "SetDB", "tx が無ければ作らない")
-	svc.SetDB(db)
 
 	// 最小文字数 (15) は運営者の経路と同じく見ない。
 	u, err := svc.CreatePluginManaged("bot-plugin", "  "+prefix+"Bot  ")

@@ -235,7 +235,7 @@ func TestCreateCoalesced_Errors(t *testing.T) {
 	_, err := svc.CreateCoalesced(context.Background(), CreateInput{Type: TypeAbuseReport}, Coalesce{})
 	assert.Error(t, err)
 
-	broken := NewService(closedClient(t), idGen, "")
+	broken := NewService(closedClient(t), idGen, "", nil)
 	_, err = broken.CreateCoalesced(context.Background(), abuseInput("mod", "r1"), Coalesce{})
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrCoalesced)

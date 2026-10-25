@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/core/blocking"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -73,7 +72,7 @@ func TestBlock_RemovesBlockerFromBlockeeLists(t *testing.T) {
 		seedList(t, lists, "bob2", "bob", "alice")
 		seedList(t, lists, "alice1", "alice", "bob")
 		seedList(t, lists, "dave1", "dave", "alice")
-		svc.SetUserListRepo(lists)
+		svc.SetUserListRepoForTest(lists)
 
 		block := svc.Block
 		if silent {
@@ -98,7 +97,7 @@ func TestBlock_ListCleanupErrorsAreBestEffort(t *testing.T) {
 		addUser(ur, "bob")
 		repo := &loggingUserListRepo{MockUserListRepository: testutil.NewMockUserListRepository(), failLookup: true}
 		seedList(t, repo.MockUserListRepository, "bob1", "bob", "alice")
-		svc.SetUserListRepo(repo)
+		svc.SetUserListRepoForTest(repo)
 		hook := &recordingFederationHook{}
 		svc.SetFederationHook(hook)
 
@@ -116,7 +115,7 @@ func TestBlock_ListCleanupErrorsAreBestEffort(t *testing.T) {
 		}
 		seedList(t, repo.MockUserListRepository, "bob1", "bob", "alice")
 		seedList(t, repo.MockUserListRepository, "bob2", "bob", "alice")
-		svc.SetUserListRepo(repo)
+		svc.SetUserListRepoForTest(repo)
 
 		_, err := svc.Block("alice", "bob")
 		require.NoError(t, err)
@@ -128,14 +127,4 @@ func TestBlock_ListCleanupErrorsAreBestEffort(t *testing.T) {
 		assert.Equal(t, []string{"alice"}, listMembers(repo.MockUserListRepository, repo.failedList))
 		assert.Empty(t, listMembers(repo.MockUserListRepository, other), "later lists are still cleaned up")
 	})
-}
-
-func TestHasUserListRepo(t *testing.T) {
-	svc, _, _, _ := newSvc(t)
-	assert.False(t, svc.HasUserListRepo())
-	svc.SetUserListRepo(testutil.NewMockUserListRepository())
-	assert.True(t, svc.HasUserListRepo())
-	var empty blocking.Service
-	empty.SetUnfollower(loggingUnfollower{&eventLog{}})
-	assert.False(t, empty.HasUserListRepo(), "別の依存だけを配線しても false")
 }

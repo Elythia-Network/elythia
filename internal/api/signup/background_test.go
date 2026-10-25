@@ -27,7 +27,7 @@ func TestSignup_MailRunsInTheBackgroundGroup(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	g := bgwork.New()
 	h := apisignup.NewHandler(svc, metaRepo, idGen, g, nil, nil)

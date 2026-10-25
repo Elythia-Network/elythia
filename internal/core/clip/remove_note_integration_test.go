@@ -45,7 +45,7 @@ func TestRemoveNote_ConcurrentRemovesDecrementOnce(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	svc := clip.NewService(repository.NewClipRepository(db), repository.NewClipNoteRepository(db),
-		repository.NewNoteRepository(db), idGen)
+		repository.NewNoteRepository(db), idGen, nil, nil)
 	require.NoError(t, svc.AddNote(user.ID, c.ID, note.ID))
 
 	clippedCount := func() int16 {

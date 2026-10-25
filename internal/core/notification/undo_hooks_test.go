@@ -83,7 +83,7 @@ func TestHook_OnNoteDeleted_Noops(t *testing.T) {
 	nilSvc.OnNoteDeleted(renote("rn", "bob", "alice", false))
 	nilSvc.OnReactionRemoved("alice", "bob", "n1")
 
-	broken := NewHook(NewService(closedClient(t), idGen, ""), nil)
+	broken := NewHook(NewService(closedClient(t), idGen, "", nil), nil)
 	broken.OnNoteDeleted(renote("rn", "bob", "alice", false))
 	broken.OnReactionRemoved("alice", "bob", "n1")
 }

@@ -66,7 +66,7 @@ func TestService_Create_NotificationLoadsNoteAfterWrite(t *testing.T) {
 	base := testutil.NewMockNoteRepository()
 	repo := &rowNoteRepo{MockNoteRepository: base}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen)
+	svc := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen, nil, nil, nil)
 	hook := &loadingHook{}
 	svc.SetNotificationHook(hook)
 
@@ -101,7 +101,7 @@ func TestService_Create_NotificationLoadsNoteAfterWrite(t *testing.T) {
 	assert.Nil(t, base.Notes["quoted"].User)
 
 	repo.rowErr = errors.New("boom")
-	svc2 := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen)
+	svc2 := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen, nil, nil, nil)
 	hook2 := &loadingHook{}
 	svc2.SetNotificationHook(hook2)
 	_, err = svc2.Create(&model.User{ID: "reactor2"}, "n1", "\U0001F44D")
@@ -116,7 +116,7 @@ func TestService_Create_SelfReactionDoesNotLoad(t *testing.T) {
 	base := testutil.NewMockNoteRepository()
 	repo := &rowNoteRepo{MockNoteRepository: base}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen)
+	svc := reaction.NewService(repo, testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen, nil, nil, nil)
 	hook := &loadingHook{}
 	svc.SetNotificationHook(hook)
 	text := "body"

@@ -36,23 +36,17 @@ type Service struct {
 	background *bgwork.Group
 }
 
-// New constructs a Service. Either dependency may be nil during tests
-// or partial wiring; in that case Log degrades to a silent no-op and
-// List returns an empty result without error.
-func New(repo repository.ModerationLogRepository, idGen id.Generator) *Service {
-	return &Service{repo: repo, idGen: idGen}
+// New constructs a Service. Either repository dependency may be nil during
+// tests or partial wiring; in that case Log degrades to a silent no-op and
+// List returns an empty result without error. background is the group the
+// writes run in, so stopping the server generation waits for them (#3661).
+//
+// background が無いと、書き込みは素の goroutine で走り、世代を止めても待たれずに
+// 閉じた DB へ書きに行く。起動もテストも通るので気付けない。構築子の必須の引数で
+// 受ける (#3825)。
+func New(repo repository.ModerationLogRepository, idGen id.Generator, background *bgwork.Group) *Service {
+	return &Service{repo: repo, idGen: idGen, background: background}
 }
-
-// SetBackground sets the group the writes run in, so stopping the server
-// generation waits for them (#3661).
-func (s *Service) SetBackground(g *bgwork.Group) {
-	if s != nil {
-		s.background = g
-	}
-}
-
-// HasBackground reports whether SetBackground received a group.
-func (s *Service) HasBackground() bool { return s != nil && s.background != nil }
 
 // Log records a moderation action performed by moderatorID. The info
 // map is JSON-encoded into moderation_log.info; key names must match

@@ -157,7 +157,7 @@ func TestChatRoomInvitationPush_BodyFitsTheWebPushLimit(t *testing.T) {
 	ctx := context.Background()
 	testRedis.FlushAll(ctx)
 	idGen, _ := id.NewGenerator("aidx")
-	notifSvc := notification.NewService(testRedis.Client, idGen, "")
+	notifSvc := notification.NewService(testRedis.Client, idGen, "", nil)
 	notifSvc.SetUnreadPublishDelay(0)
 	users := testutil.NewMockUserRepository()
 	inviter := maxRemoteUser3438("inviter")

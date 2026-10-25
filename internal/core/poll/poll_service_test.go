@@ -21,7 +21,7 @@ func newSvc(t *testing.T) (*poll.Service, *testutil.MockNoteRepository, *testuti
 	pollRepo := testutil.NewMockPollRepository()
 	voteRepo := testutil.NewMockPollVoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 	return svc, noteRepo, pollRepo, voteRepo
 }
 
@@ -90,7 +90,7 @@ func (s stubBlockingChecker) IsBlocked(_, _ string) (bool, error) { return s.blo
 func TestVote_BlockedByAuthor(t *testing.T) {
 	svc, noteRepo, pollRepo, _ := newSvc(t)
 	seedPollNote(noteRepo, pollRepo, "n1", "author", false, nil)
-	svc.SetBlockingChecker(stubBlockingChecker{blocked: true})
+	svc.SetBlockingCheckerForTest(stubBlockingChecker{blocked: true})
 	err := svc.Vote(&model.User{ID: "viewer"}, "n1", 0)
 	require.ErrorIs(t, err, poll.ErrYouHaveBeenBlocked)
 }
@@ -98,7 +98,7 @@ func TestVote_BlockedByAuthor(t *testing.T) {
 func TestVote_NotBlockedProceeds(t *testing.T) {
 	svc, noteRepo, pollRepo, _ := newSvc(t)
 	seedPollNote(noteRepo, pollRepo, "n1", "author", false, nil)
-	svc.SetBlockingChecker(stubBlockingChecker{blocked: false})
+	svc.SetBlockingCheckerForTest(stubBlockingChecker{blocked: false})
 	err := svc.Vote(&model.User{ID: "viewer"}, "n1", 0)
 	require.NoError(t, err, "ブロックされていなければ通常通り投票できる")
 }
@@ -106,7 +106,7 @@ func TestVote_NotBlockedProceeds(t *testing.T) {
 func TestVote_BlockingCheckerError(t *testing.T) {
 	svc, noteRepo, pollRepo, _ := newSvc(t)
 	seedPollNote(noteRepo, pollRepo, "n1", "author", false, nil)
-	svc.SetBlockingChecker(stubBlockingChecker{err: errStub})
+	svc.SetBlockingCheckerForTest(stubBlockingChecker{err: errStub})
 	err := svc.Vote(&model.User{ID: "viewer"}, "n1", 0)
 	require.ErrorIs(t, err, errStub)
 }
@@ -115,7 +115,7 @@ func TestVote_SelfVoteSkipsBlockCheck(t *testing.T) {
 	svc, noteRepo, pollRepo, _ := newSvc(t)
 	seedPollNote(noteRepo, pollRepo, "n1", "author", false, nil)
 	// blocked=true でも自分の poll への投票は block 判定を skip する。
-	svc.SetBlockingChecker(stubBlockingChecker{blocked: true})
+	svc.SetBlockingCheckerForTest(stubBlockingChecker{blocked: true})
 	err := svc.Vote(&model.User{ID: "author"}, "n1", 0)
 	require.NoError(t, err)
 }
@@ -283,7 +283,7 @@ func TestVote_CountError(t *testing.T) {
 	seedPollNote(noteRepo, pollRepo, "n1", "author", false, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	voteRepo := &failingPollVoteRepo{MockPollVoteRepository: testutil.NewMockPollVoteRepository(), failCount: true}
-	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 	err := svc.Vote(&model.User{ID: "viewer"}, "n1", 0)
 	assert.ErrorIs(t, err, errStub)
 }
@@ -294,7 +294,7 @@ func TestVote_CreateError(t *testing.T) {
 	seedPollNote(noteRepo, pollRepo, "n1", "author", true, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	voteRepo := &failingPollVoteRepo{MockPollVoteRepository: testutil.NewMockPollVoteRepository(), failCreate: true}
-	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+	svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 	err := svc.Vote(&model.User{ID: "viewer"}, "n1", 0)
 	assert.ErrorIs(t, err, errStub)
 }

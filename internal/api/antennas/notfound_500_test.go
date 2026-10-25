@@ -32,7 +32,7 @@ func TestAntennaShow_DBFailureIsNot4xx(t *testing.T) {
 	dbErr := errors.New("dial tcp 127.0.0.1:5432: connect: connection refused")
 	svc := coreantenna.NewService(
 		&dbFailingAntennaRepo{MockAntennaRepository: testutil.NewMockAntennaRepository(), err: dbErr},
-		testutil.NewMockUserRepository(), testRedis.Client, idGen)
+		testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newReq(t, `{"antennaId":"a1"}`)

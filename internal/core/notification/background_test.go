@@ -32,8 +32,7 @@ func TestService_DelayedUnreadRunsInTheBackgroundGroup(t *testing.T) {
 	pub := &stubMainPublisher{}
 	svc.SetMainStreamPublisher(pub)
 	g := bgwork.New()
-	svc.SetBackground(g)
-	assert.True(t, svc.HasBackground())
+	svc.background = g
 
 	ctx := context.Background()
 	_, err := svc.Create(ctx, CreateInput{NotifieeID: "alice", NotifierID: "bob", Type: TypeMention})
@@ -58,7 +57,7 @@ func TestService_UnreadCreatedDuringTheStopIsSentNotDropped(t *testing.T) {
 	pub := &stubMainPublisher{}
 	svc.SetMainStreamPublisher(pub)
 	g := bgwork.New()
-	svc.SetBackground(g)
+	svc.background = g
 
 	ctx := context.Background()
 	require.True(t, g.Go(func(context.Context) {
@@ -70,4 +69,13 @@ func TestService_UnreadCreatedDuringTheStopIsSentNotDropped(t *testing.T) {
 	assert.Zero(t, left)
 	assert.Equal(t, 1, countUnread(pub), "停止の待ちの間に作った通知を送らなかった")
 	assert.Zero(t, g.Dropped(), "停止の待ちの間に作った通知を捨てた")
+}
+
+// NewService は受け取った世代の箱を service に持たせる (#3825)。依存を構築子の
+// 必須の引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
+// 構築子が引数を捨てても build は通るので、ここで固定する。
+func TestNewServiceKeepsDependencies(t *testing.T) {
+	g := bgwork.New()
+	svc := NewService(nil, nil, "", g)
+	assert.Same(t, g, svc.background)
 }

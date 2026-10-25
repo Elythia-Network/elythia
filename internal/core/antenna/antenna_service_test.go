@@ -41,7 +41,7 @@ func newSvc(t *testing.T) (*Service, *testutil.MockAntennaRepository) {
 	t.Helper()
 	testRedis.FlushAll(context.Background())
 	repo := testutil.NewMockAntennaRepository()
-	return NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen), repo
+	return NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil), repo
 }
 
 func closedClient(t *testing.T) *redis.Client {
@@ -314,7 +314,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
 	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "u1"}
 	repo := &failingDeleteRepo{MockAntennaRepository: mock}
-	svc := NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	err := svc.Delete("u1", "a1")
 	assert.Error(t, err)
 }
@@ -414,7 +414,7 @@ func TestNotes_NotFound(t *testing.T) {
 func TestNotes_RedisError(t *testing.T) {
 	repo := testutil.NewMockAntennaRepository()
 	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "u1"}
-	svc := NewService(repo, testutil.NewMockUserRepository(), closedClient(t), idGen)
+	svc := NewService(repo, testutil.NewMockUserRepository(), closedClient(t), idGen, nil)
 	_, err := svc.Notes(context.Background(), "u1", "a1", 10, "", "")
 	assert.Error(t, err)
 }
@@ -588,7 +588,7 @@ func TestOnNoteCreated_NilArgsAreNoOp(t *testing.T) {
 
 func TestOnNoteCreated_RepoErrorIsNoOp(t *testing.T) {
 	repo := testutil.NewMockAntennaRepository()
-	svc := NewService(&listFailRepo{repo}, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := NewService(&listFailRepo{repo}, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	text := "hi"
 	svc.OnNoteCreated(&model.Note{ID: "n1", Text: &text, Visibility: model.NoteVisibilityPublic}, &model.User{ID: "u1"})
 }
@@ -1655,7 +1655,7 @@ func (p negLimitPolicy) GetUserPolicies(string) map[string]any {
 // 負の antennaLimit は upstream と同じく「1 件も作れない」こと (上限なしにしない)。
 func TestCreate_NegativeAntennaLimitDenies(t *testing.T) {
 	svc, repo := newSvc(t)
-	svc.SetRolePolicyProvider(negLimitPolicy{limit: -1})
+	svc.rolePolicyProvider = negLimitPolicy{limit: -1}
 	_, err := svc.Create(CreateInput{OwnerID: "u1", Name: "alpha", Src: "home"})
 	require.ErrorIs(t, err, ErrTooManyAntennas)
 	assert.Empty(t, repo.Antennas)

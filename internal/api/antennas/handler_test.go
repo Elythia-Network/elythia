@@ -49,7 +49,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockAntennaRepository, *testu
 	testRedis.FlushAll(context.Background())
 	repo := testutil.NewMockAntennaRepository()
 	noteRepo := testutil.NewMockNoteRepository()
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	return NewHandler(svc, noteRepo, idGen, nil, nil, nil, nil, nil, nil), repo, noteRepo
 }
 
@@ -139,7 +139,7 @@ func (r *failingAntennaRepo) Create(_ *model.Antenna) error { return errors.New(
 func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
 	repo := &failingAntennaRepo{MockAntennaRepository: mock}
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"name":"alpha","src":"all","keywords":[["foo"]],"excludeKeywords":[],"users":[],"caseSensitive":false,"withReplies":false,"withFile":false}`)
 	setUser(c, "alice")
@@ -154,7 +154,7 @@ func newHandlerWithUserList(t *testing.T) (*Handler, *testutil.MockAntennaReposi
 	testRedis.FlushAll(context.Background())
 	repo := testutil.NewMockAntennaRepository()
 	lists := testutil.NewMockUserListRepository()
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	svc.SetUserListRepo(lists)
 	return NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil), repo, lists
 }
@@ -332,7 +332,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
 	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	repo := &failingUpdateRepo{MockAntennaRepository: mock}
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1","name":"x"}`)
 	setUser(c, "alice")
@@ -433,7 +433,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
 	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	repo := &failingDeleteRepo{MockAntennaRepository: mock}
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")
@@ -469,7 +469,7 @@ func (r *listFailRepo) ListByUser(_ string) ([]*model.Antenna, error) {
 
 func TestList_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockAntennaRepository: testutil.NewMockAntennaRepository()}
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
@@ -524,7 +524,7 @@ func TestNotes_RedisError(t *testing.T) {
 	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), closed, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), closed, idGen, nil)
 	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)
 	setUser(c, "alice")
@@ -580,7 +580,7 @@ func TestNotes_PagingUntilId(t *testing.T) {
 func TestNotes_NoteRepoError(t *testing.T) {
 	repo := testutil.NewMockAntennaRepository()
 	repo.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
-	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen)
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
 	noteRepo := &failingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository()}
 	h := NewHandler(svc, noteRepo, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"antennaId":"a1"}`)

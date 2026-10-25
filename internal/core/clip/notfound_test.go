@@ -40,7 +40,7 @@ func TestClipService_DBFailureIsNotNotFound(t *testing.T) {
 	newClipFailing := func() *clip.Service {
 		return clip.NewService(
 			&failingClipRepo{MockClipRepository: testutil.NewMockClipRepository(), err: dbErr},
-			testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+			testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	}
 
 	for _, tt := range []struct {
@@ -72,7 +72,7 @@ func TestClipService_DBFailureIsNotNotFound(t *testing.T) {
 		repo := testutil.NewMockClipRepository()
 		require.NoError(t, repo.Create(&model.Clip{ID: "c1", UserID: "u1", Name: "c"}))
 		svc := clip.NewService(repo, testutil.NewMockClipNoteRepository(),
-			&failingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: dbErr}, idGen)
+			&failingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: dbErr}, idGen, nil, nil)
 
 		err := svc.AddNote("u1", "c1", "n1")
 		require.Error(t, err)
@@ -115,7 +115,7 @@ func TestClipService_PairLookupDBFailure(t *testing.T) {
 			Visibility: model.NoteVisibilityPublic}
 		pairRepo := testutil.NewMockClipNoteRepository()
 		svc := clip.NewService(clipRepo,
-			&failingPairRepo{MockClipNoteRepository: pairRepo, err: dbErr}, noteRepo, idGen)
+			&failingPairRepo{MockClipNoteRepository: pairRepo, err: dbErr}, noteRepo, idGen, nil, nil)
 		return svc, pairRepo
 	}
 

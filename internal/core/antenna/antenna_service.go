@@ -164,27 +164,27 @@ func (s *Service) SetSensitiveChannelLookup(l SensitiveChannelLookup) {
 	s.sensitiveChannels = l
 }
 
-// SetRolePolicyProvider wires a role policy source so Create enforces the
-// `antennaLimit` role policy (#1029).
-func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
-	s.rolePolicyProvider = p
-}
-
 // NewService constructs an antenna Service. userRepo は現状未使用だが、将来
 // 拡張のため受け取る (nil 許容)。home / list source を有効にするには、別途
 // SetFollowingRepo / SetUserListRepo で repository を注入する必要がある。
+//
+// rolePolicyProvider makes Create enforce the `antennaLimit` role policy
+// (#1029). 無いとアンテナを無制限に作れ、しかも黙って劣化するので、構築子の
+// 必須の引数で受ける (#3825)。
 func NewService(
 	repo repository.AntennaRepository,
 	userRepo repository.UserRepository,
 	client *redis.Client,
 	idGen id.Generator,
+	rolePolicyProvider role.PolicyProvider,
 ) *Service {
 	return &Service{
-		repo:     repo,
-		userRepo: userRepo,
-		client:   client,
-		idGen:    idGen,
-		clock:    time.Now,
+		repo:               repo,
+		userRepo:           userRepo,
+		client:             client,
+		idGen:              idGen,
+		rolePolicyProvider: rolePolicyProvider,
+		clock:              time.Now,
 	}
 }
 
@@ -1259,9 +1259,3 @@ func acctOf(u *model.User) string {
 	}
 	return acct
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと `antennaLimit` が効かず、アンテナを無制限に作れる。起動時検査に
-// 使う (#2683)。
-func (s *Service) HasRolePolicyProvider() bool { return s.rolePolicyProvider != nil }

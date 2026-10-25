@@ -38,7 +38,7 @@ func TestBuildCore_WiresTheConfiguredNoteHookConcurrency(t *testing.T) {
 				config: &config.Config{URL: "https://example.tld", Host: "example.tld", NoteHookConcurrency: tt.configured},
 				redis:  &cache.RedisClients{},
 			}
-			c := s.buildCore(&wiring{}, idGen, nil)
+			c := s.buildCore(&wiring{}, idGen, nil, nil)
 			assert.Equal(t, tt.want, c.noteCreate.HookConcurrency())
 		})
 	}

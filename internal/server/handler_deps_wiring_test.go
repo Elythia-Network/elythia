@@ -26,8 +26,9 @@ var requiredDepHandlers = []string{
 }
 
 // handlerNilAllowed lists the fields that stay nil on a server built by
-// newServerWithConfig, keyed by "<apiHandlers field>.<handler field>" or
-// "<routeParts field>.<component field>". The reason says on which path the
+// newServerWithConfig, keyed by "<apiHandlers field>.<handler field>",
+// "<routeParts field>.<component field>" or "<coreParts field>.<component
+// field>". The reason says on which path the
 // field is actually nil.
 //
 // #3817 の作業中に clips.noteRepo の未配線が見つかり、#3818 で配線した。
@@ -43,9 +44,15 @@ var handlerNilAllowed = map[string]string{
 	// newPluginNotificationDispatcher が nil でないとき (通知を受け取るプラグインが
 	// 居るとき) だけ SetMessageObserver を呼ぶ。テストの組み立てはプラグインを登録しない。
 	"chatService.messageObserver": "通知を受け取るプラグインが居ないときは配線しない (newPluginNotificationDispatcher が nil)",
+	// 依存ではなく状態。updated の間引きの窓 (clip ごと) で、最初の publishUpdated が
+	// 作る。組み立てた直後はまだクリップを更新していないので nil。
+	"clipService.pendingUpdated": "依存ではなく状態。最初の publishUpdated が作るので、組み立てた直後は nil",
+	// テストだけが stream_publish_test.go で差し替える。setupRoutes は入れず、nil の
+	// とき armUpdatedLocked は time.AfterFunc を使う。
+	"clipService.afterFunc": "テスト専用の seam。setupRoutes は入れず、nil のとき time.AfterFunc を使う",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -55,7 +62,8 @@ var handlerNilAllowed = map[string]string{
 // 通った後なので同じ規則で見る。
 //
 // 対象は、buildHandlers が作った handler のうち requiredDepHandlers に並べたもの
-// (#3817) と、setupRoutes の本文で作る部品のうち routeParts に持たせたもの全部 (#3823)。
+// (#3817) と、setupRoutes の本文で作る部品のうち routeParts に持たせたもの全部 (#3823)、
+// buildCore が作る部品のうち coreParts に持たせたもの全部 (#3825)。
 //
 // フィールドは unexported だが、同じ型の値を reflect で辿り IsNil を見るだけなので
 // unsafe は要らない (IsNil は unexported なフィールドの値にも使える)。構造体の値の
@@ -69,16 +77,31 @@ func TestBuiltHandlersHaveNoNilDependencies(t *testing.T) {
 	for _, name := range requiredDepHandlers {
 		c.component(t, "apiHandlers", name, hv.FieldByName(name))
 	}
-	// routeParts の欄は全部見る。欄を足したら、そのまま検査の対象になる。
+	// routeParts と coreParts の欄は全部見る。欄を足したら、そのまま検査の対象になる。
 	pv := reflect.ValueOf(srv.builtRouteParts)
-	require.Positive(t, pv.NumField(), "routeParts に欄が 1 つも無い")
-	for i := range pv.NumField() {
-		name := pv.Type().Field(i).Name
-		// 許可リストの key は欄の名前から作るので、apiHandlers と同じ名前があると
-		// どちらの項目か分からなくなる。
-		require.False(t, hv.FieldByName(name).IsValid(),
-			"routeParts.%s が apiHandlers の欄と同じ名前 (handlerNilAllowed の key が衝突する)", name)
-		c.component(t, "routeParts", name, pv.Field(i))
+	cv := reflect.ValueOf(srv.builtCore)
+	containers := []struct {
+		name string
+		v    reflect.Value
+	}{{"routeParts", pv}, {"coreParts", cv}}
+	seen := map[string]string{}
+	for _, name := range requiredDepHandlers {
+		seen[name] = "apiHandlers"
+	}
+	for _, ct := range containers {
+		require.Positive(t, ct.v.NumField(), "%s に欄が 1 つも無い", ct.name)
+		for i := range ct.v.NumField() {
+			name := ct.v.Type().Field(i).Name
+			// 許可リストの key は欄の名前から作るので、ほかの入れ物 (apiHandlers の
+			// 欄を含む) と同じ名前があると、どちらの項目か分からなくなる。
+			require.False(t, hv.FieldByName(name).IsValid(),
+				"%s.%s が apiHandlers の欄と同じ名前 (handlerNilAllowed の key が衝突する)", ct.name, name)
+			if prev, dup := seen[name]; dup {
+				require.Failf(t, "欄の名前が衝突する", "%s.%s が %s の欄と同じ名前 (handlerNilAllowed の key が衝突する)", ct.name, name, prev)
+			}
+			seen[name] = ct.name
+			c.component(t, ct.name, name, ct.v.Field(i))
+		}
 	}
 	used, checked := c.used, c.checked
 
@@ -88,6 +111,9 @@ func TestBuiltHandlersHaveNoNilDependencies(t *testing.T) {
 		comp, field, ok := strings.Cut(key, ".")
 		require.True(t, ok, "nestedDepChecks の key %q が <部品>.<フィールド> でない", key)
 		v := pv.FieldByName(comp)
+		if !v.IsValid() {
+			v = cv.FieldByName(comp)
+		}
 		if !v.IsValid() {
 			v = hv.FieldByName(comp)
 		}
@@ -127,7 +153,8 @@ type nilDepCheck struct {
 }
 
 // component checks every nilable field of the struct f points to. container
-// and name say where f came from ("apiHandlers" / "routeParts" and its field).
+// and name say where f came from ("apiHandlers" / "routeParts" / "coreParts"
+// and its field).
 func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.Value) {
 	t.Helper()
 	require.True(t, f.IsValid(), "%s に %s の欄が無い (rename した?)", container, name)
@@ -159,8 +186,8 @@ func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.V
 	assert.Positive(t, n, "%s.%s に nil になりうるフィールドが 1 つも無い (抽出が空振りしていないか)", container, name)
 }
 
-// requiredDepChecks names fields that #3817 and #3823 turned into constructor
-// arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
+// requiredDepChecks names fields that #3817, #3823 and #3825 turned into
+// constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
 var requiredDepChecks = []string{
 	"webhook.rolePolicyProvider",
 	"notifications.entityPacker", "notifications.noteHider", "notifications.moderatorChecker",
@@ -209,6 +236,14 @@ var requiredDepChecks = []string{
 	// 以前の表の述語 (HasCarryOverRepos) は setter のままの blockQueue も見ていた。
 	"accountMover.blockQueue",
 	"remoteStatsFetcher.hostAllowed", "remoteUserResolver.softwareBlocker",
+	// ここから #3825 (buildCore で作る部品)。
+	"blockingService.unfollower", "blockingService.followRequestCanceller",
+	"blockingService.userListRepo", "blockingService.roomInvitations",
+	"reactionService.userRoles", "reactionService.mediaSilence", "reactionService.blockingChecker",
+	"signupService.db", "signupService.ticketRepo", "signupService.appRepo",
+	"clipService.rolePolicyProvider", "clipService.streamPublisher",
+	"antennaService.rolePolicyProvider", "pollService.blockingChecker",
+	"modLogService.background", "notificationService.background",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

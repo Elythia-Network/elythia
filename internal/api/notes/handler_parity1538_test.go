@@ -93,8 +93,7 @@ func TestPollsVote_Blocked(t *testing.T) {
 	voteRepo := testutil.NewMockPollVoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
-	pollSvc.SetBlockingChecker(blockStub{blocked: true})
+	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, blockStub{blocked: true})
 	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, pollSvc, nil, idGen)
 	seedPollNote(noteRepo, pollRepo, model.NoteVisibilityPublic, nil)
 

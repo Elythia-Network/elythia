@@ -26,7 +26,7 @@ func newService(t *testing.T) (
 	emojiRepo := testutil.NewMockEmojiRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := reaction.NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen)
+	svc := reaction.NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	return svc, noteRepo, reactRepo, emojiRepo, followingRepo
 }
 
@@ -208,6 +208,7 @@ func TestService_Create_RepoError(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "👍")
 	assert.Error(t, err)
@@ -237,6 +238,7 @@ func TestService_Create_ReplaceDeleteError(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "❤")
 	assert.Error(t, err)
@@ -263,6 +265,7 @@ func TestService_Create_ReplaceConcurrentZeroAffected(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	notifications := &recordingNotificationHook{}
 	federation := &recordingFederationHook{}
@@ -336,6 +339,7 @@ func TestService_Delete_RepoError(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	err := svc.Delete(&model.User{ID: "viewer"}, "n1")
 	assert.Error(t, err)
@@ -416,6 +420,7 @@ func TestIsPureRenote_Variants(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -490,7 +495,7 @@ func (s *stubBlockingChecker) IsBlocked(_, _ string) (bool, error) {
 func TestService_Create_Blocked(t *testing.T) {
 	svc, repo, _, _, _ := newService(t)
 	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
-	svc.SetBlockingChecker(&stubBlockingChecker{blocked: true})
+	svc.SetBlockingCheckerForTest(&stubBlockingChecker{blocked: true})
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "👍")
 	require.ErrorIs(t, err, reaction.ErrBlocked)
 }
@@ -498,7 +503,7 @@ func TestService_Create_Blocked(t *testing.T) {
 func TestService_Create_BlockingCheckerError(t *testing.T) {
 	svc, repo, _, _, _ := newService(t)
 	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
-	svc.SetBlockingChecker(&stubBlockingChecker{err: errStubReaction})
+	svc.SetBlockingCheckerForTest(&stubBlockingChecker{err: errStubReaction})
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "👍")
 	assert.ErrorIs(t, err, errStubReaction)
 }
@@ -507,7 +512,7 @@ func TestService_Create_BlockingCheckerSelfSkipped(t *testing.T) {
 	// 自分自身のノートにはblockチェックが走らない
 	svc, repo, _, _, _ := newService(t)
 	seedNote(repo, "n1", "viewer", model.NoteVisibilityPublic)
-	svc.SetBlockingChecker(&stubBlockingChecker{blocked: true})
+	svc.SetBlockingCheckerForTest(&stubBlockingChecker{blocked: true})
 	_, err := svc.Create(&model.User{ID: "viewer"}, "n1", "👍")
 	require.NoError(t, err)
 }
@@ -838,7 +843,7 @@ func TestService_Create_RoleGatedEmoji(t *testing.T) {
 	t.Run("reactor without role -> heart", func(t *testing.T) {
 		svc, repo, _, emojiRepo, _ := newService(t)
 		seedLocalEmoji(emojiRepo, "vip", false, []string{"role-vip"})
-		svc.SetUserRolesProvider(stubRoles{byUser: map[string][]*model.Role{}})
+		svc.SetUserRolesProviderForTest(stubRoles{byUser: map[string][]*model.Role{}})
 		seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
 		r, err := svc.Create(&model.User{ID: "viewer"}, "n1", ":vip:")
 		require.NoError(t, err)
@@ -847,7 +852,7 @@ func TestService_Create_RoleGatedEmoji(t *testing.T) {
 	t.Run("reactor with role -> kept", func(t *testing.T) {
 		svc, repo, _, emojiRepo, _ := newService(t)
 		seedLocalEmoji(emojiRepo, "vip", false, []string{"role-vip"})
-		svc.SetUserRolesProvider(stubRoles{byUser: map[string][]*model.Role{"viewer": {{ID: "role-vip"}}}})
+		svc.SetUserRolesProviderForTest(stubRoles{byUser: map[string][]*model.Role{"viewer": {{ID: "role-vip"}}}})
 		seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
 		r, err := svc.Create(&model.User{ID: "viewer"}, "n1", ":vip:")
 		require.NoError(t, err)
@@ -859,7 +864,7 @@ func TestService_Create_MediaSilencedHostHeart(t *testing.T) {
 	host := "media.bad"
 	svc, repo, _, emojiRepo, _ := newService(t)
 	emojiRepo.Emojis["custom@media.bad"] = &model.Emoji{ID: "e_m", Name: "custom"}
-	svc.SetMediaSilenceChecker(stubMediaSilence{hosts: map[string]bool{"media.bad": true}})
+	svc.SetMediaSilenceCheckerForTest(stubMediaSilence{hosts: map[string]bool{"media.bad": true}})
 	seedNote(repo, "n1", "author", model.NoteVisibilityPublic)
 	r, err := svc.Create(&model.User{ID: "ruser", Host: &host}, "n1", ":custom:")
 	require.NoError(t, err)
@@ -922,6 +927,7 @@ func TestService_Delete_ConcurrentZeroAffected(t *testing.T) {
 		testutil.NewMockEmojiRepository(),
 		testutil.NewMockFollowingRepository(),
 		idGen,
+		nil, nil, nil,
 	)
 	err := svc.Delete(&model.User{ID: "viewer"}, "n1")
 	assert.ErrorIs(t, err, reaction.ErrReactionNotFound)
@@ -1032,7 +1038,7 @@ func TestService_Create_ReplaceAfterConcurrentUndoStoresNew(t *testing.T) {
 	mock.Reactions["existing"] = &model.NoteReaction{ID: "existing", UserID: "viewer", NoteID: "n1", Reaction: "👍"}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := reaction.NewService(noteRepo, &undoRacingDeleteRepo{MockNoteReactionRepository: mock},
-		testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen)
+		testutil.NewMockEmojiRepository(), testutil.NewMockFollowingRepository(), idGen, nil, nil, nil)
 	got, err := svc.Create(&model.User{ID: "viewer"}, "n1", "🎉")
 	require.NoError(t, err)
 	assert.Equal(t, "🎉", got)

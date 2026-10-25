@@ -465,12 +465,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Core services (#3686)。作るのは buildCore (wiring_core.go) で、ここでは今までと
 	// 同じ名前の別名を置くだけにする。移したのは、作るだけで DB にも Redis にも外部にも
 	// 触らず、goroutine も shutdown hook も持たず、依存が repository と先に作った core
-	// だけのもの。roleService は上の buildRole で作って引数で渡す (#3825)。**setter の呼び出しは 1 つも動かしていない** (下の元の位置のまま)。
+	// だけのもの。roleService は上の buildRole で作って引数で渡す (#3825)。**残った setter は、
+	// 下の元の位置のまま呼ぶ** (#3825 で構築子の引数に置き換えたものを除く)。
 	// 構築の途中で動く処理から見える配線を変えないため (docs/architecture.md 4.1)。
 	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
 	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
 	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
-	coreSvcs := s.buildCore(w, idGen, roleService)
+	coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)
 	w.core = coreSvcs
 	featuredService := coreSvcs.featured
 	hashtagService := coreSvcs.hashtag
@@ -526,7 +527,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Ranking と同 semantics、未配線だと sensitive tag が featured に出る
 	// drop-in regression が再発するので必ず wire する)。
 	hashtagService.SetMetaRepo(metaRepo)
-	modLogService.SetBackground(s.background) // #3661: 世代の停止で待つ
 	// 現在のパスワードを照合する i/ 配下の API の照合失敗をアカウント単位で数える。
 	// route ごとの limiter に置くと、token を持つだけの第三者が被害者の
 	// i/regenerate-token を使い切れる (passwordguard の package doc)。
@@ -661,7 +661,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Antennas (Phase 4.3)
 	antennaService.SetFollowingRepo(followingRepo)
 	antennaService.SetUserListRepo(userListRepo)
-	antennaService.SetRolePolicyProvider(roleService) // #1029: antennaLimit
 	// excludeNotesInSensitiveChannel の判定 (upstream AntennaService:117)。
 	antennaService.SetSensitiveChannelLookup(&sensitiveChannelLookup{repo: channelRepo})
 	// 宙吊り ID の除去は「本当に DB に無いか」を primary で確かめてから行う
@@ -672,11 +671,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	antennaService.SetUnreadRepo(antennaNoteUnreadRepo)
 	noteCreateService.SetAntennaHook(coreantenna.NewNoteCreateHook(antennaService))
 
-	// Clips (Phase 4.4)
-	clipService.SetRolePolicyProvider(roleService) // #1029: clipLimit / noteEachClipsLimit
-	// クリップの更新・ノートの追加と削除・クリップの削除を stream の clip チャンネルへ
-	// 流す (本家 2026.10.1、#3809)。
-	clipService.SetStreamPublisher(stream.NewClipStreamPublisher(streamPubSub))
+	// Clips (Phase 4.4) の rolePolicyProvider と streamPublisher は、buildCore で構築子に
+	// 渡す (#3825)。
 
 	noteCreateService.SetFeaturedRanking(featuredService)
 
@@ -701,7 +697,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reactionService.SetCountWriter(reactionCountWriter)
 
 	// Notifications (Redis Streams)
-	notificationService.SetBackground(s.background) // #3661: 世代の停止で送り切る
 	notificationService.SetNoteUnreadRepo(noteUnreadRepo)
 	notificationHook.SetNoteUnreadRepo(noteUnreadRepo)
 	// note 通知 (notify='normal' フォロワーへの投稿通知、#1559) の fan-out 依存。
@@ -844,22 +839,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Blocking & Muting
 	blockingService.SetRelationReloadPublisher(relationReloadPublisher)
-	// block 時に保留中の follow request を双方向で取り消す。upstream
-	// UserBlockingService.block の cancelRequest 相当。
-	blockingService.SetFollowRequestCanceller(followingService)
-	// block で既存のフォローを双方向に解除する。following.Service の unfollow を
-	// 通すので、カウント・チャート・Undo(Follow) / Reject(Follow) の配送・
-	// unfollow のイベントが通常の解除と同じになる (#3330)。
-	blockingService.SetUnfollower(followingService)
-	// block で、ブロックされた側のリストからブロックした人を外す
-	// (本家 removeFromList、#3330)。
-	blockingService.SetUserListRepo(userListRepo)
-	// block で、互いの持つチャットルームへの招待を消す (本家 removeRoomInvitations)。
-	blockingService.SetRoomInvitationRemover(chatRepo)
 	mutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	renoteMutingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetBlockingChecker(blockingService)
-	reactionService.SetBlockingChecker(blockingService)
 	notificationHook.SetMuteChecker(mutingService)
 
 	// Polls
@@ -868,8 +850,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ようにする (#690)。
 	pollService.SetEventPublisher(noteEventPub)
 	pollService.SetNotificationHook(notificationHook)
-	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
-	pollService.SetBlockingChecker(blockingService)
 	// poll federation hook の deliverService は buildFederation で作る (#3688)。
 	// `pollService.SetFederationHook(...)` の呼び出しは、setter を元の位置に残す
 	// 規則 (docs/architecture.md 4.1) により、下方の wire-up の位置のまま。
@@ -1187,11 +1167,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 片付ける候補を「いつから消えているか」で並べる。
 	instanceService.SetGoneRecorder(goneInstanceRepo)
 	federationResolver.SetInstanceTracker(instanceService)
-	// #1538: reactionAcceptance gate — role-gated emoji + media-silenced host。
-	// instanceService 生成後 (= 本ブロック) で配線する (reactionService は line ~281
-	// で先に作られるため、media-silence checker はここで遅延注入する)。
-	reactionService.SetUserRolesProvider(roleService)
-	reactionService.SetMediaSilenceChecker(instanceService)
 	// **サイレンスしたホストからのフォローを承認制にする。** 未配線だと
 	// 未施錠アカウントが承認なしでフォローされ、followers 限定ノートが
 	// 配送される (upstream UserFollowingService の 4 つ目の OR 条件)。
@@ -1795,13 +1770,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// Signup (public)
 	signupService.SetUserPendingRepo(userPendingRepo)
-	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定をアカウント
-	// 作成と同じ tx に入れる (#2576)。
-	signupService.SetSignupApplicationRepo(signupApplicationRepo)
-	// PromotePending を transaction 化して partial failure rollback と
-	// invitation ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
-	signupService.SetDB(s.db)
-	signupService.SetTicketRepo(signupTicketRepo)
 	// パスワードをハッシュする5つの部品へ、設定のbcryptCostから作ったHasherを渡す(#3780)。
 	signupService.SetPasswordHasher(s.passwordHasher)
 	// **入れ忘れると黙って劣化する依存は、構築子の必須の引数で渡す (#3823)。**
@@ -3986,6 +3954,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//     制約は無く、重複チェックはこの endpoint だけが持つので、劣化しても
 	//     防げるのは事前の案内だけという点で他の項目と tier が違う。
 	//     移設で新しく生まれた面なので、棚卸し (#2674) の対象には入れる
+	s.builtCore = coreParts{
+		blockingService:     blockingService,
+		reactionService:     reactionService,
+		signupService:       signupService,
+		clipService:         clipService,
+		antennaService:      antennaService,
+		pollService:         pollService,
+		modLogService:       modLogService,
+		notificationService: notificationService,
+	}
 	s.builtRouteParts = routeParts{
 		admin:            adminHandler,
 		signup:           signupHandler,
@@ -4042,8 +4020,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"プラグイン間通信でブロックリストと連合ポリシーが効かなくなる"},
 		{"inbox.signatureVerifier", inboxProcessor.HasSignatureVerifier(),
 			"HTTP 署名検証・連合ブロック・actor 一致・replay 判定が同時に飛ぶ"},
-		{"signup.ticketConsumption", signupService.HasTicketConsumption(),
-			"招待 ticket の行ロックが飛び、1 枚から複数アカウントを作る窓が開く"},
 		{"instance.hostBoundNodeinfoFetcher", metadataFetcher.HasHostBoundFetcher(),
 			"nodeinfo の取得が redirect の飛び先に縛られなくなり、任意の host が返した JSON を instance 行へ書き戻せる"},
 		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
@@ -4074,8 +4050,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"regenerate-token / revoke-token / delete-account の後も、失効した token で張られた WebSocket が通知・DM を受け取り続ける"},
 		{"oauth.streamRevoker", oauthHandler.HasStreamRevoker(),
 			"authorization code 再利用で失効させた token の WebSocket が開いたまま残る"},
-		{"signup.applicationSettlement", signupService.HasApplicationSettlement(),
-			"承認済み申請の行ロックが飛び、1 承認から複数アカウントを作る窓が開く"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 		{"inbox.replayGuard", inboxProcessor.HasInboxReplayGuard(),
@@ -4087,8 +4061,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"reaction.userRolesProvider", reactionService.HasUserRolesProvider(),
-			"ロール限定カスタム絵文字を誰でも使える"},
 		{"drive.roleChecker", driveService.HasRoleChecker(),
 			"MIME 許可リスト・NSFW 強制・ファイルサイズ上限・容量上限が同時に無効になる"},
 		{"drive.moderationLog", driveService.HasModerationLog(),
@@ -4119,12 +4091,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"chatRoom channel の購読でメンバーシップ検査が skip され、誰でも任意の room を購読できる"},
 		{"note.driveFileRepo", noteCreateService.HasDriveFileRepo(),
 			"他人の drive file ID を notes/create の fileIds に指定して自分の note に貼れる (IDOR)"},
-		{"antenna.rolePolicyProvider", antennaService.HasRolePolicyProvider(),
-			"antennaLimit が効かずアンテナを無制限に作れる"},
-		{"clip.rolePolicyProvider", clipService.HasRolePolicyProvider(),
-			"clipLimit と noteEachClipsLimit が両方とも効かない"},
-		{"clip.streamPublisher", clipService.HasStreamPublisher(),
-			"クリップの変更と削除が clip チャンネルへ流れず、デッキのクリップのカラムが追従しない"},
 
 		// ここから #2708。#2683 で「既存 entry と基準上区別できない」まで取り込み、
 		// 残していた同クラスの依存。
@@ -4148,8 +4114,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"署名鍵は payload に載せず配送時に引くので、未配線だと全ての AP 配送が POST されないまま失敗する (連合が止まる)"},
 		{"notes.metaRepo", notesHandler.HasMetaRepo(),
 			"blocked-host の note が post-fetch 経路で漏れる"},
-		{"reaction.mediaSilenceChecker", reactionService.HasMediaSilenceChecker(),
-			"media-silenced な host からのカスタム絵文字リアクションがそのまま出る"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
 			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
 		{"following.silencedHostChecker", followingService.HasSilencedHostChecker(),
@@ -4172,23 +4136,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"follow 系の main stream / Webhook と blocking/create・delete で pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.meUpdatedPublisher", followingService.HasMeUpdatedPublisher(),
 			"フォロー申請の作成・承認・取り消しで meUpdated が流れず、受け取った申請の印がリロードまで変わらない"},
-		{"blocking.unfollower", blockingService.HasUnfollower(),
-			"ブロックしても既存のフォローが外れず、相手のサーバーへ Undo(Follow) / Reject(Follow) も届かない"},
-		{"blocking.userListRepo", blockingService.HasUserListRepo(),
-			"ブロックしても、ブロックされた側のリストにブロックした人が残り、リストのタイムラインに投稿が流れ続ける"},
-		{"blocking.roomInvitationRemover", blockingService.HasRoomInvitationRemover(),
-			"ブロックしても互いのチャットルームへの招待が残り、ブロックした相手のルームに参加できる"},
 		// #3330: 一覧・単体の UserDetailed のピン留め・移行先を users/show と同じ規則で埋める。
 		{"userpack.detailExtrasMany", sharedUserPacker.HasDetailExtrasMany(),
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
-		{"blocking.followRequestCanceller", blockingService.HasFollowRequestCanceller(),
-			"block しても保留中の follow request が双方向に残り、block 中に承認されるとフォロー関係が成立する"},
-		{"reaction.blockingChecker", reactionService.HasBlockingChecker(),
-			"自分をブロックしている相手の投稿にリアクションできる (IsBlocked(target.UserID, user.ID))"},
-		{"poll.blockingChecker", pollService.HasBlockingChecker(),
-			"自分をブロックしている相手のアンケートに投票できる (IsBlocked(target.UserID, user.ID))"},
 		{"notes.blockingRepo", notesHandler.HasBlockingRepo(),
 			"ブロック / ミュート / チャンネルミュートの post-fetch filter が丸ごと skip される"},
 		{"notes.mutingRepo", notesHandler.HasMutingRepo(),
@@ -4222,12 +4174,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"世代を止めても受信後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"federation.resolver.background", federationResolver.HasBackground(),
 			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"moderationlog.background", modLogService.HasBackground(),
-			"世代を止めてもモデレーションログのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"i.background", iHandler.HasBackground(),
 			"世代を止めてもrel=meの検証と確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"notification.background", notificationService.HasBackground(),
-			"世代を止めても遅らせて送るunreadNotificationとWeb Pushを待たず、閉じたDBとqueueを使う"},
 	})
 }
 

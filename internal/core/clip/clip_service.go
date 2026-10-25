@@ -85,16 +85,6 @@ type pendingUpdated struct {
 	stop func() bool
 }
 
-// SetStreamPublisher wires the publisher that tells `clip` channel
-// subscribers about clip updates and deletion (#3809).
-func (s *Service) SetStreamPublisher(p StreamPublisher) {
-	s.streamPublisher = p
-}
-
-// HasStreamPublisher reports whether SetStreamPublisher received a publisher.
-// 未配線だとクリップのカラムが変更に追従しない。起動時検査に使う。
-func (s *Service) HasStreamPublisher() bool { return s.streamPublisher != nil }
-
 // publishUpdated publishes `updated` for clipID, coalescing bursts like
 // upstream: the first change goes out at once and opens a window; changes
 // inside the window are published once, UpdatedThrottle after the last one.
@@ -175,25 +165,31 @@ func timeAfterFunc(d time.Duration, f func()) func() bool {
 	return time.AfterFunc(d, f).Stop
 }
 
-// SetRolePolicyProvider wires a role policy source so Create / AddNote
-// enforce the clipLimit / noteEachClipsLimit role policies (#1029).
-func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
-	s.rolePolicyProvider = p
-}
-
 // NewService constructs a clip Service.
+//
+// rolePolicyProvider makes Create / AddNote enforce the clipLimit /
+// noteEachClipsLimit role policies (#1029). streamPublisher tells `clip`
+// channel subscribers about clip updates and deletion (#3809).
+//
+// どちらも無いと黙って劣化する (clipLimit と noteEachClipsLimit が両方とも
+// 効かない / デッキのクリップのカラムが変更に追従しない) ので、構築子の必須の
+// 引数で受ける (#3825)。
 func NewService(
 	repo repository.ClipRepository,
 	noteRepo repository.ClipNoteRepository,
 	notes repository.NoteRepository,
 	idGen id.Generator,
+	rolePolicyProvider role.PolicyProvider,
+	streamPublisher StreamPublisher,
 ) *Service {
 	return &Service{
-		repo:     repo,
-		noteRepo: noteRepo,
-		notes:    notes,
-		idGen:    idGen,
-		clock:    time.Now,
+		repo:               repo,
+		noteRepo:           noteRepo,
+		notes:              notes,
+		idGen:              idGen,
+		rolePolicyProvider: rolePolicyProvider,
+		streamPublisher:    streamPublisher,
+		clock:              time.Now,
 	}
 }
 
@@ -550,9 +546,3 @@ func (s *Service) materializeIfMissing(noteID string, lookupErr error) bool {
 	_, err := s.materializer.EnsureNote(context.Background(), noteID)
 	return err == nil
 }
-
-// HasRolePolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと `clipLimit` と `noteEachClipsLimit` が両方とも効かない。
-// 起動時検査に使う (#2683)。
-func (s *Service) HasRolePolicyProvider() bool { return s.rolePolicyProvider != nil }

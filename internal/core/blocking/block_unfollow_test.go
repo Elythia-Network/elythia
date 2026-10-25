@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/core/blocking"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -58,9 +57,9 @@ func TestBlock_UnfollowsBothDirectionsBeforeBlockDelivery(t *testing.T) {
 			addUser(ur, "a")
 			addUser(ur, "b")
 			log := &eventLog{}
-			svc.SetUnfollower(loggingUnfollower{log})
+			svc.SetUnfollowerForTest(loggingUnfollower{log})
 			svc.SetFederationHook(loggingBlockFederation{log})
-			svc.SetUserListRepo(&loggingUserListRepo{MockUserListRepository: testutil.NewMockUserListRepository(), log: log})
+			svc.SetUserListRepoForTest(&loggingUserListRepo{MockUserListRepository: testutil.NewMockUserListRepository(), log: log})
 
 			block := svc.Block
 			if tc.silent {
@@ -193,14 +192,4 @@ func TestBlock_MovedAccountKeepsCounts(t *testing.T) {
 	assert.Equal(t, 1, alice.FollowingCount)
 	assert.Equal(t, 1, bob.FollowersCount)
 	assert.Empty(t, chart.unfollows)
-}
-
-func TestHasUnfollower(t *testing.T) {
-	var empty blocking.Service
-	assert.False(t, empty.HasUnfollower())
-	svc, _, _, _ := newSvc(t)
-	assert.True(t, svc.HasUnfollower())
-	other := blocking.NewService(testutil.NewMockUserRepository(), testutil.NewMockBlockingRepository(), nil)
-	other.SetFollowRequestCanceller(&recordingFollowRequestCanceller{})
-	assert.False(t, other.HasUnfollower(), "別の依存だけを配線しても false")
 }

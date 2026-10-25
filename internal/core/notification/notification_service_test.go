@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 func newTestSvc(t *testing.T) *Service {
 	t.Helper()
 	testRedis.FlushAll(context.Background())
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	// テストでは 2 秒の AfterFunc を待ちたくないので同期 publish にする。
 	svc.SetUnreadPublishDelay(0)
 	return svc
@@ -66,7 +66,7 @@ func TestService_Create_RequiresNotifiee(t *testing.T) {
 func TestService_KeyPrefix(t *testing.T) {
 	testRedis.FlushAll(context.Background())
 	const host = "example.test"
-	svc := NewService(testRedis.Client, idGen, host+":")
+	svc := NewService(testRedis.Client, idGen, host+":", nil)
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, CreateInput{
@@ -589,7 +589,7 @@ func TestService_Flush(t *testing.T) {
 }
 
 func TestService_RedisErrors(t *testing.T) {
-	svc := NewService(closedClient(t), idGen, "")
+	svc := NewService(closedClient(t), idGen, "", nil)
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, CreateInput{NotifieeID: "u", NotifierID: "v", Type: TypeFollow})
@@ -940,7 +940,7 @@ func TestService_MarkAllAsRead_ReadsMarkerBeforeStream(t *testing.T) {
 	hooked := redis.NewClient(&redis.Options{Addr: testRedis.Addr})
 	t.Cleanup(func() { require.NoError(t, hooked.Close()) })
 
-	seed := NewService(testRedis.Client, idGen, "")
+	seed := NewService(testRedis.Client, idGen, "", nil)
 	seed.SetUnreadPublishDelay(0)
 	first, err := seed.Create(ctx, CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: TypeFollow,
@@ -959,7 +959,7 @@ func TestService_MarkAllAsRead_ReadsMarkerBeforeStream(t *testing.T) {
 		readTo:  newest[0].ID,
 	})
 
-	svc := NewService(hooked, idGen, "")
+	svc := NewService(hooked, idGen, "", nil)
 	svc.SetUnreadPublishDelay(0)
 	pub := &stubMainPublisher{}
 	svc.SetMainStreamPublisher(pub)

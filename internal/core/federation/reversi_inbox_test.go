@@ -929,6 +929,7 @@ func wireBlocking(t *testing.T, b *reversiFedBundle) *testutil.MockBlockingRepos
 	blockRepo := testutil.NewMockBlockingRepository()
 	b.processor.SetBlockingService(coreblocking.NewService(
 		b.userRepo, blockRepo, b.idGen,
+		nil, nil, nil, nil,
 	))
 	return blockRepo
 }

@@ -22,7 +22,7 @@ func TestAbuseReportNotifierIsWired(t *testing.T) {
 	// 書くとコンパイルが通らない。照合もその形で行う。
 	assertWired(t, serverPkg, "abuseInAppNotifier: abuseInAppNotifier",
 		"buildCore が作った通報の通知を core に入れていない。")
-	assertWired(t, serverPkg, "coreSvcs := s.buildCore(w, idGen, roleService)",
+	assertWired(t, serverPkg, "coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)",
 		"setupRoutes が buildCore の core service を使っていない。")
 	// buildCore の中の roleService は引数で受ける (#3825)。setupRoutes が buildRole で
 	// 作ったものを渡していることも照合する。

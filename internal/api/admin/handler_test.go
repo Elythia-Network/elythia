@@ -257,7 +257,7 @@ func newTestHandlerWithAssign(t *testing.T) (*apiadmin.Handler, *testutil.MockUs
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, _ := id.NewGenerator("aidx")
-	signupSvc := signup.NewService(userRepo, metaRepo, idGen)
+	signupSvc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return h, userRepo, metaRepo, roleRepo, assignRepo
@@ -272,7 +272,7 @@ func newTestHandlerNoRoles(t *testing.T) (*apiadmin.Handler, *testutil.MockUserR
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	signupSvc := signup.NewService(userRepo, metaRepo, idGen)
+	signupSvc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	return apiadmin.NewHandler(signupSvc, nil, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil), userRepo, metaRepo, idGen
 }
 
@@ -853,7 +853,7 @@ func TestShowUsers_BatchFetchesProfiles(t *testing.T) {
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, _ := id.NewGenerator("aidx")
-	signupSvc := signup.NewService(repo, metaRepo, idGen)
+	signupSvc := signup.NewService(repo, metaRepo, idGen, nil, nil, nil)
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -1617,7 +1617,7 @@ func TestSuspendUser_UpdateError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.SuspendUser, `{"userId":"u1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1628,7 +1628,7 @@ func TestUnsuspendUser_UpdateError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.UnsuspendUser, `{"userId":"u1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1638,7 +1638,7 @@ func TestShowUsers_ListError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(repo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, repo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.ShowUsers, `{"limit":10}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1648,7 +1648,7 @@ func TestUpdateMeta_UpdateError(t *testing.T) {
 	metaRepo := &failingUpdateMetaRepo{testutil.NewMockMetaRepository()}
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), nil, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.UpdateMeta, `{"name":"test"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1665,7 +1665,7 @@ func TestAccountsCreate_SignupInternalError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	// signupServiceのuserRepo.Createが失敗するようにする
 	failRepo := &failingCreateUserRepoForAdmin{testutil.NewMockUserRepository()}
-	h := apiadmin.NewHandler(signup.NewService(failRepo, metaRepo, idGen), nil, metaRepo, failRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(failRepo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, failRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	_ = failCreateRepo // suppress unused
 	rec := doPost(h.AccountsCreate, `{"username":"newuser","password":"pass"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -2237,7 +2237,7 @@ func rolesUsersFixture(t *testing.T) (
 	// ListByRole の戻りに User を埋めてくれる (handler が a.User を見るため)。
 	assignRepo.UserRepo = userRepo
 	idGen, _ := id.NewGenerator("aidx")
-	signupSvc := signup.NewService(userRepo, metaRepo, idGen)
+	signupSvc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	h := apiadmin.NewHandler(signupSvc, roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return h, userRepo, roleRepo, assignRepo
@@ -2408,7 +2408,7 @@ func TestRolesUsers_ListError(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.RolesUsers, `{"roleId":"r1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2440,7 +2440,7 @@ func TestRolesUpdateDefaultPolicies_UpdateError(t *testing.T) {
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.RolesUpdateDefaultPolicies, `{"policies":{"x":1}}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2455,7 +2455,7 @@ func TestRolesCreate_ErrorFromService(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(failRepo, assignRepo, metaRepo, idGen)
 	userRepo := testutil.NewMockUserRepository()
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// #889 fullRoleCreatePayload で 13 required field を満たして 500 path
 	// (= service error) を test する。
 	rec := doPost(h.RolesCreate, fullRoleCreatePayload, nil)
@@ -2504,7 +2504,7 @@ func TestRolesList_Error(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(failRepo, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.RolesList, `{}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2527,7 +2527,7 @@ func TestRolesAssign_ExistsError(t *testing.T) {
 	userRepo.Users["u1"] = &model.User{ID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.RolesAssign, `{"userId":"u1","roleId":"r1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2544,7 +2544,7 @@ func TestRolesUnassign_ExistsError(t *testing.T) {
 	userRepo.Users["u1"] = &model.User{ID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
 	roleSvc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := doPost(h.RolesUnassign, `{"userId":"u1","roleId":"r1"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2857,7 +2857,7 @@ func TestShowModerationLogs_WithRepo(t *testing.T) {
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "l1", Type: "suspend"}))
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -2898,7 +2898,7 @@ func TestShowModerationLogs_PacksUser(t *testing.T) {
 		ID: "l1", UserID: "mod1", Type: "suspend", User: &model.User{ID: "mod1", Username: "modu"},
 	}))
 	gen, _ := id.NewGenerator("aidx")
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 	userRepo.Profiles["mod1"] = &model.UserProfile{UserID: "mod1"}
 
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
@@ -2919,7 +2919,7 @@ func TestShowModerationLogs_Filters(t *testing.T) {
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "l1", UserID: "a", Type: "suspend", Info: []byte(`{"x":"findme"}`)}))
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "l2", UserID: "b", Type: "deleteNote", Info: []byte(`{}`)}))
 	gen, _ := id.NewGenerator("aidx")
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 
 	listIDs := func(body string) []string {
 		rec := doPost(h.ShowModerationLogs, body, nil)
@@ -3296,6 +3296,7 @@ func TestShowModerationLogs_ListError(t *testing.T) {
 	h.SetModLogService(moderationlog.New(
 		&failingModLogListRepo{testutil.NewMockModerationLogRepository()},
 		gen,
+		nil,
 	))
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -3577,7 +3578,7 @@ func TestShowModerationLogs_IncludesCreatedAt(t *testing.T) {
 	fixedTime := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	aidxID := gen.Generate(fixedTime)
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: aidxID, UserID: "u1", Type: "suspend"}))
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -3608,7 +3609,7 @@ func TestShowModerationLogs_NonAidxIDOmitsCreatedAt(t *testing.T) {
 
 	// aidx の base36 で扱えない文字 ("!") を混ぜて parse 失敗を強制する
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "!!!notaidx", UserID: "u1", Type: "suspend"}))
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -3638,7 +3639,7 @@ func TestShowModerationLogs_PreservesInfoJSON(t *testing.T) {
 		Type:   "suspend",
 		Info:   infoJSON,
 	}))
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 
 	rec := doPost(h.ShowModerationLogs, `{}`, nil)
 	require.Equal(t, http.StatusOK, rec.Code)

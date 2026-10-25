@@ -518,7 +518,7 @@ func newApprovalEnvWithEmail(t *testing.T) (*approvalEnv, *testutil.MockUserPend
 	}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
