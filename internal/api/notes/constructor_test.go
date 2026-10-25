@@ -47,7 +47,7 @@ func newHandlerNilDeps(
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, nil)
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	policies := &draftStubPolicyProvider{}
 	files := testutil.NewMockDriveFileRepository()
 	meta := testutil.NewMockMetaRepository()

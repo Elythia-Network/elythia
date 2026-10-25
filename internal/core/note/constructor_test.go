@@ -15,7 +15,7 @@ import (
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewCreateServiceKeepsDependencies(t *testing.T) {
 	g := bgwork.New()
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	blocking := testutil.NewMockBlockingRepository()
 	meta := testutil.NewMockMetaRepository()
 	silencing := &constructorSilencing{}

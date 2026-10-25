@@ -26,7 +26,7 @@ func TestNewManagerKeepsDependencies(t *testing.T) {
 }
 
 func TestNewPublishersKeepTheEntityPacker(t *testing.T) {
-	pk := entity.NewPacker(entity.PackerDeps{})
+	pk := entity.NewPacker(nil, entity.PackerDeps{})
 	assert.Same(t, pk, NewNotePublisher(nil, nil, pk).entityPacker)
 	assert.Same(t, pk, NewNotificationPublisher(nil, pk).entityPacker)
 	assert.Same(t, pk, NewReversiGamePublisher(nil, pk).entityPacker)

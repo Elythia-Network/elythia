@@ -17,7 +17,7 @@ import (
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, func() string { return "local" })
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	roles := &stubRoleProvider{}
 	replay := &countingReplayGuard{used: map[string]bool{}}
 	pending := &ctorPendingGuard{}

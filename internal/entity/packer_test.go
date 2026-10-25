@@ -32,10 +32,9 @@ func packerTestUser() *model.User {
 // 世代ごとに組み立てた依存が混ざる。
 func TestPacker_UsesItsOwnDependencies(t *testing.T) {
 	isolateDefaultPacker(t)
-	p := NewPacker(PackerDeps{
+	p := NewPacker(internalCtx(), PackerDeps{
 		CanChat:  &stubCanChatLookup{results: map[string]bool{"u1": false}},
 		Silenced: silencedByID{"u1": true},
-		MediaURL: internalCtx(),
 	})
 
 	got := p.PackUserDetailed(packerTestUser(), nil)
@@ -64,7 +63,7 @@ func TestSetters_WriteTheDefaultPacker(t *testing.T) {
 
 	raw := "https://" + remoteHost + "/a.png"
 	viaDefault := currentPacker().ProxyMediaURL(raw)
-	viaPacker := NewPacker(PackerDeps{MediaURL: internalCtx()}).ProxyMediaURL(raw)
+	viaPacker := NewPacker(internalCtx(), PackerDeps{}).ProxyMediaURL(raw)
 	if viaDefault != viaPacker {
 		t.Errorf("default Packer and Packer differ: %q vs %q", viaDefault, viaPacker)
 	}
@@ -121,7 +120,7 @@ func TestNoteFieldResolver_PacksFilesWithItsPacker(t *testing.T) {
 	files := &stubDriveFileLookup{files: map[string]*model.DriveFile{
 		"f1": remoteFile("f1"), "f2": remoteFile("f2"), "f3": remoteFile("f3"),
 	}}
-	pk := NewPacker(PackerDeps{MediaURL: internalCtx()})
+	pk := NewPacker(internalCtx(), PackerDeps{})
 	r := NewNoteFieldResolver(pk, files, nil, nil, nil, nil, makeIDGen(t))
 	notes := func() []NoteEntity {
 		return []NoteEntity{{
@@ -164,15 +163,36 @@ func TestNoteFieldResolver_PacksFilesWithItsPacker(t *testing.T) {
 	})
 }
 
-// HasMediaURL は mediaURL を持つ Packer だけ true を返す。criticalWiring が
-// これで入れ忘れを見る。
+// HasMediaURL は mediaURL を持つ Packer だけ true を返す。Packer を構築子で
+// 受ける部品 (webpush の 2 つと userpack) の HasEntityPacker がこれを使い、
+// criticalWiring が入れ忘れを見る。
 func TestPacker_HasMediaURL(t *testing.T) {
 	var nilPacker *Packer
-	if nilPacker.HasMediaURL() || NewPacker(PackerDeps{}).HasMediaURL() {
+	if nilPacker.HasMediaURL() || NewPacker(nil, PackerDeps{}).HasMediaURL() {
 		t.Error("a Packer without mediaURL must report false")
 	}
-	if !NewPacker(PackerDeps{MediaURL: internalCtx()}).HasMediaURL() {
+	if !NewPacker(internalCtx(), PackerDeps{}).HasMediaURL() {
 		t.Error("a Packer with mediaURL must report true")
+	}
+}
+
+// **NewPacker は第 1 引数の mediaURL をそのまま持つ (#3834)。**
+//
+// mediaURL は PackerDeps の欄から構築子の必須の引数へ移した。構築子が引数を
+// 捨てたり別の値を持ったりすると、渡した側の配線が効かずにメディアの URL が生の
+// まま出る (閲覧者の IP がリモートへ漏れる側)。同じ値を持つことを見る。
+func TestNewPacker_KeepsMediaURL(t *testing.T) {
+	ctx := internalCtx()
+	silenced := silencedByID{"u1": true}
+	p := NewPacker(ctx, PackerDeps{Silenced: silenced})
+	if p.mediaURL != ctx {
+		t.Errorf("NewPacker must keep the mediaURL it was given: got %p, want %p", p.mediaURL, ctx)
+	}
+	if p.silenced == nil {
+		t.Error("NewPacker must keep the PackerDeps fields alongside mediaURL")
+	}
+	if NewPacker(nil, PackerDeps{}).mediaURL != nil {
+		t.Error("NewPacker(nil, ...) must leave mediaURL nil")
 	}
 }
 

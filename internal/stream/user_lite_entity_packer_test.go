@@ -16,7 +16,7 @@ import (
 // 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewBubbleVersusPublisherKeepsDependencies(t *testing.T) {
-	pk := entity.NewPacker(entity.PackerDeps{})
+	pk := entity.NewPacker(nil, entity.PackerDeps{})
 	assert.Same(t, pk, NewBubbleVersusPublisher(nil, pk).entityPacker)
 }
 
@@ -24,8 +24,8 @@ func TestNewBubbleVersusPublisherKeepsDependencies(t *testing.T) {
 // 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
 // URL になって落ちる。
 func TestUserLitePublishers_PackInviterWithTheGivenPacker(t *testing.T) {
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 	avatar := "https://remote.example/avatar.png"
 	inviter := &model.User{ID: "alice", Username: "alice", AvatarURL: &avatar}
 	proxied := func(t *testing.T, payload any) {

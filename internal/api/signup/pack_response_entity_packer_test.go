@@ -17,8 +17,8 @@ func TestPackSignupResponse_UsesTheGivenEntityPacker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 	avatar := "https://remote.example/avatar.png"
 	u := &model.User{ID: "9zzzzzzzzz", Username: "alice", AvatarURL: &avatar}
 	out := packSignupResponse(pk, u, &model.UserProfile{UserID: u.ID}, "token", idGen, nil)

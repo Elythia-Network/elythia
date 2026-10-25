@@ -22,8 +22,8 @@ func TestService_MeUpdatedPacksWithTheGivenEntityPacker(t *testing.T) {
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
-	svc.SetEntityPackerForTest(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	svc.SetEntityPackerForTest(entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{}))
 
 	_, err := svc.UpdateProfile("u1", user.UpdateInput{Name: ptr(ptr("Alice"))})
 	require.NoError(t, err)

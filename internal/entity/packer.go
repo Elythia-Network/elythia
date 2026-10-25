@@ -14,7 +14,9 @@ package entity
 //
 // nil の *Packer と、依存が欠けた Packer は、それぞれの依存が未配線のときと
 // 同じに動く。**mediaURL が無いとメディアの URL を生のまま出す** (閲覧者の IP が
-// リモートへ漏れる側) ので、Packer を受け取る部品は criticalWiring で守る。
+// リモートへ漏れる側) ので、mediaURL は NewPacker の必須の引数で受ける (#3834)。
+// 組み立てた Packer が mediaURL を持つことは、server の
+// TestBuiltHandlersHaveNoNilDependencies が見る。
 type Packer struct {
 	// avatarDecoration embeds `url` on each avatarDecorations entry. nil omits
 	// url (the pre-#521 behaviour).
@@ -43,11 +45,17 @@ type Packer struct {
 	silenced SilencedLookup
 	// mediaURL rewrites media URLs through the media proxy. nil leaves every URL
 	// raw.
+	//
+	// 無いと、リモートのメディア (添付ファイル・アバター等) の URL を media proxy を
+	// 通さずに返し、閲覧者のブラウザがリモートから直接読むので閲覧者の IP がリモートへ
+	// 漏れる。以前は PackerDeps の欄で受けて起動時の検査 (criticalWiring の
+	// entityPacker.mediaURL の行) で見ていたが、#3834 で NewPacker の必須の引数にした。
 	mediaURL *MediaURLContext
 }
 
-// PackerDeps names the dependencies of a Packer. Unset fields behave as the
-// corresponding lookup being unwired.
+// PackerDeps names the dependencies of a Packer other than the media-proxy URL
+// rewriter, which NewPacker takes as its own argument. Unset fields behave as
+// the corresponding lookup being unwired.
 type PackerDeps struct {
 	AvatarDecoration AvatarDecorationLookup
 	EmojiDecoration  EmojiDecorationLookup
@@ -56,11 +64,12 @@ type PackerDeps struct {
 	ShowRemoteBadges func() bool
 	InstanceIconURL  func() string
 	Silenced         SilencedLookup
-	MediaURL         *MediaURLContext
 }
 
-// NewPacker returns a Packer that consults deps.
-func NewPacker(deps PackerDeps) *Packer {
+// NewPacker returns a Packer that rewrites media URLs through mediaURL and
+// consults deps. A nil mediaURL leaves every media URL raw; only tests that do
+// not look at media URLs pass nil.
+func NewPacker(mediaURL *MediaURLContext, deps PackerDeps) *Packer {
 	return &Packer{
 		avatarDecoration: deps.AvatarDecoration,
 		emojiDecoration:  deps.EmojiDecoration,
@@ -69,19 +78,19 @@ func NewPacker(deps PackerDeps) *Packer {
 		showRemoteBadges: deps.ShowRemoteBadges,
 		instanceIconURL:  deps.InstanceIconURL,
 		silenced:         deps.Silenced,
-		mediaURL:         deps.MediaURL,
+		mediaURL:         mediaURL,
 	}
 }
 
 // HasMediaURL reports whether pkr rewrites media URLs through the media
 // proxy. false means every remote media URL goes out raw and the viewer's
-// browser fetches it from the remote server directly, so the router checks
-// it at startup (criticalWiring).
+// browser fetches it from the remote server directly.
 //
-// 見るのは mediaURL だけ。canChat や silenced などが欠けても true を返す。今は
-// router が 1 組の依存から Packer を作るので、mediaURL があれば他も揃っている。
-// 欠けたときに閲覧者の IP が漏れる側に倒れるのは mediaURL だけなので、これを
-// 起動時に止める。
+// 見るのは mediaURL だけ。canChat や silenced などが欠けても true を返す。欠けた
+// ときに閲覧者の IP が漏れる側に倒れるのは mediaURL だけなので、Packer を構築子で
+// 受ける部品 (webpush の 2 つと userpack) は、受け取った Packer がこれを持つかを
+// 起動時の検査 (criticalWiring) で見る。Packer 自身の mediaURL は #3834 から
+// NewPacker の必須の引数で、起動時の検査の行は無い。
 func (pkr *Packer) HasMediaURL() bool {
 	return pkr != nil && pkr.mediaURL != nil
 }

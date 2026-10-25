@@ -28,8 +28,8 @@ import (
 // test fails first.
 func TestProxySigAcceptedByMediaproxy(t *testing.T) {
 	secret := []byte("parity-secret-9f3a")
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", secret, false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", secret, false, true), entity.PackerDeps{})
 
 	// A URL with spaces + query chars stresses the encode/decode round-trip the
 	// sig depends on.
@@ -60,8 +60,8 @@ func TestProxySigAcceptedByMediaproxy(t *testing.T) {
 // 素の署名と同じ理由 — ずれると URL プレビューの画像が全部 403 になる。
 func TestExpiringProxySigAcceptedByMediaproxy(t *testing.T) {
 	secret := []byte("parity-secret-9f3a")
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", secret, false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", secret, false, true), entity.PackerDeps{})
 
 	raw := "https://remote.example/og/a b.png?w=1&h=2"
 	built := pk.ProxyUserSuppliedMediaURLPtr(&raw)
@@ -96,8 +96,8 @@ func TestExpiringProxySigAcceptedByMediaproxy(t *testing.T) {
 // 画像は長期間そのまま配る前提なので、期限を付けると「いつの間にか画像が
 // 消える」事故になる。
 func TestAdminSuppliedProxySigHasNoExpiry(t *testing.T) {
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.example", "https://mk.example/proxy", []byte("k"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.example", "https://mk.example/proxy", []byte("k"), false, true), entity.PackerDeps{})
 
 	raw := "https://remote.example/role-icon.png"
 	built := pk.ProxyMediaURLPtr(&raw)

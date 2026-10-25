@@ -21,7 +21,10 @@ import (
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
 	coremove "github.com/elythia-network/elythia/internal/core/move"
+	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
+	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/elythia-network/elythia/internal/stream"
 )
@@ -93,4 +96,14 @@ type routeParts struct {
 
 	federationProcessor *corefederation.Processor
 	federationResolver  *corefederation.Resolver
+
+	// entity.Packer を包む部品 (#3834)。handler の中に入っていて部品の直下に Packer を
+	// 持たないので、TestBuiltHandlersHaveNoNilDependencies の assertOnePacker が同じ
+	// Packer を受け取ったかを見られるよう、ここにも持たせる。ここに入れた部品の欄は
+	// nil の検査の対象にもなる。lookup を任意で外す (NewNoteFieldResolver は nil を許す)
+	// なら、TestBuiltHandlersHaveNoNilDependencies の許可リストに足す。
+	sharedUserPacker  *userpack.Packer
+	webPushNotePacker *corewebpush.NoteRepoPacker
+	webPushUserPacker *corewebpush.UserRepoPacker
+	noteFieldResolver *entity.NoteFieldResolver
 }

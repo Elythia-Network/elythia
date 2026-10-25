@@ -254,7 +254,7 @@ func TestMe_AppTokenOmitsSecrets(t *testing.T) {
 func TestMe_CanChatFromRolePolicy(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 
-	h.entityPacker = entity.NewPacker(entity.PackerDeps{CanChat: &stubMeCanChatLookup{result: false}})
+	h.entityPacker = entity.NewPacker(nil, entity.PackerDeps{CanChat: &stubMeCanChatLookup{result: false}})
 
 	user := &model.User{
 		ID:                "user-canchat",
@@ -2993,8 +2993,8 @@ func TestUpdate_OrdinaryFieldsStillPass(t *testing.T) {
 // 通さないと $i.roles[].iconUrl が /api/i とストリーミングで食い違う。
 func TestRolePayload_ProxiesRoleIcon(t *testing.T) {
 	// アイコンは handler に渡した Packer で proxy へ通す (#3798)。
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", []byte("role-icon-secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", []byte("role-icon-secret"), false, true), entity.PackerDeps{})
 	icon := "https://cdn.example.test/role.png"
 	h := &Handler{roleProvider: &stubRoleProvider{roles: []*model.Role{
 		{ID: "pub", Name: "public-role", IsPublic: true, IconURL: &icon},

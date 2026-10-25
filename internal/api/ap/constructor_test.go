@@ -13,7 +13,7 @@ import (
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, nil)
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	hosts := apShowHostBlocker{blocked: map[string]bool{"blocked.example": true}}
 	software := apShowSoftwareBlocker{suspended: map[string]bool{"susp.example": true}}
 	extras := &recordingExtras{}

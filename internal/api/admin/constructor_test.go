@@ -27,7 +27,7 @@ type (
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	group := bgwork.New()
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	extras := &ctorDetailExtras{}
 	lists := &ctorListPacker{}
 	origins := &ctorSuspensionOrigin{}

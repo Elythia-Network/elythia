@@ -24,10 +24,11 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 10
+const criticalWiringCount = 9
 
 // entityPackerMissingEffect is the effect shared by the per-component
-// entityPacker rows (#3790, #3792, #3794, #3796, #3798).
+// entityPacker rows (#3790, #3792, #3794). The Packer's own mediaURL is a
+// required NewPacker argument since #3834.
 const entityPackerMissingEffect = "リモートのメディア (添付ファイル・アバター等) の URL を media proxy を通さずに返し、閲覧者の IP がリモートへ漏れる"
 
 // criticalWiring names one dependency whose absence degrades behaviour

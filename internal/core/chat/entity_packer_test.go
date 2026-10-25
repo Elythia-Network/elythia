@@ -13,7 +13,7 @@ import (
 // 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewServiceKeepsDependencies(t *testing.T) {
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	lites := &ctorLiteFiller{}
 	blocks := testutil.NewMockBlockingRepository()
 	s := NewService(nil, nil, packer, lites, blocks)
@@ -31,8 +31,8 @@ func (*ctorLiteFiller) FillLites([]*model.User, []*entity.UserLite) {}
 // 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
 // URL になって落ちる。
 func TestService_PackUsersStreamUsesTheGivenPacker(t *testing.T) {
-	s := &Service{entityPacker: entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})}
+	s := &Service{entityPacker: entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})}
 	avatar := "https://remote.example/avatar.png"
 	out := s.packUsersStream(&model.User{ID: "alice", Username: "alice", AvatarURL: &avatar}, nil)
 	if len(out) != 2 || out[0] == nil || out[1] != nil {

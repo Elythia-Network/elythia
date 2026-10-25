@@ -23,8 +23,8 @@ import (
 func TestNotePublisher_PacksWithTheGivenPacker(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true), entity.PackerDeps{})
 	np := NewNotePublisher(pub, idGen, pk)
 
 	const remote = "https://remote.example"

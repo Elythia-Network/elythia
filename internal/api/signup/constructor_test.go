@@ -17,7 +17,7 @@ func (*ctorPolicyProvider) GetUserPolicies(string) map[string]any { return nil }
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	group := bgwork.New()
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	policies := &ctorPolicyProvider{}
 	h := NewHandler(nil, nil, nil, group, packer, policies)
 	assert.Same(t, group, h.background)

@@ -16,15 +16,15 @@ import (
 const entityPackerProxy = "https://local.example/proxy"
 
 func proxyingEntityPacker() *entity.Packer {
-	return entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", entityPackerProxy, []byte("secret"), false, true)})
+	return entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", entityPackerProxy, []byte("secret"), false, true), entity.PackerDeps{})
 }
 
 // HasEntityPacker は mediaURL を持つ Packer を受け取ったときだけ true を返す
 // (#3792)。criticalWiring がこれで入れ忘れを見る。
 func TestPacker_HasEntityPacker(t *testing.T) {
 	assert.False(t, userpack.New(nil, userpack.Lookups{}, nil).HasEntityPacker())
-	assert.False(t, userpack.New(entity.NewPacker(entity.PackerDeps{}), userpack.Lookups{}, nil).HasEntityPacker())
+	assert.False(t, userpack.New(entity.NewPacker(nil, entity.PackerDeps{}), userpack.Lookups{}, nil).HasEntityPacker())
 	assert.True(t, userpack.New(proxyingEntityPacker(), userpack.Lookups{}, nil).HasEntityPacker())
 }
 

@@ -19,9 +19,9 @@ import (
 // handler には引数で渡す (#3798)。
 func withMediaProxy(t *testing.T) *entity.Packer {
 	t.Helper()
-	return entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+	return entity.NewPacker(entity.NewMediaURLContext(
 		"https://local.example", "https://local.example/proxy",
-		[]byte("test-secret"), false, true)})
+		[]byte("test-secret"), false, true), entity.PackerDeps{})
 }
 
 // leakUserRepo serves a single user for the avatar handler.

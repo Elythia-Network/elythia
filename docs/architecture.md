@@ -192,7 +192,7 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 
 ### 3.3 `internal/entity/` — レスポンス DTO
 
-`core/entities/*EntityService.pack()` に対応。Elythia では `entity.Packer` のメソッド `PackX()` で、ドメインロジックは持たない。pack が読む依存 (role 由来の値・アバターの飾り・メディアのプロキシなど) は Packer が持つ (#3788)。組み立て (`internal/server`) で 1 組の依存から部品へ渡す Packer を作る。投稿を包む部品 (`PackNote` / `PackNotes` / `PackNoteWithInstance` と `NoteFieldResolver`) は渡された Packer を使う (#3790)。利用者の詳細を包む部品 (`PackUserDetailed` / `PackMeDetailed` / `PackUserForFollowStreamEvent` と `userpack.Packer`) も同じく渡された Packer を使う (#3792)。`PackUserLite` を直接呼ぶ部品も同じ (#3794)。ドライブのファイル・ページ・クリップ・お知らせ・通知を包む部品も同じで、通知に埋め込む投稿と利用者も渡された Packer で包む (#3796)。メディアのプロキシ URL と `IdenticonURL` を使う側も同じで、`/avatar`・`/emoji`・フィード・reversi のアイコンは組み立てた Packer をそのまま使う (#3798)。既定の Packer へ委ねるパッケージ関数は無くなり、既定の Packer と `Set*` も本番から消した (#3800)。Packer に入れる 8 つの依存の配線は `entitycompat` の `TestEntityPackerDepsAreWired` が見る。
+`core/entities/*EntityService.pack()` に対応。Elythia では `entity.Packer` のメソッド `PackX()` で、ドメインロジックは持たない。pack が読む依存 (role 由来の値・アバターの飾り・メディアのプロキシなど) は Packer が持つ (#3788)。組み立て (`internal/server`) で 1 組の依存から部品へ渡す Packer を作る。投稿を包む部品 (`PackNote` / `PackNotes` / `PackNoteWithInstance` と `NoteFieldResolver`) は渡された Packer を使う (#3790)。利用者の詳細を包む部品 (`PackUserDetailed` / `PackMeDetailed` / `PackUserForFollowStreamEvent` と `userpack.Packer`) も同じく渡された Packer を使う (#3792)。`PackUserLite` を直接呼ぶ部品も同じ (#3794)。ドライブのファイル・ページ・クリップ・お知らせ・通知を包む部品も同じで、通知に埋め込む投稿と利用者も渡された Packer で包む (#3796)。メディアのプロキシ URL と `IdenticonURL` を使う側も同じで、`/avatar`・`/emoji`・フィード・reversi のアイコンは組み立てた Packer をそのまま使う (#3798)。既定の Packer へ委ねるパッケージ関数は無くなり、既定の Packer と `Set*` も本番から消した (#3800)。メディアのプロキシ (`MediaURLContext`) は `entity.NewPacker` の必須の第 1 引数で、残りの 7 つの依存は `PackerDeps` の欄で渡す (#3834)。`PackerDeps` の 7 つの欄の配線は `entitycompat` の `TestEntityPackerDepsAreWired` が見る。組み立てた Packer に 8 つの依存がすべて入っていることは `internal/server` の `TestBuiltHandlersHaveNoNilDependencies` が見る。
 
 | Elythia | Misskey-TS |
 |---|---|
@@ -1262,7 +1262,8 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 - **`entityPacker`の行も外した。** この行は`nil`ではなく`HasMediaURL()`を見ていて、mediaURLを
   持つことは型では保証できない。ただ、どのhandlerも`setupRoutes()`の同じ`entityPacker`を受け取り、
   その値そのものは表の`entityPacker.mediaURL`の行が見ている。段(8)でmediaURLを位置引数にするまで、
-  `entityPacker.mediaURL`の行と、setterで受ける部品の`entityPacker`の行は残す
+  `entityPacker.mediaURL`の行と、setterで受ける部品の`entityPacker`の行は残す(`entityPacker.mediaURL`の
+  行は段(8)で外した)
 - **pubsubの購読のhandlerから辿れる配線は変わらない(4.1)。** 依存を入れる時点が、元のsetterの
   位置(followingのlist packer・authのbackground・inviteのpolicyなどはstreamの節より後)から
   `buildHandlers()`の位置へ前へ移った。購読のhandler(`metaUpdated`・`federationRulesUpdated`・
@@ -1850,6 +1851,72 @@ resolverの`SetBackground`・`SetHostBlockChecker`・`SetSoftwareSuspensionCheck
   `webPushUser.entityPacker`・`streamChannels.chatRoom.service`。部品そのものは構築子の引数で受け、
   受け取ったPackerがメディアのプロキシを持つか(chatRoomはサービスがnilでないか)を見ている
 - 段(8)で扱う1行: `entityPacker.mediaURL`
+
+##### 段(8): `entity.NewPacker`のmediaURL(#3834)
+
+**entityのPackerのメディアのプロキシも、構築子の必須の引数にした。** #3812の段(8)で、最後の段。
+
+- **`entity.NewPacker(mediaURL *MediaURLContext, deps PackerDeps)`にし、`PackerDeps`から`MediaURL`を
+  外した。** 本番の呼び出しは`setupRoutes()`の1か所(`entity.NewPacker(mediaURLCtx, entityPackerDeps)`)。
+  `mediaURLCtx`は`entityPackerDeps`と同じく`NewPacker`の前で作ってあり、依存を入れる時点は
+  変わらない。無いとリモートのメディアのURLを生のまま出し、閲覧者のIPがリモートへ漏れる。この
+  説明は`Packer`の`mediaURL`のフィールドのコメントへ移した
+- **テストの呼び出しは機械的に置き換えた。** `_test.go`に
+  `git grep -E 'entity\.NewPacker\(|[^.]NewPacker\(PackerDeps'`を当てた73か所(58ファイル)。
+  `PackerDeps{}`を渡していた43か所と、`MediaURL`以外の欄だけを渡していた2か所は第1引数にnilを
+  渡す。`MediaURL:`を渡していた28か所は、その値を第1引数へ移した(`MediaURL:`だけの27か所は
+  機械的に、ほかの欄と一緒に渡していた`internal/entity/packer_test.go`の1か所は手で)。置き換えの
+  前後で件数を突き合わせた。`meself.NewPacker`は別の構築子なので対象外
+- **`HasMediaURL`は残した。** Packerを構築子で受ける部品(`webPushNote`・`webPushUser`と
+  `sharedUserPacker`)の`HasEntityPacker`がこれを使い、表の3行が見る
+- **`entityPacker.mediaURL`の行を表から外した**(`criticalWiringCount`は10から9)。組み立てた
+  Packerに`mediaURL`が入っていることは、`TestBuiltHandlersHaveNoNilDependencies`の
+  `nestedDepChecks`に`notes.entityPacker`を足して見る。どのhandlerも`setupRoutes()`の同じ
+  `entityPacker`を受け取るので、代表にnotesのhandlerのPackerを辿る。本番は`PackerDeps`の7つの欄も
+  すべて埋めるので、あわせて8つのフィールドを見る。テストの組み立てでnilのものは無かった。
+  `NewPacker`の第1引数にnilを渡すと、表に残る`…entityPacker`の3行が起動時に落とす。notesの
+  handlerにだけmediaURLの無いPackerを渡すと、`nestedDepChecks`が落とす。`Packer`に依存の欄を足した
+  ときに一覧が追いつかないまま緑にならないよう、`Packer`のnilになりうる型(ポインタ・interface・
+  func・map・スライス・chan)の欄の数と一覧の数(8)も突き合わせる。mutexのような依存でない欄は数えない
+- **代表にnotesのPackerを見る前提も縛る。** 同じテストの`assertOnePacker`が、`apiHandlers`・
+  `routeParts`・`coreParts`の各部品の直下にある`*entity.Packer`の欄が、どれもnotesのhandlerと同じ
+  Packerを指すことを見る。handlerの中に入っていて直下にPackerを持たない部品のうち、Packerを包む
+  共有の`userpack.Packer`(`sharedUserPacker`)・Web Pushの`NoteRepoPacker`と`UserRepoPacker`・
+  `entity.NoteFieldResolver`は、`routeParts`に持たせて直下で見る。部品の中の部品までreflectで
+  辿る形も試したが、組み立ての後に動き出すgoroutineが書き換える状態まで読み、`-race`が競合として
+  落とした。抽出が空振りしても緑にならないよう、件数ではなく、Packerを欄に持つべき型を6つ名指しで
+  要求する(`requiredPackerHolders`。`<型>.<欄>`の形で、notes・blockingのhandlerの2つと上の4部品の
+  6つ)。別に作ったPackerを1つの部品にだけ渡すと、その経路だけ閲覧者のIPがリモートへ漏れるか、
+  roles・canChat・isSilencedが黙って既定値になる。以前の表の行も変数`entityPacker`しか見ていな
+  かったので、これは捕まらなかった。照合するのは`*entity.Packer`型の欄だけで、Packerを包む部品
+  (`userpack.Packer`・`NoteFieldResolver`など)を作り直して1つのhandlerにだけ渡す誤りは、包む部品の
+  型の欄やinterfaceの欄に現れるので捕まらない(既知の限界。#3834の前から捕まっていなかった)
+- **`entitycompat`の`TestEntityPackerDepsAreWired`から`MediaURL: mediaURLCtx`の行を外し、構築子の
+  呼び出しの照合に置き換えた。** `PackerDeps`の欄の数と表の行の数(7)を突き合わせる。nilの検査では、
+  作り直した`*MediaURLContext`を渡す誤りが捕まらない。`mediaURLCtx`には後から、管理画面の
+  `proxyRemoteFiles`を毎回読むlookupと自前のメディアの判定(#2315)を付けているので、作り直すと
+  その2つが黙って外れる。`entityPacker := entity.NewPacker(mediaURLCtx, entityPackerDeps)`を
+  照合する(`entityPackerDeps`を実際に渡していることもここで縛る)。構築子が`mediaURL`を捨てない
+  ことは`internal/entity`の`TestNewPacker_KeepsMediaURL`が見る
+
+| | #3834の前(`d646f6efee`) | 段(8)の後 |
+|---|---|---|
+| `criticalWiringCount` | 10 | 9 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 590 | 590 |
+| その受け手 | 106 | 106 |
+
+数え方: 段(1)・段(2)の表と同じ。段(8)はsetterを置き換えていない(`MediaURL`は`PackerDeps`の欄で
+渡していた)ので、setterの行は変わらない。
+
+**`criticalWiringCount`は、#3812の見込みの9に達した。** 残る9行は、#3812で置き換えないと決めた
+行と、既に型で必須の行だけ(`recordCriticalWiring`の表の名前。表の行数は
+`TestCriticalWiringCountMatchesTable`が定数と突き合わせる)。
+
+- setterのまま残す5行: 循環の4行(`userPacker.detailExtras`・`following.meUpdatedPublisher`・
+  `userpack.detailExtrasMany`・`following.blockingChecker`)と`signup.formTokens`
+- 既に型で必須の4行: `webPushNote.entityPacker`・`sharedUserPacker.entityPacker`・
+  `webPushUser.entityPacker`・`streamChannels.chatRoom.service`。部品そのものは構築子の引数で受け、
+  受け取ったPackerがメディアのプロキシを持つか(chatRoomはサービスがnilでないか)を見ている
 
 #### /api のルートの登録 (#3697)
 

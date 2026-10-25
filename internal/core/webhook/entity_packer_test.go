@@ -24,8 +24,8 @@ func TestHooks_PackWithTheGivenPacker(t *testing.T) {
 	const remote = "https://remote.example"
 	avatar := remote + "/avatar.png"
 	author := &model.User{ID: "alice", Username: "alice", UsernameLower: "alice", AvatarURL: &avatar}
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true), entity.PackerDeps{})
 	idGen, _ := id.NewGenerator("aidx")
 
 	avatarOf := func(t *testing.T, body json.RawMessage) string {
@@ -71,8 +71,8 @@ func TestSignupHook_PacksWithTheGivenPacker(t *testing.T) {
 	sysRepo.hooks["sh1"] = &model.SystemWebhook{
 		ID: "sh1", IsActive: true, On: model.StringArray{"userCreated"},
 	}
-	h := webhook.NewSignupHook(svc, entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	h := webhook.NewSignupHook(svc, entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{}))
 
 	avatar := "https://remote.example/avatar.png"
 	h.OnUserCreated(&model.User{ID: "alice", Username: "alice", UsernameLower: "alice", AvatarURL: &avatar})

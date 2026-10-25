@@ -12,8 +12,8 @@ import (
 // 渡した Packer を使わずに nil の Packer で包むと生のリモートの URL
 // になって落ちる。
 func TestChannelBannerPublicURL_UsesTheGivenPacker(t *testing.T) {
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 	got := channelBannerPublicURL(pk, &model.DriveFile{URL: "https://remote.example/banner.png"})
 	if !strings.HasPrefix(got, "https://local.example/proxy/image.webp?") {
 		t.Errorf("banner must be proxied by the given Packer: %q", got)
@@ -24,8 +24,8 @@ func TestChannelBannerPublicURL_UsesTheGivenPacker(t *testing.T) {
 // 引く経路の両方を見る。
 func TestHandler_BannerURLUsesItsPacker(t *testing.T) {
 	h, _, _, _ := newHandler(t)
-	h.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	h.entityPacker = entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 	h.SetDriveFileRepo(&stubBannerResolver{files: map[string]*model.DriveFile{
 		"b1": {ID: "b1", URL: "https://remote.example/banner.png"},
 	}})
