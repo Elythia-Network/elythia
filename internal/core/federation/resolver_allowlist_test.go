@@ -20,24 +20,31 @@ import (
 //
 // 「ホワイトリスト連合 (federation: specified) で host が allowlist 外」の
 // シナリオは disallowed に詰めて再現する。
+// stubHostBlocker implements federation.ResolverHostBlocker. prohibited and
+// sensitive are what meta.prohibitedWords / meta.sensitiveWords return (nil
+// skips the check, as an empty setting does).
 type stubHostBlocker struct {
 	blocked    map[string]bool
 	disallowed map[string]bool
+	prohibited []string
+	sensitive  []string
 }
 
 func (s *stubHostBlocker) IsBlocked(host string) bool { return s.blocked[host] }
 func (s *stubHostBlocker) IsAllowed(host string) bool { return !s.disallowed[host] }
+func (s *stubHostBlocker) ProhibitedWords() []string  { return s.prohibited }
+func (s *stubHostBlocker) SensitiveWords() []string   { return s.sensitive }
 
-func newGatedResolver(t *testing.T, body string, blocker federation.HostBlockChecker) (*federation.Resolver, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
+// newGatedResolver builds a resolver whose host blocker is blocker (nil skips
+// the federation policy check). 構築子へ渡す形で作る (#3833)。
+func newGatedResolver(t *testing.T, body string, blocker federation.ResolverHostBlocker) (*federation.Resolver, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
 	t.Helper()
 	repo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
-	if blocker != nil {
-		r.SetHostBlockChecker(blocker)
-	}
+	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen,
+		blocker, nil, nil, nil, nil, nil)
 	return r, repo, noteRepo
 }
 
@@ -141,7 +148,7 @@ func TestProcessCreate_NonFederatedHostIsDroppedNotRetried(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
-	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
+	resolver.SetHostBlockerForTest(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
@@ -178,7 +185,7 @@ func TestProcessCreate_AllowedSenderNonFederatedAttributedToIsDropped(t *testing
 	}`
 	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(relayActor)}, idGen)
 	// note の attributedTo (remote.example) のみ非連合。送信者 host は許可。
-	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
+	resolver.SetHostBlockerForTest(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
@@ -195,7 +202,7 @@ func (s *stubSilencedChecker) IsSilenced(host string) bool { return s.silenced[h
 // #2106 N14: silenced instance (meta.silencedHosts) の remote public note は home に降格される。
 func TestIngestNote_SilencedHostPublicDemotedToHome(t *testing.T) {
 	r, _, _ := newGatedResolver(t, sampleActor, nil)
-	r.SetSilencedHostChecker(&stubSilencedChecker{silenced: map[string]bool{"remote.example": true}})
+	r.SetSilencedHostCheckerForTest(&stubSilencedChecker{silenced: map[string]bool{"remote.example": true}})
 
 	note, _, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	require.NoError(t, err)
@@ -206,7 +213,7 @@ func TestIngestNote_SilencedHostPublicDemotedToHome(t *testing.T) {
 // #2106 N14: silenced でない host の public note は public のまま (降格しない)。
 func TestIngestNote_NonSilencedHostPublicStaysPublic(t *testing.T) {
 	r, _, _ := newGatedResolver(t, sampleActor, nil)
-	r.SetSilencedHostChecker(&stubSilencedChecker{silenced: map[string]bool{"other.example": true}})
+	r.SetSilencedHostCheckerForTest(&stubSilencedChecker{silenced: map[string]bool{"other.example": true}})
 
 	note, _, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	require.NoError(t, err)

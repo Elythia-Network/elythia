@@ -148,6 +148,11 @@ type stubRemoteUserHostBlocker struct {
 func (s stubRemoteUserHostBlocker) IsBlocked(host string) bool { return s.blocked[host] }
 func (s stubRemoteUserHostBlocker) IsAllowed(host string) bool { return !s.notAllowed[host] }
 
+// ProhibitedWords and SensitiveWords let the stub be the resolver's host
+// blocker too (federation.ResolverHostBlocker). 語は持たない (判定を skip する)。
+func (s stubRemoteUserHostBlocker) ProhibitedWords() []string { return nil }
+func (s stubRemoteUserHostBlocker) SensitiveWords() []string  { return nil }
+
 // A host the instance does not federate with is skipped before the WebFinger
 // request (#3330); other hosts still go through.
 func TestRemoteUserResolver_ResolveByUsernameHost_SkipsBlockedHost(t *testing.T) {

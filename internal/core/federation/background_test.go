@@ -27,8 +27,7 @@ func TestProcess_HooksRunInTheBackgroundGroup(t *testing.T) {
 
 	g := bgwork.New()
 	env.processor.SetBackgroundForTest(g)
-	env.resolver.SetBackground(g)
-	assert.True(t, env.resolver.HasBackground())
+	env.resolver.SetBackgroundForTest(g)
 	require.Zero(t, g.Stop(context.Background()))
 
 	require.NoError(t, env.processor.Process([]byte(noteCreateBody)))

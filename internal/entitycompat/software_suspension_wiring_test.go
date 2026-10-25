@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// **配送と受信の queue の processor が、それぞれ自分の設定を読む判定を受け取っていること
-// (#3829)。**
+// **配送と受信の queue の processor と、連合の resolver が、それぞれ自分の設定を読む判定を
+// 受け取っていること (#3829、resolver は #3833)。**
 //
 // 配送停止 (`meta.deliverSuspendedSoftware`、#3558) の判定は
 // `corefederation.NewSuspendedChecker`、受信の拒否 (`meta.inboxSuspendedSoftware`、#3362) の
@@ -36,6 +36,12 @@ func TestQueueProcessorSoftwareCheckersAreWired(t *testing.T) {
 			"processors.NewRedisInboxReplayGuard(s.redis.Default))",
 		"受信の processor が受信の拒否 (inboxSuspendedSoftware) の判定を受け取っていない。\n"+
 			"管理画面で受信を拒否したソフトウェアの activity を受け付ける (#3362)")
+	// resolver も受信の拒否の判定を受ける (#3563)。#3833 で構築子の必須の引数にした。
+	assertWired(t, serverPkg,
+		"federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen, "+
+			"instanceService, inboxSoftwareChecker, instanceService, roleService, suspensionOriginRepo, s.background)",
+		"resolver が受信の拒否 (inboxSuspendedSoftware) の判定を受け取っていない。\n"+
+			"受信を拒否したソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)")
 	assertInboxSoftwareCheckerAssignments(t)
 }
 

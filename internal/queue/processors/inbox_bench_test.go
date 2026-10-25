@@ -111,7 +111,8 @@ func newInboxPipeline(tb testing.TB) *inboxPipeline {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(tb, err)
 	resolver := federation.NewResolver(userRepo, testutil.NewMockNoteRepository(),
-		activitypub.NewURLBuilder("https://example.com"), ldFwdNoFetch{}, idGen)
+		activitypub.NewURLBuilder("https://example.com"), ldFwdNoFetch{}, idGen,
+		nil, nil, nil, nil, nil, nil)
 	pubkeys := &countingPublickeyStore{MockUserPublickeyRepository: testutil.NewMockUserPublickeyRepository()}
 	pubkeys.Keys[actor.ID] = &model.UserPublickey{UserID: actor.ID, KeyID: benchActorURI + "#main-key", KeyPEM: pub}
 	resolver.SetPublickeyRepo(pubkeys)

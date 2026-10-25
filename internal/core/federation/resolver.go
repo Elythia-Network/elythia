@@ -392,7 +392,10 @@ type PublickeyExtraStore interface {
 // する。エントリは actorTTL を超えると miss として扱い、次回 ResolveActor 時
 // にリフレッシュされる。
 type Resolver struct {
-	// background は新しく作ったノートの chart hook を起動する箱 (#3661)。
+	// background は新しく作ったノートの chart hook を起動する箱 (#3661)。nil なら素の
+	// goroutine で起動する (テスト)。**本番で nil だと、世代を止めても新しいノートの
+	// chart hook の goroutine を待たず、閉じた DB へ書きに行く。** 構築子の必須の引数
+	// (#3833。以前は setter と起動時の検査)。
 	background *bgwork.Group
 	// rules は連合のルール (#3090)。nil なら評価しない。
 	rules    RuleEvaluator
@@ -433,8 +436,10 @@ type Resolver struct {
 	capabilities       SignatureCapabilityDeclarer // optional: Ed25519 対応宣言の記録 (#2393)
 	pollRepo           repository.PollRepository   // optional: Question(投票)のPoll作成
 	// suspensionOriginRepo は凍結の由来 (local / remote) の記録先 (#2973)。
-	// **未配線なら `toot:suspended` を読まない** — 由来を持てない状態で自動
-	// 凍結すると、モデレーターが解除しても次の refresh で無言で戻る。
+	// **nil なら `toot:suspended` を読まない** — 由来を持てない状態で自動
+	// 凍結すると、モデレーターが `admin/unsuspend-user` で解除しても次の actor
+	// refresh で無言で戻る (#2951 の既知の制約そのもの)。本番で nil だと、リモート
+	// actor の凍結を読まなくなる。構築子の必須の引数 (#3833。以前は setter と起動時の検査)。
 	suspensionOriginRepo repository.UserSuspensionOriginRepository
 	// pinningRepo / pinningIDGen はリモート actor の featured コレクション
 	// (ピン留め投稿) の取り込み先 (#2552)。未配線なら取り込まない。
@@ -462,31 +467,36 @@ type Resolver struct {
 	// hostBlocker は federation 設定 (none / specified / blockedHosts) を
 	// 評価する gate。fetchActor / resolveNoteOnce / IngestNoteWithCreated
 	// の入口で URI の host / attributedTo の host を判定して、ホワイト
-	// リスト外 host からの取り込みを拒否する。未配線時は legacy 挙動
-	// (全 host 許可) にフォールバック。
-	hostBlocker HostBlockChecker
+	// リスト外 host からの取り込みを拒否する。meta.prohibitedWords と
+	// meta.sensitiveWords もここから読む (ResolverHostBlocker)。
+	//
+	// **nil なら legacy 挙動 (全 host 許可) にフォールバックし、禁止語と
+	// センシティブワードの判定も skip する** (テスト)。本番で nil だと、federation
+	// 設定を無視してリモートを解決し、リモートから届くノートに禁止語のフィルタが
+	// 掛からず、センシティブワードに当たる public のノートが home にならない
+	// (どれもローカル投稿にだけ効く状態)。構築子の必須の引数 (#3833。以前は setter と
+	// 起動時の検査、#2683)。
+	hostBlocker ResolverHostBlocker
 	// softwareBlocker は受信を拒否するソフトウェア (meta.inboxSuspendedSoftware、
 	// #3362) の判定。hostAllowed でドメインブロックと同じ入口に当てる (#3563)。
 	// inbox だけで判定していた頃は、拒否していないサーバーのリノートや返信の
-	// 連鎖、ap/show で、拒否中のホストの投稿を取り込めた。未配線なら判定しない。
+	// 連鎖、ap/show で、拒否中のホストの投稿を取り込めた。nil なら判定しない
+	// (本番で nil だと、その形で取り込む)。構築子の必須の引数 (#3833)。
 	softwareBlocker SoftwareSuspensionChecker
 
 	// mediaSilencedChecker は meta.mediaSilencedHosts の判定 (#3218)。未配線なら
 	// 添付をセンシティブにしない。
 	mediaSilencedChecker MediaSilencedHostChecker
 	// silencedChecker は remote note ingest 時に meta.silencedHosts 該当 host の
-	// public note を home に降格する判定に使う (#2106 N14)。未配線時は降格しない。
+	// public note を home に降格する判定に使う (#2106 N14)。nil なら降格しない
+	// (本番で nil だと、silenced instance の remote public note が public timeline に
+	// 出る)。構築子の必須の引数 (#3833。以前は setter と起動時の検査、#2708)。
 	silencedChecker SilencedHostChecker
 	// rolePolicyProvider は受信した note の mentionLimit を投稿者の role policy
-	// から引くのに使う (#3330)。nil なら corenote.DefaultMentionLimit。
+	// から引くのに使う (#3330)。nil なら corenote.DefaultMentionLimit (本番で nil
+	// だと、base policy やリモートに当たるロールで絞った上限が効かない)。構築子の
+	// 必須の引数 (#3833)。
 	rolePolicyProvider RolePolicyProvider
-
-	// prohibitedWordsProvider は meta.prohibitedWords の読み取り元。nil なら
-	// hostBlocker から optional interface で拾う (prohibitedWords() を参照)。
-	prohibitedWordsProvider ProhibitedWordsProvider
-	// sensitiveWordsProvider は meta.sensitiveWords の読み取り元。nil なら
-	// hostBlocker が SensitiveWordsProvider を実装していればそちらを使う。
-	sensitiveWordsProvider SensitiveWordsProvider
 
 	// resolveActorGroup / resolveNoteGroup は同一 URI への並行 ResolveActor /
 	// ResolveNote 呼び出しを 1 度の DB lookup + HTTP fetch に collapse する
@@ -507,12 +517,22 @@ type Resolver struct {
 // NewResolver constructs a Resolver.
 // noteRepo / urls はリモート Note の解決と取り込みに使用する。リモート Note
 // 機能を使わない呼び出し側 (テスト等) では nil を渡してよい。
+//
+// hostBlocker 以降の依存もテストでは nil を渡せる (それぞれのフィールドの説明の
+// とおりに判定が外れる)。本番は hostBlocker と silencedChecker に
+// core/instance.Service を渡す。
 func NewResolver(
 	userRepo repository.UserRepository,
 	noteRepo repository.NoteRepository,
 	urls *activitypub.URLBuilder,
 	fetcher HTTPFetcher,
 	idGen id.Generator,
+	hostBlocker ResolverHostBlocker,
+	softwareBlocker SoftwareSuspensionChecker,
+	silencedChecker SilencedHostChecker,
+	rolePolicyProvider RolePolicyProvider,
+	suspensionOriginRepo repository.UserSuspensionOriginRepository,
+	background *bgwork.Group,
 ) *Resolver {
 	return &Resolver{
 		userRepo: userRepo,
@@ -523,6 +543,13 @@ func NewResolver(
 		keys:     map[string]publicKeyEntry{},
 		clock:    time.Now,
 		actorTTL: DefaultActorTTL,
+
+		hostBlocker:          hostBlocker,
+		softwareBlocker:      softwareBlocker,
+		silencedChecker:      silencedChecker,
+		rolePolicyProvider:   rolePolicyProvider,
+		suspensionOriginRepo: suspensionOriginRepo,
+		background:           background,
 
 		mentionFetch: newMentionFetchGuard(inboundMentionFetchSlots),
 	}
@@ -674,19 +701,6 @@ func (r *Resolver) resolveSuspensionChange(existing *model.User, actorSuspended 
 	return false, true
 }
 
-// SetSuspensionOriginRepo wires the store that records who decided a user's
-// suspension state (#2973).
-//
-// **未配線なら actor の `toot:suspended` を読まない。** 由来を持てない状態で
-// 自動凍結すると、モデレーターが `admin/unsuspend-user` で解除しても次の
-// actor refresh で無言で戻る (#2951 の既知の制約そのもの)。
-func (r *Resolver) SetSuspensionOriginRepo(repo repository.UserSuspensionOriginRepository) {
-	r.suspensionOriginRepo = repo
-}
-
-// HasSuspensionOriginRepo reports whether the store is wired.
-func (r *Resolver) HasSuspensionOriginRepo() bool { return r.suspensionOriginRepo != nil }
-
 // SetPinningRepo wires the pinned-notes store used to import a remote actor's
 // featured collection (#2552). 未配線なら featured の取り込み自体を行わない。
 func (r *Resolver) SetPinningRepo(repo repository.UserNotePiningRepository, idGen id.Generator) {
@@ -732,12 +746,18 @@ func (r *Resolver) SetDriveFileRepo(repo repository.DriveFileRepository) {
 	r.driveFileRepo = repo
 }
 
-// SetHostBlockChecker attaches a federation-policy checker used to reject
-// new fetches / ingests from hosts that the running instance does not
-// federate with (federation: none / specified、blockedHosts)。未配線時は
-// gate が無効化されて legacy 挙動 (全 host 許可) に倒れる。
-func (r *Resolver) SetHostBlockChecker(c HostBlockChecker) {
-	r.hostBlocker = c
+// ResolverHostBlocker is what the resolver reads from the instance settings:
+// the federation policy (federation: none / specified、blockedHosts) and
+// meta.prohibitedWords / meta.sensitiveWords. *instance.Service implements it.
+//
+// **禁止語とセンシティブワードも、引数の型で求める (#3833)。** 以前は
+// HostBlockChecker を受けて optional interface で拾い、持たない型を渡すと
+// 静かに無検査へ落ちていた (レビュー L2)。起動時の検査で見ていたのを、
+// 持たない型を渡すとコンパイルで落ちる形にした。
+type ResolverHostBlocker interface {
+	HostBlockChecker
+	ProhibitedWordsProvider
+	SensitiveWordsProvider
 }
 
 // SoftwareSuspensionChecker reports whether content from a host must be
@@ -747,17 +767,6 @@ func (r *Resolver) SetHostBlockChecker(c HostBlockChecker) {
 type SoftwareSuspensionChecker interface {
 	IsSuspended(host string) bool
 }
-
-// SetSoftwareSuspensionChecker attaches the meta.inboxSuspendedSoftware
-// checker. 取り込みの入口 (hostAllowed) で、ドメインブロックと同じく
-// ErrHostNotAllowed にする (#3563)。
-func (r *Resolver) SetSoftwareSuspensionChecker(c SoftwareSuspensionChecker) {
-	r.softwareBlocker = c
-}
-
-// HasSoftwareSuspensionChecker reports whether a non-nil checker was attached
-// with SetSoftwareSuspensionChecker (startup wiring check).
-func (r *Resolver) HasSoftwareSuspensionChecker() bool { return r.softwareBlocker != nil }
 
 // SilencedHostChecker reports whether a remote host is in meta.silencedHosts.
 // *instance.Service implements it (IsSilenced).
@@ -824,29 +833,10 @@ func (r *Resolver) markMediaSilencedFiles(ids model.StringArray, authorID string
 	return r.markAuthorFiles(ids, authorID, ownerSilenced, map[string]any{"isSensitive": true})
 }
 
-// SetSilencedHostChecker attaches the meta.silencedHosts checker used to demote
-// a silenced remote instance's public notes to home on ingest (#2106 N14).
-// 未配線時は降格しない。
-func (r *Resolver) SetSilencedHostChecker(c SilencedHostChecker) {
-	r.silencedChecker = c
-}
-
 // ProhibitedWordsProvider exposes meta.prohibitedWords to the inbound note
 // ingest path. *instance.Service implements it.
 type ProhibitedWordsProvider interface {
 	ProhibitedWords() []string
-}
-
-// SetProhibitedWordsProvider overrides where meta.prohibitedWords is read from.
-//
-// **通常は配線不要。** 既定では hostBlocker (router.go が core/instance.Service を
-// 渡す、= prohibitedWords と同じ meta を読む実体) から optional interface で
-// 拾う。専用の Set* を必須にすると、配線を忘れたときに「検査していないのに緑」に
-// なる — 本番で必ず立っている依存から取るほうが安全側で、`fetcher` の
-// finalURLFetcher と同じ方式。この setter はテストと、将来 hostBlocker とは
-// 別の実体から読みたくなった場合のための逃げ道。
-func (r *Resolver) SetProhibitedWordsProvider(p ProhibitedWordsProvider) {
-	r.prohibitedWordsProvider = p
 }
 
 // SensitiveWordsProvider exposes meta.sensitiveWords to the inbound note
@@ -855,35 +845,13 @@ type SensitiveWordsProvider interface {
 	SensitiveWords() []string
 }
 
-// SetSensitiveWordsProvider overrides where meta.sensitiveWords is read from.
-// 既定は prohibitedWords と同じく hostBlocker の optional interface から読む。
-func (r *Resolver) SetSensitiveWordsProvider(p SensitiveWordsProvider) {
-	r.sensitiveWordsProvider = p
-}
-
-// HasSensitiveWordsSource reports whether a source for meta.sensitiveWords is
-// reachable (either the explicit setter or the hostBlocker's optional面).
-//
-// 未配線だと、センシティブワードに当たるリモートの public の投稿が home に
-// ならない。起動時検査に使う。
-func (r *Resolver) HasSensitiveWordsSource() bool {
-	if r.sensitiveWordsProvider != nil {
-		return true
-	}
-	_, ok := r.hostBlocker.(SensitiveWordsProvider)
-	return ok
-}
-
 // sensitiveWords returns the configured meta.sensitiveWords, or nil when no
-// source is wired.
+// hostBlocker is wired.
 func (r *Resolver) sensitiveWords() []string {
-	if r.sensitiveWordsProvider != nil {
-		return r.sensitiveWordsProvider.SensitiveWords()
+	if r.hostBlocker == nil {
+		return nil
 	}
-	if p, ok := r.hostBlocker.(SensitiveWordsProvider); ok {
-		return p.SensitiveWords()
-	}
-	return nil
+	return r.hostBlocker.SensitiveWords()
 }
 
 // containsSensitiveWords reports whether cw or text hits meta.sensitiveWords.
@@ -902,39 +870,14 @@ func (r *Resolver) containsSensitiveWords(text, cw *string) bool {
 	return text != nil && *text != "" && keyword.IsKeyWordIncluded(mfm.KeywordCheckTarget(*text), words)
 }
 
-// SetBackground sets the group the chart hook of new notes runs in, so
-// stopping the server generation waits for it (#3661).
-func (r *Resolver) SetBackground(g *bgwork.Group) { r.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (r *Resolver) HasBackground() bool { return r.background != nil }
-
-// HasProhibitedWordsSource reports whether a source for meta.prohibitedWords is
-// reachable (either the explicit setter or the hostBlocker's optional面).
-//
-// **未配線だと禁止語が AP 経路だけ静かに効かなくなる (レビュー L2)。**
-// fallback が optional interface なので、`SetHostBlockChecker` に
-// `ProhibitedWords()` を持たない型を渡した瞬間に無検査へ落ちる。起動時に
-// 気付けるよう述語を出す。
-func (r *Resolver) HasProhibitedWordsSource() bool {
-	if r.prohibitedWordsProvider != nil {
-		return true
-	}
-	_, ok := r.hostBlocker.(ProhibitedWordsProvider)
-	return ok
-}
-
 // prohibitedWords returns the configured meta.prohibitedWords, or nil when no
-// source is wired / meta is unreadable (= 判定を skip、他の meta ゲートと同じ
+// hostBlocker is wired / meta is unreadable (= 判定を skip、他の meta ゲートと同じ
 // ベストエフォート)。
 func (r *Resolver) prohibitedWords() []string {
-	if r.prohibitedWordsProvider != nil {
-		return r.prohibitedWordsProvider.ProhibitedWords()
+	if r.hostBlocker == nil {
+		return nil
 	}
-	if p, ok := r.hostBlocker.(ProhibitedWordsProvider); ok {
-		return p.ProhibitedWords()
-	}
-	return nil
+	return r.hostBlocker.ProhibitedWords()
 }
 
 // containsProhibitedWords reports whether cw / text / poll choices hit
@@ -5963,15 +5906,3 @@ type RemoteMoveProcessor interface {
 // SetMoveProcessor wires the handler invoked when a remote account is observed
 // to have moved.
 func (r *Resolver) SetMoveProcessor(p RemoteMoveProcessor) { r.moveProcessor = p }
-
-// HasHostBlockChecker reports whether the host block checker was wired.
-//
-// 未配線だと federation 設定 (none / specified / blockedHosts) を無視して
-// リモートを解決する。起動時検査に使う (#2683)。
-func (r *Resolver) HasHostBlockChecker() bool { return r.hostBlocker != nil }
-
-// HasSilencedHostChecker reports whether the silenced-host checker was wired.
-//
-// 未配線だと silenced instance の remote public note が home へ降格されず
-// public timeline に出る。起動時検査に使う (#2708)。
-func (r *Resolver) HasSilencedHostChecker() bool { return r.silencedChecker != nil }

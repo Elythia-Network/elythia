@@ -1795,15 +1795,61 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 - **自ホストのURLも、wiring-checkで照合する。** `localBaseURL`には`s.config.URL`を渡す。4段目の
   `expectedHost`と同じく、`s.config.Host`などを渡しても型と空でないことの検査を通るので、
   `TestFederationHostValuesAreWired`に`NewProcessor`の呼び出しの照合を足した
+- **6段目は`core/federation`のresolver(1構築子・8行)。** `corefederation.NewResolver`は
+  `hostBlocker`・`softwareBlocker`・`silencedChecker`・`rolePolicyProvider`・`suspensionOriginRepo`・
+  `background`を受ける(`…, idGen, instanceService, inboxSoftwareChecker, instanceService, roleService,
+  suspensionOriginRepo, s.background)`)。禁止語とセンシティブワードの2行は、nilではなく
+  `hostBlocker`が`ProhibitedWords()`・`SensitiveWords()`を持つかを見ていた行で、引数の型で受ける
+  ようにした。`hostBlocker`は`HostBlockChecker`に代えて`ResolverHostBlocker`(`HostBlockChecker`・
+  `ProhibitedWordsProvider`・`SensitiveWordsProvider`)を受け、optional interfaceで拾うfallbackと
+  `SetProhibitedWordsProvider`・`SetSensitiveWordsProvider`を消した。本番の`instanceService`は3つとも
+  実装している。`hostBlocker`がnilなら(テスト)、今と同じく3つの判定をどれもskipする
+- **渡す値はどれも`NewResolver`の呼び出しより前で作ってある。** `suspensionOriginRepo`は
+  `setupRoutes()`の先頭、`roleService`は`buildRole()`、`instanceService`は`buildCore()`、
+  `inboxSoftwareChecker`は`buildFederation()`。依存を入れる時点が元のsetterの位置から前へ移ったが、
+  間にあるのは構築とsetterだけで、resolverを呼ぶのは組み立ての後に始まるHTTPのリクエストと
+  queueのworkerだけ。前へ移って変わりうるのは、取り込みの判定が掛かる方向だけ。残った
+  `federationResolver.Set…`の19行は表に無いので、setterのまま残した
+- **テストの組み立ては1段目の補助関数の中だけを直した。** `NewResolverNilDeps`は6つのnilを渡す。
+  置き換えたsetterを呼んでいた外部テストは、processorと同じく`nil_deps_test.go`の…ForTestに
+  置き換えた(`SetHostBlockerForTest`・`SetSoftwareBlockerForTest`・`SetSilencedHostCheckerForTest`・
+  `SetRolePolicyProviderForTest`・`SetSuspensionOriginRepoForTest`・`SetBackgroundForTest`)。
+  禁止語とセンシティブワードのテストは、偽のhostBlocker(`stubHostBlocker`)に語を持たせる形に
+  直し、`hostBlocker`から読むことは`NewResolver`へ渡す形で見る。テストの偽のhostBlocker
+  (`stubHostBlocker`・`stubRemoteUserHostBlocker`)には、語を返す(既定はnil)メソッドを足した。
+  `HasSensitiveWordsSource`だけを見ていたテストと、`wiring_predicate_test.go`(resolverの`Has…`の
+  テスト)は消した。パッケージ外の`NewResolver`の呼び出し(`internal/api/inbox`の3か所と
+  `internal/queue/processors`の2か所)はnilを渡す。構築子が引数を捨てないことは
+  `constructor_test.go`が見る
+- **`routeParts`に`federationResolver`を足した。** `requiredDepChecks`に置き換えた6つの欄を足した。
+  テストの組み立てでnilだったのは`federationResolver.keyFetchFailures`の1つで、許可リストに足した。
+  依存ではなく、公開鍵の取り直しに失敗した時刻の状態で、最初の失敗を記録するとき
+  (`markKeyFetchFailed`)に作る
+- **受信の拒否の判定は、wiring-checkで照合する。** `softwareBlocker`には受信の拒否の判定
+  (`inboxSoftwareChecker`、`NewInboxSuspendedChecker`)を渡す。配送停止の判定(`NewSuspendedChecker`)と
+  同じ型なので、取り違えは型でもnilの検査でも捕まらない。段(5)の
+  `TestQueueProcessorSoftwareCheckersAreWired`に、`NewResolver`の呼び出しの照合を足した
 
-| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 | 5段目の後 |
-|---|---|---|---|---|---|---|
-| `criticalWiringCount` | 28 | 28 | 27 | 24 | 21 | 18 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 | 599 | 596 |
-| その受け手 | 107 | 107 | 107 | 106 | 106 | 106 |
+| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 | 5段目の後 | 6段目の後 |
+|---|---|---|---|---|---|---|---|
+| `criticalWiringCount` | 28 | 28 | 27 | 24 | 21 | 18 | 10 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 | 599 | 596 | 590 |
+| その受け手 | 107 | 107 | 107 | 106 | 106 | 106 | 106 |
 
 数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。3段目で
-減った受け手は、置き換えたsetterしか呼んでいなかった`noteDeleteHook`。
+減った受け手は、置き換えたsetterしか呼んでいなかった`noteDeleteHook`。6段目で減った6行は
+resolverの`SetBackground`・`SetHostBlockChecker`・`SetSoftwareSuspensionChecker`・
+`SetSilencedHostChecker`・`SetRolePolicyProvider`・`SetSuspensionOriginRepo`(禁止語と
+センシティブワードは元からsetterを呼んでいなかった)。
+
+残った10行は段(7)の対象ではない。内訳は次のとおり(`recordCriticalWiring`の表の名前)。
+
+- setterのまま残す5行: 循環の4行(`userPacker.detailExtras`・`following.meUpdatedPublisher`・
+  `userpack.detailExtrasMany`・`following.blockingChecker`)と`signup.formTokens`
+- 既に型で必須の4行: `webPushNote.entityPacker`・`sharedUserPacker.entityPacker`・
+  `webPushUser.entityPacker`・`streamChannels.chatRoom.service`。部品そのものは構築子の引数で受け、
+  受け取ったPackerがメディアのプロキシを持つか(chatRoomはサービスがnilでないか)を見ている
+- 段(8)で扱う1行: `entityPacker.mediaURL`
 
 #### /api のルートの登録 (#3697)
 

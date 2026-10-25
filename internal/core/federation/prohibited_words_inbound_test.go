@@ -12,21 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubProhibitedWords implements federation.ProhibitedWordsProvider.
-type stubProhibitedWords struct{ words []string }
-
-func (s stubProhibitedWords) ProhibitedWords() []string { return s.words }
-
-// blockerWithWords is a HostBlockChecker that also exposes prohibitedWords,
-// the way core/instance.Service does in production (router.go は同じ実体を
-// hostBlocker として配線する)。
-type blockerWithWords struct {
-	stubHostBlocker
-	words []string
-}
-
-func (b *blockerWithWords) ProhibitedWords() []string { return b.words }
-
 func newProhibitedWordsResolver(t *testing.T, words []string) (*federation.Resolver, *testutil.MockNoteRepository) {
 	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
@@ -36,7 +21,7 @@ func newProhibitedWordsResolver(t *testing.T, words []string) (*federation.Resol
 	r := federation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(sampleActor)}, idGen)
 	if words != nil {
-		r.SetProhibitedWordsProvider(stubProhibitedWords{words: words})
+		r.SetHostBlockerForTest(&stubHostBlocker{prohibited: words})
 	}
 	return r, noteRepo
 }
@@ -112,12 +97,16 @@ func TestIngestNote_AcceptsWhenNoProhibitedWordMatches(t *testing.T) {
 	assert.Len(t, noteRepo.Notes, 1)
 }
 
-// provider を明示配線しなくても、既に配線済みの hostBlocker が
-// ProhibitedWordsProvider を実装していれば判定が効くこと。本番 (router.go) は
-// hostBlocker に core/instance.Service を渡すので、この経路が実際に使われる。
+// 構築子に渡した hostBlocker から禁止語を読むこと。本番 (router.go) は
+// hostBlocker に core/instance.Service を渡すので、この経路が実際に使われる
+// (#3833 から、ResolverHostBlocker の型で求める)。
 func TestIngestNote_ProhibitedWordsComeFromHostBlocker(t *testing.T) {
-	r, noteRepo := newProhibitedWordsResolver(t, nil)
-	r.SetHostBlockChecker(&blockerWithWords{words: []string{"forbidden"}})
+	noteRepo := testutil.NewMockNoteRepository()
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	r := federation.NewResolver(testutil.NewMockUserRepository(), noteRepo,
+		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen,
+		&stubHostBlocker{prohibited: []string{"forbidden"}}, nil, nil, nil, nil, nil)
 
 	note, _, err := r.IngestNoteWithCreated([]byte(remoteNoteBody(`"content": "forbidden"`)), "")
 	require.NoError(t, err)
@@ -129,8 +118,8 @@ func TestIngestNote_ProhibitedWordsComeFromHostBlocker(t *testing.T) {
 // ゲートと同じベストエフォート方針。
 func TestIngestNote_NoProhibitedWordsSourceIngestsNormally(t *testing.T) {
 	r, noteRepo := newProhibitedWordsResolver(t, nil)
-	// prohibitedWords を持たない hostBlocker (= 既存の stub) でも落ちないこと。
-	r.SetHostBlockChecker(&stubHostBlocker{})
+	// 禁止語が空の hostBlocker でも落ちないこと。
+	r.SetHostBlockerForTest(&stubHostBlocker{})
 
 	note, _, err := r.IngestNoteWithCreated([]byte(remoteNoteBody(`"content": "forbidden"`)), "")
 	require.NoError(t, err)
@@ -154,7 +143,7 @@ func newProhibitedWordsUpdateResolver(t *testing.T, words []string) (*federation
 	r := federation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{}, idGen)
 	r.SetEmojiRepo(emojiRepo)
-	r.SetProhibitedWordsProvider(stubProhibitedWords{words: words})
+	r.SetHostBlockerForTest(&stubHostBlocker{prohibited: words})
 	return r, noteRepo, emojiRepo
 }
 

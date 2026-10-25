@@ -77,7 +77,7 @@ func actorWithSuspended(t *testing.T, literal string) string {
 // なる。Misskey 系は `Delete` を送るので同じ結果になる。
 func TestResolveActor_SuspendedTrue_SuspendsNewUser(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
-	r.SetSuspensionOriginRepo(newStubOriginRepo())
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestResolveActor_SuspendedTrue_SuspendsNewUser(t *testing.T) {
 // 立っていないときは触らない (既定の挙動を変えない)。
 func TestResolveActor_NoSuspended_DoesNotSuspend(t *testing.T) {
 	r, _ := newResolver(t, sampleActor, nil)
-	r.SetSuspensionOriginRepo(newStubOriginRepo())
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
 	assert.False(t, user.IsSuspended)
@@ -106,7 +106,7 @@ func TestResolveActor_NoSuspended_DoesNotSuspend(t *testing.T) {
 func TestResolveActor_SuspendedFalse_DoesNotUnsuspend(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	// ローカルのモデレーターが先に凍結している状態を作る。
 	host := "remote.example"
@@ -127,7 +127,7 @@ func TestResolveActor_SuspendedFalse_DoesNotUnsuspend(t *testing.T) {
 // 既存ユーザーが後から凍結されたら追従する (更新経路)。
 func TestResolveActor_SuspendedTrue_SuspendsExistingUser(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
-	r.SetSuspensionOriginRepo(newStubOriginRepo())
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -150,7 +150,7 @@ func TestResolveActor_SuspendedMalformed_DoesNotSuspend(t *testing.T) {
 	for _, literal := range []string{`"no"`, `{"a":1}`, `[]`, `null`, `0`, `"maybe"`} {
 		t.Run(literal, func(t *testing.T) {
 			r, _ := newResolver(t, actorWithSuspended(t, literal), nil)
-			r.SetSuspensionOriginRepo(newStubOriginRepo())
+			r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 			user, err := r.ResolveActor("https://remote.example/users/alice")
 			require.NoErrorf(t, err, "actor ごと読めなくなっている (document を壊してはいけない)")
 			assert.Falsef(t, user.IsSuspended,
@@ -162,7 +162,7 @@ func TestResolveActor_SuspendedMalformed_DoesNotSuspend(t *testing.T) {
 // 文字列の "true" は PostgreSQL の boolean 入力構文として真。
 func TestResolveActor_SuspendedStringTrue_Suspends(t *testing.T) {
 	r, _ := newResolver(t, actorWithSuspended(t, `"true"`), nil)
-	r.SetSuspensionOriginRepo(newStubOriginRepo())
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
 	assert.True(t, user.IsSuspended)
@@ -179,7 +179,7 @@ func TestResolveActor_SuspendedStringTrue_Suspends(t *testing.T) {
 func TestResolveActor_LocalUnsuspend_IsNotOverriddenByRemote(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -201,7 +201,7 @@ func TestResolveActor_LocalUnsuspend_IsNotOverriddenByRemote(t *testing.T) {
 func TestResolveActor_LocalSuspend_IsNotLiftedByRemote(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -221,7 +221,7 @@ func TestResolveActor_LocalSuspend_IsNotLiftedByRemote(t *testing.T) {
 func TestResolveActor_RemoteSuspend_IsLiftedByRemote(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -242,7 +242,7 @@ func TestResolveActor_RemoteSuspend_IsLiftedByRemote(t *testing.T) {
 // リモートが解除できてはいけない。
 func TestResolveActor_UnknownOrigin_IsTreatedAsLocal(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
-	r.SetSuspensionOriginRepo(newStubOriginRepo()) // 記録なし
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo()) // 記録なし
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -261,7 +261,7 @@ func TestResolveActor_UnknownOrigin_IsTreatedAsLocal(t *testing.T) {
 func TestResolveActor_RemoteSuspend_RecordsOrigin(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -284,7 +284,7 @@ func TestResolveActor_OriginWriteFails_DoesNotSuspend(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
 	origins.setErr = errors.New("connection refused")
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -305,7 +305,7 @@ func TestResolveActor_OriginReadFails_LeavesStateUntouched(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
 	origins.readErr = errors.New("connection refused")
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
@@ -323,7 +323,7 @@ func TestResolveActor_OriginReadFails_LeavesStateUntouched(t *testing.T) {
 // 再生産しないため。
 func TestResolveActor_NoOriginRepo_DoesNotSuspend(t *testing.T) {
 	r, _ := newResolver(t, actorWithSuspended(t, "true"), nil)
-	// SetSuspensionOriginRepo を呼ばない
+	// suspensionOriginRepo は nil のまま (NewResolverNilDeps)
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
@@ -338,7 +338,7 @@ func TestResolveActor_NoOriginRepo_DoesNotSuspend(t *testing.T) {
 func TestResolveActor_SuspendedOnCreate_RecordsOrigin(t *testing.T) {
 	r, _ := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
@@ -355,7 +355,7 @@ func TestResolveActor_SuspendedOnCreate_OriginWriteFails_Unsuspends(t *testing.T
 	r, repo := newResolver(t, actorWithSuspended(t, "true"), nil)
 	origins := newStubOriginRepo()
 	origins.setErr = errors.New("connection refused")
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
@@ -370,7 +370,7 @@ func TestResolveActor_SuspendedOnCreate_OriginWriteFails_Unsuspends(t *testing.T
 func TestResolveActor_DeletedTombstone_IsNotUnsuspended(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
