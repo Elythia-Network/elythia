@@ -43,8 +43,7 @@ func runInbox(t *testing.T, p *processors.InboxProcessor, payload queue.InboxPay
 func TestInboxTelemetry_AcceptedAndUnsupported(t *testing.T) {
 	t.Run("accepted", func(t *testing.T) {
 		payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
-		p := processors.NewInboxProcessor(&stubFedProcessor{})
-		p.SetSignatureVerifier(v)
+		p := processors.NewInboxProcessor(&stubFedProcessor{}, v, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
 
@@ -56,8 +55,7 @@ func TestInboxTelemetry_AcceptedAndUnsupported(t *testing.T) {
 
 	t.Run("unsupported", func(t *testing.T) {
 		payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
-		p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return federation.ErrUnsupportedActivity }})
-		p.SetSignatureVerifier(v)
+		p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return federation.ErrUnsupportedActivity }}, v, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
 
@@ -79,8 +77,7 @@ func TestInboxTelemetry_SignatureFailed(t *testing.T) {
 	require.NoError(t, err)
 
 	host := "remote.example"
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host}, pubKey: otherPub})
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, &stubVerifier{actor: &model.User{ID: "alice", Host: &host}, pubKey: otherPub}, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -93,9 +90,7 @@ func TestInboxTelemetry_SignatureFailed(t *testing.T) {
 // **ブロック済みホストは元々ログすら出ない。** ここが唯一の観測点になる。
 func TestInboxTelemetry_BlockedHostIsRecorded(t *testing.T) {
 	payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(v)
-	p.SetHostBlockChecker(&stubBlocker{blocked: func(h string) bool { return h == host }})
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, v, &stubBlocker{blocked: func(h string) bool { return h == host }}, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -109,8 +104,7 @@ func TestInboxTelemetry_BlockedHostIsRecorded(t *testing.T) {
 
 func TestInboxTelemetry_ProcessingError(t *testing.T) {
 	payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
-	p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return errors.New("db down") }})
-	p.SetSignatureVerifier(v)
+	p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return errors.New("db down") }}, v, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -124,8 +118,7 @@ func TestInboxTelemetry_ProcessingError(t *testing.T) {
 func TestInboxTelemetry_UnwiredDoesNotBreakProcessing(t *testing.T) {
 	payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(v)
+	p := processors.NewInboxProcessor(stub, v, nil, nil, nil, nil)
 
 	require.NoError(t, runInbox(t, p, payload))
 	assert.Len(t, stub.calls, 1)
@@ -154,8 +147,7 @@ func TestInboxTelemetry_DerivesHostFromSignatureWhenPayloadHostEmpty(t *testing.
 	payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
 	require.Empty(t, payload.Host, "本番と同じく payload.Host は空")
 
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
-	p.SetSignatureVerifier(v)
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, v, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
@@ -167,7 +159,7 @@ func TestInboxTelemetry_DerivesHostFromSignatureWhenPayloadHostEmpty(t *testing.
 // 署名が無い / 壊れているときは空を返す (集計しない)。誤った host に足し込む
 // より、記録しない方がまし。
 func TestInboxTelemetry_NoHostWithoutSignature(t *testing.T) {
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, nil, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 

@@ -119,8 +119,7 @@ func newInboxPipeline(tb testing.TB) *inboxPipeline {
 	resolver.SetPublickeyExtraRepo(extra)
 
 	fed := federation.NewProcessor(resolver, nil, nil, nil, userRepo, testutil.NewMockNoteRepository())
-	inbox := processors.NewInboxProcessor(fed)
-	inbox.SetSignatureVerifier(resolver)
+	inbox := processors.NewInboxProcessor(fed, resolver, nil, nil, nil, nil)
 	inbox.SetLDSignatureVerifier(federation.NewLDSignatureVerifier(pubkeys.MockUserPublickeyRepository))
 	return &inboxPipeline{inbox: inbox, userFinds: &userFinds, extra: extra, pubkeys: pubkeys, key: key, actorDBRows: userRepo}
 }

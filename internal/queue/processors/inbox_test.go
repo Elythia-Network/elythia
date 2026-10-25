@@ -46,7 +46,7 @@ func mustEncode(t testing.TB, p queue.InboxPayload) []byte {
 // #534: InboxProcessor は payload decode 失敗を ErrSkipRetry で確定 fail に
 // する (壊れた payload を retry しても無限ループするため)。
 func TestInboxProcessor_DecodeFailureIsSkipRetry(t *testing.T) {
-	p := processors.NewInboxProcessor(&stubFedProcessor{})
+	p := processors.NewInboxProcessor(&stubFedProcessor{}, nil, nil, nil, nil, nil)
 
 	err := p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
@@ -60,7 +60,7 @@ func TestInboxProcessor_DecodeFailureIsSkipRetry(t *testing.T) {
 // 正常 path: federation.Processor.Process が nil を返せば Handle も nil。
 func TestInboxProcessor_HappyPathDelegatesToFederation(t *testing.T) {
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 
 	body := []byte(`{"type":"Follow","actor":"https://e/u/a"}`)
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -77,7 +77,7 @@ func TestInboxProcessor_UnsupportedActivityIsSwallowed(t *testing.T) {
 	stub := &stubFedProcessor{returnFn: func(_ []byte) error {
 		return federation.ErrUnsupportedActivity
 	}}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 
 	err := p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
@@ -191,8 +191,7 @@ func TestInboxProcessor_VerifiesSignatureWithQuery(t *testing.T) {
 			aliceURI := "https://remote.example/users/alice"
 			verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(verifier)
+			p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 			body := []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`)
 			payload := signedInboxPayloadAt(t, key, body, target)
@@ -225,8 +224,7 @@ func TestInboxProcessor_VerifiesSignatureAndCommitsHooks(t *testing.T) {
 	chart := &stubInboxChartHook{}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	p.SetInstanceTracker(tracker)
 	p.SetChartHook(chart)
 
@@ -255,8 +253,7 @@ func TestInboxProcessor_RejectsForeignActivityIDHost(t *testing.T) {
 	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	// activity.id が foreign host (evil.example) → drop。
 	body := []byte(`{"id":"https://evil.example/announces/1","type":"Announce","actor":"https://remote.example/users/alice"}`)
@@ -280,8 +277,7 @@ func TestInboxProcessor_RejectsMissingActivityID(t *testing.T) {
 	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice"}`)
 	payload := signedInboxPayload(t, key, body)
@@ -308,9 +304,7 @@ func TestInboxProcessor_BlockedHostDropped(t *testing.T) {
 	blocker := &stubBlocker{blocked: func(h string) bool { return h == host }}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetHostBlockChecker(blocker)
+	p := processors.NewInboxProcessor(stub, verifier, blocker, nil, nil, nil)
 
 	body := []byte(`{"type":"Follow"}`)
 	payload := signedInboxPayload(t, key, body)
@@ -341,8 +335,7 @@ func TestInboxProcessor_VerifyFailureDropped(t *testing.T) {
 		pubKey: otherPub,
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	payload := signedInboxPayload(t, key, []byte(`{"type":"Follow"}`))
 	err = p.Handle(context.Background(), driver.RawTask{
@@ -368,9 +361,7 @@ func TestInboxProcessor_DisallowedHostDropped(t *testing.T) {
 		allowed: func(string) bool { return false },
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetHostBlockChecker(blocker)
+	p := processors.NewInboxProcessor(stub, verifier, blocker, nil, nil, nil)
 
 	payload := signedInboxPayload(t, key, []byte(`{}`))
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -393,9 +384,7 @@ func TestInboxProcessor_LocalActorSkipsHostDependentHooks(t *testing.T) {
 	blocker := &stubBlocker{}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetHostBlockChecker(blocker)
+	p := processors.NewInboxProcessor(stub, verifier, blocker, nil, nil, nil)
 	p.SetInstanceTracker(tracker)
 	p.SetChartHook(chart)
 
@@ -413,8 +402,7 @@ func TestInboxProcessor_LocalActorSkipsHostDependentHooks(t *testing.T) {
 func TestInboxProcessor_InvalidSignatureHeaderDropped(t *testing.T) {
 	verifier := &stubVerifier{actor: &model.User{ID: "alice"}, pubKey: "x"}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	payload := queue.InboxPayload{
 		Body:    []byte(`{}`),
@@ -439,8 +427,7 @@ func TestInboxProcessor_ResolveActorErrorDropped(t *testing.T) {
 
 	verifier := &stubVerifier{actor: nil, pubKey: ""}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	payload := signedInboxPayload(t, key, []byte(`{}`))
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -455,8 +442,7 @@ func TestInboxProcessor_ResolveActorErrorDropped(t *testing.T) {
 func TestInboxProcessor_LegacyPayloadSkipsVerify(t *testing.T) {
 	verifier := &stubVerifier{} // never called
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
@@ -552,8 +538,7 @@ func TestInboxProcessor_ActorSpoofDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: false})
 
 	body := []byte(`{"type":"Delete","actor":"https://victim.example/users/alice","object":"https://victim.example/notes/1"}`)
@@ -584,8 +569,7 @@ func TestInboxProcessor_ForwardedWithValidLDSig(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	// LD-Signature が origin/alice の鍵で署名済 (creator が alice を指す)。
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://origin.example/users/alice#main-key"})
 
@@ -614,8 +598,7 @@ func TestInboxProcessor_ActorObjectFormMatches(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	// `id` を持たせる。upstream も `typeof activity.id !== 'string'` で
 	// drop するので、無いと actor 形式に関係なく落ちてゲートを通らない。
@@ -643,8 +626,7 @@ func TestInboxProcessor_ActorMismatchNoLDVerifierDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier) // ldVerifier は配線しない
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	body := []byte(`{"type":"Delete","actor":"https://victim.example/users/alice"}`)
 	payload := signedInboxPayload(t, key, body)
@@ -672,8 +654,7 @@ func TestInboxProcessor_ForwardedLDCreatorUnresolvableDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true})
 
 	body := []byte(`{"type":"Create","actor":"https://origin.example/users/alice","signature":{"type":"RsaSignature2017","creator":"https://unknown.example/users/x#main-key"}}`)
@@ -703,8 +684,7 @@ func TestInboxProcessor_ForwardedLDSigWrongActorDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	// LD creator = mal だが body actor は alice を詐称。
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true})
 
@@ -737,8 +717,7 @@ func TestInboxProcessor_SpoofShapesDropped(t *testing.T) {
 			},
 		}
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
-		p.SetSignatureVerifier(verifier)
+		p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 		p.SetLDSignatureVerifier(&stubLDVerifier{present: false})
 		return p, stub, key
 	}
@@ -765,7 +744,7 @@ func TestInboxProcessor_SpoofShapesDropped(t *testing.T) {
 // federation.Processor.Process が呼ばれる。
 func TestInboxProcessor_LDVerify_NoVerifierBypassesGate(t *testing.T) {
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
 		Body:     mustEncode(t, queue.InboxPayload{Body: []byte(`{"type":"Note"}`)}),
@@ -777,7 +756,7 @@ func TestInboxProcessor_LDVerify_NoVerifierBypassesGate(t *testing.T) {
 func TestInboxProcessor_LDVerify_PassDelegates(t *testing.T) {
 	stub := &stubFedProcessor{}
 	verifier := &stubLDVerifier{err: nil}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(verifier)
 
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -793,7 +772,7 @@ func TestInboxProcessor_LDVerify_PassDelegates(t *testing.T) {
 func TestInboxProcessor_LDVerify_FailDropsActivity(t *testing.T) {
 	stub := &stubFedProcessor{}
 	verifier := &stubLDVerifier{err: errors.New("bad signature")}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(verifier)
 
 	err := p.Handle(context.Background(), driver.RawTask{
@@ -821,7 +800,7 @@ func TestInboxProcessor_LDVerify_LegacyPathDispatchesCompactedBody(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
+			p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 			p.SetLDSignatureVerifier(&stubLDVerifier{present: tc.present, compactedBody: compacted})
 			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 				TypeName: queue.TaskTypeInbox,
@@ -838,7 +817,7 @@ func TestInboxProcessor_LDVerify_LegacyPathDispatchesCompactedBody(t *testing.T)
 func TestInboxProcessor_GenericErrorPropagatesForRetry(t *testing.T) {
 	boom := errors.New("transient db error")
 	stub := &stubFedProcessor{returnFn: func(_ []byte) error { return boom }}
-	p := processors.NewInboxProcessor(stub)
+	p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 
 	err := p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
@@ -867,8 +846,7 @@ func TestInboxProcessor_SignerIsActor_LDSigVerifyFailureNotDropped(t *testing.T)
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	// VerifyAndCompact はエラー (鍵未解決) だが forbidden-directive check は通る。
 	ldv := &stubLDVerifier{present: true, err: errors.New("ld-sig: public key not found"), forbiddenErr: nil}
 	p.SetLDSignatureVerifier(ldv)
@@ -898,8 +876,7 @@ func TestInboxProcessor_SignerIsActor_ForbiddenDirectiveDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	ldv := &stubLDVerifier{present: true, forbiddenErr: errors.New("ld-sig: forbidden directive")}
 	p.SetLDSignatureVerifier(ldv)
 
@@ -960,9 +937,7 @@ func TestInboxProcessor_DropsReplayedActivity(t *testing.T) {
 	verifier, payload := signedReplayFixture(t, body)
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetInboxReplayGuard(newMemReplayGuard())
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, newMemReplayGuard())
 
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 	require.NoError(t, p.Handle(context.Background(), task))
@@ -986,9 +961,7 @@ func TestInboxProcessor_RetryAfterFailureIsNotDropped(t *testing.T) {
 		}
 		return nil
 	}}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetInboxReplayGuard(newMemReplayGuard())
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, newMemReplayGuard())
 
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 	require.Error(t, p.Handle(context.Background(), task))
@@ -1010,9 +983,7 @@ func TestInboxProcessor_ReplayGuardFailureIsFailOpen(t *testing.T) {
 	guard.err = errors.New("redis down")
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetInboxReplayGuard(guard)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
 
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 	require.NoError(t, p.Handle(context.Background(), task))
@@ -1025,8 +996,7 @@ func TestInboxProcessor_WorksWithoutReplayGuard(t *testing.T) {
 	verifier, payload := signedReplayFixture(t, body)
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 	require.NoError(t, p.Handle(context.Background(), task))
@@ -1064,8 +1034,7 @@ func TestInboxProcessor_TypeErrorDoesNotBypassActorGate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(verifier)
+			p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 			payload := signedInboxPayload(t, key, []byte(tc.body))
 			// drop は Handle が nil を返して Process に渡らない形で観測する
 			// (retry させないため)。
@@ -1124,8 +1093,7 @@ func TestInboxProcessor_VerificationUnavailableIsRetried(t *testing.T) {
 		boom := fmt.Errorf("%w: public key for actor %q: connection refused",
 			federation.ErrLookupUnavailable, "alice")
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
-		p.SetSignatureVerifier(&unavailableKeyVerifier{actor: actor, keyErr: boom})
+		p := processors.NewInboxProcessor(stub, &unavailableKeyVerifier{actor: actor, keyErr: boom}, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
 
@@ -1147,8 +1115,7 @@ func TestInboxProcessor_VerificationUnavailableIsRetried(t *testing.T) {
 		boom := fmt.Errorf("%w: actor %q: connection refused",
 			federation.ErrLookupUnavailable, aliceURI)
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
-		p.SetSignatureVerifier(&unavailableKeyVerifier{actorErr: boom, pubKey: pub})
+		p := processors.NewInboxProcessor(stub, &unavailableKeyVerifier{actorErr: boom, pubKey: pub}, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
 
@@ -1166,8 +1133,7 @@ func TestInboxProcessor_VerificationUnavailableIsRetried(t *testing.T) {
 	// 署名が合わない body は retry しても結果が変わらないので ack のまま。
 	t.Run("署名検証の失敗は従来どおり ack", func(t *testing.T) {
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
-		p.SetSignatureVerifier(&unavailableKeyVerifier{actor: actor, keyErr: errors.New("no key")})
+		p := processors.NewInboxProcessor(stub, &unavailableKeyVerifier{actor: actor, keyErr: errors.New("no key")}, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
 
@@ -1184,8 +1150,7 @@ func TestInboxProcessor_VerificationUnavailableIsRetried(t *testing.T) {
 	// 常に落とす変異でも両方緑になる)。
 	t.Run("検証が通れば Process へ流す", func(t *testing.T) {
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
-		p.SetSignatureVerifier(&unavailableKeyVerifier{actor: actor, pubKey: pub})
+		p := processors.NewInboxProcessor(stub, &unavailableKeyVerifier{actor: actor, pubKey: pub}, nil, nil, nil, nil)
 
 		require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 			TypeName: queue.TaskTypeInbox,
@@ -1219,8 +1184,7 @@ func TestInboxProcessor_AuthorizeActorLookupUnavailableIsRetried(t *testing.T) {
 		errByURI: map[string]error{"https://origin.example/users/alice": boom},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://origin.example/users/alice#main-key"})
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
@@ -1243,7 +1207,7 @@ func TestInboxProcessor_LegacyLDVerifyLookupUnavailableIsRetried(t *testing.T) {
 
 	t.Run("確かめられなかったときは error を返す", func(t *testing.T) {
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
+		p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 		p.SetLDSignatureVerifier(&stubLDVerifier{err: boom})
 
 		err := p.Handle(context.Background(), driver.RawTask{
@@ -1257,7 +1221,7 @@ func TestInboxProcessor_LegacyLDVerifyLookupUnavailableIsRetried(t *testing.T) {
 	// **対になる側。** 検証そのものの失敗は従来どおり drop する。
 	t.Run("検証失敗は従来どおり drop", func(t *testing.T) {
 		stub := &stubFedProcessor{}
-		p := processors.NewInboxProcessor(stub)
+		p := processors.NewInboxProcessor(stub, nil, nil, nil, nil, nil)
 		p.SetLDSignatureVerifier(&stubLDVerifier{err: errors.New("bad signature")})
 
 		require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -1291,11 +1255,10 @@ func TestInboxProcessor_ForwardedActorFromBlockedHostDropped(t *testing.T) {
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://blocked.example/users/alice#main-key"})
 	// **ブロックしているのは転送元 (actor) のホストだけ。** 署名者は通る。
-	p.SetHostBlockChecker(&stubBlocker{blocked: func(h string) bool { return h == blockedHost }})
+	p := processors.NewInboxProcessor(stub, verifier,
+		&stubBlocker{blocked: func(h string) bool { return h == blockedHost }}, nil, nil, nil)
+	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://blocked.example/users/alice#main-key"})
 
 	body := []byte(`{"id":"https://blocked.example/creates/1","type":"Create","actor":"https://blocked.example/users/alice","signature":{"type":"RsaSignature2017","creator":"https://blocked.example/users/alice#main-key"}}`)
 	payload := signedInboxPayload(t, key, body)
@@ -1334,10 +1297,7 @@ func TestInboxProcessor_SoftwareSuspendedHostDropped(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(&stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub})
-			p.SetHostBlockChecker(&stubBlocker{blocked: func(string) bool { return false }})
-			p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{host: tc.suspended}})
+			p := processors.NewInboxProcessor(stub, &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}, &stubBlocker{blocked: func(string) bool { return false }}, stubSoftwareBlocker{suspended: map[string]bool{host: tc.suspended}}, nil, nil)
 
 			payload := signedInboxPayload(t, key, []byte(tc.body))
 			require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -1371,11 +1331,8 @@ func TestInboxProcessor_ForwardedActorFromSoftwareSuspendedHostDropped(t *testin
 		},
 	}
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
+	p := processors.NewInboxProcessor(stub, verifier, &stubBlocker{blocked: func(string) bool { return false }}, stubSoftwareBlocker{suspended: map[string]bool{suspendedHost: true}}, nil, nil)
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://suspended.example/users/alice#main-key"})
-	p.SetHostBlockChecker(&stubBlocker{blocked: func(string) bool { return false }})
-	p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{suspendedHost: true}})
 
 	body := []byte(`{"id":"https://suspended.example/creates/1","type":"Create","actor":"https://suspended.example/users/alice","signature":{"type":"RsaSignature2017","creator":"https://suspended.example/users/alice#main-key"}}`)
 	payload := signedInboxPayload(t, key, body)
@@ -1410,10 +1367,7 @@ func TestInboxProcessor_SoftwareSuspendedHostStoppedBeforeVerification(t *testin
 	verifier := &countingVerifier{stubVerifier: &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}}
 
 	stub := &stubFedProcessor{}
-	p := processors.NewInboxProcessor(stub)
-	p.SetSignatureVerifier(verifier)
-	p.SetHostBlockChecker(&stubBlocker{})
-	p.SetSoftwareSuspensionChecker(stubSoftwareBlocker{suspended: map[string]bool{host: true}})
+	p := processors.NewInboxProcessor(stub, verifier, &stubBlocker{}, stubSoftwareBlocker{suspended: map[string]bool{host: true}}, nil, nil)
 
 	payload := signedInboxPayload(t, key, []byte(`{"id":"https://remote.example/follows/1","type":"Follow","actor":"https://remote.example/users/alice"}`))
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
@@ -1460,8 +1414,7 @@ func TestInboxProcessor_VerifiesSignatureForEveryBodyShape(t *testing.T) {
 			for enc, raw := range map[string][]byte{"current": mustEncode(t, payload), "compact": compact, "legacy": legacy} {
 				verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 				stub := &stubFedProcessor{}
-				p := processors.NewInboxProcessor(stub)
-				p.SetSignatureVerifier(verifier)
+				p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, nil)
 				require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: raw}))
 				require.Len(t, stub.calls, 1, "%s: signature must verify in the worker", enc)
 				assert.Equal(t, tc.body, string(stub.calls[0]), "%s: the body must reach Process unchanged", enc)

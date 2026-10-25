@@ -79,14 +79,13 @@ func newLDForwardEnv(t *testing.T) *ldForwardEnv {
 	pubkeys := testutil.NewMockUserPublickeyRepository()
 	pubkeys.Keys[victim.ID] = &model.UserPublickey{UserID: victim.ID, KeyID: ldFwdVictimKeyID, KeyPEM: victimPub}
 
-	inbox := processors.NewInboxProcessor(fed)
-	inbox.SetSignatureVerifier(&multiActorVerifier{
+	inbox := processors.NewInboxProcessor(fed, &multiActorVerifier{
 		pubKey: attackerPub,
 		byURI: map[string]*model.User{
 			ldFwdAttackerURI: attacker,
 			ldFwdVictimURI:   victim,
 		},
-	})
+	}, nil, nil, nil, nil)
 	inbox.SetLDSignatureVerifier(federation.NewLDSignatureVerifier(pubkeys))
 	return &ldForwardEnv{inbox: inbox, noteRepo: noteRepo, victimID: victim.ID, victimPriv: victimPriv, attackerKey: attackerKey}
 }
@@ -355,14 +354,13 @@ func TestInboxProcessor_ForwardedLDSig_RechecksCompactedFields(t *testing.T) {
 			relayHost := "relay.example"
 			originHost := "origin.example"
 			stub := &stubFedProcessor{}
-			p := processors.NewInboxProcessor(stub)
-			p.SetSignatureVerifier(&multiActorVerifier{
+			p := processors.NewInboxProcessor(stub, &multiActorVerifier{
 				pubKey: pub,
 				byURI: map[string]*model.User{
 					"https://relay.example/actor":        {ID: "relay", Host: &relayHost, URI: uptr("https://relay.example/actor")},
 					"https://origin.example/users/alice": {ID: "alice", Host: &originHost, URI: uptr("https://origin.example/users/alice")},
 				},
-			})
+			}, nil, nil, nil, nil)
 			p.SetLDSignatureVerifier(&stubLDVerifier{
 				present:       true,
 				creator:       "https://origin.example/users/alice#main-key",
