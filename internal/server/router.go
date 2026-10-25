@@ -141,9 +141,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// リアクション・削除イベントが流れる (#690 / #700)。
 	//
 	// 下の 4 つと userListStreamPublisher は buildStream へ移さず、ここで作る (#3692)。
-	// どれも buildStream を呼ぶ stream の節より前にある受け手へ渡す依存 (4 つは core の
-	// service・連合の processor・handler、userListStreamPublisher は usersHandler) で、
-	// それより前に要る。buildStream をここで呼ぶと、manager と note / notification の
+	// どれも buildStream を呼ぶ位置 (#3692 では stream の節、#3827 からは buildHandlers の
+	// 直前) より前にある受け手へ渡す依存 (4 つは core の service・連合の processor、
+	// userListStreamPublisher は #3692 の時点の usersHandler) で、それより前に要る。
+	// buildStream をここで呼び別名も置くと、manager と note / notification の
 	// publisher (setter の受け手) まで先頭へ移り、後から入れる辺が 96 から 117 に
 	// 増える (docs/architecture.md 4.1 の数え方)。
 	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
@@ -1985,6 +1986,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 渡す値は、どれもこの位置より前で作ってある。通報と申請の受付の通知は、
 	// abuseNotifStates・roleService・signupApplicationNotifLookup のどれかが欠けると
 	// 一覧に出なくなる (fail-closed)。
+	//
+	// stream の部品は buildHandlers より前に作る (#3827)。i と oauth の handler が、
+	// buildStream で作る revoke publisher を構築子の引数で受けるため。buildStream が
+	// 使うのは先頭で作る streamPubSub と idGen だけで、中の構築子はどれも値を作って
+	// 返すだけ (Redis に繋がず、購読も goroutine も始めない)。購読 (Subscribe…) と
+	// setter、w.stream への代入と別名は、下の stream の節のまま。
+	streamSvcs := buildStream(streamPubSub, idGen)
 	hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo,
 		abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup)
 	w.handlers = hSvcs
@@ -2602,10 +2610,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 1. Redis pubsub bus (核となる publish/subscribe チャンネル)。streamPubSub と
 	// internalPubSub は、受け手へ早く渡せるよう setupRoutes の先頭で作っている (#3676)。
 	// bus・registry・manager と、ここより後で渡す publisher は buildStream
-	// (wiring_stream.go) で作る (#3692)。ここでは今までと同じ名前の別名を置くだけにし、
-	// 以降の部分は書き換えない。どれも作るだけで Redis に繋がず、購読も始めない。
-	// setter と購読 (Subscribe…)、s.streamManager への代入は元の位置のまま。
-	streamSvcs := buildStream(streamPubSub, idGen)
+	// (wiring_stream.go) で作る (#3692)。buildStream は buildHandlers の直前で呼ぶ
+	// (#3827)。ここでは今までと同じ名前の別名を置くだけにし、以降の部分は書き換えない。
+	// どれも作るだけで Redis に繋がず、購読も始めない。setter と購読 (Subscribe…)、
+	// s.streamManager への代入は元の位置のまま。
 	w.stream = streamSvcs
 	streamRegistry := streamSvcs.streamRegistry
 	streamManager := streamSvcs.streamManager

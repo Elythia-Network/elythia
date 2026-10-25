@@ -324,11 +324,13 @@ server.New() → setupRoutes()
   ├→ hook 注入 (§5)
   ├→ Handler 生成 (§3.1)。作るだけの handler は buildHandlers → wiring.handlers
   │   で作り、usersHandler の位置で別名を置く。setter は元の位置 (#3817 で構築子の
-  │   必須の引数にした依存は buildHandlers で渡す)。この途中
+  │   必須の引数にした依存は buildHandlers で渡す)。buildHandlers の直前で
+  │   buildStream を呼ぶ (#3827。別名・setter・購読は下の stream の節)。この途中
   │   (プラグインの準備より前) で、queue の handler を registerQueueHandlers で 1 回だけ
   │   登録する (一覧は builtinQueueHandlers)
-  ├→ stream (bus・registry・manager と、ここから配る publisher は buildStream → wiring.stream
-  │   で作り、別名を置く。pubsub の購読をここで始める。WebSocket のチャンネルは
+  ├→ stream (bus・registry・manager と、ここから配る publisher は buildStream で作り
+  │   (#3827 から buildHandlers の直前で呼ぶ)、ここで wiring.stream に入れて別名を置く。
+  │   pubsub の購読をここで始める。WebSocket のチャンネルは
   │   registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
   │   WebSocket / middleware
   ├→ /api のルートの登録。handler をすべて作った後、プラグインの準備より前で、
@@ -464,7 +466,8 @@ manager と note・notification の publisher (どれも setter の受け手) �
 後から入れる辺は 96 から 117 に増える (27 辺増えて 6 辺減る。増えるのは
 `streamManager` の setter の 12 辺、`notePublisher` の 5 辺、`notificationPublisher` の 10 辺)。
 なので、#3676 で先頭に置いた 4 つの publisher は先頭に残し、`buildStream()` は stream の節で
-呼んだ (4.2)。
+呼んだ (4.2)。#3827 で `buildStream()` の呼び出しだけを `buildHandlers()` の直前へ動かしたが、
+別名は stream の節に残したので、この比べ方の前提 (manager と publisher の別名の位置) は変わらない。
 
 #3694 で API の handler 30 個を `buildHandlers()` へ移し、その別名を `setupRoutes()` の
 `usersHandler` を作っていた位置に置いた (4.2)。setter を呼ぶ位置は変えていない。setter の辺、
@@ -511,6 +514,16 @@ setter も構築も動かしていないので、どの行も数が変わらな�
 `hashtagService`の`s.addPart(...)`のclosureを、それぞれ1行の登録にしたことだけで、setterも構築の順も
 動かしていない。節点は消した2つの局所変数の分だけ減り、356になった。後から入れる96辺は行番号を除けば
 前と同じで、呼び出しが離れている辺は659のまま。
+
+#3827で、`buildStream()`の呼び出し(`streamSvcs := buildStream(...)`)を、stream の節から
+`buildHandlers()`の直前へ動かした(4.2)。`i`と`oauth`のhandlerが、`buildStream()`で作る
+`streamRevokePublisher`を構築子の引数で受けるため。動かしたのはこの1行だけで、`w.stream`への
+代入、別名(`streamManager := streamSvcs.streamManager`など)、setter、購読(`Subscribe…`)は
+stream の節に残した。下の数え方では、別名の依存は`streamSvcs`だけで、`streamSvcs`をsetterの
+引数に書いている行は無い。なので、定義の行が前へ移る節点は`streamSvcs`だけで、どのsetterの
+受け手と依存の定義の行も変わらず、後から入れる辺と呼び出しが離れている辺は変わらない(道具では
+数え直していない。どの辺にも`streamSvcs`が現れないことから言える)。`buildStream()`の中の
+構築子は、どれも値を作って返すだけ(下の「stream の部品 (#3692)」)。
 
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
@@ -628,7 +641,9 @@ setupRoutes()
   - `stream` も同じ形 (`streamSvcs := buildStream(streamPubSub, idGen)`、
     `w.stream = streamSvcs`、別名は `x := streamSvcs.x`)。`buildStream()` は `Server` の
     フィールドを読まないので、メソッドではなく普通の関数にした。stream の pubsub は
-    `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける
+    `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける。#3827 から
+    `buildStream()` は `buildHandlers()` の直前で呼び、`w.stream` への代入と別名は stream の節に
+    置く (呼び出しより前に別名を書けないことは変わらない)
   - `handlers` も同じ形 (`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, …)`、
     `w.handlers = hSvcs`、別名は `x := hSvcs.x`。`…` は #3817 で足した、handler の構築子へ
     渡す値)
@@ -925,8 +940,10 @@ setupRoutes()
   streamPubSub := event.NewPubSubService(...)        // 先頭 (#3676)
   noteEventPub := stream.NewNoteEventPublisher(...)  // 受け手へ早く渡す 5 つは先頭のまま
   …
+  streamSvcs := buildStream(streamPubSub, idGen)     // wiring_stream.go。#3827 から buildHandlers の直前
+  hSvcs := s.buildHandlers(…)
+  …
   // Streaming の節
-  streamSvcs := buildStream(streamPubSub, idGen)     // wiring_stream.go
   w.stream = streamSvcs
   streamManager := streamSvcs.streamManager          // 別名 (変数から取る)
   …
@@ -954,7 +971,9 @@ setupRoutes()
 - **setter は 1 つも動かさない。** 購読 (`Subscribe…`。server role の分岐の中)、
   `OnStreamRevoke`、`s.streamManager` への代入も、位置も順も元のまま。`buildStream()` を
   呼ぶ位置は、移したものの中で最初に作っていた `streamBus` の位置 (stream の節の先頭)。
-  移した構築は副作用を持たないので、DB と Redis の文の順は変わらない
+  移した構築は副作用を持たないので、DB と Redis の文の順は変わらない。#3827 で、呼び出し
+  (`streamSvcs := buildStream(...)`) だけを `buildHandlers()` の直前へ動かした。`w.stream` への
+  代入と別名は stream の節に残した (4.1)
 - **#3676 で `setupRoutes()` の先頭に置いた 4 つの publisher (note event・drive・reversi・
   main stream) は、先頭に残した。** どれも stream の節より前にある受け手 (core の service・
   連合の processor・handler) へ渡す依存で、stream の節より前に要る。`buildStream()` を先頭で呼ぶ形も比べたが、manager と note・notification
@@ -1151,7 +1170,7 @@ route の解決が 280 本に落ちた (`TestAPIRouteHandlersResolve` の下限�
 |---|---|
 | `buildHandlers()` を呼ぶ位置より前で作る | `metaHandler`・`resetHandler`・`emojisHandler` (どれも作るだけで、依存も先の領域だけ。位置の選び方は上)、`notesHandler` (`searchService` にも依存する。4.1)、`signupHandler`・`signinHandler` (setter の依存 `captchaSvc` は outbound client を使う)、`urlHandler` (`urlPreviewFetcher` は作るときに goroutine を起動する)、`statsHandler` (chart の engine)、`testHandler` (test mode の `if` の中) |
 | `setupRoutes()` で作る部品に依存する | `proxyHandler` (`proxyService`)、`oauthHandler` (`chunkedUploadCapability`・`proxyAccountResolver`・`s.outboundOpts`)、`inboxHandler` (`federationResolver`・`federationProcessor`。outbound client に依存する)、`chartsHandler` (chart の engine)、`emojiApplicationHandler` (`emojiApplicationService`)、`backupHandler` (`backupVerifier`。`webauthnSvc` の有無で分岐して作り、作れなければ panic する)、`swHandler` (`webPushCache`。`TestPushSubscriptionCacheIsShared` が、キャッシュの生成と `apisw.NewHandler` への受け渡しを同じファイルに置くことを要求する)、`bubbleVersusHandler` (`bubbleVersusService`。stream の publisher に依存する) |
-| stream の部品に依存する | `streamingHandler` (`streamManager`。`buildStream()` は stream の節で呼ぶ) |
+| stream の部品に依存する | `streamingHandler` (`streamManager`。#3694 の時点では `buildStream()` を stream の節で呼んでいた。#3827 から呼び出しは `buildHandlers()` の直前だが、別名 `streamManager` は stream の節で置く) |
 | `usersHandler` の位置で作ると、setter で後から入れる辺が増える | `adminHandler` (`avatarDecorationResolver`・`streamRevokePublisher`・`emojiApplicationRepo`・`broadcastPublisher` の 4 辺)、`announcementHandler` (`broadcastPublisher`)、`reversiHandler` (`reversiService`)、`chatHandler` (`chatService`) |
 | outbound の HTTP client を使う | `fetchExternalHandler`・`fetchRSSHandler` (`s.outboundClient(...)` が共有の transport を初めて作りうる) |
 | setter の引数の中で作る | `drive.NewURLUploader`、`oauth.NewRedisStore`、`apiadmin.NewEmojiImageFetcher` |
