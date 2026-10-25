@@ -2565,16 +2565,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.echo.GET("/nodeinfo/2.0", nodeinfoHandler.Version2_0)
 
 	// Inbox endpoints
-	inboxHandler := inbox.NewHandler(federationResolver, federationProcessor)
-	inboxHandler.SetHostBlockChecker(instanceService)
+	// inbox admission の host 署名+一致チェックに自ホストを渡す (#1949。第 3 引数)。
+	// #534: signature 検証成功後の Process(body) を inbox queue に逃がす (第 4 引数)。
+	// nil なら legacy 同期処理にフォールバックする (テスト互換)。
+	// ブロック済み・連合しない host の actor を 403 にする (第 5 引数)。
+	inboxHandler := inbox.NewHandler(federationResolver, federationProcessor,
+		s.config.Host, s.queueClient, instanceService)
 	inboxHandler.SetInstanceTracker(instanceService)
 	inboxHandler.SetSignatureCapabilityRecorder(sigCapBuffer)
 	inboxHandler.SetChartHook(chartHooks)
-	// inbox admission の host 署名+一致チェックに自ホストを配線する (#1949)。
-	inboxHandler.SetExpectedHost(s.config.Host)
-	// #534: signature 検証成功後の Process(body) を inbox queue に逃がす。
-	// 未配線時は legacy 同期処理にフォールバック (テスト互換)。
-	inboxHandler.SetEnqueuer(s.queueClient)
 	// inbox の 64KB body limit は global pre-auth な middleware.BodyLimitByPath で適用する
 	// (#1958 / #2075)。route-level に置くと global な auth.Authenticate の token 抽出 read が
 	// 先に走って bypass されるため、ここでは limit を付けない。
@@ -4000,6 +3999,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		metadataFetcher: metadataFetcher,
 		deliverService:  deliverService,
 		noteDeleteHook:  noteDeleteHook,
+		inboxHandler:    inboxHandler,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4020,17 +4020,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"センシティブワードに当たるリモートの public のノートが home にならない (ローカル投稿にだけ効く状態)"},
 		{"federation.localBaseURL", federationProcessor.HasLocalBaseURL(),
 			"relay の Accept / Reject が全て落ち、ローカル URI の判定も外れて自ホスト宛の object がリモート扱いになる"},
-		{"inbox.expectedHost", inboxHandler.HasExpectedHost(),
-			"署名対象の host ヘッダ検査と自ホスト一致検査が飛ぶ"},
-		{"inbox.enqueuer", inboxHandler.HasEnqueuer(),
-			"同期 fallback へ落ち、actor 一致検査・LD-Signature 検証・replay guard を通らない"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
-		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),
-			"federation: none 設定でも inbox が受け付ける"},
 		{"resolver.hostBlockChecker", federationResolver.HasHostBlockChecker(),
 			"federation 設定を無視してリモートを解決する"},
 		{"streamChannels.chatRoom.service", chatRoomFactory.HasService(),

@@ -1754,12 +1754,31 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   3つの欄を足した。テストの組み立てでnilだったのは`deliverService.syncDeliverHook`の1つで、
   許可リストに足した。連合のe2e(`tests/e2e-federation`)だけが`Server.SetSyncDeliverHookForTest`で
   入れるテスト用の口で、`setupRoutes()`は入れない
+- **4段目は`api/inbox`のhandler(1構築子・3行)。** `inbox.NewHandler`は`expectedHost`・`enqueuer`・
+  `hostBlocker`を受ける(`inbox.NewHandler(federationResolver, federationProcessor, s.config.Host,
+  s.queueClient, instanceService)`)。元のsetterは構築子の直後の数行にあり、間にあるのは同じ
+  handlerの残したsetterだけ。handlerはHTTPのリクエストからしか呼ばれない。`enqueuer`がnilの
+  ときの同期の経路は、テストが使うので残した。`SetInstanceTracker`・
+  `SetSignatureCapabilityRecorder`・`SetChartHook`は表に無いので、setterのまま残した
+- **置き換えたsetterと`Has…`は消した。** テスト(すべて`package inbox`)の`NewHandler`の呼び出し
+  3か所は空文字とnilを渡し、置き換えたsetterの18か所はフィールドへ直接代入する。
+  `wiring_predicate_test.go`(`Has…`のテスト)は消し、構築子が引数を捨てないことは
+  `constructor_test.go`が見る
+- **`routeParts`に`inboxHandler`を足した。** `requiredDepChecks`に`enqueuer`と`hostBlocker`を足した。
+  `expectedHost`は文字列でnilにならないので、空でないことを見る`requiredNonEmptyStrings`を足して
+  名指しした。テストの組み立てでnilになるフィールドは無かった。表を空にすると検査が何も見なく
+  なるので、空でないことを下限として要求する
+- **自ホストの名前は、wiring-checkで照合する。** `expectedHost`には`s.config.Host`を渡す。以前は
+  `SetExpectedHost`の名前が値の意味を示していたが、位置引数では呼び出し側から見えず、
+  `s.config.URL`などの別の文字列を渡しても型と空でないことの検査を通る。
+  `TestFederationHostValuesAreWired`(`internal/entitycompat`)が構築子の呼び出しを引数まで照合する。
+  `make wiring-check`の`-run`にも足した
 
-| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 |
-|---|---|---|---|---|
-| `criticalWiringCount` | 28 | 28 | 27 | 24 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 |
-| その受け手 | 107 | 107 | 107 | 106 |
+| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 |
+|---|---|---|---|---|---|
+| `criticalWiringCount` | 28 | 28 | 27 | 24 | 21 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 | 599 |
+| その受け手 | 107 | 107 | 107 | 106 | 106 |
 
 数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。3段目で
 減った受け手は、置き換えたsetterしか呼んでいなかった`noteDeleteHook`。

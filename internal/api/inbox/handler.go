@@ -70,54 +70,62 @@ type InboxEnqueuer interface {
 // Handler accepts incoming activities and dispatches them to the federation
 // processor after verifying their HTTP signature.
 type Handler struct {
-	resolver        *federation.Resolver
-	processor       *federation.Processor
+	resolver  *federation.Resolver
+	processor *federation.Processor
+	// hostBlocker はシグネチャ検証成功後の actor が属するホストが blocked
+	// リストに含まれる (または federation 設定が許さない) 場合に 403 を返して
+	// 以降の処理をスキップする判定。**nil だと `federation: none` 設定でも inbox が
+	// 受け付ける。** 構築子の必須の引数 (#3833。以前は setter と起動時の検査、
+	// #2683)。テストは nil を渡せる。
 	hostBlocker     HostBlockChecker
 	instanceTracker InstanceTracker
 	chartHook       ChartHook
 	capabilities    SignatureCapabilityRecorder
-	enqueuer        InboxEnqueuer
-	// keyCache は同期 fallback 経路 (SetEnqueuer 未配線時) の HTTP Signature
+	// enqueuer は署名を検証した activity を worker へ渡す queue (#534)。nil だと
+	// processor.Process をリクエストの goroutine で同期に呼ぶ legacy な経路へ落ちる。
+	// **その経路は worker 側の actor-authorization gate (署名者 != activity.actor の
+	// なりすまし検出)・LD-Signature 検証・inbox replay guard を通らない。** 本番は
+	// async 一択である前提で、同期の経路はテストのためだけに残してある。構築子の
+	// 必須の引数 (#3833。以前は setter と起動時の検査、#2682)。
+	enqueuer InboxEnqueuer
+	// keyCache は同期 fallback 経路 (enqueuer が nil のとき) の HTTP Signature
 	// verify で公開鍵パースをメモ化する (#1426)。worker 側 InboxProcessor と
 	// 同じ最適化を、enqueue せず inline verify する構成にも適用する。
 	keyCache *activitypub.PublicKeyCache
 	// expectedHost は config 由来の自ホスト (host:port)。inbox admission の
-	// host 署名必須 + 一致チェックに使う。未設定時は host チェックを skip する
-	// (#1949)。
+	// host 署名必須 + 一致チェックに使う (upstream の
+	// `request.headers.host !== this.config.host`、#1949)。**空文字だと
+	// VerifyInboxAdmission の host 検査が丸ごと skip され、host ヘッダが署名対象に
+	// 含まれているかの確認と、自ホストとの一致確認の 2 つが飛ぶ。** 構築子の必須の
+	// 引数 (#3833。以前は setter と起動時の検査、#2682)。
 	expectedHost string
 }
 
 // NewHandler constructs a Handler.
-func NewHandler(resolver *federation.Resolver, processor *federation.Processor) *Handler {
-	return &Handler{resolver: resolver, processor: processor, keyCache: activitypub.NewPublicKeyCache(0)}
-}
-
-// SetEnqueuer wires the queue.Enqueuer used to dispatch verified activities
-// to the worker pool. When unset, the handler falls back to running
-// processor.Process synchronously inside the request goroutine — which is
-// the pre-#534 behaviour and what unit tests without a queue rely on.
-func (h *Handler) SetEnqueuer(e InboxEnqueuer) {
-	h.enqueuer = e
-}
-
-// SetHostBlockChecker attaches a HostBlockChecker. 設定されると、シグネチャ
-// 検証成功後の actor が属するホストが blocked リストに含まれる場合は 403 を
-// 返して以降の処理をスキップする。
-func (h *Handler) SetHostBlockChecker(c HostBlockChecker) {
-	h.hostBlocker = c
+//
+// expectedHost / enqueuer / hostBlocker はテストでは空文字か nil を渡せる
+// (それぞれのフィールドの説明のとおりに検査が外れるか、同期の経路になる)。
+func NewHandler(
+	resolver *federation.Resolver,
+	processor *federation.Processor,
+	expectedHost string,
+	enqueuer InboxEnqueuer,
+	hostBlocker HostBlockChecker,
+) *Handler {
+	return &Handler{
+		resolver:     resolver,
+		processor:    processor,
+		keyCache:     activitypub.NewPublicKeyCache(0),
+		expectedHost: expectedHost,
+		enqueuer:     enqueuer,
+		hostBlocker:  hostBlocker,
+	}
 }
 
 // SetInstanceTracker attaches an InstanceTracker. 設定されると、署名検証に
 // 成功するたびに対応 instance row の latestRequestReceivedAt が更新される。
 func (h *Handler) SetInstanceTracker(t InstanceTracker) {
 	h.instanceTracker = t
-}
-
-// SetExpectedHost wires the configured host (host:port) used by inbox admission
-// to require the request Host header to be signed and to match this server.
-// Mirrors upstream `request.headers.host !== this.config.host` (#1949).
-func (h *Handler) SetExpectedHost(host string) {
-	h.expectedHost = host
 }
 
 // SetChartHook attaches a ChartHook invoked after each successfully
@@ -232,10 +240,10 @@ func captureSignatureHeaders(req *http.Request) (headers map[string]string, comp
 // が消え、faker.send rps が ~2x 改善する (#564 bench)。Misskey TS と同じ
 // アーキテクチャ (read-and-enqueue + verify-in-worker)。
 //
-// SetEnqueuer 未配線時は legacy synchronous mode に fallback し、handler
+// enqueuer が nil のときは legacy synchronous mode に fallback し、handler
 // 内で従来通り verify + block + track + chart + process を実行する。これは
 // 単体テスト / 旧来配線を維持するためのもので、production 配線では
-// SetEnqueuer 経由の async path を踏む。
+// 構築子で渡す enqueuer 経由の async path を踏む。
 func (h *Handler) Inbox(c echo.Context) error {
 	// upstream ActivityPubServerService.inbox と同じく、federation mode が "none" なら
 	// body を読む前に 403 を即返す (#1959)。per-actor の IsAllowed gate は actor が
@@ -325,8 +333,8 @@ func (h *Handler) Inbox(c echo.Context) error {
 	}
 
 	// Legacy synchronous fallback (enqueuer 未配線時)。テストや旧来配線を
-	// 維持するために残してある。production では router.go が必ず SetEnqueuer を
-	// 呼ぶため到達しない。なお本経路は worker 側 InboxProcessor が持つ
+	// 維持するために残してある。production では setupRoutes が構築子で必ず
+	// enqueuer を渡すため到達しない。なお本経路は worker 側 InboxProcessor が持つ
 	// actor-authorization gate (署名者 != activity.actor のなりすまし検出,
 	// #parity review AUTH-1/AUTH-4) を通らない。production が async 一択である
 	// 前提のため許容しているが、将来この fallback を残すなら同 gate の適用
@@ -350,7 +358,7 @@ func (h *Handler) Inbox(c echo.Context) error {
 
 // processSynchronously runs federation.Processor.Process inline and maps
 // the outcome to an HTTP status code. Kept as a fallback for tests and
-// configurations that don't wire SetEnqueuer.
+// configurations that pass no enqueuer.
 func (h *Handler) processSynchronously(c echo.Context, body []byte) error {
 	if err := h.processor.Process(body); err != nil {
 		if errors.Is(err, federation.ErrUnsupportedActivity) {
@@ -504,25 +512,3 @@ func bodyHasActor(body []byte) bool {
 	actor, ok := probe["actor"]
 	return ok && len(actor) > 0 && string(actor) != "null"
 }
-
-// HasExpectedHost reports whether the expected Host value is wired.
-//
-// 空文字だと VerifyInboxAdmission の host 検査が丸ごと skip され、**host ヘッダが
-// 署名対象に含まれているかの確認と、自ホストとの一致確認の 2 つが飛ぶ**。
-// 本番では router が config.Host を必ず配線する (#2682)。
-func (h *Handler) HasExpectedHost() bool { return h.expectedHost != "" }
-
-// HasEnqueuer reports whether the async inbox enqueuer is wired.
-//
-// 未配線だと Handle が legacy な同期経路へ落ちる。その経路は worker 側の
-// **actor-authorization gate (署名者 != activity.actor のなりすまし検出)・
-// LD-Signature 検証・inbox replay guard を通らない**。同ファイルのコメントが
-// 「production が async 一択である前提のため許容している」と書いているとおり、
-// production では必ず配線される (#2682)。
-func (h *Handler) HasEnqueuer() bool { return h.enqueuer != nil }
-
-// HasHostBlockChecker reports whether the host block checker was wired.
-//
-// 未配線だと `federation: none` 設定でも inbox が受け付ける。起動時検査に
-// 使う (#2683)。
-func (h *Handler) HasHostBlockChecker() bool { return h.hostBlocker != nil }

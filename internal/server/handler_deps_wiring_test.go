@@ -161,6 +161,28 @@ func TestBuiltHandlersHaveNoNilDependencies(t *testing.T) {
 		}
 	}
 
+	// 文字列の依存は nil にならないので、空でないことを名指しで見る。以前の起動時の
+	// 検査の述語が `!= ""` を見ていたもの (#3833)。
+	// 抽出の下限: 表を空にすると、ループが 0 回で緑になる。
+	require.NotEmpty(t, requiredNonEmptyStrings, "requiredNonEmptyStrings が空 (検査が何も見ていない)")
+	for _, key := range requiredNonEmptyStrings {
+		comp, field, ok := strings.Cut(key, ".")
+		require.True(t, ok, "requiredNonEmptyStrings の key %q が <部品>.<フィールド> でない", key)
+		v := pv.FieldByName(comp)
+		if !v.IsValid() {
+			v = cv.FieldByName(comp)
+		}
+		if !v.IsValid() {
+			v = hv.FieldByName(comp)
+		}
+		require.True(t, v.IsValid(), "requiredNonEmptyStrings の %s の部品が無い", key)
+		require.False(t, v.IsNil(), "requiredNonEmptyStrings の %s の部品が nil", key)
+		f := v.Elem().FieldByName(field)
+		require.True(t, f.IsValid(), "%s のフィールドが無い (rename した?)", key)
+		require.Equal(t, reflect.String, f.Kind(), "%s が文字列でない", key)
+		assert.NotEmpty(t, f.String(), "%s が空のまま組み立てが終わった", key)
+	}
+
 	// 抽出の下限: 置き換えた依存を名指しで要求する。書き方が変わって何も見なく
 	// なっても緑になるのを防ぐ。
 	for _, key := range requiredDepChecks {
@@ -306,6 +328,14 @@ var requiredDepChecks = []string{
 	// ここから #3833 (連合の部品)。
 	"metadataFetcher.fetcher",
 	"deliverService.hostBlocker", "noteDeleteHook.userRepo", "noteDeleteHook.noteRepo",
+	"inboxHandler.enqueuer", "inboxHandler.hostBlocker",
+}
+
+// requiredNonEmptyStrings names string fields #3833 turned into constructor
+// arguments, keyed like handlerNilAllowed. TestBuiltHandlersHaveNoNilDependencies
+// checks that each is non-empty.
+var requiredNonEmptyStrings = []string{
+	"inboxHandler.expectedHost",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,
