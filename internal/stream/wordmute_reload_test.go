@@ -23,11 +23,11 @@ func (s *stubHardMuteLookup) HardMutedWordsForUser(userID string) []byte {
 // 更新する end-to-end の検証 (#791)。
 func TestManager_SubscribeWordMuteReload_RefreshesMatchingConnection(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 	lookup := &stubHardMuteLookup{rules: map[string][]byte{
 		"alice": []byte(`["initial"]`),
 	}}
-	m.SetHardMuteLookup(lookup)
+	m.hardMute = lookup
 
 	// alice の connection を 1 つ登録。SetHardMuteRules で initial rules を
 	// 持たせる (production の Accept 経路を模倣)。
@@ -52,12 +52,12 @@ func TestManager_SubscribeWordMuteReload_RefreshesMatchingConnection(t *testing.
 // 違う user の reload event は影響しないこと。
 func TestManager_RefreshHardMuteRules_OnlyAffectsTargetUser(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 	lookup := &stubHardMuteLookup{rules: map[string][]byte{
 		"alice": []byte(`["alice-new"]`),
 		"bob":   []byte(`["bob-original"]`),
 	}}
-	m.SetHardMuteLookup(lookup)
+	m.hardMute = lookup
 
 	alice := NewConnection("c1", &model.User{ID: "alice"}, newFakeConn())
 	alice.SetHardMuteRules([]byte(`["alice-original"]`))
@@ -79,7 +79,7 @@ func TestManager_RefreshHardMuteRules_OnlyAffectsTargetUser(t *testing.T) {
 
 // hardMute lookup が未配線なら no-op。
 func TestManager_RefreshHardMuteRules_NoLookupIsNoOp(t *testing.T) {
-	m := NewManager(NewRegistry(), newStubBus())
+	m := NewManager(NewRegistry(), newStubBus(), nil, nil, nil, nil)
 	conn := NewConnection("c1", &model.User{ID: "alice"}, newFakeConn())
 	conn.SetHardMuteRules([]byte(`["keep"]`))
 	m.register(conn)
@@ -92,8 +92,8 @@ func TestManager_RefreshHardMuteRules_NoLookupIsNoOp(t *testing.T) {
 // 不正な payload (壊れた JSON / userID 欠落) は warn して skip、panic しない。
 func TestManager_SubscribeWordMuteReload_HandlesMalformedPayload(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
-	m.SetHardMuteLookup(&stubHardMuteLookup{rules: map[string][]byte{}})
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
+	m.hardMute = &stubHardMuteLookup{rules: map[string][]byte{}}
 	m.SubscribeWordMuteReload()
 
 	// JSON 構文エラー
@@ -105,7 +105,7 @@ func TestManager_SubscribeWordMuteReload_HandlesMalformedPayload(t *testing.T) {
 
 // bus が nil のときは subscribe / unsubscribe いずれも no-op。
 func TestManager_SubscribeWordMuteReload_NilBus(t *testing.T) {
-	m := NewManager(NewRegistry(), nil)
+	m := NewManager(NewRegistry(), nil, nil, nil, nil, nil)
 	// panic しないこと。
 	m.SubscribeWordMuteReload()
 	m.UnsubscribeWordMuteReload()
@@ -114,7 +114,7 @@ func TestManager_SubscribeWordMuteReload_NilBus(t *testing.T) {
 // Shutdown が pubsub subscriber を解放すること (= bus.Unsubscribe が呼ばれる)。
 func TestManager_Shutdown_UnsubscribesWordMuteReload(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 	m.SubscribeWordMuteReload()
 	require.Contains(t, bus.subs, WordMuteReloadTopic)
 

@@ -12,32 +12,6 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-type entityPackerHolder interface {
-	SetEntityPacker(*entity.Packer)
-	HasEntityPacker() bool
-}
-
-// HasEntityPacker は mediaURL を持つ Packer を受け取ったときだけ true を返す
-// (#3794)。criticalWiring がこれで入れ忘れを見る。
-func TestUserLitePublishers_HasEntityPacker(t *testing.T) {
-	for name, h := range map[string]entityPackerHolder{"ReversiGamePublisher": &ReversiGamePublisher{}} {
-		t.Run(name, func(t *testing.T) {
-			if h.HasEntityPacker() {
-				t.Error("an unwired component must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{}))
-			if h.HasEntityPacker() {
-				t.Error("a Packer without mediaURL must report false")
-			}
-			h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-				"https://local.example", "", []byte("secret"), false, true)}))
-			if !h.HasEntityPacker() {
-				t.Error("a Packer with mediaURL must report true")
-			}
-		})
-	}
-}
-
 // NewBubbleVersusPublisher は受け取った依存を持たせる (#3823)。依存を構築子の必須の
 // 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
 // 構築子が引数を捨てても build は通るので、ここで固定する。
@@ -64,8 +38,7 @@ func TestUserLitePublishers_PackInviterWithTheGivenPacker(t *testing.T) {
 
 	t.Run("reversi", func(t *testing.T) {
 		bus := &capturingPubSub{}
-		p := NewReversiGamePublisher(bus)
-		p.SetEntityPacker(pk)
+		p := NewReversiGamePublisher(bus, pk)
 		p.PublishInvited("bob", inviter)
 		require.Len(t, bus.calls, 1)
 		proxied(t, bus.calls[0].payload)

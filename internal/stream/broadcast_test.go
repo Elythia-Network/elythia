@@ -14,7 +14,7 @@ import (
 // (認証/匿名問わず) へ top-level {type, body} で forward する。
 func TestManager_SubscribeBroadcast_ForwardsToAllConnections(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 
 	fc1, fc2 := newFakeConn(), newFakeConn()
 	c1 := NewConnection("c1", &model.User{ID: "alice"}, fc1)
@@ -46,7 +46,7 @@ func TestManager_SubscribeBroadcast_ForwardsToAllConnections(t *testing.T) {
 // #2046: 不正な broadcast payload は drop され forward されない。
 func TestManager_SubscribeBroadcast_DropsInvalidPayload(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 	fc := newFakeConn()
 	c := NewConnection("c1", &model.User{ID: "alice"}, fc)
 	go c.Start()

@@ -15,7 +15,8 @@ package server
 // method and reads s.db, s.relationCache and s.userRepo; buildCore,
 // buildFederation, buildQueue and buildHandlers are methods that also receive
 // w for the repositories; buildStream is a plain function of the stream
-// pubsub and the ID generator). A group that depends on an earlier group receives it as an
+// pubsub, the ID generator and the values setupRoutes builds for the
+// required constructor arguments of the streaming parts, #3827). A group that depends on an earlier group receives it as an
 // argument, from the variable that holds the earlier builder's result, never
 // by reading the earlier field back from w (docs/architecture.md 4.2).
 //

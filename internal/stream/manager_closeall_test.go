@@ -60,7 +60,7 @@ func readCloseCode(t *testing.T, conn *websocket.Conn) int {
 // leaves behind — and CloseAll waits until the connections unregistered.
 func TestManager_CloseAllSendsCloseFrameAndUnsubscribes(t *testing.T) {
 	bus := newStubBus()
-	m := NewManager(nil, bus)
+	m := NewManager(nil, bus, nil, nil, nil, nil)
 	m.SubscribeWordMuteReload()
 	m.SubscribeRelationReload()
 	m.SubscribeBroadcast()
@@ -89,7 +89,7 @@ func TestManager_CloseAllSendsCloseFrameAndUnsubscribes(t *testing.T) {
 // TestManager_CloseAllReportsWhatIsLeftWhenCtxEnds checks the bounded wait:
 // a connection that never unregisters is reported instead of blocking.
 func TestManager_CloseAllReportsWhatIsLeftWhenCtxEnds(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	// close handler で unregister しない接続 (Accept を通らない) を置く。
 	m.register(NewConnection("stuck", nil, newFakeConn()))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

@@ -82,8 +82,8 @@ func TestManager_AcceptWiresUGCVisibilityLookupLive(t *testing.T) {
 		mu.Unlock()
 		return &fakeChannel{ctx: ctx}
 	})
-	m := NewManager(registry, newStubBus())
-	m.SetUGCVisibilityLookup(func() string { return policy.Load().(string) })
+	m := NewManager(registry, newStubBus(), nil, nil, nil, nil)
+	m.ugcVisibility = func() string { return policy.Load().(string) }
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

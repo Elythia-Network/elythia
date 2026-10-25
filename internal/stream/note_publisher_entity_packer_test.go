@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
-// ストリームへ流す投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
+// ストリームへ流す投稿は、構築子で渡した Packer で包む (#3790)。
 //
 // 作者の avatarUrl (投稿の本体) と添付ファイル (resolver) の両方が、渡した Packer の
 // media proxy を通ることを確かめる。
@@ -23,11 +23,9 @@ import (
 func TestNotePublisher_PacksWithTheGivenPacker(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
 	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "", []byte("secret"), false, true)})
-	np.SetEntityPacker(pk)
-	require.True(t, np.HasEntityPacker())
+	np := NewNotePublisher(pub, idGen, pk)
 
 	const remote = "https://remote.example"
 	driveRepo := testutil.NewMockDriveFileRepository()

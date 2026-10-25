@@ -16,7 +16,7 @@ import (
 func TestNotePublisher_DropLocal(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	n := &model.Note{ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic}
 	username := func(i int) string {
 		var body struct {

@@ -47,7 +47,7 @@ type ServerStatsPublisher struct {
 
 	// enabled は meta の enableServerMachineStats を返す。本家は無効なら
 	// ServerStatsService が何もしないので、それに揃えて無効のあいだは集めも
-	// 流しもしない。nil (配線されていない) も無効として扱う。
+	// 流しもしない。nil も無効として扱う。構築子の必須の引数で受ける (#3827)。
 	enabled func() bool
 }
 
@@ -56,7 +56,12 @@ const ServerStatsLogMax = 200
 
 // NewServerStatsPublisher constructs a ServerStatsPublisher. interval<=0 は
 // デフォルト (2秒) を使用する。
-func NewServerStatsPublisher(pub PubSubPublisher, interval time.Duration) *ServerStatsPublisher {
+//
+// enabled decides on each tick whether host metrics are collected and
+// published. nil publishes nothing. 以前は setter で入れ、入れ忘れ (管理画面で
+// 有効にしても値が流れない) を起動時の検査 (criticalWiring) が見ていた。渡し忘れを
+// コンパイルで落とすため、構築子の必須の引数で受ける (#3827)。
+func NewServerStatsPublisher(pub PubSubPublisher, interval time.Duration, enabled func() bool) *ServerStatsPublisher {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
@@ -65,24 +70,8 @@ func NewServerStatsPublisher(pub PubSubPublisher, interval time.Duration) *Serve
 		interval: interval,
 		stopCh:   make(chan struct{}),
 		logBuf:   newStatsRingBuffer(ServerStatsLogMax),
+		enabled:  enabled,
 	}
-}
-
-// SetEnabledFunc sets the predicate that decides whether host metrics are
-// collected and published. Call it before Start. Without it nothing is
-// published.
-func (p *ServerStatsPublisher) SetEnabledFunc(fn func() bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.enabled = fn
-}
-
-// HasEnabledFunc reports whether SetEnabledFunc has been called with a non-nil
-// predicate (startup wiring check).
-func (p *ServerStatsPublisher) HasEnabledFunc() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.enabled != nil
 }
 
 func (p *ServerStatsPublisher) isEnabled() bool {
