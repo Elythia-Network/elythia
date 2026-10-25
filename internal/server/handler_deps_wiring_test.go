@@ -77,6 +77,9 @@ var handlerNilAllowed = map[string]string{
 	// 作る。既定は無効で、テストの組み立ても有効にしない。nil のとき timeline はキャッシュを
 	// 通らない (#3831)。
 	"notes.timelineCache": "enableTimelineCache を有効にしたときだけ EnableTimelineJSONCache で作る (既定は無効)",
+	// 連合の e2e (tests/e2e-federation) だけが Server.SetSyncDeliverHookForTest で入れ、queue を
+	// 通さずに同期で配送する。setupRoutes は入れず、nil のとき配送は queue へ enqueue する (#3833)。
+	"deliverService.syncDeliverHook": "テスト専用の seam。setupRoutes は入れず、nil のとき queue へ enqueue する",
 }
 
 // **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831)。**
@@ -302,6 +305,7 @@ var requiredDepChecks = []string{
 	"notes.renoteMutingRepo", "notes.channelMutingRepo", "notes.userFollowingRepo",
 	// ここから #3833 (連合の部品)。
 	"metadataFetcher.fetcher",
+	"deliverService.hostBlocker", "noteDeleteHook.userRepo", "noteDeleteHook.noteRepo",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

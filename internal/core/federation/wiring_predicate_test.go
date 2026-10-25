@@ -11,12 +11,8 @@ import (
 // 反転させる変異は e2e が捕まえるが、`return true` のように**弱める**変異は
 // 捕まらない (未配線を検出できなくなるのに起動は成功するため)。#2682 の
 // レビューで実際に素通りした形なので、同じ型のテストを置く。
-//
-// Resolver と DeliverService は別オブジェクトの別 field なので、片方の述語で
-// もう片方を代替できない。
 func TestFederation_WiringPredicates(t *testing.T) {
 	assert.False(t, (&Resolver{}).HasHostBlockChecker(), "resolver: 未配線なら false")
-	assert.False(t, (&DeliverService{}).HasHostBlockChecker(), "deliver: 未配線なら false")
 
 	// **配線したら true も固定する。** false 側だけだと、述語が別の field を
 	// 読む typo (copy-paste の付け替え漏れ) が単体・e2e とも素通りする
@@ -24,10 +20,6 @@ func TestFederation_WiringPredicates(t *testing.T) {
 	r := &Resolver{}
 	r.SetHostBlockChecker(stubWiringHostBlock{})
 	assert.True(t, r.HasHostBlockChecker(), "resolver: 配線したら true")
-
-	d := &DeliverService{}
-	d.SetHostBlockChecker(stubWiringHostBlock{})
-	assert.True(t, d.HasHostBlockChecker(), "deliver: 配線したら true")
 
 }
 

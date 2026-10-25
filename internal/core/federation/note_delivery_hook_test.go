@@ -32,7 +32,7 @@ func newNoteDeliveryHook(t *testing.T) (
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
 	renderer := activitypub.NewRenderer(urls)
 	idGen, _ := id.NewGenerator("aidx")
 	hook := federation.NewNoteDeliveryHook(deliver, renderer, urls, idGen, userRepo, noteRepo)
@@ -657,7 +657,7 @@ func TestNoteDeliveryHook_QuoteApprovalOrder(t *testing.T) {
 			return "", nil
 		})
 		idGen, _ := id.NewGenerator("aidx")
-		hook := federation.NewNoteDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls), renderer, urls, idGen, userRepo, testutil.NewMockNoteRepository())
+		hook := federation.NewNoteDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil), renderer, urls, idGen, userRepo, testutil.NewMockNoteRepository())
 		author := makeLocalAuthor(t, userRepo, keypairRepo)
 		followingRepo.RemoteInboxes[author.ID] = []string{"https://r.example/inbox"}
 		if fail {
@@ -778,7 +778,7 @@ func TestNoteDeliveryHook_SendNoteUpdate_ApprovalLookupFails(t *testing.T) {
 	renderer := activitypub.NewRenderer(urls)
 	renderer.SetQuoteApprovalResolver(func(*model.Note) (string, error) { return "", assert.AnError })
 	idGen, _ := id.NewGenerator("aidx")
-	hook := federation.NewNoteDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls), renderer, urls, idGen, userRepo, testutil.NewMockNoteRepository())
+	hook := federation.NewNoteDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil), renderer, urls, idGen, userRepo, testutil.NewMockNoteRepository())
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes[author.ID] = []string{"https://r.example/inbox"}
 	text, target := "look", "bobnote"
@@ -795,7 +795,7 @@ func TestQuoteRequestDeliveryHook_SendApprovalDelete(t *testing.T) {
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes[author.ID] = []string{"https://r.example/inbox"}
 	urls := activitypub.NewURLBuilder("https://example.com")
-	hook := federation.NewQuoteRequestDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls), activitypub.NewRenderer(urls))
+	hook := federation.NewQuoteRequestDeliveryHook(federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil), activitypub.NewRenderer(urls))
 	host, inbox := "remote.example", "https://remote.example/users/bob/inbox"
 	bob := &model.User{ID: "bob", Username: "bob", Host: &host, Inbox: &inbox}
 	a := &model.NoteQuoteAuthorization{ID: "a1", NoteID: "n1", QuoterID: "bob", QuotingURI: "https://remote.example/notes/q"}

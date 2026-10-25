@@ -5,6 +5,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ExtractEmojiTags exposes the unexported extractEmojiTags for external tests.
@@ -120,4 +121,12 @@ func NewRemoteStatsFetcherRedirectingTo(target string) *RemoteStatsFetcher {
 // 外部パッケージ (federation_test) のテストから行う。
 func (r *RemoteUserResolver) SetSoftwareSuspensionCheckerForTest(c SoftwareSuspensionChecker) {
 	r.softwareBlocker = c
+}
+
+// WithRepos returns a hook built by NewNoteDeleteDeliveryHook from h's other
+// arguments and the given repositories (#3833).
+//
+// 外部テストは作った後でフィールドへ代入できないので、構築子で作り直す。
+func (h *NoteDeleteDeliveryHook) WithRepos(userRepo repository.UserRepository, noteRepo repository.NoteRepository) *NoteDeleteDeliveryHook {
+	return NewNoteDeleteDeliveryHook(h.deliver, h.renderer, h.urls, userRepo, noteRepo)
 }

@@ -23,7 +23,7 @@ func TestPinDeliveryHook_SetRelayBroadcaster(t *testing.T) {
 
 func TestDeliverService_SetSyncDeliverHookForTest(t *testing.T) {
 	s := federation.NewDeliverService(nil, testutil.NewMockUserRepository(),
-		testutil.NewMockFollowingRepository(), testutil.NewMockUserKeypairRepository(), nil)
+		testutil.NewMockFollowingRepository(), testutil.NewMockUserKeypairRepository(), nil, nil)
 	called := false
 	s.SetSyncDeliverHookForTest(func(queue.DeliverPayload) error { called = true; return nil })
 	assert.False(t, called, "設定しただけでは呼ばれない")

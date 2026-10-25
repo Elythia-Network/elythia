@@ -1210,8 +1210,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetSignatureCapabilityDeclarer(sigCapRepo)
 
 	// AP delivery: DeliverService + フック登録 + queue processor 登録。
-	// deliverService と配送の hook は buildFederation で作る (#3688)。
-	deliverService.SetHostBlockChecker(instanceService)
+	// deliverService と配送の hook は buildFederation で作る (#3688)。host のブロックの
+	// 判定は構築子で渡す (#3833)。
 	// FEP-521a Multikey 対応で recipient capable + sender Ed25519 鍵あり 経路で
 	// Ed25519 sign を試行できるよう wire (#1067 / #1071)。
 	deliverService.SetKeypairExtraRepo(keypairExtraRepo)
@@ -1280,8 +1280,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。
 	blockingService.SetFederationHook(corefederation.NewBlockingDeliveryHook(deliverService, userRepo, apRenderer))
-	noteDeleteHook.SetUserRepo(userRepo)
-	noteDeleteHook.SetNoteRepo(noteRepo)
 	noteDeleteService.SetFederationHook(noteDeleteHook)
 	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404。第 2 引数)。
 	// enqueue 時の isBlockedInbox を通り抜ける retry-backoff 中・積み残しジョブも弾く。
@@ -4000,6 +3998,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		notes: notesHandler,
 
 		metadataFetcher: metadataFetcher,
+		deliverService:  deliverService,
+		noteDeleteHook:  noteDeleteHook,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4018,10 +4018,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"リモートから届くノートに禁止語のフィルタが掛からなくなる (ローカル投稿にだけ効く状態)"},
 		{"federation.sensitiveWords", federationResolver.HasSensitiveWordsSource(),
 			"センシティブワードに当たるリモートの public のノートが home にならない (ローカル投稿にだけ効く状態)"},
-		{"federation.noteDeleteHook.userRepo", noteDeleteHook.HasUserRepo(),
-			"DM / フォロワー限定ノートの Delete が宛先に届かず、相手サーバーに残り続ける"},
-		{"federation.noteDeleteHook.noteRepo", noteDeleteHook.HasNoteRepo(),
-			"フォローしていないリモート user が renote / reply したノートを消しても、相手サーバーに Delete が届かない"},
 		{"federation.localBaseURL", federationProcessor.HasLocalBaseURL(),
 			"relay の Accept / Reject が全て落ち、ローカル URI の判定も外れて自ホスト宛の object がリモート扱いになる"},
 		{"inbox.expectedHost", inboxHandler.HasExpectedHost(),
@@ -4035,8 +4031,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者から見えない形で制限が外れる。
 		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),
 			"federation: none 設定でも inbox が受け付ける"},
-		{"deliver.hostBlockChecker", deliverService.HasHostBlockChecker(),
-			"ブロック済み host へも配送する (outbound の defederation が効かない)"},
 		{"resolver.hostBlockChecker", federationResolver.HasHostBlockChecker(),
 			"federation 設定を無視してリモートを解決する"},
 		{"streamChannels.chatRoom.service", chatRoomFactory.HasService(),

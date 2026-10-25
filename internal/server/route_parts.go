@@ -82,6 +82,9 @@ type routeParts struct {
 	// notes の handler (#3831)。buildHandlers より前、setupRoutes の本文で作る。
 	notes *notes.Handler
 
-	// 連合の部品 (#3833)。欄の名前は setupRoutes の別名にする。
+	// 連合の部品 (#3833)。欄の名前は setupRoutes の別名にする。deliverService と
+	// noteDeleteHook は buildFederation で作る。
 	metadataFetcher *coreinstance.FetchMetadataService
+	deliverService  *corefederation.DeliverService
+	noteDeleteHook  *corefederation.NoteDeleteDeliveryHook
 }

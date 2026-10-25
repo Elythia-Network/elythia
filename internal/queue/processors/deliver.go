@@ -118,8 +118,8 @@ type DeliverProcessor struct {
 	// (画面には配送停止と出る)。
 	suspendedChecker SuspendedChecker
 	// deliveryGate は enqueue 時のチェックを通り抜けたジョブ (ブロック前に積まれたもの・
-	// retry-backoff 中のもの) を弾く第 2 の関門 (#1404)。deliver.hostBlockChecker では
-	// 代替できない。
+	// retry-backoff 中のもの) を弾く第 2 の関門 (#1404)。enqueue 時のチェック
+	// (core/federation.DeliverService の hostBlocker) では代替できない。
 	deliveryGate DeliveryGate
 	capabilities Ed25519AcceptanceRecorder
 	// metadataRefresher は配送に成功した相手の nodeinfo を取り直す (#3564)。

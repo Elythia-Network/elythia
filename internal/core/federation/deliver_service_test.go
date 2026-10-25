@@ -56,12 +56,19 @@ func (s *stubEnqueuer) ClearScheduledNote(_ string) error { return nil }
 
 func newDeliverService(t *testing.T) (*federation.DeliverService, *stubEnqueuer, *testutil.MockUserRepository, *testutil.MockFollowingRepository, *testutil.MockUserKeypairRepository) {
 	t.Helper()
+	return newDeliverServiceWithBlocker(t, nil)
+}
+
+// newDeliverServiceWithBlocker is newDeliverService with a host block checker
+// (nil skips the check).
+func newDeliverServiceWithBlocker(t *testing.T, blocker federation.HostBlockChecker) (*federation.DeliverService, *stubEnqueuer, *testutil.MockUserRepository, *testutil.MockFollowingRepository, *testutil.MockUserKeypairRepository) {
+	t.Helper()
 	enq := &stubEnqueuer{}
 	userRepo := testutil.NewMockUserRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	svc := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	svc := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, blocker)
 	return svc, enq, userRepo, followingRepo, keypairRepo
 }
 
@@ -361,9 +368,8 @@ func TestDeliverActivity_NoRecipientNoEd25519Payload(t *testing.T) {
 }
 
 func TestDeliverActivity_SkipsBlockedHosts(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{blocked: map[string]bool{"bad.example": true}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{blocked: map[string]bool{"bad.example": true}})
 
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{
 		"https://bad.example/inbox",
@@ -376,9 +382,8 @@ func TestDeliverActivity_SkipsBlockedHosts(t *testing.T) {
 // federation: specified で allowlist 外 host への deliver は skip される
 // (#536)。blocked と独立した経路。
 func TestDeliverActivity_SkipsDisallowedHosts(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{disallowed: map[string]bool{"other.example": true}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{disallowed: map[string]bool{"other.example": true}})
 
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{
 		"https://other.example/inbox",
@@ -389,9 +394,8 @@ func TestDeliverActivity_SkipsDisallowedHosts(t *testing.T) {
 }
 
 func TestDeliverActivity_BlockedInboxBadURL(t *testing.T) {
-	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{blocked: map[string]bool{}})
 	installLocalSigner(t, userRepo, keypairRepo)
-	svc.SetHostBlockChecker(&stubBlocker{blocked: map[string]bool{}})
 
 	// 不正な URL は parse 失敗で blocked 判定対象外 → そのまま enqueue される
 	require.NoError(t, svc.DeliverActivity("alice", []byte(`{}`), []string{"://bad-url"}))
@@ -527,7 +531,7 @@ func TestDeliverToFollowers_RepoError(t *testing.T) {
 	// failingFollowingRepo を使うため、独自構造を組み立てる
 	failing := &failingListInboxesRepo{MockFollowingRepository: testutil.NewMockFollowingRepository()}
 	urls := activitypub.NewURLBuilder("https://example.com")
-	svc := federation.NewDeliverService(&stubEnqueuer{}, userRepo, failing, keypairRepo, urls)
+	svc := federation.NewDeliverService(&stubEnqueuer{}, userRepo, failing, keypairRepo, urls, nil)
 	err := svc.DeliverToFollowers("alice", []byte(`{}`))
 	assert.Error(t, err)
 }
@@ -613,7 +617,7 @@ func TestDeliverToFollowersExcluding_RepoError(t *testing.T) {
 	installLocalSigner(t, userRepo, keypairRepo)
 	failing := &failingListInboxesRepo{MockFollowingRepository: testutil.NewMockFollowingRepository()}
 	urls := activitypub.NewURLBuilder("https://example.com")
-	svc := federation.NewDeliverService(&stubEnqueuer{}, userRepo, failing, keypairRepo, urls)
+	svc := federation.NewDeliverService(&stubEnqueuer{}, userRepo, failing, keypairRepo, urls, nil)
 	err := svc.DeliverToFollowersExcluding("alice", []byte(`{}`), map[string]bool{"https://x/inbox": true})
 	assert.Error(t, err)
 }

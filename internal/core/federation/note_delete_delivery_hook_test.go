@@ -41,10 +41,10 @@ func newDeleteHookWithNotes(t *testing.T) (
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
-	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls)
+	deliver := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
 	renderer := activitypub.NewRenderer(urls)
 	renderer.SetNoteResolver(noteRepo)
-	hook := federation.NewNoteDeleteDeliveryHook(deliver, renderer, urls)
+	hook := federation.NewNoteDeleteDeliveryHook(deliver, renderer, urls, nil, nil)
 	return hook, enq, userRepo, followingRepo, keypairRepo, noteRepo
 }
 
@@ -125,7 +125,7 @@ func TestNoteDeleteHook_DeliverErrorDoesNotPanic(t *testing.T) {
 
 func TestNoteDeleteHook_BroadcastToRemoteInboxes(t *testing.T) {
 	hook, enq, userRepo, _, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["alice"] = author
@@ -151,7 +151,7 @@ func TestNoteDeleteHook_BroadcastToRemoteInboxes(t *testing.T) {
 
 func TestNoteDeleteHook_BroadcastSkippedForFollowersVisibility(t *testing.T) {
 	hook, enq, userRepo, _, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice"}
 	userRepo.Users["alice"] = author
@@ -170,7 +170,7 @@ func TestNoteDeleteHook_BroadcastSkippedForFollowersVisibility(t *testing.T) {
 
 func TestNoteDeleteHook_BroadcastEmptyInboxes(t *testing.T) {
 	hook, enq, userRepo, _, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice"}
 	userRepo.Users["alice"] = author
@@ -192,7 +192,7 @@ func (f *failingListInboxes) ListRemoteInboxes() ([]model.RemoteInbox, error) {
 
 func TestNoteDeleteHook_BroadcastListError(t *testing.T) {
 	hook, enq, userRepo, _, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(&failingListInboxes{MockUserRepository: userRepo})
+	hook = hook.WithRepos(&failingListInboxes{MockUserRepository: userRepo}, nil)
 
 	author := &model.User{ID: "alice"}
 	userRepo.Users["alice"] = author
@@ -206,7 +206,7 @@ func TestNoteDeleteHook_BroadcastListError(t *testing.T) {
 
 func TestNoteDeleteHook_BroadcastDeliverError_DoesNotPanic(t *testing.T) {
 	hook, _, userRepo, _, _ := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice"}
 	userRepo.Users["alice"] = author
@@ -224,7 +224,7 @@ func TestNoteDeleteHook_BroadcastDeliverError_DoesNotPanic(t *testing.T) {
 // 2 回受け取る (#2575)。
 func TestNoteDeleteHook_DoesNotDoubleDeliverToFollowers(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["alice"] = author
@@ -262,7 +262,7 @@ func TestNoteDeleteHook_DoesNotDoubleDeliverToFollowers(t *testing.T) {
 // 一覧が引けないときはフォロワーには届ける。**何も送らないのは今より悪い。**
 func TestNoteDeleteHook_FallsBackToFollowersWhenListFails(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(&failingListInboxes{MockUserRepository: userRepo})
+	hook = hook.WithRepos(&failingListInboxes{MockUserRepository: userRepo}, nil)
 
 	author := &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["alice"] = author
@@ -280,7 +280,7 @@ func TestNoteDeleteHook_FallsBackToFollowersWhenListFails(t *testing.T) {
 // Public / Home 以外は broadcast しないので、従来どおりフォロワーだけ。
 func TestNoteDeleteHook_NonPublicStaysFollowersOnly(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["alice"] = author
@@ -302,7 +302,7 @@ func TestNoteDeleteHook_NonPublicStaysFollowersOnly(t *testing.T) {
 // 解釈すると、片方のクエリだけが変わったときに黙って配送が消える。**
 func TestNoteDeleteHook_EmptyBroadcastListStillDeliversToFollowers(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 
 	author := &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["alice"] = author
@@ -390,7 +390,7 @@ func TestNoteDeleteHook_PureRenoteSpecifiedNotDelivered(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
 	// **userRepo を配線してから見る。** 配線しないと directInboxes が常に空を
 	// 返すので、skip を外しても配送が起きず検査が空振りする。
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes["alice"] = []string{"https://r.example/inbox"}
 	noteRepo.Notes["orig"] = &model.Note{ID: "orig", UserID: "bob"}
@@ -408,7 +408,7 @@ func TestNoteDeleteHook_PureRenoteSpecifiedNotDelivered(t *testing.T) {
 // DM の Delete は宛先へ届かなければ意味が無い。宛先はフォロワーとは限らない。
 func TestNoteDeleteHook_SpecifiedReachesRecipientsNotFollowers(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followerInbox := "https://follower.example/inbox"
 	followingRepo.RemoteInboxes["alice"] = []string{followerInbox}
@@ -430,7 +430,7 @@ func TestNoteDeleteHook_SpecifiedReachesRecipientsNotFollowers(t *testing.T) {
 // 届けないと相手側に残り続ける。
 func TestNoteDeleteHook_FollowersVisibilityReachesMentionedNonFollower(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followerInbox := "https://follower.example/inbox"
 	followingRepo.RemoteInboxes["alice"] = []string{followerInbox}
@@ -455,7 +455,7 @@ func TestNoteDeleteHook_FollowersVisibilityReachesMentionedNonFollower(t *testin
 // direct とフォロワーで同じ inbox を共有していても 2 回送らない。
 func TestNoteDeleteHook_DirectAndFollowerInboxNotDuplicated(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	shared := "https://mentioned.example/inbox"
 	followingRepo.RemoteInboxes["alice"] = []string{shared}
@@ -473,7 +473,7 @@ func TestNoteDeleteHook_DirectAndFollowerInboxNotDuplicated(t *testing.T) {
 // ローカルユーザー宛の DM は連合配送が要らない (宛先が全員ローカルなら 0 件)。
 func TestNoteDeleteHook_SpecifiedLocalRecipientsOnly(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes["alice"] = []string{"https://follower.example/inbox"}
 	// inbox 列を持たせても送らない (local user は Host == nil で判定する)。
@@ -508,8 +508,7 @@ func seedRenoterNote(noteRepo *testutil.MockNoteRepository, id, userID, host, ta
 // ノートが相手のサーバーに残り続ける。
 func TestNoteDeleteHook_FollowersVisibilityReachesRenoterNonFollower(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
-	hook.SetUserRepo(userRepo)
-	hook.SetNoteRepo(noteRepo)
+	hook = hook.WithRepos(userRepo, noteRepo)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followerInbox := "https://follower.example/inbox"
 	followingRepo.RemoteInboxes["alice"] = []string{followerInbox}
@@ -538,8 +537,7 @@ func TestNoteDeleteHook_FollowersVisibilityReachesRenoterNonFollower(t *testing.
 // `visibleUserIDs` に居るので、届く相手は減らない。
 func TestNoteDeleteHook_SpecifiedDoesNotReachNonRecipientReplier(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
-	hook.SetUserRepo(userRepo)
-	hook.SetNoteRepo(noteRepo)
+	hook = hook.WithRepos(userRepo, noteRepo)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes["alice"] = []string{"https://follower.example/inbox"}
 	// 宛先ではないのに reply 行だけを持っている相手。
@@ -563,8 +561,7 @@ func TestNoteDeleteHook_SpecifiedDoesNotReachNonRecipientReplier(t *testing.T) {
 // この 2 つを同じテストで見る (片方だけだと「機能を丸ごと消しても緑」になる)。
 func TestNoteDeleteHook_RenoterWhoIsAlsoFollowerNotDuplicated(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
-	hook.SetUserRepo(userRepo)
-	hook.SetNoteRepo(noteRepo)
+	hook = hook.WithRepos(userRepo, noteRepo)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	shared := "https://renoter.example/inbox"
 	followingRepo.RemoteInboxes["alice"] = []string{shared}
@@ -594,8 +591,7 @@ func TestNoteDeleteHook_RenoterWhoIsAlsoFollowerNotDuplicated(t *testing.T) {
 // Delete まで道連れになる。
 func TestNoteDeleteHook_RenoteLookupFailureStillDeliversMentions(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
-	hook.SetUserRepo(userRepo)
-	hook.SetNoteRepo(noteRepo)
+	hook = hook.WithRepos(userRepo, noteRepo)
 	noteRepo.ListRenoteOrReplyErr = assert.AnError
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes["alice"] = []string{}
@@ -614,8 +610,7 @@ func TestNoteDeleteHook_RenoteLookupFailureStillDeliversMentions(t *testing.T) {
 // note repository 未配線では従来どおり (メンション先と DM 宛先だけ)。
 func TestNoteDeleteHook_WithoutNoteRepoSkipsRenoters(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo := newDeleteHookWithNotes(t)
-	hook.SetUserRepo(userRepo)
-	assert.False(t, hook.HasNoteRepo())
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes["alice"] = []string{}
 	seedRemoteRecipient(userRepo, "dave", "renoter.example", "https://renoter.example/users/dave/inbox")
@@ -637,7 +632,7 @@ func TestNoteDeleteHook_WithoutNoteRepoSkipsRenoters(t *testing.T) {
 // 効かずに 2 通届く。
 func TestNoteDeleteHook_SharedInboxFollower_Deduped(t *testing.T) {
 	hook, enq, userRepo, followingRepo, keypairRepo := newDeleteHook(t)
-	hook.SetUserRepo(userRepo)
+	hook = hook.WithRepos(userRepo, nil)
 	author := seedDeleteSigner(t, userRepo, keypairRepo)
 
 	const shared = "https://mentioned.example/inbox"

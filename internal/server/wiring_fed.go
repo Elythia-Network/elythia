@@ -35,6 +35,10 @@ import (
 // buildFederation only constructs. Every setter on these parts is still called
 // at its old position in setupRoutes, because workers started during
 // construction must see the same wiring as before (docs/architecture.md 4.1).
+// The dependencies #3833 made required constructor arguments (the delivery
+// service's host block checker, the note delete hook's repositories) are
+// passed here instead; they only make delivery skip more hosts or reach more
+// recipients, and nothing delivers between here and their old setters.
 type fed struct {
 	inboxSoftwareChecker       *corefederation.SuspendedChecker
 	apURLs                     *activitypub.URLBuilder
@@ -66,6 +70,7 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	keypairRepo := w.repos.keypair
 	instanceRepo := w.repos.instance
 	sysAcctSvc := coreSvcs.sysAcct
+	instanceService := coreSvcs.instance
 
 	// 受信を拒否するソフトウェア (#3362) の判定。連合の resolver、WebFinger で
 	// 利用者を引く remoteUserResolver、inbox の processor、ap/show が共有する。
@@ -75,7 +80,10 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	apURLs := activitypub.NewURLBuilder(s.config.URL)
 	apRenderer := activitypub.NewRenderer(apURLs)
 
-	deliverService := corefederation.NewDeliverService(s.queueClient, userRepo, followingRepo, keypairRepo, apURLs)
+	// ブロック済み・連合しない host の inbox へは enqueue しない (#536)。resolver・inbox と
+	// 同じ instanceService を渡す。構築子の必須の引数 (#3833)。
+	deliverService := corefederation.NewDeliverService(s.queueClient, userRepo, followingRepo, keypairRepo, apURLs,
+		instanceService)
 	// Relay 連携 (#161)。relay.Service は AP delivery を必要とするので
 	// deliverService の直後で作る。setter (SetLdSigning) は setupRoutes の元の位置。
 	relaySvc := corerelay.NewService(repository.NewRelayRepository(s.db), sysAcctSvc, apRenderer, deliverService, idGen)
@@ -84,7 +92,9 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	// QuoteRequest への応答 (#3234)。QuoteRequest の handler と、ブロックで承認を
 	// 取り消す QuoteRevoker が共有する。配送の service と renderer しか持たない (#3688)。
 	quoteRequestDeliveryHook := corefederation.NewQuoteRequestDeliveryHook(deliverService, apRenderer)
-	noteDeleteHook := corefederation.NewNoteDeleteDeliveryHook(deliverService, apRenderer, apURLs)
+	// userRepo は DM の宛先と既知のリモート inbox を、noteRepo は renote / reply した
+	// リモート user を引く (#2995)。構築子の必須の引数 (#3833)。
+	noteDeleteHook := corefederation.NewNoteDeleteDeliveryHook(deliverService, apRenderer, apURLs, userRepo, noteRepo)
 	// 落ちた配送先へのブレーカー (#3048)。状態は Redis に置くので、作るだけなら
 	// Redis に触らない。
 	deliveryBreaker := deliveryhealth.NewBreaker(s.redis.Default)

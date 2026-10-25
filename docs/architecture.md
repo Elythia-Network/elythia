@@ -770,7 +770,7 @@ setupRoutes()
   service は `buildCore()` の戻り値 `coreSvcs` から受け取る。** 中の行は `setupRoutes()` に
   あった行をそのまま移し、作る順も元のまま。使う `Server` のフィールドは `s.config` /
   `s.queueClient` / `s.redis` / `s.db`。`coreSvcs` から使うのは `sysAcct` だけ (`relaySvc`
-  の引数)
+  の引数) だった。#3833 から `instance` も使う (`deliverService` の host のブロックの判定)
 - **移す条件は core と同じ。** 作るときに DB にも Redis にも外部にも触らず、ログを出さず、
   goroutine・timer・shutdown hook・グローバルの書き換え・hook の登録のどれもせず、依存が
   repository・core・先に作った連合の部品・設定だけのもの。コンストラクタの本体を 1 つずつ
@@ -1734,14 +1734,35 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   引数を捨てないことは`internal/core/instance/constructor_test.go`が見る
 - **`routeParts`に`metadataFetcher`を足した。** `requiredDepChecks`に`metadataFetcher.fetcher`を
   足した。テストの組み立てでnilになるフィールドは無かった
+- **3段目は配送の`DeliverService`と、ノートの削除を配る`NoteDeleteDeliveryHook`(2構築子・3行)。**
+  `NewDeliverService`は`hostBlocker`を、`NewNoteDeleteDeliveryHook`は`userRepo`と`noteRepo`を
+  受ける。どちらも`buildFederation()`で作り、`instanceService`(`coreSvcs.instance`)と
+  repositoryの別名を渡す。`buildFederation()`は`buildCore()`の後に呼ぶので、どれも揃っている
+- **依存を入れる時点が、元のsetterの位置(`setupRoutes()`の`buildFederation()`より後)から
+  構築子の位置へ前へ移った。** 間で配送する行は無い(配送はHTTPのリクエストと受信のworkerから
+  起きる)。前へ移って変わりうるのは、配送先が減る(ブロック済みのhostを弾く)か増える(DMの
+  宛先とrenoteした相手に届く)方向だけ。`deliverService.SetKeypairExtraRepo`・
+  `SetPublickeyExtraRepo`は表に無いので、setterのまま残した
+- **置き換えたsetterと`Has…`は消した。** `NewDeliverService`を呼ぶテスト(16か所。
+  `internal/core/federation`の`_test.go`に`grep -c 'NewDeliverService('`を当てた)はnilを渡す。
+  `SetHostBlockChecker`を呼んでいた6か所(`deliver_service_test.go`と`default_port_gate_test.go`)は、
+  判定を構築子へ渡す補助関数`newDeliverServiceWithBlocker`に寄せた。`note_delete_delivery_hook_test.go`
+  (外部テスト)の`SetUserRepo`・`SetNoteRepo`の20か所は、残りの引数を同じにして構築子で作り直す
+  `WithRepos`(`export_test.go`)に置き換えた。`wiring_predicate_test.go`から配送の`HasHostBlockChecker`の
+  テストを消した。構築子が引数を捨てないことは`internal/core/federation/constructor_test.go`が見る
+- **`routeParts`に`deliverService`と`noteDeleteHook`を足した。** `requiredDepChecks`に置き換えた
+  3つの欄を足した。テストの組み立てでnilだったのは`deliverService.syncDeliverHook`の1つで、
+  許可リストに足した。連合のe2e(`tests/e2e-federation`)だけが`Server.SetSyncDeliverHookForTest`で
+  入れるテスト用の口で、`setupRoutes()`は入れない
 
-| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 |
-|---|---|---|---|
-| `criticalWiringCount` | 28 | 28 | 27 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 |
-| その受け手 | 107 | 107 | 107 |
+| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 |
+|---|---|---|---|---|
+| `criticalWiringCount` | 28 | 28 | 27 | 24 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 |
+| その受け手 | 107 | 107 | 107 | 106 |
 
-数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。
+数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。3段目で
+減った受け手は、置き換えたsetterしか呼んでいなかった`noteDeleteHook`。
 
 #### /api のルートの登録 (#3697)
 

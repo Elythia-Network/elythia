@@ -67,7 +67,12 @@ type DeliverService struct {
 	keypairExtraRepo   repository.UserKeypairExtraRepository   // optional: sender Ed25519 鍵
 	publickeyExtraRepo repository.UserPublickeyExtraRepository // optional: recipient capability 判定
 	urls               *activitypub.URLBuilder
-	hostBlocker        HostBlockChecker
+	// hostBlocker は配送先の host を federation 設定 (none / specified /
+	// blockedHosts) で弾く判定。配信時に呼ばれ、ブロック対象ホストの inbox には
+	// エンキューしない。**nil だと `isBlockedInbox` が常に false になり、ブロック済み
+	// host へも配送する (outbound の defederation が効かない)。** 構築子の必須の
+	// 引数 (#3833。以前は setter と起動時の検査、#2683)。テストは nil を渡せる。
+	hostBlocker HostBlockChecker
 	// syncDeliverHook, when non-nil, replaces the queue enqueue with an
 	// inline call to the hook. test 専用で federation deliver の queue 経路
 	// を bypass し、sign + HTTP POST を同期実行する e2e_federation 用。
@@ -100,6 +105,7 @@ func NewDeliverService(
 	followingRepo repository.FollowingRepository,
 	keypairRepo repository.UserKeypairRepository,
 	urls *activitypub.URLBuilder,
+	hostBlocker HostBlockChecker,
 ) *DeliverService {
 	return &DeliverService{
 		enqueuer:      enqueuer,
@@ -107,14 +113,9 @@ func NewDeliverService(
 		followingRepo: followingRepo,
 		keypairRepo:   keypairRepo,
 		urls:          urls,
+		hostBlocker:   hostBlocker,
 		clock:         time.Now,
 	}
-}
-
-// SetHostBlockChecker attaches a HostBlockChecker. 配信時にこの checker が
-// 呼ばれ、ブロック対象ホストの inbox にはエンキューしない。
-func (s *DeliverService) SetHostBlockChecker(c HostBlockChecker) {
-	s.hostBlocker = c
 }
 
 // SetClock replaces the clock used by the capability / signer cache TTL
@@ -537,9 +538,3 @@ func preferredInbox(u *model.User) string {
 	}
 	return ""
 }
-
-// HasHostBlockChecker reports whether the host block checker was wired.
-//
-// 未配線だと `isBlockedInbox` が常に false になり、ブロック済み host へも
-// 配送する (outbound の defederation が効かない)。起動時検査に使う (#2683)。
-func (s *DeliverService) HasHostBlockChecker() bool { return s.hostBlocker != nil }

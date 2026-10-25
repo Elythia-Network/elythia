@@ -29,46 +29,37 @@ type NoteDeleteDeliveryHook struct {
 	deliver  *DeliverService
 	renderer *activitypub.Renderer
 	urls     *activitypub.URLBuilder
+	// userRepo は broadcast の配送先 (既知のリモート inbox) と、DM の宛先・
+	// メンション先の inbox を引くのに使う。**nil だと DM の Delete が宛先へ
+	// 届かない。** 宛先の inbox を引けないので `directInboxes` が常に空になり、
+	// specified の Delete は誰にも配送されず、フォロワー限定でも「フォロワーで
+	// ない宛先」に届かない。public / home はフォロワーにだけ配る。失敗しても
+	// 例外は出ない。構築子の必須の引数 (#3833。以前は setter と起動時の検査)。
 	userRepo repository.UserRepository
+	// noteRepo は削除したノートを renote / reply したリモート user を探すのに
+	// 使う (#2995)。**nil だと renote / reply したリモート user へ Delete が
+	// 届かない。** 自分をフォローしていない相手が renote / reply したノートを
+	// 消しても、そのサーバーには何も届かず、削除したはずのノートが残り続ける。
+	// 失敗しても例外は出ない。構築子の必須の引数 (#3833)。
 	noteRepo repository.NoteRepository
 }
 
 // NewNoteDeleteDeliveryHook constructs a NoteDeleteDeliveryHook.
+//
+// userRepo / noteRepo はテストでは nil を渡せる (それぞれのフィールドの説明の
+// とおりに配送先が減る)。
 func NewNoteDeleteDeliveryHook(
 	deliver *DeliverService,
 	renderer *activitypub.Renderer,
 	urls *activitypub.URLBuilder,
+	userRepo repository.UserRepository,
+	noteRepo repository.NoteRepository,
 ) *NoteDeleteDeliveryHook {
-	return &NoteDeleteDeliveryHook{deliver: deliver, renderer: renderer, urls: urls}
+	return &NoteDeleteDeliveryHook{
+		deliver: deliver, renderer: renderer, urls: urls,
+		userRepo: userRepo, noteRepo: noteRepo,
+	}
 }
-
-// SetUserRepo wires a user repository used by the hook to look up remote
-// inboxes for broadcast delivery. nil 渡しはフォロワーのみへの配信に戻る。
-func (h *NoteDeleteDeliveryHook) SetUserRepo(r repository.UserRepository) {
-	h.userRepo = r
-}
-
-// SetNoteRepo wires the note repository used to find the remote users who
-// renoted or replied to the deleted note (#2995).
-func (h *NoteDeleteDeliveryHook) SetNoteRepo(r repository.NoteRepository) {
-	h.noteRepo = r
-}
-
-// HasNoteRepo reports whether the note repository was wired.
-//
-// **未配線だと renote / reply したリモート user へ Delete が届かない。**
-// 自分をフォローしていない相手が renote / reply したノートを消しても、その
-// サーバーには何も届かず、削除したはずのノートが残り続ける。失敗しても例外は
-// 出ないので、載せておかないと気付けない。
-func (h *NoteDeleteDeliveryHook) HasNoteRepo() bool { return h.noteRepo != nil }
-
-// HasUserRepo reports whether the user repository was wired.
-//
-// **未配線だと DM の Delete が宛先へ届かない。** 宛先の inbox を引けないので
-// `directInboxes` が常に空になり、specified の Delete は誰にも配送されず、
-// フォロワー限定でも「フォロワーでない宛先」に届かない。失敗しても例外は
-// 出ないので、載せておかないと気付けない。
-func (h *NoteDeleteDeliveryHook) HasUserRepo() bool { return h.userRepo != nil }
 
 // OnNoteDeleted is invoked by NoteDeleteService once a note has been removed.
 func (h *NoteDeleteDeliveryHook) OnNoteDeleted(author *model.User, note *model.Note) {
