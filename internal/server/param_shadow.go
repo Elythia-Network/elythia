@@ -25,7 +25,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // announcements in #3766; promo/read, email-address/available,
 // username/available, ap/*, bubble-game/ranking and bubble-game/register in
 // #3768; federation/* except federation/instances in #3770; pages/* and
-// page-push in #3772; the read-only top-level endpoints in #3774).
+// page-push in #3772; the read-only top-level endpoints in #3774; users and
+// users/* in #3837).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -187,6 +188,38 @@ var paramEnforcedEndpoints = []string{
 	"server-info",
 	"stats",
 	"test",
+	"users",
+	"users/achievements",
+	"users/clips",
+	"users/featured-notes",
+	"users/flashs",
+	"users/followers",
+	"users/following",
+	"users/gallery/posts",
+	"users/get-following-users-by-birthday",
+	"users/get-frequently-replied-users",
+	"users/lists/create",
+	"users/lists/create-from-public",
+	"users/lists/delete",
+	"users/lists/favorite",
+	"users/lists/get-memberships",
+	"users/lists/list",
+	"users/lists/pull",
+	"users/lists/push",
+	"users/lists/show",
+	"users/lists/unfavorite",
+	"users/lists/update",
+	"users/lists/update-membership",
+	"users/notes",
+	"users/pages",
+	"users/reactions",
+	"users/recommendation",
+	"users/relation",
+	"users/report-abuse",
+	"users/search",
+	"users/search-by-username-and-host",
+	"users/show",
+	"users/update-memo",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

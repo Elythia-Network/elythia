@@ -109,7 +109,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	api.POST("/notes/show", ok)
 	api.POST("/notes/create", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/notes/featured", ok)
-	api.GET("/users/featured-notes", ok)
+	api.GET("/federation/instances", ok)
 	api.POST("/elythia-only", ok)
 
 	serve := func(method, target, body string) int {
@@ -123,7 +123,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/notes/featured?limit=0", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/notes/featured", `{"limit":101}`))
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/users/featured-notes?userId=abc123&x=1", ""))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/instances?x=1", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/notes/show", `null`))
@@ -232,8 +232,8 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":"影の検証"}`, true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
-		{http.MethodPost, "/api/users/show", `{"username":"pshadow"}`, false, false},
-		{http.MethodPost, "/api/users/show", `{}`, false, false},
+		{http.MethodPost, "/api/notes/search-by-tag", `{"tag":"pshadow"}`, false, false},
+		{http.MethodPost, "/api/notes/search-by-tag", `{}`, false, false},
 		{http.MethodPost, "/api/notes/featured", `{"limit":"yes"}`, false, false},
 		{http.MethodPost, "/api/notes/show", `null`, false, false},
 		{http.MethodPost, "/api/notes/show", "{\"noteId\":\"\\ud800\"}", false, false},

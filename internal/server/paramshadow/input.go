@@ -120,6 +120,8 @@ const DefaultEnforcedMaxBody = 16 << 10
 // 同梱のfrontendが`i`と一緒に送るbodyでは236件からトークンの上限を超える(#3758)。
 // pages/create・updateも、本家がcontentの数にも文字列の長さにも上限を持たず、
 // 同梱のエディタのbodyではtextのブロック29個からトークンの上限を超える(#3772)。
+// users/showのuserIdsとusers/relationのuserIdの配列も本家に数の上限が無く、
+// `i`と一緒に送るbodyでは250件からトークンの上限を超える(#3837)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
