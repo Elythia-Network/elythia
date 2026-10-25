@@ -1880,6 +1880,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 使うため、これがないと「結果を見る」toggle が reload で揮発する。
 	noteFieldResolver.SetPollVoteLookup(pollVoteRepo)
 
+	// 投稿を返す handler が、閲覧者の見てはいけない中身を隠すのに使う (#3786)。
+	// 匿名 viewer へ pack する note を ugcVisibilityForVisitor='none' で hide する
+	// (upstream NoteEntityService.shouldHideNote)。管理画面の変更を再起動なしで
+	// 反映するよう、起動時の値ではなく都度引く。notes の handler と、下の
+	// buildHandlers で作る handler へ渡す。notes の handler の構築子で受けるため、
+	// notesHandler より前で作る (#3831)。NewHider は値を作るだけで、DB にも Redis
+	// にも触らない。
+	noteHider := notehide.NewHider(followingRepo, func() string { return metaUGCVisibility(metaRepo) })
+
 	// Notes endpoints
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen)
 	notesHandler.SetPiningRepo(piningRepo)
@@ -1925,11 +1934,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetUserListRepo(userListRepo)
 	notesHandler.SetClipRepos(clipRepo, clipNoteRepo, clipFavoriteRepo) // #1554: notes/clips
 
-	// 投稿を返す handler が、閲覧者の見てはいけない中身を隠すのに使う (#3786)。
-	// 匿名 viewer へ pack する note を ugcVisibilityForVisitor='none' で hide する
-	// (upstream NoteEntityService.shouldHideNote)。管理画面の変更を再起動なしで
-	// 反映するよう、起動時の値ではなく都度引く。渡す先は下の hSvcs の後でまとめる。
-	noteHider := notehide.NewHider(followingRepo, func() string { return metaUGCVisibility(metaRepo) })
 	notesHandler.SetNoteHider(noteHider)
 	// LocalTimeline / GlobalTimeline / HybridTimeline で ltlAvailable /
 	// gtlAvailable role policy を gate するために配線 (#1026)。匿名 viewer に

@@ -1653,6 +1653,24 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 2段目から4段目で受け手が減らないのは、置き換えたprocessorのどれにも表に無いsetterが残っているため。
 `processors.New…`の数には、構築子の引数の中で作る`NewRepoSigningKeySource`なども入る。
 
+##### 段(6): notesのhandler(#3831)
+
+**notesのhandlerも、同じ形にした。** #3812の段(6)。置き換えたのは、表の行で見ていた依存だけ。
+
+- **1段目で、`noteHider`を`notesHandler`より前で作るようにした。** `notes.NewHandler`の構築子で
+  受けるため。`notehide.NewHider(followingRepo, …)`は値を作るだけで、DBにもRedisにも触らない。
+  使う`followingRepo`と`metaRepo`は、どちらも`setupRoutes()`の先頭で作ってある。
+  `notesHandler.SetNoteHider`は元の位置のまま残した
+
+| | #3831の前(`988d002543`) | 1段目の後 |
+|---|---|---|
+| `criticalWiringCount` | 39 | 39 |
+| `setupRoutes()`の本文で、行頭が`notesHandler.Set`の行 | 33 | 33 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 331 | 331 |
+| そのsetterを呼ぶhandler(受け手) | 39 | 39 |
+
+数え方: 段(1)の表と同じ。`notesHandler.Set`の行は、同じ本文で行頭の空白の後が`notesHandler.Set`の行。
+
 #### /api のルートの登録 (#3697)
 
 ```
