@@ -1904,8 +1904,20 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//     ないので素通し)。列は NOT NULL DEFAULT 'local' なので、失敗時も制限側の
 	//     既定へ倒す (#2708)。**毎回読む。** 起動時に焼き込むと、運営者が管理画面で
 	//     締めてもプロセスを再起動するまで API に反映されない
+	//   - driveFileRepo: 添付ファイルの解決と、下書きの添付の所有権検査
+	//   - metaRepo: list endpoint の blocked-host filter (#1783)
+	//   - blockingRepo: children/replies/renotes の mute/block filter (#1554)
+	//   - mutingRepo: timeline endpoint で muted user の note を除外する filter (#874)。
+	//     渡さないと user mute は read 時に効かず、cache のみ DB 整合の状態になる
+	//   - renoteMutingRepo: timeline endpoint で renote-muted user の pure renote を
+	//     除外する filter (#903)。渡さないと renote-mute は read 時に効かず、frontend
+	//     で消えるべき renote が表示され続ける
+	//   - channelMutingRepo: ミュートしたチャンネルの投稿を除く
+	//   - followingRepo: HTL の「返信先が followers 限定の投稿」ガード (upstream
+	//     timeline.ts の noteFilter)
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen,
-		noteHider, entityPacker, roleService, func() string { return metaUGCVisibility(metaRepo) })
+		noteHider, entityPacker, roleService, func() string { return metaUGCVisibility(metaRepo) },
+		driveFileRepo, metaRepo, blockingRepo, mutingRepo, renoteMutingRepo, channelMutingRepo, followingRepo)
 	notesHandler.SetPiningRepo(piningRepo)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
@@ -1918,29 +1930,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		notesHandler.EnableTimelineJSONCache(ttl)
 		slog.Info("timeline JSON cache enabled", "ttlSeconds", int(ttl.Seconds()))
 	}
-	notesHandler.SetDriveFileRepo(driveFileRepo)
 	notesHandler.SetPollRepo(pollRepo)                     // #1538: polls/recommendation
 	notesHandler.SetThreadMutingRepo(noteThreadMutingRepo) // #1538: thread-muting write
 	notesHandler.SetNoteReactionRepo(reactionRepo)
 	notesHandler.SetChannelRepo(channelRepo)
-	notesHandler.SetChannelMutingRepo(channelMutingRepo)
 	// home timeline で follow 中 channel の note を含める (#1686)。
 	notesHandler.SetChannelFollowingRepo(channelFollowingRepo)
-	// HTL の「返信先が followers 限定の投稿」ガード (upstream timeline.ts の noteFilter)。
-	notesHandler.SetUserFollowingRepo(followingRepo)
 	// notes/featured の engagement ランキング読み取り (#1687)。
 	notesHandler.SetFeaturedRanking(featuredService)
-	// timeline endpoint で muted user の note を除外する filter (#874)。
-	// 未配線だと user mute は read 時に効かず、cache のみ DB 整合の状態
-	// になる security/UX regression が残る。production では必ず wire する。
-	notesHandler.SetMutingRepo(mutingRepo)
-	// timeline endpoint で renote-muted user の pure renote を除外する
-	// filter (#903)。未配線だと renote-mute は read 時に効かず、frontend
-	// で消えるべき renote が表示され続ける。production では必ず wire する。
-	notesHandler.SetRenoteMutingRepo(renoteMutingRepo)
-	notesHandler.SetBlockingRepo(blockingRepo) // #1554: children/replies/renotes mute/block filter
 	notesHandler.SetInstanceRepo(instanceRepo)
-	notesHandler.SetMetaRepo(metaRepo) // #1783: list endpoint の blocked-host filter
 	notesHandler.SetEmojiRepo(emojiRepo)
 	notesHandler.SetReactionReader(reactionCountWriter)
 	notesHandler.SetDriveFolderRepo(driveFolderRepo)
@@ -4045,14 +4043,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		// ここから #2708。#2683 で「既存 entry と基準上区別できない」まで取り込み、
 		// 残していた同クラスの依存。
-		{"notes.driveFileRepo", notesHandler.HasDriveFileRepo(),
-			"下書きの添付で他人の drive ファイル ID を指定でき、かつ全 note の files が空になる (昇格時は note.CreateService の driveFileRepo が checkFileIDs で弾くので実体は漏れない)"},
 		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
 		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
 			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
-		{"notes.metaRepo", notesHandler.HasMetaRepo(),
-			"blocked-host の note が post-fetch 経路で漏れる"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
 			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
@@ -4072,19 +4066,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
-		{"notes.blockingRepo", notesHandler.HasBlockingRepo(),
-			"ブロック / ミュート / チャンネルミュートの post-fetch filter が丸ごと skip される"},
-		{"notes.mutingRepo", notesHandler.HasMutingRepo(),
-			"post-fetch filter のミュート集合と notes/polls/recommendation の除外集合が空になる (timeline の SQL は UseMutingSubquery で残る)"},
-		{"notes.channelMutingRepo", notesHandler.HasChannelMutingRepo(),
-			"チャンネルミュートが一切効かない (別ソースが無いので in-memory・SQL・user-list timeline・HTL の全経路)"},
-		{"notes.userFollowingRepo", notesHandler.HasUserFollowingRepo(),
-			"followers 限定投稿への返信が非フォロワーの HTL / STL に出る"},
 
-		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
-		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。
-		{"notes.renoteMutingRepo", notesHandler.HasRenoteMutingRepo(),
-			"renote ミュートが read 時に一切効かない"},
 		// #3661: 応答の後などに投げっぱなしで起動する goroutine は世代の箱から
 		// 起動する。配線が外れると素の goroutine に戻り、世代の停止で待たれない。
 		// 制限が緩む種類の劣化ではないが、外れても起動もテストも通り、メンテナンスで

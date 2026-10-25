@@ -21,9 +21,9 @@ func TestRequestRelations_ListersRefuseAnotherViewer(t *testing.T) {
 	require.NoError(t, blocking.Create(&model.Blocking{ID: "b1", BlockerID: "blocker", BlockeeID: "viewer"}))
 	channelMuting := testutil.NewMockChannelMutingRepository()
 	require.NoError(t, channelMuting.Create(&model.ChannelMuting{ID: "c1", UserID: "viewer", ChannelID: "ch"}))
-	h.SetMutingRepo(muting)
-	h.SetBlockingRepo(blocking)
-	h.SetChannelMutingRepo(channelMuting)
+	h.mutingRepo = muting
+	h.blockingRepo = blocking
+	h.channelMutingRepo = channelMuting
 
 	rel := h.newRequestRelations(&model.User{ID: "viewer"})
 	m, b, cm := rel.listers()

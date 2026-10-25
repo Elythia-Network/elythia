@@ -553,7 +553,7 @@ func TestLoadBlockerIDs(t *testing.T) {
 	assert.Nil(t, h.loadBlockerIDs(&model.User{ID: "v"}))
 	blk := testutil.NewMockBlockingRepository()
 	blk.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "blocker", BlockeeID: "v"}
-	h.SetBlockingRepo(blk)
+	h.blockingRepo = blk
 	assert.Equal(t, []string{"blocker"}, h.loadBlockerIDs(&model.User{ID: "v"}))
 }
 
@@ -639,7 +639,7 @@ func TestTimeline_AllowPartialBlockedHostPageReturnsOlderNotes(t *testing.T) {
 		h := newTimelineHandler(t, noteRepo, tl)
 		meta := testutil.NewMockMetaRepository()
 		meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{bad}}
-		h.SetMetaRepo(meta)
+		h.metaRepo = meta
 		return h
 	}, dropped)
 	assert.Equal(t, older, got, "ブロック済みインスタンスの投稿で 1 ページが消えても、古い note を返すこと")
@@ -669,8 +669,8 @@ func TestTimeline_AllowPartialNestedMutePageReturnsOlderNotes(t *testing.T) {
 		mutingRepo.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: muted}
 		userRepo := testutil.NewMockUserRepository()
 		userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
-		h.SetMutingRepo(mutingRepo)
-		h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+		h.mutingRepo = mutingRepo
+		h.blockingRepo = testutil.NewMockBlockingRepository()
 		h.SetUserRepo(userRepo)
 		return h
 	}, dropped)
@@ -772,10 +772,10 @@ func TestTimeline_PageFilterLoadsOnceAndSkipsPassedNotes(t *testing.T) {
 	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
-	h.SetMutingRepo(muting)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.mutingRepo = muting
+	h.blockingRepo = testutil.NewMockBlockingRepository()
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	c, rec := newJSONRequest(t, "/api/notes/timeline", `{"limit":2}`)
 	setAuthUser(c, &model.User{ID: "viewer"})

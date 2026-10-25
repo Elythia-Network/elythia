@@ -26,7 +26,7 @@ func TestResolveFiles_NilRepo(t *testing.T) {
 
 func TestResolveFiles_NoFileIDs(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetDriveFileRepo(testutil.NewMockDriveFileRepository())
+	h.driveFileRepo = testutil.NewMockDriveFileRepository()
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{}},
 	}
@@ -40,7 +40,7 @@ func TestResolveFiles_Populates(t *testing.T) {
 	alice := "alice"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "hello.png", Type: "image/png", URL: "https://example.com/f1"}
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "world.png", Type: "image/png", URL: "https://example.com/f2"}
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{"f1", "f2"}},
@@ -62,7 +62,7 @@ func TestResolveFiles_EmbeddedRenoteAndReply(t *testing.T) {
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "outer.png", Type: "image/png", URL: "https://example.com/f1"}
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "renote.png", Type: "image/png", URL: "https://example.com/f2"}
 	fileRepo.Files["f3"] = &model.DriveFile{ID: "f3", UserID: &alice, Name: "reply.png", Type: "image/png", URL: "https://example.com/f3"}
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 
 	notes := []entity.NoteEntity{{
 		FileIDs: model.StringArray{"f1"},
@@ -83,7 +83,7 @@ func TestResolveFiles_EmbeddedRenoteOnly(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	alice := "alice"
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "renote.png", Type: "image/png", URL: "https://example.com/f2"}
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 
 	notes := []entity.NoteEntity{{
 		Renote: &entity.NoteEntity{FileIDs: model.StringArray{"f2"}},
@@ -98,7 +98,7 @@ func TestResolveFiles_UnknownFileIDsIgnored(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	alice := "alice"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "hello.png", Type: "image/png", URL: "https://example.com/f1"}
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{"f1", "missing"}},

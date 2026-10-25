@@ -116,9 +116,9 @@ func TestFeatured_DBFiltersLikeUpstream(t *testing.T) {
 	newHandler := func() *Handler {
 		h := newHandlerNilDeps(repository.NewNoteRepository(db), nil, nil, nil, nil, nil, nil, nil, idGen)
 		h.SetUserRepo(repository.NewUserRepositoryWithRelationCache(db, rc))
-		h.SetMutingRepo(repository.NewMutingRepositoryWithRelationCache(db, rc))
-		h.SetBlockingRepo(repository.NewBlockingRepositoryWithRelationCache(db, rc))
-		h.SetChannelMutingRepo(repository.NewChannelMutingRepositoryWithRelationCache(db, rc))
+		h.mutingRepo = repository.NewMutingRepositoryWithRelationCache(db, rc)
+		h.blockingRepo = repository.NewBlockingRepositoryWithRelationCache(db, rc)
+		h.channelMutingRepo = repository.NewChannelMutingRepositoryWithRelationCache(db, rc)
 		h.SetRelationCache(rc)
 		return h
 	}

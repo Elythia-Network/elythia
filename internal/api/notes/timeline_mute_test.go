@@ -15,7 +15,7 @@ func TestLoadMutedChannelIDs(t *testing.T) {
 	require.NoError(t, repo.Create(&model.ChannelMuting{ID: "m1", UserID: "viewer", ChannelID: "ch-muted-1"}))
 	require.NoError(t, repo.Create(&model.ChannelMuting{ID: "m2", UserID: "viewer", ChannelID: "ch-muted-2"}))
 	require.NoError(t, repo.Create(&model.ChannelMuting{ID: "m3", UserID: "other", ChannelID: "ch-other"}))
-	h.SetChannelMutingRepo(repo)
+	h.channelMutingRepo = repo
 
 	viewer := &model.User{ID: "viewer"}
 	ids := h.loadMutedChannelIDs(viewer)
@@ -24,7 +24,7 @@ func TestLoadMutedChannelIDs(t *testing.T) {
 
 func TestLoadMutedChannelIDs_AnonymousReturnsNil(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetChannelMutingRepo(testutil.NewMockChannelMutingRepository())
+	h.channelMutingRepo = testutil.NewMockChannelMutingRepository()
 	assert.Nil(t, h.loadMutedChannelIDs(nil))
 }
 
@@ -36,7 +36,7 @@ func TestLoadMutedChannelIDs_RepoUnsetReturnsNil(t *testing.T) {
 func TestLoadMutedChannelIDs_EmptyResultReturnsNil(t *testing.T) {
 	h, _ := newTestHandler(t)
 	repo := testutil.NewMockChannelMutingRepository()
-	h.SetChannelMutingRepo(repo)
+	h.channelMutingRepo = repo
 	assert.Nil(t, h.loadMutedChannelIDs(&model.User{ID: "viewer"}))
 }
 
@@ -50,7 +50,7 @@ func TestLoadRenoteMutedUserIDs(t *testing.T) {
 	require.NoError(t, repo.Create(&model.RenoteMuting{ID: "rm1", MuterID: "viewer", MuteeID: "muted-1"}))
 	require.NoError(t, repo.Create(&model.RenoteMuting{ID: "rm2", MuterID: "viewer", MuteeID: "muted-2"}))
 	require.NoError(t, repo.Create(&model.RenoteMuting{ID: "rm3", MuterID: "other", MuteeID: "other-mute"}))
-	h.SetRenoteMutingRepo(repo)
+	h.renoteMutingRepo = repo
 
 	viewer := &model.User{ID: "viewer"}
 	ids := h.loadRenoteMutedUserIDs(viewer)
@@ -59,7 +59,7 @@ func TestLoadRenoteMutedUserIDs(t *testing.T) {
 
 func TestLoadRenoteMutedUserIDs_AnonymousReturnsNil(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetRenoteMutingRepo(testutil.NewMockRenoteMutingRepository())
+	h.renoteMutingRepo = testutil.NewMockRenoteMutingRepository()
 	assert.Nil(t, h.loadRenoteMutedUserIDs(nil))
 }
 
@@ -71,7 +71,7 @@ func TestLoadRenoteMutedUserIDs_RepoUnsetReturnsNil(t *testing.T) {
 func TestLoadRenoteMutedUserIDs_EmptyResultReturnsNil(t *testing.T) {
 	h, _ := newTestHandler(t)
 	repo := testutil.NewMockRenoteMutingRepository()
-	h.SetRenoteMutingRepo(repo)
+	h.renoteMutingRepo = repo
 	assert.Nil(t, h.loadRenoteMutedUserIDs(&model.User{ID: "viewer"}))
 }
 
@@ -87,7 +87,7 @@ func TestLoadFollowedChannelIDs(t *testing.T) {
 	// ch-f2 は mute されているので除外される。
 	muting := testutil.NewMockChannelMutingRepository()
 	require.NoError(t, muting.Create(&model.ChannelMuting{ID: "m1", UserID: "viewer", ChannelID: "ch-f2"}))
-	h.SetChannelMutingRepo(muting)
+	h.channelMutingRepo = muting
 
 	ids := h.loadFollowedChannelIDs(&model.User{ID: "viewer"})
 	assert.ElementsMatch(t, []string{"ch-f1"}, ids)
@@ -110,7 +110,7 @@ func TestLoadFollowedChannelIDs_AllMutedReturnsNil(t *testing.T) {
 	h.SetChannelFollowingRepo(repo)
 	muting := testutil.NewMockChannelMutingRepository()
 	require.NoError(t, muting.Create(&model.ChannelMuting{ID: "m1", UserID: "viewer", ChannelID: "ch-f1"}))
-	h.SetChannelMutingRepo(muting)
+	h.channelMutingRepo = muting
 	assert.Nil(t, h.loadFollowedChannelIDs(&model.User{ID: "viewer"}))
 }
 
@@ -140,7 +140,7 @@ func TestLoadFollowingIDs(t *testing.T) {
 	require.NoError(t, repo.Create(&model.Following{ID: "f1", FollowerID: "viewer", FolloweeID: "bob"}))
 	require.NoError(t, repo.Create(&model.Following{ID: "f2", FollowerID: "viewer", FolloweeID: "carol"}))
 	require.NoError(t, repo.Create(&model.Following{ID: "f3", FollowerID: "other", FolloweeID: "dave"}))
-	h.SetUserFollowingRepo(repo)
+	h.userFollowingRepo = repo
 
 	got := h.loadFollowingIDs(&model.User{ID: "viewer"})
 	require.NotNil(t, got)
@@ -154,7 +154,7 @@ func TestLoadFollowingIDs(t *testing.T) {
 
 func TestLoadFollowingIDs_AnonymousReturnsNil(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetUserFollowingRepo(testutil.NewMockFollowingRepository())
+	h.userFollowingRepo = testutil.NewMockFollowingRepository()
 	assert.Nil(t, h.loadFollowingIDs(nil))
 }
 
@@ -167,7 +167,7 @@ func TestLoadFollowingIDs_RepoUnsetReturnsNil(t *testing.T) {
 // ガードが丸ごと無効になってしまう。
 func TestLoadFollowingIDs_EmptyIsNotNil(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.SetUserFollowingRepo(testutil.NewMockFollowingRepository())
+	h.userFollowingRepo = testutil.NewMockFollowingRepository()
 	got := h.loadFollowingIDs(&model.User{ID: "viewer"})
 	require.NotNil(t, got)
 	assert.Empty(t, got)

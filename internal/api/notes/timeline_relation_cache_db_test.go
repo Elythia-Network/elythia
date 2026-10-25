@@ -119,11 +119,11 @@ func newRelationTimelineEnv(t *testing.T, prefix string, fanout bool) *relationT
 	}
 	e.h = newHandlerNilDeps(noteRepo, nil, nil, nil, tl, nil, nil, nil, idGen)
 	e.h.SetUserRepo(userRepo)
-	e.h.SetMutingRepo(e.muting)
-	e.h.SetRenoteMutingRepo(e.renoteMuting)
-	e.h.SetBlockingRepo(e.blocking)
-	e.h.SetUserFollowingRepo(e.following)
-	e.h.SetChannelMutingRepo(e.channelMuting)
+	e.h.mutingRepo = e.muting
+	e.h.renoteMutingRepo = e.renoteMuting
+	e.h.blockingRepo = e.blocking
+	e.h.userFollowingRepo = e.following
+	e.h.channelMutingRepo = e.channelMuting
 	e.h.SetChannelFollowingRepo(e.channelFollowing)
 	e.h.SetRelationCache(e.rc)
 

@@ -48,7 +48,7 @@ func TestUserListTimeline_DropsBlockedHostNotes(t *testing.T) {
 	h := newUserListTimelineHandler(t, userListBlockedHostRows())
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	rec := postExtra(h.UserListTimeline, `{"listId":"l1"}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -67,7 +67,7 @@ func TestUserListTimeline_BlockedHostFetchErrorIsFatal(t *testing.T) {
 	h := newUserListTimelineHandler(t, userListBlockedHostRows())
 	meta := testutil.NewMockMetaRepository()
 	meta.FetchErr = assert.AnError
-	h.SetMetaRepo(meta)
+	h.metaRepo = meta
 
 	rec := postExtra(h.UserListTimeline, `{"listId":"l1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

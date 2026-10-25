@@ -99,8 +99,8 @@ func TestRenotes_FiltersBlockingAuthor(t *testing.T) {
 	blockingRepo.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "blocker", BlockeeID: "alice"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(blockingRepo)
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = blockingRepo
 	h.SetUserRepo(userRepo)
 
 	c, rec := newJSONRequest(t, "/api/notes/renotes", `{"noteId":"parent"}`)
@@ -128,8 +128,8 @@ func TestReplies_FiltersMutedAuthor(t *testing.T) {
 	blockingRepo := testutil.NewMockBlockingRepository()
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(blockingRepo)
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = blockingRepo
 	h.SetUserRepo(userRepo)
 
 	c, rec := newJSONRequest(t, "/api/notes/replies", `{"noteId":"parent"}`)

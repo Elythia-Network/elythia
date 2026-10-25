@@ -129,8 +129,8 @@ func TestFeatured_RankingFiltersMutedBeforeLimit(t *testing.T) {
 	mutingRepo.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = testutil.NewMockBlockingRepository()
 	h.SetUserRepo(userRepo)
 	h.SetFeaturedRanking(&fakeFeaturedReader{global: []string{"a", "b", "c", "d"}})
 

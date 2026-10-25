@@ -47,7 +47,7 @@ func newTranslateHiddenFixture(t *testing.T) *translateHiddenFixture {
 	require.NoError(t, err)
 	h := newHandlerNilDeps(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
 	h.SetUserRepo(userRepo)
-	h.SetUserFollowingRepo(followingRepo)
+	h.userFollowingRepo = followingRepo
 	h.SetTranslator(translate.NewDeepLWithClient("key", srv.URL, srv.Client()))
 	return &translateHiddenFixture{h: h, notes: noteRepo, users: userRepo, follow: followingRepo, idGen: idGen, called: &called}
 }
@@ -172,7 +172,7 @@ func (failingExistsFollowingRepo) Exists(string, string) (bool, error) {
 // どちらにしても DeepL は呼ばない。
 func TestTranslate_FollowLookupFailureIs500(t *testing.T) {
 	f := newTranslateHiddenFixture(t)
-	f.h.SetUserFollowingRepo(failingExistsFollowingRepo{testutil.NewMockFollowingRepository()})
+	f.h.userFollowingRepo = failingExistsFollowingRepo{testutil.NewMockFollowingRepository()}
 	author := &model.User{ID: "author", MakeNotesFollowersOnlyBefore: &windowSeconds}
 	rec := f.post(f.seed(author, 60*day), &model.User{ID: "viewer"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

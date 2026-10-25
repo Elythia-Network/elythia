@@ -62,11 +62,11 @@ func featuredParityFixture(t *testing.T) (*Handler, *testutil.MockNoteRepository
 	userRepo.Profiles["viewer"] = &model.UserProfile{UserID: "viewer", MutedInstances: datatypes.JSON(`["remote.example"]`)}
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{BlockedHosts: []string{"blocked.example"}}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(blockingRepo)
-	h.SetChannelMutingRepo(channelMutingRepo)
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = blockingRepo
+	h.channelMutingRepo = channelMutingRepo
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(metaRepo)
+	h.metaRepo = metaRepo
 
 	s := func(v string) *string { return &v }
 	user := func(id string) *model.User { return &model.User{ID: id} }
@@ -228,22 +228,22 @@ func TestFeatured_LookupErrorsFailClosed(t *testing.T) {
 		breakH func(h *Handler)
 	}{
 		{"muting", &model.User{ID: "viewer"}, func(h *Handler) {
-			h.SetMutingRepo(failingMutingRepo{testutil.NewMockMutingRepository()})
+			h.mutingRepo = failingMutingRepo{testutil.NewMockMutingRepository()}
 		}},
 		{"blocking", &model.User{ID: "viewer"}, func(h *Handler) {
 			b := testutil.NewMockBlockingRepository()
 			b.ExistsErr = errors.New("blocking lookup failed")
-			h.SetBlockingRepo(b)
+			h.blockingRepo = b
 		}},
 		{"blocked hosts", &model.User{ID: "viewer"}, func(h *Handler) {
 			m := testutil.NewMockMetaRepository()
 			m.FetchErr = errors.New("meta lookup failed")
-			h.SetMetaRepo(m)
+			h.metaRepo = m
 		}},
 		{"blocked hosts anonymous", nil, func(h *Handler) {
 			m := testutil.NewMockMetaRepository()
 			m.FetchErr = errors.New("meta lookup failed")
-			h.SetMetaRepo(m)
+			h.metaRepo = m
 		}},
 	}
 	for _, c := range cases {

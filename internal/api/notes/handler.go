@@ -48,13 +48,23 @@ type Handler struct {
 	// note_favorite.noteId が note への外部キーなので、行が無いと INSERT が
 	// 失敗する。favorite には core service が無く、この handler が FK 行を
 	// 書いているためここが差し込み口になる。
-	materializer      NoteMaterializer
-	driveFileRepo     repository.DriveFileRepository
-	draftRepo         repository.NoteDraftRepository
-	pollRepo          repository.PollRepository
-	threadMutingRepo  repository.NoteThreadMutingRepository
-	noteReactionRepo  repository.NoteReactionRepository
-	channelRepo       repository.ChannelRepository
+	materializer NoteMaterializer
+	// driveFileRepo は添付ファイルの解決と、下書きの添付の所有権検査に使う。nil だと
+	// 下書きの添付で他人の drive ファイル ID を指定でき (`handler_drafts.go` の
+	// 所有権検査が nil で true を返す)、加えて `fieldResolver()` が drive を引けなく
+	// なるので **全 note の files が空配列**になる。下書きから note への昇格は
+	// `note.CreateService` の driveFileRepo の checkFileIDs を通るので、他人の
+	// ファイルの実体までは出ない (#2708)。
+	driveFileRepo    repository.DriveFileRepository
+	draftRepo        repository.NoteDraftRepository
+	pollRepo         repository.PollRepository
+	threadMutingRepo repository.NoteThreadMutingRepository
+	noteReactionRepo repository.NoteReactionRepository
+	channelRepo      repository.ChannelRepository
+	// channelMutingRepo は閲覧者がミュートしたチャンネルの投稿を除く。nil だと
+	// チャンネルミュートが**一切**効かない。別ソースが無いので in-memory・SQL
+	// (`TimelineFilter.MutedChannelIDs`)・user-list timeline・HTL の followed-channel
+	// 差し引きの全経路が死ぬ (#2708)。
 	channelMutingRepo repository.ChannelMutingRepository
 	// channelFollowingRepo は home timeline で follow 中 channel の note を
 	// 含めるため、viewer の followed channel id を引くのに使う (#1686)。
@@ -62,20 +72,37 @@ type Handler struct {
 	channelFollowingRepo repository.ChannelFollowingRepository
 	// userFollowingRepo は HTL の「返信先が followers 限定の投稿」ガードに使う。
 	// upstream timeline.ts は取得側の noteFilter で followings を参照する。
-	// 未配線ならガードをスキップする。
+	// nil ならガードをスキップし、followers 限定投稿への返信が非フォロワーの
+	// HTL / STL に出る (#2708)。
 	userFollowingRepo repository.FollowingRepository
-	mutingRepo        repository.MutingRepository
-	renoteMutingRepo  repository.RenoteMutingRepository
+	// mutingRepo は閲覧者がミュートした利用者の投稿を除く (upstream Misskey TS の
+	// muting JOIN と同 semantics、#874)。nil だと post-fetch filter のミュート集合と、
+	// `notes/polls/recommendation` が SQL へ渡す除外集合が空になる。timeline の SQL 側は
+	// `UseMutingSubquery` が別に効くので残る (#2708)。
+	mutingRepo repository.MutingRepository
+	// renoteMutingRepo は閲覧者が renote ミュートした利用者の pure renote を除く
+	// (#903、upstream の generateMutedUserRelatedRenotesQuery と同 semantics)。nil だと
+	// `loadRenoteMutedUserIDs` が nil を返し、renote ミュートが read 時に一切効かない
+	// (#2709 review)。
+	renoteMutingRepo repository.RenoteMutingRepository
 	// blockingRepo は notes/children・replies・renotes の list 応答で被block /
 	// mute / instance-mute filter を適用するのに使う (#1554、upstream
-	// generateBaseNoteFilteringQuery 相当)。未配線時は filter skip。
+	// generateBaseNoteFilteringQuery 相当)。nil だとブロック / ミュート / チャンネル
+	// ミュートの post-fetch filter が丸ごと skip される (`applyMuteBlock` は
+	// `blockingRepo != nil` で全体を gate している。#2708)。
 	blockingRepo repository.BlockingRepository
 	// relationCache は閲覧者のミュート・ブロック・フォローの一覧を、
 	// 要求をまたいで持つ (#3607)。nil なら repository から読む。
 	relationCache *repository.RelationCache
 	instanceRepo  repository.InstanceRepository
 	// metaRepo は list endpoint の blocked-host filter で meta.blockedHosts を
-	// 引く (#1783)。未配線時は blocked-host filter を skip。
+	// 引く (#1783、upstream generateBlockedHostQueryForNote)。nil だと blocked-host
+	// filter を skip し、blocked-host の note が post-fetch 経路で漏れる (#2708)。
+	//
+	// 上の driveFileRepo・channelMutingRepo・userFollowingRepo・mutingRepo・
+	// renoteMutingRepo・blockingRepo と、この metaRepo の 7 つは、以前は setter で
+	// 入れて起動時に検査していた (#2708、#2709 review) が、#3831 で構築子の必須の
+	// 引数にした。
 	metaRepo        repository.MetaRepository
 	emojiRepo       repository.EmojiRepository
 	driveFolderRepo repository.DriveFolderRepository
@@ -213,42 +240,10 @@ func (h *Handler) SetScheduledNoteEnqueuer(e ScheduledNoteEnqueuer) {
 	h.scheduledNoteEnqueuer = e
 }
 
-// SetChannelMutingRepo attaches a ChannelMutingRepository so timeline handlers
-// can exclude notes posted to channels the viewer has muted.
-func (h *Handler) SetChannelMutingRepo(r repository.ChannelMutingRepository) {
-	h.channelMutingRepo = r
-}
-
-// SetUserFollowingRepo attaches a FollowingRepository used by the home timeline
-// followers-only-reply guard.
-func (h *Handler) SetUserFollowingRepo(r repository.FollowingRepository) {
-	h.userFollowingRepo = r
-}
-
 // SetChannelFollowingRepo attaches a ChannelFollowingRepository so the home
 // timeline includes notes from channels the viewer follows (#1686).
 func (h *Handler) SetChannelFollowingRepo(r repository.ChannelFollowingRepository) {
 	h.channelFollowingRepo = r
-}
-
-// SetMutingRepo attaches a MutingRepository so timeline handlers can exclude
-// notes whose author / renote-source the viewer has muted (= upstream Misskey
-// TS の muting JOIN と同 semantics、#874)。
-func (h *Handler) SetMutingRepo(r repository.MutingRepository) {
-	h.mutingRepo = r
-}
-
-// SetRenoteMutingRepo attaches a RenoteMutingRepository so timeline handlers
-// can exclude pure renotes by users the viewer has renote-muted (#903)。
-// upstream Misskey TS の generateMutedUserRelatedRenotesQuery と同 semantics。
-func (h *Handler) SetRenoteMutingRepo(r repository.RenoteMutingRepository) {
-	h.renoteMutingRepo = r
-}
-
-// SetBlockingRepo attaches a BlockingRepository so notes/children・replies・
-// renotes can exclude notes authored by users who block the viewer (#1554)。
-func (h *Handler) SetBlockingRepo(r repository.BlockingRepository) {
-	h.blockingRepo = r
 }
 
 // SetTranslator attaches the translator for /api/notes/translate. A translator
@@ -294,11 +289,6 @@ func (h *Handler) filterVisitorUGC(viewer *model.User, notes []*model.Note) []*m
 		}
 	}
 	return out
-}
-
-// SetDriveFileRepo attaches a DriveFileRepository for file resolution.
-func (h *Handler) SetDriveFileRepo(r repository.DriveFileRepository) {
-	h.driveFileRepo = r
 }
 
 // ModeratorChecker reports whether a user holds moderator / administrator
@@ -406,7 +396,10 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 //
 // noteHider, entityPacker, policyProvider and ugcVisibility gate what a
 // viewer may see. ugcVisibility is called on every request, so a change in
-// the admin panel takes effect without a restart.
+// the admin panel takes effect without a restart. The repositories from
+// driveFileRepo to userFollowingRepo back the per-viewer filters (blocked
+// hosts, blocks, mutes, renote mutes, channel mutes and the followers-only
+// reply guard) and attached-file resolution.
 func NewHandler(
 	noteRepo repository.NoteRepository,
 	createService *note.CreateService,
@@ -421,6 +414,13 @@ func NewHandler(
 	entityPacker *entity.Packer,
 	policyProvider role.PolicyProvider,
 	ugcVisibility func() string,
+	driveFileRepo repository.DriveFileRepository,
+	metaRepo repository.MetaRepository,
+	blockingRepo repository.BlockingRepository,
+	mutingRepo repository.MutingRepository,
+	renoteMutingRepo repository.RenoteMutingRepository,
+	channelMutingRepo repository.ChannelMutingRepository,
+	userFollowingRepo repository.FollowingRepository,
 ) *Handler {
 	// 入れ忘れると黙って劣化する依存は、構築子の必須の引数で受ける (#3831)。以前は
 	// setter で後から入れ、recordCriticalWiring が起動時に入れ忘れを見ていた。
@@ -440,6 +440,14 @@ func NewHandler(
 		entityPacker:    entityPacker,
 		policyProvider:  policyProvider,
 		ugcVisibilityFn: ugcVisibility,
+
+		driveFileRepo:     driveFileRepo,
+		metaRepo:          metaRepo,
+		blockingRepo:      blockingRepo,
+		mutingRepo:        mutingRepo,
+		renoteMutingRepo:  renoteMutingRepo,
+		channelMutingRepo: channelMutingRepo,
+		userFollowingRepo: userFollowingRepo,
 	}
 }
 
@@ -971,12 +979,6 @@ func keepPassed(notes []*model.Note, passed map[string]struct{}) []*model.Note {
 	return out
 }
 
-// SetMetaRepo wires a MetaRepository used for the blocked-host filter on the
-// post-fetch list endpoints (#1783, upstream generateBlockedHostQueryForNote)。
-func (h *Handler) SetMetaRepo(r repository.MetaRepository) {
-	h.metaRepo = r
-}
-
 // blockedHosts returns meta.blockedHosts, or nil when the meta repo is unwired.
 func (h *Handler) blockedHosts() ([]string, error) {
 	if h.metaRepo == nil {
@@ -1486,49 +1488,3 @@ func nilOrChannel(r repository.ChannelRepository) entity.ChannelLookup {
 func (h *Handler) PackForEmbed(ctx context.Context, n *model.Note) entity.NoteEntity {
 	return h.packReferencedNote(ctx, n, nil, true)
 }
-
-// HasDriveFileRepo / HasMetaRepo / HasBlockingRepo / HasMutingRepo /
-// HasChannelMutingRepo / HasUserFollowingRepo report whether the visibility
-// gates were wired (#2708).
-//
-// 未配線時にそれぞれ:
-//
-//   - driveFileRepo: 下書きの添付で他人の drive ファイル ID を指定でき
-//     (`handler_drafts.go` の所有権検査が nil で true を返す)、加えて
-//     `fieldResolver()` が drive を引けなくなるので **全 note の files が
-//     空配列**になる。下書きから note への昇格は `note.CreateService` の driveFileRepo の
-//     checkFileIDs を通るので、他人のファイルの実体までは出ない
-//   - metaRepo: blocked-host の note が post-fetch 経路で漏れる
-//   - blockingRepo: ブロック / ミュート / チャンネルミュートの post-fetch
-//     filter が丸ごと skip される (`applyMuteBlock` は `blockingRepo != nil`
-//     で全体を gate している)
-//   - mutingRepo: post-fetch filter のミュート集合と、
-//     `notes/polls/recommendation` が SQL へ渡す除外集合が空になる。timeline の
-//     SQL 側は `UseMutingSubquery` が別に効くので残る
-//   - channelMutingRepo: チャンネルミュートが**一切**効かない。別ソースが
-//     無いので in-memory・SQL (`TimelineFilter.MutedChannelIDs`)・user-list
-//     timeline・HTL の followed-channel 差し引き の全経路が死ぬ
-//   - userFollowingRepo: followers 限定投稿への返信が非フォロワーの HTL / STL
-//     に出る
-func (h *Handler) HasDriveFileRepo() bool { return h.driveFileRepo != nil }
-
-// HasMetaRepo reports whether the meta repository was wired.
-func (h *Handler) HasMetaRepo() bool { return h.metaRepo != nil }
-
-// HasBlockingRepo reports whether the blocking repository was wired.
-func (h *Handler) HasBlockingRepo() bool { return h.blockingRepo != nil }
-
-// HasMutingRepo reports whether the muting repository was wired.
-func (h *Handler) HasMutingRepo() bool { return h.mutingRepo != nil }
-
-// HasChannelMutingRepo reports whether the channel muting repository was wired.
-func (h *Handler) HasChannelMutingRepo() bool { return h.channelMutingRepo != nil }
-
-// HasRenoteMutingRepo reports whether the renote muting repository was wired.
-//
-// 未配線だと `loadRenoteMutedUserIDs` が nil を返し、renote ミュートが read 時に
-// 一切効かない (#2709 review)。
-func (h *Handler) HasRenoteMutingRepo() bool { return h.renoteMutingRepo != nil }
-
-// HasUserFollowingRepo reports whether the following repository was wired.
-func (h *Handler) HasUserFollowingRepo() bool { return h.userFollowingRepo != nil }
