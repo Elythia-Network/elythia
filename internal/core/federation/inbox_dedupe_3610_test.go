@@ -435,7 +435,7 @@ func TestResolveActor_RefreshSuspensionIsVisibleToProcessWithSigner(t *testing.T
 	r.SetSuspensionOriginRepo(newStubOriginRepo())
 	followingSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(r, followingSvc, nil, nil, repo, noteRepo)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 
 	signer := seedLiveAlice(mock) // lastFetchedAt が無いので次の解決で読み直す
 	_ = signer

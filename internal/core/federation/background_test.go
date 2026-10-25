@@ -26,9 +26,8 @@ func TestProcess_HooksRunInTheBackgroundGroup(t *testing.T) {
 	env.processor.SetAntennaHook(antenna)
 
 	g := bgwork.New()
-	env.processor.SetBackground(g)
+	env.processor.SetBackgroundForTest(g)
 	env.resolver.SetBackground(g)
-	assert.True(t, env.processor.HasBackground())
 	assert.True(t, env.resolver.HasBackground())
 	require.Zero(t, g.Stop(context.Background()))
 

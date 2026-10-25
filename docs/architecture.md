@@ -1773,12 +1773,34 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `s.config.URL`などの別の文字列を渡しても型と空でないことの検査を通る。
   `TestFederationHostValuesAreWired`(`internal/entitycompat`)が構築子の呼び出しを引数まで照合する。
   `make wiring-check`の`-run`にも足した
+- **5段目は`core/federation`のprocessor(1構築子・3行)。** `corefederation.NewProcessor`は
+  `localBaseURL`・`blockingService`・`background`を受ける(`…, userRepo, noteRepo, s.config.URL,
+  blockingService, s.background)`)。`blockingService`(`coreSvcs.blocking`)は`buildCore()`で作り、
+  元の`SetBlockingService`はreversiの節(`setupRoutes()`の後ろの方)にあった。依存を入れる時点が
+  前へ移ったが、processorを呼ぶのはinboxのhandler(HTTPのリクエスト)とqueueのworkerだけで、
+  どちらも組み立ての後に始まる。前へ移って変わりうるのは、受信したBlockを処理し、reversiの
+  Inviteにブロック判定が掛かる方向だけ。残った`federationProcessor.Set…`の19行(`setupRoutes()`の
+  本文で行頭が`federationProcessor.Set`の行)は表に無いので、setterのまま残した
+- **テストの組み立ては1段目の補助関数の中だけを直した。** `NewProcessorNilDeps`は空文字とnilを
+  渡す。置き換えたsetterを呼んでいたテスト(`SetLocalBaseURL`の35か所、`SetBlockingService`の
+  4か所、`SetBackground`の1か所。すべて外部テストの`federation_test`)は、作った後でフィールドへ
+  代入できないので、`nil_deps_test.go`の`SetLocalBaseURLForTest`・`SetBlockingServiceForTest`・
+  `SetBackgroundForTest`に置き換えた(`_test.go`にあるので本番のコードからは呼べない。
+  `quote_request_dispatch_test.go`はテストの途中で入れて、空のときと入れたときの両方を見る)。
+  パッケージ外の`NewProcessor`の呼び出し(`internal/api/inbox`の3か所と`internal/queue/processors`の
+  2か所)は、空文字とnilを渡す。構築子が引数を捨てないことは`constructor_test.go`が見る
+- **`routeParts`に`federationProcessor`を足した。** `requiredDepChecks`に`blockingService`と
+  `background`を、`requiredNonEmptyStrings`に`localBaseURL`を足した。テストの組み立てでnilになる
+  フィールドは無かった
+- **自ホストのURLも、wiring-checkで照合する。** `localBaseURL`には`s.config.URL`を渡す。4段目の
+  `expectedHost`と同じく、`s.config.Host`などを渡しても型と空でないことの検査を通るので、
+  `TestFederationHostValuesAreWired`に`NewProcessor`の呼び出しの照合を足した
 
-| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 |
-|---|---|---|---|---|---|
-| `criticalWiringCount` | 28 | 28 | 27 | 24 | 21 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 | 599 |
-| その受け手 | 107 | 107 | 107 | 106 | 106 |
+| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 | 3段目の後 | 4段目の後 | 5段目の後 |
+|---|---|---|---|---|---|---|
+| `criticalWiringCount` | 28 | 28 | 27 | 24 | 21 | 18 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 | 602 | 599 | 596 |
+| その受け手 | 107 | 107 | 107 | 106 | 106 | 106 |
 
 数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。3段目で
 減った受け手は、置き換えたsetterしか呼んでいなかった`noteDeleteHook`。

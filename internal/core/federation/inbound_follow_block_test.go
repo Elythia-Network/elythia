@@ -16,7 +16,7 @@ import (
 
 // newProcessorForInboundFollowBlock wires the processor the same way as
 // production (router.go): followingSvc.SetBlockingChecker(blockingSvc) +
-// processor.SetBlockingService(blockingSvc)。remote alice / local bob を
+// NewProcessor の blockingService (テストでは SetBlockingServiceForTest)。remote alice / local bob を
 // pre-seed して resolver の fetch を回避する (#1631)。
 func newProcessorForInboundFollowBlock(t *testing.T) (
 	*federation.Processor,
@@ -36,8 +36,8 @@ func newProcessorForInboundFollowBlock(t *testing.T) (
 	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen, followingSvc, nil, nil, nil)
 	followingSvc.SetBlockingChecker(blockingSvc)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetBlockingService(blockingSvc)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetBlockingServiceForTest(blockingSvc)
+	p.SetLocalBaseURLForTest("https://example.com")
 
 	// remote alice を URI 付きで pre-seed (resolver は FindByURI hit で再利用)
 	aliceURI := "https://remote.example/users/alice"
@@ -116,7 +116,7 @@ func TestProcess_FollowBlockingWithoutBlockingServiceErrors(t *testing.T) {
 	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen, followingSvc, nil, nil, nil)
 	followingSvc.SetBlockingChecker(blockingSvc)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"
 	repo.Users["alice1"] = &model.User{ID: "alice1", Username: "alice", UsernameLower: "alice", URI: &aliceURI, Host: &host}
@@ -141,7 +141,7 @@ func TestProcess_FollowRemoteFolloweeSkipped(t *testing.T) {
 	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	acceptor := &stubInboundFollowAcceptor{}
 	p.SetInboundFollowAcceptor(acceptor)
 

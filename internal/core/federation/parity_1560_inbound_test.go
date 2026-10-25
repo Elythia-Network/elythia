@@ -32,8 +32,8 @@ func newProcForInbound1560(t *testing.T, fetcherBody string) (
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	blockingSvc := coreblocking.NewService(repo, blockingRepo, idGen, followingSvc, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetBlockingService(blockingSvc)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetBlockingServiceForTest(blockingSvc)
+	p.SetLocalBaseURLForTest("https://example.com")
 	return p, repo, noteRepo, followingRepo
 }
 

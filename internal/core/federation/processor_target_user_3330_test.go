@@ -37,7 +37,7 @@ const (
 func seedTargetUsers(p *federation.Processor, repo *testutil.MockUserRepository, bobDeleted bool) {
 	// 本番と同じく base URL を配線する。旧実装 (prefix 一致) はこれが無いと
 	// 何も当てないので、配線した状態で本家との差を見る。
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	aliceURI := targetTestAliceURI
 	host := "remote.example"
 	repo.Users[targetTestAliceID] = &model.User{ID: targetTestAliceID, Username: "alice", UsernameLower: "alice", URI: &aliceURI, Host: &host}

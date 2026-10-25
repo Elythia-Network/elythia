@@ -50,7 +50,7 @@ func TestProcess_RejectPendingFollowRequest(t *testing.T) {
 	followingSvc.SetWebhookHook(webhooks)
 	followingSvc.SetFederationHook(delivery)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"
 	repo.Users["alice1"] = &model.User{ID: "alice1", Username: "alice", UsernameLower: "alice", URI: &aliceURI, Host: &host, IsLocked: true}
@@ -86,7 +86,7 @@ func TestProcess_RejectFollow_RemoteFollowerIsIgnored(t *testing.T) {
 	events := &rejectMainEvents{}
 	followingSvc.SetMainStreamPublisher(events)
 	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"
 	repo.Users["alice1"] = &model.User{ID: "alice1", Username: "alice", UsernameLower: "alice", URI: &aliceURI, Host: &host}

@@ -89,4 +89,6 @@ type routeParts struct {
 	deliverService  *corefederation.DeliverService
 	noteDeleteHook  *corefederation.NoteDeleteDeliveryHook
 	inboxHandler    *inbox.Handler
+
+	federationProcessor *corefederation.Processor
 }

@@ -329,13 +329,14 @@ var requiredDepChecks = []string{
 	"metadataFetcher.fetcher",
 	"deliverService.hostBlocker", "noteDeleteHook.userRepo", "noteDeleteHook.noteRepo",
 	"inboxHandler.enqueuer", "inboxHandler.hostBlocker",
+	"federationProcessor.blockingService", "federationProcessor.background",
 }
 
 // requiredNonEmptyStrings names string fields #3833 turned into constructor
 // arguments, keyed like handlerNilAllowed. TestBuiltHandlersHaveNoNilDependencies
 // checks that each is non-empty.
 var requiredNonEmptyStrings = []string{
-	"inboxHandler.expectedHost",
+	"inboxHandler.expectedHost", "federationProcessor.localBaseURL",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,
