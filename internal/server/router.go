@@ -1110,9 +1110,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	federationResolver.SetEmojiRepo(emojiRepo)
 	federationResolver.SetDriveFileRepo(driveFileRepo)
 	federationResolver.SetAttachmentProbeClient(attachmentProbeClient)
-	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo)
-	federationProcessor.SetBackground(s.background) // #3661: 世代の停止で待つ
-	federationProcessor.SetLocalBaseURL(s.config.URL)
+	// 自ホストの base URL (inbound の object がローカルユーザーを指すかの判定と、relay の
+	// Accept / Reject の検査)、Block / Undo(Block) と reversi の Invite のブロック判定に使う
+	// blockingService、世代の停止で待つ受信後の hook の箱 (#3661) は構築子で渡す (#3833)。
+	federationProcessor := corefederation.NewProcessor(federationResolver, followingService, reactionService, noteDeleteService, userRepo, noteRepo,
+		s.config.URL, blockingService, s.background)
 	// federation 経由のリモートノート (Create / Announce) も PerUserNotesChart
 	// 等の note 系 chart に +1 を記録するために配線する (#1156)。これが無いと
 	// リモートユーザーのプロフィール「アクティビティ」タブの heatmap が空に
@@ -3152,7 +3154,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}))
 	// Phase 9.7: federation processor / reversi handler に reversi 依存を注入。
 	federationProcessor.SetReversi(reversiService, reversiRepo, idGen, reversiFedCache)
-	federationProcessor.SetBlockingService(blockingService)
 	federationProcessor.SetAbuseReportRepo(abuseReportRepo, idGen)
 	// リモートからの通報 (AP Flag) もローカルと同じ通知を出す (#2868 / #3256)。
 	// **配線しないと通報の出どころで通知の有無が変わる。**
@@ -4000,6 +4001,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		deliverService:  deliverService,
 		noteDeleteHook:  noteDeleteHook,
 		inboxHandler:    inboxHandler,
+
+		federationProcessor: federationProcessor,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4018,8 +4021,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"リモートから届くノートに禁止語のフィルタが掛からなくなる (ローカル投稿にだけ効く状態)"},
 		{"federation.sensitiveWords", federationResolver.HasSensitiveWordsSource(),
 			"センシティブワードに当たるリモートの public のノートが home にならない (ローカル投稿にだけ効く状態)"},
-		{"federation.localBaseURL", federationProcessor.HasLocalBaseURL(),
-			"relay の Accept / Reject が全て落ち、ローカル URI の判定も外れて自ホスト宛の object がリモート扱いになる"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 
@@ -4036,8 +4037,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
 		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
 			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
-		{"inbox.blockingService", federationProcessor.HasBlockingService(),
-			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
 			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
 		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),
@@ -4060,8 +4059,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 起動する。配線が外れると素の goroutine に戻り、世代の停止で待たれない。
 		// 制限が緩む種類の劣化ではないが、外れても起動もテストも通り、メンテナンスで
 		// 世代を作り直すときにだけ表に出るので、ここで起動時に落とす。
-		{"federation.processor.background", federationProcessor.HasBackground(),
-			"世代を止めても受信後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"federation.resolver.background", federationResolver.HasBackground(),
 			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
 	})

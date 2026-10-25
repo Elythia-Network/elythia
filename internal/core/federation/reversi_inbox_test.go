@@ -407,7 +407,7 @@ func TestReversiInbox_Invite_MissingRecipient(t *testing.T) {
 // #417 P1 deploy で "recipient ... not found" エラーが出た regression を防ぐ。
 func TestReversiInbox_Invite_RecipientLocalWithoutURI(t *testing.T) {
 	b := newReversiProcessor(t)
-	b.processor.SetLocalBaseURL("https://example.com")
+	b.processor.SetLocalBaseURLForTest("https://example.com")
 	// local user は URI 未設定 (プロダクション挙動)
 	b.userRepo.Users["localbob"] = &model.User{
 		ID: "localbob", Username: "localbob", UsernameLower: "localbob",
@@ -904,7 +904,7 @@ func registerRemoteCarol(t *testing.T, repo *testutil.MockUserRepository) {
 // 第三者が「リモート同士の対局行」をこのサーバーに作れる。
 func TestReversiInbox_Invite_RemoteRecipientRejected(t *testing.T) {
 	b := newReversiProcessor(t)
-	b.processor.SetLocalBaseURL("https://example.com")
+	b.processor.SetLocalBaseURLForTest("https://example.com")
 	registerRemoteCarol(t, b.userRepo)
 
 	body := []byte(`{
@@ -927,7 +927,7 @@ func TestReversiInbox_Invite_RemoteRecipientRejected(t *testing.T) {
 func wireBlocking(t *testing.T, b *reversiFedBundle) *testutil.MockBlockingRepository {
 	t.Helper()
 	blockRepo := testutil.NewMockBlockingRepository()
-	b.processor.SetBlockingService(coreblocking.NewService(
+	b.processor.SetBlockingServiceForTest(coreblocking.NewService(
 		b.userRepo, blockRepo, b.idGen,
 		nil, nil, nil, nil,
 	))
@@ -940,7 +940,7 @@ func wireBlocking(t *testing.T, b *reversiFedBundle) *testutil.MockBlockingRepos
 // `invited` を push できる (= ブロックを迂回した接触経路になる)。
 func TestReversiInbox_Invite_BlockedActorDropped(t *testing.T) {
 	b := newReversiProcessor(t)
-	b.processor.SetLocalBaseURL("https://example.com")
+	b.processor.SetLocalBaseURLForTest("https://example.com")
 	registerRemoteAlice(t, b.userRepo)
 	registerLocalBob(t, b.userRepo)
 	blockRepo := wireBlocking(t, b)
@@ -971,7 +971,7 @@ func TestReversiInbox_Invite_BlockedActorDropped(t *testing.T) {
 // **判定できないなら通さない (#2792 と同じ向き)。**
 func TestReversiInbox_Invite_BlockLookupFailureRejected(t *testing.T) {
 	b := newReversiProcessor(t)
-	b.processor.SetLocalBaseURL("https://example.com")
+	b.processor.SetLocalBaseURLForTest("https://example.com")
 	registerRemoteAlice(t, b.userRepo)
 	registerLocalBob(t, b.userRepo)
 	blockRepo := wireBlocking(t, b)
@@ -997,7 +997,7 @@ func TestReversiInbox_Invite_BlockLookupFailureRejected(t *testing.T) {
 // ならないようにする。
 func TestReversiInbox_Invite_UnblockedActorPasses(t *testing.T) {
 	b := newReversiProcessor(t)
-	b.processor.SetLocalBaseURL("https://example.com")
+	b.processor.SetLocalBaseURLForTest("https://example.com")
 	registerRemoteAlice(t, b.userRepo)
 	registerLocalBob(t, b.userRepo)
 	wireBlocking(t, b)

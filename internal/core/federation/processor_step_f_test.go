@@ -1308,7 +1308,7 @@ func TestProcess_RejectFollow_InnerActorEmbeddedObject(t *testing.T) {
 	// **local user は本番と同じく uri NULL。** `userFromAPID` の
 	// local-ID 分岐を通すために base URL を配線する (偽の uri を持たせて
 	// FindByURI で通すと、本番に無い経路でしかテストしていないことになる)。
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	// local follower bob が remote followee alice をフォロー済み。
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"

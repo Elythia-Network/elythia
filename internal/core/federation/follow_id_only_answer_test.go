@@ -33,7 +33,7 @@ func newIDOnlyFixture(t *testing.T) idOnlyFixture {
 	resolver := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	svc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(resolver, svc, nil, nil, repo, testutil.NewMockNoteRepository())
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 	aliceURI := "https://remote.example/users/alice"
 	evilURI := "https://remote.example/users/evil"
 	host := "remote.example"

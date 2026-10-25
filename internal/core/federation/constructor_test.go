@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
+	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
@@ -47,4 +49,13 @@ func TestNewNoteDeleteDeliveryHookKeepsDependencies(t *testing.T) {
 	h := NewNoteDeleteDeliveryHook(nil, nil, nil, users, notes)
 	assert.Same(t, users, h.userRepo)
 	assert.Same(t, notes, h.noteRepo)
+}
+
+func TestNewProcessorKeepsDependencies(t *testing.T) {
+	blocking := coreblocking.NewService(nil, nil, nil, nil, nil, nil, nil)
+	g := bgwork.New()
+	p := NewProcessor(nil, nil, nil, nil, nil, nil, "https://example.test", blocking, g)
+	assert.Equal(t, "https://example.test", p.localBaseURL)
+	assert.Same(t, blocking, p.blockingService)
+	assert.Same(t, g, p.background)
 }

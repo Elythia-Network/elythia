@@ -66,7 +66,9 @@ type RelayActorChecker interface {
 // Processor dispatches inbound activities to the right handler.
 type Processor struct {
 	// background は受信後のベストエフォートフックを起動する箱 (#3661)。
-	// 世代の停止で待つ。nil なら素の goroutine で起動する (テスト)。
+	// 世代の停止で待つ。nil なら素の goroutine で起動する (テスト)。**本番で nil だと、
+	// 世代を止めても受信後の hook の goroutine を待たず、閉じた DB へ書きに行く。**
+	// 構築子の必須の引数 (#3833。以前は setter と起動時の検査)。
 	background *bgwork.Group
 	// rules は連合のルール (#3090)。nil なら評価しない。
 	rules            RuleEvaluator
@@ -83,7 +85,14 @@ type Processor struct {
 	accountCreatedAt AccountCreatedAtFillerFunc
 
 	// Block/Flag/Move/Add/Remove federation hooks.
-	// SetBlockingService等で注入。nilの場合は対応activityがErrUnsupportedActivityを返す。
+	// 構築子 (blockingService) と SetAbuseReportRepo 等で注入。nilの場合は対応activityが
+	// ErrUnsupportedActivityを返す。
+	//
+	// blockingService が nil だと、inbound の Block / Undo(Block) が
+	// `ErrUnsupportedActivity` になるだけでなく、**reversi の Invite からブロック判定が
+	// 丸ごと飛ぶ** (`reversi_inbox.go` の `p.blockingService != nil` guard)。ブロック済みの
+	// リモート利用者が対象の `reversi:<userID>` ストリームへ `invited` を push できる。
+	// 構築子の必須の引数 (#3833。以前は setter と起動時の検査)。
 	blockingService *coreblocking.Service
 	// quoteRequests は FEP-044f の QuoteRequest に答える (#3234)。未配線なら
 	// ErrUnsupportedActivity。
@@ -159,6 +168,11 @@ type Processor struct {
 	// object が "{localBaseURL}/users/{id}" 形式のとき、ローカルユーザーを
 	// ID で lookup するために使用する (ローカルユーザーの user.uri は NULL
 	// なので FindByURI では解決できない)。
+	//
+	// **空文字だと静かに壊れる。** relay の Accept / Reject は activity id が
+	// 自ホストの URI であることを要求する (fail-closed) ので、ここが空だと
+	// relay の状態遷移が全て落ちる。ローカル URI の判定も全部外れる。構築子の
+	// 必須の引数 (#3833。以前は setter と起動時の検査)。
 	localBaseURL string
 
 	// inboundFollowAcceptor は inbound Follow に対して Accept activity を
@@ -222,26 +236,6 @@ func (p *Processor) handleQuoteRequest(act genericActivity) error {
 	}
 	return p.quoteRequests.Handle(quoter, act.raw)
 }
-
-// SetLocalBaseURL configures the local instance's base URL. This is used to
-// detect whether an inbound activity's object refers to a local user.
-func (p *Processor) SetLocalBaseURL(baseURL string) {
-	p.localBaseURL = baseURL
-}
-
-// HasLocalBaseURL reports whether the local base URL was wired.
-//
-// **未配線だと静かに壊れる。** relay の Accept / Reject は activity id が
-// 自ホストの URI であることを要求する (fail-closed) ので、ここが空だと
-// relay の状態遷移が全て落ちる。ローカル URI の判定も全部外れる。
-func (p *Processor) HasLocalBaseURL() bool { return p.localBaseURL != "" }
-
-// SetBackground sets the group the best-effort hooks run in, so stopping the
-// server generation waits for them (#3661).
-func (p *Processor) SetBackground(g *bgwork.Group) { p.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (p *Processor) HasBackground() bool { return p.background != nil }
 
 // resolveTargetUser looks up a user referenced by URI in an inbound activity.
 // ローカルユーザの user.uri は DB 上 NULL なので FindByURI では解決できない。
@@ -399,6 +393,11 @@ type NoteChartHook interface {
 
 // NewProcessor constructs a Processor. reactionService / noteDeleteSvc は省略
 // 可能 (nil)。nil の場合、対応する activity 種別は ErrUnsupportedActivity を返す。
+//
+// localBaseURL は inbound activity の object がローカルユーザーを指すかの判定に
+// 使う、自インスタンスの base URL。background は受信後のベストエフォートフックを
+// 起動する箱 (#3661)。localBaseURL / blockingService / background はテストでは
+// 空文字か nil を渡せる (それぞれのフィールドの説明のとおりに劣化する)。
 func NewProcessor(
 	resolver *Resolver,
 	followingService *corefollowing.Service,
@@ -406,6 +405,9 @@ func NewProcessor(
 	noteDeleteSvc *corenote.DeleteService,
 	userRepo repository.UserRepository,
 	noteRepo repository.NoteRepository,
+	localBaseURL string,
+	blockingService *coreblocking.Service,
+	background *bgwork.Group,
 ) *Processor {
 	return &Processor{
 		resolver:         resolver,
@@ -414,6 +416,9 @@ func NewProcessor(
 		noteDeleteSvc:    noteDeleteSvc,
 		userRepo:         userRepo,
 		noteRepo:         noteRepo,
+		localBaseURL:     localBaseURL,
+		blockingService:  blockingService,
+		background:       background,
 	}
 }
 
@@ -867,20 +872,6 @@ type ActivityFields struct {
 func ExtractActivityFields(body []byte) ActivityFields {
 	return NormalizeActivity(body).Fields()
 }
-
-// SetBlockingService wires the blocking service for Block/Undo Block activities.
-func (p *Processor) SetBlockingService(svc *coreblocking.Service) {
-	p.blockingService = svc
-}
-
-// HasBlockingService reports whether the blocking service was wired.
-//
-// 未配線だと inbound の Block / Undo(Block) が `ErrUnsupportedActivity` に
-// なるだけでなく、**reversi の Invite からブロック判定が丸ごと飛ぶ**
-// (`reversi_inbox.go` の `p.blockingService != nil` guard)。ブロック済みの
-// リモート利用者が対象の `reversi:<userID>` ストリームへ `invited` を push
-// できる。起動時検査に使う。
-func (p *Processor) HasBlockingService() bool { return p != nil && p.blockingService != nil }
 
 // SetAbuseReportRepo wires the abuse report repository for Flag activities.
 func (p *Processor) SetAbuseReportRepo(repo repository.AbuseReportRepository, idGen id.Generator) {

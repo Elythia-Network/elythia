@@ -28,7 +28,7 @@ func TestProcess_FollowRelay_OnlyRequestingChanges(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, users, _, _ := newProcessor(t, aliceActor)
-			p.SetLocalBaseURL("https://example.com")
+			p.SetLocalBaseURLForTest("https://example.com")
 
 			relayRepo := testutil.NewMockRelayRepository()
 			require.NoError(t, relayRepo.Create(&model.Relay{ID: "rel123", Inbox: "https://relay.example/inbox", Status: tc.from}))

@@ -165,7 +165,7 @@ func TestProcess_QuoteAnswerDispatch(t *testing.T) {
 	// 自分の URL を知らないうちは、id だけの形を自分の QuoteRequest と見なさない。
 	_ = p.Process(answer("Accept", reqURI, "https://remote.example/approvals/0"))
 	assert.Empty(t, answers.got)
-	p.SetLocalBaseURL("https://example.com")
+	p.SetLocalBaseURLForTest("https://example.com")
 
 	require.NoError(t, p.Process(answer("Accept", embedded, "https://remote.example/approvals/1")))
 	require.NoError(t, p.Process(answer("Accept", reqURI, "https://remote.example/approvals/2")))
