@@ -140,13 +140,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// する共通 publisher。subNote / sn メッセージで購読しているクライアントへ
 	// リアクション・削除イベントが流れる (#690 / #700)。
 	//
-	// 下の 4 つと userListStreamPublisher は buildStream へ移さず、ここで作る (#3692)。
+	// 下の 3 つと userListStreamPublisher は buildStream へ移さず、ここで作る (#3692)。
 	// どれも buildStream を呼ぶ位置 (#3692 では stream の節、#3827 からは buildHandlers の
-	// 直前) より前にある受け手へ渡す依存 (4 つは core の service・連合の processor、
+	// 直前) より前にある受け手へ渡す依存 (3 つは core の service・連合の processor・handler、
 	// userListStreamPublisher は #3692 の時点の usersHandler) で、それより前に要る。
 	// buildStream をここで呼び別名も置くと、manager と note / notification の
 	// publisher (setter の受け手) まで先頭へ移り、後から入れる辺が 96 から 117 に
-	// 増える (docs/architecture.md 4.1 の数え方)。
+	// 増える (docs/architecture.md 4.1 の数え方)。#3676 でここに置いた reversi の
+	// publisher は、Packer を構築子の引数で受けるので entityPacker の後で作る (#3827)。
 	noteEventPub := stream.NewNoteEventPublisher(streamPubSub)
 	// relation 変更 (#2400) の publisher。7 系統すべてを繋がないと「一部の操作だけ
 	// 反映されない」形の抜けになる。
@@ -159,7 +160,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 加えて、期限付き mute の自然失効を cron (checkExpiredMutingsProcessor) が通知する。
 	relationReloadPublisher := &relationReloadPublisherAdapter{pubsub: streamPubSub}
 	drivePublisher := stream.NewDrivePublisher(streamPubSub)
-	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub)
 	mainStreamPublisher := stream.NewMainStreamPublisher(streamPubSub)
 	// users/lists/update-membership の withReplies 変更 (#2051) と、users/lists/push /
 	// pull の userAdded / userRemoved (#1549) を流す publisher。前は 2 つの handler の
@@ -432,6 +432,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 部品へ渡す Packer (#3790)。組み立てごとに作り、プロセスの状態は書き換えない
 	// (#3800 で既定の Packer と Set* を本番から消した)。
 	entityPacker := entity.NewPacker(entityPackerDeps)
+	// reversi の対局の publisher。招待者 (UserLite) を包む Packer は構築子の必須の引数
+	// (#3794、#3827)。#3676 から setupRoutes の先頭で作っていたが、Packer を渡すために
+	// ここへ移した。作るだけで Redis に繋がず、使う側 (連合の processor・reversi の
+	// service と handler) はどれもここより後にある。
+	reversiPublisher := stream.NewReversiGamePublisher(streamPubSub, entityPacker)
 
 	// listRelationRepos は embed user に viewer 視点の relation block を付与する
 	// 共有 Repos。mute/renote-mute/following/federation/hashtags handler が
@@ -813,9 +818,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webhookNoteHook.SetFollowingRepo(followingRepo)
 	noteCreateService.SetWebhookHook(webhookNoteHook)
 	webhookReactionHook.SetFollowingRepo(followingRepo)
-	// UserLite を包む部品にも渡す (#3794)。投稿・利用者・ドライブのファイルを包む core の
-	// 部品 (#3790、#3792、#3796) には、buildCore で構築子に渡す (#3825)。
-	reversiPublisher.SetEntityPacker(entityPacker)
 	reactionService.SetWebhookHook(webhookReactionHook)
 	followingService.SetWebhookHook(webhookFollowingHook)
 	webhookSignupHook := corewebhook.NewSignupHook(webhookService, entityPacker) // #3823: Packer は構築子の必須の引数
@@ -1989,10 +1991,38 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//
 	// stream の部品は buildHandlers より前に作る (#3827)。i と oauth の handler が、
 	// buildStream で作る revoke publisher を構築子の引数で受けるため。buildStream が
-	// 使うのは先頭で作る streamPubSub と idGen だけで、中の構築子はどれも値を作って
-	// 返すだけ (Redis に繋がず、購読も goroutine も始めない)。購読 (Subscribe…) と
-	// setter、w.stream への代入と別名 (revoke publisher を除く) は、下の stream の節のまま。
-	streamSvcs := buildStream(streamPubSub, idGen)
+	// 使うのは先頭で作る streamPubSub と idGen と、下で渡す Packer と 4 つの lookup だけで、
+	// 中の構築子はどれも値を作って返すだけ (Redis に繋がず、購読も goroutine も始めない)。
+	// 購読 (Subscribe…) と setter、w.stream への代入と別名 (revoke publisher を除く) は、
+	// 下の stream の節のまま。
+	//
+	// manager の配信ごとの filter と、note / notification の publisher の Packer は、
+	// どれも無いと黙って劣化するので、構築子の必須の引数で渡す (#3827)。
+	//   - hardMutedWords (#787) の rules lookup。connection 確立時に 1 度だけ
+	//     user_profile を引き、以降の publish では cache された rules を各 timeline
+	//     channel が参照する
+	//   - muteBlockSnapshot (#1711): main / notifications channel が notification /
+	//     mention 配信時に instance-mute / block / mute を gate するための snapshot を
+	//     接続確立時に 1 回 fetch する。失敗 / anonymous は nil 返却で fail-open に
+	//     degrade — filter 無しで動き続ける
+	//   - timeline channel (LTL/GTL/HTL) の ltlAvailable / gtlAvailable gate 用の role
+	//     policy provider (#1942)。REST timeline と同じく WS でも policy で無効化された
+	//     timeline を subscribe させない (policy bypass 解消)
+	//   - 匿名接続への meta.ugcVisibilityForVisitor (upstream NoteStreamingHidingService /
+	//     Connection の noteUpdated)。REST と同じ metaUGCVisibility を毎回引く (cachedMeta
+	//     なので event ごとの DB 往復は無い)。起動時に焼き込むと、管理画面で締めても
+	//     再起動まで streaming に効かない
+	streamSvcs := buildStream(streamPubSub, idGen, entityPacker,
+		&hardMuteLookupAdapter{userRepo: userRepo},
+		&muteBlockSnapshotAdapter{
+			muting:        mutingRepo,
+			blocking:      blockingRepo,
+			renoteMuting:  renoteMutingRepo,
+			channelMuting: channelMutingRepo,
+			userRepo:      userRepo,
+		},
+		roleService,
+		func() string { return metaUGCVisibility(metaRepo) })
 	// 失効を扱う handler (i・oauth・admin) へ配る revoke publisher。別名は変数 streamSvcs
 	// から取る。i と oauth の handler が構築子の引数で受けるので、ほかの別名 (下の
 	// stream の節) より前に置く (#3827)。
@@ -2620,7 +2650,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	streamManager := streamSvcs.streamManager
 	notePublisher := streamSvcs.notePublisher
 	notificationPublisher := streamSvcs.notificationPublisher
-	notificationPublisher.SetEntityPacker(entityPacker) // #3796: 通知の本文と埋め込んだ投稿・利用者を包む
 	broadcastPublisher := streamSvcs.broadcastPublisher
 	chatPublisher := streamSvcs.chatPublisher
 
@@ -2923,26 +2952,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.streamManager = streamManager
 	// readNotificationメッセージをnotificationServiceに橋渡しする
 	streamManager.SetNotificationReader(&notifReaderAdapter{svc: notificationService})
-	// hardMutedWords (#787) 用の rules lookup を wire。connection 確立時に
-	// 1 度だけ user_profile を引き、以降の publish では cache された rules を
-	// 各 timeline channel が参照する。
-	streamManager.SetHardMuteLookup(&hardMuteLookupAdapter{userRepo: userRepo})
+	// hardMutedWords (#787)・muteBlockSnapshot (#1711)・role policy (#1942)・
+	// ugcVisibilityForVisitor の lookup は、buildStream で manager の構築子に渡す (#3827)。
 	// followeeSnapshot (#1063): home/hybrid/local timeline channel が reply gate
 	// に使う「followeeID -> withReplies」map を接続確立時に 1 回だけ fetch する。
 	// 失敗 / anonymous は nil 返却で degrade — channel は 3 escape hatch のみで
 	// 動く (= 旧来の "全 reply drop" よりは upstream 互換に近い)。
 	streamManager.SetFollowingSnapshotLookup(&followingSnapshotAdapter{repo: followingRepo})
-	// muteBlockSnapshot (#1711): main / notifications channel が notification /
-	// mention 配信時に instance-mute / block / mute を gate するための snapshot を
-	// 接続確立時に 1 回 fetch する。失敗 / anonymous は nil 返却で fail-open に
-	// degrade — filter 無しで動き続ける。
-	streamManager.SetMuteBlockSnapshotLookup(&muteBlockSnapshotAdapter{
-		muting:        mutingRepo,
-		blocking:      blockingRepo,
-		renoteMuting:  renoteMutingRepo,
-		channelMuting: channelMutingRepo,
-		userRepo:      userRepo,
-	})
 	// subNote visibility gate (#1460 IDOR fix): handleSubNote が任意の noteID
 	// で noteStream を subscribe させると、followers / specified note の
 	// reacted / unreacted / pollVoted / deleted event が非対象 viewer に
@@ -2952,15 +2968,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// onlineStatus の source。upstream と同じく WebSocket 接続中だけ
 	// lastActiveDate を更新する (REST では更新しない、#2350)。
 	streamManager.SetLastActiveRecorder(&lastActiveRecorderAdapter{userRepo: userRepo, background: s.background})
-	// timeline channel (LTL/GTL/HTL) の ltlAvailable / gtlAvailable gate 用に role
-	// policy provider を配線する (#1942)。REST timeline と同じく WS でも policy で
-	// 無効化された timeline を subscribe させない (policy bypass 解消)。
-	streamManager.SetPolicyProvider(roleService)
-	// 匿名接続への meta.ugcVisibilityForVisitor (upstream
-	// NoteStreamingHidingService / Connection の noteUpdated)。REST と同じ
-	// metaUGCVisibility を毎回引く (cachedMeta なので event ごとの DB 往復は無い)。
-	// 起動時に焼き込むと、管理画面で締めても再起動まで streaming に効かない。
-	streamManager.SetUGCVisibilityLookup(func() string { return metaUGCVisibility(metaRepo) })
 	// 以下 3 つの subscriber は **WebSocket 接続を持つ role でだけ**起動する
 	// (#2459)。queue role には connection が無いので、購読しても受け取った
 	// event を捨てるだけで Redis pubsub の帯域を食う。
@@ -3004,12 +3011,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	pinDeliveryHook.SetRelayBroadcaster(relaySvc)
 	iHandler.SetPinDeliveryHook(pinDeliveryHook)
 	// note / notification の publisher は buildStream で作る (#3692)。setter はここ。
+	// Packer は buildStream で構築子に渡す (#3827)。
 	notePublisher.SetEmojiLookup(emojiRepo)
 	notePublisher.SetInstanceLookup(instanceRepo)
 	notePublisher.SetReactionReader(reactionCountWriter)
 	notePublisher.SetReactionPairReader(reactionRepo) // #2067: renote embed の pair cache を note_reaction から埋める
 	notePublisher.SetFieldResolver(noteFieldResolver)
-	notePublisher.SetEntityPacker(entityPacker)
 	notificationPublisher.SetRepos(userRepo, noteRepo, idGen)
 	notificationPublisher.SetInstanceLookup(instanceRepo)
 	notificationPublisher.SetEmojiLookup(emojiRepo)
@@ -3044,10 +3051,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// **別マシンの値を交互に受け取り**、管理画面のグラフが振動する。
 	// factory の登録は role に関係なく行う (WebSocket が生えるのは server
 	// role だけなので、queue role では誰も subscribe しない)。
-	serverStatsPub := stream.NewServerStatsPublisher(streamPubSub, 0)
+	//
 	// 無効のあいだは集めも流しもしない (本家 ServerStatsService と同じ)。
-	// tick ごとに見るので、管理画面での切り替えは再起動を待たずに効く。
-	serverStatsPub.SetEnabledFunc(func() bool {
+	// tick ごとに見るので、管理画面での切り替えは再起動を待たずに効く。判定は
+	// 構築子の必須の引数で渡す (#3827)。
+	serverStatsPub := stream.NewServerStatsPublisher(streamPubSub, 0, func() bool {
 		m, err := metaRepo.Fetch()
 		return err == nil && m != nil && m.EnableServerMachineStats
 	})
@@ -3971,6 +3979,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		accountMover:          accountMover,
 		remoteStatsFetcher:    remoteStatsFetcher,
 		remoteUserResolver:    remoteUserResolver,
+
+		streamManager:         streamManager,
+		notePublisher:         notePublisher,
+		notificationPublisher: notificationPublisher,
+		serverStatsPub:        serverStatsPub,
+		reversiPublisher:      reversiPublisher,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -3979,15 +3993,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
 		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
-		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 利用者の詳細を包む部品 (#3792)。sharedUserPacker は follow 系の webhook と
 		// main stream、blocking の応答、pages の pageEvent、一覧を包む handler などが共有する。
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		// UserLite を包む部品 (#3794)。
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
-		{"reversiPublisher.entityPacker", reversiPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// 残りの Pack を呼ぶ部品 (#3796)。
-		{"notificationPublisher.entityPacker", notificationPublisher.HasEntityPacker(), entityPackerMissingEffect},
 		// メディアのプロキシ URL を作る部品 (#3798)。/avatar・/emoji・フィードと
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
@@ -4012,8 +4023,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"署名対象の host ヘッダ検査と自ホスト一致検査が飛ぶ"},
 		{"inbox.enqueuer", inboxHandler.HasEnqueuer(),
 			"同期 fallback へ落ち、actor 一致検査・LD-Signature 検証・replay guard を通らない"},
-		{"stream.serverStatsEnabled", serverStatsPub.HasEnabledFunc(),
-			"enableServerMachineStats を有効にしても serverStats に値が流れない"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 		{"inbox.replayGuard", inboxProcessor.HasInboxReplayGuard(),
@@ -4025,14 +4034,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// 利用者から見えない形で制限が外れる。
 		{"notes.policyProvider", notesHandler.HasPolicyProvider(),
 			"timeline の可視性 gate (ltlAvailable / gtlAvailable) に加え canSearchNotes・canUseTranslator・noteDraftLimit が同時に素通しになる"},
-		{"stream.hardMuteLookup", streamManager.HasHardMuteLookup(),
-			"配信ごとのハードミュート filter が無効になる"},
-		{"stream.muteBlockLookup", streamManager.HasMuteBlockSnapshotLookup(),
-			"配信ごとのミュート / ブロック filter が無効になる (fail-open)"},
-		{"stream.policyProvider", streamManager.HasPolicyProvider(),
-			"streaming の ltlAvailable / gtlAvailable gate が無効になる (fail-open)"},
-		{"stream.ugcVisibilityLookup", streamManager.HasUGCVisibilityLookup(),
-			"未ログインの streaming 接続に ugcVisibilityForVisitor が効かず、全 note と noteUpdated が流れる (fail-open)"},
 		{"inboxProcessor.hostBlockChecker", inboxProcessor.HasHostBlockChecker(),
 			"ブロック済み host / 許可外 host からの activity を受け入れる"},
 		{"inbox.hostBlockChecker", inboxHandler.HasHostBlockChecker(),

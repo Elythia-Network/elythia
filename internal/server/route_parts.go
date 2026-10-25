@@ -23,8 +23,8 @@ import (
 )
 
 // routeParts holds the components setupRoutes builds in its own body (not in
-// buildHandlers) whose dependencies are required constructor arguments
-// (#3823). 本番では読まない。
+// buildHandlers or buildCore), or through buildStream, whose dependencies are
+// required constructor arguments (#3823, #3827). 本番では読まない。
 //
 // 構築子の必須の引数にした依存は、型では渡し忘れを防げても nil は渡せる。
 // TestBuiltHandlersHaveNoNilDependencies が組み立てた後の部品のフィールドを見て、
@@ -55,4 +55,14 @@ type routeParts struct {
 	accountMover          *coremove.Service
 	remoteStatsFetcher    *corefederation.RemoteStatsFetcher
 	remoteUserResolver    *corefederation.RemoteUserResolver
+
+	// stream の部品 (#3827 の 3 段目)。manager と note・notification の publisher は
+	// buildStream で、serverStats の publisher は stream の節で、reversi の publisher は
+	// entityPacker の後で作る。欄の名前は setupRoutes の別名にする (reversi の欄は
+	// handler なので reversiPublisher)。
+	streamManager         *stream.Manager
+	notePublisher         *stream.NotePublisher
+	notificationPublisher *stream.NotificationPublisher
+	serverStatsPub        *stream.ServerStatsPublisher
+	reversiPublisher      *stream.ReversiGamePublisher
 }

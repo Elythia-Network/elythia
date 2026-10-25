@@ -163,7 +163,7 @@ func TestNewShutdownBudget(t *testing.T) {
 // reading) does not eat the time of the shutdown hooks (#3463 review M1 / M3
 // / L3).
 func TestServer_StopBackgroundSends1012AndLeavesTimeForHooks(t *testing.T) {
-	m := stream.NewManager(nil, nil)
+	m := stream.NewManager(nil, nil, nil, nil, nil, nil)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)

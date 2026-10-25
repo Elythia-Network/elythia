@@ -41,7 +41,7 @@ func (s *stubPublisher) Publish(_ context.Context, channel string, payload any) 
 func TestNotePublisher_PublishesPackedNote(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	text := "hello"
 	n := &model.Note{
@@ -93,7 +93,7 @@ func (s *stubBufferedReactionsReader) GetBufferedMany(_ context.Context, ids []s
 func TestNotePublisher_MergesBufferedReactions(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	noteID := idGen.Generate(time.Now())
 	np.SetReactionReader(&stubBufferedReactionsReader{deltas: map[string]map[string]int64{
 		noteID: {":heart@.:": 7},
@@ -125,7 +125,7 @@ func TestNotePublisher_MergesBufferedReactions(t *testing.T) {
 func TestNotePublisher_PopulatesAuthorInstance(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	themeColor := "#deadbe"
 	host := "remote.example"
 	np.SetInstanceLookup(&stubInstanceLookup{byHost: map[string]*model.Instance{
@@ -157,7 +157,7 @@ func TestNotePublisher_PopulatesAuthorInstance(t *testing.T) {
 func TestNotePublisher_FieldResolverPopulatesFiles(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	driveRepo := testutil.NewMockDriveFileRepository()
 	noteID := idGen.Generate(time.Now())
@@ -198,7 +198,7 @@ func TestNotePublisher_FieldResolverPopulatesFiles(t *testing.T) {
 func TestNotePublisher_PublishesEmbeddedRenote(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	renoteID := idGen.Generate(time.Now())
 	noteID := idGen.Generate(time.Now())
@@ -232,14 +232,14 @@ func TestNotePublisher_PublishesEmbeddedRenote(t *testing.T) {
 
 func TestNotePublisher_NilPubIsNoOp(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(nil, idGen)
+	np := NewNotePublisher(nil, idGen, nil)
 	np.PublishNote("topic", &model.Note{}, &model.User{})
 }
 
 func TestNotePublisher_NilNoteIsNoOp(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	np.PublishNote("topic", nil, &model.User{})
 	assert.Empty(t, pub.topics)
 }
@@ -247,7 +247,7 @@ func TestNotePublisher_NilNoteIsNoOp(t *testing.T) {
 func TestNotePublisher_NilAuthorIsNoOp(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	np.PublishNote("topic", &model.Note{}, nil)
 	assert.Empty(t, pub.topics)
 }
@@ -255,7 +255,7 @@ func TestNotePublisher_NilAuthorIsNoOp(t *testing.T) {
 func TestNotePublisher_MarshalErrorIsLoggedNotPropagated(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	// datatypes.JSON は invalid JSON で MarshalJSON が失敗する
 	n := &model.Note{
 		ID:        idGen.Generate(time.Now()),
@@ -270,7 +270,7 @@ func TestNotePublisher_MarshalErrorIsLoggedNotPropagated(t *testing.T) {
 func TestNotePublisher_PublishErrorIsLoggedNotPropagated(t *testing.T) {
 	pub := &stubPublisher{err: errors.New("redis down")}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	n := &model.Note{ID: idGen.Generate(time.Now()), UserID: "u1"}
 	np.PublishNote("topic", n, &model.User{ID: "u1"})
@@ -281,7 +281,7 @@ func TestNotePublisher_PublishErrorIsLoggedNotPropagated(t *testing.T) {
 
 func TestNotificationPublisher_PublishesPayload(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	n := &corenotification.Notification{ID: "n1", Type: corenotification.TypeFollow, NotifierID: "u2"}
 	np.PublishNotification("alice", n)
 	require.Len(t, pub.topics, 1)
@@ -309,7 +309,7 @@ func (s *stubNotifNoteRepo) FindByIDWithRelations(_ string) (*model.Note, error)
 
 func TestNotificationPublisher_WithRepos_PacksUserAndNote(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	// #1471: visibility gate が入ったので test data も visibility を明示。
 	// public は誰でも見られるので note embed が残ることを確認する path。
@@ -342,7 +342,7 @@ func TestNotificationPublisher_WithRepos_PacksUserAndNote(t *testing.T) {
 // streaming payload に embed する。
 func TestNotificationPublisher_RoleAssigned_PacksRole(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "alice", Username: "alice"}}, &stubNotifNoteRepo{}, idGen)
 	np.SetRoleLookup(func(roleID string) (map[string]any, bool) {
@@ -369,7 +369,7 @@ func TestNotificationPublisher_RoleAssigned_PacksRole(t *testing.T) {
 // (Pack が true nil を返して downstream の nil guard で drop される、#1559)。
 func TestNotificationPublisher_RoleAssigned_DroppedWhenRoleDeleted(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "alice", Username: "alice"}}, &stubNotifNoteRepo{}, idGen)
 	np.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
@@ -387,7 +387,7 @@ func TestNotificationPublisher_RoleAssigned_DroppedWhenRoleDeleted(t *testing.T)
 // invitation を pack して streaming payload に embed する。viewer は notifiee。
 func TestNotificationPublisher_ChatInvitation_PacksInvitation(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "inviter", Username: "inviter"}}, &stubNotifNoteRepo{}, idGen)
 	np.SetChatInvitationLookup(func(invID, viewerID string) (map[string]any, bool) {
@@ -413,19 +413,19 @@ func TestNotificationPublisher_ChatInvitation_PacksInvitation(t *testing.T) {
 }
 
 func TestNotificationPublisher_Pack_NilNotification(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	assert.Nil(t, np.Pack("alice", nil))
 }
 
 func TestNotificationPublisher_Pack_WithoutRepos_ReturnsRawNotification(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	n := &corenotification.Notification{ID: "x"}
 	// SetReposを呼ばなければ raw *Notificationがそのまま返る。
 	assert.Equal(t, n, np.Pack("alice", n))
 }
 
 func TestNotificationPublisher_Pack_WithRepos_ReturnsPackedMap(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "u_b", Username: "b"}},
@@ -464,7 +464,7 @@ func (s *stubNotifFollowingChecker) Exists(followerID, followeeID string) (bool,
 // non-follower notifiee の stream に流れた際、note embed を nil 化して
 // 本文を漏らさないこと。
 func TestNotificationPublisher_Pack_FollowersNote_NonFollowerNotifiee_DropsNote(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -496,7 +496,7 @@ func TestNotificationPublisher_Pack_FollowersNote_NonFollowerNotifiee_DropsNote(
 // follower 関係がある notifiee には従来通り note を embed する (regress
 // guard: visibility gate が overshoot して全 follower まで落としていないか)。
 func TestNotificationPublisher_Pack_FollowersNote_FollowerNotifiee_KeepsNote(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -526,7 +526,7 @@ func TestNotificationPublisher_Pack_FollowersNote_FollowerNotifiee_KeepsNote(t *
 // 落とす (mention 経路で visibleUserIDs 外の user に通知が走る ill-formed
 // state での leak 防止)。
 func TestNotificationPublisher_Pack_SpecifiedNote_NonRecipient_DropsNote(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -553,7 +553,7 @@ func TestNotificationPublisher_Pack_SpecifiedNote_NonRecipient_DropsNote(t *test
 // specified note でも author 本人 / visibleUserIDs 内の notifiee には
 // 従来通り note を embed する。
 func TestNotificationPublisher_Pack_SpecifiedNote_Recipient_KeepsNote(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -582,7 +582,7 @@ func TestNotificationPublisher_Pack_SpecifiedNote_Recipient_KeepsNote(t *testing
 // SetFollowingChecker するが、test の partial setup で followers note の
 // embed が抜けないことを固定する。
 func TestNotificationPublisher_Pack_FollowersNote_NilFollowingChecker_DropsForNonAuthor(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -611,7 +611,7 @@ func TestNotificationPublisher_Pack_FollowersNote_NilFollowingChecker_DropsForNo
 // 漏れないことを end-to-end で固定。
 func TestNotificationPublisher_PublishNotification_GatesNoteByVisibility(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "bob"}},
@@ -645,33 +645,33 @@ func TestNotificationPublisher_PublishNotification_GatesNoteByVisibility(t *test
 func strPtr(s string) *string { return &s }
 
 func TestNotificationPublisher_NilPubIsNoOp(t *testing.T) {
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	np.PublishNotification("alice", &corenotification.Notification{})
 }
 
 func TestNotificationPublisher_NilNotificationIsNoOp(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	np.PublishNotification("alice", nil)
 	assert.Empty(t, pub.topics)
 }
 
 func TestNotificationPublisher_EmptyNotifieeIsNoOp(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	np.PublishNotification("", &corenotification.Notification{})
 	assert.Empty(t, pub.topics)
 }
 
 func TestNotificationPublisher_PublishErrorIsLogged(t *testing.T) {
 	pub := &stubPublisher{err: errors.New("redis down")}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	np.PublishNotification("alice", &corenotification.Notification{ID: "n1"})
 }
 
 func TestNotificationPublisher_MarshalErrorIsLogged(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	// chan は JSON.Marshal で失敗する
 	np.PublishNotification("alice", &corenotification.Notification{
 		ID:    "n1",
@@ -787,7 +787,7 @@ func TestNotePublisher_EmitsReactionAndUserPairCache(t *testing.T) {
 
 	// pair あり → 配列を出力
 	pub := &stubPublisher{}
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	n := &model.Note{
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		ReactionAndUserPairCache: []string{"userA/👍", "userB/❤"},
@@ -801,7 +801,7 @@ func TestNotePublisher_EmitsReactionAndUserPairCache(t *testing.T) {
 
 	// pair 空 → streaming は [] を出す (REST と異なり key を残す)
 	pub2 := &stubPublisher{}
-	np2 := NewNotePublisher(pub2, idGen)
+	np2 := NewNotePublisher(pub2, idGen, nil)
 	n2 := &model.Note{
 		ID: idGen.Generate(time.Now()), UserID: "u1", Visibility: model.NoteVisibilityPublic,
 	}
@@ -818,7 +818,7 @@ func TestNotePublisher_EmitsReactionAndUserPairCache(t *testing.T) {
 func TestNotePublisher_EmitsRenoteReactionAndUserPairCache(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	pub := &stubPublisher{}
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	renote := &model.Note{
 		ID: idGen.Generate(time.Now()), UserID: "u2", Visibility: model.NoteVisibilityPublic,
@@ -855,7 +855,7 @@ func (s *stubReactionPairReader) ListReactionPairs(noteID string, _ int) ([]stri
 func TestNotePublisher_RenotePairCacheFromReader(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	renoteID := idGen.Generate(time.Now())
 	noteID := idGen.Generate(time.Now())
 	reader := &stubReactionPairReader{pairs: map[string][]string{renoteID: {"alice/👍", "bob/❤"}}}
@@ -883,7 +883,7 @@ func TestNotePublisher_RenotePairCacheFromReader(t *testing.T) {
 func TestNotePublisher_QuoteRenoteSkipsPairReader(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	renoteID := idGen.Generate(time.Now())
 	reader := &stubReactionPairReader{pairs: map[string][]string{renoteID: {"alice/👍"}}}
 	np.SetReactionPairReader(reader)
@@ -905,7 +905,7 @@ func TestNotePublisher_QuoteRenoteSkipsPairReader(t *testing.T) {
 func TestNotePublisher_NoReactionsSkipsPairReader(t *testing.T) {
 	pub := &stubPublisher{}
 	idGen, _ := id.NewGenerator("aidx")
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 	renoteID := idGen.Generate(time.Now())
 	reader := &stubReactionPairReader{}
 	np.SetReactionPairReader(reader)
@@ -926,7 +926,7 @@ func TestNotePublisher_NoReactionsSkipsPairReader(t *testing.T) {
 // 追加分だけ添付メディアが消え、リロードするまで出てこない。
 func TestNotificationPublisher_FieldResolverPopulatesNoteFiles(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 
 	driveRepo := testutil.NewMockDriveFileRepository()
@@ -967,7 +967,7 @@ func TestNotificationPublisher_FieldResolverPopulatesNoteFiles(t *testing.T) {
 // myReaction のような viewer 依存 field も解決されること。
 func TestNotificationPublisher_ResolvesViewerFieldsForNotifiee(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 
 	reactionRepo := &stubStreamReactionLookup{rows: map[string]*model.NoteReaction{
@@ -1013,7 +1013,7 @@ func (s *stubStreamReactionLookup) FindByUserAndNoteIDs(userID string, _ []strin
 // 未配線 (nil resolver) では従来どおり files が空配列で、panic もしないこと。
 func TestNotificationPublisher_NoFieldResolverKeepsFilesEmpty(t *testing.T) {
 	pub := &stubPublisher{}
-	np := NewNotificationPublisher(pub)
+	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(
 		&stubNotifUserRepo{user: &model.User{ID: "u2", Username: "bob"}},

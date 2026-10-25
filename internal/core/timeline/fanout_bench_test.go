@@ -120,7 +120,7 @@ func BenchmarkFanoutHook_Followers(b *testing.B) {
 			h := NewFanoutHook(fanout, following)
 			ps := event.NewPubSubService(client, "bench:")
 			defer ps.Close()
-			h.SetStreamingPublisher(stream.NewNotePublisher(ps, idGen))
+			h.SetStreamingPublisher(stream.NewNotePublisher(ps, idGen, nil))
 			if c.subscribed {
 				// 本番と同じく、自プロセスが <prefix>* を PSUBSCRIBE している状態に
 				// する。フォロワー宛ての PUBLISH はすべてこの接続へ流れ、購読者の

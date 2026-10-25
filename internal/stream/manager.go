@@ -118,11 +118,48 @@ func (m *Manager) trackLastActive(user *model.User) (stop func()) {
 
 // NewManager constructs a Manager with no live connections. registry / bus が
 // nil でも動作する (channel framework を一切使わないテスト用)。
-func NewManager(registry *Registry, bus PubSubBus) *Manager {
+//
+// The remaining arguments are the per-publish filters, all read at connection
+// setup or per event:
+//
+//   - hardMute returns the viewer's persisted hardMutedWords (#787)
+//   - muteBlock returns the viewer's mute/block snapshot (muting / blocking-me
+//     / renote-muting / muted-instances / muting-channels), which the main /
+//     notifications channels use to gate notification / mention delivery
+//     (#1711)
+//   - policyProvider lets timeline channels gate ltlAvailable / gtlAvailable
+//     at connect time (#1942)
+//   - ugcVisibility is the live meta.ugcVisibilityForVisitor lookup for
+//     anonymous connections on note channels and noteUpdated events (upstream
+//     NoteStreamingHidingService / Connection)
+//
+// **どれも nil だと fail-open。** ハードミュート、ミュート/ブロック、ltl/gtl の
+// 可視性 gate、匿名接続への visitor policy が黙って素通しになる。以前は setter で
+// 入れ、入れ忘れを起動時の検査 (#2683) が見ていた。渡し忘れをコンパイルで落とす
+// ため、構築子の必須の引数で受ける (#3827)。nil を渡したテストでは filter が掛から
+// ない (旧挙動)。
+//
+// **`SetFollowingSnapshotLookup` と `SetNoteVisibilityChecker` は対象外 (setter のまま)。**
+// `SetNoteVisibilityChecker` は未配線で全 subNote を拒否する = 素直に
+// fail-closed (`dispatcher.go` の `if d.noteVisibility == nil { return }`)。
+// `SetFollowingSnapshotLookup` は**支配的には fail-closed**
+// (`channels/note_filter.go` の `followsFromSnap` / `renotedReplyVisibleTo` /
+// `streamNoteVisibleForViewer`、`channels/user_list.go` の
+// `userListVisibilityShouldEmit` はいずれも `snap == nil` で落とす) だが、**1 経路だけ緩む**: `replyShouldEmit` の
+// home / hybrid では `followee.withReplies` が false 扱いになる結果、
+// mention hatch (#1195) を通って 1 通余分に流れうる。reply embed 自体は
+// `hideEmbeds` が別 gate で blank 化するので実害は軽微と判断して対象外にした
+// (#2683 review M-1 / round 2 M-2)。**この判断を変えるならここも直すこと。**
+func NewManager(registry *Registry, bus PubSubBus, hardMute HardMuteRulesLookup, muteBlock MuteBlockSnapshotLookup,
+	policyProvider role.PolicyProvider, ugcVisibility UGCVisibilityLookup) *Manager {
 	return &Manager{
-		conns:    make(map[string]*Connection),
-		registry: registry,
-		bus:      bus,
+		conns:           make(map[string]*Connection),
+		registry:        registry,
+		bus:             bus,
+		hardMute:        hardMute,
+		muteBlockLookup: muteBlock,
+		policyProvider:  policyProvider,
+		ugcVisibility:   ugcVisibility,
 	}
 }
 
@@ -130,13 +167,6 @@ func NewManager(registry *Registry, bus PubSubBus) *Manager {
 // messages from clients are handled.
 func (m *Manager) SetNotificationReader(nr NotificationReader) {
 	m.notifReader = nr
-}
-
-// SetHardMuteLookup wires a lookup that returns the viewer's persisted
-// hardMutedWords (#787). Called at connection setup; nil disables the
-// per-publish hard mute filter.
-func (m *Manager) SetHardMuteLookup(l HardMuteRulesLookup) {
-	m.hardMute = l
 }
 
 // SetFollowingSnapshotLookup wires a lookup that returns the viewer's followee
@@ -148,15 +178,6 @@ func (m *Manager) SetFollowingSnapshotLookup(l FollowingSnapshotLookup) {
 	m.followingLookup = l
 }
 
-// SetMuteBlockSnapshotLookup wires a lookup that returns the viewer's
-// mute/block snapshot (muting / blocking-me / renote-muting / muted-instances /
-// muting-channels). Called at connection setup so the main / notifications
-// channels can gate notification / mention delivery (#1711). nil disables the
-// per-publish mute/block filter (fail-open).
-func (m *Manager) SetMuteBlockSnapshotLookup(l MuteBlockSnapshotLookup) {
-	m.muteBlockLookup = l
-}
-
 // SetNoteVisibilityChecker wires a NoteVisibilityChecker so per-connection
 // Dispatcher can refuse subNote subscriptions to non-visible notes
 // (#1460 IDOR fix)。未配線時は fail-closed で全 subNote が subscribe しない
@@ -165,26 +186,11 @@ func (m *Manager) SetNoteVisibilityChecker(c NoteVisibilityChecker) {
 	m.noteVisibility = c
 }
 
-// SetPolicyProvider wires a role policy source so timeline channels can gate
-// ltlAvailable / gtlAvailable at connect time (#1942). nil disables the gate
-// (fail-open, test/旧挙動).
-func (m *Manager) SetPolicyProvider(p role.PolicyProvider) {
-	m.policyProvider = p
-}
-
 // UGCVisibilityLookup returns the current meta.ugcVisibilityForVisitor. It is
 // called per event for anonymous connections, so it must be cheap (backed by
 // the cached meta repository) and must reflect admin changes without a
 // restart.
 type UGCVisibilityLookup func() string
-
-// SetUGCVisibilityLookup wires the live meta.ugcVisibilityForVisitor lookup so
-// anonymous connections get the visitor policy on note channels and
-// noteUpdated events (upstream NoteStreamingHidingService / Connection). nil
-// disables the gate (fail-open, test/旧挙動).
-func (m *Manager) SetUGCVisibilityLookup(l UGCVisibilityLookup) {
-	m.ugcVisibility = l
-}
 
 // Accept implements api/streaming.ConnectionAcceptor. *websocket.Conn から
 // Connection を組み立て、Dispatcher 経由で channel framework に橋渡しする。
@@ -403,38 +409,6 @@ func formatID(n uint64) string {
 	}
 	return string(buf[i:])
 }
-
-// HasHardMuteLookup / HasMuteBlockSnapshotLookup / HasPolicyProvider report
-// whether the per-publish filters were wired.
-//
-// **この 3 つは未配線だと fail-open**。ハードミュート、ミュート/ブロック、
-// ltl/gtl の可視性 gate が黙って素通しになる。起動時検査に使う (#2683)。
-//
-// **`SetFollowingSnapshotLookup` と `SetNoteVisibilityChecker` は対象外。**
-//
-// `SetNoteVisibilityChecker` は未配線で全 subNote を拒否する = 素直に
-// fail-closed (`dispatcher.go` の `if d.noteVisibility == nil { return }`)。
-//
-// `SetFollowingSnapshotLookup` は**支配的には fail-closed**
-// (`channels/note_filter.go` の `followsFromSnap` / `renotedReplyVisibleTo` /
-// `streamNoteVisibleForViewer`、`channels/user_list.go` の
-// `userListVisibilityShouldEmit` はいずれも `snap == nil` で落とす) だが、**1 経路だけ緩む**: `replyShouldEmit` の
-// home / hybrid では `followee.withReplies` が false 扱いになる結果、
-// mention hatch (#1195) を通って 1 通余分に流れうる。reply embed 自体は
-// `hideEmbeds` が別 gate で blank 化するので実害は軽微と判断して対象外にした
-// (#2683 review M-1 / round 2 M-2)。**この判断を変えるならここも直すこと。**
-func (m *Manager) HasHardMuteLookup() bool { return m.hardMute != nil }
-
-// HasMuteBlockSnapshotLookup reports whether the mute/block snapshot lookup was wired.
-func (m *Manager) HasMuteBlockSnapshotLookup() bool { return m.muteBlockLookup != nil }
-
-// HasPolicyProvider reports whether the role policy provider was wired.
-func (m *Manager) HasPolicyProvider() bool { return m.policyProvider != nil }
-
-// HasUGCVisibilityLookup reports whether the meta.ugcVisibilityForVisitor
-// lookup was wired. 未配線だと匿名接続への visitor policy が素通しになる
-// (fail-open) ので、起動時検査に使う。
-func (m *Manager) HasUGCVisibilityLookup() bool { return m.ugcVisibility != nil }
 
 // Registry returns the channel registry the manager's dispatchers look
 // channels up in. It exists for the server's wiring tests (#3692): the

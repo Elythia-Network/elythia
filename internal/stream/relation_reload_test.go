@@ -48,11 +48,11 @@ func muteSnapshot(mutedIDs ...string) *MuteBlockSnapshot {
 func newRelationManager(t *testing.T) (*Manager, *stubBus, *relFollowingLookup, *relMuteBlockLookup) {
 	t.Helper()
 	bus := newStubBus()
-	m := NewManager(NewRegistry(), bus)
+	m := NewManager(NewRegistry(), bus, nil, nil, nil, nil)
 	fl := &relFollowingLookup{snaps: map[string]map[string]bool{}}
 	ml := &relMuteBlockLookup{snaps: map[string]*MuteBlockSnapshot{}}
 	m.SetFollowingSnapshotLookup(fl)
-	m.SetMuteBlockSnapshotLookup(ml)
+	m.muteBlockLookup = ml
 	return m, bus, fl, ml
 }
 
@@ -196,7 +196,7 @@ func TestManager_RefreshRelations_EmptyUserIDIsNoOp(t *testing.T) {
 
 // bus 未配線でも panic しない (既存構成が壊れない)。
 func TestManager_SubscribeRelationReload_NilBus(t *testing.T) {
-	m := NewManager(NewRegistry(), nil)
+	m := NewManager(NewRegistry(), nil, nil, nil, nil, nil)
 	assert.NotPanics(t, m.SubscribeRelationReload)
 	assert.NotPanics(t, m.UnsubscribeRelationReload)
 }

@@ -22,7 +22,7 @@ func newSuspendedTestPublisher(t *testing.T) (*NotePublisher, *stubPublisher, id
 	pub := &stubPublisher{}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return NewNotePublisher(pub, idGen), pub, idGen
+	return NewNotePublisher(pub, idGen, nil), pub, idGen
 }
 
 func TestPublishNote_SuspendedAuthorIsNotPublished(t *testing.T) {

@@ -25,19 +25,19 @@ func TestFormatID(t *testing.T) {
 // Registry は dispatcher が引くのと同じ registry を返す (#3692)。
 func TestManager_RegistryReturnsTheConstructedRegistry(t *testing.T) {
 	r := NewRegistry()
-	assert.Same(t, r, NewManager(r, nil).Registry())
-	assert.Nil(t, NewManager(nil, nil).Registry())
+	assert.Same(t, r, NewManager(r, nil, nil, nil, nil, nil).Registry())
+	assert.Nil(t, NewManager(nil, nil, nil, nil, nil, nil).Registry())
 }
 
 func TestManager_AllocateIDIncrements(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	a := m.allocateID()
 	b := m.allocateID()
 	assert.NotEqual(t, a, b)
 }
 
 func TestManager_RegisterUnregister(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	c := NewConnection("c1", nil, newFakeConn())
 	m.register(c)
 	assert.Equal(t, 1, m.Count())
@@ -48,7 +48,7 @@ func TestManager_RegisterUnregister(t *testing.T) {
 }
 
 func TestManager_ShutdownClosesEverything(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	fc := newFakeConn()
 	c := NewConnection("c1", nil, fc)
 	m.register(c)
@@ -60,7 +60,7 @@ func TestManager_ShutdownClosesEverything(t *testing.T) {
 func TestManager_AcceptRegistersAndUnregistersOnClose(t *testing.T) {
 	// Accept は *websocket.Conn を要求するが、connection_test の fakeConn を
 	// 直接渡すために register/unregister の経路だけテストする。
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	fc := newFakeConn()
 	id := m.allocateID()
 	c := NewConnection(id, nil, fc)
@@ -76,7 +76,7 @@ func TestManager_AcceptRegistersAndUnregistersOnClose(t *testing.T) {
 // *websocket.Conn pair. Accept は内部で readLoop をブロックするので別 goroutine
 // で起動し、close 後に登録が解除されることを確認する。
 func TestManager_AcceptViaHTTPTestServer(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -121,9 +121,9 @@ func (s *stubMuteBlockLookup) called() string {
 // TestManager_AcceptInvokesMuteBlockLookup verifies Accept fetches and attaches
 // the viewer's mute/block snapshot at connection setup (#1711).
 func TestManager_AcceptInvokesMuteBlockLookup(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	lookup := &stubMuteBlockLookup{snap: &MuteBlockSnapshot{Muting: map[string]struct{}{"x": {}}}}
-	m.SetMuteBlockSnapshotLookup(lookup)
+	m.muteBlockLookup = lookup
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -163,9 +163,9 @@ func (s *stubPolicyProvider) called() string {
 }
 
 func TestManager_AcceptInvokesPolicyProvider(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	provider := &stubPolicyProvider{}
-	m.SetPolicyProvider(provider)
+	m.policyProvider = provider
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +198,7 @@ func TestManager_AcceptDispatchesConnectMessages(t *testing.T) {
 		holder.Value = ch
 		return ch
 	})
-	m := NewManager(registry, bus)
+	m := NewManager(registry, bus, nil, nil, nil, nil)
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +248,7 @@ func (r *recordingLastActive) calls() []string {
 
 // 接続時に 1 回記録し、stop 後は ticker が止まること。
 func TestManager_TrackLastActiveRecordsOnConnect(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil, nil, nil, nil)
 	rec := &recordingLastActive{}
 	m.SetLastActiveRecorder(rec)
 
@@ -263,11 +263,11 @@ func TestManager_TrackLastActiveRecordsOnConnect(t *testing.T) {
 func TestManager_TrackLastActiveNoopCases(t *testing.T) {
 	rec := &recordingLastActive{}
 
-	unwired := NewManager(nil, nil)
+	unwired := NewManager(nil, nil, nil, nil, nil, nil)
 	unwired.trackLastActive(&model.User{ID: "u1"})()
 	assert.Empty(t, rec.calls())
 
-	anon := NewManager(nil, nil)
+	anon := NewManager(nil, nil, nil, nil, nil, nil)
 	anon.SetLastActiveRecorder(rec)
 	anon.trackLastActive(nil)()
 	assert.Empty(t, rec.calls(), "匿名接続は記録しない")
@@ -289,7 +289,7 @@ func TestManagerAccept_AttachesScopesThroughAcceptPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewManager(nil, nil)
+			m := NewManager(nil, nil, nil, nil, nil, nil)
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				conn, err := upgrader.Upgrade(w, r, nil)

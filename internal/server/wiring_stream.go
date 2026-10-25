@@ -6,6 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/event"
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/stream"
@@ -23,12 +24,15 @@ import (
 // constructor just builds a value are listed: no Redis access (the pubsub
 // connects on its first Subscribe, which setupRoutes still calls), no log, no
 // goroutine, timer, shutdown hook or global write, and dependencies limited
-// to the stream pubsub and the ID generator.
+// to the stream pubsub, the ID generator and the values setupRoutes passes to
+// buildStream for the required constructor arguments (#3827: the entity
+// packer and the four per-publish filter lookups of the manager).
 //
 // Streaming parts that stay in setupRoutes (docs/architecture.md 4.2): the
 // publishers that receivers before the stream section need (note events,
-// drive, reversi and main stream for core services, the federation processor
-// and handlers, built at the top of setupRoutes since #3676; the user list
+// drive and main stream for core services, the federation processor and
+// handlers, built at the top of setupRoutes since #3676; the reversi game
+// publisher, built right after the entity packer since #3827; the user list
 // publisher for usersHandler), the server and queue stats publishers (they start
 // a ticker and register a shutdown hook), and the publishers built inside the
 // arguments of another constructor (the admin stream publisher of the abuse
@@ -55,7 +59,23 @@ type streamParts struct {
 // function: streamPubSub is the value setupRoutes creates (and stores in
 // s.streamPubSub) at its top, passed in as a variable like every earlier group
 // (docs/architecture.md 4.2).
-func buildStream(streamPubSub *event.PubSubService, idGen id.Generator) streamParts {
+//
+// entityPacker and the four lookups are required constructor arguments of the
+// parts (#3827): the note and notification publishers pack with entityPacker,
+// and the manager applies hardMuteLookup, muteBlockLookup, policyProvider and
+// ugcVisibilityLookup to every connection. Each degrades silently when it is
+// missing, so leaving it out does not compile, where it used to be a setter
+// that the startup check (recordCriticalWiring) had to catch. setupRoutes
+// builds them before calling buildStream; buildStream only hands them on.
+func buildStream(
+	streamPubSub *event.PubSubService,
+	idGen id.Generator,
+	entityPacker *entity.Packer,
+	hardMuteLookup stream.HardMuteRulesLookup,
+	muteBlockLookup stream.MuteBlockSnapshotLookup,
+	policyProvider corerole.PolicyProvider,
+	ugcVisibilityLookup stream.UGCVisibilityLookup,
+) streamParts {
 	// 下の行は setupRoutes にあった行をそのまま移した。ゲートが構築の式を引数まで
 	// 含めて照合しうるので、引数も setupRoutes と同じ名前で受ける。
 	//
@@ -65,13 +85,16 @@ func buildStream(streamPubSub *event.PubSubService, idGen id.Generator) streamPa
 	// Channel registry。registry は factory を map に入れるだけで、引くのは接続を
 	// 受けたとき (dispatcher の Lookup)。
 	streamRegistry := stream.NewRegistry()
-	// Connection manager。registry と bus の参照を持つだけで、接続も購読も始めない。
-	streamManager := stream.NewManager(streamRegistry, streamBus)
+	// Connection manager。registry と bus と配信ごとの filter の参照を持つだけで、
+	// 接続も購読も始めない。filter はどれも無いと fail-open なので、構築子の必須の
+	// 引数で渡す (#3827)。
+	streamManager := stream.NewManager(streamRegistry, streamBus, hardMuteLookup, muteBlockLookup, policyProvider, ugcVisibilityLookup)
 	// 失効を扱う handler へ配る revoke publisher。自プロセスの Manager も渡す —
 	// publish が失敗しても、ここに居る接続は閉じる。
 	streamRevokePublisher := stream.NewStreamRevokePublisher(streamPubSub, streamManager)
-	notePublisher := stream.NewNotePublisher(streamPubSub, idGen)
-	notificationPublisher := stream.NewNotificationPublisher(streamPubSub)
+	notePublisher := stream.NewNotePublisher(streamPubSub, idGen, entityPacker)
+	// #3796: 通知の本文と埋め込んだ投稿・利用者を包む。
+	notificationPublisher := stream.NewNotificationPublisher(streamPubSub, entityPacker)
 	// broadcast stream publisher (emoji / global announcement 等を全 connection へ、#2046/#2056)。
 	broadcastPublisher := stream.NewBroadcastPublisher(streamPubSub)
 	chatPublisher := stream.NewChatPublisher(streamPubSub)

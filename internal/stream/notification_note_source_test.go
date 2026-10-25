@@ -38,7 +38,7 @@ func TestNotificationPublisher_PackWithNoteSource_MatchesPack(t *testing.T) {
 	} {
 		note := &model.Note{ID: "note1", UserID: "bob", Visibility: tc.vis, Text: &text, User: &model.User{ID: "bob", Username: "bob"}}
 		repo := &countingNotifNoteRepo{note: note}
-		np := NewNotificationPublisher(nil)
+		np := NewNotificationPublisher(nil, nil)
 		np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "bob", Username: "bob"}}, repo, idGen)
 		n := &corenotification.Notification{ID: "x", Type: corenotification.TypeMention, NotifierID: "bob", NoteID: "note1"}
 
@@ -61,7 +61,7 @@ func TestNotificationPublisher_PackWithNoteSource_Fallbacks(t *testing.T) {
 	note := &model.Note{ID: "note1", UserID: "bob", Visibility: model.NoteVisibilityPublic}
 	n := &corenotification.Notification{ID: "x", Type: corenotification.TypeMention, NotifierID: "bob", NoteID: "note1"}
 
-	np := NewNotificationPublisher(nil)
+	np := NewNotificationPublisher(nil, nil)
 	assert.Nil(t, np.PackWithNoteSource("alice", nil, nil))
 
 	// note repository 未配線なら、source があっても note を埋めない (従来と同じ)。

@@ -30,7 +30,7 @@ func (c *capturingPubSub) Publish(_ context.Context, topic string, payload any) 
 
 func TestReversiGamePublisher_PublishEnvelope(t *testing.T) {
 	bus := &capturingPubSub{}
-	p := NewReversiGamePublisher(bus)
+	p := NewReversiGamePublisher(bus, nil)
 	p.PublishGameEvent("g1", "log", map[string]any{"pos": 19})
 
 	require.Len(t, bus.calls, 1)
@@ -47,19 +47,19 @@ func TestReversiGamePublisher_PublishEnvelope(t *testing.T) {
 }
 
 func TestReversiGamePublisher_NilPub(t *testing.T) {
-	p := NewReversiGamePublisher(nil)
+	p := NewReversiGamePublisher(nil, nil)
 	p.PublishGameEvent("g1", "log", nil) // no panic
 }
 
 func TestReversiGamePublisher_EmptyGameID(t *testing.T) {
 	bus := &capturingPubSub{}
-	p := NewReversiGamePublisher(bus)
+	p := NewReversiGamePublisher(bus, nil)
 	p.PublishGameEvent("", "log", nil)
 	assert.Empty(t, bus.calls)
 }
 
 func TestReversiGamePublisher_PublishError(t *testing.T) {
 	bus := &capturingPubSub{err: errors.New("pub boom")}
-	p := NewReversiGamePublisher(bus)
+	p := NewReversiGamePublisher(bus, nil)
 	p.PublishGameEvent("g1", "log", nil) // logged but not panicked
 }

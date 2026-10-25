@@ -55,6 +55,10 @@ var handlerNilAllowed = map[string]string{
 	// nil の detector を SetSensitiveDetection に渡す (自動付与は走らず、手動の
 	// isSensitive だけが効く既定の構成)。テストの組み立ては URL を設定しない。
 	"driveService.sensitiveDetector": "nsfwDetectorUrl を設定しないときは nil を入れる (既定の構成)",
+	// 依存ではなく状態。直前に pack した投稿の JSON (cachedID と対) で、最初に投稿を流す
+	// とき (PublishNote / PublishNoteMany の packNote) に作る。組み立てた直後はまだ投稿を
+	// 流していないので nil (#3827)。
+	"notePublisher.cachedBody": "依存ではなく状態。最初に投稿を流すとき (packNote) に作るので、組み立てた直後は nil",
 }
 
 // **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825)。**
@@ -256,10 +260,14 @@ var requiredDepChecks = []string{
 	"driveService.entityPacker", "driveService.roleChecker", "driveService.modLog", "driveService.modLogUsers",
 	"userService.entityPacker",
 	"webhookNoteHook.entityPacker", "webhookReactionHook.entityPacker", "webhookFollowingHook.packer",
-	// ここから #3827 (i と oauth の handler)。
+	// ここから #3827 (i と oauth の handler、stream の部品)。
 	"i.noteHider", "i.entityPacker", "i.roleProvider", "i.totpReplayGuard", "i.twoFAPending",
 	"i.authInvalidator", "i.accessTokenRepo", "i.streamRevoker", "i.followRequestAccepter", "i.background",
 	"oauth.streamRevoker",
+	"streamManager.hardMute", "streamManager.muteBlockLookup", "streamManager.policyProvider",
+	"streamManager.ugcVisibility",
+	"notePublisher.entityPacker", "notificationPublisher.entityPacker", "reversiPublisher.entityPacker",
+	"serverStatsPub.enabled",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

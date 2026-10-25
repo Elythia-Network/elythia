@@ -48,7 +48,8 @@ type NotePublisher struct {
 	// 解決されない後段 field を埋める。未設定時は従来通り Files が
 	// 空配列のまま publish される (旧挙動)。SetFieldResolver で配線。
 	fieldResolver *entity.NoteFieldResolver
-	// entityPacker は流す投稿を包む依存を持つ (#3790)。
+	// entityPacker は流す投稿を包む依存を持つ (#3790)。無いとリモートのメディアの URL を
+	// 生のまま流すので、構築子の必須の引数で受ける (#3827)。
 	entityPacker *entity.Packer
 
 	mu         sync.Mutex
@@ -66,9 +67,13 @@ func (p *NotePublisher) DropLocal() {
 	p.cachedBody = nil
 }
 
-// NewNotePublisher constructs a NotePublisher.
-func NewNotePublisher(pub PubSubPublisher, idGen id.Generator) *NotePublisher {
-	return &NotePublisher{pub: pub, idGen: idGen}
+// NewNotePublisher constructs a NotePublisher. entityPacker is the Packer the
+// published notes are packed with (#3790). 無いとリモートのメディアの URL を生のまま
+// 流し、閲覧者の IP がリモートへ漏れる。以前は setter で入れ、入れ忘れを起動時の
+// 検査 (criticalWiring) が見ていた。渡し忘れをコンパイルで落とすため、構築子の必須の
+// 引数で受ける (#3827)。
+func NewNotePublisher(pub PubSubPublisher, idGen id.Generator, entityPacker *entity.Packer) *NotePublisher {
+	return &NotePublisher{pub: pub, idGen: idGen, entityPacker: entityPacker}
 }
 
 // SetEmojiLookup attaches an EmojiLookup so published notes get their
@@ -134,13 +139,6 @@ func reactionsNonEmpty(raw []byte) bool {
 func (p *NotePublisher) SetFieldResolver(r *entity.NoteFieldResolver) {
 	p.fieldResolver = r
 }
-
-// SetEntityPacker wires the Packer the published notes are packed with (#3790).
-func (p *NotePublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs.
-func (p *NotePublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
 
 // PublishNote implements core/timeline.StreamingPublisher.
 func (p *NotePublisher) PublishNote(topic string, n *model.Note, author *model.User) {
@@ -379,21 +377,15 @@ type NotificationPublisher struct {
 	// reply / mention / quote (MkNote で全体描画される) から添付メディアが消える。
 	fieldResolver *entity.NoteFieldResolver
 	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3796)。組み立てで渡す。
+	// 持つ (#3796)。構築子の必須の引数で受ける (#3827)。
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this NotificationPublisher packs entities with (#3796).
-func (p *NotificationPublisher) SetEntityPacker(pk *entity.Packer) { p.entityPacker = pk }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (p *NotificationPublisher) HasEntityPacker() bool { return p.entityPacker.HasMediaURL() }
-
-// NewNotificationPublisher constructs a NotificationPublisher.
-func NewNotificationPublisher(pub PubSubPublisher) *NotificationPublisher {
-	return &NotificationPublisher{pub: pub}
+// NewNotificationPublisher constructs a NotificationPublisher. entityPacker
+// is the Packer it packs entities with (#3796). 無いと avatarUrl などを生のまま
+// 返し、閲覧者の IP がリモートへ漏れるので、構築子の必須の引数で受ける (#3827)。
+func NewNotificationPublisher(pub PubSubPublisher, entityPacker *entity.Packer) *NotificationPublisher {
+	return &NotificationPublisher{pub: pub, entityPacker: entityPacker}
 }
 
 // SetRepos wires the narrow repositories and id generator used by

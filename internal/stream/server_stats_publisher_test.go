@@ -53,9 +53,7 @@ func (c *capturePubSub) snapshot() []struct {
 // newEnabledServerStatsPublisher は enableServerMachineStats が有効な状態の
 // publisher を作る。
 func newEnabledServerStatsPublisher(pub PubSubPublisher, interval time.Duration) *ServerStatsPublisher {
-	p := NewServerStatsPublisher(pub, interval)
-	p.SetEnabledFunc(func() bool { return true })
-	return p
+	return NewServerStatsPublisher(pub, interval, func() bool { return true })
 }
 
 func TestServerStatsPublisher_PublishesSnapshot(t *testing.T) {
@@ -103,7 +101,7 @@ func TestServerStatsPublisher_DoubleStartNoOp(t *testing.T) {
 
 func TestServerStatsPublisher_NilPubNoOp(t *testing.T) {
 	// pub が nil でも panic せず、Start はno-opとなる。
-	p := NewServerStatsPublisher(nil, 50*time.Millisecond)
+	p := NewServerStatsPublisher(nil, 50*time.Millisecond, nil)
 	p.Start()
 	p.Stop()
 }
@@ -183,16 +181,15 @@ func TestServerStatsPublisher_LogDefensiveCopy(t *testing.T) {
 
 func TestServerStatsPublisher_DisabledPublishesNothing(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		set  func(p *ServerStatsPublisher)
+		name    string
+		enabled func() bool
 	}{
-		{name: "gate not wired", set: func(*ServerStatsPublisher) {}},
-		{name: "gate returns false", set: func(p *ServerStatsPublisher) { p.SetEnabledFunc(func() bool { return false }) }},
+		{name: "gate not wired", enabled: nil},
+		{name: "gate returns false", enabled: func() bool { return false }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pub := &capturePubSub{}
-			p := NewServerStatsPublisher(pub, 0)
-			tc.set(p)
+			p := NewServerStatsPublisher(pub, 0, tc.enabled)
 			p.tick()
 			p.tick()
 			assert.Empty(t, pub.snapshot(), "nothing may be published while disabled")
@@ -203,10 +200,9 @@ func TestServerStatsPublisher_DisabledPublishesNothing(t *testing.T) {
 
 func TestServerStatsPublisher_DisablingDropsHistory(t *testing.T) {
 	pub := &capturePubSub{}
-	p := NewServerStatsPublisher(pub, 0)
 	var enabled atomic.Bool
 	enabled.Store(true)
-	p.SetEnabledFunc(enabled.Load)
+	p := NewServerStatsPublisher(pub, 0, enabled.Load)
 
 	p.tick()
 	p.tick()
@@ -226,13 +222,6 @@ func TestServerStatsPublisher_DisablingDropsHistory(t *testing.T) {
 	p.tick()
 	assert.Len(t, p.Log(0), 1)
 	assert.Len(t, pub.snapshot(), 3)
-}
-
-func TestServerStatsPublisher_HasEnabledFunc(t *testing.T) {
-	p := NewServerStatsPublisher(&capturePubSub{}, 0)
-	assert.False(t, p.HasEnabledFunc())
-	p.SetEnabledFunc(func() bool { return false })
-	assert.True(t, p.HasEnabledFunc())
 }
 
 func TestStatsRingBuffer_Reset(t *testing.T) {

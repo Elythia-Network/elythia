@@ -380,7 +380,9 @@ following・reaction・drive・連合・queueのprocessor・handlerなど)には
 `noteEventPub` / `relationReloadPublisher` / `mainStreamPublisher` / `drivePublisher` /
 `reversiPublisher`) を `setupRoutes()` の先頭へ、chart の engine と hook
 (`chartCharts` / `chartHooks`) を repository の直後へ移し、受け手には作った直後に渡す
-ようにした (上の `notificationService.SetMainStreamPublisher` だけは元の位置)。ほかに、受け手より後で作っていた純粋な部品 (repository 16 個、
+ようにした (上の `notificationService.SetMainStreamPublisher` だけは元の位置)。
+`reversiPublisher` は、#3827 で Packer を構築子の引数で受けるようにしたので、`entityPacker` の
+直後へ移した (使う側はどれもそれより後にある)。ほかに、受け手より後で作っていた純粋な部品 (repository 16 個、
 `featuredService`、`hashtagService`、`modLogService`、`instanceService` など) を
 受け手より先に作るようにした (こちらは setter を呼ぶ位置は変えていない)。
 
@@ -525,7 +527,11 @@ stream の節に残した。下の数え方では、別名の依存は`streamSvc
 数え直していない。どの辺にも`streamSvcs`が現れないことから言える)。`buildStream()`の中の
 構築子は、どれも値を作って返すだけ(下の「stream の部品 (#3692)」)。後の段で`streamRevokePublisher`の
 別名だけを呼び出しの直後へ移した(`i`と`oauth`の構築子へ渡すため)。依存の定義が前へ移るだけなので、
-後から入れる辺は増えない。
+後から入れる辺は増えない。同じ#3827の後の段で、
+`reversiPublisher`の定義を`entityPacker`の直後へ後ろへ移した。`reversiPublisher`を受け手とする
+setter(`SetEntityPacker`)は構築子の引数にして消し、依存とするsetter
+(`federationProcessor.SetReversiStreamPublisher`・`reversiHandler.SetStreamPublisher`)の受け手は
+どちらも`entityPacker`より後で定義するので、後から入れる辺は増えない。
 
 数え方 (`setupRoutes()` の構文木。道具はコミットしていない):
 
@@ -640,8 +646,9 @@ setupRoutes()
     `w.fed = fedSvcs`、別名は `x := fedSvcs.x`)
   - `queue` も同じ形 (`queueSvcs := s.buildQueue(w, coreSvcs, idGen)`、
     `w.queue = queueSvcs`、別名は `x := queueSvcs.x`)
-  - `stream` も同じ形 (`streamSvcs := buildStream(streamPubSub, idGen)`、
-    `w.stream = streamSvcs`、別名は `x := streamSvcs.x`)。`buildStream()` は `Server` の
+  - `stream` も同じ形 (`streamSvcs := buildStream(streamPubSub, idGen, entityPacker, …)`、
+    `w.stream = streamSvcs`、別名は `x := streamSvcs.x`。`…` は #3827 で足した、manager の
+    4 つの lookup)。`buildStream()` は `Server` の
     フィールドを読まないので、メソッドではなく普通の関数にした。stream の pubsub は
     `setupRoutes()` の先頭で作った変数 `streamPubSub` を引数で受ける。#3827 から
     `buildStream()` は `buildHandlers()` の直前で呼び、`w.stream` への代入と別名は stream の節に
@@ -943,7 +950,8 @@ setupRoutes()
   streamPubSub := event.NewPubSubService(...)        // 先頭 (#3676)
   noteEventPub := stream.NewNoteEventPublisher(...)  // 受け手へ早く渡す 5 つは先頭のまま
   …
-  streamSvcs := buildStream(streamPubSub, idGen)     // wiring_stream.go。#3827 から buildHandlers の直前
+  streamSvcs := buildStream(streamPubSub, idGen, entityPacker, …)  // wiring_stream.go。#3827 から buildHandlers の直前
+  streamRevokePublisher := streamSvcs.streamRevokePublisher        // i と oauth の構築子へ渡す (#3827)
   hSvcs := s.buildHandlers(…)
   …
   // Streaming の節
@@ -963,7 +971,10 @@ setupRoutes()
 
 - **`buildStream()` は普通の関数で、stream の pubsub (`streamPubSub`) と ID の generator を
   引数で受ける。** `Server` のフィールドは読まない。中の行は `setupRoutes()` にあった行を
-  そのまま移し、作る順も元のまま
+  そのまま移し、作る順も元のまま。#3827 から、構築子の必須の引数にした `entityPacker` (note・
+  notification の publisher) と manager の 4 つの lookup (ハードミュート・ミュートとブロックの
+  snapshot・role の policy・`ugcVisibilityForVisitor`) も引数で受ける。どれも `setupRoutes()` が
+  呼び出しより前で作る (lookup の adapter と closure は、呼び出しの引数の中で作る)
 - **移す条件は core・連合・queue と同じ。** コンストラクタの本体を 1 つずつ読み、構造体を
   作るだけなのを確かめた。Redis に繋ぐのは pubsub の最初の `Subscribe` で、作るときには
   繋がない。移したのは 8 つの構築: bus (`NewEventPubSubBus`。manager に渡すだけなので
@@ -978,7 +989,7 @@ setupRoutes()
   (`streamSvcs := buildStream(...)`) だけを `buildHandlers()` の直前へ動かした。`w.stream` への
   代入と別名 (`streamRevokePublisher` の別名を除く) は stream の節に残した (4.1)
 - **#3676 で `setupRoutes()` の先頭に置いた 4 つの publisher (note event・drive・reversi・
-  main stream) は、先頭に残した。** どれも stream の節より前にある受け手 (core の service・
+  main stream) は、先頭に残した。** (reversi は #3827 で `entityPacker` の直後へ移した。4.1) どれも stream の節より前にある受け手 (core の service・
   連合の processor・handler) へ渡す依存で、stream の節より前に要る。`buildStream()` を先頭で呼ぶ形も比べたが、manager と note・notification
   の publisher (setter の受け手) まで先頭へ移り、後から入れる辺が 96 から 117 に増えた
   (4.1)。stream の節で呼べば 96 のまま。`relationReloadPublisher` は `internal/server` の
@@ -1026,7 +1037,7 @@ setupRoutes()
 増えた 11 件は、足したテスト (`wiring_stream_test.go`) の文字列と、`internal/stream/channels`
 と `tests/e2e-federation` のテストのチャンネル名で、どれも `internal/server` の行を照合しない)。上の規則のとおり、
 `streamRevokePublisher: streamRevokePublisher`、`streamManager: streamManager`、
-`streamSvcs := buildStream(streamPubSub, idGen)`、`w.stream = streamSvcs`、
+`streamSvcs := buildStream(streamPubSub, idGen)` (#3827 からは足した引数まで含めた呼び出し)、`w.stream = streamSvcs`、
 `streamRevokePublisher := streamSvcs.streamRevokePublisher`、
 `streamManager := streamSvcs.streamManager` も照合する。
 `TestDivergenceDoc_StreamChannelsMatchRegistry` は `streamRegistry.Register(...)` の正規表現で
@@ -1056,7 +1067,7 @@ registry は `buildStream()` で作り、登録は `setupRoutes()` の別名に�
 
 | 理由 | 例 |
 |---|---|
-| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`) |
+| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler。`reversiPublisher` は #3827 から `entityPacker` の直後で作る)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`) |
 | `Start` と shutdown hook を対で持つ | `serverStatsPub`、`queueStatsPub` (queueInspector の分岐の中) |
 | 別の部品の構築の引数の中で作る | `NewAdminStreamPublisher` (`coreabuse.NewCreatedNotifier` の引数。ゲートが式ごと照合する)、`NewBubbleVersusPublisher` (`corebubbleversus.NewService` の引数) |
 
@@ -1431,7 +1442,8 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 
 - **1段目で、`buildStream()`の呼び出しを`buildHandlers()`の直前へ動かした。** `i`と`oauth`の
   handlerの`streamRevoker`は、`buildHandlers()`(と`oauth`の構築子)より後の`buildStream()`で作る
-  `streamRevokePublisher`を受けていた。`buildStream()`が使うのは先頭で作る`streamPubSub`と`idGen`だけで、
+  `streamRevokePublisher`を受けていた。`buildStream()`が使うのは先頭で作る`streamPubSub`と`idGen`だけ
+  (1段目の時点。3段目で`entityPacker`と4つのlookupも受けるようにした)で、
   中の構築子はどれも値を作って返すだけ(Redisに繋がず、購読もgoroutineも始めない。上の
   「stream の部品 (#3692)」)。動かしたのは呼び出しの1行だけで、`w.stream`への代入・別名・
   `s.streamManager`への代入・setter・購読(`Subscribe…`)はstreamの節に残した。動かした区間に
@@ -1449,33 +1461,67 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `streamRevokePublisher`の別名(`streamRevokePublisher := streamSvcs.streamRevokePublisher`)は、
   `i`と`oauth`が構築子で受けるので、`buildStream()`の呼び出しの直後へ移した(ほかの別名はstreamの節)。
   `buildHandlers()`は`Server`のフィールドの`s.auth`も読むようになった
+- **3段目はstreamの部品の5構築子・8行。** `stream.NewManager`の4行(`hardMuteLookup`・
+  `muteBlockLookup`・`policyProvider`・`ugcVisibilityLookup`)、`NewNotePublisher`・
+  `NewNotificationPublisher`の`entityPacker`、`NewServerStatsPublisher`の`serverStatsEnabled`
+  (判定の関数)、`NewReversiGamePublisher`の`entityPacker`(ここまで各1行)。`buildStream()`は
+  `entityPacker`と4つのlookupも引数で受ける(`streamSvcs := buildStream(streamPubSub, idGen,
+  entityPacker, &hardMuteLookupAdapter{…}, &muteBlockSnapshotAdapter{…}, roleService, func()
+  string { return metaUGCVisibility(metaRepo) })`)。lookupのadapterとclosureは、元のsetterと
+  同じ式で呼び出しの引数の中で作る。`reversiPublisher`は`entityPacker`より前(`setupRoutes()`の
+  先頭、#3676)で作っていたので、`entityPacker`の直後へ移した。使う側(連合のprocessor・reversiの
+  serviceとhandler)はどれもそれより後にある。serverStatsのpublisherはstreamの節の元の位置で、
+  判定を構築子に渡す
 - **依存を入れる時点が、元のsetterの位置から構築子の位置へ前へ移っただけ。** 元の`i`のsetterは
   `buildHandlers()`の後のAccount endpointsの節と、streamの節(`SetStreamRevoker`。購読の後)にあった。
   購読のhandler(`metaUpdated`・`federationRulesUpdated`・`rolesUpdated`・`antennaUpdated`と、
   `cachebus`・`corerelationcache`の`Connect…`)が触るのはキャッシュとmeta・nodeinfoのhandlerで、
-  `i`と`oauth`のhandlerには届かない。どちらもHTTPのリクエストからしか呼ばれない
-- **wiring-checkの照合も直した。** `TestTwoFAPendingGuardIsWired`(`internal/entitycompat`)は、
+  `i`と`oauth`のhandlerには届かない。どちらもHTTPのリクエストからしか呼ばれない。3段目の
+  managerの4つのsetterとnote・notificationのpublisherの`SetEntityPacker`はstreamの節にあり、
+  managerのsetterは購読(`SubscribeWordMuteReload`など)の前、`notePublisher.SetEntityPacker`は
+  購読の後だった。購読のhandlerのうちmanagerが持つもの(word muteとrelationの取り直し、
+  broadcast、失効)は、接続ごとのsnapshotの取り直しと転送・切断で、どれもmanagerを作った後に
+  始まる。構築子へ移すと、その時点で4つのlookupは入っているので、購読の前にlookupが揃って
+  いることは変わらない。publisherはどれも購読のhandlerから呼ばれない(呼ぶのはcoreのservice
+  と連合のprocessorで、リクエストと受信のときだけ)。`reversiPublisher`の`SetEntityPacker`は
+  `buildCore()`の後(streamの節より前)にあった。serverStatsの判定は、`StartBackground`で始まる
+  tick(4.3)と、接続を受けた後の`requestLog`(`Log`)からしか読まない。どちらも構築の後で、
+  構築子と元のsetterは同じ節で隣り合っていた
+- **wiring-checkの照合も直した(3段目)。** `TestStreamRevokeIsWired`は`buildStream()`の呼び出しを、
+  足した引数まで含めて照合する。`TestServerStatsGateIsWired`は、setterの照合をやめ、
+  `stream.NewServerStatsPublisher`に渡す判定の中身を照合する(判定を反転させた関数も同じ型で
+  渡せるので、型でもnilの検査でも捕まらない)
+- **wiring-checkの照合も直した(2段目)。** `TestTwoFAPendingGuardIsWired`(`internal/entitycompat`)は、
   setterの照合をやめ、Redisで実装したguardを作る行と、それが`buildHandlers()`の呼び出しを通って
   `i.NewHandler(...)`へ渡る行を照合する(同じ型の数えないguardを渡す形は、型でもnilの検査でも
   捕まらない)。`emoji_decoration_cache_wiring_test.go`の`buildHandlers()`の呼び出しの照合と、
   `TestBuildHandlersFillsEveryField`の呼び出しを新しい署名に直した
-- **外部パッケージのテストは無い。** `i`と`oauth`のテストはどちらも同じパッケージにあるので、
-  補助関数が作ったhandlerに後から入れていた箇所はフィールドへ直接代入する(#3817と同じ)。
-  `TestNewHandlerKeepsDependencies`を`i`に足し、`oauth`には`streamRevoker`を足した
+- **外部パッケージのテストは、構築子で渡す。** `i`・`oauth`・`stream`のテストはどれも同じ
+  パッケージにあるので、補助関数が作った部品に後から入れていた箇所はフィールドへ直接代入する
+  (#3817と同じ)。ほかのパッケージから構築子を呼ぶテスト(`core/timeline`のベンチの
+  `NewNotePublisher`、`internal/server`の`NewManager`)はnilを渡す。`export_test.go`の`…ForTest`は
+  足していない。`TestNewHandlerKeepsDependencies`を`i`に足し、`oauth`には`streamRevoker`を足した。
+  `stream`には、5つの構築子が引数を持たせることを見るテスト(`constructor_test.go`)を足した
 - **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `requiredDepHandlers`に
   `i`を足した。`oauth`は段(2)から`routeParts`にある。テストの組み立て(test mode・miniredis)では、
-  `i`のnilになりうるフィールドはどれもnilでなかったので、許可リストには足していない
+  `i`のnilになりうるフィールドはどれもnilでなかったので、許可リストには足していない。3段目で
+  streamの部品5つ(`streamManager`・`notePublisher`・`notificationPublisher`・`serverStatsPub`・
+  `reversiPublisher`)を`routeParts`に足した。欄の名前は`setupRoutes()`の別名(reversiの欄は
+  handlerなので`reversiPublisher`)。許可リストに足したのは`notePublisher.cachedBody`の1つで、
+  依存ではなく状態(直前にpackした投稿のJSON)。最初に投稿を流すとき(`packNote`)に作るので、
+  組み立てた直後はnil
 
-| | #3827の前(`19f512bf20`) | 2段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 72 | 61 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 342 | 331 |
-| そのsetterを呼ぶhandler(受け手) | 40 | 39 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 647 | 636 |
-| その受け手 | 110 | 109 |
+| | #3827の前(`19f512bf20`) | 2段目の後 | 3段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 72 | 61 | 53 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 342 | 331 | 331 |
+| そのsetterを呼ぶhandler(受け手) | 40 | 39 | 39 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 647 | 636 | 628 |
+| その受け手 | 110 | 109 | 107 |
 
 数え方: 上の表と同じ。1段目は呼び出しを動かしただけで、どの数も変わらない。2段目で減った受け手は、
-置き換えたsetterしか呼んでいなかった`oauthHandler`。
+置き換えたsetterしか呼んでいなかった`oauthHandler`。3段目で減った受け手は`reversiPublisher`と
+`serverStatsPub`。
 
 #### /api のルートの登録 (#3697)
 

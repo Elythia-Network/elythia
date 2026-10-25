@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// 通知の本文 (通知した利用者) と、埋め込んだ投稿の作者は、SetEntityPacker で渡された
+// 通知の本文 (通知した利用者) と、埋め込んだ投稿の作者は、構築子で渡された
 // Packer で包む (#3796)。
 // 渡した Packer を使わずに nil の Packer で包むと avatarUrl が生のリモートの
 // URL になって落ちる。
@@ -27,8 +27,8 @@ func TestNotificationPublisher_PacksWithTheGivenPacker(t *testing.T) {
 
 	p := &NotificationPublisher{}
 	p.SetRepos(&stubNotifUserRepo{user: notifier}, &stubNotifNoteRepo{note: note}, idGen)
-	p.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)}))
+	p.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
 
 	n := &corenotification.Notification{ID: "n1", Type: corenotification.TypeMention, NotifierID: "alice", NoteID: note.ID}
 	packed, ok := p.Pack("bob", n).(map[string]any)

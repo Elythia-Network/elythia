@@ -25,7 +25,13 @@ func TestStreamRevokeIsWired(t *testing.T) {
 		"buildStream が作った revoke publisher を stream に入れていない。")
 	assertWired(t, serverPkg, "streamManager: streamManager",
 		"buildStream が作った manager (revoke publisher が閉じる側) を stream に入れていない。")
-	assertWired(t, serverPkg, "streamSvcs := buildStream(streamPubSub, idGen)",
+	// buildStream は #3827 から Packer と manager の 4 つの lookup も受ける。引数まで含めて
+	// 照合する (呼び出しは buildHandlers の直前)。
+	assertWired(t, serverPkg, "streamSvcs := buildStream(streamPubSub, idGen, entityPacker, "+
+		"&hardMuteLookupAdapter{userRepo: userRepo}, "+
+		"&muteBlockSnapshotAdapter{muting: mutingRepo, blocking: blockingRepo, renoteMuting: renoteMutingRepo, "+
+		"channelMuting: channelMutingRepo, userRepo: userRepo}, "+
+		"roleService, func() string { return metaUGCVisibility(metaRepo) })",
 		"setupRoutes が buildStream の stream の部品を使っていない。")
 	assertWired(t, serverPkg, "w.stream = streamSvcs",
 		"buildStream の stream の部品を wiring に入れていない。")

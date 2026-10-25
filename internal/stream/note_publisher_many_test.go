@@ -62,7 +62,7 @@ func newManyTestNote(t *testing.T) (*model.Note, *model.User, id.Generator) {
 func TestNotePublisher_PublishNoteMany_Batch(t *testing.T) {
 	n, user, idGen := newManyTestNote(t)
 	pub := &stubBatchPublisher{errAt: -1}
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	topics := []string{"homeTimeline:a", "homeTimeline:b"}
 	logs := captureSlog(t)
@@ -77,7 +77,7 @@ func TestNotePublisher_PublishNoteMany_Batch(t *testing.T) {
 
 	// 本文は PublishNote と同じ。
 	single := &stubPublisher{}
-	NewNotePublisher(single, idGen).PublishNote("homeTimeline:a", n, user)
+	NewNotePublisher(single, idGen, nil).PublishNote("homeTimeline:a", n, user)
 	require.Len(t, single.payloads, 1)
 	want, err := json.Marshal(single.payloads[0])
 	require.NoError(t, err)
@@ -89,19 +89,19 @@ func TestNotePublisher_PublishNoteMany_Batch(t *testing.T) {
 func TestNotePublisher_PublishNoteMany_FallsBackToPublish(t *testing.T) {
 	n, user, idGen := newManyTestNote(t)
 	pub := &stubPublisher{}
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	np.PublishNoteMany([]string{"homeTimeline:a", "homeTimeline:b"}, n, user)
 	assert.Equal(t, []string{"homeTimeline:a", "homeTimeline:b"}, pub.topics)
 
 	// Publish の失敗は宛先ごとに記録して続ける。
 	failing := &stubPublisher{err: errors.New("boom")}
-	NewNotePublisher(failing, idGen).PublishNoteMany([]string{"homeTimeline:a"}, n, user)
+	NewNotePublisher(failing, idGen, nil).PublishNoteMany([]string{"homeTimeline:a"}, n, user)
 	assert.Empty(t, failing.topics)
 
 	// 単発の PublishNote の失敗のログにもノート ID を出す。
 	logs := captureSlog(t)
-	NewNotePublisher(&stubPublisher{err: errors.New("down")}, idGen).PublishNote("homeTimeline:a", n, user)
+	NewNotePublisher(&stubPublisher{err: errors.New("down")}, idGen, nil).PublishNote("homeTimeline:a", n, user)
 	recs := logs.records(t, "note publisher: publish failed")
 	require.Len(t, recs, 1)
 	assert.Equal(t, "homeTimeline:a", recs[0]["topic"])
@@ -113,7 +113,7 @@ func TestNotePublisher_PublishNoteMany_PartialFailure(t *testing.T) {
 	n, user, idGen := newManyTestNote(t)
 	pub := &stubBatchPublisher{errAt: 1}
 	logs := captureSlog(t)
-	NewNotePublisher(pub, idGen).PublishNoteMany([]string{"homeTimeline:a", "homeTimeline:b", "homeTimeline:c"}, n, user)
+	NewNotePublisher(pub, idGen, nil).PublishNoteMany([]string{"homeTimeline:a", "homeTimeline:b", "homeTimeline:c"}, n, user)
 	require.Len(t, pub.batches, 1)
 
 	// 失敗が 1 件なら、PublishNote と同じ文言・属性 (topic / err) の 1 行。
@@ -133,7 +133,7 @@ func TestNotePublisher_PublishNoteMany_MixedFailures(t *testing.T) {
 	e1, e2 := errors.New("i/o timeout"), errors.New("WRONGTYPE")
 	pub := &stubBatchPublisher{errs: []error{e1, nil, e2, e1}}
 	logs := captureSlog(t)
-	NewNotePublisher(pub, idGen).PublishNoteMany([]string{"t0", "t1", "t2", "t3"}, n, user)
+	NewNotePublisher(pub, idGen, nil).PublishNoteMany([]string{"t0", "t1", "t2", "t3"}, n, user)
 
 	recs := logs.records(t, "note publisher: publish failed for several topics")
 	require.Len(t, recs, 1)
@@ -153,7 +153,7 @@ func TestNotePublisher_PublishNoteMany_FailuresAreSummarized(t *testing.T) {
 	}
 	logs := captureSlog(t)
 	// まとめて送れない publisher (1 件ずつの経路) でも同じ形で 1 行にまとめる。
-	NewNotePublisher(&stubPublisher{err: errors.New("down")}, idGen).PublishNoteMany(topics, n, user)
+	NewNotePublisher(&stubPublisher{err: errors.New("down")}, idGen, nil).PublishNoteMany(topics, n, user)
 
 	recs := logs.records(t, "note publisher: publish failed for several topics")
 	require.Len(t, recs, 1)
@@ -170,7 +170,7 @@ func TestNotePublisher_PublishNoteMany_FailuresAreSummarized(t *testing.T) {
 func TestNotePublisher_PublishNoteMany_Gates(t *testing.T) {
 	n, user, idGen := newManyTestNote(t)
 	pub := &stubBatchPublisher{errAt: -1}
-	np := NewNotePublisher(pub, idGen)
+	np := NewNotePublisher(pub, idGen, nil)
 
 	np.PublishNoteMany(nil, n, user)
 	np.PublishNoteMany([]string{"homeTimeline:a"}, nil, user)
@@ -178,5 +178,5 @@ func TestNotePublisher_PublishNoteMany_Gates(t *testing.T) {
 	np.PublishNoteMany([]string{"homeTimeline:a"}, n, &model.User{ID: "u1", IsSuspended: true})
 	assert.Empty(t, pub.batches, "suspended author and empty input publish nothing")
 
-	NewNotePublisher(nil, idGen).PublishNoteMany([]string{"homeTimeline:a"}, n, user)
+	NewNotePublisher(nil, idGen, nil).PublishNoteMany([]string{"homeTimeline:a"}, n, user)
 }
