@@ -617,8 +617,8 @@ setupRoutes()
     入れるので、それより前に `w.repos.x` を書くとコンパイルが通らない。照合はキー
     `repos: s.buildRepos()` で行い、リテラル全体は見ない (後でフィールドを足しても
     書き直さずに済む)
-  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen)`、
-    `w.core = coreSvcs`、別名は `x := coreSvcs.x`)。`buildCore()` が `w.repos` を読むので
+  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen, roleService)`、
+    `w.core = coreSvcs`、別名は `x := coreSvcs.x`。引数の`roleService`は#3825から`buildRole()`で作る)。`buildCore()` が `w.repos` を読むので
     リテラルには足せない。`w.core = …` から直接別名を取ると、別名を代入より前に書いても
     コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
   - `fed` も `core` と同じ形 (`fedSvcs := s.buildFederation(w, coreSvcs, idGen)`、
@@ -663,9 +663,11 @@ setupRoutes()
 ```
 setupRoutes()
   …                                     // repository の別名、EnsureInitial、chart の hook
-  coreSvcs := s.buildCore(w, idGen)     // wiring_core.go
+  roleService := s.buildRole(w, idGen)  // wiring_core.go (#3825)
+  …                                     // entityPacker と sharedUserPacker (#3825)
+  coreSvcs := s.buildCore(w, idGen, roleService)
   w.core = coreSvcs
-  roleService := coreSvcs.role          // 別名 (変数から取る)
+  featuredService := coreSvcs.featured  // 別名 (変数から取る)
   …
   roleService.SetUserRepo(userRepo)     // setter は元の位置のまま
 ```
@@ -692,8 +694,9 @@ setupRoutes()
 `internal/server` / `tools` の `_test.go` の文字列リテラルを、`wiring_core.go` と
 `internal/server` のほかのファイルに当てた)。ほかのゲートは setter の行を照合して
 おり、setter は動かしていない。このゲートは、上の規則のとおり
-`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen)`、
-`w.core = coreSvcs`、`abuseInAppNotifier := coreSvcs.abuseInAppNotifier` も照合する。
+`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen, roleService)`、
+`w.core = coreSvcs`、`abuseInAppNotifier := coreSvcs.abuseInAppNotifier` も照合する。#3825で
+`roleService`を`buildCore()`の引数にしたので、`roleService := s.buildRole(w, idGen)`も照合する。
 
 **`setupRoutes()` に残したもの** (`core*.New…` の 46 回の呼び出し、`corefederation` を除く):
 
