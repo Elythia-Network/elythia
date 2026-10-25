@@ -129,8 +129,8 @@ func TestPreview_Success(t *testing.T) {
 // 閲覧者 IP が外部サイトへ漏洩しない (issue #1529)。
 func TestPreview_RemoteThumbnailProxied(t *testing.T) {
 	// プレビューの画像は handler に渡した Packer で proxy へ通す (#3798)。
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", []byte("url-preview-secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", []byte("url-preview-secret"), false, true), entity.PackerDeps{})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -170,8 +170,8 @@ func TestPreview_RemoteThumbnailProxied(t *testing.T) {
 // proxy の allowlist を恒久的に迂回できる。
 func TestPreview_ProxySignatureExpires(t *testing.T) {
 	secret := []byte("url-preview-secret")
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://mk.test", "https://mk.test/proxy", secret, false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://mk.test", "https://mk.test/proxy", secret, false, true), entity.PackerDeps{})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")

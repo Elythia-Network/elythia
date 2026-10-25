@@ -391,7 +391,7 @@ func testWebhookBody(t *testing.T, eventType string) map[string]any {
 	h, _, _, _ := newTestHandler(t)
 	// ダミーの利用者にロールが当たっても、本家と同じくバッジは出さない。本文は
 	// handler に渡した Packer で包むので、そこへバッジのロールを入れておく (#3794)。
-	h.SetEntityPackerForTest(entity.NewPacker(entity.PackerDeps{UserRoles: badgeRoleLookup{}}))
+	h.SetEntityPackerForTest(entity.NewPacker(nil, entity.PackerDeps{UserRoles: badgeRoleLookup{}}))
 	repo := testutil.NewMockSystemWebhookRepository()
 	require.NoError(t, repo.Create(&model.SystemWebhook{ID: "w1", URL: "https://saved.example"}))
 	h.SetSystemWebhookRepo(repo)

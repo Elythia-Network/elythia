@@ -15,7 +15,7 @@ import (
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, nil)
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	meta := testutil.NewMockMetaRepository()
 
 	h := NewHandler(nil, nil, hider, packer, meta, func() string { return "local" })

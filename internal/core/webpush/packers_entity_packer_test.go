@@ -36,8 +36,8 @@ func TestNoteRepoPacker_UsesTheGivenPacker(t *testing.T) {
 	drive.Files["f1"] = &model.DriveFile{
 		ID: "f1", Name: "a.png", Type: "image/png", URL: uri, URI: &uri, UserHost: &host, IsLink: true,
 	}
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true), entity.PackerDeps{})
 
 	out, ok := webpush.NewNoteRepoPacker(repo, idGen, nil, drive, pk).PackNoteByID(n.ID, "viewer")
 	require.True(t, ok)
@@ -54,8 +54,8 @@ func TestUserRepoPacker_UsesTheGivenPacker(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	avatar := "https://remote.example/avatar.png"
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", AvatarURL: &avatar}
-	pk := entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	pk := entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 
 	p := webpush.NewUserRepoPacker(repo, pk)
 	assert.True(t, p.HasEntityPacker())

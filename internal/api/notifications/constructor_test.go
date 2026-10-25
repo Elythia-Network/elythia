@@ -15,7 +15,7 @@ import (
 // 見なくなった。構築子が引数を捨てても build は通るので、ここで固定する。
 // 関数の依存は比べられないので、呼んで渡したものが返ることを見る。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	hider := notehide.NewHider(nil, nil)
 	moderators := stubModeratorChecker{moderators: map[string]bool{"mod1": true}}
 	states := func([]string) (map[string]model.AbuseReportState, error) {

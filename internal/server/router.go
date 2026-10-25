@@ -427,11 +427,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		ShowRemoteBadges: showRemoteBadges,
 		InstanceIconURL:  instanceIconURL,
 		Silenced:         roleService,
-		MediaURL:         mediaURLCtx,
 	}
 	// 部品へ渡す Packer (#3790)。組み立てごとに作り、プロセスの状態は書き換えない
-	// (#3800 で既定の Packer と Set* を本番から消した)。
-	entityPacker := entity.NewPacker(entityPackerDeps)
+	// (#3800 で既定の Packer と Set* を本番から消した)。メディアのプロキシ
+	// (mediaURLCtx) は構築子の必須の引数で渡す (#3834)。無いとリモートのメディアの
+	// URL を生のまま出し、閲覧者の IP がリモートへ漏れる。
+	entityPacker := entity.NewPacker(mediaURLCtx, entityPackerDeps)
 	// reversi の対局の publisher。招待者 (UserLite) を包む Packer は構築子の必須の引数
 	// (#3794、#3827)。#3676 から setupRoutes の先頭で作っていたが、Packer を渡すために
 	// ここへ移した。作るだけで Redis に繋がず、使う側 (連合の processor・reversi の
@@ -4002,6 +4003,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 		federationProcessor: federationProcessor,
 		federationResolver:  federationResolver,
+
+		sharedUserPacker:  sharedUserPacker,
+		webPushNotePacker: webPushNotePacker,
+		webPushUserPacker: webPushUserPacker,
+		noteFieldResolver: noteFieldResolver,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4011,11 +4017,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"sharedUserPacker.entityPacker", sharedUserPacker.HasEntityPacker(), entityPackerMissingEffect},
 		// UserLite を包む部品 (#3794)。
 		{"webPushUser.entityPacker", webPushUserPacker.HasEntityPacker(), entityPackerMissingEffect},
-		// 残りの Pack を呼ぶ部品 (#3796)。
-		// メディアのプロキシ URL を作る部品 (#3798)。/avatar・/emoji・フィードと
-		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
-		// Packer 自身も載せる。
-		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 

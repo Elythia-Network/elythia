@@ -13,7 +13,7 @@ import (
 // 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。
 // 構築子が引数を捨てても build は通るので、ここで固定する。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	idGen, _ := id.NewGenerator("aidx")
 	list := userpack.New(nil, userpack.Lookups{}, idGen)
 	h := NewHandler(nil, packer, list)

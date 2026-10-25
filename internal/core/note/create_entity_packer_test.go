@@ -22,8 +22,8 @@ func TestCreateService_PublishesWithTheGivenPacker(t *testing.T) {
 	svc, noteRepo, _ := newCreateService(t)
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
-	svc.SetEntityPackerForTest(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "", []byte("secret"), false, true)}))
+	svc.SetEntityPackerForTest(entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "", []byte("secret"), false, true), entity.PackerDeps{}))
 	avatar := "https://remote.example/avatar.png"
 	noteRepo.Notes["r1"] = &model.Note{
 		ID: "r1", UserID: "bob", Visibility: model.NoteVisibilityPublic,

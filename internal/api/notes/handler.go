@@ -166,8 +166,8 @@ type Handler struct {
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790)。mediaURL を持たない Packer だと、リモートのメディアの URL を生の
 	// まま返し、閲覧者の IP がリモートへ漏れる。#3831 で構築子の必須の引数にした。
-	// mediaURL を持つことは型では保証できないので、渡す値そのものは起動時の検査の
-	// `entityPacker.mediaURL` の行が見る。
+	// Packer の mediaURL は #3834 から entity.NewPacker の必須の引数で、組み立てた
+	// Packer が持つことは server の TestBuiltHandlersHaveNoNilDependencies が見る。
 	entityPacker *entity.Packer
 }
 

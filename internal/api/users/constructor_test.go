@@ -17,7 +17,7 @@ import (
 // 関数の依存は比べられないので、呼んで渡したものが返ることを見る。
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, nil)
-	packer := entity.NewPacker(entity.PackerDeps{})
+	packer := entity.NewPacker(nil, entity.PackerDeps{})
 	policies := &stubListsPolicy{}
 	meta := testutil.NewMockMetaRepository()
 	channelMuting := testutil.NewMockChannelMutingRepository()

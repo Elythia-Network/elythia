@@ -22,8 +22,8 @@ func TestShow_PacksWithTheGivenPacker(t *testing.T) {
 	avatar := "https://remote.example/avatar.png"
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", AvatarURL: &avatar}
 	h.SetRepos(userRepo, testutil.NewMockNoteRepository())
-	h.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	h.entityPacker = entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 	_, err := svc.Create(context.Background(), notification.CreateInput{
 		NotifieeID: "alice", NotifierID: "bob", Type: notification.TypeFollow,
 	})

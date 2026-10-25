@@ -27,8 +27,8 @@ func TestNotificationPublisher_PacksWithTheGivenPacker(t *testing.T) {
 
 	p := &NotificationPublisher{}
 	p.SetRepos(&stubNotifUserRepo{user: notifier}, &stubNotifNoteRepo{note: note}, idGen)
-	p.entityPacker = entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
-		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true)})
+	p.entityPacker = entity.NewPacker(entity.NewMediaURLContext(
+		"https://local.example", "https://local.example/proxy", []byte("secret"), false, true), entity.PackerDeps{})
 
 	n := &corenotification.Notification{ID: "n1", Type: corenotification.TypeMention, NotifierID: "alice", NoteID: note.ID}
 	packed, ok := p.Pack("bob", n).(map[string]any)

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/entity"
 )
 
 // requiredDepHandlers are the apiHandlers fields whose handlers take their
@@ -86,7 +87,7 @@ var handlerNilAllowed = map[string]string{
 	"federationResolver.keyFetchFailures": "依存ではなく状態。最初の失敗を記録するとき (markKeyFetchFailed) に作るので、組み立てた直後は nil",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831、#3833)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831、#3833、#3834)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -164,6 +165,14 @@ func TestBuiltHandlersHaveNoNilDependencies(t *testing.T) {
 			assert.False(t, isNilDep(f), "%s.%s が nil のまま組み立てが終わった", key, name)
 		}
 	}
+
+	// Packer に依存の欄を足したら、上の notes.entityPacker の一覧にも足す。足し忘れると、
+	// 新しい依存が nil のまま組み立てが終わっても緑になる (#3834)。数えるのは nil に
+	// なりうる型 (ポインタ・interface・func・map・スライス・chan) の欄だけ。mutex や
+	// 数値のような依存でない欄は一覧に入れない (isNilDep は nil になりえない型を扱えない)。
+	assert.Equal(t, nilableFields(reflect.TypeFor[entity.Packer]()), len(nestedDepChecks["notes.entityPacker"]),
+		"entity.Packer の nil になりうる欄の数と nestedDepChecks の notes.entityPacker の一覧の数が合わない")
+	assertOnePacker(t, pv.FieldByName("notes").Elem().FieldByName("entityPacker"), hv, pv, cv)
 
 	// 文字列の依存は nil にならないので、空でないことを名指しで見る。以前の起動時の
 	// 検査の述語が `!= ""` を見ていたもの (#3833)。
@@ -351,8 +360,91 @@ var requiredNonEmptyStrings = []string{
 // iplookuplog.Service は repo と idGen のどちらかが nil だと、Record が黙って
 // 何もしない。以前の起動時の検査の述語 (Wired) は両方を見ていたので、ここでも
 // 両方を見る (#3823)。
+//
+// entity.Packer は mediaURL が nil だとリモートのメディアの URL を生のまま出し、
+// 閲覧者の IP がリモートへ漏れる。以前は起動時の検査 (criticalWiring の
+// entityPacker.mediaURL の行) で見ていたが、#3834 で NewPacker の必須の引数にした
+// ので、組み立てた Packer の中をここで見る。どの handler も setupRoutes の同じ
+// entityPacker を受け取るので (assertOnePacker が見る)、代表に notes の handler の Packer を辿る。本番の
+// router は PackerDeps の 7 つの欄もすべて埋めるので、あわせて見る (配線の文字列は
+// entitycompat の TestEntityPackerDepsAreWired も見る)。
 var nestedDepChecks = map[string][]string{
 	"admin.ipLookupAudit": {"repo", "idGen"},
+	"notes.entityPacker": {
+		"mediaURL", "avatarDecoration", "emojiDecoration", "canChat", "userRoles",
+		"showRemoteBadges", "instanceIconURL", "silenced",
+	},
+}
+
+// requiredPackerHolders names types (and their field) assertOnePacker must
+// find an *entity.Packer in. 件数ではなく、実在する対象を名指しで要求する
+// (docs/gates.md)。handler (notes・blocking) と、handler の中に入っている部品を
+// routeParts に持たせたもの (UserLite を包む共有の userpack.Packer、Web Push の
+// 投稿と利用者の packer、投稿の添付を引く NoteFieldResolver) を入れる。
+var requiredPackerHolders = []string{
+	"notes.Handler.entityPacker",
+	"blocking.Handler.entityPacker",
+	"userpack.Packer.entityPacker",
+	"webpush.NoteRepoPacker.entityPacker",
+	"webpush.UserRepoPacker.entityPacker",
+	"entity.NoteFieldResolver.packer",
+}
+
+// assertOnePacker fails when a component built by setupRoutes holds an
+// *entity.Packer other than want.
+//
+// nestedDepChecks は notes の handler の Packer だけを代表に見る。それで足りるのは、
+// どの部品も setupRoutes が 1 度だけ作る entityPacker を受け取るときだけなので、その
+// 前提をここで縛る (#3834)。別に作った Packer (メディアのプロキシの無いもの、依存の
+// 欄が空のものなど) を 1 つの部品にだけ渡すと、その部品の経路だけ閲覧者の IP が
+// リモートへ漏れるか、roles・canChat・isSilenced が黙って既定値になる。
+//
+// 照合するのは *entity.Packer 型の欄だけ。Packer を包む部品 (userpack.Packer・
+// NoteFieldResolver など) を作り直して 1 つの handler にだけ渡す誤りは、包む部品の
+// 型の欄や interface の欄に現れるので、ここでは捕まらない (既知の限界。#3834 の前から)。
+//
+// 見るのは apiHandlers・routeParts・coreParts の各部品の直下の欄だけ。部品の中の部品
+// まで reflect で辿ると、組み立ての後に動き出す goroutine が書き換える状態まで読んで
+// しまい、-race が競合として落とす。handler の中に入っている Packer を包む部品は、
+// routeParts に持たせて直下で見る。
+func assertOnePacker(t *testing.T, want reflect.Value, containers ...reflect.Value) {
+	t.Helper()
+	packerType := reflect.TypeFor[*entity.Packer]()
+	require.Equal(t, packerType, want.Type(), "notes.entityPacker の型が *entity.Packer でない")
+	require.False(t, want.IsNil(), "notes.entityPacker が nil")
+	holders := map[string]bool{}
+	for _, ct := range containers {
+		for i := range ct.NumField() {
+			comp := ct.Field(i)
+			if comp.Kind() != reflect.Pointer || comp.IsNil() || comp.Elem().Kind() != reflect.Struct {
+				continue
+			}
+			for j := range comp.Elem().NumField() {
+				f := comp.Elem().Field(j)
+				if f.Type() != packerType || f.IsNil() {
+					continue
+				}
+				holders[comp.Elem().Type().String()+"."+comp.Elem().Type().Field(j).Name] = true
+				assert.Equal(t, want.Pointer(), f.Pointer(), "%s.%s が setupRoutes の entityPacker と別の Packer を持っている",
+					ct.Type().Field(i).Name, comp.Elem().Type().Field(j).Name)
+			}
+		}
+	}
+	for _, h := range requiredPackerHolders {
+		assert.True(t, holders[h], "%s の *entity.Packer が見つからない (部品を routeParts から外していないか、型や欄の名前が変わっていないか)", h)
+	}
+}
+
+// nilableFields counts the fields of the struct type t that can hold nil.
+func nilableFields(t reflect.Type) int {
+	n := 0
+	for i := range t.NumField() {
+		switch t.Field(i).Type.Kind() {
+		case reflect.Pointer, reflect.Interface, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan:
+			n++
+		}
+	}
+	return n
 }
 
 // isNilDep reports whether v holds no dependency: v is nil, or v is an
