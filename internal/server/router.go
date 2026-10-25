@@ -1087,8 +1087,21 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// アクセスを拒否する。timeout は先頭だけの単発 fetch なので apHTTPClient
 	// (30s) より短めの 10s にする。
 	attachmentProbeClient := s.outboundClient(10 * time.Second)
-	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen)
-	federationResolver.SetBackground(s.background) // #3661: 世代の停止で待つ
+	// 構築子で渡す依存 (#3833):
+	//   - ホワイトリスト連合 (federation: specified) / blockedHosts に対する gate を
+	//     resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
+	//     適用する。deliver_service / inboxProcessor と同じ instanceService を共有する。
+	//     meta.prohibitedWords と meta.sensitiveWords も同じ instanceService から読む
+	//   - 受信を拒否するソフトウェア (#3362) のホストの投稿・actor も、リノートや返信の
+	//     連鎖、ap/show で取り込まない (#3563)。inbox と同じく判定のたびに meta を読む。
+	//     メンションの解決 (remoteUserResolver) は構築子で同じ checker を受け取る
+	//   - silenced host の public note を home 降格 (#2106 N14)
+	//   - 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)
+	//   - 凍結の由来の記録先。無いと actor の `toot:suspended` を読まない — 由来を持てない
+	//     状態で自動凍結すると、モデレーターが解除しても次の refresh で無言で戻る (#2973)
+	//   - 世代の停止で待つ、新しいノートの chart hook の箱 (#3661)
+	federationResolver := corefederation.NewResolver(userRepo, noteRepo, apURLs, apFetcher, idGen,
+		instanceService, inboxSoftwareChecker, instanceService, roleService, suspensionOriginRepo, s.background)
 	federationResolver.SetChartHook(chartHooks)
 	// resolver が新しく作った note (inbound Create、返信元・引用・Announce の
 	// 対象など) は resolver 側で数える (#3330)。processor は Announce の renote
@@ -1133,8 +1146,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	webfingerClient := activitypub.NewWebFingerClient(s.outboundClient(10*time.Second), s.config.UserAgent)
 	// notes/create の DB に無いリモートの利用者へのメンションも同じ経路で取りに行く
 	// (本家 NoteCreateService.extractMentionedUsers → RemoteUserResolveService、#3330)。
-	// 連合しないホストには WebFinger を投げない (hostBlocker は instanceService が
-	// できた後で下の federationResolver と一緒に渡す)。
+	// 連合しないホストには WebFinger を投げない (hostBlocker は下の
+	// remoteUserResolver.SetHostBlockChecker で渡す)。
 	//
 	// **1 つの instance を共有する。** 同じ acct の解決・再同期を singleflight で
 	// まとめるので、users/show と notes/create (と reversi) が別々に持つと、
@@ -1153,20 +1166,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 片付ける候補を「いつから消えているか」で並べる。
 	instanceService.SetGoneRecorder(goneInstanceRepo)
 	federationResolver.SetInstanceTracker(instanceService)
-	// ホワイトリスト連合 (federation: specified) / blockedHosts に対する gate を
-	// resolver の入口 (fetchActor / resolveNoteOnce / IngestNoteWithCreated) に
-	// 適用する。deliver_service / inboxProcessor と同じ instanceService を共有。
-	federationResolver.SetHostBlockChecker(instanceService)
-	// 受信を拒否するソフトウェア (#3362) のホストの投稿・actor も、リノートや返信の
-	// 連鎖、ap/show で取り込まない (#3563)。inbox と同じく判定のたびに meta を読む。
-	// メンションの解決 (remoteUserResolver) は構築子で同じ checker を受け取る。
-	federationResolver.SetSoftwareSuspensionChecker(inboxSoftwareChecker)
 	remoteUserResolver.SetHostBlockChecker(instanceService)
-	federationResolver.SetSilencedHostChecker(instanceService)      // #2106 N14: silenced host の public note を home 降格
 	federationResolver.SetMediaSilencedHostChecker(instanceService) // #3218: media silenced host の添付をセンシティブに
-	// 受信した note の mentionLimit を投稿者 (リモート) の role policy から引く (#3330)。
-	// 未配線だと既定値 20 固定になり、base policy やリモート向けのロールが効かない。
-	federationResolver.SetRolePolicyProvider(roleService)
 	// 連合のルール (#3090)。ホスト単位の設定 (上の hostBlocker / silenced) に
 	// 追加の層として重ねる。activity のルールは inbox の署名検証の後
 	// (dispatchActivity の入口)、投稿のルールは取り込みの全経路で評価する。
@@ -1217,9 +1218,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// FEP-521a Multikey 対応で recipient capable + sender Ed25519 鍵あり 経路で
 	// Ed25519 sign を試行できるよう wire (#1067 / #1071)。
 	deliverService.SetKeypairExtraRepo(keypairExtraRepo)
-	// **未配線だと actor の `toot:suspended` を読まない** — 由来を持てない状態で
-	// 自動凍結すると、モデレーターが解除しても次の refresh で無言で戻る (#2973)。
-	federationResolver.SetSuspensionOriginRepo(suspensionOriginRepo)
 	deliverService.SetPublickeyExtraRepo(publickeyExtraRepo)
 	// test (#780) で queue を bypass して同期 deliver する hook を後付けで
 	// 差し替えられるよう、Server から参照を保持する。
@@ -4003,6 +4001,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		inboxHandler:    inboxHandler,
 
 		federationProcessor: federationProcessor,
+		federationResolver:  federationResolver,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4017,30 +4016,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
 		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
-		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
-			"リモートから届くノートに禁止語のフィルタが掛からなくなる (ローカル投稿にだけ効く状態)"},
-		{"federation.sensitiveWords", federationResolver.HasSensitiveWordsSource(),
-			"センシティブワードに当たるリモートの public のノートが home にならない (ローカル投稿にだけ効く状態)"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 
 		// ここから可視性・権限・上限 (#2683)。認証ほど鋭くはないが、いずれも
 		// 利用者から見えない形で制限が外れる。
-		{"resolver.hostBlockChecker", federationResolver.HasHostBlockChecker(),
-			"federation 設定を無視してリモートを解決する"},
 		{"streamChannels.chatRoom.service", chatRoomFactory.HasService(),
 			"chatRoom channel の購読でメンバーシップ検査が skip され、誰でも任意の room を購読できる"},
 
 		// ここから #2708。#2683 で「既存 entry と基準上区別できない」まで取り込み、
 		// 残していた同クラスの依存。
-		{"resolver.suspensionOriginRepo", federationResolver.HasSuspensionOriginRepo(),
-			"リモート actor の凍結を読まなくなる (#2951 が効かない)。読んだとしても由来を刻めないので、モデレーターが解除しても次の refresh で無言で戻る"},
-		{"resolver.softwareBlocker", federationResolver.HasSoftwareSuspensionChecker(),
-			"受信を拒否するソフトウェアのホストの投稿を、リノートや返信の連鎖、ap/show で取り込む (#3563)"},
-		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
-			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
-		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),
-			"受信した note の mentionLimit が既定値 20 固定になり、base policy やリモートに当たるロールで絞った上限が効かない (#3330)"},
 		// #3330: follow 系の main stream / Webhook と blocking/create・delete の
 		// 利用者を本家の UserDetailedNotMe に揃える共有の packer の、ピン留めと移行先を
 		// 埋める側 (users の handler)。packer そのものを following と webhook へ渡すのは、
@@ -4054,13 +4039,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
-
-		// #3661: 応答の後などに投げっぱなしで起動する goroutine は世代の箱から
-		// 起動する。配線が外れると素の goroutine に戻り、世代の停止で待たれない。
-		// 制限が緩む種類の劣化ではないが、外れても起動もテストも通り、メンテナンスで
-		// 世代を作り直すときにだけ表に出るので、ここで起動時に落とす。
-		{"federation.resolver.background", federationResolver.HasBackground(),
-			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
 	})
 }
 

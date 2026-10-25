@@ -70,7 +70,7 @@ func TestIngestNote_MentionLimitFollowsAuthorRolePolicy(t *testing.T) {
 	t.Run("custom limit from the author's policies", func(t *testing.T) {
 		r, _, _, author := newMentionLimitResolver(t)
 		p := &fakeMentionPolicies{userID: author.ID, limit: 2}
-		r.SetRolePolicyProvider(p)
+		r.SetRolePolicyProviderForTest(p)
 
 		_, err := r.IngestNote(mentionNoteBody("over", 3))
 		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
@@ -83,14 +83,14 @@ func TestIngestNote_MentionLimitFollowsAuthorRolePolicy(t *testing.T) {
 
 	t.Run("limit raised above the default", func(t *testing.T) {
 		r, _, _, author := newMentionLimitResolver(t)
-		r.SetRolePolicyProvider(&fakeMentionPolicies{userID: author.ID, limit: corenote.DefaultMentionLimit + 5})
+		r.SetRolePolicyProviderForTest(&fakeMentionPolicies{userID: author.ID, limit: corenote.DefaultMentionLimit + 5})
 		_, err := r.IngestNote(mentionNoteBody("raised", corenote.DefaultMentionLimit+5))
 		require.NoError(t, err, "ロールで上げた上限まではリモートでも通る")
 	})
 
 	t.Run("limit zero rejects any mention", func(t *testing.T) {
 		r, _, _, author := newMentionLimitResolver(t)
-		r.SetRolePolicyProvider(&fakeMentionPolicies{userID: author.ID, limit: 0})
+		r.SetRolePolicyProviderForTest(&fakeMentionPolicies{userID: author.ID, limit: 0})
 		_, err := r.IngestNote(mentionNoteBody("zero-one", 1))
 		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
 		_, err = r.IngestNote(mentionNoteBody("zero-none", 0))
@@ -111,7 +111,7 @@ func TestIngestNote_MentionLimitFollowsAuthorRolePolicy(t *testing.T) {
 func TestIngestNote_NoMentionsDoesNotLookUpPolicies(t *testing.T) {
 	r, _, noteRepo, author := newMentionLimitResolver(t)
 	p := &fakeMentionPolicies{userID: author.ID, limit: 2}
-	r.SetRolePolicyProvider(p)
+	r.SetRolePolicyProviderForTest(p)
 
 	_, err := r.IngestNote(mentionNoteBody("no-mentions", 0))
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestIngestNote_MentionLimitFromConditionalRoleOnRemoteUser(t *testing.T) {
 		CondFormula: datatypes.JSON([]byte(`{"type":"isRemote"}`)),
 		Policies:    datatypes.JSON([]byte(`{"mentionLimit":{"useDefault":false,"priority":0,"value":1}}`)),
 	}
-	r.SetRolePolicyProvider(roleSvc)
+	r.SetRolePolicyProviderForTest(roleSvc)
 
 	_, err := r.IngestNote(mentionNoteBody("cond-over", 2))
 	require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
@@ -170,7 +170,7 @@ func TestIngestNote_MentionLimitFromConditionalRoleOnRemoteUser(t *testing.T) {
 // #3330: the Update path applies the same per-author limit as creation.
 func TestUpdateRemoteNote_MentionLimitFollowsAuthorRolePolicy(t *testing.T) {
 	r, _, noteRepo, author := newMentionLimitResolver(t)
-	r.SetRolePolicyProvider(&fakeMentionPolicies{userID: author.ID, limit: 1})
+	r.SetRolePolicyProviderForTest(&fakeMentionPolicies{userID: author.ID, limit: 1})
 	host := "remote.example"
 	uri := "https://remote.example/notes/edit-policy"
 	original := "original"

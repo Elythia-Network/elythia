@@ -80,8 +80,7 @@ func newSuspensionEnv(t *testing.T) (*fullProcessorEnv, *recordingDocFetcher, *t
 	require.NoError(t, instances.Create(&model.Instance{ID: "i1", Host: "susp.example", SoftwareName: &name, SoftwareVersion: &ver}))
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{InboxSuspendedSoftware: []byte(`[{"software":"misskey","versionRange":"<=2024.11.0"}]`)}
-	env.resolver.SetSoftwareSuspensionChecker(federation.NewInboxSuspendedChecker(meta, instances))
-	require.True(t, env.resolver.HasSoftwareSuspensionChecker())
+	env.resolver.SetSoftwareBlockerForTest(federation.NewInboxSuspendedChecker(meta, instances))
 	return env, fetcher, meta
 }
 
@@ -193,7 +192,7 @@ func TestIngestNote_MentionsOnInboxSuspendedSoftware(t *testing.T) {
 	const unknown = "https://susp.example/users/x"
 	f.bodies[unknown] = actorDoc(unknown, "x")
 	blocker := &stubSoftwareBlocker{suspended: map[string]bool{"susp.example": true, "known.example": true}}
-	r.SetSoftwareSuspensionChecker(blocker)
+	r.SetSoftwareBlockerForTest(blocker)
 
 	note, err := r.IngestNote(noteBody(t, "susp-m1", []string{known, unknown}, []string{activitypub.Public}, nil))
 	require.NoError(t, err)
@@ -213,7 +212,7 @@ func TestIngestNote_InboxSuspendedSoftwareMentionsDoNotUseFetchBudget(t *testing
 	}
 	const legit = "https://ok.example/users/bob"
 	f.bodies[legit] = actorDoc(legit, "bob")
-	r.SetSoftwareSuspensionChecker(&stubSoftwareBlocker{suspended: map[string]bool{"susp.example": true}})
+	r.SetSoftwareBlockerForTest(&stubSoftwareBlocker{suspended: map[string]bool{"susp.example": true}})
 
 	// 宛先 (specified) の利用者は Mention の後に取りに行く。件数の上限で弾かれるか
 	// どうかは問わない。見るのは取りに行ったかどうか。

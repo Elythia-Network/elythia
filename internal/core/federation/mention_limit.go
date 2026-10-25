@@ -11,16 +11,6 @@ type RolePolicyProvider interface {
 	GetUserPolicies(userID string) map[string]any
 }
 
-// SetRolePolicyProvider wires the role policy lookup used for the mention
-// limit of inbound notes (#3330). nil keeps corenote.DefaultMentionLimit.
-func (r *Resolver) SetRolePolicyProvider(p RolePolicyProvider) {
-	r.rolePolicyProvider = p
-}
-
-// HasRolePolicyProvider reports whether the role policy lookup was wired
-// (critical wiring check).
-func (r *Resolver) HasRolePolicyProvider() bool { return r.rolePolicyProvider != nil }
-
 // mentionLimitFor returns the `mentionLimit` policy of the note author userID.
 // 本家 NoteCreateService.create は投稿者がリモートでも
 // roleService.getUserPolicies(user.id).mentionLimit で判定する。

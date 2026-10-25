@@ -27,8 +27,9 @@ import (
 )
 
 // routeParts holds the components setupRoutes builds in its own body (not in
-// buildHandlers or buildCore), or through buildStream, whose dependencies are
-// required constructor arguments (#3823, #3827, #3829, #3831, #3833). 本番では読まない。
+// buildHandlers or buildCore), or through buildStream or buildFederation, whose
+// dependencies are required constructor arguments (#3823, #3827, #3829, #3831,
+// #3833). 本番では読まない。
 //
 // 構築子の必須の引数にした依存は、型では渡し忘れを防げても nil は渡せる。
 // TestBuiltHandlersHaveNoNilDependencies が組み立てた後の部品のフィールドを見て、
@@ -91,4 +92,5 @@ type routeParts struct {
 	inboxHandler    *inbox.Handler
 
 	federationProcessor *corefederation.Processor
+	federationResolver  *corefederation.Resolver
 }

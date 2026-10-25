@@ -381,7 +381,7 @@ func TestResolveActor_UnsuspendWriteFailureKeepsReturnedRowSuspended(t *testing.
 	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(actorWithSuspended(t, "false"))}, idGen)
 	origins := newStubOriginRepo()
-	r.SetSuspensionOriginRepo(origins)
+	r.SetSuspensionOriginRepoForTest(origins)
 	host := "remote.example"
 	uri := "https://remote.example/users/alice"
 	mock.Users["existing"] = &model.User{ID: "existing", Username: "alice", UsernameLower: "alice", Host: &host, URI: &uri, IsSuspended: true}
@@ -432,7 +432,7 @@ func TestResolveActor_RefreshSuspensionIsVisibleToProcessWithSigner(t *testing.T
 	require.NoError(t, err)
 	r := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(actorWithSuspended(t, "true"))}, idGen)
-	r.SetSuspensionOriginRepo(newStubOriginRepo())
+	r.SetSuspensionOriginRepoForTest(newStubOriginRepo())
 	followingSvc := corefollowing.NewService(repo, testutil.NewMockFollowingRepository(), testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessorNilDeps(r, followingSvc, nil, nil, repo, noteRepo)
 	p.SetLocalBaseURLForTest("https://example.com")

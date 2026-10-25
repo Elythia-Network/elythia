@@ -3,24 +3,14 @@ package federation_test
 import (
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// stubSensitiveWords implements federation.SensitiveWordsProvider.
-type stubSensitiveWords struct{ words []string }
-
-func (s stubSensitiveWords) SensitiveWords() []string { return s.words }
-
-// blockerWithSensitiveWords is a HostBlockChecker that also exposes
-// sensitiveWords, the way core/instance.Service does in production.
-type blockerWithSensitiveWords struct {
-	stubHostBlocker
-	words []string
-}
-
-func (b *blockerWithSensitiveWords) SensitiveWords() []string { return b.words }
 
 const followersOnlyAudience = `"to": ["https://remote.example/users/alice/followers"]`
 
@@ -45,7 +35,7 @@ func TestIngestNote_SensitiveWordsDemotePublicToHome(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r, noteRepo := newProhibitedWordsResolver(t, nil)
-			r.SetSensitiveWordsProvider(stubSensitiveWords{words: tc.words})
+			r.SetHostBlockerForTest(&stubHostBlocker{sensitive: tc.words})
 
 			note, created, err := r.IngestNoteWithCreated([]byte(tc.body), "")
 			require.NoError(t, err)
@@ -60,7 +50,7 @@ func TestIngestNote_SensitiveWordsDemotePublicToHome(t *testing.T) {
 // public でない投稿の可視性は変えない (本家も public のときだけ降格する)。
 func TestIngestNote_SensitiveWordsKeepNonPublic(t *testing.T) {
 	r, _ := newProhibitedWordsResolver(t, nil)
-	r.SetSensitiveWordsProvider(stubSensitiveWords{words: []string{"spoiler"}})
+	r.SetHostBlockerForTest(&stubHostBlocker{sensitive: []string{"spoiler"}})
 
 	body := `{
 		"@context": "https://www.w3.org/ns/activitystreams",
@@ -76,25 +66,19 @@ func TestIngestNote_SensitiveWordsKeepNonPublic(t *testing.T) {
 	assert.Equal(t, model.NoteVisibilityFollowers, note.Visibility)
 }
 
-// 本番は hostBlocker (core/instance.Service) から読む。
+// 本番は構築子に渡す hostBlocker (core/instance.Service) から読む (#3833 から、
+// ResolverHostBlocker の型で求める)。
 func TestIngestNote_SensitiveWordsComeFromHostBlocker(t *testing.T) {
-	r, _ := newProhibitedWordsResolver(t, nil)
-	assert.False(t, r.HasSensitiveWordsSource())
-	r.SetHostBlockChecker(&stubHostBlocker{})
-	assert.False(t, r.HasSensitiveWordsSource(), "SensitiveWords を持たない hostBlocker では読めない")
-	r.SetHostBlockChecker(&blockerWithSensitiveWords{words: []string{"spoiler"}})
-	assert.True(t, r.HasSensitiveWordsSource())
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen,
+		&stubHostBlocker{sensitive: []string{"spoiler"}}, nil, nil, nil, nil, nil)
 
 	note, _, err := r.IngestNoteWithCreated([]byte(remoteNoteBody(`"content": "a spoiler here"`)), "")
 	require.NoError(t, err)
 	require.NotNil(t, note)
 	assert.Equal(t, model.NoteVisibilityHome, note.Visibility)
-}
-
-func TestHasSensitiveWordsSource_ExplicitProvider(t *testing.T) {
-	r, _ := newProhibitedWordsResolver(t, nil)
-	r.SetSensitiveWordsProvider(stubSensitiveWords{})
-	assert.True(t, r.HasSensitiveWordsSource())
 }
 
 func sensitiveUpdateBody(extra string) string {
@@ -124,7 +108,7 @@ func TestUpdateRemoteNote_SensitiveWordsDemote(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r, noteRepo, _ := newProhibitedWordsUpdateResolver(t, nil)
 			noteRepo.Notes["n1"].Visibility = tc.from
-			r.SetSensitiveWordsProvider(stubSensitiveWords{words: []string{"spoiler", "sensitive.example"}})
+			r.SetHostBlockerForTest(&stubHostBlocker{sensitive: []string{"spoiler", "sensitive.example"}})
 
 			got, err := r.UpdateRemoteNote([]byte(sensitiveUpdateBody(tc.extra)), "")
 			require.NoError(t, err)

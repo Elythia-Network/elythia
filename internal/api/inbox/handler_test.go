@@ -68,7 +68,8 @@ func newHandler(t *testing.T, pubKeyPEM string) (*Handler, *testutil.MockUserRep
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(actorBody(pubKeyPEM))}, idGen)
+	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(actorBody(pubKeyPEM))}, idGen,
+		nil, nil, nil, nil, nil, nil)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo, "", nil, nil)
 	return NewHandler(resolver, processor, "", nil, nil), repo, followingRepo
@@ -209,7 +210,8 @@ func TestInbox_ResolverError(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
-	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
+	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen,
+		nil, nil, nil, nil, nil, nil)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo, "", nil, nil)
 	h := NewHandler(resolver, processor, "", nil, nil)
@@ -239,7 +241,8 @@ func TestInbox_PublicKeyMissing(t *testing.T) {
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
-	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
+	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen,
+		nil, nil, nil, nil, nil, nil)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo, "", nil, nil)
 	h := NewHandler(resolver, processor, "", nil, nil)

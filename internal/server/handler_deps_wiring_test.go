@@ -80,9 +80,13 @@ var handlerNilAllowed = map[string]string{
 	// 連合の e2e (tests/e2e-federation) だけが Server.SetSyncDeliverHookForTest で入れ、queue を
 	// 通さずに同期で配送する。setupRoutes は入れず、nil のとき配送は queue へ enqueue する (#3833)。
 	"deliverService.syncDeliverHook": "テスト専用の seam。setupRoutes は入れず、nil のとき queue へ enqueue する",
+	// 依存ではなく状態。公開鍵の取り直しに失敗した時刻 (userID ごと) で、最初の失敗を
+	// 記録するとき (markKeyFetchFailed) に作る。組み立てた直後はまだ失敗していないので
+	// nil (#3833)。
+	"federationResolver.keyFetchFailures": "依存ではなく状態。最初の失敗を記録するとき (markKeyFetchFailed) に作るので、組み立てた直後は nil",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829、#3831、#3833)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -94,7 +98,7 @@ var handlerNilAllowed = map[string]string{
 // 対象は、buildHandlers が作った handler のうち requiredDepHandlers に並べたもの
 // (#3817、i は #3827) と、setupRoutes の本文 (と buildStream) で作る部品のうち
 // routeParts に持たせたもの全部 (#3823、stream の部品と feed・peer は #3827、queue の
-// processor は #3829、notes の handler は #3831)、
+// processor は #3829、notes の handler は #3831、連合の部品は #3833)、
 // buildCore が作る部品のうち coreParts に持たせたもの全部 (#3825)。
 //
 // フィールドは unexported だが、同じ型の値を reflect で辿り IsNil を見るだけなので
@@ -240,8 +244,8 @@ func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.V
 	assert.Positive(t, n, "%s.%s に nil になりうるフィールドが 1 つも無い (抽出が空振りしていないか)", container, name)
 }
 
-// requiredDepChecks names fields that #3817, #3823, #3825, #3827, #3829 and #3831
-// turned into constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
+// requiredDepChecks names fields that #3817, #3823, #3825, #3827, #3829, #3831
+// and #3833 turned into constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
 var requiredDepChecks = []string{
 	"webhook.rolePolicyProvider",
 	"notifications.entityPacker", "notifications.noteHider", "notifications.moderatorChecker",
@@ -330,6 +334,8 @@ var requiredDepChecks = []string{
 	"deliverService.hostBlocker", "noteDeleteHook.userRepo", "noteDeleteHook.noteRepo",
 	"inboxHandler.enqueuer", "inboxHandler.hostBlocker",
 	"federationProcessor.blockingService", "federationProcessor.background",
+	"federationResolver.hostBlocker", "federationResolver.softwareBlocker", "federationResolver.silencedChecker",
+	"federationResolver.rolePolicyProvider", "federationResolver.suspensionOriginRepo", "federationResolver.background",
 }
 
 // requiredNonEmptyStrings names string fields #3833 turned into constructor

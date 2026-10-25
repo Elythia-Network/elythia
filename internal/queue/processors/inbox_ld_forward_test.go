@@ -72,7 +72,8 @@ func newLDForwardEnv(t *testing.T) *ldForwardEnv {
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	resolver := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"), ldFwdNoFetch{}, idGen)
+	resolver := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"), ldFwdNoFetch{}, idGen,
+		nil, nil, nil, nil, nil, nil)
 	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	fed := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo, "", nil, nil)
 

@@ -24,7 +24,7 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 18
+const criticalWiringCount = 10
 
 // entityPackerMissingEffect is the effect shared by the per-component
 // entityPacker rows (#3790, #3792, #3794, #3796, #3798).

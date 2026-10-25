@@ -197,7 +197,7 @@ func TestIngestNote_SkipsKnownLocalAndBlockedMentions(t *testing.T) {
 	repo.Users["uLocal"] = &model.User{ID: "uLocal", Username: "local", UsernameLower: "local"}
 	const blocked = "https://blocked.example/users/x"
 	f.bodies[blocked] = actorDoc(blocked, "x")
-	r.SetHostBlockChecker(stubRemoteUserHostBlocker{blocked: map[string]bool{"blocked.example": true}})
+	r.SetHostBlockerForTest(stubRemoteUserHostBlocker{blocked: map[string]bool{"blocked.example": true}})
 
 	note, err := r.IngestNote(noteBody(t, "m4",
 		[]string{known, "https://example.com/users/uLocal", "https://example.com/notes/n1", blocked, ""},
@@ -319,7 +319,7 @@ func TestIngestNote_SkippedEntriesDoNotUseFetchLimit(t *testing.T) {
 	for _, kind := range []string{"blocked", "local", "known"} {
 		t.Run(kind, func(t *testing.T) {
 			r, repo, f := newMentionFetchResolver(t)
-			r.SetHostBlockChecker(stubRemoteUserHostBlocker{blocked: map[string]bool{"blocked.example": true}})
+			r.SetHostBlockerForTest(stubRemoteUserHostBlocker{blocked: map[string]bool{"blocked.example": true}})
 			var cc []string
 			for i := range corenote.DefaultMentionLimit {
 				var u string
@@ -527,7 +527,7 @@ func TestIngestNote_UnknownActorFetchFollowsMentionLimitPolicy(t *testing.T) {
 	t.Run("raised limit fetches more than the default", func(t *testing.T) {
 		r, _, f := newMentionFetchResolver(t)
 		p := &countingPolicies{limit: float64(30)}
-		r.SetRolePolicyProvider(p)
+		r.SetRolePolicyProviderForTest(p)
 		mentions := newMentions(f, "up", corenote.DefaultMentionLimit+5)
 		note, err := r.IngestNote(noteBody(t, "p1", mentions, []string{activitypub.Public}, nil))
 		require.NoError(t, err)
@@ -536,7 +536,7 @@ func TestIngestNote_UnknownActorFetchFollowsMentionLimitPolicy(t *testing.T) {
 	})
 	t.Run("raised limit caps attempts", func(t *testing.T) {
 		r, _, f := newMentionFetchResolver(t)
-		r.SetRolePolicyProvider(&countingPolicies{limit: float64(22)})
+		r.SetRolePolicyProviderForTest(&countingPolicies{limit: float64(22)})
 		var cc []string
 		for i := range 30 {
 			cc = append(cc, fmt.Sprintf("https://cap%d.example/users/x", i))
@@ -547,7 +547,7 @@ func TestIngestNote_UnknownActorFetchFollowsMentionLimitPolicy(t *testing.T) {
 	})
 	t.Run("lowered limit fetches nothing for a note over it", func(t *testing.T) {
 		r, _, f := newMentionFetchResolver(t)
-		r.SetRolePolicyProvider(&countingPolicies{limit: float64(2)})
+		r.SetRolePolicyProviderForTest(&countingPolicies{limit: float64(2)})
 		mentions := newMentions(f, "low", 3)
 		_, err := r.IngestNote(noteBody(t, "p3", mentions, []string{activitypub.Public}, nil))
 		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
@@ -556,7 +556,7 @@ func TestIngestNote_UnknownActorFetchFollowsMentionLimitPolicy(t *testing.T) {
 	t.Run("no mentions never looks the policy up", func(t *testing.T) {
 		r, _, _ := newMentionFetchResolver(t)
 		p := &countingPolicies{limit: float64(30)}
-		r.SetRolePolicyProvider(p)
+		r.SetRolePolicyProviderForTest(p)
 		_, err := r.IngestNote(noteBody(t, "p4", nil, []string{activitypub.Public}, nil))
 		require.NoError(t, err)
 		assert.Zero(t, p.calls)
@@ -564,7 +564,7 @@ func TestIngestNote_UnknownActorFetchFollowsMentionLimitPolicy(t *testing.T) {
 	t.Run("policy looked up once", func(t *testing.T) {
 		r, _, f := newMentionFetchResolver(t)
 		p := &countingPolicies{limit: float64(30)}
-		r.SetRolePolicyProvider(p)
+		r.SetRolePolicyProviderForTest(p)
 		mentions := newMentions(f, "once", 3)
 		_, err := r.IngestNote(noteBody(t, "p5", mentions, []string{activitypub.Public}, nil))
 		require.NoError(t, err)

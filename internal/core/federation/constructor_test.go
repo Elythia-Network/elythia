@@ -7,13 +7,20 @@ import (
 
 	"github.com/elythia-network/elythia/internal/bgwork"
 	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // 構築子の引数に渡すだけの値。どれも呼ばれないので、interface を埋め込んで型を満たす。
 type (
-	ctorSoftwareBlocker struct{ SoftwareSuspensionChecker }
-	ctorHostBlocker     struct{ HostBlockChecker }
+	ctorSoftwareBlocker     struct{ SoftwareSuspensionChecker }
+	ctorHostBlocker         struct{ HostBlockChecker }
+	ctorResolverHostBlocker struct{ ResolverHostBlocker }
+	ctorSilencedChecker     struct{ SilencedHostChecker }
+	ctorRolePolicies        struct{ RolePolicyProvider }
+	ctorOriginRepo          struct {
+		repository.UserSuspensionOriginRepository
+	}
 )
 
 // 構築子は受け取った依存を持たせる (#3823)。依存を構築子の必須の引数にしたので、
@@ -58,4 +65,20 @@ func TestNewProcessorKeepsDependencies(t *testing.T) {
 	assert.Equal(t, "https://example.test", p.localBaseURL)
 	assert.Same(t, blocking, p.blockingService)
 	assert.Same(t, g, p.background)
+}
+
+func TestNewResolverKeepsDependencies(t *testing.T) {
+	hostBlocker := &ctorResolverHostBlocker{}
+	software := &ctorSoftwareBlocker{}
+	silenced := &ctorSilencedChecker{}
+	policies := &ctorRolePolicies{}
+	origins := &ctorOriginRepo{}
+	g := bgwork.New()
+	r := NewResolver(nil, nil, nil, nil, nil, hostBlocker, software, silenced, policies, origins, g)
+	assert.Same(t, hostBlocker, r.hostBlocker)
+	assert.Same(t, software, r.softwareBlocker)
+	assert.Same(t, silenced, r.silencedChecker)
+	assert.Same(t, policies, r.rolePolicyProvider)
+	assert.Same(t, origins, r.suspensionOriginRepo)
+	assert.Same(t, g, r.background)
 }
