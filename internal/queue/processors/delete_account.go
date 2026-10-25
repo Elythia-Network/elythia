@@ -39,16 +39,6 @@ type PushSubscriptionCacheInvalidator interface {
 	Invalidate(ctx context.Context, userID string)
 }
 
-// SetPushSubscriptionCache wires the cache that Web Push delivery reads
-// subscriptions from. It must be the same instance the WebPushProcessor uses;
-// nil disables invalidation.
-func (p *DeleteAccountProcessor) SetPushSubscriptionCache(c PushSubscriptionCacheInvalidator) {
-	p.pushCache = c
-}
-
-// HasPushSubscriptionCache reports whether SetPushSubscriptionCache was wired.
-func (p *DeleteAccountProcessor) HasPushSubscriptionCache() bool { return p.pushCache != nil }
-
 // pushCacheInvalidateTimeout bounds the Redis call made to drop the cached
 // push subscriptions.
 const pushCacheInvalidateTimeout = 5 * time.Second
@@ -68,15 +58,6 @@ func (p *DeleteAccountProcessor) invalidatePushSubscriptions(ctx context.Context
 	p.pushCache.Invalidate(local, userID)
 }
 
-// SetPageRepo wires the PageRepository used to delete the user's pages one by
-// one so that the notes they reference get their pageCount decremented (#3293).
-func (p *DeleteAccountProcessor) SetPageRepo(r repository.PageRepository) {
-	p.pageRepo = r
-}
-
-// HasPageRepo reports whether SetPageRepo was wired.
-func (p *DeleteAccountProcessor) HasPageRepo() bool { return p.pageRepo != nil }
-
 // SetUserRepo wires the UserRepository used to physically delete the user row
 // for non-soft (local) account deletion (#2230). nil keeps the soft behavior.
 func (p *DeleteAccountProcessor) SetUserRepo(r repository.UserRepository) {
@@ -87,11 +68,18 @@ func (p *DeleteAccountProcessor) SetUserRepo(r repository.UserRepository) {
 // needs. Any nil repository causes that deletion phase to be skipped, so
 // tests and partial-start configurations do not need to supply the full
 // repository set.
-func NewDeleteAccountProcessor(noteRepo repository.NoteRepository, driveFileRepo repository.DriveFileRepository, followingRepo repository.FollowingRepository) *DeleteAccountProcessor {
+//
+// pageRepo deletes the user's pages one by one so that the notes they
+// reference get their pageCount decremented (#3293). pushCache must be the
+// same subscription cache the WebPushProcessor reads; nil disables
+// invalidation.
+func NewDeleteAccountProcessor(noteRepo repository.NoteRepository, driveFileRepo repository.DriveFileRepository, followingRepo repository.FollowingRepository, pageRepo repository.PageRepository, pushCache PushSubscriptionCacheInvalidator) *DeleteAccountProcessor {
 	return &DeleteAccountProcessor{
 		noteRepo:      noteRepo,
 		driveFileRepo: driveFileRepo,
 		followingRepo: followingRepo,
+		pageRepo:      pageRepo,
+		pushCache:     pushCache,
 	}
 }
 

@@ -19,12 +19,13 @@ import (
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	coremove "github.com/elythia-network/elythia/internal/core/move"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // routeParts holds the components setupRoutes builds in its own body (not in
 // buildHandlers or buildCore), or through buildStream, whose dependencies are
-// required constructor arguments (#3823, #3827). 本番では読まない。
+// required constructor arguments (#3823, #3827, #3829). 本番では読まない。
 //
 // 構築子の必須の引数にした依存は、型では渡し忘れを防げても nil は渡せる。
 // TestBuiltHandlersHaveNoNilDependencies が組み立てた後の部品のフィールドを見て、
@@ -69,4 +70,8 @@ type routeParts struct {
 	// 構造体リテラルから構築子に替えた部品 (#3827 の 4 段目)。
 	feed *feedHandler
 	peer *pluginPeerDeps
+
+	// queue の processor (#3829)。欄の名前は setupRoutes の別名にする。
+	deleteAccountProcessor     *processors.DeleteAccountProcessor
+	postScheduledNoteProcessor *processors.PostScheduledNoteProcessor
 }

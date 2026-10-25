@@ -16,9 +16,10 @@ import (
 // **購読キャッシュを捨てる側が、Web Push の配送が読むのと同じキャッシュを
 // 受け取っていること (#3207 レビュー)。**
 //
-// `deleteAccount.pushSubscriptionCache` は criticalWiring で nil を起動時に
-// 落とすが、`corewebpush.NewSubscriptionCache(...)` をもう 1 つ作って渡しても
-// nil ではないので通る。その場合 Redis の層は共有されて消えるが、配送側の
+// アカウント削除の購読キャッシュは `processors.NewDeleteAccountProcessor` の必須の
+// 引数で (#3829。以前は criticalWiring の `deleteAccount.pushSubscriptionCache`)、
+// nil は `TestBuiltHandlersHaveNoNilDependencies` が落とすが、
+// `corewebpush.NewSubscriptionCache(...)` をもう 1 つ作って渡しても nil ではないので通る。その場合 Redis の層は共有されて消えるが、配送側の
 // プロセス内の層 (3 分) は残り、削除した購読へ push され続ける。
 // `internal/server` は router を組み立てるテストが無いので、ここで AST から
 // 「キャッシュの生成は 1 回だけで、配送と無効化の両方に同じ変数を渡す」ことを見る。
@@ -62,8 +63,9 @@ func pushSubscriptionCacheProblems(fset *token.FileSet, files []*ast.File) []str
 			case exprString(sel) == "processors.NewWebPushProcessor":
 				deliveryArgs = append(deliveryArgs, exprString(node.Args[0]))
 				sites[fileOf(node)] = true
-			case sel.Sel.Name == "SetPushSubscriptionCache" && exprString(sel.X) == "deleteAccountProcessor":
-				deleteAccountArgs = append(deleteAccountArgs, exprString(node.Args[0]))
+			case exprString(sel) == "processors.NewDeleteAccountProcessor":
+				// 購読キャッシュは最後の引数 (#3829)。
+				deleteAccountArgs = append(deleteAccountArgs, exprString(node.Args[len(node.Args)-1]))
 				sites[fileOf(node)] = true
 			case exprString(sel) == "apisw.NewHandler":
 				swArgs = append(swArgs, exprString(node.Args[len(node.Args)-1]))
@@ -80,7 +82,7 @@ func pushSubscriptionCacheProblems(fset *token.FileSet, files []*ast.File) []str
 	}{
 		{cacheVars, "corewebpush.NewSubscriptionCache を変数に代入している箇所 (キャッシュを複数作ると、無効化しても配送側のプロセス内の層が残る)"},
 		{deliveryArgs, "processors.NewWebPushProcessor の呼び出し"},
-		{deleteAccountArgs, "deleteAccountProcessor.SetPushSubscriptionCache の呼び出し"},
+		{deleteAccountArgs, "processors.NewDeleteAccountProcessor の呼び出し"},
 		{swArgs, "apisw.NewHandler の呼び出し"},
 	} {
 		if len(c.got) != 1 {
@@ -115,7 +117,7 @@ func pushSubscriptionCacheProblems(fset *token.FileSet, files []*ast.File) []str
 // 生成と受け渡しが別々のファイルにあるときに落とすこと (#3672 レビュー M-1)。
 func TestPushSubscriptionCacheProblemsRequireOneFile(t *testing.T) {
 	const create = "func a() {\n\tc := corewebpush.NewSubscriptionCache(r, d)\n\t_ = c\n}\n"
-	const use = "func b() {\n\tprocessors.NewWebPushProcessor(c)\n\tdeleteAccountProcessor.SetPushSubscriptionCache(c)\n\tapisw.NewHandler(x, c)\n}\n"
+	const use = "func b() {\n\tprocessors.NewWebPushProcessor(c)\n\tprocessors.NewDeleteAccountProcessor(n, d, f, p, c)\n\tapisw.NewHandler(x, c)\n}\n"
 	parse := func(srcs map[string]string) (*token.FileSet, []*ast.File) {
 		fset := token.NewFileSet()
 		var names []string
@@ -141,6 +143,6 @@ func TestPushSubscriptionCacheProblemsRequireOneFile(t *testing.T) {
 	assert.Contains(t, got[0], "別々のファイル")
 
 	// 同じファイルでも、別の変数を渡したら落とす。
-	fset, files = parse(map[string]string{"a.go": create + strings.Replace(use, "SetPushSubscriptionCache(c)", "SetPushSubscriptionCache(other)", 1)})
+	fset, files = parse(map[string]string{"a.go": create + strings.Replace(use, "NewDeleteAccountProcessor(n, d, f, p, c)", "NewDeleteAccountProcessor(n, d, f, p, other)", 1)})
 	assert.Len(t, pushSubscriptionCacheProblems(fset, files), 1)
 }

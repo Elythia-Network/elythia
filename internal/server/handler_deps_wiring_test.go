@@ -67,7 +67,7 @@ var handlerNilAllowed = map[string]string{
 	"peer.urlFor": "テスト専用の seam。newPluginPeerDeps は入れず、nil のとき https の既定の URL を作る",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827、#3829)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -78,7 +78,8 @@ var handlerNilAllowed = map[string]string{
 //
 // 対象は、buildHandlers が作った handler のうち requiredDepHandlers に並べたもの
 // (#3817、i は #3827) と、setupRoutes の本文 (と buildStream) で作る部品のうち
-// routeParts に持たせたもの全部 (#3823、stream の部品と feed・peer は #3827)、
+// routeParts に持たせたもの全部 (#3823、stream の部品と feed・peer は #3827、queue の
+// processor は #3829)、
 // buildCore が作る部品のうち coreParts に持たせたもの全部 (#3825)。
 //
 // フィールドは unexported だが、同じ型の値を reflect で辿り IsNil を見るだけなので
@@ -202,8 +203,8 @@ func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.V
 	assert.Positive(t, n, "%s.%s に nil になりうるフィールドが 1 つも無い (抽出が空振りしていないか)", container, name)
 }
 
-// requiredDepChecks names fields that #3817, #3823, #3825 and #3827 turned into
-// constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
+// requiredDepChecks names fields that #3817, #3823, #3825, #3827 and #3829 turned
+// into constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
 var requiredDepChecks = []string{
 	"webhook.rolePolicyProvider",
 	"notifications.entityPacker", "notifications.noteHider", "notifications.moderatorChecker",
@@ -276,6 +277,9 @@ var requiredDepChecks = []string{
 	"notePublisher.entityPacker", "notificationPublisher.entityPacker", "reversiPublisher.entityPacker",
 	"serverStatsPub.enabled",
 	"feed.ugcVisibility", "peer.blocker",
+	// ここから #3829 (queue の processor)。
+	"deleteAccountProcessor.pageRepo", "deleteAccountProcessor.pushCache",
+	"postScheduledNoteProcessor.lock",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

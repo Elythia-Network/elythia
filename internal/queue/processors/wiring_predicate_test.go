@@ -45,20 +45,6 @@ type stubInboxReplayGuard struct{}
 func (stubInboxReplayGuard) Seen(context.Context, string) (bool, error) { return false, nil }
 func (stubInboxReplayGuard) Remember(context.Context, string) error     { return nil }
 
-// 予約投稿の二重 publish を防ぐ lock。inbox の replay guard と同じ一回性の
-// tier なので起動時に検査する (#2682 review M-C)。
-func TestPostScheduledNoteProcessor_HasLock(t *testing.T) {
-	assert.False(t, (&PostScheduledNoteProcessor{}).HasLock(), "未配線なら false")
-
-	p := &PostScheduledNoteProcessor{}
-	p.SetLock(stubScheduledNoteLock{})
-	assert.True(t, p.HasLock(), "配線したら true")
-}
-
-type stubScheduledNoteLock struct{}
-
-func (stubScheduledNoteLock) TryAcquire(context.Context, string) (bool, error) { return true, nil }
-
 // #2683: host block checker も同じ扱い。未配線だと `isBlocked` が常に false に
 // なり、ブロック済み host / 許可外 host からの activity を受け入れる。
 // 署名検査・replay guard の述語では代替できない (それぞれ独立に消せる)。
