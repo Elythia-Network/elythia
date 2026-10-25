@@ -544,9 +544,9 @@ func TestDraftsCreate_NoteDraftLimitExceeded(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
 	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1"}
 	repo.drafts["d2"] = &model.NoteDraft{ID: "d2", UserID: "u1"}
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"noteDraftLimit": 2,
-	}})
+	}}
 	rec := postDraft(h.DraftsCreate, `{"text":"third"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_DRAFTS")
@@ -554,9 +554,9 @@ func TestDraftsCreate_NoteDraftLimitExceeded(t *testing.T) {
 
 func TestDraftsCreate_NoteDraftLimit_PassesUnderLimit(t *testing.T) {
 	h, _ := newDraftHandlerWithRepo()
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"noteDraftLimit": 10,
-	}})
+	}}
 	rec := postDraft(h.DraftsCreate, `{"text":"draft"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -945,9 +945,9 @@ func TestDraftsCreate_ScheduledNoteLimitExceeded(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
 	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", IsActuallyScheduled: true}
 	repo.drafts["d2"] = &model.NoteDraft{ID: "d2", UserID: "u1", IsActuallyScheduled: true}
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"scheduledNoteLimit": 2,
-	}})
+	}}
 	body := fmt.Sprintf(`{"text":"third","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(time.Hour))
 	rec := postDraft(h.DraftsCreate, body, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1308,18 +1308,18 @@ func TestDraftsUpdate_LengthLimitsBeforeLookup(t *testing.T) {
 // 負の noteDraftLimit / scheduledNoteLimit は「作れない」こと (upstream の `count >= limit`)。
 func TestDraftsCreate_NegativeLimitsDeny(t *testing.T) {
 	h, _ := newDraftHandlerWithRepo()
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"noteDraftLimit": -1,
-	}})
+	}}
 	rec := postDraft(h.DraftsCreate, `{"text":"draft"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_DRAFTS")
 
 	h2, _ := newDraftHandlerWithRepo()
-	h2.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h2.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"noteDraftLimit":     10,
 		"scheduledNoteLimit": -1,
-	}})
+	}}
 	body := fmt.Sprintf(`{"text":"s","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(time.Hour))
 	rec = postDraft(h2.DraftsCreate, body, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1335,9 +1335,9 @@ func TestDraftsUpdate_ScheduledNoteLimit(t *testing.T) {
 	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &future}
 	repo.drafts["d2"] = &model.NoteDraft{ID: "d2", UserID: "u1", IsActuallyScheduled: true, ScheduledAt: &future}
 	repo.drafts["d3"] = &model.NoteDraft{ID: "d3", UserID: "u1"}
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{
 		"scheduledNoteLimit": 2,
-	}})
+	}}
 	body := fmt.Sprintf(`{"draftId":"d3","scheduledAt":%d,"isActuallyScheduled":true}`, futureMs(time.Hour))
 	rec := postDraft(h.DraftsUpdate, body, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)

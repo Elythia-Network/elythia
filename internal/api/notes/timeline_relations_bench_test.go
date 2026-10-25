@@ -102,7 +102,7 @@ func BenchmarkHomeTimelineViewerRelations(b *testing.B) {
 	userRepo := repository.NewCachedUserRepository(repository.NewUserRepository(db))
 	tlService := timeline.NewService(nil, noteRepo, followingRepo)
 	tlService.SetFanoutToggle(benchFanoutOff{})
-	h := NewHandler(noteRepo, nil, nil, nil, tlService, nil, nil, nil, benchIDGen(b))
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, tlService, nil, nil, nil, benchIDGen(b))
 	h.SetUserRepo(userRepo)
 	h.SetMetaRepo(repository.NewCachedMetaRepository(repository.NewMetaRepository(db)))
 	h.SetMutingRepo(repository.NewMutingRepository(db))

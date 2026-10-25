@@ -94,7 +94,7 @@ func TestPollsVote_Blocked(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, blockStub{blocked: true})
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, pollSvc, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, pollSvc, nil, idGen)
 	seedPollNote(noteRepo, pollRepo, model.NoteVisibilityPublic, nil)
 
 	c, rec := newJSONRequest(t, "/api/notes/polls/vote", `{"noteId":"n1","choice":1}`)
@@ -112,7 +112,7 @@ func newShowHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	return h, noteRepo
 }
 
@@ -130,7 +130,7 @@ func TestShow_RequireSigninAnonymous(t *testing.T) {
 
 func TestShow_UgcVisibilityNoneAnonymous(t *testing.T) {
 	h, noteRepo := newShowHandler(t)
-	h.SetUGCVisibility("none")
+	h.ugcVisibilityFn = func() string { return "none" }
 	seedReactionNote(noteRepo, "n1", "public")
 	c, rec := newJSONRequest(t, "/api/notes/show", `{"noteId":"n1"}`)
 	require.NoError(t, h.Show(c))
@@ -141,7 +141,7 @@ func TestShow_UgcVisibilityNoneAnonymous(t *testing.T) {
 
 func TestShow_AuthedBypassesRestrictions(t *testing.T) {
 	h, noteRepo := newShowHandler(t)
-	h.SetUGCVisibility("none")
+	h.ugcVisibilityFn = func() string { return "none" }
 	seedReactionNote(noteRepo, "n1", "public")
 	noteRepo.Notes["n1"].User.RequireSigninToViewContents = true
 	c, rec := newJSONRequest(t, "/api/notes/show", `{"noteId":"n1"}`)

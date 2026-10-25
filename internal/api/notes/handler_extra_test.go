@@ -45,7 +45,7 @@ func newExtraHandlerWithFollowing(t *testing.T) (*Handler, *testutil.MockNoteRep
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, followingRepo)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 	h.SetFavoriteRepo(favRepo)
 	return h, noteRepo, favRepo, followingRepo
 }
@@ -161,7 +161,7 @@ func TestFavoritesCreate_NilRepo(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	// SetFavoriteRepo を呼ばない → favoriteRepo は nil のまま
 	rec := postExtra(h.FavoritesCreate, `{"noteId":"n1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -175,7 +175,7 @@ func TestFavoritesCreate_NoQueryServiceRejects(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
 	favRepo := testutil.NewMockNoteFavoriteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen) // queryService=nil
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen) // queryService=nil
 	h.SetFavoriteRepo(favRepo)
 	rec := postExtra(h.FavoritesCreate, `{"noteId":"n1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -342,7 +342,7 @@ func TestFavoritesDelete_InvalidParam(t *testing.T) {
 
 func TestFavoritesDelete_NilRepo(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(testutil.NewMockNoteRepository(), nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(testutil.NewMockNoteRepository(), nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.FavoritesDelete, `{"noteId":"n1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -657,7 +657,7 @@ func TestUserListTimeline_Success(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository())
-	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 	listRepo := testutil.NewMockUserListRepository()
 	listRepo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "u1", Name: "my list"}
 	h.SetUserListRepo(listRepo)
@@ -734,7 +734,7 @@ func TestUserListTimeline_PassesFilterToRepo(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, fRepo)
-	h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 	h.SetUserListRepo(listRepo)
 
 	rec := postExtra(h.UserListTimeline,
@@ -775,7 +775,7 @@ func TestUserListTimeline_WithoutUserListRepo(t *testing.T) {
 	// 行わない userListNotesRepo fake を使う。
 	noteRepo := &userListNotesRepo{MockNoteRepository: testutil.NewMockNoteRepository(), rows: nil}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.UserListTimeline, `{"listId":"l1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -788,7 +788,7 @@ func (f *failingListByUserListRepo) ListByUserList(_ string, _ int, _, _ string,
 
 func TestUserListTimeline_RepoError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failingListByUserListRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(&failingListByUserListRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.UserListTimeline, `{"listId":"l1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -987,7 +987,7 @@ func (f *failingSearchByTagRepo) SearchByTag(_ [][]string, _ string, _ int, _, _
 
 func TestSearchByTag_RepoError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failingSearchByTagRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(&failingSearchByTagRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.SearchByTag, `{"tag":"x"}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -1006,7 +1006,7 @@ func TestClips_Success(t *testing.T) {
 // 返す (汎用 RequireRolePolicy の 403 ROLE_PERMISSION_DENIED ではない、upstream translate.ts:72-75)。
 func TestTranslate_CannotUseTranslator_503Unavailable(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{"canUseTranslator": false}})
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{"canUseTranslator": false}}
 	txt := "hello"
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &txt}
 	rec := postExtra(h.Translate, `{"noteId":"n1","targetLang":"en"}`, &model.User{ID: "viewer"})
@@ -1020,7 +1020,7 @@ func TestTranslate_CannotUseTranslator_503Unavailable(t *testing.T) {
 // (gate で弾かれていれば note fetch 前に 400 になる)。
 func TestTranslate_CanUseTranslator_PassesPolicyGate(t *testing.T) {
 	h, noteRepo, _ := newExtraHandler(t)
-	h.SetPolicyProvider(&draftStubPolicyProvider{policies: map[string]any{"canUseTranslator": true}})
+	h.policyProvider = &draftStubPolicyProvider{policies: map[string]any{"canUseTranslator": true}}
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: nil}
 	rec := postExtra(h.Translate, `{"noteId":"n1","targetLang":"en"}`, &model.User{ID: "viewer"})
 	assert.Equal(t, http.StatusNoContent, rec.Code, "policy gate 通過後 null-text 204 に到達 (#2010)")
@@ -1065,7 +1065,7 @@ func newTranslateHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository, 
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, followingRepo)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	h.SetTranslator(translate.NewDeepL("dummy", false, nil))
 	return h, noteRepo, followingRepo
 }
@@ -1142,7 +1142,7 @@ func TestTranslate_NoQueryServiceRejects(t *testing.T) {
 	secret := "secret body"
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &secret}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen) // queryService=nil
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen) // queryService=nil
 	h.SetTranslator(translate.NewDeepL("dummy", false, nil))
 	rec := postExtra(h.Translate, `{"noteId":"n1","targetLang":"en"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1161,7 +1161,7 @@ func TestShowPartialBulk_Success(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, nil, nil, idGen)
 
 	noteRepo.Notes["n1"] = &model.Note{
 		ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic,
@@ -1179,7 +1179,7 @@ func TestShowPartialBulk_DiffShape(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	text := "hello"
 	noteRepo.Notes["n1"] = &model.Note{
 		ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic,
@@ -1215,7 +1215,7 @@ func (f *failingFindManyRepo) FindManyByIDsWithUser(_ []string) ([]*model.Note, 
 
 func TestShowPartialBulk_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failingFindManyRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(&failingFindManyRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.ShowPartialBulk, `{"noteIds":["n1"]}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -1237,7 +1237,7 @@ func TestShowPartialBulk_NoQueryServiceRejects(t *testing.T) {
 	// fail-closed 挙動を担保する。
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
 	noteRepo.Notes["n1"] = &model.Note{
 		ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic,
 		User: &model.User{ID: "u1"},
@@ -1261,7 +1261,7 @@ func TestFavoritesCreate_CreateError(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	h.SetFavoriteRepo(&failingFavCreateRepo{testutil.NewMockNoteFavoriteRepository()})
 	rec := postExtra(h.FavoritesCreate, `{"noteId":"n1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -1277,7 +1277,7 @@ func TestFavoritesDelete_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	noteRepo := testutil.NewMockNoteRepository()
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
-	h := NewHandler(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, nil, nil, nil, nil, nil, idGen)
 	// note 存在 + favorite 存在の状態で Delete だけ失敗させ、500 経路を踏ませる。
 	failing := &failingFavDeleteRepo{testutil.NewMockNoteFavoriteRepository()}
 	failing.Favorites["u1:n1"] = &model.NoteFavorite{UserID: "u1", NoteID: "n1"}
@@ -1294,7 +1294,7 @@ func (f *failingFeaturedRepo) ListFeatured(_, _ string, _, _ int) ([]*model.Note
 
 func TestFeatured_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failingFeaturedRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(&failingFeaturedRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.Featured, `{}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1314,7 +1314,7 @@ func TestUnrenote_ListError(t *testing.T) {
 	noteRepo.Notes["orig"] = &model.Note{ID: "orig", UserID: "u1"}
 	failing := &failingListRenotesRepo{MockNoteRepository: noteRepo}
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(failing, nil, corenote.NewDeleteService(failing), nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(failing, nil, corenote.NewDeleteService(failing), nil, nil, nil, nil, nil, idGen)
 
 	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
 
@@ -1328,7 +1328,7 @@ func TestUnrenote_DeleteError(t *testing.T) {
 	noteRepo.Notes["rn1"] = &model.Note{ID: "rn1", UserID: "u1", RenoteID: &renoteID}
 	idGen, _ := id.NewGenerator("aidx")
 	deleteSvc := corenote.NewDeleteService(&failingDeleteNoteRepo{noteRepo})
-	h := NewHandler(noteRepo, nil, deleteSvc, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, deleteSvc, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.Unrenote, `{"noteId":"orig"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1341,7 +1341,7 @@ func (f *failingMentionsRepo) ListMentions(_, _ string, _ bool, _ int, _, _ stri
 
 func TestMentions_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(&failingMentionsRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(&failingMentionsRepo{testutil.NewMockNoteRepository()}, nil, nil, nil, nil, nil, nil, nil, idGen)
 	rec := postExtra(h.Mentions, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1365,7 +1365,7 @@ func captureTranslateHandler(t *testing.T) (*Handler, *testutil.MockNoteReposito
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	querySvc := corenote.NewQueryService(noteRepo, followingRepo)
-	h := NewHandler(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, querySvc, nil, nil, nil, nil, idGen)
 	h.SetTranslator(translate.NewDeepLWithClient("key", srv.URL, srv.Client()))
 	return h, noteRepo, &sent
 }
@@ -1417,7 +1417,7 @@ func TestTranslate_TranslatorNotConfigured_Unavailable(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
 	tr := &notConfiguredTranslator{}
 	h.SetTranslator(tr)
 

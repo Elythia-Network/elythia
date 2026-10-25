@@ -114,7 +114,7 @@ func TestFeatured_DBFiltersLikeUpstream(t *testing.T) {
 
 	rc := repository.NewRelationCacheWithTTL(db, time.Hour)
 	newHandler := func() *Handler {
-		h := NewHandler(repository.NewNoteRepository(db), nil, nil, nil, nil, nil, nil, nil, idGen)
+		h := newHandlerNilDeps(repository.NewNoteRepository(db), nil, nil, nil, nil, nil, nil, nil, idGen)
 		h.SetUserRepo(repository.NewUserRepositoryWithRelationCache(db, rc))
 		h.SetMutingRepo(repository.NewMutingRepositoryWithRelationCache(db, rc))
 		h.SetBlockingRepo(repository.NewBlockingRepositoryWithRelationCache(db, rc))

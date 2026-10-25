@@ -45,7 +45,7 @@ func newTranslateHiddenFixture(t *testing.T) *translateHiddenFixture {
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h := NewHandler(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
+	h := newHandlerNilDeps(noteRepo, nil, nil, corenote.NewQueryService(noteRepo, followingRepo), nil, nil, nil, nil, idGen)
 	h.SetUserRepo(userRepo)
 	h.SetUserFollowingRepo(followingRepo)
 	h.SetTranslator(translate.NewDeepLWithClient("key", srv.URL, srv.Client()))

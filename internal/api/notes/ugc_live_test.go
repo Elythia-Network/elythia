@@ -12,7 +12,7 @@ func TestUGCVisibilityLookupIsLive(t *testing.T) {
 
 	h := &Handler{}
 	current := "all"
-	h.SetUGCVisibilityLookup(func() string { return current })
+	h.ugcVisibilityFn = func() string { return current }
 	if got := h.ugcVisibilityNow(); got != "all" {
 		t.Fatalf("起動時: want all, got %q", got)
 	}

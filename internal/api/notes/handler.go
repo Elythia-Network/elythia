@@ -92,21 +92,30 @@ type Handler struct {
 	// myNoteFavorited1 を付与するのに使う (#1762)。未配線時は付与しない。
 	achievementGranter AchievementGranter
 	bufReader          entity.BufferedReactionsReader
-	// ugcVisibilityFn controls what unauthenticated visitors can see.
+	// ugcVisibilityFn returns meta.ugcVisibilityForVisitor, which controls what
+	// unauthenticated visitors can see: "all", "local" or "none". nil and ""
+	// mean "all".
 	//
 	// **毎回読む。** 起動時に文字列を焼き込むと、運営者が管理画面で締めても
 	// プロセスを再起動するまで反映されない。`/api/meta` と管理画面は新しい値を
 	// 返し、robots.txt と SSR も毎回 meta を読むので「ブラウザで見ると効いて
 	// いる」ように見えるのに、API は匿名に本文を返し続ける。
+	//
+	// nil か空文字だと、匿名 visitor への露出を `ugcVisibilityForVisitor` で gate
+	// できない (空文字は "none" でも "local" でもないので素通し)。列は
+	// `NOT NULL DEFAULT 'local'` なので、空になるのは配線が漏れたときだけ。以前は
+	// setter で入れて起動時に検査していた (#2708) が、#3831 で構築子の必須の引数にした。
 	ugcVisibilityFn func() string
-	// ugcVisibility controls what unauthenticated visitors can see.
-	// "all" (default), "local", "none"
-	ugcVisibility string
-	translator    translate.Translator
+	translator      translate.Translator
 	// policyProvider は LocalTimeline / GlobalTimeline / HybridTimeline で
 	// ltlAvailable / gtlAvailable policy を gate するために使う (#1026)。
 	// 匿名 viewer (userID="") に対しても base policies を返す upstream 互換
 	// semantics で、middleware ではなく handler 内で gate する。
+	//
+	// nil だと timeline の可視性 gate (`timelineAvailable`) に加え、
+	// `canSearchNotes` (`handler.go`)・`canUseTranslator` (`handler_extra.go`)・
+	// `noteDraftLimit` / `scheduledNoteLimit` (`handler_drafts.go`) も同時に素通しになる。
+	// 以前は setter で入れて起動時に検査していた (#2683) が、#3831 で構築子の必須の引数にした。
 	policyProvider role.PolicyProvider
 	// scheduledNoteEnqueuer は drafts/create で `isActuallyScheduled=true`
 	// の draft を delayed queue に enqueue するための narrow interface (#1040)。
@@ -122,30 +131,18 @@ type Handler struct {
 	// (upstream featured.ts の globalNotesRankingCache)。channel ranking は cache
 	// しない (channel ごとなので)。
 	featuredGlobalCache FeaturedRankingCache
-	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// noteHider applies the per-viewer hideNote gate to the notes this handler
+	// packs (#3786). nil だと匿名の閲覧者に ugcVisibilityForVisitor が効かない
+	// (fail-open)。以前は setter で入れて起動時に検査していたが、#3831 で構築子の
+	// 必須の引数にした。
 	noteHider *notehide.Hider
 	// entityPacker は投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
-	// 持つ (#3790)。組み立てで渡す。
+	// 持つ (#3790)。mediaURL を持たない Packer だと、リモートのメディアの URL を生の
+	// まま返し、閲覧者の IP がリモートへ漏れる。#3831 で構築子の必須の引数にした。
+	// mediaURL を持つことは型では保証できないので、渡す値そのものは起動時の検査の
+	// `entityPacker.mediaURL` の行が見る。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
 // is still pinned at request time.
@@ -216,14 +213,6 @@ func (h *Handler) SetScheduledNoteEnqueuer(e ScheduledNoteEnqueuer) {
 	h.scheduledNoteEnqueuer = e
 }
 
-// SetPolicyProvider wires a role policy source so timeline endpoints gate
-// access by ltlAvailable / gtlAvailable (#1026). nil 時は gate を skip する
-// (= test 経路 / 旧挙動互換)。匿名 viewer (userID="") には base policies を
-// 返す upstream 互換 semantics を要求する。
-func (h *Handler) SetPolicyProvider(p role.PolicyProvider) {
-	h.policyProvider = p
-}
-
 // SetChannelMutingRepo attaches a ChannelMutingRepository so timeline handlers
 // can exclude notes posted to channels the viewer has muted.
 func (h *Handler) SetChannelMutingRepo(r repository.ChannelMutingRepository) {
@@ -268,25 +257,13 @@ func (h *Handler) SetTranslator(t translate.Translator) {
 	h.translator = t
 }
 
-// SetUGCVisibility sets the visitor content visibility policy from meta.
-//
-// Deprecated: 固定値を焼き込む形。`SetUGCVisibilityLookup` を使うこと。
-// テストの利便のために残してある。
-func (h *Handler) SetUGCVisibility(v string) {
-	h.ugcVisibility = v
-}
-
-// SetUGCVisibilityLookup wires a live lookup of the policy.
-func (h *Handler) SetUGCVisibilityLookup(fn func() string) {
-	h.ugcVisibilityFn = fn
-}
-
-// ugcVisibilityNow resolves the current policy.
+// ugcVisibilityNow resolves the current policy. It returns "" (= "all") when
+// no lookup is wired.
 func (h *Handler) ugcVisibilityNow() string {
 	if h.ugcVisibilityFn != nil {
 		return h.ugcVisibilityFn()
 	}
-	return h.ugcVisibility
+	return ""
 }
 
 // visitorHidesAll reports whether viewer is an anonymous visitor who must get
@@ -426,6 +403,10 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 // queryService/timelineService/reactionService/pollService/searchService が
 // nil の場合、それぞれの依存に対応するエンドポイントは利用不可となる
 // (テストで一部だけ初期化する用途を許容する)。
+//
+// noteHider, entityPacker, policyProvider and ugcVisibility gate what a
+// viewer may see. ugcVisibility is called on every request, so a change in
+// the admin panel takes effect without a restart.
 func NewHandler(
 	noteRepo repository.NoteRepository,
 	createService *note.CreateService,
@@ -436,7 +417,15 @@ func NewHandler(
 	pollService *poll.Service,
 	searchService *search.Service,
 	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	policyProvider role.PolicyProvider,
+	ugcVisibility func() string,
 ) *Handler {
+	// 入れ忘れると黙って劣化する依存は、構築子の必須の引数で受ける (#3831)。以前は
+	// setter で後から入れ、recordCriticalWiring が起動時に入れ忘れを見ていた。
+	// nil は渡せるので、本番の組み立てで nil が残らないことは internal/server の
+	// TestBuiltHandlersHaveNoNilDependencies が見る。
 	return &Handler{
 		noteRepo:        noteRepo,
 		createService:   createService,
@@ -447,6 +436,10 @@ func NewHandler(
 		pollService:     pollService,
 		searchService:   searchService,
 		idGen:           idGen,
+		noteHider:       noteHider,
+		entityPacker:    entityPacker,
+		policyProvider:  policyProvider,
+		ugcVisibilityFn: ugcVisibility,
 	}
 }
 
@@ -1494,17 +1487,9 @@ func (h *Handler) PackForEmbed(ctx context.Context, n *model.Note) entity.NoteEn
 	return h.packReferencedNote(ctx, n, nil, true)
 }
 
-// HasPolicyProvider reports whether the role policy provider was wired.
-//
-// 未配線だと timeline の可視性 gate (`timelineAvailable`) に加え、
-// `canSearchNotes` (`handler.go`)・`canUseTranslator` (`handler_extra.go`)・
-// `noteDraftLimit` (`handler_drafts.go`) も同時に素通しになる。**1 つの nil で
-// 4 箇所**。起動時検査に使う (#2683)。
-func (h *Handler) HasPolicyProvider() bool { return h.policyProvider != nil }
-
 // HasDriveFileRepo / HasMetaRepo / HasBlockingRepo / HasMutingRepo /
-// HasChannelMutingRepo / HasUserFollowingRepo / HasUGCVisibility report whether
-// the visibility gates were wired (#2708).
+// HasChannelMutingRepo / HasUserFollowingRepo report whether the visibility
+// gates were wired (#2708).
 //
 // 未配線時にそれぞれ:
 //
@@ -1525,8 +1510,6 @@ func (h *Handler) HasPolicyProvider() bool { return h.policyProvider != nil }
 //     timeline・HTL の followed-channel 差し引き の全経路が死ぬ
 //   - userFollowingRepo: followers 限定投稿への返信が非フォロワーの HTL / STL
 //     に出る
-//   - ugcVisibility: 匿名 visitor への露出を `ugcVisibilityForVisitor` で
-//     gate できない
 func (h *Handler) HasDriveFileRepo() bool { return h.driveFileRepo != nil }
 
 // HasMetaRepo reports whether the meta repository was wired.
@@ -1549,9 +1532,3 @@ func (h *Handler) HasRenoteMutingRepo() bool { return h.renoteMutingRepo != nil 
 
 // HasUserFollowingRepo reports whether the following repository was wired.
 func (h *Handler) HasUserFollowingRepo() bool { return h.userFollowingRepo != nil }
-
-// HasUGCVisibility reports whether the visitor content visibility policy was set.
-//
-// **空文字は gate 無効**と同義 (`"none"` でも `"local"` でもないので素通し)。
-// 列は `NOT NULL DEFAULT 'local'` なので、空になるのは配線が漏れたときだけ。
-func (h *Handler) HasUGCVisibility() bool { return h.ugcVisibilityNow() != "" }

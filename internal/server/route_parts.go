@@ -6,6 +6,7 @@ import (
 	apibubblegame "github.com/elythia-network/elythia/internal/api/bubblegame"
 	apichat "github.com/elythia-network/elythia/internal/api/chat"
 	"github.com/elythia-network/elythia/internal/api/drive"
+	"github.com/elythia-network/elythia/internal/api/notes"
 	"github.com/elythia-network/elythia/internal/api/oauth"
 	apiresetpassword "github.com/elythia-network/elythia/internal/api/resetpassword"
 	apireversi "github.com/elythia-network/elythia/internal/api/reversi"
@@ -25,7 +26,7 @@ import (
 
 // routeParts holds the components setupRoutes builds in its own body (not in
 // buildHandlers or buildCore), or through buildStream, whose dependencies are
-// required constructor arguments (#3823, #3827, #3829). 本番では読まない。
+// required constructor arguments (#3823, #3827, #3829, #3831). 本番では読まない。
 //
 // 構築子の必須の引数にした依存は、型では渡し忘れを防げても nil は渡せる。
 // TestBuiltHandlersHaveNoNilDependencies が組み立てた後の部品のフィールドを見て、
@@ -76,4 +77,7 @@ type routeParts struct {
 	postScheduledNoteProcessor *processors.PostScheduledNoteProcessor
 	deliverProcessor           *processors.DeliverProcessor
 	inboxProcessor             *processors.InboxProcessor
+
+	// notes の handler (#3831)。buildHandlers より前、setupRoutes の本文で作る。
+	notes *notes.Handler
 }

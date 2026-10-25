@@ -85,7 +85,7 @@ func newTimelineHandler(t *testing.T, noteRepo *testutil.MockNoteRepository, tl 
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	return NewHandler(noteRepo, createSvc, deleteSvc, querySvc, tl, nil, nil, nil, idGen)
+	return newHandlerNilDeps(noteRepo, createSvc, deleteSvc, querySvc, tl, nil, nil, nil, idGen)
 }
 
 // seedTimelineNote creates a note in the repo and returns its id.
@@ -189,11 +189,11 @@ func (s *stubTimelinePolicyProvider) GetUserPolicies(userID string) map[string]a
 func TestLocalTimeline_LtlDisabled_Anonymous(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"": {"ltlAvailable": false},
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	require.NoError(t, h.LocalTimeline(c))
@@ -205,11 +205,11 @@ func TestLocalTimeline_LtlDisabled_Anonymous(t *testing.T) {
 func TestLocalTimeline_LtlDisabled_AuthenticatedUser(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"alice": {"ltlAvailable": false},
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	setAuthUser(c, &model.User{ID: "alice"})
@@ -221,11 +221,11 @@ func TestLocalTimeline_LtlDisabled_AuthenticatedUser(t *testing.T) {
 func TestLocalTimeline_LtlEnabled_PassesThrough(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"": {"ltlAvailable": true},
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	require.NoError(t, h.LocalTimeline(c))
@@ -236,11 +236,11 @@ func TestLocalTimeline_LtlEnabled_PassesThrough(t *testing.T) {
 func TestGlobalTimeline_GtlDisabled(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"": {"gtlAvailable": false},
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/global-timeline", `{}`)
 	require.NoError(t, h.GlobalTimeline(c))
@@ -254,11 +254,11 @@ func TestGlobalTimeline_GtlDisabled(t *testing.T) {
 func TestHybridTimeline_LtlDisabledRejects(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"alice": {"ltlAvailable": false, "gtlAvailable": true},
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/hybrid-timeline", `{}`)
 	setAuthUser(c, &model.User{ID: "alice"})
@@ -307,7 +307,7 @@ func TestLocalTimeline_WithRepliesOnlyOK(t *testing.T) {
 func TestLocalTimeline_NoPolicyProviderSkipsGate(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	// SetPolicyProvider を呼ばない
+	// policyProvider は nil のまま (newHandlerNilDeps)
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	require.NoError(t, h.LocalTimeline(c))
@@ -322,11 +322,11 @@ func TestLocalTimeline_NoPolicyProviderSkipsGate(t *testing.T) {
 func TestLocalTimeline_MissingPolicyKeyDenies(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"": {}, // empty policies map (= key 不在)
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	require.NoError(t, h.LocalTimeline(c))
@@ -338,11 +338,11 @@ func TestLocalTimeline_MissingPolicyKeyDenies(t *testing.T) {
 func TestLocalTimeline_NonBoolPolicyValueDenies(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	h := newTimelineHandler(t, noteRepo, newFailingTimelineService(t))
-	h.SetPolicyProvider(&stubTimelinePolicyProvider{
+	h.policyProvider = &stubTimelinePolicyProvider{
 		policiesByUser: map[string]map[string]any{
 			"": {"ltlAvailable": "yes"}, // 文字列 (production では起きないが defensive)
 		},
-	})
+	}
 
 	c, rec := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
 	require.NoError(t, h.LocalTimeline(c))
@@ -764,7 +764,7 @@ func TestTimeline_PageFilterLoadsOnceAndSkipsPassedNotes(t *testing.T) {
 		require.NoError(t, fanout.Push(context.Background(), coretimeline.HomeTimelineName("viewer"), nid, 100))
 	}
 
-	h := NewHandler(spy, corenote.NewCreateService(mock, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil),
+	h := newHandlerNilDeps(spy, corenote.NewCreateService(mock, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil),
 		corenote.NewDeleteService(mock), corenote.NewQueryService(mock, nil), tl, nil, nil, nil, idGen)
 	muting := &countingMutingRepo{MockMutingRepository: testutil.NewMockMutingRepository()}
 	muting.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}
