@@ -15,7 +15,7 @@ import (
 func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	// 依存が未配線だと bind より前に早期 return するので配線する。
-	h.SetAccessTokenRepo(testutil.NewMockAccessTokenRepository())
+	h.accessTokenRepo = testutil.NewMockAccessTokenRepository()
 	h.SetRegistryRepo(testutil.NewMockRegistryRepository())
 	h.SetTransferEnqueuer(&stubTransferEnqueuer{})
 	h.SetGalleryRepo(&stubGalleryRepo{})

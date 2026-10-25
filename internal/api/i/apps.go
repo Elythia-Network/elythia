@@ -188,7 +188,7 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, apierr.Error("CREDENTIAL_REQUIRED", "Credential required.", "6f1f0d3a-3d5b-4b1f-9c3e-2a6d1e5b8c47"))
 	}
 	// repo 未配線は認証の**後**に見る。前に置くと未認証リクエストにも 204 を返す
-	// (起動時の HasAccessTokenRepo 検査があるので production には届かないが、
+	// (accessTokenRepo は構築子の必須の引数なので production には届かないが、
 	// 認証を handler に移した以上、順序で守るべきもの)。
 	if h.accessTokenRepo == nil {
 		return c.NoContent(http.StatusNoContent)

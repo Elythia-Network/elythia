@@ -32,10 +32,12 @@ import (
 	"github.com/elythia-network/elythia/internal/api/users"
 	apiwebhooks "github.com/elythia-network/elythia/internal/api/webhooks"
 	"github.com/elythia-network/elythia/internal/api/wellknown"
+	"github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/stream"
 )
 
 // apiHandlers holds the API handlers setupRoutes builds through buildHandlers
@@ -49,9 +51,9 @@ import (
 // starts no goroutine, registers no shutdown hook and writes no global. Their
 // dependencies are limited to the repositories, the core services, the
 // federation parts, server configuration, the Server's DB handle, echo
-// instance and background work group, the ID generator, and the values
-// setupRoutes builds before calling buildHandlers and passes in as arguments
-// (#3817), and nothing else.
+// instance, background work group and auth middleware, the ID generator, and
+// the values setupRoutes builds before calling buildHandlers and passes in as
+// arguments (#3817, #3827), and nothing else.
 //
 // A handler is listed only if building it at the position of usersHandler
 // (where setupRoutes calls buildHandlers) adds no late setter edge: no setter
@@ -62,8 +64,8 @@ import (
 // inside an if or inside another call, or are built before usersHandler stay
 // in setupRoutes (docs/architecture.md 4.2).
 //
-// buildHandlers only constructs. The dependencies that #3817 turned into
-// constructor arguments are passed here; every other setter on these handlers
+// buildHandlers only constructs. The dependencies that #3817 and #3827 turned
+// into constructor arguments are passed here; every other setter on these handlers
 // is still called at its old position in setupRoutes, and every route is still
 // registered there.
 type apiHandlers struct {
@@ -101,7 +103,7 @@ type apiHandlers struct {
 
 // buildHandlers builds the API handlers from w.repos, coreSvcs and fedSvcs,
 // in the order setupRoutes used to build them. It reads s.db, s.config,
-// s.background and s.echo (the endpoints handler reads the echo routes when a
+// s.background, s.auth and s.echo (the endpoints handler reads the echo routes when a
 // request comes, not here, because not every route is registered yet).
 // coreSvcs and fedSvcs are the values buildCore and buildFederation returned;
 // they are passed in rather than read back from w.core and w.fed so that
@@ -112,10 +114,15 @@ type apiHandlers struct {
 // buildHandlers that the handlers take as required constructor arguments
 // (#3817): the note hider, the entity packer, the user packer shared with the
 // follow webhooks, the cached meta repository, and the read-time lookups of
-// the abuseReport and signupApplicationReceived notifications. A dependency
-// whose absence degrades a handler silently is a constructor argument, so
-// leaving it out does not compile, where it used to be a setter that the
-// startup check (recordCriticalWiring) had to catch.
+// the abuseReport and signupApplicationReceived notifications, and for the i
+// handler (#3827) the temp secret guard of i/2fa/register and the revoke
+// publisher buildStream built. A dependency whose absence degrades a handler
+// silently is a constructor argument, so leaving it out does not compile,
+// where it used to be a setter that the startup check (recordCriticalWiring)
+// had to catch.
+//
+// twoFAPendingGuard is built by setupRoutes from s.redis.Default, not here:
+// TestBuildHandlersFillsEveryField builds a Server without Redis clients.
 func (s *Server) buildHandlers(
 	w *wiring,
 	coreSvcs core,
@@ -128,6 +135,8 @@ func (s *Server) buildHandlers(
 	abuseNotifStates notifications.AbuseReportStateLookup,
 	abuseUnresolvedCount func() (int64, error),
 	signupApplicationNotifLookup entity.SignupApplicationLookup,
+	twoFAPendingGuard twofactor.PendingGuard,
+	streamRevokePublisher *stream.StreamRevokePublisher,
 ) apiHandlers {
 	// 下の構築の行は、#3694 で setupRoutes にあった行を移したもので、#3817 で構築子の
 	// 必須の引数にした依存を足した (setupRoutes で setter に渡していたのと同じ式)。
@@ -142,6 +151,7 @@ func (s *Server) buildHandlers(
 	bubbleGameRepo := w.repos.bubbleGame
 	promoReadRepo := w.repos.promoRead
 	signupTicketRepo := w.repos.signupTicket
+	accessTokenRepo := w.repos.accessToken
 	driveFileRepo := w.repos.driveFile
 	mutingRepo := w.repos.muting
 	blockingRepo := w.repos.blocking
@@ -162,6 +172,7 @@ func (s *Server) buildHandlers(
 	pageService := coreSvcs.page
 	flashService := coreSvcs.flash
 	roleService := coreSvcs.role
+	totpReplayGuard := coreSvcs.totpReplayGuard
 	apRenderer := fedSvcs.apRenderer
 	apURLs := fedSvcs.apURLs
 	inboxSoftwareChecker := fedSvcs.inboxSoftwareChecker
@@ -173,7 +184,11 @@ func (s *Server) buildHandlers(
 	usersHandler := users.NewHandler(userService, followingService, noteRepo, idGen, noteHider, entityPacker,
 		roleService, metaRepo, func() string { return metaUGCVisibility(metaRepo) },
 		channelMutingRepo, mutingRepo, blockingRepo, userRelationRepo)
-	iHandler := i.NewHandler(userService, idGen)
+	// i の handler の、入れ忘れると黙って劣化する依存 (#3827)。s.auth は i/regenerate-token
+	// などで旧 token を auth cache から即時に落とす (#884)。followingService は鍵を外した
+	// ときの一括承認 (#3466)、s.background は世代の停止で待つ箱 (#3661)。
+	iHandler := i.NewHandler(userService, idGen, noteHider, entityPacker, roleService, totpReplayGuard,
+		twoFAPendingGuard, s.auth, accessTokenRepo, streamRevokePublisher, followingService, s.background)
 	webhookHandler := apiwebhooks.NewHandler(webhookRepo, idGen, roleService) // #1029: webhookLimit
 	notificationsHandler := notifications.NewHandler(notificationService, idGen, entityPacker, noteHider,
 		roleService, abuseNotifStates, abuseUnresolvedCount, signupApplicationNotifLookup)

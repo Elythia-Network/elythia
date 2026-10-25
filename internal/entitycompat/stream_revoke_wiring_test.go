@@ -5,8 +5,8 @@ import "testing"
 // 資格情報の失効で /streaming の接続を閉じる経路は、publish 側 (各 handler) と
 // 購読側 (stream.Manager) の両方が揃って初めて効く。
 //
-// **handler 側は起動時の critical wiring 検査 (i.streamRevoker /
-// admin.userStreamRevoker / oauth.streamRevoker) が見るが、購読側は見ない。**
+// **handler 側は構築子の必須の引数 (i・oauth は #3827、admin は #3823) で、nil を渡す形は
+// TestBuiltHandlersHaveNoNilDependencies が見るが、購読側は見ない。**
 // `SubscribeStreamRevoke` を落としても publish は成功し、ビルドもテストも通るまま
 // どの接続も閉じなくなる。失効した token の WebSocket が通知・DM を受け取り続ける
 // 状態へ黙って戻るので、配線の 1 行をここで固定する。

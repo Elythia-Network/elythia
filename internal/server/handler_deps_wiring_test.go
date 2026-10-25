@@ -13,16 +13,17 @@ import (
 )
 
 // requiredDepHandlers are the apiHandlers fields whose handlers take their
-// dependencies as required constructor arguments (#3817).
+// dependencies as required constructor arguments (#3817, #3827).
 //
-// i の handler は stream の節で作る値に依存するので、まだ setter で入れている
-// (#3812 の段 (4))。それ以外の apiHandlers の欄 (wellknown・nodeinfo など) は
-// #3817 の対象ではないので見ない。
+// i の handler は buildStream で作る revoke publisher に依存していたので、buildStream を
+// buildHandlers より前へ動かした #3827 で足した。それ以外の apiHandlers の欄
+// (wellknown・nodeinfo など) は #3817 の対象ではないので見ない。
 var requiredDepHandlers = []string{
 	"webhook", "notifications", "hashtags", "gallery", "blocking", "mute", "renoteMute",
 	"drive", "federation", "flash", "following", "userList", "auth", "bubbleGame",
 	"invite", "pages",
 	"users", "channels", "antennas", "clips", "roles", "ap",
+	"i",
 }
 
 // handlerNilAllowed lists the fields that stay nil on a server built by
@@ -190,7 +191,7 @@ func (c nilDepCheck) component(t *testing.T, container, name string, f reflect.V
 	assert.Positive(t, n, "%s.%s に nil になりうるフィールドが 1 つも無い (抽出が空振りしていないか)", container, name)
 }
 
-// requiredDepChecks names fields that #3817, #3823 and #3825 turned into
+// requiredDepChecks names fields that #3817, #3823, #3825 and #3827 turned into
 // constructor arguments. TestBuiltHandlersHaveNoNilDependencies must check each of them.
 var requiredDepChecks = []string{
 	"webhook.rolePolicyProvider",
@@ -255,6 +256,10 @@ var requiredDepChecks = []string{
 	"driveService.entityPacker", "driveService.roleChecker", "driveService.modLog", "driveService.modLogUsers",
 	"userService.entityPacker",
 	"webhookNoteHook.entityPacker", "webhookReactionHook.entityPacker", "webhookFollowingHook.packer",
+	// ここから #3827 (i と oauth の handler)。
+	"i.noteHider", "i.entityPacker", "i.roleProvider", "i.totpReplayGuard", "i.twoFAPending",
+	"i.authInvalidator", "i.accessTokenRepo", "i.streamRevoker", "i.followRequestAccepter", "i.background",
+	"oauth.streamRevoker",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

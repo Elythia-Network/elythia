@@ -45,8 +45,7 @@ func TestRegenerateToken_RevokesOldTokenStreamsAfterNotifying(t *testing.T) {
 	oldToken := *user.Token
 	log := &streamEventLog{}
 	h.SetMainStreamPublisher(loggingMainPublisher{log})
-	h.SetStreamRevoker(loggingStreamRevoker{log})
-	assert.True(t, h.HasStreamRevoker())
+	h.streamRevoker = loggingStreamRevoker{log}
 
 	rec := postExtra(h.RegenerateToken, `{"password":"pass"}`, user)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -61,7 +60,7 @@ func TestRegenerateToken_WrongPasswordDoesNotRevokeStreams(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	user := setupUserWithPassword(repo, "u1", "pass")
 	log := &streamEventLog{}
-	h.SetStreamRevoker(loggingStreamRevoker{log})
+	h.streamRevoker = loggingStreamRevoker{log}
 
 	rec := postExtra(h.RegenerateToken, `{"password":"wrong"}`, user)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -74,9 +73,9 @@ func TestRevokeToken_RevokesThatTokenStreams(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 	log := &streamEventLog{}
-	h.SetStreamRevoker(loggingStreamRevoker{log})
+	h.streamRevoker = loggingStreamRevoker{log}
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t1"}`, stubUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -88,9 +87,9 @@ func TestRevokeToken_ForeignTokenDoesNotRevokeStreams(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", UserID: "someone-else"}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 	log := &streamEventLog{}
-	h.SetStreamRevoker(loggingStreamRevoker{log})
+	h.streamRevoker = loggingStreamRevoker{log}
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t1"}`, stubUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -102,14 +101,9 @@ func TestDeleteAccount_RevokesAllUserStreams(t *testing.T) {
 	h, repo, _ := newDeleteAccountHandler(t)
 	user := setupUserWithPassword(repo, "u1", "pass")
 	log := &streamEventLog{}
-	h.SetStreamRevoker(loggingStreamRevoker{log})
+	h.streamRevoker = loggingStreamRevoker{log}
 
 	rec := postExtra(h.DeleteAccount, `{"password":"pass"}`, user)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, []string{"revokeUser:u1"}, log.events)
-}
-
-func TestHasStreamRevoker_Unwired(t *testing.T) {
-	h, _ := newExtraHandler(t)
-	assert.False(t, h.HasStreamRevoker())
 }

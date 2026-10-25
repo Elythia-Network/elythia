@@ -59,7 +59,7 @@ func TestApps_ReturnsTokensWithApp(t *testing.T) {
 	// 別ユーザーの token は除外
 	tokens.Tokens["h3"] = &model.AccessToken{ID: "other", Hash: "h3", UserID: "other"}
 
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtra(h.Apps, `{}`, stubUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -97,7 +97,7 @@ func TestApps_SortByCreatedAtDesc(t *testing.T) {
 	t2 := idGen.Generate(time.Now().Add(time.Second))
 	tokens.Tokens["h1"] = &model.AccessToken{ID: t1, Hash: "h1", UserID: stubUser.ID}
 	tokens.Tokens["h2"] = &model.AccessToken{ID: t2, Hash: "h2", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtra(h.Apps, `{"sort":"+createdAt"}`, stubUser)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -143,7 +143,7 @@ func TestAuthorizedApps_ReturnsAppEntities(t *testing.T) {
 	tokens.Tokens["h2"] = &model.AccessToken{ID: idGen.Generate(time.Now()), Hash: "h2", UserID: stubUser.ID}
 	// 別ユーザーの token も除外。
 	tokens.Tokens["h3"] = &model.AccessToken{ID: "other-token", Hash: "h3", UserID: "other", AppID: &appID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtra(h.AuthorizedApps, `{}`, stubUser)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -179,7 +179,7 @@ func TestAuthorizedApps_Pagination(t *testing.T) {
 	tokens.Tokens["h1"] = &model.AccessToken{ID: t1, Hash: "h1", UserID: stubUser.ID, AppID: &a1}
 	tokens.Tokens["h2"] = &model.AccessToken{ID: t2, Hash: "h2", UserID: stubUser.ID, AppID: &a2}
 	tokens.Tokens["h3"] = &model.AccessToken{ID: t3, Hash: "h3", UserID: stubUser.ID, AppID: &a3}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	// limit=2, sort=asc (id 昇順) → t1(a1), t2(a2)。
 	rec := postExtra(h.AuthorizedApps, `{"limit":2,"sort":"asc"}`, stubUser)
@@ -210,7 +210,7 @@ func TestRevokeToken_Owned(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t1"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -224,7 +224,7 @@ func TestRevokeToken_ForeignTokenIsNoOp(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h2"] = &model.AccessToken{ID: "t2", Hash: "h2", UserID: "other"}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t2"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -235,7 +235,7 @@ func TestRevokeToken_ForeignTokenIsNoOp(t *testing.T) {
 
 func TestRevokeToken_UnknownTokenIsIdempotent(t *testing.T) {
 	h, _ := newExtraHandler(t)
-	h.SetAccessTokenRepo(testutil.NewMockAccessTokenRepository())
+	h.accessTokenRepo = testutil.NewMockAccessTokenRepository()
 	rec := postExtra(h.RevokeToken, `{"tokenId":"ghost"}`, stubUser)
 	// 存在しないなら 204 (idempotent)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -247,7 +247,7 @@ func TestRevokeToken_ByTokenHash(t *testing.T) {
 	// SHA-256("mytoken") をハッシュとして登録 (map key = hash)
 	hash := "1a17ea3569204d6c4114794ca73fa257457fc0612928c7bf024801659b77dba8"
 	repo.Tokens[hash] = &model.AccessToken{ID: "at1", Hash: hash, UserID: stubUser.ID}
-	h.SetAccessTokenRepo(repo)
+	h.accessTokenRepo = repo
 	// 生tokenで失効できる
 	rec := postExtra(h.RevokeToken, `{"token":"mytoken"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -271,9 +271,9 @@ func TestRevokeToken_ByRawTokenForAppIssuedToken(t *testing.T) {
 		Hash:   hashWithSecret,
 		UserID: stubUser.ID,
 	}
-	h.SetAccessTokenRepo(repo)
+	h.accessTokenRepo = repo
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	rec := postExtra(h.RevokeToken, `{"token":"`+rawToken+`"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -300,9 +300,9 @@ func TestRevokeToken_InvalidatorByTokenIDPath(t *testing.T) {
 		Hash:   "h_byid",
 		UserID: stubUser.ID,
 	}
-	h.SetAccessTokenRepo(repo)
+	h.accessTokenRepo = repo
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	rec := postExtra(h.RevokeToken, `{"tokenId":"at_byid_1"}`, stubUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -312,7 +312,7 @@ func TestRevokeToken_InvalidatorByTokenIDPath(t *testing.T) {
 
 func TestRevokeToken_NoParams(t *testing.T) {
 	h, _ := newExtraHandler(t)
-	h.SetAccessTokenRepo(testutil.NewMockAccessTokenRepository())
+	h.accessTokenRepo = testutil.NewMockAccessTokenRepository()
 	// tokenId も token も空 → 400
 	assert.Equal(t, http.StatusBadRequest, postExtra(h.RevokeToken, `{}`, stubUser).Code)
 }
@@ -343,7 +343,7 @@ func TestRevokeToken_AppCanRevokeItself(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtraAsApp(h.RevokeToken, `{"tokenId":"t1"}`, stubUser, "t1")
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -358,7 +358,7 @@ func TestRevokeToken_AppCannotRevokeOtherOwnToken(t *testing.T) {
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", UserID: stubUser.ID}
 	tokens.Tokens["h2"] = &model.AccessToken{ID: "t2", Hash: "h2", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtraAsApp(h.RevokeToken, `{"tokenId":"t2"}`, stubUser, "t1")
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -374,7 +374,7 @@ func TestRevokeToken_AppForeignTokenStaysNoOp(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h9"] = &model.AccessToken{ID: "t9", Hash: "h9", UserID: "other"}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtraAsApp(h.RevokeToken, `{"tokenId":"t9"}`, stubUser, "t1")
 	assert.Equal(t, http.StatusNoContent, rec.Code, "存在を漏らさない")
@@ -389,7 +389,7 @@ func TestRevokeToken_NativeSessionUnrestricted(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h2"] = &model.AccessToken{ID: "t2", Hash: "h2", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	// **native token の TokenID は必ず空文字**。auth.go の resolveUser が
 	// `put(token, user, nil, "", false)` を返すため。架空の値を置くと、production では
@@ -409,7 +409,7 @@ func TestRevokeToken_AppRevokesItselfByRawToken(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h1"] = &model.AccessToken{ID: "t1", Hash: "h1", Token: "raw_app_xyz", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtraAsApp(h.RevokeToken, `{"token":"raw_app_xyz"}`, stubUser, "t1")
 	assert.Equal(t, http.StatusNoContent, rec.Code, "raw token による自己失効ができる")
@@ -422,7 +422,7 @@ func TestRevokeToken_AppCannotRevokeOtherOwnTokenByRawToken(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	tokens := testutil.NewMockAccessTokenRepository()
 	tokens.Tokens["h2"] = &model.AccessToken{ID: "t2", Hash: "h2", Token: "raw_other", UserID: stubUser.ID}
-	h.SetAccessTokenRepo(tokens)
+	h.accessTokenRepo = tokens
 
 	rec := postExtraAsApp(h.RevokeToken, `{"token":"raw_other"}`, stubUser, "t1")
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -435,7 +435,7 @@ func TestRevokeToken_AppCannotRevokeOtherOwnTokenByRawToken(t *testing.T) {
 // 1384574d-... になり wire が食い違う。
 func TestRevokeToken_UnauthenticatedUsesEndpointSpecificError(t *testing.T) {
 	h, _ := newExtraHandler(t)
-	h.SetAccessTokenRepo(testutil.NewMockAccessTokenRepository())
+	h.accessTokenRepo = testutil.NewMockAccessTokenRepository()
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t1"}`, nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Contains(t, rec.Body.String(), "CREDENTIAL_REQUIRED")
@@ -447,7 +447,7 @@ func TestRevokeToken_UnauthenticatedUsesEndpointSpecificError(t *testing.T) {
 // upstream の 204 からさらに遠のく。
 func TestRevokeToken_SuspendedGets403(t *testing.T) {
 	h, _ := newExtraHandler(t)
-	h.SetAccessTokenRepo(testutil.NewMockAccessTokenRepository())
+	h.accessTokenRepo = testutil.NewMockAccessTokenRepository()
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"tokenId":"t1"}`))
@@ -465,10 +465,10 @@ func TestRevokeToken_SuspendedGets403(t *testing.T) {
 // **DB 障害を「失効した」(204) に丸めない** (#2792)。
 func TestRevokeToken_DBFailureIsNot204(t *testing.T) {
 	h, _ := newExtraHandler(t)
-	h.SetAccessTokenRepo(&failingAccessTokenRepo{
+	h.accessTokenRepo = &failingAccessTokenRepo{
 		MockAccessTokenRepository: testutil.NewMockAccessTokenRepository(),
 		err:                       errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
-	})
+	}
 	rec := postExtra(h.RevokeToken, `{"tokenId":"t1"}`, stubUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code, "DB 障害が 204 に化けている")
 }

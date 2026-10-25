@@ -157,7 +157,7 @@ func TestVerifyEmail_DBFailureIsNot4xx(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil), idGen)
+	h := NewHandler(coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil), idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	assert.Equal(t, http.StatusInternalServerError,
 		postExtra(h.VerifyEmail, `{"code":"abc"}`, stubUser).Code)

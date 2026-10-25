@@ -26,8 +26,7 @@ func (c *countingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) 
 func stoppedGroup(t *testing.T, h *Handler) *bgwork.Group {
 	t.Helper()
 	g := bgwork.New()
-	h.SetBackground(g)
-	require.True(t, h.HasBackground())
+	h.background = g
 	require.Zero(t, g.Stop(context.Background()))
 	return g
 }

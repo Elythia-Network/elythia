@@ -182,30 +182,14 @@ type Handler struct {
 	// testModeは2FAのTOTPの検証を素通しにする(本家UserAuthService.validateOtpの
 	// `NODE_ENV === 'test'`相当、#3780)。twofactor.ValidateWithReplayへ渡す。
 	testMode bool
-	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。未配線だと
-	// 匿名の閲覧者への ugcVisibilityForVisitor が効かないので、criticalWiring が
-	// 起動時に検査する。
+	// noteHider は閲覧者が見てはいけない投稿の中身を隠す (#3786)。無いと匿名の
+	// 閲覧者への ugcVisibilityForVisitor が効かないので、構築子の必須の引数で受ける
+	// (#3827)。
 	noteHider *notehide.Hider
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
 }
-
-// SetNoteHider wires the Hider that applies the per-viewer hideNote gate to
-// the notes this handler packs.
-func (h *Handler) SetNoteHider(n *notehide.Hider) { h.noteHider = n }
-
-// HasNoteHider reports whether SetNoteHider received a Hider. 未配線だと
-// 匿名の閲覧者に ugcVisibilityForVisitor が効かない (fail-open)。
-func (h *Handler) HasNoteHider() bool { return h.noteHider != nil }
-
-// SetEntityPacker wires the Packer this handler packs entities with (#3790).
-func (h *Handler) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとリモートのメディアの URL を生のまま返し、閲覧者の
-// IP がリモートへ漏れる。
-func (h *Handler) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // TokenInvalidator は i/regenerate-token / i/change-password 等の sensitive
 // 操作後に auth cache の旧 token entry を即時削除するための interface
@@ -453,26 +437,6 @@ type StreamRevoker interface {
 	RevokeAccessTokenStreams(userID, tokenID string)
 }
 
-// SetStreamRevoker wires the revoker used by i/regenerate-token,
-// i/revoke-token and i/delete-account.
-func (h *Handler) SetStreamRevoker(r StreamRevoker) {
-	h.streamRevoker = r
-}
-
-// HasStreamRevoker reports whether the stream revoker is wired.
-//
-// 未配線だと、失効させた token で張られていた WebSocket が**再接続するまで
-// 通知・DM・フォロワー限定投稿を受け取り続ける**。HTTP 側の失効
-// (HasAuthInvalidator) とは独立に効く。
-func (h *Handler) HasStreamRevoker() bool { return h.streamRevoker != nil }
-
-// SetAuthInvalidator attaches a token invalidator so RegenerateToken and
-// other sensitive endpoints can drop the old token from the auth cache
-// immediately (#884、security regression fix)。
-func (h *Handler) SetAuthInvalidator(inv TokenInvalidator) {
-	h.authInvalidator = inv
-}
-
 // invalidateUserTokenCache removes every cached entry that resolves to the
 // given userID, across all of the user's tokens (native login + access
 // tokens / multi-device sessions). Self-mutation that affects the entire
@@ -499,15 +463,6 @@ func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 	h.mainStreamPublisher = p
 }
 
-// SetTOTPReplayGuard wires the per-user replay guard used to refuse a
-// TOTP code that was already consumed within its acceptance window
-// (RFC 6238 §5.2). nil disables the protection. Affects i/2fa/done and
-// any sensitive endpoint that re-checks the TOTP via check2FAToken /
-// verify2FAToken. Also backs the single-use reservation for backup codes (#2852).
-func (h *Handler) SetTOTPReplayGuard(g twofactor.ReplayGuard) {
-	h.totpReplayGuard = g
-}
-
 // SetTestMode enables the upstream-compatible TOTP bypass of test runs (see
 // twofactor.ValidateWithReplay). Production leaves it false.
 func (h *Handler) SetTestMode(v bool) { h.testMode = v }
@@ -515,16 +470,6 @@ func (h *Handler) SetTestMode(v bool) { h.testMode = v }
 // SetPasswordHasher sets the Hasher that i/change-password hashes the new
 // password with. Unset, the default cost is used.
 func (h *Handler) SetPasswordHasher(hasher password.Hasher) { h.passwordHasher = hasher }
-
-// SetTwoFAPendingGuard wires the guard that bounds the lifetime and the
-// wrong-code budget of the temp secret issued by i/2fa/register. nil disables
-// the limit.
-func (h *Handler) SetTwoFAPendingGuard(g twofactor.PendingGuard) {
-	h.twoFAPending = g
-}
-
-// HasTwoFAPendingGuard reports whether the temp secret guard is wired.
-func (h *Handler) HasTwoFAPendingGuard() bool { return h.twoFAPending != nil }
 
 // SetInstanceRepo attaches an InstanceRepository so favorites/notifications
 // note embeds populate UserLite.Instance for remote users (#277).
@@ -627,12 +572,6 @@ type GalleryRepository interface {
 	ExistsLike(userID, postID string) (bool, error)
 }
 
-// SetAccessTokenRepo wires the access_token repo for i/authorized-apps and
-// i/revoke-token.
-func (h *Handler) SetAccessTokenRepo(r repository.AccessTokenRepository) {
-	h.accessTokenRepo = r
-}
-
 // SetGalleryRepo wires the gallery repo for i/gallery/*.
 func (h *Handler) SetGalleryRepo(r GalleryRepository) { h.galleryRepo = r }
 
@@ -725,18 +664,6 @@ type FollowRequestBulkAccepter interface {
 	AcceptAllRequests(followeeID string) error
 }
 
-// SetFollowRequestBulkAccepter wires the bulk acceptance of pending follow
-// requests run when i/update unlocks the account (upstream
-// acceptAllFollowRequests, #3466).
-func (h *Handler) SetFollowRequestBulkAccepter(a FollowRequestBulkAccepter) {
-	h.followRequestAccepter = a
-}
-
-// HasFollowRequestBulkAccepter reports whether the bulk acceptance was wired.
-//
-// 未配線だと、鍵を外しても溜まっていたリクエストが承認されずに残る。起動時検査に使う。
-func (h *Handler) HasFollowRequestBulkAccepter() bool { return h.followRequestAccepter != nil }
-
 // SetAnnouncementRepo wires the announcement repository used to compute
 // hasUnreadAnnouncement / unreadAnnouncements on /api/i.
 func (h *Handler) SetAnnouncementRepo(r AnnouncementUnreadSource) {
@@ -801,21 +728,59 @@ func (h *Handler) SetAvatarDecorationRepo(r repository.AvatarDecorationRepositor
 	h.avatarDecorationRepo = r
 }
 
-// SetBackground sets the group the work after a response runs in, so stopping
-// the server generation waits for it (#3661).
-func (h *Handler) SetBackground(g *bgwork.Group) { h.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (h *Handler) HasBackground() bool { return h.background != nil }
-
 // NewHandler creates a new account Handler.
-func NewHandler(userService *user.Service, idGen id.Generator) *Handler {
-	return &Handler{userService: userService, idGen: idGen}
-}
-
-// SetRoleProvider attaches a RoleProvider for dynamic role/policy resolution.
-func (h *Handler) SetRoleProvider(rp RoleProvider) {
-	h.roleProvider = rp
+//
+// The remaining arguments are the dependencies whose absence degrades the
+// handler silently:
+//
+//   - noteHider applies the per-viewer hideNote gate to the notes this
+//     handler packs (#3786); entityPacker packs entities and rewrites media
+//     URLs (#3790)
+//   - roleProvider resolves roles and policies (alwaysMarkNsfw,
+//     wordMuteLimit, canUpdateBioMedia, antennaLimit, avatarDecorationLimit)
+//   - totpReplayGuard refuses a TOTP code that was already consumed within its
+//     acceptance window (RFC 6238 §5.2) and backs the single-use reservation
+//     of backup codes (#2852); twoFAPending bounds the lifetime and the
+//     wrong-code budget of the temp secret issued by i/2fa/register
+//   - authInvalidator drops tokens from the auth cache right away (#884);
+//     accessTokenRepo backs i/revoke-token, i/apps and i/authorized-apps;
+//     streamRevoker closes the /streaming connections of a revoked credential
+//   - followRequestAccepter accepts the pending follow requests when the
+//     account stops being locked (#3466)
+//   - background is the work group the post-response work (rel=me
+//     verification and mail) runs in, so stopping a generation waits for it
+//     (#3661)
+//
+// 以前は setter で後から入れ、入れ忘れを起動時の検査 (criticalWiring) が見ていた。
+// 渡し忘れをコンパイルで落とすため、構築子の必須の引数で受ける (#3827)。
+func NewHandler(
+	userService *user.Service,
+	idGen id.Generator,
+	noteHider *notehide.Hider,
+	entityPacker *entity.Packer,
+	roleProvider RoleProvider,
+	totpReplayGuard twofactor.ReplayGuard,
+	twoFAPending twofactor.PendingGuard,
+	authInvalidator TokenInvalidator,
+	accessTokenRepo repository.AccessTokenRepository,
+	streamRevoker StreamRevoker,
+	followRequestAccepter FollowRequestBulkAccepter,
+	background *bgwork.Group,
+) *Handler {
+	return &Handler{
+		userService:           userService,
+		idGen:                 idGen,
+		noteHider:             noteHider,
+		entityPacker:          entityPacker,
+		roleProvider:          roleProvider,
+		totpReplayGuard:       totpReplayGuard,
+		twoFAPending:          twoFAPending,
+		authInvalidator:       authInvalidator,
+		accessTokenRepo:       accessTokenRepo,
+		streamRevoker:         streamRevoker,
+		followRequestAccepter: followRequestAccepter,
+		background:            background,
+	}
 }
 
 // SetRegistryRepo attaches a RegistryRepository for i/registry/* endpoints.
@@ -2815,52 +2780,3 @@ func (h *Handler) fillPinnedFields(ctx context.Context, u *model.User, profile *
 		}
 	}
 }
-
-// HasTOTPReplayGuard reports whether the TOTP one-time-use guard is wired.
-//
-// signin と /api/i の 2 経路が**同じ guard を共有する**。こちらが未配線だと
-// 一度観測された有効な TOTP コードを window 内で再利用できる (#2682)。
-//
-// 対象は 10 endpoint。check2FAToken を通る 7 つ (i/update-email /
-// i/2fa/register / i/2fa/unregister / i/2fa/remove-key / i/change-password /
-// i/delete-account / i/regenerate-token)、verify2FAToken を通る 2 つ (i/2fa/register-key /
-// i/2fa/key-done)、guard を直接引く i/2fa/done (handler_2fa.go)。
-// **guard はバックアップコードの予約にも使う** (#2852)。
-func (h *Handler) HasTOTPReplayGuard() bool { return h.totpReplayGuard != nil }
-
-// HasAuthInvalidator reports whether the auth cache invalidator is wired.
-//
-// 未配線だと失効させたはずの token が**auth cache の TTL のあいだ認証を
-// 通り続ける**。router 側のコメントもこれを security regression と呼んで
-// いる (#2682)。
-//
-// 引くのは 5 箇所: i/regenerate-token / i/revoke-token (apps.go) /
-// i/delete-account (handler_extra.go) / i/update / i/move (move.go)。
-// **失効の主経路である i/revoke-token を含む**ので、これだけを
-// regenerate-token の話と読まないこと。
-func (h *Handler) HasAuthInvalidator() bool { return h.authInvalidator != nil }
-
-// HasAccessTokenRepo reports whether the access_token repo is wired.
-//
-// **未配線を 204 と区別できない。** RevokeToken は repo が nil だと即
-// `204 No Content` を返すが、これは失効に成功したときの応答と同じ
-// (apps.go)。つまり i/revoke-token が「成功した」と言いながら何も消さず、
-// 同時に i/apps と i/authorized-apps が空配列を返すので、利用者からは
-// 「アプリは無い」と見えて食い違いにも気付けない。
-//
-// **HasAuthInvalidator では代替できない。** invalidator を引くのは repo の
-// early return より後なので、cache 側の検査が通っていても revoke 自体は
-// 起きていない。しかも失効漏れは cache TTL の 30 秒ではなく**恒久**
-// (#2682 review H-1)。
-func (h *Handler) HasAccessTokenRepo() bool { return h.accessTokenRepo != nil }
-
-// HasRoleProvider reports whether the role provider was wired.
-//
-// **1 つの nil で 4 つの gate が外れる**: alwaysMarkNsfw の自己解除防止
-// (`i/update`)、`wordMuteLimit`、`canUpdateBioMedia` (未配線を明示的に許可側へ
-// OR している)、`i/import-antennas` の `antennaLimit`
-// (`antennaImportWouldExceedLimit` が nil で false を返す)。加えて
-// `avatarDecorationLimit` が policy を読めず 1 固定になる (policy が 1 より
-// 大きい role には厳しく、0 の role には緩い側へ倒れる)。起動時検査に使う
-// (#2708)。
-func (h *Handler) HasRoleProvider() bool { return h.roleProvider != nil }

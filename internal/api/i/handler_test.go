@@ -53,7 +53,7 @@ func newHandlerWithFailingUnpinDelete(t *testing.T) (*Handler, *testutil.MockUse
 	piningRepo := &failingPiningDeleteRepo{MockUserNotePiningRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	return NewHandler(svc, idGen), mock
+	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), mock
 }
 
 func newHandlerWithFailingPiningCount(t *testing.T) (*Handler, *testutil.MockUserRepository, *testutil.MockNoteRepository) {
@@ -63,7 +63,7 @@ func newHandlerWithFailingPiningCount(t *testing.T) (*Handler, *testutil.MockUse
 	piningRepo := &failingPiningRepo{MockUserNotePiningRepository: testutil.NewMockUserNotePiningRepository()}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	return NewHandler(svc, idGen), userRepo, noteRepo
+	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), userRepo, noteRepo
 }
 
 // failingUserRepoForUpdate forces user.UpdateUser to fail.
@@ -86,7 +86,7 @@ func newHandlerWithFailingUpdate(t *testing.T) (*Handler, *testutil.MockUserRepo
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	return NewHandler(svc, idGen), mockUR
+	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), mockUR
 }
 
 // post is a small helper to invoke a handler with an authenticated request.
@@ -110,7 +110,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *test
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return h, userRepo, noteRepo, piningRepo
 }
 
@@ -254,7 +254,7 @@ func TestMe_AppTokenOmitsSecrets(t *testing.T) {
 func TestMe_CanChatFromRolePolicy(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 
-	h.SetEntityPacker(entity.NewPacker(entity.PackerDeps{CanChat: &stubMeCanChatLookup{result: false}}))
+	h.entityPacker = entity.NewPacker(entity.PackerDeps{CanChat: &stubMeCanChatLookup{result: false}})
 
 	user := &model.User{
 		ID:                "user-canchat",
@@ -588,7 +588,7 @@ func (s *stubRoleProvider) HasRolePolicy(_, policyKey string) bool {
 
 func TestMe_WithRoleProvider(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		admin:     true,
 		moderator: true,
 		roles: []*model.Role{
@@ -598,7 +598,7 @@ func TestMe_WithRoleProvider(t *testing.T) {
 			{ID: "r3", Name: "Supporter", IsPublic: true, DisplayOrder: 30},
 		},
 		policies: map[string]any{"gtlAvailable": true, "driveCapacityMb": 500},
-	})
+	}
 
 	user := &model.User{
 		ID:                "user1",
@@ -751,9 +751,9 @@ func TestUpdate_AvatarID_RestrictedByRole(t *testing.T) {
 
 	// policies map で canUpdateBioMedia=false を設定 (admin/moderator フラグ
 	// なし → HasRolePolicy が false を返す stub)。
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"canUpdateBioMedia": false},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarId":"file1"}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "policy=false で 403")
@@ -766,9 +766,9 @@ func TestUpdate_AvatarID_AllowedWhenPolicyTrue(t *testing.T) {
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
 
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"canUpdateBioMedia": true},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarId":"file1"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "policy=true なら通常成功")
@@ -780,9 +780,9 @@ func TestUpdate_AvatarID_NullClearAllowedRegardlessOfPolicy(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"canUpdateBioMedia": false},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarId":null}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "null clear は gate 対象外")
@@ -964,9 +964,9 @@ func TestUpdate_BannerID_RestrictedByRole(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"canUpdateBioMedia": false},
-	})
+	}
 
 	rec := post(h.Update, `{"bannerId":"file2"}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -978,7 +978,7 @@ func TestUpdate_AvatarID_NoRoleProviderSkipsGate(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	// SetRoleProvider を呼ばない
+	// roleProvider を入れない
 	rec := post(h.Update, `{"avatarId":"file1"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -988,10 +988,10 @@ func TestUpdate_AvatarID_AdminBypass(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		admin:    true,
 		policies: map[string]any{"canUpdateBioMedia": false},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarId":"file1"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "admin は policy=false でもバイパス")
@@ -1003,9 +1003,9 @@ func TestUpdate_AlwaysMarkNsfw_RestrictedByRole(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"alwaysMarkNsfw": true},
-	})
+	}
 
 	rec := post(h.Update, `{"alwaysMarkNsfw":false}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "policy=true で 403")
@@ -1021,9 +1021,9 @@ func TestUpdate_AlwaysMarkNsfw_RestrictedEvenForTrue(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"alwaysMarkNsfw": true},
-	})
+	}
 
 	rec := post(h.Update, `{"alwaysMarkNsfw":true}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1033,9 +1033,9 @@ func TestUpdate_AlwaysMarkNsfw_AllowedWhenPolicyFalse(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"alwaysMarkNsfw": false},
-	})
+	}
 
 	rec := post(h.Update, `{"alwaysMarkNsfw":true}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "policy=false なら通常成功")
@@ -1046,10 +1046,10 @@ func TestUpdate_AlwaysMarkNsfw_AdminBypass(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		admin:    true,
 		policies: map[string]any{"alwaysMarkNsfw": true},
-	})
+	}
 
 	rec := post(h.Update, `{"alwaysMarkNsfw":false}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "admin は policy=true でもバイパス")
@@ -1060,9 +1060,9 @@ func TestUpdate_AlwaysMarkNsfw_OmittedSkipsGate(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: map[string]any{"alwaysMarkNsfw": true},
-	})
+	}
 
 	rec := post(h.Update, `{"name":"new name"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, "省略時は gate 通過")
@@ -1487,7 +1487,7 @@ func TestUpdate_InvalidatesTokenCacheOnSuccess(t *testing.T) {
 	repo.Users["user1"] = user
 
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	// middleware が context に詰める想定の auth token を直接 set する。
 	e := echo.New()
@@ -1580,7 +1580,7 @@ func TestUpdate_NoTokenInContextStillInvalidatesUser(t *testing.T) {
 	repo.Users["user1"] = user
 
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	rec := post(h.Update, `{"name":"updated"}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -1979,7 +1979,7 @@ func TestUpdate_AvatarDecorations_Success(t *testing.T) {
 	deco := testutil.NewMockAvatarDecorationRepository()
 	deco.Decorations["dec1"] = &model.AvatarDecoration{ID: "dec1", Name: "Hat", URL: "https://e/x.png"}
 	h.SetAvatarDecorationRepo(deco)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"dec1","angle":0.5,"flipH":true,"offsetX":0.1,"offsetY":-0.2}]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -1999,7 +1999,7 @@ func TestUpdate_AvatarDecorations_EmptyArrayClears(t *testing.T) {
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
 
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	rec := post(h.Update, `{"avatarDecorations":[]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -2020,7 +2020,7 @@ func TestUpdate_AvatarDecorations_DefaultsAppliedWhenFieldsOmitted(t *testing.T)
 	deco := testutil.NewMockAvatarDecorationRepository()
 	deco.Decorations["dec1"] = &model.AvatarDecoration{ID: "dec1"}
 	h.SetAvatarDecorationRepo(deco)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	// id だけ指定 — 残り全フィールドは 0 / false で埋まる。
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"dec1"}]}`, user)
@@ -2040,7 +2040,7 @@ func TestUpdate_AvatarDecorations_ExceedsLimit(t *testing.T) {
 	deco.Decorations["dec1"] = &model.AvatarDecoration{ID: "dec1"}
 	deco.Decorations["dec2"] = &model.AvatarDecoration{ID: "dec2"}
 	h.SetAvatarDecorationRepo(deco)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"dec1"},{"id":"dec2"}]}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2057,7 +2057,7 @@ func TestUpdate_AvatarDecorations_UnknownIDRejected(t *testing.T) {
 	repo.Users["user1"] = user
 	deco := testutil.NewMockAvatarDecorationRepository()
 	h.SetAvatarDecorationRepo(deco)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"missing"}]}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2076,10 +2076,10 @@ func TestUpdate_AvatarDecorations_RestrictedByRole(t *testing.T) {
 	deco.Decorations["dec1"] = &model.AvatarDecoration{ID: "dec1", RoleIDs: model.StringArray{"role-vip"}}
 	h.SetAvatarDecorationRepo(deco)
 	// ユーザーは role-other のみ所持 → role-vip 必須の dec1 は弾かれる。
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		roles:    []*model.Role{{ID: "role-other"}},
 		policies: map[string]any{"avatarDecorationLimit": 1},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"dec1"}]}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2098,10 +2098,10 @@ func TestUpdate_AvatarDecorations_RoleAllowed(t *testing.T) {
 	deco := testutil.NewMockAvatarDecorationRepository()
 	deco.Decorations["dec1"] = &model.AvatarDecoration{ID: "dec1", RoleIDs: model.StringArray{"role-vip"}}
 	h.SetAvatarDecorationRepo(deco)
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		roles:    []*model.Role{{ID: "role-vip"}, {ID: "role-other"}},
 		policies: map[string]any{"avatarDecorationLimit": 1},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"dec1"}]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -2111,7 +2111,7 @@ func TestUpdate_AvatarDecorations_EmptyIDRejected(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["user1"] = user
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 5}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 5}}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":""}]}`, user)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -2134,7 +2134,7 @@ func TestUpdate_AvatarDecorations_NoRepoSkipsCatalogCheck(t *testing.T) {
 	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": 1}}
 
 	// AvatarDecorationRepo 未配線 → catalog 検証 skip。任意 id を受け付ける fallback。
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"anything"}]}`, user)
@@ -2155,7 +2155,7 @@ func TestUpdate_AvatarDecorations_RoleOverrideFloatLimitAccepted(t *testing.T) {
 	deco.Decorations["c"] = &model.AvatarDecoration{ID: "c"}
 	h.SetAvatarDecorationRepo(deco)
 	// jsonb override 経由を模倣して float64 を渡す。
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": float64(3)}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"avatarDecorationLimit": float64(3)}}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"id":"a"},{"id":"b"},{"id":"c"}]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -2862,7 +2862,7 @@ func TestMe_ModerationNote_ModeratorGated(t *testing.T) {
 
 	t.Run("moderator sees moderationNote", func(t *testing.T) {
 		h, userRepo, _, _ := newTestHandler(t)
-		h.SetRoleProvider(&stubRoleProvider{moderator: true})
+		h.roleProvider = &stubRoleProvider{moderator: true}
 		user := &model.User{ID: "u1", Username: "u1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 		userRepo.Users["u1"] = user
 		userRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", ModerationNote: &mn, Fields: datatypes.JSON([]byte("[]"))}
@@ -2872,7 +2872,7 @@ func TestMe_ModerationNote_ModeratorGated(t *testing.T) {
 
 	t.Run("non-moderator omits moderationNote", func(t *testing.T) {
 		h, userRepo, _, _ := newTestHandler(t)
-		h.SetRoleProvider(&stubRoleProvider{moderator: false})
+		h.roleProvider = &stubRoleProvider{moderator: false}
 		user := &model.User{ID: "u2", Username: "u2", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 		userRepo.Users["u2"] = user
 		userRepo.Profiles["u2"] = &model.UserProfile{UserID: "u2", ModerationNote: &mn, Fields: datatypes.JSON([]byte("[]"))}
@@ -2889,7 +2889,7 @@ func TestUpdate_ReturnsRoleFlags(t *testing.T) {
 	user := &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["u1"] = user
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Fields: datatypes.JSON([]byte("[]"))}
-	h.SetRoleProvider(&stubRoleProvider{admin: true, moderator: true})
+	h.roleProvider = &stubRoleProvider{admin: true, moderator: true}
 
 	rec := post(h.Update, `{"name":"updated"}`, user)
 	require.Equal(t, http.StatusOK, rec.Code)

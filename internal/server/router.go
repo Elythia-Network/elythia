@@ -1977,7 +1977,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// usersHandler の位置。移した handler は作るだけで副作用を持たないので、作る位置が
 	// 前へ移っても、DB と Redis の文の順は変わらない。setter とルートの登録はそれぞれ
 	// 元の位置のまま。ここより前で作る handler (meta・notes など) と、setupRoutes で作る
-	// 部品・stream・outbound client に依存する handler、ここで作ると setter で後から
+	// 部品・stream の manager・outbound client に依存する handler、ここで作ると setter で後から
 	// 入れる辺が増える handler (admin など) は、元の位置で作る (docs/architecture.md 4.2)。
 	// **別名は変数 hSvcs から取る。** w.handlers から取ると、別名を代入より前に書いても
 	// コンパイルが通り、ゼロ値を黙って受け取る (docs/architecture.md 4.2)。
@@ -1991,10 +1991,20 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// buildStream で作る revoke publisher を構築子の引数で受けるため。buildStream が
 	// 使うのは先頭で作る streamPubSub と idGen だけで、中の構築子はどれも値を作って
 	// 返すだけ (Redis に繋がず、購読も goroutine も始めない)。購読 (Subscribe…) と
-	// setter、w.stream への代入と別名は、下の stream の節のまま。
+	// setter、w.stream への代入と別名 (revoke publisher を除く) は、下の stream の節のまま。
 	streamSvcs := buildStream(streamPubSub, idGen)
+	// 失効を扱う handler (i・oauth・admin) へ配る revoke publisher。別名は変数 streamSvcs
+	// から取る。i と oauth の handler が構築子の引数で受けるので、ほかの別名 (下の
+	// stream の節) より前に置く (#3827)。
+	streamRevokePublisher := streamSvcs.streamRevokePublisher
+	// i/2fa/register の仮の秘密の期限と i/2fa/done の失敗回数を数える guard。i の
+	// handler が構築子の引数で受ける (#3827)。作るだけで Redis には触らない。
+	// buildHandlers の中で s.redis を読むと、Redis の無い Server で組み立てるテスト
+	// (TestBuildHandlersFillsEveryField) が落ちるので、ここで作って渡す。
+	twoFAPendingGuard := coretwofactor.NewRedisPendingGuard(s.redis.Default)
 	hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo,
-		abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup)
+		abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup,
+		twoFAPendingGuard, streamRevokePublisher)
 	w.handlers = hSvcs
 	s.builtHandlers = hSvcs
 	usersHandler := hSvcs.users
@@ -2028,12 +2038,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	inviteHandler := hSvcs.invite
 	echoTestHandler := hSvcs.echoTest
 	// 投稿を返す handler へ、上で作った noteHider と Packer を渡す (#3786 / #3790)。
-	// buildHandlers で作る handler の多くは構築子の引数で受ける (#3817)。i の handler は
-	// stream の節で作る値に依存するので、まだ setter で入れる (#3812 の段 (4))。渡し
-	// 忘れると、その経路だけ匿名の閲覧者に ugcVisibilityForVisitor が効かないので、
-	// 下の recordCriticalWiring が handler ごとに検査する。
-	iHandler.SetNoteHider(noteHider)
-	iHandler.SetEntityPacker(entityPacker)
+	// buildHandlers で作る handler は構築子の引数で受ける (#3817、i は #3827)。notes の
+	// handler は setter で入れる。渡し忘れると、その経路だけ匿名の閲覧者に
+	// ugcVisibilityForVisitor が効かないので、下の recordCriticalWiring が検査する。
 	notesHandler.SetEntityPacker(entityPacker)
 
 	// Users endpoints
@@ -2086,16 +2093,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersHandler.SetModeratorChecker(roleService)
 
 	// Account endpoints
-	iHandler.SetBackground(s.background) // #3661: 世代の停止で待つ
 	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
 	iHandler.SetRelationReloadPublisher(relationReloadPublisher)
 	iHandler.SetMainStreamPublisher(mainStreamPublisher)
 	iHandler.SetUserRepo(userRepo)
 	// フォロー申請の作成・承認・取り消しで followee に meUpdated を流す (#3330)。
 	followingService.SetMeUpdatedPublisher(iHandler)
-	iHandler.SetRoleProvider(roleService)
-	iHandler.SetTOTPReplayGuard(totpReplayGuard)
-	iHandler.SetTwoFAPendingGuard(coretwofactor.NewRedisPendingGuard(s.redis.Default))
 	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
 	iHandler.SetPasswordHasher(s.passwordHasher)
 	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
@@ -2103,10 +2106,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetRegistryRepo(registryRepo)
 	iHandler.SetMetaRepo(metaRepo)
 	iHandler.SetServerURL(s.config.URL)
-	// i/regenerate-token で旧 token を auth cache から即時削除する (#884)。
-	// 未配線だと cache TTL 経過まで旧 token が auth 通過する security
-	// regression が残るので production では必ず wire する。
-	iHandler.SetAuthInvalidator(s.auth)
 	// i/update-email の verifymail / truemail SaaS 呼び出しも SSRF-safe
 	// transport + forward proxy 経由にする (#638)。
 	iHandler.SetEmailValidationClient(s.outboundClient(10 * time.Second))
@@ -2125,8 +2124,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// i/import-antennas の TOO_MANY_ANTENNAS 同期 enforce 用 (#1667)。
 	iHandler.SetImportDriveReader(driveReader)
 	iHandler.SetAntennaCounter(antennaRepo)
-	// P4-6 (#166): i/authorized-apps, i/revoke-token, i/gallery/*, i/page-likes
-	iHandler.SetAccessTokenRepo(accessTokenRepo)
+	// P4-6 (#166): i/gallery/*, i/page-likes。i/authorized-apps と i/revoke-token の
+	// accessTokenRepo は構築子の引数で渡す (#3827)。
 	iHandler.SetGalleryRepo(galleryRepo)
 	iHandler.SetPageLikeRepo(pageLikeRepo)
 	// P4-6 followup (#174): i/move は federation resolver + deliverService を使って
@@ -2166,7 +2165,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	iHandler.SetNotificationService(notificationService)
 	iHandler.SetAchievementNotifier(notificationService)
 	iHandler.SetFollowRequestRepo(followRequestRepo)
-	iHandler.SetFollowRequestBulkAccepter(followingService) // #3466: 鍵を外したときの一括承認
 	iHandler.SetChatRepo(chatRepo)
 	// Phase 7-2 follow-up (#271)
 	iHandler.SetAntennaUnreadRepo(antennaNoteUnreadRepo)
@@ -2495,6 +2493,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// code 再利用で token を revoke したとき、auth cache に残った entry で
 		// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。構築子の必須の引数 (#3823)。
 		s.auth,
+		// 失効させた token で張られた WebSocket も閉じる。revoke publisher は buildStream
+		// で作る。構築子の必須の引数 (#3827)。
+		streamRevokePublisher,
 	)
 	// 匿名で外部への取得と Redis への保存を起こせるので、接続元ごとに絞る。
 	s.echo.GET("/oauth/authorize", oauthHandler.Authorize, middleware.RequireIPRateLimit(rateLimiter, middleware.OAuthAuthorizeRateLimitKey))
@@ -2617,7 +2618,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	w.stream = streamSvcs
 	streamRegistry := streamSvcs.streamRegistry
 	streamManager := streamSvcs.streamManager
-	streamRevokePublisher := streamSvcs.streamRevokePublisher
 	notePublisher := streamSvcs.notePublisher
 	notificationPublisher := streamSvcs.notificationPublisher
 	notificationPublisher.SetEntityPacker(entityPacker) // #3796: 通知の本文と埋め込んだ投稿・利用者を包む
@@ -2990,11 +2990,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 無効化 event を追い越して積まれた entry も、そこで確実に切れている)。
 	streamManager.SetRevokeRecheckDelay(middleware.AuthCacheTTL + 5*time.Second)
 	// WebSocket は接続時に 1 度しか認証しないので、tokenCache を落とすだけでは
-	// 既存の接続が閉じない。失効を扱う handler へ revoke publisher を配る。
-	// 自プロセスの Manager も渡す — publish が失敗しても、ここに居る接続は閉じる。
-	// revoke publisher は buildStream で作る (#3692)。
-	iHandler.SetStreamRevoker(streamRevokePublisher)
-	oauthHandler.SetStreamRevoker(streamRevokePublisher)
+	// 既存の接続が閉じない。失効を扱う handler (i・oauth・admin) へは、buildStream で
+	// 作った revoke publisher を構築子の引数で配る (#3823、#3827)。publisher は自プロセスの
+	// Manager も持つ — publish が失敗しても、ここに居る接続は閉じる。
 	// profile 編集を remote followers に Update(Person) で配信する (#1560)。
 	// actor endpoint と同じ shape にするため ed25519 keypair を、follower 以外の
 	// relay subscriber にも届けるため relay broadcaster を配線する。hook は
@@ -3977,10 +3975,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
 		// ugcVisibilityForVisitor='none' を効かせない。
-		{"i.noteHider", iHandler.HasNoteHider(), noteHiderMissingEffect},
 		{"notes.noteHider", notesHandler.HasNoteHider(), noteHiderMissingEffect},
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
-		{"i.entityPacker", iHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"notes.entityPacker", notesHandler.HasEntityPacker(), entityPackerMissingEffect},
 		{"webPushNote.entityPacker", webPushNotePacker.HasEntityPacker(), entityPackerMissingEffect},
 		{"notePublisher.entityPacker", notePublisher.HasEntityPacker(), entityPackerMissingEffect},
@@ -4016,20 +4012,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"署名対象の host ヘッダ検査と自ホスト一致検査が飛ぶ"},
 		{"inbox.enqueuer", inboxHandler.HasEnqueuer(),
 			"同期 fallback へ落ち、actor 一致検査・LD-Signature 検証・replay guard を通らない"},
-		{"i.totpReplayGuard", iHandler.HasTOTPReplayGuard(),
-			"2FA gate を持つ 9 endpoint と i/2fa/done で有効な TOTP コードを再利用でき、バックアップコードの単回予約も効かなくなる"},
-		{"i.twoFAPendingGuard", iHandler.HasTwoFAPendingGuard(),
-			"i/2fa/register の仮の秘密に期限と試行回数の上限が掛からない"},
 		{"stream.serverStatsEnabled", serverStatsPub.HasEnabledFunc(),
 			"enableServerMachineStats を有効にしても serverStats に値が流れない"},
-		{"i.authInvalidator", iHandler.HasAuthInvalidator(),
-			"revoke-token / regenerate-token / delete-account / update の後も古い token が auth cache の TTL のあいだ通る"},
-		{"i.accessTokenRepo", iHandler.HasAccessTokenRepo(),
-			"i/revoke-token が成功と同じ 204 を返したまま token を消さない (恒久)"},
-		{"i.streamRevoker", iHandler.HasStreamRevoker(),
-			"regenerate-token / revoke-token / delete-account の後も、失効した token で張られた WebSocket が通知・DM を受け取り続ける"},
-		{"oauth.streamRevoker", oauthHandler.HasStreamRevoker(),
-			"authorization code 再利用で失効させた token の WebSocket が開いたまま残る"},
 		{"signup.formTokens", signupHandler.HasFormTokens(),
 			"captcha を 1 つも設定していないインスタンスで、申請 endpoint の唯一の簡易チェックが素通しになる"},
 		{"inbox.replayGuard", inboxProcessor.HasInboxReplayGuard(),
@@ -4084,8 +4068,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"blocked-host の note が post-fetch 経路で漏れる"},
 		{"inbox.blockingService", federationProcessor.HasBlockingService(),
 			"受信した Block / Undo(Block) が無視され、reversi の Invite からブロック判定が飛ぶ"},
-		{"i.followRequestBulkAccepter", iHandler.HasFollowRequestBulkAccepter(),
-			"鍵を外しても溜まっていたフォローリクエストが承認されずに残る"},
 		{"resolver.silencedHostChecker", federationResolver.HasSilencedHostChecker(),
 			"silenced instance の remote public note が home へ降格されず public timeline に出る"},
 		{"resolver.rolePolicyProvider", federationResolver.HasRolePolicyProvider(),
@@ -4111,8 +4093,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"チャンネルミュートが一切効かない (別ソースが無いので in-memory・SQL・user-list timeline・HTL の全経路)"},
 		{"notes.userFollowingRepo", notesHandler.HasUserFollowingRepo(),
 			"followers 限定投稿への返信が非フォロワーの HTL / STL に出る"},
-		{"i.roleProvider", iHandler.HasRoleProvider(),
-			"alwaysMarkNsfw の自己解除防止・wordMuteLimit・canUpdateBioMedia・i/import-antennas の antennaLimit が同時に外れ、avatarDecorationLimit は policy を無視して 1 固定になり、canUseEmojiAsAvatarDecoration も既定の true 固定になる (ロールで絵文字デコレーションを止められなくなる)"},
 		{"notes.ugcVisibility", notesHandler.HasUGCVisibility(),
 			"匿名 visitor への note 露出を ugcVisibilityForVisitor で gate できない"},
 		{"deleteAccount.pageRepo", deleteAccountProcessor.HasPageRepo(),
@@ -4134,8 +4114,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"世代を止めても受信後のhookのgoroutineを待たず、閉じたDBへ書きに行く"},
 		{"federation.resolver.background", federationResolver.HasBackground(),
 			"世代を止めても新しいノートのchart hookのgoroutineを待たず、閉じたDBへ書きに行く"},
-		{"i.background", iHandler.HasBackground(),
-			"世代を止めてもrel=meの検証と確認メールのgoroutineを待たず、閉じたDBへ書きに行く"},
 	})
 }
 

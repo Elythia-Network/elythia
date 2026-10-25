@@ -257,7 +257,7 @@ func TestTwoFARegisterKey_TOTPReplayFromSignin_Blocked(t *testing.T) {
 		Client:    iTestRedis.Client,
 		KeyPrefix: "test:" + t.Name(),
 	}
-	h.SetTOTPReplayGuard(guard)
+	h.totpReplayGuard = guard
 
 	code, err := totp.GenerateCode(secret, time.Now())
 	require.NoError(t, err)

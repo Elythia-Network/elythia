@@ -59,5 +59,5 @@ func newSensitiveMediaHandler(t *testing.T) (*Handler, *testutil.MockUserReposit
 	svc.SetDriveFileRepository(driveRepo)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	userRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Fields: datatypes.JSON([]byte("[]"))}
-	return NewHandler(svc, idGen), userRepo, driveRepo
+	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), userRepo, driveRepo
 }

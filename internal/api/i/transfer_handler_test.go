@@ -343,7 +343,7 @@ func TestImportAntennas_TooMany(t *testing.T) {
 	driveRepo.Files["ant"] = &model.DriveFile{ID: "ant", UserID: &uid, Size: 100}
 	h.SetImportDriveReader(&stubImportFileReader{body: []byte(`[{"name":"a"},{"name":"b"}]`)})
 	h.SetAntennaCounter(&stubAntennaCounter{count: 4})
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"antennaLimit": 5}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"antennaLimit": 5}}
 	// 現 4 + import 2 = 6 >= 5 → TOO_MANY_ANTENNAS。
 	rec := post(h.ImportAntennas, `{"fileId":"ant"}`, &model.User{ID: ownerID})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -358,7 +358,7 @@ func TestImportAntennas_MaxCountCannotWrapBelowLimit(t *testing.T) {
 	driveRepo.Files["ant"] = &model.DriveFile{ID: "ant", UserID: &uid, Size: 100}
 	h.SetImportDriveReader(&stubImportFileReader{body: []byte(`[{"name":"a"}]`)})
 	h.SetAntennaCounter(&stubAntennaCounter{count: math.MaxInt64})
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"antennaLimit": math.MaxInt}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"antennaLimit": math.MaxInt}}
 
 	rec := post(h.ImportAntennas, `{"fileId":"ant"}`, &model.User{ID: ownerID})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -373,7 +373,7 @@ func TestImportAntennas_UnderLimit(t *testing.T) {
 	driveRepo.Files["ant"] = &model.DriveFile{ID: "ant", UserID: &uid, Size: 100}
 	h.SetImportDriveReader(&stubImportFileReader{body: []byte(`[{"name":"a"}]`)})
 	h.SetAntennaCounter(&stubAntennaCounter{count: 1})
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"antennaLimit": 5}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"antennaLimit": 5}}
 	// 現 1 + import 1 = 2 < 5 → enqueue。
 	rec := post(h.ImportAntennas, `{"fileId":"ant"}`, &model.User{ID: ownerID})
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -489,7 +489,7 @@ func TestImportAntennas_NegativeLimitDenies(t *testing.T) {
 	driveRepo.Files["ant"] = &model.DriveFile{ID: "ant", UserID: &uid, Size: 100}
 	h.SetImportDriveReader(&stubImportFileReader{body: []byte(`[{"name":"a"}]`)})
 	h.SetAntennaCounter(&stubAntennaCounter{count: 0})
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"antennaLimit": -1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"antennaLimit": -1}}
 	rec := post(h.ImportAntennas, `{"fileId":"ant"}`, &model.User{ID: ownerID})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_ANTENNAS")

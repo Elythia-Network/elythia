@@ -131,10 +131,10 @@ func TestTwoFAGatedEndpoints_WrongPasswordKeepsBackupCode(t *testing.T) {
 				h, repo = newExtraHandler(t)
 			}
 			if tt.name == "delete-account" {
-				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+				h.roleProvider = &stubRoleProvider{policies: map[string]any{
 					role.PolicyCanDeleteAccount: true,
 					role.PolicyCanPurgeAccount:  true,
-				}})
+				}}
 			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")
@@ -156,7 +156,7 @@ func TestChangePassword_TOTPReplayStillRejectedAfterSuccess(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "oldpass")
 	secret := enableTwoFactorWithTOTP(t, repo, "u1")
 	guard := &countingReplayGuard{used: map[string]bool{}}
-	h.SetTOTPReplayGuard(guard)
+	h.totpReplayGuard = guard
 	code := totpCode(t, secret)
 
 	rec := postExtra(h.ChangePassword,
@@ -179,7 +179,7 @@ func TestChangePassword_TOTPReusableAfterWrongPassword(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "oldpass")
 	secret := enableTwoFactorWithTOTP(t, repo, "u1")
 	guard := &countingReplayGuard{used: map[string]bool{}}
-	h.SetTOTPReplayGuard(guard)
+	h.totpReplayGuard = guard
 	code := totpCode(t, secret)
 
 	rec := postExtra(h.ChangePassword,
@@ -269,10 +269,10 @@ func TestTwoFAGatedEndpoints_SuccessConsumesExactlyOne(t *testing.T) {
 				h, repo = newExtraHandler(t)
 			}
 			if tt.name == "delete-account" {
-				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+				h.roleProvider = &stubRoleProvider{policies: map[string]any{
 					role.PolicyCanDeleteAccount: true,
 					role.PolicyCanPurgeAccount:  true,
-				}})
+				}}
 			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")
@@ -340,15 +340,15 @@ func TestTwoFAGatedEndpoints_WrongPasswordReleasesReservation(t *testing.T) {
 				h, repo = newExtraHandler(t)
 			}
 			if tt.name == "delete-account" {
-				h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+				h.roleProvider = &stubRoleProvider{policies: map[string]any{
 					role.PolicyCanDeleteAccount: true,
 					role.PolicyCanPurgeAccount:  true,
-				}})
+				}}
 			}
 			user := setupUserWithPassword(repo, "u1", "oldpass")
 			enableTwoFactorWithBackupCodes(repo, "u1")
 			guard := &countingReplayGuard{used: map[string]bool{}}
-			h.SetTOTPReplayGuard(guard)
+			h.totpReplayGuard = guard
 
 			postExtra(tt.call(h), tt.body, user)
 
@@ -371,7 +371,7 @@ func TestCheck2FAToken_BackupCodeReservedOnce(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	setupUserWithPassword(repo, "u1", "oldpass")
 	enableTwoFactorWithBackupCodes(repo, "u1")
-	h.SetTOTPReplayGuard(&countingReplayGuard{used: map[string]bool{}})
+	h.totpReplayGuard = &countingReplayGuard{used: map[string]bool{}}
 	profile := repo.Profiles["u1"]
 	ctx := context.Background()
 
@@ -403,7 +403,7 @@ func TestCheck2FAToken_BackupCodeAndTOTPKeyspacesAreSeparate(t *testing.T) {
 	code := totpCode(t, secret)
 	// TOTP と同じ文字列をバックアップコードとしても持たせる。
 	repo.Profiles["u1"].TwoFactorBackupSecret = model.StringArray{code}
-	h.SetTOTPReplayGuard(&countingReplayGuard{used: map[string]bool{}})
+	h.totpReplayGuard = &countingReplayGuard{used: map[string]bool{}}
 	profile := repo.Profiles["u1"]
 
 	// backup code として消費される (ConsumeBackupCode が先に hit する)。
@@ -445,7 +445,7 @@ func TestCheck2FAToken_ConcurrentDistinctCodesDoNotResurrect(t *testing.T) {
 	setupUserWithPassword(repo, "u1", "oldpass")
 	repo.Profiles["u1"].TwoFactorEnabled = true
 	repo.Profiles["u1"].TwoFactorBackupSecret = model.StringArray{"c1", "c2", "c3"}
-	h.SetTOTPReplayGuard(&countingReplayGuard{used: map[string]bool{}})
+	h.totpReplayGuard = &countingReplayGuard{used: map[string]bool{}}
 	profile := repo.Profiles["u1"]
 	ctx := context.Background()
 
@@ -472,7 +472,7 @@ func TestCheck2FAToken_ReleasesReservationWhenConsumeFails(t *testing.T) {
 	enableTwoFactorWithBackupCodes(repo, "u1")
 	repo.RemoveBackupCodeFn = func(string, string) error { return errors.New("db down") }
 	guard := &countingReplayGuard{used: map[string]bool{}}
-	h.SetTOTPReplayGuard(guard)
+	h.totpReplayGuard = guard
 
 	use, ok := h.check2FAToken(context.Background(), repo.Profiles["u1"], "backup1")
 	require.True(t, ok)
@@ -493,7 +493,7 @@ func TestTwoFAUnregister_KeepsTOTPReplayRecord(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "oldpass")
 	secret := enableTwoFactorWithTOTP(t, repo, "u1")
 	guard := &countingReplayGuard{used: map[string]bool{}}
-	h.SetTOTPReplayGuard(guard)
+	h.totpReplayGuard = guard
 	code := totpCode(t, secret)
 
 	rec := postExtra(h.TwoFAUnregister,
@@ -516,7 +516,7 @@ func TestVerify2FAToken_ConsumeFailureRejects(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	setupUserWithPassword(repo, "u1", "oldpass")
 	enableTwoFactorWithBackupCodes(repo, "u1")
-	h.SetTOTPReplayGuard(&countingReplayGuard{used: map[string]bool{}})
+	h.totpReplayGuard = &countingReplayGuard{used: map[string]bool{}}
 	repo.RemoveBackupCodeFn = func(string, string) error { return errors.New("db down") }
 
 	assert.False(t, h.verify2FAToken(context.Background(), repo.Profiles["u1"], "backup1"),
@@ -528,7 +528,7 @@ func TestVerify2FAToken_SuccessPasses(t *testing.T) {
 	h, repo := newExtraHandler(t)
 	setupUserWithPassword(repo, "u1", "oldpass")
 	enableTwoFactorWithBackupCodes(repo, "u1")
-	h.SetTOTPReplayGuard(&countingReplayGuard{used: map[string]bool{}})
+	h.totpReplayGuard = &countingReplayGuard{used: map[string]bool{}}
 
 	assert.True(t, h.verify2FAToken(context.Background(), repo.Profiles["u1"], "backup1"))
 }

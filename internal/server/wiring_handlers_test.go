@@ -25,7 +25,7 @@ func TestBuildHandlersFillsEveryField(t *testing.T) {
 	require.NoError(t, err)
 	s := &Server{config: &config.Config{URL: "https://example.tld", Host: "example.tld"}}
 
-	h := s.buildHandlers(&wiring{}, core{}, fed{}, idGen, nil, nil, nil, nil, nil, nil, nil)
+	h := s.buildHandlers(&wiring{}, core{}, fed{}, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	v := reflect.ValueOf(h)
 	// 抽出の下限: 名指しの欄があり、欄が 1 つ以上あること。
