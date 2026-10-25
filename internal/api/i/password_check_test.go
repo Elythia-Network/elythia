@@ -102,10 +102,10 @@ var passwordEndpoints = []passwordEndpoint{
 func newGuardedHandler(t *testing.T, g passwordguard.Guard) (*Handler, *model.User) {
 	t.Helper()
 	h, repo := newExtraHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{
 		role.PolicyCanDeleteAccount: true,
 		role.PolicyCanPurgeAccount:  true,
-	}})
+	}}
 	// requireWebAuthn は依存が nil だと照合の手前で 503 を返すので、Redis 無しの
 	// サービスを入れておく (照合より先には Redis を使わない)。
 	svc, err := twofactor.NewWebAuthnService("https://example.com", "Misskey", nil)

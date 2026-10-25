@@ -15,8 +15,20 @@ func TestOAuthAuthorizeIPRateLimitIsWired(t *testing.T) {
 
 // i/2fa/register の仮の秘密の期限と i/2fa/done の失敗回数は、router が guard を
 // 渡さないと数えられない (handler は nil なら数えない)。
+//
+// guard は i の handler の構築子の必須の引数 (#3827)。渡し忘れはコンパイルで落ち、nil を
+// 渡す形は TestBuiltHandlersHaveNoNilDependencies が落とす。ただ、同じ型の別の実装
+// (数えない guard) を渡す形はどちらでも捕まらないので、Redis で実装した guard を作る行と、
+// それが setupRoutes → buildHandlers → i.NewHandler へ渡る段を照合する。
 func TestTwoFAPendingGuardIsWired(t *testing.T) {
+	const symptom = "i/2fa/register の仮の秘密に期限と試行回数の上限が掛からない"
 	assertWired(t, serverPkg,
-		`iHandler.SetTwoFAPendingGuard(coretwofactor.NewRedisPendingGuard(s.redis.Default))`,
-		"i/2fa/register の仮の秘密に期限と試行回数の上限が掛からない")
+		`twoFAPendingGuard := coretwofactor.NewRedisPendingGuard(s.redis.Default)`, symptom)
+	assertWired(t, serverPkg,
+		`hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo, `+
+			`abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup, `+
+			`twoFAPendingGuard, streamRevokePublisher)`, symptom)
+	assertWired(t, serverPkg,
+		`i.NewHandler(userService, idGen, noteHider, entityPacker, roleService, totpReplayGuard, `+
+			`twoFAPendingGuard, s.auth, accessTokenRepo, streamRevokePublisher, followingService, s.background)`, symptom)
 }

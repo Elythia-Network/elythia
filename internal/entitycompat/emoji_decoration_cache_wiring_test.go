@@ -236,7 +236,7 @@ func TestAvatarDecorationRoleSetsAreWired(t *testing.T) {
 	// internal/server の TestSetupRoutesAliasesEveryBuiltHandler が落とす。
 	assertWired(t, serverPkg, "avatarDecorations: avatarDecorationsHandler",
 		"buildHandlers が作った get-avatar-decorations の handler を apiHandlers に入れていない。")
-	assertWired(t, serverPkg, "hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo, abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup)",
+	assertWired(t, serverPkg, "hSvcs := s.buildHandlers(w, coreSvcs, fedSvcs, idGen, noteHider, entityPacker, sharedUserPacker, metaRepo, abuseNotifStates, abuseReportRepoForNotif.CountUnresolved, signupApplicationNotifLookup, twoFAPendingGuard, streamRevokePublisher)",
 		"setupRoutes が buildHandlers の handler を使っていない。")
 	assertWired(t, serverPkg, "w.handlers = hSvcs",
 		"buildHandlers の handler を wiring に入れていない。")

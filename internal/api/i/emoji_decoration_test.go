@@ -53,7 +53,7 @@ func emojiDecoFixture(t *testing.T, policies map[string]any) (*Handler, *testuti
 	emojis.Emojis["party@"] = &model.Emoji{ID: "e1", Name: "party", PublicURL: "https://e/party.webp"}
 	h.SetEmojiRepo(emojis)
 	h.SetAvatarDecorationRepo(testutil.NewMockAvatarDecorationRepository())
-	h.SetRoleProvider(&stubRoleProvider{policies: policies})
+	h.roleProvider = &stubRoleProvider{policies: policies}
 	return h, repo, emojis, user
 }
 
@@ -205,7 +205,7 @@ func TestUpdate_EmojiDecoration_UnwiredRepoIsInternalError(t *testing.T) {
 	user := &model.User{ID: "user1", Username: "user1", AvatarDecorations: datatypes.JSON([]byte("[]"))}
 	repo.Users["user1"] = user
 	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
-	h.SetRoleProvider(&stubRoleProvider{policies: defaultEmojiDecoPolicies()})
+	h.roleProvider = &stubRoleProvider{policies: defaultEmojiDecoPolicies()}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"emojiName":"party"}]}`, user)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -407,10 +407,10 @@ func TestUpdate_EmojiDecoration_RestrictedEmojiAllowedWithRole(t *testing.T) {
 		ID: "e5", Name: "vip", PublicURL: "u",
 		RoleIDsThatCanBeUsedThisEmojiAsReaction: model.StringArray{"role-vip"},
 	}
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies: defaultEmojiDecoPolicies(),
 		roles:    []*model.Role{{ID: "role-vip"}},
-	})
+	}
 
 	rec := post(h.Update, `{"avatarDecorations":[{"emojiName":"vip"}]}`, user)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

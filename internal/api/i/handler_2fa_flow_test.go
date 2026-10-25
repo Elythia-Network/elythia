@@ -241,7 +241,7 @@ func TestTwoFADone_ReplayRejected(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "pass")
 	tempSecret := "JBSWY3DPEHPK3PXP"
 	repo.Profiles["u1"].TwoFactorTempSecret = &tempSecret
-	h.SetTOTPReplayGuard(newReplayGuard(t))
+	h.totpReplayGuard = newReplayGuard(t)
 
 	token, err := totp.GenerateCode(tempSecret, time.Now())
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestVerify2FAToken_ReplayRejected(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP"
 	repo.Profiles["u1"].TwoFactorSecret = &secret
 	repo.Profiles["u1"].TwoFactorEnabled = true
-	h.SetTOTPReplayGuard(newReplayGuard(t))
+	h.totpReplayGuard = newReplayGuard(t)
 
 	token, err := totp.GenerateCode(secret, time.Now())
 	require.NoError(t, err)
@@ -315,7 +315,7 @@ func TestTwoFAUnregister_Success(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP"
 	repo.Profiles["u1"].TwoFactorSecret = &secret
 	repo.Profiles["u1"].TwoFactorEnabled = true
-	h.SetTOTPReplayGuard(newReplayGuard(t))
+	h.totpReplayGuard = newReplayGuard(t)
 
 	// upstream 互換: 2FA 有効中の unregister は TOTP token も要求される。
 	token, err := totp.GenerateCode(secret, time.Now())
@@ -438,7 +438,7 @@ func TestTwoFAUnregister_ClearsPasswordLessLogin(t *testing.T) {
 	repo.Profiles["u1"].TwoFactorSecret = &secret
 	repo.Profiles["u1"].TwoFactorEnabled = true
 	repo.Profiles["u1"].UsePasswordLessLogin = true
-	h.SetTOTPReplayGuard(newReplayGuard(t))
+	h.totpReplayGuard = newReplayGuard(t)
 
 	// 2FA 有効中の unregister は TOTP token も要求される。
 	token, err := totp.GenerateCode(secret, time.Now())

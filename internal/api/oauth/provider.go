@@ -74,8 +74,8 @@ type Handler struct {
 	// auth cache の TTL (30s) の間だけ古い token が通ってしまう。
 	authInvalidator TokenInvalidator
 	// streamRevoker は失効させた token で張られた /streaming 接続を閉じる。
-	// optional。未設定だと、盗んだ code から得た token の WebSocket が
-	// 失効後も開いたまま残る。
+	// 無いと、盗んだ code から得た token の WebSocket が失効後も開いたまま残る
+	// ので、構築子の必須の引数で受ける (#3827)。
 	streamRevoker StreamRevoker
 }
 
@@ -84,14 +84,6 @@ type Handler struct {
 type StreamRevoker interface {
 	RevokeAccessTokenStreams(userID, tokenID string)
 }
-
-// SetStreamRevoker wires the revoker used when a code replay revokes a token.
-func (h *Handler) SetStreamRevoker(r StreamRevoker) {
-	h.streamRevoker = r
-}
-
-// HasStreamRevoker reports whether the stream revoker is wired.
-func (h *Handler) HasStreamRevoker() bool { return h.streamRevoker != nil }
 
 // NewHandler constructs the OAuth provider handler. httpClient must be
 // SSRF-guarded (it fetches attacker-suppliable client_id URLs). allowHTTP
@@ -102,7 +94,11 @@ func (h *Handler) HasStreamRevoker() bool { return h.streamRevoker != nil }
 // authInvalidator が引かれるのは攻撃を検出した瞬間 (RFC 6749 4.1.2 の
 // authorization code の再利用)。無いと、コードを盗んで再利用した相手の
 // access token が、失効を決めた後も auth cache の TTL のあいだ通り続ける (#2682)。
-func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tokenRepo TokenStore, idGen IDGenerator, issuer string, allowHTTP bool, renderConsent ConsentRenderer, authInvalidator TokenInvalidator) *Handler {
+//
+// streamRevoker closes the /streaming connections of the token a code replay
+// revokes. 無いと、その token で張られた WebSocket が失効後も開いたまま残るので、
+// authInvalidator と同じく構築子の必須の引数で受ける (#3827)。
+func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tokenRepo TokenStore, idGen IDGenerator, issuer string, allowHTTP bool, renderConsent ConsentRenderer, authInvalidator TokenInvalidator, streamRevoker StreamRevoker) *Handler {
 	return &Handler{
 		store:           store,
 		httpClient:      httpClient,
@@ -113,6 +109,7 @@ func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tok
 		allowHTTP:       allowHTTP,
 		renderConsent:   renderConsent,
 		authInvalidator: authInvalidator,
+		streamRevoker:   streamRevoker,
 	}
 }
 

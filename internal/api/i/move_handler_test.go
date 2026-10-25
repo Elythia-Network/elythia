@@ -200,7 +200,7 @@ func TestMove_InvalidatesAuthCache(t *testing.T) {
 			h, user, setMover := moveHandlerWithPasswordUser(t)
 			setMover(&stubMover{err: err})
 			inv := &stubTokenInvalidator{}
-			h.SetAuthInvalidator(inv)
+			h.authInvalidator = inv
 			post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"pw"}`, user)
 			assert.Equal(t, []string{"me"}, inv.userCalls)
 		})
@@ -210,7 +210,7 @@ func TestMove_InvalidatesAuthCache(t *testing.T) {
 	h, user, setMover := moveHandlerWithPasswordUser(t)
 	setMover(&stubMover{})
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 	post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"wrong"}`, user)
 	assert.Empty(t, inv.userCalls)
 }
@@ -237,7 +237,7 @@ func TestMove_InvalidatesAfterTheMove(t *testing.T) {
 	sm := &stubMover{}
 	setMover(sm)
 	inv := &moveOrderInvalidator{mover: sm}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 	post(h.Move, `{"moveToAccount":"https://other.example/users/x","password":"pw"}`, user)
 	assert.Equal(t, []bool{true}, inv.seen)
 }

@@ -40,7 +40,7 @@ func newExtraHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetFavoriteRepo(testutil.NewMockNoteFavoriteRepository())
 	return h, userRepo
 }
@@ -52,7 +52,7 @@ func newDeleteAccountHandler(t *testing.T) (*Handler, *testutil.MockUserReposito
 		role.PolicyCanDeleteAccount: true,
 		role.PolicyCanPurgeAccount:  true,
 	}}
-	h.SetRoleProvider(provider)
+	h.roleProvider = provider
 	return h, repo, provider
 }
 
@@ -322,7 +322,7 @@ func TestDeleteAccount_InvalidatesAllUserTokens(t *testing.T) {
 	user := setupUserWithPassword(repo, "u1", "pass")
 
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	rec := postExtra(h.DeleteAccount, `{"password":"pass"}`, user)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -360,7 +360,7 @@ func TestFavorites_NilRepo(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// favoriteRepo not set
 	rec := postExtra(h.Favorites, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -542,7 +542,7 @@ func TestRegenerateToken_InvalidatesOldToken(t *testing.T) {
 	repo.Users["u1"] = user
 
 	inv := &stubTokenInvalidator{}
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 
 	rec := postExtra(h.RegenerateToken, `{"password":"pass"}`, user)
 	require.Equal(t, http.StatusNoContent, rec.Code)
@@ -574,7 +574,7 @@ func TestChangePassword_UpdateError(t *testing.T) {
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := postExtra(h.ChangePassword, `{"currentPassword":"pass","newPassword":"new"}`, failRepo.Users["u1"])
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -587,11 +587,11 @@ func TestDeleteAccount_UpdateError(t *testing.T) {
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
-	h := NewHandler(svc, idGen)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{
 		role.PolicyCanDeleteAccount: true,
 		role.PolicyCanPurgeAccount:  true,
-	}})
+	}}
 	rec := postExtra(h.DeleteAccount, `{"password":"pass"}`, failRepo.Users["u1"])
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -604,7 +604,7 @@ func TestRegenerateToken_UpdateError(t *testing.T) {
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	rec := postExtra(h.RegenerateToken, `{"password":"pass"}`, failRepo.Users["u1"])
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -622,7 +622,7 @@ func TestRegenerateToken_UpdateErrorKeepsBackupCode(t *testing.T) {
 	before := backupCodes(failRepo.MockUserRepository, "u1")
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"backup1"}`, failRepo.Users["u1"])
 
@@ -642,7 +642,7 @@ func TestFavorites_ListError(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(userRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetFavoriteRepo(&failingFavListRepo{testutil.NewMockNoteFavoriteRepository()})
 	rec := postExtra(h.Favorites, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -797,7 +797,7 @@ func TestClaimAchievement_UpdateError(t *testing.T) {
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(&failingProfileUpdateRepo{baseRepo}, noteRepo, piningRepo, idGen, nil)
-	h := NewHandler(svc, idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := postExtra(h.ClaimAchievement, `{"name":"notes1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -954,13 +954,13 @@ func TestDeleteAccount_CanDeleteAccountPolicyFailsClosed(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newExtraHandler(t)
-			h.SetRoleProvider(tt.provider)
+			h.roleProvider = tt.provider
 			enq := &fakeDeleteEnqueuer{}
 			fed := &fakeAccountDeletionFed{}
 			inv := &stubTokenInvalidator{}
 			h.SetDeleteAccountEnqueuer(enq)
 			h.SetAccountDeletionFederationHook(fed)
-			h.SetAuthInvalidator(inv)
+			h.authInvalidator = inv
 			user := setupUserWithPassword(repo, "u1", "pass")
 
 			rec := postExtra(h.DeleteAccount, `{"password":"pass"}`, user)
@@ -1020,7 +1020,7 @@ func TestDeleteAccount_CanPurgeAccountMapsToPreserveAccount(t *testing.T) {
 				policies[role.PolicyCanPurgeAccount] = tt.value
 			}
 			provider := &countingCheckedRoleProvider{stubRoleProvider: &stubRoleProvider{policies: policies}}
-			h.SetRoleProvider(provider)
+			h.roleProvider = provider
 			enq := &fakeDeleteEnqueuer{}
 			h.SetDeleteAccountEnqueuer(enq)
 			user := setupUserWithPassword(repo, "u1", "pass")
@@ -1039,16 +1039,16 @@ func TestDeleteAccount_CanPurgeAccountMapsToPreserveAccount(t *testing.T) {
 
 func TestDeleteAccount_ResolverErrorPrecedesCredentialsAndTwoFactor(t *testing.T) {
 	h, repo := newExtraHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{
+	h.roleProvider = &stubRoleProvider{
 		policies:  map[string]any{role.PolicyCanDeleteAccount: true, role.PolicyCanPurgeAccount: true},
 		policyErr: errors.New("resolver failed"),
-	})
+	}
 	enq := &fakeDeleteEnqueuer{}
 	fed := &fakeAccountDeletionFed{}
 	inv := &stubTokenInvalidator{}
 	h.SetDeleteAccountEnqueuer(enq)
 	h.SetAccountDeletionFederationHook(fed)
-	h.SetAuthInvalidator(inv)
+	h.authInvalidator = inv
 	user := setupUserWithPassword(repo, "u1", "pass")
 	enableTwoFactorWithBackupCodes(repo, "u1")
 

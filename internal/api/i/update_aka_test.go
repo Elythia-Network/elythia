@@ -242,7 +242,7 @@ func TestUpdate_HardMutedWordsRegexTooComplex(t *testing.T) {
 // (`count > limit` が常に真)。上限なしにしない。
 func TestUpdate_NegativeWordMuteLimitDenies(t *testing.T) {
 	h, me := akaHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": -1}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"wordMuteLimit": -1}}
 	rec := post(h.Update, `{"hardMutedWords":["spam"]}`, me)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_MUTED_WORDS")
@@ -252,7 +252,7 @@ func TestUpdate_NegativeWordMuteLimitDenies(t *testing.T) {
 // 入力の正規表現をコンパイルさせない。
 func TestUpdate_MuteWordCountCheckedBeforeRegex(t *testing.T) {
 	h, me := akaHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}}
 	for _, key := range []string{"mutedWords", "hardMutedWords"} {
 		// 11 件 (上限 10 を超える) の、どれも正規表現として読めない語。
 		words := make([]string, 11)
@@ -271,7 +271,7 @@ func TestUpdate_MuteWordCountCheckedBeforeRegex(t *testing.T) {
 // 数えること。AND の組の中の語も足す。
 func TestUpdate_WordMuteLimitCountsCharacters(t *testing.T) {
 	h, me := akaHandler(t)
-	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}})
+	h.roleProvider = &stubRoleProvider{policies: map[string]any{"wordMuteLimit": 10}}
 	for body, want := range map[string]int{
 		`{"hardMutedWords":[["abcdefghijk"]]}`:        http.StatusBadRequest, // 1 件でも 11 文字
 		`{"hardMutedWords":[["abcde"],["fgh","ij"]]}`: http.StatusOK,         // 10 文字

@@ -155,7 +155,7 @@ func TestUpdate_UnlockAcceptsPendingRequests(t *testing.T) {
 			followApprovalUser(repo, tc.stored)
 			h.SetUserRepo(repo)
 			acc := &recordingBulkAccepter{}
-			h.SetFollowRequestBulkAccepter(acc)
+			h.followRequestAccepter = acc
 			me := &model.User{ID: "user1", Username: "user1", IsLocked: tc.cached, AvatarDecorations: datatypes.JSON([]byte("[]"))}
 
 			rec := post(h.Update, tc.body, me)
@@ -175,8 +175,7 @@ func TestUpdate_UnlockAcceptFailureStillSucceeds(t *testing.T) {
 	user := followApprovalUser(repo, true)
 	h.SetUserRepo(repo)
 	acc := &recordingBulkAccepter{err: errors.New("db down")}
-	h.SetFollowRequestBulkAccepter(acc)
-	assert.True(t, h.HasFollowRequestBulkAccepter())
+	h.followRequestAccepter = acc
 
 	rec := post(h.Update, `{"isLocked":false}`, user)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

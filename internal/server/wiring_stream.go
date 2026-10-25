@@ -36,9 +36,10 @@ import (
 //
 // buildStream only constructs. setupRoutes calls it right before buildHandlers
 // (#3827), so that the i and oauth handlers can take the revoke publisher as a
-// constructor argument; the aliases, the wiring.stream assignment, every
-// setter on these parts and every Subscribe… are still at their old position
-// in the stream section of setupRoutes.
+// constructor argument; the wiring.stream assignment, the aliases (except
+// streamRevokePublisher, placed right after the call for those handlers),
+// every setter on these parts and every Subscribe… are still at their old
+// position in the stream section of setupRoutes.
 type streamParts struct {
 	streamRegistry        *stream.Registry
 	streamManager         *stream.Manager

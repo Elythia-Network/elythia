@@ -23,8 +23,7 @@ func newPendingGuard(t *testing.T, h *Handler) *miniredis.Miniredis {
 	mr := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = client.Close() })
-	h.SetTwoFAPendingGuard(twofactor.NewRedisPendingGuard(client))
-	require.True(t, h.HasTwoFAPendingGuard())
+	h.twoFAPending = twofactor.NewRedisPendingGuard(client)
 	return mr
 }
 
