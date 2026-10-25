@@ -32,40 +32,42 @@ type HTTPFetcher interface {
 	FetchHTML(uri string) ([]byte, error)
 }
 
-// hostBoundJSONFetcher is the optional面 used to bind a nodeinfo fetch to the
-// host we asked for.
+// HostBoundHTTPFetcher is the HTTPFetcher FetchMetadataService needs: it also
+// reports the URL a JSON fetch ended at, so a nodeinfo fetch can be bound to
+// the host we asked for.
 //
 // **href の検証だけでは足りない (レビュー H3)。** discovery が返す
 // `links[].href` の host を縛っても、client が redirect を追従するなら
 // **302 一回で任意の host / ポートへ飛べる**。`meta.allowExternalApRedirect` の
 // 既定は true なので、既定構成でそのまま成立していた。最終 URL まで見て
 // 初めて「その host の文書を読んだ」と言える。
-type hostBoundJSONFetcher interface {
+//
+// **構築子の引数の型で求める (#3833)。** 以前は HTTPFetcher を受けて
+// optional interface で拾い、持たない実装では FetchJSON に fallback していた。
+// その形では `FetchJSONWithFinalURL` を rename しただけで redirect の束縛が
+// 丸ごと消えたまま全テストが緑になり (2 周目レビュー M1)、起動時の検査で
+// 見ていた。今は持たない型を渡すとコンパイルで落ちる。
+type HostBoundHTTPFetcher interface {
+	HTTPFetcher
+	// FetchJSONWithFinalURL is FetchJSON but also returns the URL that
+	// actually answered (after redirects). 空文字なら最終 URL の検査を
+	// skip する。
 	FetchJSONWithFinalURL(uri string) ([]byte, string, error)
 }
 
 // FetchMetadataService fetches /.well-known/nodeinfo for a remote host and
 // updates the corresponding instance row with the parsed metadata.
 type FetchMetadataService struct {
-	repo    repository.InstanceRepository
-	fetcher HTTPFetcher
+	repo repository.InstanceRepository
+	// fetcher は nodeinfo と HTML の取得元。nodeinfo は FetchJSONWithFinalURL で
+	// 取り、redirect の飛び先が要求した host を外れたら捨てる
+	// (fetchJSONFromHost)。
+	fetcher HostBoundHTTPFetcher
 	clock   func() time.Time
 }
 
-// HasHostBoundFetcher reports whether the wired fetcher can bind a nodeinfo
-// fetch to the host we asked for.
-//
-// **optional interface なので、外れても静かに無束縛へ落ちる (2 周目レビュー M1)。**
-// `fetchJSONFromHost` は実装が無ければ `FetchJSON` に fallback するので、
-// `FetchJSONSameHost` を rename しただけで**redirect の束縛が丸ごと消えたまま
-// 全テストが緑**になる。起動時に気付けるよう述語を出す。
-func (s *FetchMetadataService) HasHostBoundFetcher() bool {
-	_, ok := s.fetcher.(hostBoundJSONFetcher)
-	return ok
-}
-
 // NewFetchMetadataService constructs a FetchMetadataService.
-func NewFetchMetadataService(repo repository.InstanceRepository, fetcher HTTPFetcher) *FetchMetadataService {
+func NewFetchMetadataService(repo repository.InstanceRepository, fetcher HostBoundHTTPFetcher) *FetchMetadataService {
 	return &FetchMetadataService{repo: repo, fetcher: fetcher, clock: time.Now}
 }
 
@@ -623,15 +625,9 @@ func (s *FetchMetadataService) fetchDocument(href, host string) (*nodeinfoDocume
 var errNodeinfoHostEscaped = errors.New("nodeinfo: response came from another host")
 
 // fetchJSONFromHost fetches JSON and refuses a response served by a different
-// host (see hostBoundJSONFetcher).
+// host (see HostBoundHTTPFetcher).
 func (s *FetchMetadataService) fetchJSONFromHost(uri, host string) ([]byte, error) {
-	bound, ok := s.fetcher.(hostBoundJSONFetcher)
-	if !ok {
-		// 最終 URL を返せない実装 (テスト用の偽物) では従来どおり。本番の
-		// fetcher は必ず実装している。
-		return s.fetcher.FetchJSON(uri)
-	}
-	body, finalURL, err := bound.FetchJSONWithFinalURL(uri)
+	body, finalURL, err := s.fetcher.FetchJSONWithFinalURL(uri)
 	if err != nil {
 		return nil, err
 	}

@@ -300,6 +300,8 @@ var requiredDepChecks = []string{
 	"notes.noteHider", "notes.entityPacker", "notes.policyProvider", "notes.ugcVisibilityFn",
 	"notes.driveFileRepo", "notes.metaRepo", "notes.blockingRepo", "notes.mutingRepo",
 	"notes.renoteMutingRepo", "notes.channelMutingRepo", "notes.userFollowingRepo",
+	// ここから #3833 (連合の部品)。
+	"metadataFetcher.fetcher",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,
