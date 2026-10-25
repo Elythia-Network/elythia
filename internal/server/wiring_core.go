@@ -105,9 +105,23 @@ type core struct {
 	abuseInAppNotifier   *coreabuse.InAppNotifier
 }
 
+// buildRole builds the role service from w.repos (#3825).
+//
+// role.Service は buildCore の前に作る。entity の Packer と共有の userpack の
+// Packer が roleService に依存し、buildCore で作る部品の構築子がその 2 つを
+// 受け取るため。作るだけで DB にも Redis にも触らない (buildCore と同じ条件)。
+func (s *Server) buildRole(w *wiring, idGen id.Generator) *corerole.Service {
+	roleRepo := w.repos.role
+	roleAssignmentRepo := w.repos.roleAssignment
+	var metaRepo repository.MetaRepository = w.repos.cachedMeta
+	return corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
+}
+
 // buildCore builds the core services from w.repos, in the order setupRoutes
 // used to build them. It reads s.redis, s.config, s.queueClient and s.db.
-func (s *Server) buildCore(w *wiring, idGen id.Generator) core {
+// roleService is built by buildRole before it (#3825) and is stored in the
+// role field as is.
+func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.Service) core {
 	// 下の行は setupRoutes にあった行をそのまま移した。ゲートが構築の式を引数まで
 	// 含めて照合するので、repository も同じ名前の別名で受ける。
 	userRepo := w.repos.user
@@ -138,8 +152,6 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator) core {
 	pageLikeRepo := w.repos.pageLike
 	flashRepo := w.repos.flash
 	flashLikeRepo := w.repos.flashLike
-	roleRepo := w.repos.role
-	roleAssignmentRepo := w.repos.roleAssignment
 	userListRepo := w.repos.userList
 	webhookRepo := w.repos.webhook
 	systemWebhookRepo := w.repos.systemWebhook
@@ -175,7 +187,6 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator) core {
 	// Instance management (Phase 3 Step H)。インスタンスの停止・サイレンスの判定を、
 	// 連合・following・reaction・配送が共有する。
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
-	roleService := corerole.NewService(roleRepo, roleAssignmentRepo, metaRepo, idGen)
 	signupService := coresignup.NewService(userRepo, metaRepo, idGen)
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo)
 	// 投稿後のフックの同時実行の枠を設定の数で作り直す(#3780)。

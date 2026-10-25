@@ -334,58 +334,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 読ませる (#3330)。
 	chartHooks.SetMetaSource(metaRepo.Fetch)
 
-	// Core services (#3686)。作るのは buildCore (wiring_core.go) で、ここでは今までと
-	// 同じ名前の別名を置くだけにする。移したのは、作るだけで DB にも Redis にも外部にも
-	// 触らず、goroutine も shutdown hook も持たず、依存が repository と先に作った core
-	// だけのもの。**setter の呼び出しは 1 つも動かしていない** (下の元の位置のまま)。
-	// 構築の途中で動く処理から見える配線を変えないため (docs/architecture.md 4.1)。
-	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
-	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
-	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
-	coreSvcs := s.buildCore(w, idGen)
-	w.core = coreSvcs
-	featuredService := coreSvcs.featured
-	hashtagService := coreSvcs.hashtag
-	modLogService := coreSvcs.modLog
-	reversiFedCache := coreSvcs.reversiFedCache
-	totpReplayGuard := coreSvcs.totpReplayGuard
-	webPushService := coreSvcs.webPush
-	instanceService := coreSvcs.instance
-	roleService := coreSvcs.role
-	signupService := coreSvcs.signup
-	noteCreateService := coreSvcs.noteCreate
-	noteDeleteService := coreSvcs.noteDelete
-	noteQueryService := coreSvcs.noteQuery
-	userService := coreSvcs.user
-	followingService := coreSvcs.following
-	timelineFanoutHook := coreSvcs.timelineFanoutHook
-	ephemeralStore := coreSvcs.ephemeralStore
-	timelineService := coreSvcs.timeline
-	channelService := coreSvcs.channel
-	antennaService := coreSvcs.antenna
-	clipService := coreSvcs.clip
-	reactionService := coreSvcs.reaction
-	notificationService := coreSvcs.notification
-	notificationHook := coreSvcs.notificationHook
-	webhookService := coreSvcs.webhook
-	webhookNoteHook := coreSvcs.webhookNoteHook
-	webhookReactionHook := coreSvcs.webhookReactionHook
-	webhookFollowingHook := coreSvcs.webhookFollowingHook
-	blockingService := coreSvcs.blocking
-	mutingService := coreSvcs.muting
-	renoteMutingService := coreSvcs.renoteMuting
-	pollService := coreSvcs.poll
-	localDriveStorage := coreSvcs.localDriveStorage
-	driveStorage := coreSvcs.driveStorage
-	driveService := coreSvcs.drive
-	imgProcessor := coreSvcs.imgProcessor
-	driveReader := coreSvcs.driveReader
-	sysAcctSvc := coreSvcs.sysAcct
-	listProxyFollow := coreSvcs.listProxyFollow
-	retentionSvc := coreSvcs.retention
-	achievementService := coreSvcs.achievement
-	proxyAllowlist := coreSvcs.proxyAllowlist
-	abuseInAppNotifier := coreSvcs.abuseInAppNotifier
+	// role.Service (#3825)。entity の Packer と共有の userpack の Packer が依存し、
+	// buildCore で作る部品の構築子がその 2 つを受け取るので、buildCore より前に作る。
+	// 作るだけで DB にも Redis にも触らない。setter は下の元の位置のまま。
+	roleService := s.buildRole(w, idGen)
 
 	// entity の Packer の依存 (#3788、#3790)。投稿を包む部品 (webpush、
 	// NoteFieldResolver、handler) へ渡すので、それらを作るより前に組み立てる。
@@ -479,6 +431,88 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 部品へ渡す Packer (#3790)。組み立てごとに作り、プロセスの状態は書き換えない
 	// (#3800 で既定の Packer と Set* を本番から消した)。
 	entityPacker := entity.NewPacker(entityPackerDeps)
+
+	// listRelationRepos は embed user に viewer 視点の relation block を付与する
+	// 共有 Repos。mute/renote-mute/following/federation/hashtags handler が
+	// 共有する (#1957-a)。Apply は匿名 / self / 未配線で no-op。
+	//
+	// **`/users` / `/pinned-users` はこれを使わない** (#2791 で移設した先の
+	// `usersHandler.viewerRelationRepos()` が同じ 6 つを組み立てる)。
+	// `userrelation.Repos` にフィールドを足すときは**両方に配線が要る** —
+	// 片方だけ更新すると explore と pinned-users から黙って欠ける。
+	listRelationRepos := userrelation.Repos{
+		Following:     followingRepo,
+		Blocking:      blockingRepo,
+		Muting:        mutingRepo,
+		RenoteMuting:  renoteMutingRepo,
+		FollowRequest: followRequestRepo,
+		Memo:          userMemoRepo,
+		Relation:      userRelationRepo,
+	}
+	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
+	// UserDetailedNotMe で相手を送る。followed は UserLite (#3269)。
+	// main stream の同じイベントと blocking/create・delete の応答も同じ packer で
+	// 組む (#3330)。ピン留めと移行先を埋める側 (users の handler) は後で組み立てる
+	// ので、そこで SetDetailExtras する。
+	sharedUserPacker := userpack.New(entityPacker, userpack.Lookups{
+		Instances:  instanceRepo,
+		Emojis:     emojiRepo,
+		Profiles:   userRepo,
+		Relations:  listRelationRepos,
+		Moderators: roleService,
+	}, idGen)
+
+	// Core services (#3686)。作るのは buildCore (wiring_core.go) で、ここでは今までと
+	// 同じ名前の別名を置くだけにする。移したのは、作るだけで DB にも Redis にも外部にも
+	// 触らず、goroutine も shutdown hook も持たず、依存が repository と先に作った core
+	// だけのもの。roleService は上の buildRole で作って引数で渡す (#3825)。**setter の呼び出しは 1 つも動かしていない** (下の元の位置のまま)。
+	// 構築の途中で動く処理から見える配線を変えないため (docs/architecture.md 4.1)。
+	// 副作用のあるものと、stream・handler・連合の部品に依存するものは、下の元の位置で作る。
+	// **別名は変数 coreSvcs から取る。** w.core から取ると、別名を代入より前に書いても
+	// コンパイルが通り、ゼロ値 (nil) を黙って受け取る (#3686 のレビュー)。
+	coreSvcs := s.buildCore(w, idGen, roleService)
+	w.core = coreSvcs
+	featuredService := coreSvcs.featured
+	hashtagService := coreSvcs.hashtag
+	modLogService := coreSvcs.modLog
+	reversiFedCache := coreSvcs.reversiFedCache
+	totpReplayGuard := coreSvcs.totpReplayGuard
+	webPushService := coreSvcs.webPush
+	instanceService := coreSvcs.instance
+	signupService := coreSvcs.signup
+	noteCreateService := coreSvcs.noteCreate
+	noteDeleteService := coreSvcs.noteDelete
+	noteQueryService := coreSvcs.noteQuery
+	userService := coreSvcs.user
+	followingService := coreSvcs.following
+	timelineFanoutHook := coreSvcs.timelineFanoutHook
+	ephemeralStore := coreSvcs.ephemeralStore
+	timelineService := coreSvcs.timeline
+	channelService := coreSvcs.channel
+	antennaService := coreSvcs.antenna
+	clipService := coreSvcs.clip
+	reactionService := coreSvcs.reaction
+	notificationService := coreSvcs.notification
+	notificationHook := coreSvcs.notificationHook
+	webhookService := coreSvcs.webhook
+	webhookNoteHook := coreSvcs.webhookNoteHook
+	webhookReactionHook := coreSvcs.webhookReactionHook
+	webhookFollowingHook := coreSvcs.webhookFollowingHook
+	blockingService := coreSvcs.blocking
+	mutingService := coreSvcs.muting
+	renoteMutingService := coreSvcs.renoteMuting
+	pollService := coreSvcs.poll
+	localDriveStorage := coreSvcs.localDriveStorage
+	driveStorage := coreSvcs.driveStorage
+	driveService := coreSvcs.drive
+	imgProcessor := coreSvcs.imgProcessor
+	driveReader := coreSvcs.driveReader
+	sysAcctSvc := coreSvcs.sysAcct
+	listProxyFollow := coreSvcs.listProxyFollow
+	retentionSvc := coreSvcs.retention
+	achievementService := coreSvcs.achievement
+	proxyAllowlist := coreSvcs.proxyAllowlist
+	abuseInAppNotifier := coreSvcs.abuseInAppNotifier
 
 	// 以下は #3676 で受け手より先に作るようにした部品のうち、buildCore へ移さなかった
 	// もの (passwordFailureGuard・proxyAccountResolver・dbHealth) と、buildCore へ移した
@@ -1736,35 +1770,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	usersChart := chartCharts.Users
 	statsHandler := stats.NewHandler(s.db, notesChart, usersChart)
 
-	// listRelationRepos は embed user に viewer 視点の relation block を付与する
-	// 共有 Repos。mute/renote-mute/following/federation/hashtags handler が
-	// 共有する (#1957-a)。Apply は匿名 / self / 未配線で no-op。
-	//
-	// **`/users` / `/pinned-users` はこれを使わない** (#2791 で移設した先の
-	// `usersHandler.viewerRelationRepos()` が同じ 6 つを組み立てる)。
-	// `userrelation.Repos` にフィールドを足すときは**両方に配線が要る** —
-	// 片方だけ更新すると explore と pinned-users から黙って欠ける。
-	listRelationRepos := userrelation.Repos{
-		Following:     followingRepo,
-		Blocking:      blockingRepo,
-		Muting:        mutingRepo,
-		RenoteMuting:  renoteMutingRepo,
-		FollowRequest: followRequestRepo,
-		Memo:          userMemoRepo,
-		Relation:      userRelationRepo,
-	}
-	// follow / unfollow の Webhook は本家と同じく、フォローした側から見た
-	// UserDetailedNotMe で相手を送る。followed は UserLite (#3269)。
-	// main stream の同じイベントと blocking/create・delete の応答も同じ packer で
-	// 組む (#3330)。ピン留めと移行先を埋める側 (users の handler) は後で組み立てる
-	// ので、そこで SetDetailExtras する。
-	sharedUserPacker := userpack.New(entityPacker, userpack.Lookups{
-		Instances:  instanceRepo,
-		Emojis:     emojiRepo,
-		Profiles:   userRepo,
-		Relations:  listRelationRepos,
-		Moderators: roleService,
-	}, idGen)
+	// 共有の userpack の Packer は buildCore より前で作る (#3825)。setter は元の位置のまま。
 	webhookFollowingHook.SetUserPacker(sharedUserPacker)
 	followingService.SetUserPacker(sharedUserPacker)
 
