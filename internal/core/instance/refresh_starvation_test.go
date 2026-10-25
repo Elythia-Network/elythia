@@ -316,6 +316,13 @@ func (f *panicFetcher) FetchJSON(_ string) ([]byte, error) {
 
 func (f *panicFetcher) FetchHTML(_ string) ([]byte, error) { panic("boom in FetchHTML") }
 
+// FetchJSONWithFinalURL reports no final URL, so the host check is skipped as
+// it was for fetchers without the method before #3833.
+func (f *panicFetcher) FetchJSONWithFinalURL(uri string) ([]byte, string, error) {
+	b, err := f.FetchJSON(uri)
+	return b, "", err
+}
+
 // icon 取得の panic でプロセスを落とさない (#2730)。
 //
 // **別 goroutine の panic は呼び出し元の defer では拾えない** ので、echo の
@@ -385,6 +392,13 @@ func (f *handshakeFetcher) FetchJSON(_ string) ([]byte, error) {
 	b := f.bodies[0]
 	f.bodies = f.bodies[1:]
 	return b, nil
+}
+
+// FetchJSONWithFinalURL reports no final URL, so the host check is skipped as
+// it was for fetchers without the method before #3833.
+func (f *handshakeFetcher) FetchJSONWithFinalURL(uri string) ([]byte, string, error) {
+	b, err := f.FetchJSON(uri)
+	return b, "", err
 }
 
 func (f *handshakeFetcher) FetchHTML(_ string) ([]byte, error) {

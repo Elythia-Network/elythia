@@ -1177,7 +1177,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.addStartStopper(context.Background(), "fedRuleHits", fedRuleHits)
 	// 新規 instance row 発見時に nodeinfo を取得して metadata を更新する。
 	// admin/federation/refresh-remote-instance-metadata でも同じ fetcher を
-	// 再利用して on-demand で再取得する (#351 フォロー)。
+	// 再利用して on-demand で再取得する (#351 フォロー)。apFetcher は redirect の
+	// 飛び先を返す取得 (FetchJSONWithFinalURL) を持ち、構築子が型で求める (#3833)。
 	metadataFetcher := coreinstance.NewFetchMetadataService(instanceRepo, apFetcher)
 	instanceService.SetMetadataFetcher(metadataFetcher)
 	// 受信と配送のたびに、24 時間より古ければ nodeinfo を取り直す (#3564)。
@@ -3997,6 +3998,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		inboxProcessor:             inboxProcessor,
 
 		notes: notesHandler,
+
+		metadataFetcher: metadataFetcher,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。
@@ -4011,8 +4014,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
 		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
-		{"instance.hostBoundNodeinfoFetcher", metadataFetcher.HasHostBoundFetcher(),
-			"nodeinfo の取得が redirect の飛び先に縛られなくなり、任意の host が返した JSON を instance 行へ書き戻せる"},
 		{"federation.prohibitedWords", federationResolver.HasProhibitedWordsSource(),
 			"リモートから届くノートに禁止語のフィルタが掛からなくなる (ローカル投稿にだけ効く状態)"},
 		{"federation.sensitiveWords", federationResolver.HasSensitiveWordsSource(),

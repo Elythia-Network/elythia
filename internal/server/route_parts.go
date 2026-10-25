@@ -18,6 +18,7 @@ import (
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
 	"github.com/elythia-network/elythia/internal/core/emojiapplication"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
 	coremove "github.com/elythia-network/elythia/internal/core/move"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 	"github.com/elythia-network/elythia/internal/queue/processors"
@@ -26,7 +27,7 @@ import (
 
 // routeParts holds the components setupRoutes builds in its own body (not in
 // buildHandlers or buildCore), or through buildStream, whose dependencies are
-// required constructor arguments (#3823, #3827, #3829, #3831). 本番では読まない。
+// required constructor arguments (#3823, #3827, #3829, #3831, #3833). 本番では読まない。
 //
 // 構築子の必須の引数にした依存は、型では渡し忘れを防げても nil は渡せる。
 // TestBuiltHandlersHaveNoNilDependencies が組み立てた後の部品のフィールドを見て、
@@ -80,4 +81,7 @@ type routeParts struct {
 
 	// notes の handler (#3831)。buildHandlers より前、setupRoutes の本文で作る。
 	notes *notes.Handler
+
+	// 連合の部品 (#3833)。欄の名前は setupRoutes の別名にする。
+	metadataFetcher *coreinstance.FetchMetadataService
 }

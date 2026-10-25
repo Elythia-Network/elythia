@@ -1713,6 +1713,36 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 `notesHandler.Set`の行。2段目と3段目で受け手が減らないのは、notesのhandlerに表に無いsetter
 (`SetPiningRepo`・`SetTranslator`など)が残っているため。
 
+##### 段(7): 連合(#3833)
+
+**連合の部品も、同じ形にした。** #3812の段(7)。置き換えたのは、表の行で見ていた依存だけ。
+
+- **1段目は、テストの組み立てを補助関数に寄せただけ。** `internal/core/federation`のテストの
+  `NewResolver`の呼び出し(338か所。`federation_test`の316と`package federation`の22)と
+  `NewProcessor`の呼び出し(38か所。すべて`federation_test`)を、今の構築子をそのまま包む
+  `NewResolverNilDeps`・`NewProcessorNilDeps`(`nil_deps_test.go`)へ機械的に寄せた。後の段で
+  構築子の引数が増えても、直すのは補助関数の中だけで済む。`package federation`の`_test.go`に
+  置いたので、外部テスト(`federation_test`)からも呼べる
+- **2段目は`instance.hostBoundNodeinfoFetcher`(1構築子・1行)。** nilではなく、渡した取得元が
+  redirectの飛び先を返す取得(`FetchJSONWithFinalURL`)を持つかを見ていた行で、引数の型で受ける
+  ようにした。`coreinstance.NewFetchMetadataService`は`HTTPFetcher`に代えて
+  `HostBoundHTTPFetcher`(`HTTPFetcher`と`FetchJSONWithFinalURL`)を受け、optional interfaceで
+  拾っていた`hostBoundJSONFetcher`と、持たない実装で`FetchJSON`へ落ちるfallbackは消した。本番の
+  `apFetcher`(`*corefederation.APFetcher`)は元から実装している。テストの偽の取得元のうち持って
+  いなかった2つ(`panicFetcher`・`handshakeFetcher`)には、`FetchJSON`を呼んで最終URLを空文字で
+  返すメソッドを足した(最終URLが空なら検査をskipするので、元のfallbackと同じ動き)。構築子が
+  引数を捨てないことは`internal/core/instance/constructor_test.go`が見る
+- **`routeParts`に`metadataFetcher`を足した。** `requiredDepChecks`に`metadataFetcher.fetcher`を
+  足した。テストの組み立てでnilになるフィールドは無かった
+
+| | #3833の前(`ea8d65fae2`) | 1段目の後 | 2段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 28 | 28 | 27 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 605 | 605 | 605 |
+| その受け手 | 107 | 107 | 107 |
+
+数え方: 段(1)・段(2)の表と同じ。2段目は表の行を外しただけで、setterは元から無い。
+
 #### /api のルートの登録 (#3697)
 
 ```

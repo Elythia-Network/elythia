@@ -37,7 +37,7 @@ type scriptedFetcher struct {
 	finalURLs []string
 }
 
-// FetchJSONWithFinalURL implements hostBoundJSONFetcher.
+// FetchJSONWithFinalURL implements instance.HostBoundHTTPFetcher.
 func (s *scriptedFetcher) FetchJSONWithFinalURL(url string) ([]byte, string, error) {
 	idx := s.idx
 	body, err := s.FetchJSON(url)
