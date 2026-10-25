@@ -21,7 +21,7 @@ func (s *stubCapabilityRecorder) ObserveInboundAlg(host, alg string) {
 	s.algs = append(s.algs, alg)
 }
 
-// 同期 verify 経路 (SetEnqueuer 未配線) でも署名方式が記録される。worker 経路
+// 同期 verify 経路 (enqueuer が nil) でも署名方式が記録される。worker 経路
 // だけに入れると、この構成では丸ごと記録されない。
 func TestInbox_RecordsInboundSignatureAlg(t *testing.T) {
 	priv, pub, err := activitypub.GenerateRSAKeypair()

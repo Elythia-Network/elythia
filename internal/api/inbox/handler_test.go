@@ -71,7 +71,7 @@ func newHandler(t *testing.T, pubKeyPEM string) (*Handler, *testutil.MockUserRep
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(actorBody(pubKeyPEM))}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
-	return NewHandler(resolver, processor), repo, followingRepo
+	return NewHandler(resolver, processor, "", nil, nil), repo, followingRepo
 }
 
 func newPost(t *testing.T, body []byte) (echo.Context, *httptest.ResponseRecorder) {
@@ -212,7 +212,7 @@ func TestInbox_ResolverError(t *testing.T) {
 	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
-	h := NewHandler(resolver, processor)
+	h := NewHandler(resolver, processor, "", nil, nil)
 
 	priv, _, _ := activitypub.GenerateRSAKeypair()
 	key, _ := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
@@ -242,7 +242,7 @@ func TestInbox_PublicKeyMissing(t *testing.T) {
 	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
-	h := NewHandler(resolver, processor)
+	h := NewHandler(resolver, processor, "", nil, nil)
 
 	priv, _, _ := activitypub.GenerateRSAKeypair()
 	key, _ := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
@@ -279,7 +279,7 @@ func TestInbox_BlockedHost(t *testing.T) {
 	h, repo, _ := newHandler(t, pub)
 	bobURI := "https://example.com/users/bob"
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
-	h.SetHostBlockChecker(&stubBlocker{blocked: map[string]bool{"remote.example": true}})
+	h.hostBlocker = &stubBlocker{blocked: map[string]bool{"remote.example": true}}
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	c, rec := newPost(t, body)
@@ -307,7 +307,7 @@ func TestInbox_DisallowedHost(t *testing.T) {
 	// blocked は空のまま、disallowed (= specified モードで allowlist 外) を
 	// シミュレート。これだけで 403 reject されること = allowlist enforcement
 	// が deliver path と独立に inbox path にも入ったこと。
-	h.SetHostBlockChecker(&stubBlocker{disallowed: map[string]bool{"remote.example": true}})
+	h.hostBlocker = &stubBlocker{disallowed: map[string]bool{"remote.example": true}}
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	c, rec := newPost(t, body)
@@ -460,7 +460,7 @@ func (r *recordingEnqueuer) EnqueueInbox(_ context.Context, p queue.InboxPayload
 	return nil
 }
 
-// SetEnqueuer 後は Inbox は Process / verifySignature を呼ばずに
+// enqueuer を入れた後は Inbox は Process / verifySignature を呼ばずに
 // EnqueueInbox に委譲する (#565)。followingRepo に書き込みが起きないこと、
 // enqueuer が body と signature 関連 header を受け取ること、HTTP は 202
 // Accepted を返すことを確認する。worker 側の verify に必要な Method /
@@ -474,7 +474,7 @@ func TestInbox_AsyncMode_DispatchesToQueue(t *testing.T) {
 
 	h, repo, followingRepo := newHandler(t, pub)
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	bobURI := "https://example.com/users/bob"
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
@@ -510,7 +510,7 @@ func TestInbox_AsyncMode_PathKeepsQuery(t *testing.T) {
 
 	h, _, _ := newHandler(t, pub)
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	e := echo.New()
@@ -540,7 +540,7 @@ func TestInbox_AsyncMode_RejectsMissingSignatureHeader(t *testing.T) {
 	require.NoError(t, err)
 	h, _, _ := newHandler(t, pub)
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	body := []byte(`{"type":"Follow"}`)
 	c, rec := newPost(t, body)
@@ -560,7 +560,7 @@ func TestInbox_AsyncMode_EnqueueFailureReturns500(t *testing.T) {
 	require.NoError(t, err)
 
 	h, repo, _ := newHandler(t, pub)
-	h.SetEnqueuer(&recordingEnqueuer{err: errors.New("redis down")})
+	h.enqueuer = &recordingEnqueuer{err: errors.New("redis down")}
 
 	bobURI := "https://example.com/users/bob"
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
@@ -622,7 +622,7 @@ func TestInbox_HostMismatchRejected(t *testing.T) {
 	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
 	require.NoError(t, err)
 	h, _, _ := newHandler(t, pub)
-	h.SetExpectedHost("example.com")
+	h.expectedHost = "example.com"
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	c, rec := newPost(t, body)
@@ -640,7 +640,7 @@ func TestInbox_HostSignedAndMatchAccepted(t *testing.T) {
 	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
 	require.NoError(t, err)
 	h, repo, followingRepo := newHandler(t, pub)
-	h.SetExpectedHost("example.com")
+	h.expectedHost = "example.com"
 
 	bobURI := "https://example.com/users/bob"
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
@@ -723,7 +723,7 @@ func TestInbox_FederationDisabled(t *testing.T) {
 	_, pub, err := activitypub.GenerateRSAKeypair()
 	require.NoError(t, err)
 	h, _, _ := newHandler(t, pub)
-	h.SetHostBlockChecker(&stubBlocker{fedDisabled: true})
+	h.hostBlocker = &stubBlocker{fedDisabled: true}
 
 	// 署名なしの素の body でも、federation gate が先に効いて 403 (401 ではない)。
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
@@ -743,7 +743,7 @@ func TestInbox_FederationEnabled_NotGated(t *testing.T) {
 	h, repo, _ := newHandler(t, pub)
 	bobURI := "https://example.com/users/bob"
 	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
-	h.SetHostBlockChecker(&stubBlocker{fedDisabled: false})
+	h.hostBlocker = &stubBlocker{fedDisabled: false}
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	c, rec := newPost(t, body)
@@ -879,7 +879,7 @@ func TestInbox_AsyncMode_CarriesEverySignedHeader(t *testing.T) {
 
 	h, _, _ := newHandler(t, pub)
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	body := []byte(`{"type":"Create","actor":"https://remote.example/users/alice","object":{"type":"Note","id":"https://remote.example/notes/1","attributedTo":"https://remote.example/users/alice","to":["https://remote.example/users/alice/followers"],"content":"x"}}`)
 	c, rec := newPost(t, body)
@@ -959,7 +959,7 @@ func TestInbox_AsyncMode_RejectsSignatureOverHeaderLimits(t *testing.T) {
 
 	h, _, _ := newHandler(t, pub)
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	c, rec := newPost(t, body)

@@ -62,9 +62,9 @@ func TestInbox_AdmissionRejectLogIdentifiesTheSender(t *testing.T) {
 	require.NoError(t, err)
 
 	h, _, followingRepo := newHandler(t, pub)
-	h.SetExpectedHost("example.com")
+	h.expectedHost = "example.com"
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	original := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
 	tampered := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/eve"}`)
@@ -100,9 +100,9 @@ func TestInbox_NoActorRejectLogIdentifiesTheSender(t *testing.T) {
 	require.NoError(t, err)
 
 	h, _, _ := newHandler(t, pub)
-	h.SetExpectedHost("example.com")
+	h.expectedHost = "example.com"
 	enq := &recordingEnqueuer{}
-	h.SetEnqueuer(enq)
+	h.enqueuer = enq
 
 	body := []byte(`{"type":"Create","object":{"id":"https://remote.example/notes/1","type":"Note"}}`)
 	c, rec := newPost(t, body)
@@ -146,9 +146,9 @@ func TestInbox_AdmissionRejectLogWithoutParsableSignature(t *testing.T) {
 			_, pub, err := activitypub.GenerateRSAKeypair()
 			require.NoError(t, err)
 			h, _, _ := newHandler(t, pub)
-			h.SetExpectedHost("example.com")
+			h.expectedHost = "example.com"
 			enq := &recordingEnqueuer{}
-			h.SetEnqueuer(enq)
+			h.enqueuer = enq
 
 			body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice"}`)
 			c, rec := newPost(t, body)

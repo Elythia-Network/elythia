@@ -6,6 +6,7 @@ import (
 	apibubblegame "github.com/elythia-network/elythia/internal/api/bubblegame"
 	apichat "github.com/elythia-network/elythia/internal/api/chat"
 	"github.com/elythia-network/elythia/internal/api/drive"
+	"github.com/elythia-network/elythia/internal/api/inbox"
 	"github.com/elythia-network/elythia/internal/api/notes"
 	"github.com/elythia-network/elythia/internal/api/oauth"
 	apiresetpassword "github.com/elythia-network/elythia/internal/api/resetpassword"
@@ -87,4 +88,5 @@ type routeParts struct {
 	metadataFetcher *coreinstance.FetchMetadataService
 	deliverService  *corefederation.DeliverService
 	noteDeleteHook  *corefederation.NoteDeleteDeliveryHook
+	inboxHandler    *inbox.Handler
 }
