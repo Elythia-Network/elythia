@@ -180,6 +180,40 @@ type pluginPeerDeps struct {
 	urlFor func(host, plugin string) string
 }
 
+// newPluginPeerDeps builds the dependencies of the peer channel.
+//
+// blocker is the host-block checker. 無いとプラグイン間通信でブロックリストと
+// 連合ポリシーが効かなくなる。以前は構造体リテラルで組み、入れ忘れを起動時の検査
+// (criticalWiring) が見ていた。渡し忘れをコンパイルで落とすため、構築子の必須の引数で
+// 受ける (#3827)。ほかの欄も同じく引数で受ける。urlFor はテストが httptest の
+// サーバーへ向ける seam なので受けない (nil のとき https)。パッケージ内のテストは、
+// 要る欄だけを書いた構造体リテラルで組む (多くは 1〜3 欄しか書かない)。
+func newPluginPeerDeps(
+	selfHost string,
+	client *http.Client,
+	resolver peerActorResolver,
+	keyCache *activitypub.PublicKeyCache,
+	blocker peerHostBlocker,
+	signer peerSigner,
+	remote peerPluginLister,
+	idGen id.Generator,
+	limiter *peerRateLimiter,
+	enqueuer peerEnqueuer,
+) *pluginPeerDeps {
+	return &pluginPeerDeps{
+		selfHost: selfHost,
+		client:   client,
+		resolver: resolver,
+		keyCache: keyCache,
+		blocker:  blocker,
+		signer:   signer,
+		remote:   remote,
+		idGen:    idGen,
+		limiter:  limiter,
+		enqueuer: enqueuer,
+	}
+}
+
 // peerURL builds the endpoint URL for a host.
 func (d *pluginPeerDeps) peerURL(host, plugin string) string {
 	if d.urlFor != nil {
@@ -734,13 +768,4 @@ func apiCatchall(c echo.Context) error {
 		))
 	}
 	return c.JSON(http.StatusOK, map[string]any{})
-}
-
-// HasBlocker reports whether the host-block checker was wired.
-//
-// **起動時のゲートに載せるための述語。** `recordCriticalWiring` の一覧に peer が
-// 1 つも無く、`blocker:` の行を消してもブロック判定が黙って無効になる状態で
-// 全テストが緑になっていた (inbox の同種の fail-open は全て載っている)。
-func (d *pluginPeerDeps) HasBlocker() bool {
-	return d != nil && d.blocker != nil
 }

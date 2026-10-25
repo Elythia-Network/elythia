@@ -35,14 +35,21 @@ func TestPluginPeerBodyLimitIsWired(t *testing.T) {
 // nil 許容にしてあり、落としても build もテストも通る。落ちるのは
 // 「認証を通った相手 (と署名を持たない相手) が受け口を無制限に叩ける」状態で、
 // 症状が出るのは攻撃を受けたときだけ。
-// **これは呼び出しではなく struct literal のフィールド。** `wiringNodes` は
-// KeyValueExpr も集めるので同じ形で書ける。空白は正規化されるので、gofmt の
-// 整列が変わっても落ちない (実際に変わって落ちたことがある)。
+// #3827 から deps は構築子 (newPluginPeerDeps) で組むので、構築子の呼び出しを引数まで
+// 含めて照合する。limiter は 9 番目の引数。nil を渡す形は
+// TestBuiltHandlersHaveNoNilDependencies も落とすが、引数の順を取り違えたり、
+// 別の limiter を渡したりする形はここで見る。空白は正規化されるので、引数の折り方が
+// 変わっても落ちない。
 func TestPluginPeerRateLimiterIsWired(t *testing.T) {
-	assertWired(t, serverPkg,
-		"limiter: newPeerRateLimiter()",
+	assertWired(t, serverPkg, pluginPeerDepsWiring,
 		"pluginPeerDeps の limiter が nil になり、peer の受け口が無制限になる")
 }
+
+// pluginPeerDepsWiring is how setupRoutes builds the peer channel's
+// dependencies (#3827).
+const pluginPeerDepsWiring = "s.peerDeps = newPluginPeerDeps(s.config.Host, s.outboundClient(peerTimeout), " +
+	"federationResolver, activitypub.NewPublicKeyCache(256), instanceService, instanceSigner, pluginPeers, " +
+	"idGen, newPeerRateLimiter(), s.queueClient)"
 
 // catchall は名前付き関数を router から参照していないと効かない。
 //
@@ -75,8 +82,9 @@ func TestPluginJobQueuesAreWired(t *testing.T) {
 // **落としても build もテストも通る。** pluginPeer は enqueuer が nil のとき
 // warn を出して捨てるので、落ちるのは「送信が全部消える」ところ。相手側にしか
 // 症状が出ないうえ、こちらのログを見ないと気付けない。
+//
+// #3827 から構築子の最後の引数 (TestPluginPeerRateLimiterIsWired と同じ呼び出しを照合する)。
 func TestPluginPeerEnqueuerIsWired(t *testing.T) {
-	assertWired(t, serverPkg,
-		"enqueuer: s.queueClient",
+	assertWired(t, serverPkg, pluginPeerDepsWiring,
 		"pluginPeerDeps の enqueuer が nil になり、peer の送信が全部捨てられる")
 }

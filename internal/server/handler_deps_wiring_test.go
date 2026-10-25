@@ -59,9 +59,15 @@ var handlerNilAllowed = map[string]string{
 	// とき (PublishNote / PublishNoteMany の packNote) に作る。組み立てた直後はまだ投稿を
 	// 流していないので nil (#3827)。
 	"notePublisher.cachedBody": "依存ではなく状態。最初に投稿を流すとき (packNote) に作るので、組み立てた直後は nil",
+	// テストだけが feed_window_test.go で時刻を固定する。newFeedHandler は入れず、nil のとき
+	// time.Now を使う (#3827)。
+	"feed.now": "テスト専用の seam。newFeedHandler は入れず、nil のとき time.Now を使う",
+	// テストだけが httptest のサーバーへ向けるために入れる。newPluginPeerDeps は入れず、
+	// nil のとき peerURL は https の既定の URL を作る (#3827)。
+	"peer.urlFor": "テスト専用の seam。newPluginPeerDeps は入れず、nil のとき https の既定の URL を作る",
 }
 
-// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825)。**
+// **組み立てたサーバーの handler と部品に、nil の依存が残っていないこと (#3817、#3823、#3825、#3827)。**
 //
 // 依存を構築子の必須の引数にすると、渡し忘れはコンパイルで落ちる。ただ nil は
 // 渡せる。以前の起動時の検査 (criticalWiring の表) と wiring-check の文字列の照合は、
@@ -71,7 +77,8 @@ var handlerNilAllowed = map[string]string{
 // 通った後なので同じ規則で見る。
 //
 // 対象は、buildHandlers が作った handler のうち requiredDepHandlers に並べたもの
-// (#3817) と、setupRoutes の本文で作る部品のうち routeParts に持たせたもの全部 (#3823)、
+// (#3817、i は #3827) と、setupRoutes の本文 (と buildStream) で作る部品のうち
+// routeParts に持たせたもの全部 (#3823、stream の部品と feed・peer は #3827)、
 // buildCore が作る部品のうち coreParts に持たせたもの全部 (#3825)。
 //
 // フィールドは unexported だが、同じ型の値を reflect で辿り IsNil を見るだけなので
@@ -268,6 +275,7 @@ var requiredDepChecks = []string{
 	"streamManager.ugcVisibility",
 	"notePublisher.entityPacker", "notificationPublisher.entityPacker", "reversiPublisher.entityPacker",
 	"serverStatsPub.enabled",
+	"feed.ugcVisibility", "peer.blocker",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

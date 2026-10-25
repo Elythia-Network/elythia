@@ -654,9 +654,57 @@ func TestPluginPeer_BlockerMissingIsFailClosed(t *testing.T) {
 		"送信側: 判定できないときは送らないこと")
 }
 
-// 配線の有無を起動時ゲートが見られること。
-func TestPluginPeerDeps_HasBlocker(t *testing.T) {
-	require.False(t, (&pluginPeerDeps{}).HasBlocker())
-	require.False(t, (*pluginPeerDeps)(nil).HasBlocker())
-	require.True(t, (&pluginPeerDeps{blocker: allowAllPeerBlocker{}}).HasBlocker())
+// newPluginPeerDeps は受け取った依存を持たせる (#3827)。blocker を構築子の必須の
+// 引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なくなった。構築子が
+// 引数を捨てても build は通るので、ここで固定する。
+func TestNewPluginPeerDepsKeepsDependencies(t *testing.T) {
+	client := &http.Client{}
+	resolver := &ctorPeerResolver{}
+	keyCache := activitypub.NewPublicKeyCache(1)
+	blocker := &ctorPeerBlocker{}
+	signer := &ctorPeerSigner{}
+	remote := &ctorPeerLister{}
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	limiter := newPeerRateLimiter()
+	enqueuer := &ctorPeerEnqueuer{}
+
+	d := newPluginPeerDeps("local.example", client, resolver, keyCache, blocker, signer, remote, idGen, limiter, enqueuer)
+	require.Equal(t, "local.example", d.selfHost)
+	require.Same(t, client, d.client)
+	require.Same(t, resolver, d.resolver)
+	require.Same(t, keyCache, d.keyCache)
+	require.Same(t, blocker, d.blocker)
+	require.Same(t, signer, d.signer)
+	require.Same(t, remote, d.remote)
+	require.Equal(t, idGen, d.idGen)
+	require.Same(t, limiter, d.limiter)
+	require.Same(t, enqueuer, d.enqueuer)
+	require.Nil(t, d.urlFor, "urlFor はテストの seam。構築子は入れない")
+}
+
+type ctorPeerResolver struct{}
+
+func (*ctorPeerResolver) ResolveActor(string) (*model.User, error)         { return nil, nil }
+func (*ctorPeerResolver) PublicKeyForKeyID(string, string) (string, error) { return "", nil }
+
+type ctorPeerBlocker struct{}
+
+func (*ctorPeerBlocker) IsBlocked(string) bool          { return false }
+func (*ctorPeerBlocker) IsAllowed(string) bool          { return true }
+func (*ctorPeerBlocker) ShouldSkipDelivery(string) bool { return false }
+
+type ctorPeerSigner struct{}
+
+func (*ctorPeerSigner) Signer() (*activitypub.PrivateKey, error) { return nil, nil }
+
+type ctorPeerLister struct{}
+
+func (*ctorPeerLister) Plugins(context.Context, string) ([]string, error) { return nil, nil }
+func (*ctorPeerLister) Forget(string)                                     {}
+
+type ctorPeerEnqueuer struct{}
+
+func (*ctorPeerEnqueuer) EnqueuePluginPeer(context.Context, string, []byte, ...driver.EnqueueOption) error {
+	return nil
 }
