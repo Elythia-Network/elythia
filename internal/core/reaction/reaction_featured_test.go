@@ -47,7 +47,7 @@ func newSvcWithRanking(t *testing.T, alwaysSample bool) (*Service, *testutil.Moc
 	emojiRepo := testutil.NewMockEmojiRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen)
+	svc := NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	fake := newFakeRanking()
 	svc.SetFeaturedRanking(fake)
 	if alwaysSample {
@@ -126,7 +126,7 @@ func TestUpdateFeaturedOnReaction_NoRankingNoop(t *testing.T) {
 	emojiRepo := testutil.NewMockEmojiRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen)
+	svc := NewService(noteRepo, reactRepo, emojiRepo, followingRepo, idGen, nil, nil, nil)
 	noteID := idGen.Generate(time.Now())
 	noteRepo.Notes[noteID] = &model.Note{ID: noteID, UserID: "author", Visibility: model.NoteVisibilityPublic}
 	_, err := svc.Create(&model.User{ID: "viewer"}, noteID, "")

@@ -79,8 +79,7 @@ func newFixture(t *testing.T) *fixture {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	users := repository.NewUserRepository(db)
-	creator := signup.NewService(users, metaRepo, idGen)
-	creator.SetDB(db)
+	creator := signup.NewService(users, metaRepo, idGen, db, nil, nil)
 	creator.SetUsedUsernameRepo(repository.NewUsedUsernameRepository(db))
 
 	f := &fixture{db: db, uploader: &fakeUploader{}, deleter: &fakeDeleter{}}

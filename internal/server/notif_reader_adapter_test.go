@@ -48,7 +48,7 @@ func TestNotifReaderAdapter_ReadAll_DoesNotForce(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 
-	svc := corenotification.NewService(client, idGen, "")
+	svc := corenotification.NewService(client, idGen, "", nil)
 	// 2 秒の AfterFunc を待たずに済ませる。
 	svc.SetUnreadPublishDelay(0)
 

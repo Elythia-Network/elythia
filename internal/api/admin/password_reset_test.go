@@ -27,7 +27,7 @@ func attachModLog(t *testing.T, h modLogServiceSetter) *testutil.MockModerationL
 	repo := testutil.NewMockModerationLogRepository()
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	h.SetModLogService(moderationlog.New(repo, gen))
+	h.SetModLogService(moderationlog.New(repo, gen, nil))
 	return repo
 }
 

@@ -24,7 +24,7 @@ func newTestService(t *testing.T) (*signup.Service, *testutil.MockUserRepository
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := signup.NewService(userRepo, metaRepo, idGen)
+	svc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	return svc, userRepo, metaRepo
 }
 
@@ -220,7 +220,7 @@ func TestSignup_UserCreateError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := signup.NewService(repo, metaRepo, idGen)
+	svc := signup.NewService(repo, metaRepo, idGen, nil, nil, nil)
 	_, err := svc.Signup("user1", "pass", false, signup.UsernamePolicyPublic)
 	assert.Error(t, err)
 }
@@ -230,7 +230,7 @@ func TestSignup_ProfileCreateError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := signup.NewService(repo, metaRepo, idGen)
+	svc := signup.NewService(repo, metaRepo, idGen, nil, nil, nil)
 	_, err := svc.Signup("user1", "pass", false, signup.UsernamePolicyPublic)
 	assert.Error(t, err)
 }

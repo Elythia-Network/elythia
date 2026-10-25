@@ -34,7 +34,7 @@ func TestCreateDelete_UsePacker(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	blockingRepo := testutil.NewMockBlockingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	h := NewHandler(coreblocking.NewService(userRepo, blockingRepo, idGen), userRepo, idGen, nil, nil, nil)
+	h := NewHandler(coreblocking.NewService(userRepo, blockingRepo, idGen, nil, nil, nil, nil), userRepo, idGen, nil, nil, nil)
 	relations := userrelation.Repos{Blocking: blockingRepo}
 	h.SetRelationRepos(relations)
 	extras := &pinExtras{}

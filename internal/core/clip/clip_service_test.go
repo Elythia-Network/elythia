@@ -22,7 +22,7 @@ func newSvc(t *testing.T) (*clip.Service, *testutil.MockClipRepository, *testuti
 	// visibility lookup 用 map を共有させる (#1418 review)。
 	noteRepo.Notes = notes.Notes
 	idGen, _ := id.NewGenerator("aidx")
-	return clip.NewService(repo, noteRepo, notes, idGen), repo, noteRepo, notes
+	return clip.NewService(repo, noteRepo, notes, idGen, nil, nil), repo, noteRepo, notes
 }
 
 // --- Create ----------------------------------------------------------------
@@ -46,7 +46,7 @@ func TestCreate_ClipLimitExceeded(t *testing.T) {
 	svc, repo, _, _ := newSvc(t)
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	repo.Clips["c2"] = &model.Clip{ID: "c2", UserID: "u1"}
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"clipLimit": 2,
 	}})
 	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "third"})
@@ -55,7 +55,7 @@ func TestCreate_ClipLimitExceeded(t *testing.T) {
 
 func TestCreate_ClipLimit_PassesUnderLimit(t *testing.T) {
 	svc, _, _, _ := newSvc(t)
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"clipLimit": 10,
 	}})
 	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "first"})
@@ -68,7 +68,7 @@ func TestAddNote_NoteEachClipsLimitExceeded(t *testing.T) {
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
 	noteRepo.Entries["cn1"] = &model.ClipNote{ID: "cn1", ClipID: "c1", NoteID: "old1"}
 	noteRepo.Entries["cn2"] = &model.ClipNote{ID: "cn2", ClipID: "c1", NoteID: "old2"}
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"noteEachClipsLimit": 2,
 	}})
 	err := svc.AddNote("u1", "c1", "n1")
@@ -296,7 +296,7 @@ func TestAddNote_RepoError(t *testing.T) {
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := clip.NewService(repo, noteRepo, notes, idGen)
+	svc := clip.NewService(repo, noteRepo, notes, idGen, nil, nil)
 	err := svc.AddNote("u1", "c1", "n1")
 	assert.Error(t, err)
 }
@@ -376,7 +376,7 @@ func TestRemoveNote_RepoError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1", ClippedCount: 1}
-	svc := clip.NewService(repo, noteRepo, notes, idGen)
+	svc := clip.NewService(repo, noteRepo, notes, idGen, nil, nil)
 	err := svc.RemoveNote("u1", "c1", "n1")
 	assert.Error(t, err)
 	assert.False(t, errors.Is(err, clip.ErrNoteNotFound), "DB 障害が NO_SUCH_NOTE に丸められている")
@@ -444,7 +444,7 @@ func TestNotes_RepoError(t *testing.T) {
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	noteRepo := &listFailRepo{MockClipNoteRepository: testutil.NewMockClipNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := clip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen)
+	svc := clip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen, nil, nil)
 	_, err := svc.Notes("u1", "c1", "", "", 10, "")
 	assert.Error(t, err)
 }
@@ -471,7 +471,7 @@ func TestCreate_ClipLimit_Fractional(t *testing.T) {
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	repo.Clips["c2"] = &model.Clip{ID: "c2", UserID: "u1"}
 	// 上限 1.5 に対し既に 2 件あるので弾く。
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"clipLimit": 1.5,
 	}})
 	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "third"})
@@ -483,7 +483,7 @@ func TestCreate_ClipLimit_FractionalPasses(t *testing.T) {
 	svc, repo, _, _ := newSvc(t)
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	// 1 件 < 1.5 なのでまだ作れる。
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"clipLimit": 1.5,
 	}})
 	_, err := svc.Create(clip.CreateInput{OwnerID: "u1", Name: "second"})
@@ -493,7 +493,7 @@ func TestCreate_ClipLimit_FractionalPasses(t *testing.T) {
 // 負の clipLimit / noteEachClipsLimit は「作れない / 足せない」こと。
 func TestClipLimits_NegativeDenies(t *testing.T) {
 	svc, repo, _, notes := newSvc(t)
-	svc.SetRolePolicyProvider(&stubRolePolicyProvider{policies: map[string]any{
+	svc.SetRolePolicyProviderForTest(&stubRolePolicyProvider{policies: map[string]any{
 		"clipLimit":          -1,
 		"noteEachClipsLimit": -1,
 	}})

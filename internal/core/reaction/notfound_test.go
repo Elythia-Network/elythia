@@ -42,7 +42,7 @@ func TestReactionCreate_DBFailureIsNotNoteNotFound(t *testing.T) {
 	svc := NewService(
 		&dbFailingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: dbErr},
 		testutil.NewMockNoteReactionRepository(), testutil.NewMockEmojiRepository(),
-		testutil.NewMockFollowingRepository(), idGen)
+		testutil.NewMockFollowingRepository(), idGen, nil, nil, nil)
 	// **materialize が走らないことまで見る。** guard を materialize の後ろに
 	// 置くと error の種別は同じなので、呼び出し回数を見ないと変異が生き残る。
 	mat := &countingNoteMaterializer{}

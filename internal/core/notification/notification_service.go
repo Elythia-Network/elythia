@@ -246,22 +246,20 @@ type PolicyResolver interface {
 // keyPrefix (通常は `cfg.Redis.KeyPrefix()` = `<host>:`) は TS 本家と同じキー
 // 名前空間 (`<host>:notificationTimeline:*`, `<host>:latestReadNotification:*`)
 // を使うために全 Redis キーの前に付与される。空文字列ならprefix無し。
-func NewService(client *redis.Client, idGen id.Generator, keyPrefix string) *Service {
+//
+// background is the group the delayed unreadNotification and Web Push run in,
+// so stopping the server generation sends them before it closes the DB and the
+// queue (#3661). 無いと世代を止めても待たれずに閉じた DB と queue を使い、
+// しかも黙って劣化するので、構築子の必須の引数で受ける (#3825)。
+func NewService(client *redis.Client, idGen id.Generator, keyPrefix string, background *bgwork.Group) *Service {
 	return &Service{
 		client:             client,
 		idGen:              idGen,
 		keyPrefix:          keyPrefix,
+		background:         background,
 		unreadPublishDelay: defaultUnreadPublishDelay,
 	}
 }
-
-// SetBackground sets the group the delayed unreadNotification and Web Push
-// run in, so stopping the server generation sends them before it closes the
-// DB and the queue (#3661).
-func (s *Service) SetBackground(g *bgwork.Group) { s.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (s *Service) HasBackground() bool { return s.background != nil }
 
 // SetUnreadPublishDelay overrides the delay between Notification persistence
 // and `unreadNotification` publish. 0 makes the publish synchronous (used by

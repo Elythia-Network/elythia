@@ -217,7 +217,7 @@ func TestRolesAssign_UndeterminedIndirectPrivilegeIsNotTreatedAsSafe(t *testing.
 	require.NoError(t, err)
 	flaky := &failingRoleListRepo{MockRoleRepository: roleRepo}
 	roleSvc := corerole.NewService(flaky, assignRepo, metaRepo, idGen)
-	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := doPost(h.RolesAssign, `{"userId":"mod1","roleId":"staff"}`, &model.User{ID: "mod1"})
 

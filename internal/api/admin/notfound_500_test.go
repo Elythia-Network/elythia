@@ -53,7 +53,7 @@ func handlerWithFailingUserLookupOnly(t *testing.T, err error) *apiadmin.Handler
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, _ := id.NewGenerator("aidx")
 	return apiadmin.NewHandler(
-		signup.NewService(userRepo, metaRepo, idGen),
+		signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil),
 		role.NewService(roleRepo, assignRepo, metaRepo, idGen),
 		metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -74,7 +74,7 @@ func handlerWithFailingUserRepo(t *testing.T, err error) *apiadmin.Handler {
 	assignRepo := testutil.NewMockRoleAssignmentRepository(roleRepo)
 	idGen, _ := id.NewGenerator("aidx")
 	return apiadmin.NewHandler(
-		signup.NewService(userRepo, metaRepo, idGen),
+		signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil),
 		role.NewService(roleRepo, assignRepo, metaRepo, idGen),
 		metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 

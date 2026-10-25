@@ -82,20 +82,30 @@ type Service struct {
 
 // NewService constructs a PollService.
 // followingRepo は followers 可視性ノートへの投票チェックに使われる (省略可)。
+//
+// blockingChecker makes Vote reject votes from users the note author has
+// blocked (upstream youHaveBeenBlocked). nil skips the check (local-only
+// tests).
+//
+// 無いと**自分をブロックしている**相手のアンケートに投票でき、しかも黙って
+// 劣化するので、構築子の必須の引数で受ける (#3825)。判定は
+// `IsBlocked(target.UserID, user.ID)` (blocker が note 著者)。
 func NewService(
 	noteRepo repository.NoteRepository,
 	pollRepo repository.PollRepository,
 	pollVoteRepo repository.PollVoteRepository,
 	followingRepo repository.FollowingRepository,
 	idGen id.Generator,
+	blockingChecker BlockingChecker,
 ) *Service {
 	return &Service{
-		noteRepo:      noteRepo,
-		pollRepo:      pollRepo,
-		pollVoteRepo:  pollVoteRepo,
-		followingRepo: followingRepo,
-		idGen:         idGen,
-		nowFn:         time.Now,
+		noteRepo:        noteRepo,
+		pollRepo:        pollRepo,
+		pollVoteRepo:    pollVoteRepo,
+		followingRepo:   followingRepo,
+		idGen:           idGen,
+		blockingChecker: blockingChecker,
+		nowFn:           time.Now,
 	}
 }
 
@@ -109,13 +119,6 @@ func (s *Service) SetNotificationHook(h NotificationHook) {
 // (フロントは reload で count を取り直すフォールバックに頼る、#690)。
 func (s *Service) SetEventPublisher(p NoteEventPublisher) {
 	s.eventPub = p
-}
-
-// SetBlockingChecker attaches a BlockingChecker used by Vote to reject votes
-// from users the note author has blocked (upstream youHaveBeenBlocked)。nil
-// 配線時は block 判定を skip (local-only テスト環境向け)。
-func (s *Service) SetBlockingChecker(c BlockingChecker) {
-	s.blockingChecker = c
 }
 
 // SetFederationHook attaches a FederationDeliveryHook used after a vote is
@@ -281,10 +284,3 @@ func (s *Service) materializeIfMissing(noteID string, lookupErr error) bool {
 	_, err := s.materializer.EnsureNote(context.Background(), noteID)
 	return err == nil
 }
-
-// HasBlockingChecker reports whether the blocking checker was wired.
-//
-// 未配線だと**自分をブロックしている**相手のアンケートに投票できる。gate は
-// `IsBlocked(target.UserID, user.ID)` (blocker が note 著者)。起動時検査に
-// 使う (#2708)。
-func (s *Service) HasBlockingChecker() bool { return s.blockingChecker != nil }

@@ -28,7 +28,7 @@ func newReactionHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository, *
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen)
+	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen, nil, nil, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, reactSvc, nil, nil, idGen)
 	return h, noteRepo, reactRepo
 }
@@ -122,8 +122,7 @@ func TestReactionsCreate_Blocked(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen)
-	reactSvc.SetBlockingChecker(&stubBlockingCheckerReact{})
+	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen, nil, nil, &stubBlockingCheckerReact{})
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, reactSvc, nil, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/reactions/create", `{"noteId":"n1","reaction":"👍"}`)
@@ -171,7 +170,7 @@ func TestReactionsCreate_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen)
+	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen, nil, nil, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, reactSvc, nil, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/reactions/create", `{"noteId":"n1","reaction":"👍"}`)
@@ -243,7 +242,7 @@ func TestReactionsDelete_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen)
+	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen, nil, nil, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, reactSvc, nil, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/reactions/delete", `{"noteId":"n1"}`)
@@ -369,7 +368,7 @@ func TestReactions_List_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen)
+	reactSvc := corereaction.NewService(noteRepo, reactRepo, emojiRepo, nil, idGen, nil, nil, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, reactSvc, nil, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/reactions", `{"noteId":"n1"}`)

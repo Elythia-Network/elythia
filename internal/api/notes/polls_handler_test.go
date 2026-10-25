@@ -23,7 +23,7 @@ func newPollsHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository, *tes
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, pollSvc, nil, idGen)
 	return h, noteRepo, pollRepo
 }
@@ -160,7 +160,7 @@ func TestPollsVote_RepoError(t *testing.T) {
 	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
-	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 	h := NewHandler(noteRepo, createSvc, deleteSvc, querySvc, nil, nil, pollSvc, nil, idGen)
 
 	c, rec := newJSONRequest(t, "/api/notes/polls/vote", `{"noteId":"n1","choice":0}`)

@@ -106,8 +106,7 @@ func newModeratorFilesFixture(t *testing.T) *moderatorFilesFixture {
 	meta := testutil.NewMockMetaRepository()
 	meta.Meta = &model.Meta{ID: "x"}
 	roles := role.NewService(repository.NewRoleRepository(db), repository.NewRoleAssignmentRepository(db), meta, idGen)
-	modLog := moderationlog.New(repository.NewModerationLogRepository(db), idGen)
-	modLog.SetBackground(fx.logs)
+	modLog := moderationlog.New(repository.NewModerationLogRepository(db), idGen, fx.logs)
 
 	svc := coredrive.NewService(repository.NewDriveFileRepository(db), repository.NewDriveFolderRepository(db),
 		coredrive.NewLocalStorage(fx.storeDir, "https://example.com/files"), idGen)

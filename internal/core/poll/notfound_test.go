@@ -49,7 +49,7 @@ func TestVote_DBFailureIsNotNotFound(t *testing.T) {
 	t.Run("note lookup", func(t *testing.T) {
 		svc := poll.NewService(
 			&dbFailingNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: dbErr},
-			testutil.NewMockPollRepository(), testutil.NewMockPollVoteRepository(), nil, idGen)
+			testutil.NewMockPollRepository(), testutil.NewMockPollVoteRepository(), nil, idGen, nil)
 		// **materialize が走らないことまで見る** (上の理由と同じ)。
 		mat := &countingNoteMaterializer{}
 		svc.SetNoteMaterializer(mat)
@@ -71,7 +71,7 @@ func TestVote_DBFailureIsNotNotFound(t *testing.T) {
 		}
 		svc := poll.NewService(noteRepo, &dbFailingPollRepo{
 			MockPollRepository: testutil.NewMockPollRepository(), err: dbErr,
-		}, testutil.NewMockPollVoteRepository(), nil, idGen)
+		}, testutil.NewMockPollVoteRepository(), nil, idGen, nil)
 
 		err := svc.Vote(me, "n1", 0)
 		require.Error(t, err)

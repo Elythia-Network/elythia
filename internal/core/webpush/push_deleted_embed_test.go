@@ -84,7 +84,7 @@ func TestHook_PushOmitsDeletedNotes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mr.FlushAll()
-			svc := corenotification.NewService(rc, idGen, "")
+			svc := corenotification.NewService(rc, idGen, "", nil)
 			svc.SetUnreadPublishDelay(0)
 			users := testutil.NewMockUserRepository()
 			for _, u := range []string{"alice", "bob", "carol"} {

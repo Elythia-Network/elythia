@@ -31,7 +31,7 @@ func TestLogUserActionWithUser_NilTargetIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("idgen: %v", err)
 	}
-	h := &Handler{modLogService: moderationlog.New(repo, gen)}
+	h := &Handler{modLogService: moderationlog.New(repo, gen, nil)}
 
 	// nil target — must early-return without writing anything.
 	h.logUserActionWithUser(newCtx(), moderationlog.LogSuspend, nil)
@@ -52,7 +52,7 @@ func TestLogUserAction_MissingTargetIsNoop(t *testing.T) {
 		t.Fatalf("idgen: %v", err)
 	}
 	// userRepo は空 → FindByID は ErrNotFound を返す。
-	h := &Handler{userRepo: testutil.NewMockUserRepository(), modLogService: moderationlog.New(repo, gen)}
+	h := &Handler{userRepo: testutil.NewMockUserRepository(), modLogService: moderationlog.New(repo, gen, nil)}
 
 	h.logUserAction(newCtx(), moderationlog.LogResetPassword, "ghost")
 

@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 func newTestHandler(t *testing.T) (*Handler, *notification.Service) {
 	t.Helper()
 	testRedis.FlushAll(context.Background())
-	svc := notification.NewService(testRedis.Client, idGen, "")
+	svc := notification.NewService(testRedis.Client, idGen, "", nil)
 	// テストは AfterFunc 待ちを避けるため同期 publish にする。
 	svc.SetUnreadPublishDelay(0)
 	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil), svc
@@ -213,7 +213,7 @@ func TestShow_InvalidJSON(t *testing.T) {
 func TestShow_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
-	svc := notification.NewService(closed, idGen, "")
+	svc := notification.NewService(closed, idGen, "", nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/i/notifications", `{}`)
@@ -362,7 +362,7 @@ func TestShow_ImplicitMarkAsReadDoesNotForce(t *testing.T) {
 func TestMarkAllAsRead_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
-	svc := notification.NewService(closed, idGen, "")
+	svc := notification.NewService(closed, idGen, "", nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/notifications/mark-all-as-read", `{}`)
@@ -541,7 +541,7 @@ func TestFlush_NilService(t *testing.T) {
 func TestFlush_RedisError(t *testing.T) {
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	_ = closed.Close()
-	svc := notification.NewService(closed, idGen, "")
+	svc := notification.NewService(closed, idGen, "", nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 
 	c, rec := newJSONRequest(t, "/api/notifications/flush", `{}`)

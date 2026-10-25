@@ -201,16 +201,6 @@ func (s *Service) SetFeaturedRanking(r FeaturedRanking) {
 	s.featuredRanking = r
 }
 
-// SetUserRolesProvider wires role lookup for role-gated emoji reaction gating (#1538).
-func (s *Service) SetUserRolesProvider(p UserRolesProvider) {
-	s.userRoles = p
-}
-
-// SetMediaSilenceChecker wires the media-silence host check for reaction gating (#1538).
-func (s *Service) SetMediaSilenceChecker(c MediaSilenceChecker) {
-	s.mediaSilence = c
-}
-
 // SetCountWriter replaces the default direct writer with a buffered one.
 func (s *Service) SetCountWriter(w ReactionCountWriter) {
 	s.countWriter = w
@@ -222,32 +212,42 @@ func (s *Service) CountWriter() ReactionCountWriter {
 }
 
 // NewService constructs a new ReactionService.
+//
+// userRoles gates role-limited custom emoji (#1538). mediaSilence turns custom
+// emoji reactions from media-silenced hosts into the fallback (#1538).
+// blockingChecker refuses reactions to notes of users who block the reactor.
+//
+// 3 つとも無いと黙って緩む側に倒れる (ロール限定の絵文字を誰でも使える /
+// media-silenced な host の絵文字がそのまま出る / 自分をブロックしている相手の
+// 投稿にリアクションできる。blockingChecker の判定は IsBlocked(target.UserID,
+// user.ID) で、blocker が投稿の著者) ので、構築子の必須の引数で受ける (#3825)。
 func NewService(
 	noteRepo repository.NoteRepository,
 	reactionRepo repository.NoteReactionRepository,
 	emojiRepo repository.EmojiRepository,
 	followingRepo repository.FollowingRepository,
 	idGen id.Generator,
+	userRoles UserRolesProvider,
+	mediaSilence MediaSilenceChecker,
+	blockingChecker BlockingChecker,
 ) *Service {
 	return &Service{
-		noteRepo:      noteRepo,
-		reactionRepo:  reactionRepo,
-		emojiRepo:     emojiRepo,
-		followingRepo: followingRepo,
-		idGen:         idGen,
-		countWriter:   NewDirectWriter(noteRepo),
-		randFn:        rand.Float64,
+		noteRepo:        noteRepo,
+		reactionRepo:    reactionRepo,
+		emojiRepo:       emojiRepo,
+		followingRepo:   followingRepo,
+		idGen:           idGen,
+		userRoles:       userRoles,
+		mediaSilence:    mediaSilence,
+		blockingChecker: blockingChecker,
+		countWriter:     NewDirectWriter(noteRepo),
+		randFn:          rand.Float64,
 	}
 }
 
 // SetNotificationHook attaches a NotificationHook used after Create succeeds.
 func (s *Service) SetNotificationHook(h NotificationHook) {
 	s.notificationHook = h
-}
-
-// SetBlockingChecker attaches a BlockingChecker used by Create.
-func (s *Service) SetBlockingChecker(c BlockingChecker) {
-	s.blockingChecker = c
 }
 
 // SetFederationHook attaches a FederationHook used after Create / Delete
@@ -927,22 +927,3 @@ func isPureRenote(n *model.Note) bool {
 	}
 	return true
 }
-
-// HasUserRolesProvider reports whether the user roles provider was wired.
-//
-// 未配線だとロール限定カスタム絵文字の gate が素通しになり、誰でも使える。
-// 起動時検査に使う (#2683)。
-func (s *Service) HasUserRolesProvider() bool { return s.userRoles != nil }
-
-// HasMediaSilenceChecker reports whether the media-silence checker was wired.
-//
-// 未配線だと media-silenced な host からのカスタム絵文字リアクションがそのまま
-// 出る (フォールバックの ❤ にならない)。起動時検査に使う (#2708)。
-func (s *Service) HasMediaSilenceChecker() bool { return s.mediaSilence != nil }
-
-// HasBlockingChecker reports whether the blocking checker was wired.
-//
-// 未配線だと**自分をブロックしている**相手の投稿にリアクションできる。gate は
-// `IsBlocked(target.UserID, user.ID)` (blocker が note 著者) なので、自分が
-// ブロックした相手への操作はそもそもここを通らない。起動時検査に使う (#2708)。
-func (s *Service) HasBlockingChecker() bool { return s.blockingChecker != nil }

@@ -134,7 +134,7 @@ func TestShowModerationLogs_PacksActorsOnceAsAnonymous(t *testing.T) {
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "l1", UserID: "mod1", Type: "suspend", User: mod}))
 	require.NoError(t, modLogRepo.Create(&model.ModerationLog{ID: "l2", UserID: "mod1", Type: "unsuspend", User: mod}))
 	gen, _ := id.NewGenerator("aidx")
-	h.SetModLogService(moderationlog.New(modLogRepo, gen))
+	h.SetModLogService(moderationlog.New(modLogRepo, gen, nil))
 	p := &recordingListPacker{}
 	h.SetListPackerForTest(p)
 

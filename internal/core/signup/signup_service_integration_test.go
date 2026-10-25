@@ -63,11 +63,8 @@ func newTxService(t *testing.T, db *gorm.DB) *signup.Service {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 
-	svc := signup.NewService(userRepo, metaRepo, idGen)
+	svc := signup.NewService(userRepo, metaRepo, idGen, db, ticketRepo, repository.NewSignupApplicationRepository(db))
 	svc.SetUserPendingRepo(pendingRepo)
-	svc.SetTicketRepo(ticketRepo)
-	svc.SetSignupApplicationRepo(repository.NewSignupApplicationRepository(db))
-	svc.SetDB(db)
 	return svc
 }
 
@@ -337,12 +334,10 @@ func TestPromotePending_TxTicketRepoGenericError(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 
-	svc := signup.NewService(userRepo, metaRepo, idGen)
-	svc.SetUserPendingRepo(pendingRepo)
-	svc.SetTicketRepo(&errorTicketRepo{
+	svc := signup.NewService(userRepo, metaRepo, idGen, db, &errorTicketRepo{
 		err: errors.New("simulated DB error"),
-	})
-	svc.SetDB(db)
+	}, nil)
+	svc.SetUserPendingRepo(pendingRepo)
 
 	tid := prefix + "tid"
 	row, err := svc.CreatePending(prefix+"err", "err@it.example", "pw", &tid)
@@ -768,7 +763,7 @@ func TestSignupForApplication_FallsBackWithoutTxWiring(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := signup.NewService(userRepo, metaRepo, idGen)
+	svc := signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 
 	res, err := svc.SignupForApplication(prefix+"u", "hunter22", "no-such-app", "")
 	require.NoError(t, err)
@@ -838,11 +833,9 @@ func newTxServiceWithMeta(t *testing.T, db *gorm.DB, meta *model.Meta) *signup.S
 	idGen, _ := id.NewGenerator("aidx")
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = meta
-	svc := signup.NewService(repository.NewUserRepository(db), metaRepo, idGen)
+	svc := signup.NewService(repository.NewUserRepository(db), metaRepo, idGen, db,
+		repository.NewRegistrationTicketRepository(db), repository.NewSignupApplicationRepository(db))
 	svc.SetUserPendingRepo(repository.NewUserPendingRepository(db))
-	svc.SetTicketRepo(repository.NewRegistrationTicketRepository(db))
-	svc.SetSignupApplicationRepo(repository.NewSignupApplicationRepository(db))
-	svc.SetDB(db)
 	return svc
 }
 

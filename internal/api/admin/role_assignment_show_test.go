@@ -73,7 +73,7 @@ func assignmentAdminHandler(t *testing.T, roleRepo repository.RoleRepository, us
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	roleService := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
-	return admin.NewHandler(signup.NewService(userRepo, metaRepo, idGen), roleService, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return admin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleService, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func TestRolesAssignmentShow_ExactLookup(t *testing.T) {

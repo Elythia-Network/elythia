@@ -228,6 +228,10 @@ type Server struct {
 	// builtRouteParts is what setupRoutes built in its own body for this
 	// generation (#3823). 本番では読まない。builtHandlers と同じ理由で持つ。
 	builtRouteParts routeParts
+	// builtCore is what buildCore built for this generation, limited to the
+	// parts whose dependencies are required constructor arguments (#3825).
+	// 本番では読まない。builtHandlers と同じ理由で持つ。
+	builtCore coreParts
 }
 
 func runReactionFlushWorker(ctx context.Context, enqueue func() error) {

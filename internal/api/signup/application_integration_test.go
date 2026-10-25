@@ -37,11 +37,9 @@ func newApprovalHandlerWithDB(t *testing.T) (*apisignup.Handler, *gorm.DB, *mode
 	metaRepo.Meta = &model.Meta{ID: "x", ApprovalRequiredForSignup: true}
 
 	appRepo := repository.NewSignupApplicationRepository(db)
-	svc := coresignup.NewService(repository.NewUserRepository(db), metaRepo, idGen)
+	svc := coresignup.NewService(repository.NewUserRepository(db), metaRepo, idGen, db,
+		repository.NewRegistrationTicketRepository(db), appRepo)
 	svc.SetUserPendingRepo(repository.NewUserPendingRepository(db))
-	svc.SetTicketRepo(repository.NewRegistrationTicketRepository(db))
-	svc.SetSignupApplicationRepo(appRepo)
-	svc.SetDB(db)
 
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	h.SetSignupApplications(signupapplication.NewService(appRepo, idGen))

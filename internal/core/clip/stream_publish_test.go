@@ -75,10 +75,9 @@ func newPublishingSvc(t *testing.T) (*Service, *recordingClipPublisher, *fakeTim
 	notes := testutil.NewMockNoteRepository()
 	noteRepo.Notes = notes.Notes
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewService(repo, noteRepo, notes, idGen)
 	pub := &recordingClipPublisher{}
+	svc := NewService(repo, noteRepo, notes, idGen, nil, pub)
 	timers := &fakeTimers{}
-	svc.SetStreamPublisher(pub)
 	svc.afterFunc = timers.afterFunc
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1", Name: "one"}
 	repo.Clips["c2"] = &model.Clip{ID: "c2", UserID: "u1", Name: "two"}
@@ -213,9 +212,8 @@ func TestPublishDeleted_NotWhenDeleteFails(t *testing.T) {
 	repo := testutil.NewMockClipRepository()
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewService(failingDeleteClipRepo{repo}, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
 	pub := &recordingClipPublisher{}
-	svc.SetStreamPublisher(pub)
+	svc := NewService(failingDeleteClipRepo{repo}, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, pub)
 	require.Error(t, svc.Delete("u1", "c1"))
 	assert.Empty(t, pub.snapshot())
 }
@@ -224,7 +222,7 @@ func TestPublish_NoPublisherIsNoOp(t *testing.T) {
 	repo := testutil.NewMockClipRepository()
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "u1"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+	svc := NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	timers := &fakeTimers{}
 	svc.afterFunc = timers.afterFunc
 	name := "renamed"
@@ -245,11 +243,4 @@ func TestPublishUpdated_RealTimer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, pub.snapshot(), 1)
 	assert.Eventually(t, func() bool { return len(pub.snapshot()) == 2 }, UpdatedThrottle+5*time.Second, 50*time.Millisecond)
-}
-
-func TestService_HasStreamPublisher(t *testing.T) {
-	assert.False(t, (&Service{}).HasStreamPublisher(), "未配線なら false")
-	x := &Service{}
-	x.SetStreamPublisher(&recordingClipPublisher{})
-	assert.True(t, x.HasStreamPublisher(), "配線したら true")
 }

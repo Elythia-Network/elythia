@@ -617,8 +617,8 @@ setupRoutes()
     入れるので、それより前に `w.repos.x` を書くとコンパイルが通らない。照合はキー
     `repos: s.buildRepos()` で行い、リテラル全体は見ない (後でフィールドを足しても
     書き直さずに済む)
-  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen, roleService)`、
-    `w.core = coreSvcs`、別名は `x := coreSvcs.x`。引数の`roleService`は#3825から`buildRole()`で作る)。`buildCore()` が `w.repos` を読むので
+  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)`、
+    `w.core = coreSvcs`、別名は `x := coreSvcs.x`。引数の`roleService`は#3825から`buildRole()`で作る。`streamPubSub`は先頭で作るstreamのpubsub)。`buildCore()` が `w.repos` を読むので
     リテラルには足せない。`w.core = …` から直接別名を取ると、別名を代入より前に書いても
     コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
   - `fed` も `core` と同じ形 (`fedSvcs := s.buildFederation(w, coreSvcs, idGen)`、
@@ -665,7 +665,7 @@ setupRoutes()
   …                                     // repository の別名、EnsureInitial、chart の hook
   roleService := s.buildRole(w, idGen)  // wiring_core.go (#3825)
   …                                     // entityPacker と sharedUserPacker (#3825)
-  coreSvcs := s.buildCore(w, idGen, roleService)
+  coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)
   w.core = coreSvcs
   featuredService := coreSvcs.featured  // 別名 (変数から取る)
   …
@@ -679,9 +679,13 @@ setupRoutes()
 - **移すのは、作るだけのものに限る。** 作るときに DB にも Redis にも外部にも触らず、
   ログを出さず、goroutine・timer・shutdown hook・グローバルの書き換え・hook の登録の
   どれもせず、依存が repository と先に作った core だけのもの。コンストラクタの本体
-  (中で呼ぶ関数を含む) を 1 つずつ読んで確かめた
+  (中で呼ぶ関数を含む) を 1 つずつ読んで確かめた。#3825 から、`buildCore()` が引数で
+  受ける値 (`roleService`・stream の pubsub `streamPubSub`) にも依存してよい。stream の
+  publisher は、その pubsub から作るもの (`clipService` に渡す `NewClipStreamPublisher`) に
+  限る (作っても購読も接続もしない)
 - **setter は 1 つも動かさない。** 構築の途中で動く処理 (4.1) から見える配線を変えない
-  ため。`buildCore()` を呼ぶ位置は、移したものの中で最初に作っていた `featuredService` の
+  ため (#3825 で構築子の必須の引数にした依存は、setter ではなく `buildCore()` の中で構築子に
+  渡す。下の「handlerの依存を構築子の必須の引数にする」の段(3))。`buildCore()` を呼ぶ位置は、移したものの中で最初に作っていた `featuredService` の
   位置。移した構築は副作用を持たないので、DB と Redis の文の順は変わらない
 - **`wiring` へは変数を経由した代入で入れ、別名は変数から取る** (上の規則)。ゲートは
   この形を照合する (`TestAbuseReportNotifierIsWired`)
@@ -694,7 +698,7 @@ setupRoutes()
 `internal/server` / `tools` の `_test.go` の文字列リテラルを、`wiring_core.go` と
 `internal/server` のほかのファイルに当てた)。ほかのゲートは setter の行を照合して
 おり、setter は動かしていない。このゲートは、上の規則のとおり
-`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen, roleService)`、
+`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)`、
 `w.core = coreSvcs`、`abuseInAppNotifier := coreSvcs.abuseInAppNotifier` も照合する。#3825で
 `roleService`を`buildCore()`の引数にしたので、`roleService := s.buildRole(w, idGen)`も照合する。
 
@@ -1026,11 +1030,11 @@ registry は `buildStream()` で作り、登録は `setupRoutes()` の別名に�
 上の形に限って許す)、欄の書き忘れが無いこと、パッケージの中で stream の registry に登録する
 関数が `registerStreamChannels()` に限られること)。
 
-**`setupRoutes()` に残したもの** (`stream.New…` の 9 回の呼び出し。#3809 で 1 回足して 10 回):
+**`setupRoutes()` に残したもの** (`stream.New…` の 9 回の呼び出し。#3809 で 1 回足して 10 回、#3825 で `NewClipStreamPublisher` を `buildCore()` へ移して 9 回):
 
 | 理由 | 例 |
 |---|---|
-| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`)、`NewClipStreamPublisher` (#3809。受け手は `clipService` で、setter の引数の中で作る) |
+| stream の節より前にある受け手へ渡す | `noteEventPub`・`drivePublisher`・`reversiPublisher`・`mainStreamPublisher` (#3676 で先頭に置いたもの。受け手は core の service・連合の processor・handler)、`userListStreamPublisher` (上でまとめたもの。stream の節より前の受け手は `usersHandler`) |
 | `Start` と shutdown hook を対で持つ | `serverStatsPub`、`queueStatsPub` (queueInspector の分岐の中) |
 | 別の部品の構築の引数の中で作る | `NewAdminStreamPublisher` (`coreabuse.NewCreatedNotifier` の引数。ゲートが式ごと照合する)、`NewBubbleVersusPublisher` (`corebubbleversus.NewService` の引数) |
 
@@ -1213,7 +1217,7 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   setterで入れるフィールドも、`setupRoutes()`を通った後なので同じ規則で見る。組み立てた
   handlerは`Server`のフィールド`builtHandlers`に持たせる(本番では読まない)。nilでよい
   フィールドは、どの経路で実際にnilになるかを書いた許可リスト(`handlerNilAllowed`)に載せ、
-  使われない項目があれば落とす。#3817の時点では空(#3823で3つ足した。下の段(2))。このテストを書く途中で、`setupRoutes()`が
+  使われない項目があれば落とす。#3817の時点では空(#3823で3つ、#3825で2つ足した。下の段(2)・段(3))。このテストを書く途中で、`setupRoutes()`が
   `clipsHandler.SetNoteRepo`を呼んでおらず本番でもnilのままだったことが分かり
   (clips/notesのrenoteの入れ子のmute/block検査が飛んでいた)、#3818で配線した。
   抽出が空振りしても緑にならないよう、置き換えた依存のフィールドを名指しで要求する
@@ -1320,6 +1324,60 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
 `clipsHandler.SetNoteRepo`の1行を足したもの。2段目で減った受け手は、置き換えたsetterしか
 呼んでいなかった`urlHandler`・`bubbleVersusPublisher`・`announcementCreator`・`ssrMeta`・
 `driveURLUploader`・`webhookSignupHook`・`remoteStatsFetcher`の7つ(うちhandlerは`urlHandler`)。
+
+##### 段(3): `buildCore()`で作るcoreの部品(#3825)
+
+**`buildCore()`で作るcoreの部品も、同じ形にした。** #3812の段(3)。置き換えたのは、表の行で
+見ていた依存だけ。
+
+- **1段目で、`roleService`と2つのpackerを`buildCore()`より前で作るようにした。** 部品の
+  構築子の一部は`entityPacker`か`sharedUserPacker`を受け取るが、2つのpackerは`buildCore()`の
+  中で作る`roleService`に依存していた。そこで`roleService`を`buildRole()`
+  (`internal/server/wiring_core.go`)で作り、`setupRoutes()`の順を、`buildRole()` →
+  `entityPacker`の節 → `listRelationRepos`と`sharedUserPacker`の節 → `buildCore()`にした。
+  `buildCore()`は`roleService`を引数で受け、`core`の`role`にそのまま入れる。setterは動かして
+  いない。移した節のうち構築のときに走るDBの文は、`proxyRemoteFiles`の写しの`metaRepo.Fetch()`
+  だけで、元の位置との間には`buildCore()`(作るだけでDBにもRedisにも触らない)しか無いので、
+  DBの文の順も購読の位置も変わらない
+- **2段目はpackerの要らない8構築子・15行。** blocking(4行: `unfollower`・
+  `followRequestCanceller`・`userListRepo`・`roomInvitationRemover`)、reaction(3行:
+  `userRolesProvider`・`mediaSilenceChecker`・`blockingChecker`)、signup(2行。
+  `ticketConsumption`と`applicationSettlement`で、引数は`db`・`ticketRepo`・
+  `signupApplicationRepo`の3つ)、clip(2行: `rolePolicyProvider`・`streamPublisher`)、
+  antennaの`rolePolicyProvider`、pollの`blockingChecker`、moderationlogとnotificationの
+  `background`(ここまで各1行)
+- **2段目で、`buildCore()`の中のblockingの構築をreactionより前へ移した。** reactionの
+  `blockingChecker`に渡すため。blockingが使う値(repository・`followingService`・`chatRepo`)は、
+  どれもその前で揃う。clipの`streamPublisher`は、`setupRoutes()`の先頭で作る`streamPubSub`を
+  `buildCore()`の引数で受けて、その場で`stream.NewClipStreamPublisher(streamPubSub)`で作る
+  (作っても購読も接続もしない)
+- **依存を入れる時点が、元のsetterの位置から`buildCore()`の位置へ前へ移っただけ。**
+  元のsetterはどれもstreamの節(最初の`Subscribe`)より前にあり、`buildCore()`から元のsetterまでの
+  間に、`Subscribe`・`Connect…`・`Start`・goroutineの起動は無い(行を突き合わせて確かめた)。
+  pubsubの購読のhandlerから辿れる配線は変わらない(4.1)
+- **外部パッケージのテストは、`export_test.go`の`…ForTest`で後から入れる。** 補助関数が作った
+  serviceに後から入れていたテスト(`core/blocking`・`core/reaction`・`core/clip`・`core/poll`の
+  外部パッケージのテスト)に置いた。テストの中で構築子を呼んでいる箇所と、別のパッケージの
+  テストは構築子で渡す。同じパッケージのテストはフィールドへ直接代入する(#3817と同じ)
+- **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `buildCore()`で作る
+  部品のうち置き換えたものを、`Server`のフィールド`builtCore`(型は`coreParts`、
+  `internal/server/core_parts.go`)に持たせる。`core`の欄を全部は並べない。欄の名前は
+  `setupRoutes()`の別名(`blockingService`など)にした。`core`のフィールド名
+  (`blocking`・`signup`など)は`apiHandlers`・`routeParts`の欄とぶつかり、許可リストの
+  key (`<欄>.<フィールド>`)が区別できないため。テストは3つの入れ物の欄の名前が重ならないことも
+  確かめる。許可リストに足したのは、clipの`pendingUpdated`(依存ではなく状態で、最初の
+  `publishUpdated`が作る)と`afterFunc`(テストだけが差し替えるseamで、nilのとき
+  `time.AfterFunc`を使う)の2つ
+
+| | #3825の前(`5b7e06b1bf`) | 2段目の後 |
+|---|---|---|
+| `criticalWiringCount` | 104 | 89 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 680 | 664 |
+| その受け手 | 112 | 111 |
+
+数え方: 上の表と同じ。2段目で減った受け手は、置き換えたsetterしか呼んでいなかった
+`modLogService`。行頭が`<名前>Handler.Set`の行(342)と、その受け手(40)は変わらない
+(handlerは置き換えていない)。
 
 #### /api のルートの登録 (#3697)
 

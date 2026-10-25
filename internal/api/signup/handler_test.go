@@ -114,7 +114,7 @@ func newTestHandler(t *testing.T) (*apisignup.Handler, *testutil.MockUserReposit
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	signupSvc := coresignup.NewService(userRepo, metaRepo, idGen)
+	signupSvc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	h := apisignup.NewHandler(signupSvc, metaRepo, idGen, nil, nil, nil)
 	return h, userRepo, metaRepo
 }
@@ -317,7 +317,7 @@ func TestSignup_EmailRequired_CreatesPendingAndSendsEmail(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -355,7 +355,7 @@ func TestSignup_EmailRequired_SendsJapaneseEmailFromAcceptLanguage(t *testing.T)
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true, Langs: []string{"ja-JP", "en-US"}}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -388,7 +388,7 @@ func TestSignup_EmailRequired_SendsJapaneseEmailFromAcceptLanguageWithoutMetaLan
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -423,7 +423,7 @@ func TestSignup_EmailRequired_PasswordTooLong(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -442,7 +442,7 @@ func TestSignup_EmailRequired_DuplicateUsername(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -460,7 +460,7 @@ func TestSignupPending_Success(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -502,7 +502,7 @@ func TestSignupPending_FiresSigninSideEffects(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	rec := &stubSigninRecorder{}
@@ -526,7 +526,7 @@ func TestSignup_DoesNotFireSigninSideEffects(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	h.SetTestMode(true)
 	rec := &stubSigninRecorder{}
@@ -551,7 +551,7 @@ func TestSignupPending_NotFound(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -721,7 +721,7 @@ func TestSignup_InternalError(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	failRepo := &failingCreateUserRepo{userRepo}
-	signupSvc := coresignup.NewService(failRepo, metaRepo, idGen)
+	signupSvc := coresignup.NewService(failRepo, metaRepo, idGen, nil, nil, nil)
 	h := apisignup.NewHandler(signupSvc, metaRepo, idGen, nil, nil, nil)
 
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass"}`)
@@ -757,7 +757,7 @@ func TestSignup_EmailRequired_BannedDomain(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true, BannedEmailDomains: []string{"bad.example"}}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -773,7 +773,7 @@ func TestSignup_EmailRequired_DefaultURL(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -801,7 +801,7 @@ func TestSignupPending_Expired(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -826,7 +826,7 @@ func TestSignupPending_UsernameClash(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -847,7 +847,7 @@ func TestSignup_EmailRequired_NoSender(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -884,7 +884,7 @@ func TestSignupPending_MarksInvitationTicketUsed(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true, DisableRegistration: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -951,7 +951,7 @@ func TestSignup_EmailRequired_TicketResendWindow(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true, DisableRegistration: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	store := newMockTicketStore()

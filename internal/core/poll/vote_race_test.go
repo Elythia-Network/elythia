@@ -41,7 +41,7 @@ func TestVote_ConcurrentDuplicateRejected(t *testing.T) {
 			pollRepo := testutil.NewMockPollRepository()
 			voteRepo := &racingVoteRepo{MockPollVoteRepository: testutil.NewMockPollVoteRepository(), createErr: tc.repoErr}
 			idGen, _ := id.NewGenerator("aidx")
-			svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen)
+			svc := poll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
 			pub := &stubEventPub{}
 			svc.SetEventPublisher(pub)
 			seedPollNote(noteRepo, pollRepo, "n1", "author", tc.multiple, nil)

@@ -16,7 +16,7 @@ import (
 func newTestHook(t *testing.T) (*Hook, *Service, *testutil.MockUserRepository) {
 	t.Helper()
 	testRedis.FlushAll(context.Background())
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	// #2106 L35: push が scheduleUnreadPublish guard 経由になったので、Hook test では delay=0 で
 	// 同期発火させて push の同期 assert を維持する。
 	svc.SetUnreadPublishDelay(0)
@@ -343,7 +343,7 @@ func TestHook_OnNoteCreated_NoteUnreadPublicNoop(t *testing.T) {
 func TestService_MarkAllAsRead_ClearsNoteUnread(t *testing.T) {
 	// MarkAllAsRead が呼ばれたら note_unread 行を全削除し、
 	// HasUnreadSpecifiedNotes が false に戻ることを確認する (#319 BUG 修正)。
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	unread := testutil.NewMockNoteUnreadRepository()
 	svc.SetNoteUnreadRepo(unread)
 
@@ -368,7 +368,7 @@ func TestService_MarkAllAsRead_ClearsNoteUnread(t *testing.T) {
 func TestService_Flush_ClearsNoteUnread(t *testing.T) {
 	// Flush (account deletion 等) でも note_unread を clear する。
 	testRedis.FlushAll(context.Background())
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	unread := testutil.NewMockNoteUnreadRepository()
 	svc.SetNoteUnreadRepo(unread)
 
@@ -384,7 +384,7 @@ func TestHook_OnNoteCreated_NoteUnreadSkipsMentionWithoutUserRepo(t *testing.T) 
 	// userRepo が未配線でも mention 解決を試みずに panic せず、
 	// visibleUserIds 経由の note_unread だけ作られる (nil deref 回避)。
 	testRedis.FlushAll(context.Background())
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	h := NewHook(svc, nil) // userRepo 未配線
 
 	unread := testutil.NewMockNoteUnreadRepository()
@@ -410,7 +410,7 @@ func TestHook_OnNoteCreated_NoteUnreadSkipsMentionWithoutUserRepo(t *testing.T) 
 
 func TestService_HasUnreadSpecifiedNotes_UsesRepoWhenSet(t *testing.T) {
 	// repo 注入時は Redis scan でなく repo.HasAnySpecified を参照する。
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	unread := testutil.NewMockNoteUnreadRepository()
 	svc.SetNoteUnreadRepo(unread)
 
@@ -653,7 +653,7 @@ func TestHook_NotifyMissingUserSkipped(t *testing.T) {
 func TestHook_NotifyWithoutUserRepo(t *testing.T) {
 	// userRepo == nil の場合はホストチェックをスキップする
 	testRedis.FlushAll(context.Background())
-	svc := NewService(testRedis.Client, idGen, "")
+	svc := NewService(testRedis.Client, idGen, "", nil)
 	h := NewHook(svc, nil)
 	h.OnFollowed("bob", "alice")
 
@@ -664,7 +664,7 @@ func TestHook_NotifyWithoutUserRepo(t *testing.T) {
 
 func TestHook_NotifyServiceErrorLogged(t *testing.T) {
 	// closed clientではCreate失敗 → ログ出力されるだけで例外なし
-	svc := NewService(closedClient(t), idGen, "")
+	svc := NewService(closedClient(t), idGen, "", nil)
 	repo := testutil.NewMockUserRepository()
 	addLocalUser(repo, "alice", "alice")
 	h := NewHook(svc, repo)
@@ -845,7 +845,7 @@ func TestHook_WebPushWithoutPackers(t *testing.T) {
 }
 
 func TestHook_WebPushSkippedWhenCreateFails(t *testing.T) {
-	svc := NewService(closedClient(t), idGen, "")
+	svc := NewService(closedClient(t), idGen, "", nil)
 	repo := testutil.NewMockUserRepository()
 	addLocalUser(repo, "alice", "alice")
 	h := NewHook(svc, repo)

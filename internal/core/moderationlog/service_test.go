@@ -71,7 +71,7 @@ func newSvc(t *testing.T, repo *spyRepo) *Service {
 	t.Helper()
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	return New(repo, gen)
+	return New(repo, gen, nil)
 }
 
 func TestService_Log_writesEntry(t *testing.T) {
@@ -116,7 +116,7 @@ func TestService_Log_nilReceiverIsNoop(t *testing.T) {
 }
 
 func TestService_Log_nilDepsAreNoop(t *testing.T) {
-	svc := New(nil, nil)
+	svc := New(nil, nil, nil)
 	svc.Log(context.Background(), "actor", LogSuspend, nil)
 	// no panic, no assertion needed
 }
@@ -191,7 +191,7 @@ func TestService_LogMany_nilReceiverIsNoop(t *testing.T) {
 }
 
 func TestService_LogMany_nilDepsAreNoop(t *testing.T) {
-	svc := New(nil, nil)
+	svc := New(nil, nil, nil)
 	svc.LogMany(context.Background(), "actor", []Entry{{Type: LogSuspend}})
 }
 
@@ -268,7 +268,7 @@ func (panicRepo) List(model.ModerationLogFilter) ([]*model.ModerationLog, error)
 func TestService_Log_recoverFromGoroutinePanic(t *testing.T) {
 	gen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc := New(panicRepo{}, gen)
+	svc := New(panicRepo{}, gen, nil)
 
 	// 何が起きても (panic 含む) Log 呼び出し自体は即返る。
 	svc.Log(context.Background(), "actor1", LogSuspend, map[string]any{"userId": "x"})
@@ -286,7 +286,7 @@ func TestService_List_returnsEmptySliceWhenUnwired(t *testing.T) {
 	assert.NotNil(t, logs)
 	assert.Empty(t, logs)
 
-	svc = New(nil, nil)
+	svc = New(nil, nil, nil)
 	logs, err = svc.List(model.ModerationLogFilter{Limit: 10})
 	require.NoError(t, err)
 	assert.NotNil(t, logs)
@@ -306,7 +306,7 @@ func TestService_List_returnsEmptySliceWhenRepoReturnsNil(t *testing.T) {
 func TestService_List_passesThroughRepoError(t *testing.T) {
 	repo := &errorListRepo{err: errors.New("db down")}
 	gen, _ := id.NewGenerator("aidx")
-	svc := New(repo, gen)
+	svc := New(repo, gen, nil)
 
 	logs, err := svc.List(model.ModerationLogFilter{Limit: 10})
 	require.Error(t, err)

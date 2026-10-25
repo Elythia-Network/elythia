@@ -24,7 +24,7 @@ var errWiringCheckSkipped = errors.New("critical wiring check did not run: setup
 
 // criticalWiringCount is the number of entries setupRoutes is expected to
 // register. Guards against an entry being dropped from the table.
-const criticalWiringCount = 104
+const criticalWiringCount = 89
 
 // noteHiderMissingEffect is the effect shared by the per-handler noteHider
 // entries (#3786).
@@ -43,8 +43,8 @@ type criticalWiring struct {
 	// "<package>.<field>" だが、消費側が別パッケージにあるもの
 	// (inbox.signatureVerifier / inbox.replayGuard は processors) や、
 	// 単一の field ではなく複数の配線が揃って初めて成立するもの
-	// (signup.ticketConsumption = db + ticketRepo) がある
-	// (#2682 review L-C)。実体は各 Has… 述語の GoDoc を見ること。
+	// (以前の signup.ticketConsumption = db + ticketRepo。#3825 で構築子の
+	// 引数にして表から外した) がある (#2682 review L-C)。実体は各 Has… 述語の GoDoc を見ること。
 	name string
 	// wired is the consumer's own report of whether it received the
 	// dependency.

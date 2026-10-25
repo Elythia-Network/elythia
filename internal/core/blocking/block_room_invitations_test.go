@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/core/blocking"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -53,7 +52,7 @@ func TestBlock_RemovesRoomInvitationsBothWays(t *testing.T) {
 		seedRoomInvitation(t, chat, "bobRoom", "bob", "alice")
 		seedRoomInvitation(t, chat, "carolRoom", "carol", "alice")
 		seedRoomInvitation(t, chat, "carolRoom", "carol", "bob")
-		svc.SetRoomInvitationRemover(chat)
+		svc.SetRoomInvitationRemoverForTest(chat)
 
 		block := svc.Block
 		if silent {
@@ -73,7 +72,7 @@ func TestBlock_RoomInvitationCleanupErrorIsBestEffort(t *testing.T) {
 	addUser(ur, "alice")
 	addUser(ur, "bob")
 	remover := &failingRoomInvitationRemover{}
-	svc.SetRoomInvitationRemover(remover)
+	svc.SetRoomInvitationRemoverForTest(remover)
 	hook := &recordingFederationHook{}
 	svc.SetFederationHook(hook)
 
@@ -84,14 +83,4 @@ func TestBlock_RoomInvitationCleanupErrorIsBestEffort(t *testing.T) {
 	exists, err := br.Exists("alice", "bob")
 	require.NoError(t, err)
 	assert.True(t, exists)
-}
-
-func TestHasRoomInvitationRemover(t *testing.T) {
-	svc, _, _, _ := newSvc(t)
-	assert.False(t, svc.HasRoomInvitationRemover())
-	svc.SetRoomInvitationRemover(testutil.NewMockChatRepository())
-	assert.True(t, svc.HasRoomInvitationRemover())
-	var empty blocking.Service
-	empty.SetUserListRepo(testutil.NewMockUserListRepository())
-	assert.False(t, empty.HasRoomInvitationRemover(), "別の依存だけを配線しても false")
 }

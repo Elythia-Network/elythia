@@ -76,7 +76,7 @@ func TestDeleteByNote_EmptyArgumentsAreNoop(t *testing.T) {
 	assert.Len(t, streamTypes(t, svc, "author"), 1)
 
 	require.NoError(t, svc.DeleteByNote(ctx, "nobody", "x", "n", TypeReaction), "an empty stream is fine")
-	broken := NewService(closedClient(t), idGen, "")
+	broken := NewService(closedClient(t), idGen, "", nil)
 	assert.Error(t, broken.DeleteByNote(ctx, "author", "x", "n", TypeReaction))
 }
 

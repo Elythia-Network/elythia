@@ -51,7 +51,7 @@ func newHandlerWithFollowing(t *testing.T) (
 	noteRepo.Notes = notes.Notes
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
+	svc := coreclip.NewService(repo, noteRepo, notes, idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	h.SetQueryService(corenote.NewQueryService(notes, followingRepo))
 	return h, repo, noteRepo, notes, followingRepo
@@ -107,7 +107,7 @@ func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockClipRepository()
 	repo := &failingClipRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"name":"alpha"}`)
 	setUser(c, "alice")
@@ -246,7 +246,7 @@ func TestUpdate_RepoError(t *testing.T) {
 	mock.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice"}
 	repo := &failingUpdateRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1","name":"x"}`)
 	setUser(c, "alice")
@@ -303,7 +303,7 @@ func TestDelete_RepoError(t *testing.T) {
 	mock.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice"}
 	repo := &failingDeleteRepo{MockClipRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1"}`)
 	setUser(c, "alice")
@@ -433,7 +433,7 @@ func (r *listFailRepo) ListByUser(_, _, _ string, _, _ int) ([]*model.Clip, erro
 func TestList_RepoError(t *testing.T) {
 	repo := &listFailRepo{MockClipRepository: testutil.NewMockClipRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen)
+	svc := coreclip.NewService(repo, testutil.NewMockClipNoteRepository(), testutil.NewMockNoteRepository(), idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{}`)
 	setUser(c, "alice")
@@ -524,7 +524,7 @@ func TestAddNote_RepoError(t *testing.T) {
 	notes.Notes["n1"] = &model.Note{ID: "n1", Visibility: model.NoteVisibilityPublic}
 	noteRepo := &failingClipNoteCreateRepo{MockClipNoteRepository: testutil.NewMockClipNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
+	svc := coreclip.NewService(repo, noteRepo, notes, idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	// AddNote の visibility gate (#1456) を通過させるため queryService を wire。
 	h.SetQueryService(corenote.NewQueryService(notes, nil))
@@ -621,7 +621,7 @@ func TestAddNote_WorksWithoutQueryService(t *testing.T) {
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1", Visibility: model.NoteVisibilityPublic}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, clipNoteRepo, notes, idGen)
+	svc := coreclip.NewService(repo, clipNoteRepo, notes, idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil) // SetQueryService を意図的に呼ばない
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
 	setUser(c, "alice")
@@ -716,7 +716,7 @@ func TestRemoveNote_RepoError(t *testing.T) {
 	// clip_note の削除が失敗したら、NO_SUCH_NOTE ではなく 500 にする。
 	notes := testutil.NewMockNoteRepository()
 	notes.Notes["n1"] = &model.Note{ID: "n1"}
-	svc := coreclip.NewService(repo, noteRepo, notes, idGen)
+	svc := coreclip.NewService(repo, noteRepo, notes, idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1","noteId":"n1"}`)
 	setUser(c, "alice")
@@ -824,7 +824,7 @@ func TestNotes_RepoError(t *testing.T) {
 	repo.Clips["c1"] = &model.Clip{ID: "c1", UserID: "alice"}
 	noteRepo := &listFailNoteRepo{MockClipNoteRepository: testutil.NewMockClipNoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreclip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen)
+	svc := coreclip.NewService(repo, noteRepo, testutil.NewMockNoteRepository(), idGen, nil, nil)
 	h := NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil)
 	c, rec := newReq(t, `{"clipId":"c1"}`)
 	setUser(c, "alice")

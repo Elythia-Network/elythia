@@ -100,7 +100,7 @@ func TestSignupPending_RegistrationClosed(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 
@@ -126,7 +126,7 @@ func TestSignupPending_RegistrationClosed_UnknownCode(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", RegistrationClosed: true}
 	pendingRepo := testutil.NewMockUserPendingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coresignup.NewService(userRepo, metaRepo, idGen)
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
 	svc.SetUserPendingRepo(pendingRepo)
 	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 

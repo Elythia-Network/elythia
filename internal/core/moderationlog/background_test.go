@@ -31,10 +31,10 @@ func (s *slowRepo) CreateMany(logs []*model.ModerationLog) error {
 // them, and after it no write starts.
 func TestService_WritesRunInTheBackgroundGroup(t *testing.T) {
 	repo := &slowRepo{}
-	svc := New(repo, newSvc(t, &repo.spyRepo).idGen)
 	g := bgwork.New()
-	svc.SetBackground(g)
-	assert.True(t, svc.HasBackground())
+	svc := New(repo, newSvc(t, &repo.spyRepo).idGen, g)
+	// 構築子が引数を捨てても build は通るので、持たせたことも固定する (#3825)。
+	assert.Same(t, g, svc.background)
 
 	svc.Log(context.Background(), "actor1", LogSuspend, nil)
 	svc.LogMany(context.Background(), "actor1", []Entry{{Type: LogSuspend}})
@@ -46,10 +46,4 @@ func TestService_WritesRunInTheBackgroundGroup(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	assert.Len(t, repo.snapshot(), 2, "世代を止めた後に書きに行った")
 	assert.EqualValues(t, 2, g.Dropped())
-}
-
-func TestService_SetBackgroundOnNilService(t *testing.T) {
-	var svc *Service
-	svc.SetBackground(bgwork.New())
-	assert.False(t, svc.HasBackground())
 }
