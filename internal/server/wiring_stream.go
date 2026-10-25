@@ -34,8 +34,11 @@ import (
 // arguments of another constructor (the admin stream publisher of the abuse
 // report notifier, the bubble game publisher of its service).
 //
-// buildStream only constructs. Every setter on these parts is still called at
-// its old position in setupRoutes.
+// buildStream only constructs. setupRoutes calls it right before buildHandlers
+// (#3827), so that the i and oauth handlers can take the revoke publisher as a
+// constructor argument; the aliases, the wiring.stream assignment, every
+// setter on these parts and every Subscribe… are still at their old position
+// in the stream section of setupRoutes.
 type streamParts struct {
 	streamRegistry        *stream.Registry
 	streamManager         *stream.Manager
