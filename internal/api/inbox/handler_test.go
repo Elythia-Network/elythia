@@ -69,7 +69,7 @@ func newHandler(t *testing.T, pubKeyPEM string) (*Handler, *testutil.MockUserRep
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(actorBody(pubKeyPEM))}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	return NewHandler(resolver, processor), repo, followingRepo
 }
@@ -210,7 +210,7 @@ func TestInbox_ResolverError(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
 	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	h := NewHandler(resolver, processor)
 
@@ -240,7 +240,7 @@ func TestInbox_PublicKeyMissing(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	urls := activitypub.NewURLBuilder("https://example.com")
 	resolver := federation.NewResolver(repo, noteRepo, urls, errorFetcher{}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 	h := NewHandler(resolver, processor)
 

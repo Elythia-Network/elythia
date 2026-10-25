@@ -39,7 +39,7 @@ func newExtraHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	h := NewHandler(svc, idGen)
 	h.SetFavoriteRepo(testutil.NewMockNoteFavoriteRepository())
 	return h, userRepo
@@ -359,7 +359,7 @@ func TestFavorites_NilRepo(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	h := NewHandler(svc, idGen)
 	// favoriteRepo not set
 	rec := postExtra(h.Favorites, `{}`, &model.User{ID: "u1"})
@@ -573,7 +573,7 @@ func TestChangePassword_UpdateError(t *testing.T) {
 	failRepo.Users["u1"] = &model.User{ID: "u1"}
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	h := NewHandler(svc, idGen)
 	rec := postExtra(h.ChangePassword, `{"currentPassword":"pass","newPassword":"new"}`, failRepo.Users["u1"])
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -586,7 +586,7 @@ func TestDeleteAccount_UpdateError(t *testing.T) {
 	failRepo.Users["u1"] = &model.User{ID: "u1"}
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	h := NewHandler(svc, idGen)
 	h.SetRoleProvider(&stubRoleProvider{policies: map[string]any{
 		role.PolicyCanDeleteAccount: true,
@@ -603,7 +603,7 @@ func TestRegenerateToken_UpdateError(t *testing.T) {
 	failRepo.Users["u1"] = &model.User{ID: "u1"}
 	failRepo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Password: &hashStr}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	h := NewHandler(svc, idGen)
 	rec := postExtra(h.RegenerateToken, `{"password":"pass"}`, failRepo.Users["u1"])
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -621,7 +621,7 @@ func TestRegenerateToken_UpdateErrorKeepsBackupCode(t *testing.T) {
 	enableTwoFactorWithBackupCodes(failRepo.MockUserRepository, "u1")
 	before := backupCodes(failRepo.MockUserRepository, "u1")
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := coreuser.NewService(failRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	h := NewHandler(svc, idGen)
 
 	rec := postExtra(h.RegenerateToken, `{"password":"pass","token":"backup1"}`, failRepo.Users["u1"])
@@ -641,7 +641,7 @@ func (f *failingFavListRepo) ListByUser(_ string, _, _ string, _ int) ([]*model.
 func TestFavorites_ListError(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := coreuser.NewService(userRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	h := NewHandler(svc, idGen)
 	h.SetFavoriteRepo(&failingFavListRepo{testutil.NewMockNoteFavoriteRepository()})
 	rec := postExtra(h.Favorites, `{}`, &model.User{ID: "u1"})
@@ -796,7 +796,7 @@ func TestClaimAchievement_UpdateError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(&failingProfileUpdateRepo{baseRepo}, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(&failingProfileUpdateRepo{baseRepo}, noteRepo, piningRepo, idGen, nil)
 	h := NewHandler(svc, idGen)
 
 	rec := postExtra(h.ClaimAchievement, `{"name":"notes1"}`, &model.User{ID: "u1"})

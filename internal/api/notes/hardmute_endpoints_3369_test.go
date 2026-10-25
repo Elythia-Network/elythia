@@ -48,7 +48,7 @@ func TestListEndpoints_ApplyHardMute(t *testing.T) {
 		noteRepo := &userListNotesRepo{MockNoteRepository: testutil.NewMockNoteRepository(), rows: rows}
 		idGen, _ := id.NewGenerator("aidx")
 		querySvc := corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository())
-		h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, testutil.NewMockPollRepository(), idGen, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
+		h := NewHandler(noteRepo, corenote.NewCreateService(noteRepo, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil), corenote.NewDeleteService(noteRepo), querySvc, nil, nil, nil, nil, idGen)
 		listRepo := testutil.NewMockUserListRepository()
 		listRepo.Lists["l1"] = &model.UserList{ID: "l1", UserID: "viewer", Name: "my list"}
 		h.SetUserListRepo(listRepo)

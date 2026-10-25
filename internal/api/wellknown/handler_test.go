@@ -20,7 +20,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(userRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := user.NewService(userRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 	urls := activitypub.NewURLBuilder("https://example.com")
 	return NewHandler(urls, svc, "example.com", "https://example.com"), userRepo
 }

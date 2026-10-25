@@ -27,7 +27,7 @@ func TestNoteCreateHook_FiresNoteEventOnAuthor(t *testing.T) {
 		ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"note"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 
 	text := "hello"
 	h.OnNoteCreated(
@@ -45,7 +45,7 @@ func TestNoteCreateHook_FiresReplyEventOnParentAuthor(t *testing.T) {
 		ID: "h_reply", UserID: "bob", Active: true, On: model.StringArray{"reply"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 
 	text := "reply body"
 	h.OnNoteCreated(
@@ -63,7 +63,7 @@ func TestNoteCreateHook_ReplyThreadMutedSkipped(t *testing.T) {
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h_reply"] = &model.Webhook{ID: "h_reply", UserID: "bob", Active: true, On: model.StringArray{"reply"}}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	muteRepo := testutil.NewMockNoteThreadMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.NoteThreadMuting{UserID: "bob", ThreadID: "np"}))
 	h.SetThreadMutingRepo(muteRepo)
@@ -83,7 +83,7 @@ func TestNoteCreateHook_ReplyThreadMuteUsesThreadID(t *testing.T) {
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h_reply"] = &model.Webhook{ID: "h_reply", UserID: "bob", Active: true, On: model.StringArray{"reply"}}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	muteRepo := testutil.NewMockNoteThreadMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.NoteThreadMuting{UserID: "bob", ThreadID: "troot"}))
 	h.SetThreadMutingRepo(muteRepo)
@@ -104,7 +104,7 @@ func TestNoteCreateHook_MentionThreadMutedSkipped(t *testing.T) {
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h_m"] = &model.Webhook{ID: "h_m", UserID: "bob", Active: true, On: model.StringArray{"mention"}}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	muteRepo := testutil.NewMockNoteThreadMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.NoteThreadMuting{UserID: "bob", ThreadID: "n_m"}))
 	h.SetThreadMutingRepo(muteRepo)
@@ -123,7 +123,7 @@ func TestNoteCreateHook_RenoteThreadMuteNotGated(t *testing.T) {
 	svc, enq, userRepo, _ := newTestService(t)
 	userRepo.hooks["h_rn"] = &model.Webhook{ID: "h_rn", UserID: "bob", Active: true, On: model.StringArray{"renote"}}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	muteRepo := testutil.NewMockNoteThreadMutingRepository()
 	require.NoError(t, muteRepo.Create(&model.NoteThreadMuting{UserID: "bob", ThreadID: "nr"}))
 	h.SetThreadMutingRepo(muteRepo)
@@ -143,7 +143,7 @@ func TestNoteCreateHook_FiresRenoteEventOnRenoteAuthor(t *testing.T) {
 		ID: "h_renote", UserID: "bob", Active: true, On: model.StringArray{"renote"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 
 	h.OnNoteCreated(
 		&model.Note{ID: "n3", UserID: "alice", Visibility: model.NoteVisibilityPublic},
@@ -161,7 +161,7 @@ func TestNoteCreateHook_FiresMentionEventOnMentionedUsers(t *testing.T) {
 		ID: "h_mention", UserID: "carol", Active: true, On: model.StringArray{"mention"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 
 	h.OnNoteCreated(
 		&model.Note{ID: "n4", UserID: "alice", Mentions: model.StringArray{"carol"}, Visibility: model.NoteVisibilityPublic},
@@ -179,7 +179,7 @@ func TestNoteCreateHook_SkipsSelfReplyAndMention(t *testing.T) {
 		On: model.StringArray{"note", "reply", "renote", "mention"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 
 	h.OnNoteCreated(
 		&model.Note{ID: "n5", UserID: "alice", Mentions: model.StringArray{"alice"}, Visibility: model.NoteVisibilityPublic},
@@ -196,7 +196,7 @@ func TestNoteCreateHook_NilSafe(t *testing.T) {
 	var h *webhook.NoteCreateHook
 	h.OnNoteCreated(nil, nil, nil, nil)
 	idGen, _ := id.NewGenerator("aidx")
-	h = webhook.NewNoteCreateHook(nil, idGen)
+	h = webhook.NewNoteCreateHook(nil, idGen, nil)
 	h.OnNoteCreated(nil, nil, nil, nil)
 }
 
@@ -206,7 +206,7 @@ func TestReactionCreateHook(t *testing.T) {
 		ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"reaction"},
 	}
 	idGen, _ := id.NewGenerator("aidx")
-	h := webhook.NewReactionCreateHook(svc, idGen)
+	h := webhook.NewReactionCreateHook(svc, idGen, nil)
 
 	h.OnReactionCreated(
 		&model.Note{ID: "n1", UserID: "alice", Visibility: model.NoteVisibilityPublic},
@@ -221,7 +221,7 @@ func TestReactionCreateHook_NilSafe(t *testing.T) {
 	var h *webhook.ReactionCreateHook
 	h.OnReactionCreated(nil, nil, "")
 	idGen, _ := id.NewGenerator("aidx")
-	h = webhook.NewReactionCreateHook(nil, idGen)
+	h = webhook.NewReactionCreateHook(nil, idGen, nil)
 	h.OnReactionCreated(nil, nil, "")
 }
 
@@ -273,7 +273,7 @@ func TestNoteCreateHook_GatesDepthTwoFollowersQuoteTarget(t *testing.T) {
 	userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"note"}}
 	idGen, _ := id.NewGenerator("aidx")
 	follow := testutil.NewMockFollowingRepository() // alice follows nobody
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	h.SetFollowingRepo(follow)
 
 	top := nestedQuoteNote("alice", "host", "carol", model.NoteVisibilityFollowers)
@@ -292,7 +292,7 @@ func TestNoteCreateHook_DepthTwoQuoteTargetVisibleToFollower(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	follow := testutil.NewMockFollowingRepository()
 	follow.Followings["f"] = &model.Following{ID: "f", FollowerID: "alice", FolloweeID: "carol"}
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	h.SetFollowingRepo(follow)
 
 	top := nestedQuoteNote("alice", "host", "carol", model.NoteVisibilityFollowers)
@@ -314,7 +314,7 @@ func TestNoteCreateHook_PerRecipientEmbedGate(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	follow := testutil.NewMockFollowingRepository()
 	follow.Followings["f"] = &model.Following{ID: "f", FollowerID: "dave", FolloweeID: "carol"} // dave follows carol, eve does not
-	h := webhook.NewNoteCreateHook(svc, idGen)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
 	h.SetFollowingRepo(follow)
 
 	top := nestedQuoteNote("alice", "host", "carol", model.NoteVisibilityFollowers)
@@ -341,7 +341,7 @@ func TestFollowingHook_FiresFollowAndFollowed(t *testing.T) {
 	userRepo.hooks["h_followed"] = &model.Webhook{
 		ID: "h_followed", UserID: "bob", Active: true, On: model.StringArray{"followed"},
 	}
-	h := webhook.NewFollowingHook(svc)
+	h := webhook.NewFollowingHook(svc, nil)
 	wireFollowLookups(t, h, "bob")
 
 	follower := &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
@@ -362,7 +362,7 @@ func TestFollowingHook_Unfollow(t *testing.T) {
 	userRepo.hooks["h_u"] = &model.Webhook{
 		ID: "h_u", UserID: "alice", Active: true, On: model.StringArray{"unfollow"},
 	}
-	h := webhook.NewFollowingHook(svc)
+	h := webhook.NewFollowingHook(svc, nil)
 	wireFollowLookups(t, h, "bob")
 	h.OnUnfollow(
 		&model.User{ID: "alice", Username: "alice", UsernameLower: "alice"},
@@ -377,7 +377,7 @@ func TestFollowingHook_NilSafe(t *testing.T) {
 	h.OnFollow(nil, nil)
 	h.OnUnfollow(nil, nil)
 	h.OnFollowed(nil, nil)
-	h = webhook.NewFollowingHook(nil)
+	h = webhook.NewFollowingHook(nil, nil)
 	h.OnFollow(nil, nil)
 	h.OnUnfollow(nil, nil)
 	h.OnFollowed(nil, nil)
@@ -431,7 +431,7 @@ func TestNoteCreateHook_TopLevelVisibilityGate(t *testing.T) {
 			ID: "h1", UserID: ownerID, Active: true, On: model.StringArray{event},
 		}
 		idGen, _ := id.NewGenerator("aidx")
-		h := webhook.NewNoteCreateHook(svc, idGen)
+		h := webhook.NewNoteCreateHook(svc, idGen, nil)
 		follows := testutil.NewMockFollowingRepository()
 		h.SetFollowingRepo(follows)
 		return h, enq, follows

@@ -291,13 +291,6 @@ type RemoteUserResyncer interface {
 	ResyncIfStale(u *model.User) (*model.User, error)
 }
 
-// SetBackground sets the group the best-effort hooks run in, so stopping the
-// server generation waits for them (#3661).
-func (s *CreateService) SetBackground(g *bgwork.Group) { s.background = g }
-
-// HasBackground reports whether SetBackground received a group.
-func (s *CreateService) HasBackground() bool { return s.background != nil }
-
 // SetRemoteUserResolver wires the resolver used to fetch mentioned remote
 // users that are not in the DB, as upstream RemoteUserResolveService.resolveUser
 // does. nil keeps mention resolution DB-only.
@@ -345,36 +338,11 @@ func (s *CreateService) SetRolePolicyProvider(p role.PolicyProvider) {
 	s.rolePolicyProvider = p
 }
 
-// SetSilencingProvider attaches a SilencingProvider so public-visibility
-// notes from `canPublicNote=false` users are demoted to `home` (#1024).
-// nil 時は demotion skip (= 旧挙動)。
-func (s *CreateService) SetSilencingProvider(p SilencingProvider) {
-	s.silencingProvider = p
-}
-
-// SetBlockingRepo attaches a BlockingRepository for detecting reply/renote
-// block violations. When unset the block check is skipped (backward compat).
-func (s *CreateService) SetBlockingRepo(r repository.BlockingRepository) {
-	s.blockingRepo = r
-}
-
 // SetThreadMutingRepo attaches a NoteThreadMutingRepository so reply/mention
 // main-stream events are suppressed for recipients who thread-muted the thread,
 // matching upstream NoteCreateService (#1954). nil disables the gate.
 func (s *CreateService) SetThreadMutingRepo(r repository.NoteThreadMutingRepository) {
 	s.threadMuteRepo = r
-}
-
-// SetDriveFileRepo attaches a DriveFileRepository for validating fileIds.
-// When unset fileId validation is skipped (backward compat).
-func (s *CreateService) SetDriveFileRepo(r repository.DriveFileRepository) {
-	s.driveFileRepo = r
-}
-
-// SetMetaRepo attaches a MetaRepository for prohibited-word detection.
-// When unset the check is skipped.
-func (s *CreateService) SetMetaRepo(r repository.MetaRepository) {
-	s.metaRepo = r
 }
 
 // SetChannelRepo attaches a ChannelRepository for the "renote outside of
@@ -387,18 +355,46 @@ func (s *CreateService) SetChannelRepo(r repository.ChannelRepository) {
 // followingRepo は省略可 (nil)。指定された場合、followers可視性ノートへの
 // reply/renoteで閲覧権限を厳格にチェックする。
 // fanoutHookも省略可 (nil)。設定されていればnote作成成功時にコールバックされる。
+//
+// background is the group the best-effort hooks run in, so stopping the
+// server generation waits for them (#3661). entityPacker packs the notes
+// published to the main stream (#3790). blockingRepo detects reply / renote
+// block violations, metaRepo detects sensitive and prohibited words,
+// silencingProvider demotes public notes of `canPublicNote=false` users to
+// `home` (#1024) and driveFileRepo validates fileIds. A nil gate dependency
+// skips its check (tests).
+//
+// どれも無いと黙って劣化する (世代を止めても投稿後のhookのgoroutineを待たない /
+// main stream の投稿のメディアの URL を media proxy を通さずに返す / **自分を
+// ブロックしている**相手への返信・引用が通る。判定は
+// `checkBlocked(t.UserID, in.User.ID)` / meta のセンシティブワードと禁止ワードが
+// 効かない / silenced な利用者の public 投稿が home へ降格されない / 他人の drive
+// file ID を `fileIds` に指定して自分の note に貼れる (IDOR)) ので、構築子の必須の
+// 引数で受ける (#3825)。
 func NewCreateService(
 	noteRepo repository.NoteRepository,
 	pollRepo repository.PollRepository,
 	idGen id.Generator,
 	followingRepo repository.FollowingRepository,
+	background *bgwork.Group,
+	entityPacker *entity.Packer,
+	blockingRepo repository.BlockingRepository,
+	metaRepo repository.MetaRepository,
+	silencingProvider SilencingProvider,
+	driveFileRepo repository.DriveFileRepository,
 ) *CreateService {
 	return &CreateService{
-		noteRepo:      noteRepo,
-		pollRepo:      pollRepo,
-		followingRepo: followingRepo,
-		idGen:         idGen,
-		hookSlots:     newHookSlots(0),
+		noteRepo:          noteRepo,
+		pollRepo:          pollRepo,
+		followingRepo:     followingRepo,
+		idGen:             idGen,
+		background:        background,
+		entityPacker:      entityPacker,
+		blockingRepo:      blockingRepo,
+		metaRepo:          metaRepo,
+		silencingProvider: silencingProvider,
+		driveFileRepo:     driveFileRepo,
+		hookSlots:         newHookSlots(0),
 	}
 }
 
@@ -459,14 +455,6 @@ func (s *CreateService) SetIndexHook(h IndexHook) {
 func (s *CreateService) SetChartHook(h ChartHook) {
 	s.chartHook = h
 }
-
-// SetEntityPacker wires the Packer the notes published to the main stream are
-// packed with (#3790).
-func (s *CreateService) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs.
-func (s *CreateService) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
 
 // SetWebhookHook attaches a WebhookHook invoked after note creation so that
 // user webhooks subscribed to note / reply / renote / mention events can fire.
@@ -2094,26 +2082,3 @@ func (s *CreateService) materializeIfMissing(noteID string, lookupErr error) boo
 	_, err := s.materializer.EnsureNote(context.Background(), noteID)
 	return err == nil
 }
-
-// HasBlockingRepo / HasMetaRepo / HasSilencingProvider report whether the
-// note-creation gates were wired.
-//
-// 未配線時にそれぞれ: **自分をブロックしている**相手への返信・引用が通る
-// (gate は `checkBlocked(t.UserID, in.User.ID)` = 返信先の著者が自分を
-// ブロックしているか)、meta のセンシティブワードと禁止ワードの両方が効かない、
-// silenced な利用者の public 投稿が home へ降格されない。起動時検査に使う
-// (#2683)。
-func (s *CreateService) HasBlockingRepo() bool { return s.blockingRepo != nil }
-
-// HasMetaRepo reports whether the meta repository was wired.
-func (s *CreateService) HasMetaRepo() bool { return s.metaRepo != nil }
-
-// HasSilencingProvider reports whether the silencing provider was wired.
-func (s *CreateService) HasSilencingProvider() bool { return s.silencingProvider != nil }
-
-// HasDriveFileRepo reports whether the drive file repository was wired.
-//
-// 未配線だと `checkFileIDs` が素通しになり、**他人の drive file ID を
-// `notes/create` の `fileIds` に指定して自分の note に貼れる** (IDOR)。
-// page の eyecatch (#2683 の `pages.driveFileRepo`) より経路が広い。
-func (s *CreateService) HasDriveFileRepo() bool { return s.driveFileRepo != nil }

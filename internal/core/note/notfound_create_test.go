@@ -60,7 +60,7 @@ func TestCreate_DBFailureIsNotTargetNotFound(t *testing.T) {
 			failing := &dbFailingCreateNoteRepo{
 				MockNoteRepository: testutil.NewMockNoteRepository(), err: dbErr,
 			}
-			svc := NewCreateService(failing, testutil.NewMockPollRepository(), idGen, nil)
+			svc := NewCreateService(failing, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil)
 			mat := &countingNoteMaterializer{}
 			svc.SetNoteMaterializer(mat)
 

@@ -53,7 +53,7 @@ func TestCreateService_HookConcurrency(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewCreateService(nil, nil, nil, nil)
+			s := NewCreateService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			tt.set(s)
 			if got := s.HookConcurrency(); got != tt.want {
 				t.Fatalf("HookConcurrency()=%d, want %d", got, tt.want)
@@ -275,7 +275,7 @@ func (h *blockingFanoutHook) OnNoteCreated(*model.Note, *model.User) {
 func TestCreateService_RunsHooksWithinItsSlots(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	svc := NewCreateService(testutil.NewMockNoteRepository(), testutil.NewMockPollRepository(), idGen, nil)
+	svc := NewCreateService(testutil.NewMockNoteRepository(), testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil)
 	svc.SetHookConcurrency(1)
 	hook := &blockingFanoutHook{started: make(chan struct{}, 2), release: make(chan struct{})}
 	svc.SetFanoutHook(hook)

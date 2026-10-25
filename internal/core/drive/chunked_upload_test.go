@@ -51,9 +51,9 @@ func newChunkedFixture(t *testing.T) *chunkedFixture {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 
-	svc := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	svc := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 	roles := &fakeMod{policies: map[string]map[string]any{"u1": defaultChunkedPolicies()}}
-	svc.SetRoleChecker(roles)
+	svc.SetRoleCheckerForTest(roles)
 
 	sessions := newMockChunkedSessionRepo()
 	f := &chunkedFixture{
@@ -292,7 +292,7 @@ func TestStartChunkedUpload_FailClosedWithoutPolicies(t *testing.T) {
 	_, err := f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{User: f.user, Size: 1})
 	assert.ErrorIs(t, err, drive.ErrChunkedUploadNotAllowed)
 
-	f.svc.SetRoleChecker(nil)
+	f.svc.SetRoleCheckerForTest(nil)
 	_, err = f.svc.StartChunkedUpload(context.Background(), drive.StartChunkedUploadInput{User: f.user, Size: 1})
 	assert.ErrorIs(t, err, drive.ErrChunkedUploadNotAllowed)
 }

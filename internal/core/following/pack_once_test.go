@@ -49,7 +49,7 @@ func TestFollowEvents_PackFolloweeOnce(t *testing.T) {
 	addUser(t, userRepo, "alice", false)
 	addUser(t, userRepo, "bob", true)
 	packer := &countingPacker{}
-	svc.SetUserPacker(packer)
+	svc.SetUserPackerForTest(packer)
 	hook := &packedHook{}
 	svc.SetWebhookHook(hook)
 	pub := &stubMainStreamPublisher{}
@@ -90,7 +90,7 @@ func TestFollow_PublicPacksOnce(t *testing.T) {
 	addUser(t, userRepo, "alice", false)
 	addUser(t, userRepo, "bob", false)
 	packer := &countingPacker{}
-	svc.SetUserPacker(packer)
+	svc.SetUserPackerForTest(packer)
 	hook := &packedHook{}
 	svc.SetWebhookHook(hook)
 	svc.SetMainStreamPublisher(&stubMainStreamPublisher{})
@@ -116,11 +116,4 @@ func TestFollowEvents_UnwiredPackerUsesPlainHook(t *testing.T) {
 	assert.Empty(t, hook.bodies)
 	assert.Equal(t, 1, hook.follows)
 	assert.Equal(t, 1, hook.unfollows)
-}
-
-func TestService_HasUserPacker(t *testing.T) {
-	svc, _, _, _ := newSvc(t)
-	assert.False(t, svc.HasUserPacker())
-	svc.SetUserPacker(&countingPacker{})
-	assert.True(t, svc.HasUserPacker())
 }

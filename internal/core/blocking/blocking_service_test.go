@@ -30,7 +30,7 @@ func newSvcWithFollowing(t *testing.T) (*blocking.Service, *testutil.MockUserRep
 	blockingRepo := testutil.NewMockBlockingRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	followingSvc := following.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := following.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	svc := blocking.NewService(userRepo, blockingRepo, idGen, followingSvc, nil, nil, nil)
 	return svc, userRepo, blockingRepo, followingRepo, followingSvc
 }
@@ -210,7 +210,7 @@ func TestBlock_RemoveFollowingDeleteError(t *testing.T) {
 	mock.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "a", FolloweeID: "b"}
 	idGen, _ := id.NewGenerator("aidx")
 	followingSvc := following.NewService(userRepo, &failingFollowingRepo{MockFollowingRepository: mock},
-		testutil.NewMockFollowRequestRepository(), idGen)
+		testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	svc := blocking.NewService(userRepo, testutil.NewMockBlockingRepository(), idGen, followingSvc, nil, nil, nil)
 	hook := &recordingFederationHook{}
 	svc.SetFederationHook(hook)
@@ -361,7 +361,7 @@ func TestBlock_CancelledRequestCannotBeAccepted(t *testing.T) {
 	followRequestRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
 
-	followingSvc := following.NewService(userRepo, followingRepo, followRequestRepo, idGen)
+	followingSvc := following.NewService(userRepo, followingRepo, followRequestRepo, idGen, nil, nil, nil, nil)
 	blockingSvc := blocking.NewService(userRepo, testutil.NewMockBlockingRepository(), idGen, followingSvc, followingSvc, nil, nil)
 
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", IsLocked: true}

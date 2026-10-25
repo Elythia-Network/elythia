@@ -37,7 +37,7 @@ func newResyncService(t *testing.T) (*user.Service, *resyncingResolver) {
 	host := "remote.example"
 	repo.Users["uR"] = &model.User{ID: "uR", Username: "remote", UsernameLower: "remote", Host: &host}
 	repo.Users["uL"] = &model.User{ID: "uL", Username: "me", UsernameLower: "me"}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	rs := &resyncingResolver{}
 	svc.SetRemoteUserResolver(rs)
 	return svc, rs
@@ -78,7 +78,7 @@ func TestResolveByUsername_ResyncNilUser(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	host := "remote.example"
 	repo.Users["uR"] = &model.User{ID: "uR", Username: "remote", UsernameLower: "remote", Host: &host}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	svc.SetRemoteUserResolver(&nilResyncer{})
 	_, err := svc.ResolveByUsername("remote", &host)
 	require.ErrorIs(t, err, user.ErrFailedToResolveRemoteUser)
@@ -102,7 +102,7 @@ func TestResolveByUsername_ResolverWithoutResync(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	host := "remote.example"
 	repo.Users["uR"] = &model.User{ID: "uR", Username: "remote", UsernameLower: "remote", Host: &host}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	svc.SetRemoteUserResolver(&stubRemoteResolver{})
 	bundle, err := svc.ResolveByUsername("remote", &host)
 	require.NoError(t, err)

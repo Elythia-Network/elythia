@@ -61,8 +61,8 @@ func newModWriteFixture(t *testing.T, sensitive bool) *modWriteFixture {
 	roles := &fakeMod{moderators: map[string]bool{"mod": true}}
 	logs := &fakeModLogger{}
 	pub := &stubDriveStreamPublisher{}
-	svc.SetRoleChecker(roles)
-	svc.SetModerationLog(logs, users)
+	svc.SetRoleCheckerForTest(roles)
+	svc.SetModerationLogForTest(logs, users)
 	svc.SetStreamingPublisher(pub)
 	files.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &ownerID, Name: "a.png", IsSensitive: sensitive}
 	return &modWriteFixture{
@@ -286,7 +286,7 @@ func TestModeratorWrite_OwnerlessRemoteFile(t *testing.T) {
 // 所有者の名前を引けなくても、操作は済んでいるのでログは残す。
 func TestModeratorWrite_OwnerLookupFailureStillLogs(t *testing.T) {
 	fx := newModWriteFixture(t, false)
-	fx.svc.SetModerationLog(fx.logs, failingUserLookup{})
+	fx.svc.SetModerationLogForTest(fx.logs, failingUserLookup{})
 
 	_, err := fx.svc.Update(fx.mod, "f1", drive.UpdateInput{IsSensitive: boolPtr(true)})
 	require.NoError(t, err)
@@ -300,20 +300,13 @@ func TestModeratorWrite_WithoutModerationLog(t *testing.T) {
 	svc, files, _ := newSvc(t)
 	ownerID := "owner"
 	files.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &ownerID}
-	svc.SetRoleChecker(&fakeMod{moderators: map[string]bool{"mod": true}})
-	assert.False(t, svc.HasModerationLog())
-	svc.SetModerationLog(&fakeModLogger{}, nil)
-	assert.False(t, svc.HasModerationLog())
+	svc.SetRoleCheckerForTest(&fakeMod{moderators: map[string]bool{"mod": true}})
+	// 利用者の lookup が欠けた半端な配線も、ログを書かずに通す。
+	svc.SetModerationLogForTest(&fakeModLogger{}, nil)
 
 	_, err := svc.Update(&model.User{ID: "mod"}, "f1", drive.UpdateInput{IsSensitive: boolPtr(true)})
 	require.NoError(t, err)
 	require.NoError(t, svc.Delete(&model.User{ID: "mod"}, "f1"))
-}
-
-func TestHasModerationLog(t *testing.T) {
-	svc, _, _ := newSvc(t)
-	svc.SetModerationLog(&fakeModLogger{}, testutil.NewMockUserRepository())
-	assert.True(t, svc.HasModerationLog())
 }
 
 // 絵文字が画像として使っているファイルは、system 所有でなくても moderator には

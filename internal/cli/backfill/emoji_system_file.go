@@ -84,6 +84,13 @@ func emojiSystemFile(e env, args []string) int {
 		repository.NewDriveFolderRepository(db),
 		storage,
 		idGen,
+		// entityPacker・roleChecker・moderationLog (logger と利用者の lookup) は
+		// 渡さない (#3825)。このコマンドが呼ぶのは CopyToSystemFile と
+		// DeleteSystemFile だけで、複製は利用者の無い system file (User: nil) なので、
+		// ロールの policy の検査も stream への publish (ここで Packer を使う) も
+		// 通らない。モデレーターの操作でもないので監査ログも書かない。#3825 より前も
+		// setter を呼ばず、どれも nil のまま動いていた。
+		nil, nil, nil, nil,
 	)
 	// **storedInternal = true の行はローカル FS にある。** オブジェクトストレージへ
 	// 移行する前に保存されたファイルをここから読む (#1414 / #2315)。

@@ -53,7 +53,7 @@ func newIntegrationImporter(t *testing.T, db *gorm.DB) (*emojiimport.Importer, *
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
-	driveService := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	driveService := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 	driveReader := transfer.NewRepoBackedDriveReader(fileRepo, storage)
 	imp := emojiimport.NewImporter(emojiimport.Deps{
 		UserRepo:  userRepo,

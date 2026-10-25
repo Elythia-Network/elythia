@@ -23,9 +23,9 @@ func TestCreateService_ValidationOrderMatchesUpstream(t *testing.T) {
 	}})
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "m1", ProhibitedWords: []string{"badword"}}
-	svc.SetMetaRepo(metaRepo)
+	svc.SetMetaRepoForTest(metaRepo)
 	fileRepo := testutil.NewMockDriveFileRepository()
-	svc.SetDriveFileRepo(fileRepo)
+	svc.SetDriveFileRepoForTest(fileRepo)
 	channels := &stubChannelHook{exists: false}
 	svc.SetChannelHook(channels)
 

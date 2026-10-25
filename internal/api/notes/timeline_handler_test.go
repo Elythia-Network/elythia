@@ -82,7 +82,7 @@ func newTimelineHandler(t *testing.T, noteRepo *testutil.MockNoteRepository, tl 
 	t.Helper()
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	return NewHandler(noteRepo, createSvc, deleteSvc, querySvc, tl, nil, nil, nil, idGen)
@@ -764,7 +764,7 @@ func TestTimeline_PageFilterLoadsOnceAndSkipsPassedNotes(t *testing.T) {
 		require.NoError(t, fanout.Push(context.Background(), coretimeline.HomeTimelineName("viewer"), nid, 100))
 	}
 
-	h := NewHandler(spy, corenote.NewCreateService(mock, testutil.NewMockPollRepository(), idGen, nil),
+	h := NewHandler(spy, corenote.NewCreateService(mock, testutil.NewMockPollRepository(), idGen, nil, nil, nil, nil, nil, nil, nil),
 		corenote.NewDeleteService(mock), corenote.NewQueryService(mock, nil), tl, nil, nil, nil, idGen)
 	muting := &countingMutingRepo{MockMutingRepository: testutil.NewMockMutingRepository()}
 	muting.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}

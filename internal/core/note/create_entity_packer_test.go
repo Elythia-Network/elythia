@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// main stream へ流す投稿は、SetEntityPacker で渡した Packer で包む (#3790)。
+// main stream へ流す投稿は、構築子で渡した Packer で包む (#3790、#3825)。
 //
 // 返信先の投稿者の avatarUrl が、渡した Packer の media proxy を通ることを確かめる。
 // (このテストの mock は作った投稿に作者を付けないので、作者ではなく返信先で見る。)
@@ -22,10 +22,8 @@ func TestCreateService_PublishesWithTheGivenPacker(t *testing.T) {
 	svc, noteRepo, _ := newCreateService(t)
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
-	assert.False(t, svc.HasEntityPacker())
-	svc.SetEntityPacker(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
+	svc.SetEntityPackerForTest(entity.NewPacker(entity.PackerDeps{MediaURL: entity.NewMediaURLContext(
 		"https://local.example", "", []byte("secret"), false, true)}))
-	require.True(t, svc.HasEntityPacker())
 	avatar := "https://remote.example/avatar.png"
 	noteRepo.Notes["r1"] = &model.Note{
 		ID: "r1", UserID: "bob", Visibility: model.NoteVisibilityPublic,

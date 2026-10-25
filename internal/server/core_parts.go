@@ -4,11 +4,16 @@ import (
 	coreantenna "github.com/elythia-network/elythia/internal/core/antenna"
 	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
 	coreclip "github.com/elythia-network/elythia/internal/core/clip"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	coremodlog "github.com/elythia-network/elythia/internal/core/moderationlog"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
 	corenotification "github.com/elythia-network/elythia/internal/core/notification"
 	corepoll "github.com/elythia-network/elythia/internal/core/poll"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
 	coresignup "github.com/elythia-network/elythia/internal/core/signup"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
+	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 )
 
 // coreParts holds the parts buildCore builds whose dependencies are required
@@ -30,4 +35,13 @@ type coreParts struct {
 	pollService         *corepoll.Service
 	modLogService       *coremodlog.Service
 	notificationService *corenotification.Service
+
+	// packer の要る部品 (#3825 の 3 段目)。
+	noteCreateService    *corenote.CreateService
+	followingService     *corefollowing.Service
+	driveService         *coredrive.Service
+	userService          *coreuser.Service
+	webhookNoteHook      *corewebhook.NoteCreateHook
+	webhookReactionHook  *corewebhook.ReactionCreateHook
+	webhookFollowingHook *corewebhook.FollowingHook
 }

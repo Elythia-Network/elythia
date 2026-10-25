@@ -52,7 +52,7 @@ func newHandlerWithFailingUnpinDelete(t *testing.T) (*Handler, *testutil.MockUse
 	mock := testutil.NewMockUserNotePiningRepository()
 	piningRepo := &failingPiningDeleteRepo{MockUserNotePiningRepository: mock}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	return NewHandler(svc, idGen), mock
 }
 
@@ -62,7 +62,7 @@ func newHandlerWithFailingPiningCount(t *testing.T) (*Handler, *testutil.MockUse
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := &failingPiningRepo{MockUserNotePiningRepository: testutil.NewMockUserNotePiningRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	return NewHandler(svc, idGen), userRepo, noteRepo
 }
 
@@ -85,7 +85,7 @@ func newHandlerWithFailingUpdate(t *testing.T) (*Handler, *testutil.MockUserRepo
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	return NewHandler(svc, idGen), mockUR
 }
 
@@ -109,7 +109,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *test
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	svc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	h := NewHandler(svc, idGen)
 	return h, userRepo, noteRepo, piningRepo
 }

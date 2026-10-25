@@ -617,8 +617,8 @@ setupRoutes()
     入れるので、それより前に `w.repos.x` を書くとコンパイルが通らない。照合はキー
     `repos: s.buildRepos()` で行い、リテラル全体は見ない (後でフィールドを足しても
     書き直さずに済む)
-  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)`、
-    `w.core = coreSvcs`、別名は `x := coreSvcs.x`。引数の`roleService`は#3825から`buildRole()`で作る。`streamPubSub`は先頭で作るstreamのpubsub)。`buildCore()` が `w.repos` を読むので
+  - `core` は変数を経由した代入 (`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub, entityPacker, sharedUserPacker)`、
+    `w.core = coreSvcs`、別名は `x := coreSvcs.x`。引数の`roleService`は#3825から`buildRole()`で作る。`streamPubSub`は先頭で作るstreamのpubsub。2つのpackerは`buildRole()`の後に作る)。`buildCore()` が `w.repos` を読むので
     リテラルには足せない。`w.core = …` から直接別名を取ると、別名を代入より前に書いても
     コンパイルが通るので、別名は変数から取る。照合はこの 3 つの行で行う
   - `fed` も `core` と同じ形 (`fedSvcs := s.buildFederation(w, coreSvcs, idGen)`、
@@ -665,7 +665,7 @@ setupRoutes()
   …                                     // repository の別名、EnsureInitial、chart の hook
   roleService := s.buildRole(w, idGen)  // wiring_core.go (#3825)
   …                                     // entityPacker と sharedUserPacker (#3825)
-  coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)
+  coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub, entityPacker, sharedUserPacker)
   w.core = coreSvcs
   featuredService := coreSvcs.featured  // 別名 (変数から取る)
   …
@@ -680,7 +680,7 @@ setupRoutes()
   ログを出さず、goroutine・timer・shutdown hook・グローバルの書き換え・hook の登録の
   どれもせず、依存が repository と先に作った core だけのもの。コンストラクタの本体
   (中で呼ぶ関数を含む) を 1 つずつ読んで確かめた。#3825 から、`buildCore()` が引数で
-  受ける値 (`roleService`・stream の pubsub `streamPubSub`) にも依存してよい。stream の
+  受ける値 (`roleService`・stream の pubsub `streamPubSub`・`entityPacker`・`sharedUserPacker`) にも依存してよい。stream の
   publisher は、その pubsub から作るもの (`clipService` に渡す `NewClipStreamPublisher`) に
   限る (作っても購読も接続もしない)
 - **setter は 1 つも動かさない。** 構築の途中で動く処理 (4.1) から見える配線を変えない
@@ -698,7 +698,7 @@ setupRoutes()
 `internal/server` / `tools` の `_test.go` の文字列リテラルを、`wiring_core.go` と
 `internal/server` のほかのファイルに当てた)。ほかのゲートは setter の行を照合して
 おり、setter は動かしていない。このゲートは、上の規則のとおり
-`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub)`、
+`abuseInAppNotifier: abuseInAppNotifier`、`coreSvcs := s.buildCore(w, idGen, roleService, streamPubSub, entityPacker, sharedUserPacker)`、
 `w.core = coreSvcs`、`abuseInAppNotifier := coreSvcs.abuseInAppNotifier` も照合する。#3825で
 `roleService`を`buildCore()`の引数にしたので、`roleService := s.buildRole(w, idGen)`も照合する。
 
@@ -1351,14 +1351,35 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   どれもその前で揃う。clipの`streamPublisher`は、`setupRoutes()`の先頭で作る`streamPubSub`を
   `buildCore()`の引数で受けて、その場で`stream.NewClipStreamPublisher(streamPubSub)`で作る
   (作っても購読も接続もしない)
+- **3段目はpackerの要る7構築子・17行。** noteCreate(6行: `entityPacker`・`background`・
+  `blockingRepo`・`metaRepo`・`silencingProvider`・`driveFileRepo`)、following(4行: `entityPacker`・
+  `silencedHostChecker`・`silentFollowRepo`・`userPacker`)、drive(3行: `entityPacker`・`roleChecker`・
+  `moderationLog`。`moderationLog`は`modLog`と`modLogUsers`の2つの引数)、userの`entityPacker`、
+  webhookのnote・reactionの`entityPacker`とfollowingの`userPacker`(ここまで各1行)。
+  `buildCore()`は`entityPacker`と`sharedUserPacker`も引数で受ける
+- **`internal/cli/backfill`(`elythia backfill emoji-system-file`)は、driveのserviceに
+  `entityPacker`・`roleChecker`・`moderationLog`を渡さない(明示的にnil)。** 呼ぶのは
+  `CopyToSystemFile`と`DeleteSystemFile`だけで、複製は利用者の無いsystem fileなので、ロールの
+  policyの検査もstreamへのpublish(ここでPackerを使う)も通らない。#3825より前もsetterを
+  呼ばず、どれもnilのまま動いていた
 - **依存を入れる時点が、元のsetterの位置から`buildCore()`の位置へ前へ移っただけ。**
-  元のsetterはどれもstreamの節(最初の`Subscribe`)より前にあり、`buildCore()`から元のsetterまでの
-  間に、`Subscribe`・`Connect…`・`Start`・goroutineの起動は無い(行を突き合わせて確かめた)。
+  2段目の元のsetterはどれもstreamの節(最初の`Subscribe`)より前にあり、`buildCore()`から元の
+  setterまでの間に、`Subscribe`・`Connect…`・`Start`・goroutineの起動は無い(行を突き合わせて
+  確かめた)。3段目の`driveService.SetModerationLog`だけは`Subscribe`より後にあったが、購読の
+  handler(`metaUpdated`・`federationRulesUpdated`・`rolesUpdated`・`antennaUpdated`と、
+  `cachebus`・`corerelationcache`の`Connect…`)が触るのはmeta・連合のルール・ロール・アンテナ・
+  関係・インスタンスの停止・relay・認証・利用者・アバターデコレーション・絵文字のキャッシュと、
+  metaとnodeinfoのhandler・captcha・リアクションのバッファで、driveのserviceには届かない。
   pubsubの購読のhandlerから辿れる配線は変わらない(4.1)
 - **外部パッケージのテストは、`export_test.go`の`…ForTest`で後から入れる。** 補助関数が作った
-  serviceに後から入れていたテスト(`core/blocking`・`core/reaction`・`core/clip`・`core/poll`の
-  外部パッケージのテスト)に置いた。テストの中で構築子を呼んでいる箇所と、別のパッケージの
+  serviceに後から入れていたテスト(`core/blocking`・`core/reaction`・`core/clip`・`core/poll`と、
+  3段目の`core/note`・`core/following`・`core/drive`・`core/user`の外部パッケージのテスト)に
+  置いた。テストの中で構築子を呼んでいる箇所と、別のパッケージの
   テストは構築子で渡す。同じパッケージのテストはフィールドへ直接代入する(#3817と同じ)
+- **置き換えなかったもの。** 循環なので残す`following.blockingChecker`・
+  `following.meUpdatedPublisher`・`userPacker.detailExtras`・`userpack.detailExtrasMany`(#3812で
+  残すと決めた行)、既に型で必須の`sharedUserPacker.entityPacker`、段(8)で扱う
+  `entityPacker.mediaURL`。表の行もsetterも元のまま
 - **nilを渡す形は、`TestBuiltHandlersHaveNoNilDependencies`を広げて見る。** `buildCore()`で作る
   部品のうち置き換えたものを、`Server`のフィールド`builtCore`(型は`coreParts`、
   `internal/server/core_parts.go`)に持たせる。`core`の欄を全部は並べない。欄の名前は
@@ -1367,16 +1388,17 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   key (`<欄>.<フィールド>`)が区別できないため。テストは3つの入れ物の欄の名前が重ならないことも
   確かめる。許可リストに足したのは、clipの`pendingUpdated`(依存ではなく状態で、最初の
   `publishUpdated`が作る)と`afterFunc`(テストだけが差し替えるseamで、nilのとき
-  `time.AfterFunc`を使う)の2つ
+  `time.AfterFunc`を使う)の2つと、3段目のdriveの`sensitiveDetector`(`nsfwDetectorUrl`を
+  設定しないときは`setupRoutes()`がnilを入れる既定の構成で、テストの組み立ても設定しない)
 
-| | #3825の前(`5b7e06b1bf`) | 2段目の後 |
-|---|---|---|
-| `criticalWiringCount` | 104 | 89 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 680 | 664 |
-| その受け手 | 112 | 111 |
+| | #3825の前(`5b7e06b1bf`) | 2段目の後 | 3段目の後 |
+|---|---|---|---|
+| `criticalWiringCount` | 104 | 89 | 72 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 680 | 664 | 647 |
+| その受け手 | 112 | 111 | 110 |
 
-数え方: 上の表と同じ。2段目で減った受け手は、置き換えたsetterしか呼んでいなかった
-`modLogService`。行頭が`<名前>Handler.Set`の行(342)と、その受け手(40)は変わらない
+数え方: 上の表と同じ。減った受け手は、置き換えたsetterしか呼んでいなかった`modLogService`
+(2段目)と`webhookFollowingHook`(3段目)。行頭が`<名前>Handler.Set`の行(342)と、その受け手(40)は変わらない
 (handlerは置き換えていない)。
 
 #### /api のルートの登録 (#3697)

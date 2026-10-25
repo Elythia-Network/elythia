@@ -38,7 +38,7 @@ func TestUserService_DBFailureIsNotUserNotFound(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := coreuser.NewService(
 		&dbFailingUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: dbErr},
-		testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+		testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 
 	for _, tt := range []struct {
 		name string

@@ -36,17 +36,12 @@ type NoteCreateHook struct {
 	entityPacker *entity.Packer
 }
 
-// NewNoteCreateHook constructs a NoteCreateHook.
-func NewNoteCreateHook(svc *Service, idGen id.Generator) *NoteCreateHook {
-	return &NoteCreateHook{svc: svc, idGen: idGen}
+// NewNoteCreateHook constructs a NoteCreateHook. entityPacker packs the note
+// payload (#3790). 無いとメディアの URL を media proxy を通さずに送り、しかも
+// 黙って劣化するので、構築子の必須の引数で受ける (#3825)。
+func NewNoteCreateHook(svc *Service, idGen id.Generator, entityPacker *entity.Packer) *NoteCreateHook {
+	return &NoteCreateHook{svc: svc, idGen: idGen, entityPacker: entityPacker}
 }
-
-// SetEntityPacker wires the Packer the note payload is packed with (#3790).
-func (h *NoteCreateHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs.
-func (h *NoteCreateHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetThreadMutingRepo attaches a NoteThreadMutingRepository so reply/mention
 // webhook events are suppressed for recipients who thread-muted the thread,
@@ -160,17 +155,12 @@ type ReactionCreateHook struct {
 	entityPacker *entity.Packer
 }
 
-// NewReactionCreateHook constructs a ReactionCreateHook.
-func NewReactionCreateHook(svc *Service, idGen id.Generator) *ReactionCreateHook {
-	return &ReactionCreateHook{svc: svc, idGen: idGen}
+// NewReactionCreateHook constructs a ReactionCreateHook. entityPacker packs
+// the note payload (#3790). 無いとメディアの URL を media proxy を通さずに送り、
+// しかも黙って劣化するので、構築子の必須の引数で受ける (#3825)。
+func NewReactionCreateHook(svc *Service, idGen id.Generator, entityPacker *entity.Packer) *ReactionCreateHook {
+	return &ReactionCreateHook{svc: svc, idGen: idGen, entityPacker: entityPacker}
 }
-
-// SetEntityPacker wires the Packer the note payload is packed with (#3790).
-func (h *ReactionCreateHook) SetEntityPacker(p *entity.Packer) { h.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs.
-func (h *ReactionCreateHook) HasEntityPacker() bool { return h.entityPacker.HasMediaURL() }
 
 // SetFollowingRepo attaches a FollowingRepository used to gate the embed
 // visibility of the reaction note payload for the recipient (= note author).
@@ -229,21 +219,20 @@ type FollowingHook struct {
 	packer *userpack.Packer
 }
 
-// NewFollowingHook constructs a FollowingHook.
-func NewFollowingHook(svc *Service) *FollowingHook {
-	return &FollowingHook{svc: svc}
+// NewFollowingHook constructs a FollowingHook. packer is shared with the main
+// stream publisher, so the webhook and the stream carry the same shape.
+//
+// 無いと follow / unfollow の Webhook は profile を確かめられないので送られず、
+// followed は instance と絵文字を解決しない形になる。しかも黙って劣化するので、
+// 構築子の必須の引数で受ける (#3825)。
+func NewFollowingHook(svc *Service, packer *userpack.Packer) *FollowingHook {
+	return &FollowingHook{svc: svc, packer: packer}
 }
 
 // SetUserLookups wires the lookups used to pack the `user` of follow /
 // followed / unfollow bodies with pk, and idGen to derive createdAt.
 func (h *FollowingHook) SetUserLookups(pk *entity.Packer, l UserLookups, idGen id.Generator) {
 	h.packer = userpack.New(pk, l, idGen)
-}
-
-// SetUserPacker wires a packer shared with the main stream publisher, so the
-// webhook and the stream carry the same shape.
-func (h *FollowingHook) SetUserPacker(p *userpack.Packer) {
-	h.packer = p
 }
 
 // OnFollow fires the `follow` event on the follower's webhooks.
@@ -301,18 +290,12 @@ func (h *FollowingHook) OnFollowed(follower, followee *model.User) {
 	})
 }
 
-// HasUserPacker reports whether the user packer was wired.
-//
-// 未配線だと follow / unfollow の Webhook は profile を確かめられないので送られず、
-// followed は instance と絵文字を解決しない形になる。起動時検査に使う。
-func (h *FollowingHook) HasUserPacker() bool { return h.packer != nil }
-
 // userPacker returns the wired packer, or one without lookups when unwired
 // (which drops the detailed bodies, see userpack.Packer.DetailedNotMe).
 //
 // 未配線のときの Packer は nil の entity.Packer なので、followed の avatarUrl は
-// 生のリモートの URL になる (#3792)。本番は criticalWiring の
-// webhookFollowing.userPacker が配線を必須にしているので、ここへは来ない。
+// 生のリモートの URL になる (#3792)。本番は NewFollowingHook の必須の引数で
+// 共有の packer を渡す (#3825) ので、ここへは来ない。
 func (h *FollowingHook) userPacker() *userpack.Packer {
 	if h.packer == nil {
 		return userpack.New(nil, userpack.Lookups{}, nil)

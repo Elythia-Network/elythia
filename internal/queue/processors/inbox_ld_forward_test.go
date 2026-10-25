@@ -73,7 +73,7 @@ func newLDForwardEnv(t *testing.T) *ldForwardEnv {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	resolver := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"), ldFwdNoFetch{}, idGen)
-	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(userRepo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	fed := federation.NewProcessor(resolver, followingSvc, nil, nil, userRepo, noteRepo)
 
 	pubkeys := testutil.NewMockUserPublickeyRepository()

@@ -30,7 +30,7 @@ func TestResolveMentionUserIDs_IDNHost(t *testing.T) {
 	repo.Users["idn1"] = &model.User{
 		ID: "idn1", Username: "IdnUser", UsernameLower: "idnuser", Host: &host, URI: &uri,
 	}
-	svc := corenote.NewCreateService(nil, nil, nil, nil)
+	svc := corenote.NewCreateService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	require.NotNil(t, svc)
 	svc.SetUserRepo(repo)
 

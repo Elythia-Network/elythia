@@ -73,7 +73,7 @@ func newEmojiImporter(t *testing.T, reader emojiimport.DriveReader) *emojiimport
 	folderRepo.FilesRef = fileRepo
 	storage := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 	idGen, _ := id.NewGenerator("aidx")
-	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen)
+	uploader := drive.NewService(fileRepo, folderRepo, storage, idGen, nil, nil, nil, nil)
 	return emojiimport.NewImporter(emojiimport.Deps{
 		UserRepo:  userRepo,
 		EmojiRepo: testutil.NewMockEmojiRepository(),

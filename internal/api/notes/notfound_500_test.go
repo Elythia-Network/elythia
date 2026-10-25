@@ -35,7 +35,7 @@ func newDBFailingHandler(t *testing.T, err error) *Handler {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	return NewHandler(failing,
-		corenote.NewCreateService(failing, pollRepo, idGen, nil),
+		corenote.NewCreateService(failing, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil),
 		corenote.NewDeleteService(failing),
 		corenote.NewQueryService(failing, nil),
 		nil, nil, nil, nil, idGen)
@@ -83,7 +83,7 @@ func TestTranslate_DBFailureIsNot4xx(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	h := NewHandler(failing,
-		corenote.NewCreateService(failing, pollRepo, idGen, nil),
+		corenote.NewCreateService(failing, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil),
 		corenote.NewDeleteService(failing),
 		corenote.NewQueryService(failing, nil),
 		nil, nil, nil, nil, idGen)
@@ -129,7 +129,7 @@ func TestMaterializeIfMissing_SkipsOnDBFailure(t *testing.T) {
 		pollRepo := testutil.NewMockPollRepository()
 		idGen, _ := id.NewGenerator("aidx")
 		h := NewHandler(failing,
-			corenote.NewCreateService(failing, pollRepo, idGen, nil),
+			corenote.NewCreateService(failing, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil),
 			corenote.NewDeleteService(failing),
 			corenote.NewQueryService(failing, nil),
 			nil, nil, nil, nil, idGen)
@@ -146,7 +146,7 @@ func TestMaterializeIfMissing_SkipsOnDBFailure(t *testing.T) {
 		pollRepo := testutil.NewMockPollRepository()
 		idGen, _ := id.NewGenerator("aidx")
 		h := NewHandler(repo,
-			corenote.NewCreateService(repo, pollRepo, idGen, nil),
+			corenote.NewCreateService(repo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil),
 			corenote.NewDeleteService(repo),
 			corenote.NewQueryService(repo, nil),
 			nil, nil, nil, nil, idGen)
@@ -187,7 +187,7 @@ func TestNotes_ServiceErrorNotLaundered(t *testing.T) {
 		pollRepo := testutil.NewMockPollRepository()
 		idGen, _ := id.NewGenerator("aidx")
 		return NewHandler(failing,
-			corenote.NewCreateService(failing, pollRepo, idGen, nil),
+			corenote.NewCreateService(failing, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil),
 			corenote.NewDeleteService(failing),
 			corenote.NewQueryService(failing, nil),
 			nil, nil, nil, nil, idGen)

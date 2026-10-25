@@ -107,7 +107,7 @@ func TestReactions_ProfileDBFailureIsNot200(t *testing.T) {
 			MockUserRepository: repo,
 			err:                errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
 		},
-		testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen)
+		testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen, nil)
 
 	rec := postStub(h.Reactions, `{"userId":"target"}`, &model.User{ID: "viewer"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code,
@@ -143,7 +143,7 @@ func TestRelationVisibility_ProfileDBFailureIsNot200(t *testing.T) {
 					MockUserRepository: repo,
 					err:                errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
 				},
-				testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen)
+				testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen, nil)
 
 			assert.Equal(t, http.StatusInternalServerError, ep.run(h),
 				"DB 障害でフォロワー一覧が公開扱いになっている (#2799)")
@@ -190,7 +190,7 @@ func TestAcctLookupDBFailureIsNot404(t *testing.T) {
 			h.SetUserRepo(repo)
 			h.userService = coreuser.NewService(
 				&dbFailingAcctLookupRepo{MockUserRepository: repo, err: dbErr},
-				testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen)
+				testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), h.idGen, nil)
 
 			assert.Equal(t, http.StatusInternalServerError, ep.run(h),
 				"DB 障害が NO_SUCH_USER に丸められている (#2792)")

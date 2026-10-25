@@ -71,7 +71,7 @@ func TestReadFileBodyUsesLocalForStoredInternal(t *testing.T) {
 	// primary (= オブジェクトストレージのつもり) と local を別物にする。
 	primary := drive.NewLocalStorage(t.TempDir(), "https://s3.example/files")
 	local := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
-	svc := drive.NewService(fileRepo, folderRepo, primary, idGen)
+	svc := drive.NewService(fileRepo, folderRepo, primary, idGen, nil, nil, nil, nil)
 	svc.SetLocalStorage(local)
 
 	// ローカルにだけ実体がある行 (移行前に保存されたもの)。

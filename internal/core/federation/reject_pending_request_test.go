@@ -42,7 +42,7 @@ func TestProcess_RejectPendingFollowRequest(t *testing.T) {
 	requestRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen, nil, nil, nil, nil)
 	events := &rejectMainEvents{}
 	webhooks := &rejectWebhooks{}
 	delivery := &rejectDelivery{}
@@ -82,7 +82,7 @@ func TestProcess_RejectFollow_RemoteFollowerIsIgnored(t *testing.T) {
 	requestRepo := testutil.NewMockFollowRequestRepository()
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, requestRepo, idGen, nil, nil, nil, nil)
 	events := &rejectMainEvents{}
 	followingSvc.SetMainStreamPublisher(events)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)

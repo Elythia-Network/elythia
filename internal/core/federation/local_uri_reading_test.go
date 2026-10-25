@@ -192,7 +192,7 @@ func newAcceptFamilyFixture(t *testing.T) *acceptFamilyFixture {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
-	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	aliceURI := "https://remote.example/users/alice"

@@ -20,7 +20,7 @@ func newPollsHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository, *tes
 	pollRepo := testutil.NewMockPollRepository()
 	voteRepo := testutil.NewMockPollVoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)
@@ -157,7 +157,7 @@ func TestPollsVote_RepoError(t *testing.T) {
 	seedPollNote(noteRepo, pollRepo, model.NoteVisibilityPublic, nil)
 	voteRepo := &failingVoteRepo{MockPollVoteRepository: testutil.NewMockPollVoteRepository()}
 	idGen, _ := id.NewGenerator("aidx")
-	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil)
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
 	deleteSvc := corenote.NewDeleteService(noteRepo)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	pollSvc := corepoll.NewService(noteRepo, pollRepo, voteRepo, nil, idGen, nil)

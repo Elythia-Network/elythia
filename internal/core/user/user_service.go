@@ -116,14 +116,6 @@ type Service struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this service packs entities with (#3792).
-func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いと avatarUrl などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
-
 // UsertagHook reconciles the hashtag attach aggregate when a user's tags
 // change. 実装は core/hashtag.Service.UpdateUsertags。
 type UsertagHook interface {
@@ -140,17 +132,23 @@ func (s *Service) SetRolePolicyProvider(p role.PolicyProvider) {
 // NewService creates a new user Service.
 // noteRepo, piningRepo, idGen are optional for callers that only need the
 // read-only show methods (pass nil); the pin-related methods require them.
+//
+// entityPacker packs users and notes (#3792). 無いと avatarUrl などを media proxy を
+// 通さずに返し、閲覧者の IP がリモートへ漏れる。しかも黙って劣化するので、構築子の
+// 必須の引数で受ける (#3825)。
 func NewService(
 	userRepo repository.UserRepository,
 	noteRepo repository.NoteRepository,
 	piningRepo repository.UserNotePiningRepository,
 	idGen id.Generator,
+	entityPacker *entity.Packer,
 ) *Service {
 	return &Service{
-		userRepo:   userRepo,
-		noteRepo:   noteRepo,
-		piningRepo: piningRepo,
-		idGen:      idGen,
+		userRepo:     userRepo,
+		noteRepo:     noteRepo,
+		piningRepo:   piningRepo,
+		idGen:        idGen,
+		entityPacker: entityPacker,
 	}
 }
 

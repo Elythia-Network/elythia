@@ -285,14 +285,6 @@ type Service struct {
 	entityPacker *entity.Packer
 }
 
-// SetEntityPacker wires the Packer this Service packs entities with (#3796).
-func (s *Service) SetEntityPacker(p *entity.Packer) { s.entityPacker = p }
-
-// HasEntityPacker reports whether SetEntityPacker received a Packer that
-// rewrites media URLs. 無いとファイルの url などを生のまま返し、閲覧者の IP が
-// リモートへ漏れる。
-func (s *Service) HasEntityPacker() bool { return s.entityPacker.HasMediaURL() }
-
 // defaultMediaProcessingConcurrency is how many uploads may decode at once.
 //
 // **枠が無いと確保量を掛け算できた。** `processImage` は寸法 / blurhash /
@@ -408,19 +400,6 @@ func (s *Service) publishFolderEvent(userID, eventType string, body any) {
 		return
 	}
 	s.folderPublisher.PublishDriveFolderEvent(userID, eventType, body)
-}
-
-// SetRoleChecker wires a moderator role lookup so Show allows moderators to
-// inspect any file (matching upstream Misskey's drive/files/show behaviour).
-// Nil keeps the existing owner-only check.
-func (s *Service) SetRoleChecker(rc RoleChecker) { s.roleChecker = rc }
-
-// SetModerationLog wires the moderation log written when a moderator changes
-// the sensitive flag of, or deletes, another user's file (#3678). users
-// resolves the owner's username and host for the entry.
-func (s *Service) SetModerationLog(l ModerationLogger, users ModerationLogUserLookup) {
-	s.modLog = l
-	s.modLogUsers = users
 }
 
 // SetLocalStorage wires the always-local backend used to reach rows whose
@@ -604,17 +583,39 @@ func (s *Service) SetOfficialSensitiveDetector(d *OfficialDetector) {
 }
 
 // NewService constructs a DriveService.
+//
+// entityPacker packs the files published to the drive and main streams
+// (#3796). roleChecker supplies the role policies (MIME allowlist, forced
+// NSFW, file size and capacity limits) and the moderator check that lets
+// moderators inspect any file, matching upstream drive/files/show; nil keeps
+// the owner-only check and no policy limits. modLog and modLogUsers write the
+// moderation log when a moderator changes the sensitive flag of, or deletes,
+// another user's file (#3678); modLogUsers resolves the owner's username and
+// host. A nil logger skips the entry.
+//
+// どれも無いと黙って劣化する (ファイルの url などを media proxy を通さずに返す /
+// 1 つの nil で MIME 許可リスト・NSFW 強制・ファイルサイズ上限・容量上限が同時に
+// 外れる / モデレーターが他人のファイルを変えても消してもログに残らない) ので、
+// 構築子の必須の引数で受ける (#3825)。
 func NewService(
 	fileRepo repository.DriveFileRepository,
 	folderRepo repository.DriveFolderRepository,
 	storage Storage,
 	idGen id.Generator,
+	entityPacker *entity.Packer,
+	roleChecker RoleChecker,
+	modLog ModerationLogger,
+	modLogUsers ModerationLogUserLookup,
 ) *Service {
 	return &Service{
 		fileRepo:     fileRepo,
 		folderRepo:   folderRepo,
 		storage:      storage,
 		idGen:        idGen,
+		entityPacker: entityPacker,
+		roleChecker:  roleChecker,
+		modLog:       modLog,
+		modLogUsers:  modLogUsers,
 		mediaSlots:   semaphore.NewWeighted(int64(defaultMediaProcessingConcurrency())),
 		mediaSlotCap: defaultMediaProcessingConcurrency(),
 	}
@@ -1345,7 +1346,7 @@ func fileOwnerID(f *model.DriveFile) string {
 // on another user's file. info は本家 DriveService の
 // {fileId, fileUserId, fileUserUsername, fileUserHost} と同じ形。
 func (s *Service) logModeratorAction(moderator *model.User, t moderationlog.LogType, f *model.DriveFile) {
-	if !s.HasModerationLog() {
+	if !s.hasModerationLog() {
 		return
 	}
 	info := map[string]any{
@@ -1888,12 +1889,6 @@ func normalizeMimePatterns(raw any) []string {
 	}
 }
 
-// HasRoleChecker reports whether the role checker was wired.
-//
-// **1 つの nil で 4 つの制限が同時に外れる** — MIME 許可リスト、NSFW 強制、
-// ファイルサイズ上限、容量上限。起動時検査に使う (#2683)。
-func (s *Service) HasRoleChecker() bool { return s.roleChecker != nil }
-
-// HasModerationLog reports whether SetModerationLog received both
+// hasModerationLog reports whether NewService received both moderation log
 // dependencies.
-func (s *Service) HasModerationLog() bool { return s.modLog != nil && s.modLogUsers != nil }
+func (s *Service) hasModerationLog() bool { return s.modLog != nil && s.modLogUsers != nil }

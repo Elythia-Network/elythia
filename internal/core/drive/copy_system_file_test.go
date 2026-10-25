@@ -142,7 +142,7 @@ func TestCopyToSystemFileReadsStoredInternalFromLocal(t *testing.T) {
 	// primary (= オブジェクトストレージのつもり) と local を別物にする。
 	primary := drive.NewLocalStorage(t.TempDir(), "https://s3.example/files")
 	local := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
-	svc := drive.NewService(fileRepo, folderRepo, primary, idGen)
+	svc := drive.NewService(fileRepo, folderRepo, primary, idGen, nil, nil, nil, nil)
 	svc.SetLocalStorage(local)
 
 	body := pngBody("legacy-local-bytes")
@@ -250,12 +250,12 @@ func TestCopyToSystemFileReportsUploadFailure(t *testing.T) {
 	local := drive.NewLocalStorage(t.TempDir(), "https://example.com/files")
 
 	// まず素の service で元ファイルを作る。
-	seed := drive.NewService(fileRepo, folderRepo, local, idGen)
+	seed := drive.NewService(fileRepo, folderRepo, local, idGen, nil, nil, nil, nil)
 	src, err := seed.Upload(context.Background(), drive.UploadInput{Body: pngBody("x"), Name: "o.png"})
 	require.NoError(t, err)
 
 	boom := errors.New("storage is down")
-	svc := drive.NewService(fileRepo, folderRepo, failingPutStorage{inner: local, err: boom}, idGen)
+	svc := drive.NewService(fileRepo, folderRepo, failingPutStorage{inner: local, err: boom}, idGen, nil, nil, nil, nil)
 	_, err = svc.CopyToSystemFile(context.Background(), src, "e", false, 1<<20)
 	require.Error(t, err)
 	require.ErrorIs(t, err, boom, "元のエラーが辿れない")

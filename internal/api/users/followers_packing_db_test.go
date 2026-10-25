@@ -69,8 +69,8 @@ func dbFollowersHandler(t *testing.T, db *gorm.DB) *Handler {
 	pinRepo := repository.NewUserNotePiningRepository(db)
 	fRepo := repository.NewFollowingRepository(db)
 	frRepo := repository.NewFollowRequestRepository(db)
-	h := NewHandler(coreuser.NewService(userRepo, noteRepo, pinRepo, idGen),
-		corefollowing.NewService(userRepo, fRepo, frRepo, idGen), noteRepo, idGen, nil, nil, nil, nil, nil, nil, repository.NewMutingRepository(db), repository.NewBlockingRepository(db), nil)
+	h := NewHandler(coreuser.NewService(userRepo, noteRepo, pinRepo, idGen, nil),
+		corefollowing.NewService(userRepo, fRepo, frRepo, idGen, nil, nil, nil, nil), noteRepo, idGen, nil, nil, nil, nil, nil, nil, repository.NewMutingRepository(db), repository.NewBlockingRepository(db), nil)
 	h.SetUserRepo(userRepo)
 	h.SetPiningRepo(pinRepo)
 	h.SetFollowingRepo(fRepo)

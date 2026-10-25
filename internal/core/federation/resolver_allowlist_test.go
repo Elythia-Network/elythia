@@ -142,7 +142,7 @@ func TestProcessCreate_NonFederatedHostIsDroppedNotRetried(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{"type":"Create","actor":"https://remote.example/users/alice","object":` + sampleRemoteNote + `}`)
@@ -179,7 +179,7 @@ func TestProcessCreate_AllowedSenderNonFederatedAttributedToIsDropped(t *testing
 	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(relayActor)}, idGen)
 	// note の attributedTo (remote.example) のみ非連合。送信者 host は許可。
 	resolver.SetHostBlockChecker(&stubHostBlocker{disallowed: map[string]bool{"remote.example": true}})
-	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen)
+	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	body := []byte(`{"type":"Create","actor":"https://relay.allowed/users/relay","object":` + sampleRemoteNote + `}`)

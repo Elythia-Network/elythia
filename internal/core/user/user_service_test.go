@@ -21,7 +21,7 @@ func newFullSvc(t *testing.T) (*user.Service, *testutil.MockUserRepository, *tes
 	nRepo := testutil.NewMockNoteRepository()
 	pRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	return user.NewService(uRepo, nRepo, pRepo, idGen), uRepo, nRepo, pRepo
+	return user.NewService(uRepo, nRepo, pRepo, idGen, nil), uRepo, nRepo, pRepo
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -31,7 +31,7 @@ func TestService_ShowByID_Success(t *testing.T) {
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	desc := "hello"
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Description: &desc}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	bundle, err := svc.ShowByID("u1")
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestService_ShowByID_Success(t *testing.T) {
 
 func TestService_ShowByID_NotFound(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	_, err := svc.ShowByID("missing")
 	require.Error(t, err)
@@ -52,7 +52,7 @@ func TestService_ShowByID_NotFound(t *testing.T) {
 func TestService_ShowByID_NoProfile(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	bundle, err := svc.ShowByID("u1")
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestService_ShowManyByIDs_PreservesOrderAndSkipsMissing(t *testing.T) {
 	d2 := "d2"
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Description: &d1}
 	repo.Profiles["u2"] = &model.UserProfile{UserID: "u2", Description: &d2}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	out, err := svc.ShowManyByIDs([]string{"u2", "ghost", "u1"})
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestService_ShowManyByIDs_PreservesOrderAndSkipsMissing(t *testing.T) {
 
 func TestService_ShowManyByIDs_EmptyInput(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	out, err := svc.ShowManyByIDs(nil)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestService_ShowManyByIDs_EmptyInput(t *testing.T) {
 
 func TestService_ShowManyByIDs_AllMissing(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	out, err := svc.ShowManyByIDs([]string{"x", "y"})
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestService_FindManyByIDs(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	repo.Users["u2"] = &model.User{ID: "u2", Username: "bob"}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	// 空入力は repo を叩かずに nil 返却。
 	out, err := svc.FindManyByIDs(nil)
@@ -124,7 +124,7 @@ func TestService_GetProfilesByUserIDs_BatchOK(t *testing.T) {
 	d1, d2 := "p1", "p2"
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Description: &d1}
 	repo.Profiles["u2"] = &model.UserProfile{UserID: "u2", Description: &d2}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	out := svc.GetProfilesByUserIDs([]string{"u1", "u2", "ghost"})
 	require.Len(t, out, 2)
@@ -137,7 +137,7 @@ func TestService_GetProfilesByUserIDs_BatchOK(t *testing.T) {
 
 func TestService_GetProfilesByUserIDs_EmptyInput(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	out := svc.GetProfilesByUserIDs(nil)
 	assert.Empty(t, out)
 }
@@ -154,7 +154,7 @@ func (failingProfileRepo) FindProfilesByUserIDs(_ []string) ([]*model.UserProfil
 }
 
 func TestService_GetProfilesByUserIDs_RepoErrorYieldsEmptyMap(t *testing.T) {
-	svc := user.NewService(failingProfileRepo{testutil.NewMockUserRepository()}, nil, nil, nil)
+	svc := user.NewService(failingProfileRepo{testutil.NewMockUserRepository()}, nil, nil, nil, nil)
 	out := svc.GetProfilesByUserIDs([]string{"u1"})
 	require.NotNil(t, out, "must return a non-nil map even on repository error")
 	assert.Empty(t, out)
@@ -164,7 +164,7 @@ func TestService_ShowManyByIDs_NoProfileSilentlyOmitted(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	// Profile 行が無くても User は返る
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	out, err := svc.ShowManyByIDs([]string{"u1"})
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestService_ShowManyByIDs_NoProfileSilentlyOmitted(t *testing.T) {
 func TestService_ShowByUsername_Success(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice"}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	bundle, err := svc.ShowByUsername("alice", nil)
 	require.NoError(t, err)
@@ -187,7 +187,7 @@ func TestService_ShowByUsername_WithHost(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	host := "remote.example.com"
 	repo.Users["u2"] = &model.User{ID: "u2", Username: "bob", UsernameLower: "bob", Host: &host}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	bundle, err := svc.ShowByUsername("bob", &host)
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestService_ShowByUsername_WithHost(t *testing.T) {
 
 func TestService_ShowByUsername_NotFound(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	_, err := svc.ShowByUsername("nobody", nil)
 	require.Error(t, err)
@@ -222,7 +222,7 @@ func TestService_ShowByUsername_RemoteFallback_NoResolver_ReturnsErrUserNotFound
 	// host が指定されていても resolver が未注入なら従来どおり ErrUserNotFound
 	// を返すこと (後方互換)。
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	host := "remote.example"
 	_, err := svc.ShowByUsername("ghost", &host)
@@ -233,7 +233,7 @@ func TestService_ShowByUsername_RemoteFallback_NoResolver_ReturnsErrUserNotFound
 func TestService_ShowByUsername_RemoteFallback_EmptyHostIgnoresResolver(t *testing.T) {
 	// host が空文字列の場合は resolver を呼ばずに ErrUserNotFound を返す。
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	resolver := &stubRemoteResolver{}
 	svc.SetRemoteUserResolver(resolver)
 
@@ -246,7 +246,7 @@ func TestService_ShowByUsername_RemoteFallback_EmptyHostIgnoresResolver(t *testi
 
 func TestService_ShowByUsername_RemoteFallback_ResolverSucceeds(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	host := "remote.example"
 	resolved := &model.User{ID: "u9", Username: "remote", UsernameLower: "remote", Host: &host}
 	resolver := &stubRemoteResolver{user: resolved}
@@ -267,7 +267,7 @@ func TestService_ShowByUsername_RemoteFallback_ResolverSucceeds(t *testing.T) {
 
 func TestService_ShowByUsername_RemoteFallback_ResolverFails(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	resolver := &stubRemoteResolver{err: errors.New("webfinger: dial timeout")}
 	svc.SetRemoteUserResolver(resolver)
 
@@ -281,7 +281,7 @@ func TestService_ShowByUsername_RemoteFallback_ResolverFails(t *testing.T) {
 func TestService_ShowByUsername_RemoteFallback_ResolverReturnsNil(t *testing.T) {
 	// resolver が (nil, nil) を返した場合も失敗扱いにする (防御的実装)。
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	resolver := &stubRemoteResolver{user: nil}
 	svc.SetRemoteUserResolver(resolver)
 
@@ -296,7 +296,7 @@ func TestService_ShowByUsername_LocalHit_ResolverNotCalled(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	host := "remote.example"
 	repo.Users["u3"] = &model.User{ID: "u3", Username: "cached", UsernameLower: "cached", Host: &host}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	resolver := &stubRemoteResolver{err: errors.New("should not be called")}
 	svc.SetRemoteUserResolver(resolver)
 
@@ -310,7 +310,7 @@ func TestService_GetProfile_Found(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	desc := "hi"
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", Description: &desc}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	p := svc.GetProfile("u1")
 	require.NotNil(t, p)
@@ -319,7 +319,7 @@ func TestService_GetProfile_Found(t *testing.T) {
 
 func TestService_GetProfile_Missing(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	assert.Nil(t, svc.GetProfile("missing"))
 }
@@ -863,7 +863,7 @@ func TestService_UpdateProfile_UserUpdateError_DoesNotPublish(t *testing.T) {
 	mockUR.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
 	uRepo := &failingUserRepo{MockUserRepository: mockUR, failUpdateUser: true}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(uRepo, nil, nil, idGen)
+	svc := user.NewService(uRepo, nil, nil, idGen, nil)
 	pub := &stubMainStreamPublisher{}
 	svc.SetMainStreamPublisher(pub)
 
@@ -1058,7 +1058,7 @@ func TestService_UpdateProfile_UserUpdateError(t *testing.T) {
 	mockUR.Users["u1"] = &model.User{ID: "u1"}
 	uRepo := &failingUserRepo{MockUserRepository: mockUR, failUpdateUser: true}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(uRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := user.NewService(uRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 
 	_, err := svc.UpdateProfile("u1", user.UpdateInput{IsLocked: ptr(true)})
 	assert.ErrorIs(t, err, errStub)
@@ -1069,7 +1069,7 @@ func TestService_UpdateProfile_ProfileUpdateError(t *testing.T) {
 	mockUR.Users["u1"] = &model.User{ID: "u1"}
 	uRepo := &failingUserRepo{MockUserRepository: mockUR, failUpdateProfile: true}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(uRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+	svc := user.NewService(uRepo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 
 	_, err := svc.UpdateProfile("u1", user.UpdateInput{Description: ptr(ptr("hi"))})
 	assert.ErrorIs(t, err, errStub)
@@ -1082,7 +1082,7 @@ func TestService_PinNote_CountError(t *testing.T) {
 	mockNR.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1"}
 	piningRepo := &failingPiningRepo{MockUserNotePiningRepository: testutil.NewMockUserNotePiningRepository(), failCount: true}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(mockUR, mockNR, piningRepo, idGen)
+	svc := user.NewService(mockUR, mockNR, piningRepo, idGen, nil)
 
 	err := svc.PinNote("u1", "n1")
 	assert.ErrorIs(t, err, errStub)
@@ -1092,7 +1092,7 @@ func TestService_ListPinnedNotes_Error(t *testing.T) {
 	mockUR := testutil.NewMockUserRepository()
 	piningRepo := &failingPiningRepo{MockUserNotePiningRepository: testutil.NewMockUserNotePiningRepository(), failListByU: true}
 	idGen, _ := id.NewGenerator("aidx")
-	svc := user.NewService(mockUR, testutil.NewMockNoteRepository(), piningRepo, idGen)
+	svc := user.NewService(mockUR, testutil.NewMockNoteRepository(), piningRepo, idGen, nil)
 
 	_, err := svc.ListPinnedNotes("u1")
 	assert.ErrorIs(t, err, errStub)
@@ -1304,7 +1304,7 @@ func TestService_SearchByUsernameAndHost(t *testing.T) {
 			repo2.Users[id] = &model.User{ID: id, Username: "many", UsernameLower: "many"}
 		}
 		idGen, _ := id.NewGenerator("aidx")
-		s2 := user.NewService(repo2, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen)
+		s2 := user.NewService(repo2, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
 		out, err := s2.SearchByUsernameAndHost("many", nil, 0)
 		require.NoError(t, err)
 		assert.Len(t, out, 10)
@@ -1406,7 +1406,7 @@ func TestService_UpdateProfile_SkipsUsertagHookWhenDescriptionOmitted(t *testing
 // WebFinger + actor fetch に化けてはならない。
 func TestService_ShowByUsernameDB_NeverResolves(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	resolver := &stubRemoteResolver{}
 	svc.SetRemoteUserResolver(resolver)
 
@@ -1421,7 +1421,7 @@ func TestService_ShowByUsernameDB_FindsCachedRemote(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	host := "remote.example"
 	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice", Host: &host}
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 
 	got, err := svc.ShowByUsernameDB("alice", &host)
 	require.NoError(t, err)
@@ -1456,7 +1456,7 @@ func TestShowByUsername_IDNHost(t *testing.T) {
 		repo.Users["idn1"] = &model.User{
 			ID: "idn1", Username: "IdnUser", UsernameLower: "idnuser", Host: &host, URI: &uri,
 		}
-		svc := user.NewService(repo, nil, nil, nil)
+		svc := user.NewService(repo, nil, nil, nil, nil)
 		res := &recordingResolver{}
 		svc.SetRemoteUserResolver(res)
 		return svc, res
@@ -1520,7 +1520,7 @@ func TestShowByUsername_LocalHostShortCircuit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := testutil.NewMockUserRepository()
 			repo.Users["me"] = &model.User{ID: "me", Username: "Alice", UsernameLower: "alice"}
-			svc := user.NewService(repo, nil, nil, nil)
+			svc := user.NewService(repo, nil, nil, nil, nil)
 			// resolver は「呼ばれたら失敗する」ので、短絡できないと error になる。
 			svc.SetRemoteUserResolver(federation.NewRemoteUserResolver(nil, nil, repo, tc.localHost, nil))
 
@@ -1551,7 +1551,7 @@ func TestShowByUsername_NonNormalizedStoredHostFallsBackToRemote(t *testing.T) {
 			repo.Users["u1"] = &model.User{
 				ID: "u1", Username: "Alice", UsernameLower: "alice", Host: &h,
 			}
-			svc := user.NewService(repo, nil, nil, nil)
+			svc := user.NewService(repo, nil, nil, nil, nil)
 			res := &recordingResolver{err: errors.New("not resolvable in test")}
 			svc.SetRemoteUserResolver(res)
 
@@ -1573,7 +1573,7 @@ func TestShowByUsername_DBErrorIsNotTreatedAsMiss(t *testing.T) {
 	boom := errors.New("connection reset by peer")
 	repo := testutil.NewMockUserRepository()
 	repo.FindByUsernameLowerFn = func(string, *string) (*model.User, error) { return nil, boom }
-	svc := user.NewService(repo, nil, nil, nil)
+	svc := user.NewService(repo, nil, nil, nil, nil)
 	res := &recordingResolver{}
 	svc.SetRemoteUserResolver(res)
 
@@ -1596,7 +1596,7 @@ func TestService_RemoveBackupCode(t *testing.T) {
 	}
 	idGen, _ := id.NewGenerator("aidx")
 	svc := user.NewService(repo, testutil.NewMockNoteRepository(),
-		testutil.NewMockUserNotePiningRepository(), idGen)
+		testutil.NewMockUserNotePiningRepository(), idGen, nil)
 
 	require.NoError(t, svc.RemoveBackupCode("u1", "c2"))
 	assert.Equal(t, "u1", gotUser)

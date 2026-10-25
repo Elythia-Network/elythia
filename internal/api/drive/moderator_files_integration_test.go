@@ -109,10 +109,9 @@ func newModeratorFilesFixture(t *testing.T) *moderatorFilesFixture {
 	modLog := moderationlog.New(repository.NewModerationLogRepository(db), idGen, fx.logs)
 
 	svc := coredrive.NewService(repository.NewDriveFileRepository(db), repository.NewDriveFolderRepository(db),
-		coredrive.NewLocalStorage(fx.storeDir, "https://example.com/files"), idGen)
-	svc.SetRoleChecker(roles)
+		coredrive.NewLocalStorage(fx.storeDir, "https://example.com/files"), idGen,
+		nil, roles, modLog, repository.NewUserRepository(db))
 	svc.SetStreamingPublisher(fx.pub)
-	svc.SetModerationLog(modLog, repository.NewUserRepository(db))
 	fx.svc = svc
 	fx.h = NewHandler(svc, idGen, nil, nil, nil)
 	return fx

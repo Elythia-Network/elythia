@@ -59,7 +59,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *testutil
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	urls := activitypub.NewURLBuilder("https://example.com")
@@ -1271,7 +1271,7 @@ func newHandlerWithPining(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
@@ -1430,7 +1430,7 @@ func newHandlerWithFollowing(t *testing.T) (*Handler, *testutil.MockUserReposito
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
@@ -1652,7 +1652,7 @@ func newHandlerWithOutbox(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	noteRepo := testutil.NewMockNoteRepository()
 	piningRepo := testutil.NewMockUserNotePiningRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen)
+	userSvc := coreuser.NewService(userRepo, noteRepo, piningRepo, idGen, nil)
 	querySvc := corenote.NewQueryService(noteRepo, nil)
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	h := NewHandler(activitypub.NewRenderer(activitypub.NewURLBuilder("https://example.com")), userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil)
