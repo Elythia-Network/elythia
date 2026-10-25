@@ -2413,28 +2413,26 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	if pu, err := urlpkg.Parse(s.config.URL); err == nil && pu.Host != "" {
 		feedHost = pu.Host
 	}
-	feedH := &feedHandler{
-		baseURL:       s.config.URL,
-		host:          feedHost,
-		users:         feedUserResolver{repo: userRepo},
-		notes:         noteRepo,
-		parseTime:     idGen.ParseTime,
-		ugcVisibility: func() string { return metaUGCVisibility(metaRepo) },
-		profiles: func(userID string) *model.UserProfile {
+	// 依存は構築子の必須の引数で渡す (#3827)。ugcVisibilityForVisitor の lookup は毎回読む。
+	feedH := newFeedHandler(s.config.URL, feedHost,
+		feedUserResolver{repo: userRepo},
+		noteRepo,
+		idGen.ParseTime,
+		func() string { return metaUGCVisibility(metaRepo) },
+		func(userID string) *model.UserProfile {
 			p, err := userRepo.FindProfileByUserID(userID)
 			if err != nil {
 				return nil
 			}
 			return p
 		},
-		avatarURL: func(u *model.User) string {
+		func(u *model.User) string {
 			if u.AvatarURL != nil && *u.AvatarURL != "" {
 				return *u.AvatarURL
 			}
 			return entityPacker.IdenticonURL(u)
 		},
-		toHTML: feedNoteHTML(feedHost),
-	}
+		feedNoteHTML(feedHost))
 
 	// /@<acct> は AP のユーザー解決とフィードの入口を兼ねる。Echo のルータは
 	// Fastify と違い `/@:user.rss` のようなセグメント内リテラルを解釈できない
@@ -3702,22 +3700,25 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// そのまま使う** — inbox と同じ厳しさにするため、専用の実装を作らない。
 	// 相手のプラグイン一覧はキャッシュの一覧に登録するので (#3776)、変数に取り出す。
 	pluginPeers := newNodeInfoPeerLister(s.outboundClient(peerLookupTimeout), peered)
-	s.peerDeps = &pluginPeerDeps{
-		selfHost: s.config.Host,
-		client:   s.outboundClient(peerTimeout),
-		resolver: federationResolver,
-		keyCache: activitypub.NewPublicKeyCache(256),
-		blocker:  instanceService,
-		signer:   instanceSigner,
+	// 依存は構築子の必須の引数で渡す (#3827)。instanceService はブロックリストと連合の
+	// ポリシーの判定。
+	s.peerDeps = newPluginPeerDeps(
+		s.config.Host,
+		s.outboundClient(peerTimeout),
+		federationResolver,
+		activitypub.NewPublicKeyCache(256),
+		instanceService,
+		instanceSigner,
 		// **こちらが持っているものだけ覚える。** 相手の nodeinfo は相手が
 		// 書いた値なので、そのまま持つと外から中身を膨らませられる。
-		remote:  pluginPeers,
-		idGen:   idGen,
-		limiter: newPeerRateLimiter(),
+		pluginPeers,
+		idGen,
+		// 受け口のレート制限。全プラグインで 1 つを共有する。
+		newPeerRateLimiter(),
 		// 送信はキューに積む (#2819)。**プロセス内の time.Sleep だと再起動を
 		// またげず、デプロイのたびに送信中のものが消える。**
-		enqueuer: s.queueClient,
-	}
+		s.queueClient,
+	)
 
 	// 外部とファイルの系統 (#3776)。RSS と peer のプラグイン一覧はここより前の登録の
 	// 並びの後で作るので、ここで登録する。5 つとも外から取った値か、ファイルを描いた
@@ -3985,6 +3986,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		notificationPublisher: notificationPublisher,
 		serverStatsPub:        serverStatsPub,
 		reversiPublisher:      reversiPublisher,
+
+		feed: feedH,
+		peer: s.peerDeps,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿の中身を隠す判定 (#3786)。未配線の handler は、匿名の閲覧者に
@@ -4003,8 +4007,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		// reversi のアイコンは部品を持たず、組み立てた Packer をそのまま使うので、
 		// Packer 自身も載せる。
 		{"entityPacker.mediaURL", entityPacker.HasMediaURL(), entityPackerMissingEffect},
-		{"peer.blocker", s.peerDeps.HasBlocker(),
-			"プラグイン間通信でブロックリストと連合ポリシーが効かなくなる"},
 		{"inbox.signatureVerifier", inboxProcessor.HasSignatureVerifier(),
 			"HTTP 署名検証・連合ブロック・actor 一致・replay 判定が同時に飛ぶ"},
 		{"instance.hostBoundNodeinfoFetcher", metadataFetcher.HasHostBoundFetcher(),
@@ -4100,8 +4102,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"アカウント削除でページが user 行の CASCADE で消え、参照していたノートの pageCount が減らない (リモートのノートが掃除で消えなくなる)"},
 		{"deleteAccount.pushSubscriptionCache", deleteAccountProcessor.HasPushSubscriptionCache(),
 			"アカウント削除で sw_subscription を消しても購読キャッシュが残り、削除後の通知が最大 1 時間、消したはずの購読へ push され続ける"},
-		{"feed.ugcVisibility", feedH.HasUGCVisibility(),
-			"ugcVisibilityForVisitor が none でも Web の feed (.rss / .atom / .json) を返す"},
 
 		// ここから #2709 review。上と収載基準が同じなのに落ちていた分
 		// (無条件配線で、nil が空集合として素通しされる = 緩い側へ倒れる)。

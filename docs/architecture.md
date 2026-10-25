@@ -1472,6 +1472,16 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   先頭、#3676)で作っていたので、`entityPacker`の直後へ移した。使う側(連合のprocessor・reversiの
   serviceとhandler)はどれもそれより後にある。serverStatsのpublisherはstreamの節の元の位置で、
   判定を構築子に渡す
+- **4段目は`feed`と`peer`(新しい構築子2つ・2行)。** どちらもsetterではなく構造体リテラルで
+  組んでいたので、構築子`newFeedHandler`(`internal/server/feed.go`)と`newPluginPeerDeps`
+  (`internal/server/plugin_peer.go`)を作り、本番の組み立てだけで使う。置き換えた行は
+  `feed.ugcVisibility`と`peer.blocker`だが、構築子はリテラルに書いていた欄をすべて引数で受ける。
+  テストが差し替えるseam(`feed`の`now`、`peer`の`urlFor`)は受けない。パッケージ内のテストは、
+  要る欄だけを書いたリテラルのまま残した(`pluginPeerDeps`のリテラルは#3827の前で42個あり、多くは
+  1〜3欄しか書かない。`HasBlocker`のテストの2個を消して40個。`internal/server`の`_test.go`に
+  `grep -o 'pluginPeerDeps{'`を当てて数えた)。構築子が引数を捨てないことは`TestNewFeedHandlerKeepsDependencies`と
+  `TestNewPluginPeerDepsKeepsDependencies`が見る。作る位置は元のリテラルの位置のままで、
+  リテラルを構築子の呼び出しに替えただけなので、動きは変わらない
 - **依存を入れる時点が、元のsetterの位置から構築子の位置へ前へ移っただけ。** 元の`i`のsetterは
   `buildHandlers()`の後のAccount endpointsの節と、streamの節(`SetStreamRevoker`。購読の後)にあった。
   購読のhandler(`metaUpdated`・`federationRulesUpdated`・`rolesUpdated`・`antennaUpdated`と、
@@ -1487,6 +1497,10 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `buildCore()`の後(streamの節より前)にあった。serverStatsの判定は、`StartBackground`で始まる
   tick(4.3)と、接続を受けた後の`requestLog`(`Log`)からしか読まない。どちらも構築の後で、
   構築子と元のsetterは同じ節で隣り合っていた
+- **wiring-checkの照合も直した(4段目)。** `TestPluginPeerRateLimiterIsWired`と
+  `TestPluginPeerEnqueuerIsWired`は、構造体リテラルの欄(`limiter: newPeerRateLimiter()`・
+  `enqueuer: s.queueClient`)の照合をやめ、`s.peerDeps = newPluginPeerDeps(...)`の呼び出しを
+  引数まで含めて照合する(引数の順を取り違える形も落とす)
 - **wiring-checkの照合も直した(3段目)。** `TestStreamRevokeIsWired`は`buildStream()`の呼び出しを、
   足した引数まで含めて照合する。`TestServerStatsGateIsWired`は、setterの照合をやめ、
   `stream.NewServerStatsPublisher`に渡す判定の中身を照合する(判定を反転させた関数も同じ型で
@@ -1509,19 +1523,22 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `reversiPublisher`)を`routeParts`に足した。欄の名前は`setupRoutes()`の別名(reversiの欄は
   handlerなので`reversiPublisher`)。許可リストに足したのは`notePublisher.cachedBody`の1つで、
   依存ではなく状態(直前にpackした投稿のJSON)。最初に投稿を流すとき(`packNote`)に作るので、
-  組み立てた直後はnil
+  組み立てた直後はnil。4段目で`feed`と`peer`を`routeParts`に足し、許可リストに`feed.now`と
+  `peer.urlFor`を足した。どちらもテストだけが入れるseamで、構築子は入れず、nilのとき既定
+  (`time.Now`・httpsのURL)を使う
 
-| | #3827の前(`19f512bf20`) | 2段目の後 | 3段目の後 |
-|---|---|---|---|
-| `criticalWiringCount` | 72 | 61 | 53 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 342 | 331 | 331 |
-| そのsetterを呼ぶhandler(受け手) | 40 | 39 | 39 |
-| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 647 | 636 | 628 |
-| その受け手 | 110 | 109 | 107 |
+| | #3827の前(`19f512bf20`) | 2段目の後 | 3段目の後 | 4段目の後 |
+|---|---|---|---|---|
+| `criticalWiringCount` | 72 | 61 | 53 | 51 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 342 | 331 | 331 | 331 |
+| そのsetterを呼ぶhandler(受け手) | 40 | 39 | 39 | 39 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 647 | 636 | 628 | 628 |
+| その受け手 | 110 | 109 | 107 | 107 |
 
 数え方: 上の表と同じ。1段目は呼び出しを動かしただけで、どの数も変わらない。2段目で減った受け手は、
 置き換えたsetterしか呼んでいなかった`oauthHandler`。3段目で減った受け手は`reversiPublisher`と
-`serverStatsPub`。
+`serverStatsPub`。4段目はsetterを置き換えていない(構造体リテラルを構築子に替えた)ので、setterの
+行は変わらない。
 
 #### /api のルートの登録 (#3697)
 

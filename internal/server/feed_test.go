@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -323,9 +324,46 @@ func TestFeed_UGCVisibilityForVisitor(t *testing.T) {
 	}
 }
 
-// HasUGCVisibility backs the feed.ugcVisibility startup wiring check: an
-// unwired lookup silently falls back to `local`, so `none` would not 404.
-func TestFeedHandler_HasUGCVisibility(t *testing.T) {
-	assert.False(t, (&feedHandler{}).HasUGCVisibility(), "unwired lookup must be reported")
-	assert.True(t, (&feedHandler{ugcVisibility: func() string { return "none" }}).HasUGCVisibility())
+// newFeedHandler は受け取った依存を handler に持たせる (#3827)。ugcVisibility を
+// 構築子の必須の引数にしたので、起動時の検査 (criticalWiring) は入れ忘れを見なく
+// なった。構築子が引数を捨てても build は通るので、ここで固定する。func の欄は
+// 呼んで、渡した関数が呼ばれることで確かめる。
+func TestNewFeedHandlerKeepsDependencies(t *testing.T) {
+	users := &stubFeedUsers{}
+	notes := &stubFeedNotes{}
+	var called []string
+	h := newFeedHandler("https://local.example", "local.example", users, notes,
+		func(string) (time.Time, error) { called = append(called, "parseTime"); return time.Time{}, nil },
+		func() string { called = append(called, "ugcVisibility"); return "none" },
+		func(string) *model.UserProfile { called = append(called, "profiles"); return nil },
+		func(*model.User) string { called = append(called, "avatarURL"); return "" },
+		func(string, string) string { called = append(called, "toHTML"); return "" })
+	assert.Equal(t, "https://local.example", h.baseURL)
+	assert.Equal(t, "local.example", h.host)
+	assert.Same(t, users, h.users)
+	assert.Same(t, notes, h.notes)
+	assert.Nil(t, h.now, "now はテストの seam。構築子は入れない")
+	for _, f := range []func(){
+		func() { _, _ = h.parseTime("x") },
+		func() { _ = h.ugcVisibility() },
+		func() { _ = h.profiles("u") },
+		func() { _ = h.avatarURL(&model.User{}) },
+		func() { _ = h.toHTML("", "") },
+	} {
+		f()
+	}
+	assert.Equal(t, []string{"parseTime", "ugcVisibility", "profiles", "avatarURL", "toHTML"}, called)
+}
+
+// 本番の組み立てが newFeedHandler へ baseURL と host を取り違えずに渡す (#3827)。
+// どちらも string の位置引数なので、入れ替えても build は通り、nil の検査
+// (TestBuiltHandlersHaveNoNilDependencies) と上の構築子のテストも通ってしまう。
+func TestBuiltFeedHandlerGetsBaseURLAndHost(t *testing.T) {
+	srv := newServerWithConfig(t, func(cfg *config.Config) {
+		cfg.URL = "https://feed.example"
+	})
+	feed := srv.builtRouteParts.feed
+	require.NotNil(t, feed)
+	assert.Equal(t, "https://feed.example", feed.baseURL)
+	assert.Equal(t, "feed.example", feed.host)
 }

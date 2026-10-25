@@ -32,12 +32,12 @@ const serverGo = "internal/server/server.go"
 // (実測)。パーサはコメントをそもそも構文木に載せないので、囲み方に依存しない。
 //
 // **呼び出しだけでは足りない。** 守りたい配線には struct literal のフィールド
-// (`limiter: newPeerRateLimiter()`) と代入 (`pluginQueues := ...`) があり、
+// (`streamManager: streamManager`) と代入 (`pluginQueues := ...`) があり、
 // どちらも CallExpr ではない。
 //
 // 出力は**常に 1 行**。ソースが複数行に折られていても畳まれるので、テスト側は
 // 見たままの 1 行を書けばよい。ただし **KeyValueExpr は末尾カンマを含まない**
-// (`limiter: newPeerRateLimiter()`)、**AssignStmt は文全体**を書く。
+// (`streamManager: streamManager`)、**AssignStmt は文全体**を書く。
 //
 // 正規化は空白の連続を 1 つに畳むだけ。**全部消さない** — interpreted string
 // literal の中身まで詰めると `f("a b")` と `f("ab")` が同じものになる

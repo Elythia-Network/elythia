@@ -65,4 +65,8 @@ type routeParts struct {
 	notificationPublisher *stream.NotificationPublisher
 	serverStatsPub        *stream.ServerStatsPublisher
 	reversiPublisher      *stream.ReversiGamePublisher
+
+	// 構造体リテラルから構築子に替えた部品 (#3827 の 4 段目)。
+	feed *feedHandler
+	peer *pluginPeerDeps
 }
