@@ -33,7 +33,7 @@ func newProhibitedWordsResolver(t *testing.T, words []string) (*federation.Resol
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{body: []byte(sampleActor)}, idGen)
 	if words != nil {
 		r.SetProhibitedWordsProvider(stubProhibitedWords{words: words})
@@ -151,7 +151,7 @@ func newProhibitedWordsUpdateResolver(t *testing.T, words []string) (*federation
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", URI: &uri, UserID: "alice-id", UserHost: &host, Text: &original}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"),
 		&stubFetcher{}, idGen)
 	r.SetEmojiRepo(emojiRepo)
 	r.SetProhibitedWordsProvider(stubProhibitedWords{words: words})

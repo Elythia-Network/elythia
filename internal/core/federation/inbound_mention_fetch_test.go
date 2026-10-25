@@ -106,7 +106,7 @@ func newMentionFetchResolver(t *testing.T) (*corefederation.Resolver, *testutil.
 	f := newRouteFetcher()
 	f.bodies[mentionAuthorURI] = actorDoc(mentionAuthorURI, "alice")
 	idGen, _ := id.NewGenerator("aidx")
-	r := corefederation.NewResolver(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen)
+	r := corefederation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen)
 	return r, repo, f
 }
 

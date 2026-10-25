@@ -36,7 +36,7 @@ func TestUpsertAttachments_URLForm(t *testing.T) {
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	newResolver := func(drive *testutil.MockDriveFileRepository) *federation.Resolver {
-		r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+		r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 			activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 		r.SetDriveFileRepo(drive)
 		return r

@@ -370,7 +370,7 @@ func TestUpdateRemoteNote_NewAccountRuleIsMeasuredAtPostTime(t *testing.T) {
 	text := "hi"
 	noteRepo.Notes[noteID] = &model.Note{ID: noteID, URI: &uri, UserID: authorID, UserHost: &host, Text: &text,
 		CW: strPtr("new account"), Visibility: model.NoteVisibilityHome}
-	r := federation.NewResolver(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{}, idGen)
 
 	svc, _ := newRules(t, &model.FederationRule{ID: "new", NewWithinHours: ptrInt(24), CW: strPtr("new account"), Unlist: true})
 	svc.SetClockForTest(func() time.Time { return t0.Add(48 * time.Hour) })

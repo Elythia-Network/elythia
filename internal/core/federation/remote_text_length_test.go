@@ -61,7 +61,7 @@ func TestIngestNote_ClipsRemoteTextToUpstreamLength(t *testing.T) {
 			repo := testutil.NewMockUserRepository()
 			noteRepo := testutil.NewMockNoteRepository()
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen)
 			note, err := r.IngestNote(remoteNoteJSON(t, "https://remote.example/notes/len-"+string(rune('a'+i)), tc.fields))
 			require.NoError(t, err)
 			require.NotNil(t, note.Text)
@@ -101,7 +101,7 @@ func TestIngestNote_HashtagAcrossClipIsNotTruncated(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// 8187 + " #foo" で 8192 単位。切り口は `#foo` の直後。
 	text := strings.Repeat("a", 8187) + " #foobar"
 	note, err := r.IngestNote(remoteNoteJSON(t, "https://remote.example/notes/tag-cut", map[string]any{"_misskey_content": text}))

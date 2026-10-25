@@ -35,7 +35,7 @@ func plantNumberedLocalUsers(repo *testutil.MockUserRepository, n int) {
 func TestExtractLocalUserID_LastSegment(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	r := federation.NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 
 	cases := []struct {
 		uri  string
@@ -83,7 +83,7 @@ func TestIngestNote_LocalFollowersCollectionIsNotTheUser(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/to-bob-followers",
@@ -176,7 +176,7 @@ func TestResolveMentionedUserIDs_LocalLookupDedupsIDs(t *testing.T) {
 	repo := &countingUserRepo{MockUserRepository: mock}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{}, idGen)
 
 	ids, err := r.ResolveMentionedUserIDs([]string{
 		"https://example.com/users/bob",
@@ -202,7 +202,7 @@ func TestResolveMentionedUserIDs_LocalExistenceIsOneQuery(t *testing.T) {
 	repo := &countingUserRepo{MockUserRepository: mock}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{}, idGen)
 
 	hrefs := []string{"https://example.com/users/missing"}
 	for i := 0; i < 5; i++ {
@@ -230,9 +230,9 @@ func TestProcess_AcceptFollowActorReadLikeGetUserFromApID(t *testing.T) {
 	reqRepo := testutil.NewMockFollowRequestRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(aliceActor)}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, reqRepo, idGen, nil, nil, nil, nil)
-	p := federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo)
+	p := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 
 	aliceURI := "https://remote.example/users/alice"
 	host := "remote.example"

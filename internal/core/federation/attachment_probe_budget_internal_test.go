@@ -60,7 +60,7 @@ func TestUpsertAttachments_BoundsTotalProbeTime(t *testing.T) {
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), nopFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 	tr := &hangingTransport{}
@@ -105,7 +105,7 @@ func TestUpsertAttachments_ZeroProbeBudgetFallsBackToDefault(t *testing.T) {
 	drive := testutil.NewMockDriveFileRepository()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), nopFetcher{}, idGen)
 	r.SetDriveFileRepo(drive)
 	r.SetAttachmentProbeClient(srv.Client())

@@ -67,7 +67,7 @@ func TestResolveActor_NoteAuthorWaitIsTrackedOnTheGraph(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, f, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, f, idGen)
 	r.SetPinningRepo(testutil.NewMockUserNotePiningRepository(), idGen)
 
 	var once sync.Once

@@ -76,7 +76,7 @@ func TestIngestNote_UnknownMentionFetchOnlyAtEntry(t *testing.T) {
 				carol:  testActorDoc(carol, "carol"),
 			}, calls: map[string]int{}}
 			idGen, _ := id.NewGenerator("aidx")
-			r := NewResolver(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen)
+			r := NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen)
 			if tc.ephemeral {
 				r.SetEphemeralSink(ledgerSink{byURI: map[string]*model.Note{}})
 			}
@@ -102,7 +102,7 @@ func TestIngestNote_UnknownMentionFetchOnlyAtEntry(t *testing.T) {
 // `/users/<id>` like upstream ApDbResolverService.parseUri.
 func TestResolver_LocalUserIDFromURI(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
-	r := NewResolver(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), &uriCountingFetcher{}, idGen)
+	r := NewResolverNilDeps(testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), &uriCountingFetcher{}, idGen)
 	for _, tc := range []struct {
 		uri       string
 		wantID    string
@@ -141,7 +141,7 @@ func TestResolver_RefreshActor(t *testing.T) {
 			f.bodies[bob] = body
 		}
 		idGen, _ := id.NewGenerator("aidx")
-		return NewResolver(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen), repo, f
+		return NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), activitypub.NewURLBuilder("https://example.com"), f, idGen), repo, f
 	}
 	t.Run("updates the stored row", func(t *testing.T) {
 		doc := map[string]any{}

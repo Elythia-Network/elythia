@@ -105,8 +105,8 @@ func TestProcess_QuoteRequestActorUnresolvable(t *testing.T) {
 		notes := testutil.NewMockNoteRepository()
 		gen, _ := id.NewGenerator("aidx")
 		urls := activitypub.NewURLBuilder("https://example.com")
-		resolver := federation.NewResolver(users, notes, urls, &stubFetcher{err: tc.err}, gen)
-		p := federation.NewProcessor(resolver, nil, nil, nil, users, notes)
+		resolver := federation.NewResolverNilDeps(users, notes, urls, &stubFetcher{err: tc.err}, gen)
+		p := federation.NewProcessorNilDeps(resolver, nil, nil, nil, users, notes)
 		resp := &qdResponder{}
 		p.SetQuoteRequestHandler(federation.NewQuoteRequestHandler(federation.QuoteRequestDeps{
 			Notes: notes, Users: users, Blocks: qdAllow{}, Follows: qdAllow{}, Approvals: &qdStore{},

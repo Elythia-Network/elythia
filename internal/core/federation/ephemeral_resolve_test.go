@@ -97,7 +97,7 @@ func ephResolverDocs(t *testing.T, docs map[string]string) (*federation.Resolver
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, noteRepo, urls, &docFetcher{docs: docs}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &docFetcher{docs: docs}, idGen)
 	sink := newFakeSink()
 	r.SetEphemeralSink(sink)
 	return r, sink, noteRepo, userRepo
@@ -112,7 +112,7 @@ func ephResolver(t *testing.T, body string) (*federation.Resolver, *fakeSink, *t
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	sink := newFakeSink()
 	r.SetEphemeralSink(sink)
 	return r, sink, noteRepo, userRepo
@@ -176,7 +176,7 @@ func TestResolveNoteEphemeral_NoSinkFallsBackToDB(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(userRepo, noteRepo, urls, &stubFetcher{body: []byte(ephActorDoc)}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &stubFetcher{body: []byte(ephActorDoc)}, idGen)
 
 	uri := "https://remote.example/notes/1"
 	noteRepo.Notes["existing"] = &model.Note{ID: "existing", UserID: "u1", URI: &uri}
@@ -527,7 +527,7 @@ func relayProcessor(t *testing.T, docs map[string]string, relayURI string) (
 	r, sink, noteRepo, userRepo := ephResolverDocs(t, docs)
 	followingSvc := corefollowing.NewService(userRepo, testutil.NewMockFollowingRepository(),
 		testutil.NewMockFollowRequestRepository(), mustIDGen(t), nil, nil, nil, nil)
-	p := federation.NewProcessor(r, followingSvc, nil, nil, userRepo, noteRepo)
+	p := federation.NewProcessorNilDeps(r, followingSvc, nil, nil, userRepo, noteRepo)
 	p.SetRelayActorChecker(&stubRelayChecker{relays: map[string]bool{relayURI: true}})
 	return p, sink, noteRepo, userRepo
 }
@@ -709,7 +709,7 @@ func TestEphemeralEntryPoints_NoSink(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(userRepo, noteRepo, urls, &docFetcher{docs: map[string]string{actorURI: ephActorDoc}}, idGen)
+	r := federation.NewResolverNilDeps(userRepo, noteRepo, urls, &docFetcher{docs: map[string]string{actorURI: ephActorDoc}}, idGen)
 
 	u, err := r.ResolveActorEphemeral(actorURI)
 	require.NoError(t, err)

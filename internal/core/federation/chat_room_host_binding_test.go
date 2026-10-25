@@ -224,7 +224,7 @@ func newProcessorFetchErr(t *testing.T, err error) (*federation.Processor, *test
 	followingRepo := testutil.NewMockFollowingRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	resolver := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: err}, idGen)
+	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: err}, idGen)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
-	return federation.NewProcessor(resolver, followingSvc, nil, nil, repo, noteRepo), repo, followingRepo, noteRepo
+	return federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo), repo, followingRepo, noteRepo
 }

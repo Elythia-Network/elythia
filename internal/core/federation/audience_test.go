@@ -33,7 +33,7 @@ func TestIngestNote_FollowersMatchedAgainstStoredFollowersURI(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(customFollowersActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(customFollowersActor)}, idGen)
 
 	actor, err := r.ResolveActor("https://remote.example/author/carol")
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestRefreshActor_UpdatesFollowersURI(t *testing.T) {
 			}`
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			require.NotNil(t, user.FollowersURI)

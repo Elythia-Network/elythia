@@ -17,7 +17,7 @@ func newEmojiResolver(t *testing.T) (*federation.Resolver, *testutil.MockEmojiRe
 	t.Helper()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(
+	r := federation.NewResolverNilDeps(
 		testutil.NewMockUserRepository(), testutil.NewMockNoteRepository(), urls, &stubFetcher{}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)

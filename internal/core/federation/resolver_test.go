@@ -86,7 +86,7 @@ func newResolver(t *testing.T, body string, err error) (*federation.Resolver, *t
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	return federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body), err: err}, idGen), repo
+	return federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body), err: err}, idGen), repo
 }
 
 func TestResolveActor_NewUser(t *testing.T) {
@@ -122,7 +122,7 @@ func newResolverWithFetcher(t *testing.T, f federation.HTTPFetcher) (*federation
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	return federation.NewResolver(repo, noteRepo, urls, f, idGen), repo
+	return federation.NewResolverNilDeps(repo, noteRepo, urls, f, idGen), repo
 }
 
 // #1820: evil.example が victim(remote.example) になりすました actor を返しても、
@@ -571,7 +571,7 @@ func TestResolveNote_RejectsMissingContext(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	_, err := r.ResolveNote("https://remote.example/notes/n1")
 	require.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -584,7 +584,7 @@ func TestIngestNote_NoContextStillIngested(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	// attributedTo を先に解決できるよう actor を fetch 可能にしておく。
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{
 		"id": "https://remote.example/notes/inlined",
 		"type": "Note",
@@ -613,7 +613,7 @@ func TestResolveNote_RejectsFragmentURL(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleRemoteNote)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleRemoteNote)}, idGen)
 	_, err := r.ResolveNote("https://remote.example/notes/n1#frag")
 	require.ErrorIs(t, err, federation.ErrResolveFragment)
 }
@@ -657,7 +657,7 @@ func TestResolveNote_RecursionLimit(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, f, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, f, idGen)
 
 	note, err := r.ResolveNote("https://remote.example/notes/0")
 	require.NoError(t, err)
@@ -731,7 +731,7 @@ func TestResolveNote_StrictRejectsCrossHostRedirect(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, f, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, f, idGen)
 	_, err := r.ResolveNote("https://attacker.example/notes/x")
 	require.ErrorIs(t, err, federation.ErrObjectHostMismatch)
 	assert.Empty(t, noteRepo.Notes)
@@ -751,7 +751,7 @@ func TestResolveNoteAllowCrossHost_AllowsCrossHostRedirect(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, f, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, f, idGen)
 	note, err := r.ResolveNoteAllowCrossHost("https://attacker.example/notes/x")
 	require.NoError(t, err)
 	require.NotNil(t, note)
@@ -772,7 +772,7 @@ func TestResolveActor_RepoCreateError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	_, err := r.ResolveActor("https://remote.example/users/alice")
 	assert.Error(t, err)
 }
@@ -826,7 +826,7 @@ func TestResolveNote_LocalAlreadyStored(t *testing.T) {
 	noteRepo.Notes["nlocal"] = &model.Note{ID: "nlocal", UserID: "u1"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	got, err := r.ResolveNote("https://example.com/notes/nlocal")
 	require.NoError(t, err)
@@ -838,7 +838,7 @@ func TestResolveNote_LocalUnknown(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	_, err := r.ResolveNote("https://example.com/notes/missing")
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
@@ -851,7 +851,7 @@ func TestResolveNote_RemoteCached(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", URI: &uri}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	got, err := r.ResolveNote(uri)
 	require.NoError(t, err)
@@ -865,7 +865,7 @@ func TestResolveNote_RemoteFetchAndIngest(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	// 最初の呼び出しで Note JSON、続いて attributedTo を解決するための actor JSON を返す
 	fetcher := &scriptedFetcher{bodies: [][]byte{[]byte(sampleRemoteNote), []byte(sampleActor)}}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 
 	got, err := r.ResolveNote("https://remote.example/notes/n1")
 	require.NoError(t, err)
@@ -884,7 +884,7 @@ func TestResolveNote_FetchError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
 	_, err := r.ResolveNote("https://remote.example/notes/x")
 	assert.Error(t, err)
 }
@@ -893,7 +893,7 @@ func TestResolveNote_NoNoteRepo(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, nil, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, nil, urls, &stubFetcher{}, idGen)
 	_, err := r.ResolveNote("https://remote.example/notes/x")
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -903,7 +903,7 @@ func TestIngestNote_BadJSON(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	_, err := r.IngestNote([]byte(`{not json`))
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -913,7 +913,7 @@ func TestIngestNote_MissingFields(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	_, err := r.IngestNote([]byte(`{"id":"x"}`))
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -922,7 +922,7 @@ func TestIngestNote_NoNoteRepo(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, nil, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, nil, urls, &stubFetcher{}, idGen)
 	_, err := r.IngestNote([]byte(sampleRemoteNote))
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -934,7 +934,7 @@ func TestIngestNote_DedupOnExisting(t *testing.T) {
 	noteRepo.Notes["existing"] = &model.Note{ID: "existing", URI: &uri}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	got, err := r.IngestNote([]byte(sampleRemoteNote))
 	require.NoError(t, err)
 	assert.Equal(t, "existing", got.ID)
@@ -948,7 +948,7 @@ func TestIngestNoteWithCreated_FreshIngest(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	got, created, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -962,7 +962,7 @@ func TestIngestNoteWithCreated_DedupReturnsFalse(t *testing.T) {
 	noteRepo.Notes["existing"] = &model.Note{ID: "existing", URI: &uri}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	got, created, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -977,7 +977,7 @@ func TestIngestNoteWithCreated_AttributionMismatchRejected(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// note の著者は remote.example/users/alice だが、配送 actor は別人。
 	_, _, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "https://other.example/users/mallory")
 	require.ErrorIs(t, err, federation.ErrNoteAttributionMismatch)
@@ -991,7 +991,7 @@ func TestIngestNoteWithCreated_CrossHostIDRejected(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// id は a.example、attributedTo は b.example。
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", "id":"https://a.example/notes/x","type":"Note","attributedTo":"https://b.example/users/y","content":"forge"}`
 	_, _, err := r.IngestNoteWithCreated([]byte(body), "")
@@ -1005,7 +1005,7 @@ func TestIngestNoteWithCreated_LegitAttributionAccepted(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	got, created, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "https://remote.example/users/alice")
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1017,7 +1017,7 @@ func TestIngestNote_ResolveActorError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: errors.New("actor down")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: errors.New("actor down")}, idGen)
 	_, err := r.IngestNote([]byte(sampleRemoteNote))
 	assert.Error(t, err)
 }
@@ -1037,7 +1037,7 @@ func TestIngestNote_HashtagsFromTagArray(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h1",
@@ -1063,7 +1063,7 @@ func TestIngestNote_HashtagsFromTextFallback(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h2",
@@ -1083,7 +1083,7 @@ func TestIngestNote_HashtagsMergeAndDedup(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h3",
@@ -1110,7 +1110,7 @@ func TestIngestNote_HashtagsFromCW(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h-cw",
@@ -1134,7 +1134,7 @@ func TestIngestNote_HashtagWithoutPrefixDefensive(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h-noprefix",
@@ -1157,7 +1157,7 @@ func TestIngestNote_NoHashtags(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/h4",
@@ -1176,7 +1176,7 @@ func TestIngestNote_NoteCreateError(t *testing.T) {
 	noteRepo := &failingNoteCreateRepo{MockNoteRepository: testutil.NewMockNoteRepository()}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	_, err := r.IngestNote([]byte(sampleRemoteNote))
 	assert.Error(t, err)
 }
@@ -1214,7 +1214,7 @@ func TestIngestNote_APVoteRoutedToPollService(t *testing.T) {
 	}))
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetPollRepo(pollRepo)
 	voter := &stubPollVoter{}
 	r.SetPollVoter(voter)
@@ -1248,7 +1248,7 @@ func TestIngestNote_APVoteUnknownChoiceFallsThrough(t *testing.T) {
 	}))
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetPollRepo(pollRepo)
 	voter := &stubPollVoter{}
 	r.SetPollVoter(voter)
@@ -1281,7 +1281,7 @@ func TestIngestNote_NormalReplyToPollNotConfusedAsVote(t *testing.T) {
 	}))
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetPollRepo(pollRepo)
 	voter := &stubPollVoter{}
 	r.SetPollVoter(voter)
@@ -1307,7 +1307,7 @@ func TestIngestNote_ReplyToLocal(t *testing.T) {
 	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n2",
 		"type": "Note",
@@ -1329,7 +1329,7 @@ func TestIngestNote_ReplyToRemote(t *testing.T) {
 	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent", URI: &parentURI}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n3",
 		"type": "Note",
@@ -1349,7 +1349,7 @@ func TestIngestNote_SensitiveWithoutSummary(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n4",
 		"type": "Note",
@@ -1386,7 +1386,7 @@ func TestIngestNote_PublicVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-public", []string{"https://www.w3.org/ns/activitystreams#Public"}, []string{"https://remote.example/users/alice/followers"})
 	got, err := r.IngestNote(body)
@@ -1400,7 +1400,7 @@ func TestIngestNote_HomeVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-home", []string{"https://remote.example/users/alice/followers"}, []string{"https://www.w3.org/ns/activitystreams#Public"})
 	got, err := r.IngestNote(body)
@@ -1417,7 +1417,7 @@ func TestIngestNote_CCOnlyPublicVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-cc-public", []string{}, []string{"https://www.w3.org/ns/activitystreams#Public"})
 	got, err := r.IngestNote(body)
@@ -1431,7 +1431,7 @@ func TestIngestNote_FollowersVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-followers", []string{"https://remote.example/users/alice/followers"}, []string{})
 	got, err := r.IngestNote(body)
@@ -1445,7 +1445,7 @@ func TestIngestNote_DirectVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-direct", []string{"https://remote.example/users/bob"}, []string{})
 	got, err := r.IngestNote(body)
@@ -1459,7 +1459,7 @@ func TestIngestNote_EmptyAudienceVisibility(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := makeNoteJSON("vis-empty", []string{}, []string{})
 	got, err := r.IngestNote(body)
@@ -1475,7 +1475,7 @@ func TestIngestNote_TextFallback_SourceContent(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/source1",
@@ -1497,7 +1497,7 @@ func TestIngestNote_TextFallback_MisskeyContent(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/mk1",
@@ -1519,7 +1519,7 @@ func TestIngestNote_TextFallback_HTMLConversion(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/html1",
@@ -1540,7 +1540,7 @@ func TestIngestNote_TextFallback_Priority(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/prio1",
@@ -1563,7 +1563,7 @@ func TestIngestNote_TextFallback_SourceWrongMediaType(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/wrongmt1",
@@ -1601,7 +1601,7 @@ func TestUpdateRemoteNote_HappyPath(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	got, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "")
 	require.NoError(t, err)
@@ -1627,7 +1627,7 @@ func TestUpdateRemoteNote_ActorMismatchRejected(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	// 別 actor (mallory) が alice の note を Update しようとする → 拒否 (本文不変)。
 	got, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "https://evil.example/users/mallory")
@@ -1651,7 +1651,7 @@ func TestUpdateRemoteNote_ActorMatchProceeds(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	got, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), authorURI)
 	require.NoError(t, err)
@@ -1673,7 +1673,7 @@ func TestUpdateRemoteNote_RecalculatesHashtags(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n1",
@@ -1704,7 +1704,7 @@ func TestUpdateRemoteNote_ClearsTagsToEmptyNotNull(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n1",
@@ -1723,7 +1723,7 @@ func TestUpdateRemoteNote_NoNoteRepo(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, nil, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, nil, urls, &stubFetcher{}, idGen)
 	_, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "")
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -1733,7 +1733,7 @@ func TestUpdateRemoteNote_BadJSON(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	_, err := r.UpdateRemoteNote([]byte(`{not json`), "")
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -1743,7 +1743,7 @@ func TestUpdateRemoteNote_MissingID(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	_, err := r.UpdateRemoteNote([]byte(`{"type":"Note"}`), "")
 	assert.ErrorIs(t, err, federation.ErrInvalidNote)
 }
@@ -1753,7 +1753,7 @@ func TestUpdateRemoteNote_NotFound(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	got, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "")
 	require.NoError(t, err)
 	assert.Nil(t, got)
@@ -1770,7 +1770,7 @@ func TestUpdateRemoteNote_LocalNoteSkipped(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	got, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "")
 	require.NoError(t, err)
@@ -1791,7 +1791,7 @@ func TestUpdateRemoteNote_EmptyContentNoOp(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n1",
@@ -1815,7 +1815,7 @@ func TestUpdateRemoteNote_SensitiveWithoutSummary(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n1",
@@ -1850,7 +1850,7 @@ func TestUpdateRemoteNote_UpdateFieldsError(t *testing.T) {
 	noteRepo := &failingNoteUpdateRepo{MockNoteRepository: mock}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	_, err := r.UpdateRemoteNote([]byte(remoteNoteUpdateBody), "")
 	assert.Error(t, err)
 }
@@ -1881,7 +1881,7 @@ func TestResolveActor_TTLRefresh(t *testing.T) {
 		"endpoints": {"sharedInbox": "https://remote.example/inbox-v2"},
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	require.NotNil(t, user.Name)
@@ -1925,7 +1925,7 @@ func TestResolveActor_TTLRefreshUpdatesDescription(t *testing.T) {
 		"summary": "new bio",
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	require.NotNil(t, repo.Profiles["existing"].Description)
@@ -1961,7 +1961,7 @@ func TestResolveActor_ProfileExtrasNoPropertyValueAttachments(t *testing.T) {
 		],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -1993,7 +1993,7 @@ func TestResolveActor_ProfileExtrasRequiresStringNameValue(t *testing.T) {
 		],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	var fields []struct{ Name, Value string }
@@ -2018,7 +2018,7 @@ func TestResolveActor_DescriptionStripsNULFromMisskeySummary(t *testing.T) {
 		"_misskey_summary": "bi\u0000o",
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	got := repo.Profiles[user.ID].Description
@@ -2047,7 +2047,7 @@ func TestResolveActor_ProfileExtrasStripsNUL(t *testing.T) {
 		"attachment": [{"type":"PropertyValue","name":"We\u0000b","value":"exa\u0000mple.org"}],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2088,7 +2088,7 @@ func TestResolveActor_ProfileExtrasAcceptsArrayType(t *testing.T) {
 		],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	var fields []struct{ Name, Value string }
@@ -2124,7 +2124,7 @@ func TestResolveActor_TTLRefreshClearsRemovedProfileExtras(t *testing.T) {
 		"inbox": "https://mstdn.example/users/karl/inbox",
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2155,7 +2155,7 @@ func TestRemoteTagAndAttachment_ArrayTypeElements(t *testing.T) {
 		"attachment": [{"type": ["PropertyValue"], "name": "Pronoun", "value": "they/them"}],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2218,7 +2218,7 @@ func TestResolveActor_SingleObjectTagAndLinkURL(t *testing.T) {
 		"url": {"type":"Link","href":"https://mstdn.example/@tess"},
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err, "actor 解決が通ること")
 	require.NotNil(t, user.Name)
@@ -2241,7 +2241,7 @@ func TestResolveActor_SingleObjectAttachment(t *testing.T) {
 		"attachment": {"type":"PropertyValue","name":"Web","value":"example.org"},
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err, "actor 解決が通ること")
 	require.NotNil(t, user)
@@ -2271,7 +2271,7 @@ func TestResolveActor_NonStringVcard(t *testing.T) {
 		"_misskey_summary": {"a": 1},
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err, "actor 解決が通ること")
 
@@ -2315,7 +2315,7 @@ func TestResolveActor_TruncatesDisplayName(t *testing.T) {
 				"name": "` + tc.in + `",
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			if tc.wantNil {
@@ -2365,7 +2365,7 @@ func TestResolveActor_RejectsUnusableUsername(t *testing.T) {
 				"inbox": "https://mstdn.example/users/sam/inbox",
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			_, err := r.ResolveActor(uri)
 			if tc.ok {
 				assert.NoError(t, err)
@@ -2402,7 +2402,7 @@ func TestResolveActor_ImportsProfileExtras(t *testing.T) {
 		],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2439,7 +2439,7 @@ func TestResolveActor_ProfileExtrasAbsent(t *testing.T) {
 		"inbox": "https://mstdn.example/users/dave/inbox",
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2483,7 +2483,7 @@ func TestResolveActor_ProfileExtrasRejectsBadBirthday(t *testing.T) {
 				"vcard:bday": "` + tc.bday + `",
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			got := repo.Profiles[user.ID].Birthday
@@ -2525,7 +2525,7 @@ func TestResolveActor_ProfileExtrasTrimsLocation(t *testing.T) {
 				"vcard:Address": "` + tc.in + `",
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			got := repo.Profiles[user.ID].Location
@@ -2557,7 +2557,7 @@ func TestResolveActor_ProfileExtrasTruncatesLocation(t *testing.T) {
 		"vcard:Address": "` + long + `",
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	got := repo.Profiles[user.ID].Location
@@ -2586,7 +2586,7 @@ func TestResolveActor_ProfileExtrasCapsFieldCount(t *testing.T) {
 		"attachment": [` + strings.Join(items, ",") + `],
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	var fields []struct{ Name, Value string }
@@ -2621,7 +2621,7 @@ func TestResolveActor_TTLRefreshBackfillsProfileExtras(t *testing.T) {
 		"attachment": [{"type":"PropertyValue","name":"Site","value":"example.org"}],
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 
@@ -2669,7 +2669,7 @@ func TestResolveActor_TTLRefreshConvertsHTMLDescription(t *testing.T) {
 		"summary": "<p>fresh html bio from Mastodon</p>",
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	got := repo.Profiles["existing-bob"].Description
@@ -2705,7 +2705,7 @@ func TestResolveActor_TTLRefreshBackfillsProfile(t *testing.T) {
 		"summary": "back-filled bio",
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	_, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	profile, err := repo.FindProfileByUserID("existing")
@@ -2741,7 +2741,7 @@ func TestResolveActor_TTLRefreshUpdatesIconBanner(t *testing.T) {
 		"image": {"type": "Image", "url": "https://remote.example/new-banner.png"},
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	require.NotNil(t, user.AvatarURL)
@@ -2796,7 +2796,7 @@ func refreshBannerActor(t *testing.T, image string) (*recordingUserRepo, *model.
 		"inbox": "https://remote.example/users/alice/inbox",` + image + `
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	return repo, user
@@ -2857,7 +2857,7 @@ func TestResolveActor_TTLRefreshPreservesIconWhenOmitted(t *testing.T) {
 		"inbox": "https://remote.example/users/alice/inbox",
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	require.NotNil(t, user.AvatarURL)
@@ -2888,7 +2888,7 @@ func TestResolveActor_TTLRefreshUpdatesIsLocked(t *testing.T) {
 		"manuallyApprovesFollowers": true,
 		"publicKey": {"publicKeyPem": "REFRESHED"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	assert.True(t, user.IsLocked, "IsLocked should flip to true on refresh when remote opts in")
@@ -2933,7 +2933,7 @@ func TestResolveActor_TTLRefreshNormalizesName(t *testing.T) {
 				"name": "` + tc.in + `",
 				"publicKey": {"publicKeyPem": "REFRESHED"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(updated)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			require.NotNil(t, user.Name)
@@ -2960,7 +2960,7 @@ func TestResolveActor_NoRefreshWhenFresh(t *testing.T) {
 		LastFetchedAt: &now,
 	}
 	// fetcher が何を返しても name は更新されないはず
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// 公開鍵キャッシュは空 → refreshPublicKey 経路を通る
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
@@ -2989,7 +2989,7 @@ func TestResolveActor_TTLRefreshFetchError(t *testing.T) {
 		LastFetchedAt: &old,
 	}
 	// fetcher エラーでも refresh はベストエフォートなので既存 user を返す
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	assert.Equal(t, "Original", *user.Name)
@@ -3000,7 +3000,7 @@ func TestPublicKeyForActor_DBFallback(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	pkRepo := testutil.NewMockUserPublickeyRepository()
 	r.SetPublickeyRepo(pkRepo)
 
@@ -3029,7 +3029,7 @@ func TestPublicKeyForActor_DBFallback_NilRepo(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// publickeyRepo未設定
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
@@ -3048,7 +3048,7 @@ func TestPublicKeyForActor_TTLExpiry(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	// 解決して publicKey をキャッシュする (現在時刻で fetched 扱い)
 	user, err := r.ResolveActor("https://remote.example/users/alice")
@@ -3068,7 +3068,7 @@ func TestResolver_SetClockNil(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// nil を渡しても panic / 変更なし
 	r.SetClock(nil)
 	// 直後に呼んでもデフォルト clock のまま動く
@@ -3091,7 +3091,7 @@ func TestResolveActor_NotifiesInstanceTrackerOnCreate(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	tracker := &stubInstanceTracker{}
 	r.SetInstanceTracker(tracker)
 
@@ -3116,7 +3116,7 @@ func TestResolveActor_NotifiesInstanceTrackerOnRefresh(t *testing.T) {
 		Host:          &host,
 		LastFetchedAt: &old,
 	}
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	tracker := &stubInstanceTracker{}
 	r.SetInstanceTracker(tracker)
 
@@ -3131,7 +3131,7 @@ func TestResolveActor_NoTrackerNoOp(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetInstanceTracker(nil)
 	_, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err)
@@ -3151,7 +3151,7 @@ func TestResolveActor_ChartHookFiresOnNewUser(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	hook := &stubChartHook{}
 	r.SetChartHook(hook)
 
@@ -3287,7 +3287,7 @@ func TestIngestNote_HashtagHookFiresOnRemoteIngest(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	hook := &stubHashtagHook{}
 	r.SetHashtagHook(hook)
 
@@ -3311,7 +3311,7 @@ func TestIngestNote_HashtagHookSkipsWhenNoTags(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	hook := &stubHashtagHook{}
 	r.SetHashtagHook(hook)
 
@@ -3338,7 +3338,7 @@ func TestUpdateRemoteNote_HashtagHookFiresOnTagsChange(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	hook := &stubHashtagHook{}
 	r.SetHashtagHook(hook)
 
@@ -3368,7 +3368,7 @@ func TestUpdateRemoteNote_HashtagHookSkipsWhenTagsUnchanged(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	hook := &stubHashtagHook{}
 	r.SetHashtagHook(hook)
 
@@ -3397,7 +3397,7 @@ func TestResolveActor_FreshButCacheMissFetchError(t *testing.T) {
 		LastFetchedAt: &now,
 	}
 	// publicKey は cache 空 → refreshPublicKey 経路に入るが fetcher はエラー
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: errors.New("net down")}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	assert.Equal(t, "existing", user.ID)
@@ -3411,7 +3411,7 @@ func TestResolver_SetActorTTL(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// 0 / 負値は無視されデフォルト維持
 	r.SetActorTTL(0)
 	r.SetActorTTL(-1)
@@ -3441,7 +3441,7 @@ func TestRefreshPublicKey_OnExistingUser_FetchError(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{err: errors.New("oops")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{err: errors.New("oops")}, idGen)
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
 	assert.Equal(t, "existing", user.ID)
@@ -3564,7 +3564,7 @@ func TestRefreshActor_UpdatesChatScopeFromCanChat(t *testing.T) {
 			noteRepo := testutil.NewMockNoteRepository()
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, user.ChatScope)
@@ -3588,7 +3588,7 @@ func TestRefreshActor_UpdatesIsBotOnTypeChange(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(actorJSON("Service"))}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(actorJSON("Service"))}, idGen)
 
 	user, err := r.ResolveActor(uri)
 	require.NoError(t, err)
@@ -3776,7 +3776,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3810,7 +3810,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3838,7 +3838,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3875,7 +3875,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3914,7 +3914,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3951,7 +3951,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -3985,7 +3985,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4021,7 +4021,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		// emojiRepo未設定
 
 		tags := []activitypub.EmojiTag{
@@ -4036,7 +4036,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4049,7 +4049,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4066,7 +4066,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4086,7 +4086,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4104,7 +4104,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		emojiRepo.CreateErr = errors.New("simulated db error")
 		r.SetEmojiRepo(emojiRepo)
@@ -4121,7 +4121,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 
 		host := "remote.example"
@@ -4148,7 +4148,7 @@ func TestUpsertEmojis(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		emojiRepo := testutil.NewMockEmojiRepository()
 		r.SetEmojiRepo(emojiRepo)
 
@@ -4204,7 +4204,7 @@ func TestResolveActor_EmojiTagExtraction(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)
 
@@ -4230,7 +4230,7 @@ func TestResolveActor_EmojiTagExtraction_NoEmojiRepo(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
 	// SetEmojiRepoを呼ばない
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
@@ -4256,7 +4256,7 @@ func TestRefreshActor_EmojiTagExtraction(t *testing.T) {
 		LastFetchedAt: &stale,
 	}
 
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)
 
@@ -4308,7 +4308,7 @@ func TestIngestNote_EmojiTagExtraction(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	// IngestNoteではまずNote JSONを処理してからactorを解決するためscriptedFetcherを使う
 	// ただしIngestNoteは直接body []byteを受け取るので、actorの解決にだけfetcherが使われる
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActorWithEmoji)}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)
 
@@ -4337,7 +4337,7 @@ func TestIngestNote_EmojiTagExtraction_NoEmojiRepo(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	// SetEmojiRepoを呼ばない
 
 	note, err := r.IngestNote([]byte(sampleNoteWithEmoji))
@@ -4356,7 +4356,7 @@ func TestUpdateRemoteNote_EmojiTagExtraction(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)
 
@@ -4401,7 +4401,7 @@ func TestUpdateRemoteNote_EmojiTagExtraction_ExistingEmoji(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	r.SetEmojiRepo(emojiRepo)
 
@@ -4588,7 +4588,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4625,7 +4625,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4651,7 +4651,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4674,7 +4674,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 		userID := "u1"
 		host := "remote.example"
@@ -4690,7 +4690,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := &createErrDriveRepo{
 			MockDriveFileRepository: testutil.NewMockDriveFileRepository(),
 			err:                     errors.New("db down"),
@@ -4715,7 +4715,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		client := &http.Client{Timeout: 1 * time.Second}
 		r.SetAttachmentProbeClient(client)
 		// nil 渡しでも panic しない (= invalidate 相当)
@@ -4730,7 +4730,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4765,7 +4765,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4791,7 +4791,7 @@ func TestUpsertAttachments(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 
@@ -4826,7 +4826,7 @@ func TestCollectAttachedFileTypes(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		assert.Empty(t, r.CollectAttachedFileTypes([]string{"f1"}))
 	})
 
@@ -4835,7 +4835,7 @@ func TestCollectAttachedFileTypes(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 		assert.Empty(t, r.CollectAttachedFileTypes(nil))
@@ -4846,7 +4846,7 @@ func TestCollectAttachedFileTypes(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 		drive.Files["a"] = &model.DriveFile{ID: "a", Type: "image/png"}
@@ -4862,7 +4862,7 @@ func TestCollectAttachedFileTypes(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		drive := testutil.NewMockDriveFileRepository()
 		r.SetDriveFileRepo(drive)
 		drive.Files["a"] = &model.DriveFile{ID: "a", Type: "image/png"}
@@ -4876,7 +4876,7 @@ func TestCollectAttachedFileTypes(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		r.SetDriveFileRepo(&findIDsErrDriveRepo{
 			MockDriveFileRepository: testutil.NewMockDriveFileRepository(),
 			err:                     errors.New("db down"),
@@ -4972,7 +4972,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		plantLocalUsers(repo, "alice", "bob")
 
 		ids, err := r.ResolveMentionedUserIDs([]string{
@@ -4993,7 +4993,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		boom := errors.New("connection refused")
 		repo.FindManyByIDsErr = boom
 		_, err := r.ResolveMentionedUserIDs([]string{"https://example.com/users/alice"})
@@ -5012,7 +5012,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 		ids, err := r.ResolveMentionedUserIDs([]string{uri})
 		require.NoError(t, err)
@@ -5024,7 +5024,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 		ids, err := r.ResolveMentionedUserIDs([]string{"https://unknown.example/users/x"})
 		require.NoError(t, err, "not-found で止めている")
@@ -5036,7 +5036,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 		plantLocalUsers(repo, "alice")
 
 		ids, err := r.ResolveMentionedUserIDs([]string{
@@ -5052,7 +5052,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 		ids, err := r.ResolveMentionedUserIDs(nil)
 		require.NoError(t, err)
@@ -5068,7 +5068,7 @@ func TestResolveMentionedUserIDs(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
 
 		_, err := r.ResolveMentionedUserIDs([]string{"https://remote.example/users/x"})
 		require.ErrorIs(t, err, boom)
@@ -5087,7 +5087,7 @@ func TestIngestNote_SpecifiedDMPopulatesMentionsAndVisibleUserIDs(t *testing.T) 
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/dm1",
@@ -5116,7 +5116,7 @@ func TestIngestNote_NonSpecifiedSkipsVisibleUserIDs(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/pub1",
@@ -5150,7 +5150,7 @@ func TestIngestNote_MentionsComeFromTagsOnly(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	cases := []struct {
 		name, id, to string
@@ -5211,7 +5211,7 @@ func TestIngestNote_SpecifiedRecipientsIncludeCC(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/dm-cc",
@@ -5237,7 +5237,7 @@ func TestIngestNote_MentionsIncludeRecipientsAndReplyAuthor(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	plantLocalUsers(repo, "carol", "dave")
 	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob", Visibility: model.NoteVisibilitySpecified, VisibleUserIDs: model.StringArray{"carol"}}
 
@@ -5319,7 +5319,7 @@ func TestIngestNote_MentionLimitCountsReplyTargetAuthor(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 		plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit)
 		author, err := r.ResolveActor("https://remote.example/users/alice")
 		require.NoError(t, err)
@@ -5358,7 +5358,7 @@ func TestIngestNote_MentionLimitCountsSpecifiedRecipients(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit+1)
 
 	mkBody := func(n int) []byte {
@@ -5395,7 +5395,7 @@ func TestIngestNote_EmailAddressIsNotTextMention(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/mail1",
@@ -5417,7 +5417,7 @@ func TestUpdateRemoteNote_MentionsRecomputed(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	plantLocalUsers(repo, "alice")
 
 	// 既存リモートノート (mentions 空)
@@ -5456,7 +5456,7 @@ func TestUpdateRemoteNote_MentionsComeFromTagsOnly(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	host := "remote.example"
 	uri := "https://remote.example/notes/edit-tags"
@@ -5499,7 +5499,7 @@ func TestUpdateRemoteNote_DropsTooManyMentions(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+		r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 		plantNumberedLocalUsers(repo, corenote.DefaultMentionLimit+1)
 		host := "remote.example"
 		uri := "https://remote.example/notes/edit-limit"
@@ -5591,7 +5591,7 @@ func TestResolveActor_DedupesConcurrentCalls(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	fetcher := &blockingFetcher{body: []byte(sampleActor), gate: make(chan struct{})}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 
 	const N = 16
 	var wg sync.WaitGroup
@@ -5654,7 +5654,7 @@ func TestResolveNote_DedupesConcurrentCalls(t *testing.T) {
 		"content": "hello"
 	}`)
 	fetcher := &blockingNoteFetcher{body: body, gate: make(chan struct{})}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 
 	const N = 16
 	var wg sync.WaitGroup
@@ -6029,7 +6029,7 @@ func TestResolveActor_PermanentlyInvalidDocumentStopsRefetchLoop(t *testing.T) {
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
 	counting := &countingFetcher{body: []byte(body)}
-	r := federation.NewResolver(repo, noteRepo, urls, counting, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, counting, idGen)
 
 	for i := 0; i < 5; i++ {
 		_, err := r.ResolveActor(uri)
@@ -6062,7 +6062,7 @@ func TestResolveActor_DropsOversizedMediaURLs(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err, "actor 自体は作る")
@@ -6099,7 +6099,7 @@ func TestResolveActor_DropsOversizedMediaURLs(t *testing.T) {
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
 			repo := testutil.NewMockUserRepository()
-			r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor("https://remote.example/users/carol")
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantAvatar, user.AvatarURL != nil, "avatarUrl")
@@ -6122,7 +6122,7 @@ func TestResolveActor_DropsOversizedMediaURLs(t *testing.T) {
 			"publicKey": {"publicKeyPem": "PEM"}
 		}`
 		repo := testutil.NewMockUserRepository()
-		r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(nulBody)}, idGen)
+		r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(nulBody)}, idGen)
 		user, err := r.ResolveActor("https://remote.example/users/dave")
 		require.NoError(t, err, "actor 自体は作る")
 		assert.Nil(t, user.AvatarURL)
@@ -6141,7 +6141,7 @@ func TestResolveActor_DropsOversizedMediaURLs(t *testing.T) {
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
 	repo2 := testutil.NewMockUserRepository()
-	r2 := federation.NewResolver(repo2, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body2)}, idGen)
+	r2 := federation.NewResolverNilDeps(repo2, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body2)}, idGen)
 	user2, err := r2.ResolveActor("https://remote.example/users/bob")
 	require.NoError(t, err)
 	require.NotNil(t, user2.AvatarURL)
@@ -6168,7 +6168,7 @@ func TestResolveActor_CrossHostAssertionMethodRefDoesNotProtect(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	extra := &stubPublickeyExtraRepo{}
 	r.SetPublickeyExtraRepo(extra)
 
@@ -6219,7 +6219,7 @@ func TestResolveActor_EmptyPublicKeyDoesNotAmplifyFetches(t *testing.T) {
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
 			counting := &countingFetcher{body: []byte(tc.body)}
-			r := federation.NewResolver(repo, noteRepo, urls, counting, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, counting, idGen)
 
 			for i := 0; i < 10; i++ {
 				_, err := r.ResolveActor("https://remote.example/users/alice")
@@ -6248,7 +6248,7 @@ func TestResolveActor_KeyFetchBackoffExpires(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	counting := &countingFetcher{body: []byte(body)}
-	r := federation.NewResolver(repo, noteRepo, urls, counting, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, counting, idGen)
 
 	base := time.Now()
 	now := base
@@ -6277,7 +6277,7 @@ func TestResolver_KeyFetchFailuresArePruned(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte("{}")}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte("{}")}, idGen)
 
 	base := time.Now()
 	now := base
@@ -6304,7 +6304,7 @@ func TestResolveActor_KeyIDHostBindingRejectsWWW(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		return federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+		return federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	}
 	doc := func(keyID string) string {
 		return `{ "@context": "https://www.w3.org/ns/activitystreams",
@@ -6361,7 +6361,7 @@ func TestResolveActor_HostMismatchStopsRefetchLoop(t *testing.T) {
 		"publicKey": {"id": "https://remote.example/users/alice#main-key", "owner": "x", "publicKeyPem": "PEM"}
 	}`
 	counting := &countingFetcher{body: []byte(body)}
-	r := federation.NewResolver(repo, noteRepo, urls, counting, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, counting, idGen)
 
 	for i := 0; i < 5; i++ {
 		_, err := r.ResolveActor(uri)
@@ -6401,7 +6401,7 @@ func TestResolveActor_InboxWithWhitespaceIsAccepted(t *testing.T) {
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
 			repo := testutil.NewMockUserRepository()
-			r := federation.NewResolver(repo, testutil.NewMockNoteRepository(),
+			r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(),
 				activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(body)}, mustIDGen(t))
 			user, err := r.ResolveActor("https://remote.example/users/alice")
 			if !tc.ok {
@@ -6454,7 +6454,7 @@ func TestResolveActor_TTLRefreshDropsOversizedMediaURLs(t *testing.T) {
 				"image": {"type": "Image", "url": ` + strconv.Quote(tc.image) + `},
 				"publicKey": {"publicKeyPem": "PEM"}
 			}`
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
 			// 落とすだけで既存値は温存する (空値では上書きしない)。
@@ -6483,7 +6483,7 @@ func TestResolveActor_NormalizesAllDeliveryURLs(t *testing.T) {
 		"endpoints": {"sharedInbox": "https://remote.example/endpoints\n"},
 		"publicKey": {"id": "https://remote.example/users/alice#main-key\n", "publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	pkRepo := &stubPublickeyRepo{}
 	r.SetPublickeyRepo(pkRepo)
 	user, err := r.ResolveActor("https://remote.example/users/alice")
@@ -6515,7 +6515,7 @@ func TestResolveActor_NormalizesAllDeliveryURLs(t *testing.T) {
 		"endpoints": {"sharedInbox": "https://remote.example/endpoints\n"},
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r2 := federation.NewResolver(repo2, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body2)}, idGen)
+	r2 := federation.NewResolverNilDeps(repo2, testutil.NewMockNoteRepository(), urls, &stubFetcher{body: []byte(body2)}, idGen)
 	user2, err := r2.ResolveActor("https://remote.example/users/bob")
 	require.NoError(t, err)
 	require.NotNil(t, user2.SharedInbox)
@@ -6545,7 +6545,7 @@ func TestResolveActor_NormalizesAssertionMethodKeyID(t *testing.T) {
 		"publicKey": {"publicKeyPem": "PEM"},
 		"assertionMethod": [{"id": "https://remote.example/users/alice#ed25519-key ", "type": "Multikey", "controller": "x", "publicKeyMultibase": "` + mb + `"}]
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	extra := &stubPublickeyExtraRepo{}
 	r.SetPublickeyExtraRepo(extra)
 
@@ -6629,7 +6629,7 @@ func TestResolveActor_NormalizesID(t *testing.T) {
 		"inbox": "https://remote.example/users/alice/inbox",
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	user, err := r.ResolveActor("https://remote.example/users/alice")
 	require.NoError(t, err, "actor を落とさない")
 	require.NotNil(t, user.URI)
@@ -6651,7 +6651,7 @@ func TestIngestNote_NormalizesIDAndAttributedTo(t *testing.T) {
 		"inbox": "https://remote.example/users/alice/inbox",
 		"publicKey": {"publicKeyPem": "PEM"}
 	}`
-	r := federation.NewResolver(repo, noteRepo, urls, &docFetcher{docs: map[string]string{actorURI: actorBody}}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &docFetcher{docs: map[string]string{actorURI: actorBody}}, idGen)
 	noteBody := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/1\n",
 		"type": "Note",
@@ -6704,7 +6704,7 @@ func TestResolveActor_UnreadablePublicKeyPemKeepsCachedKey(t *testing.T) {
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
 			swappable := &swappableFetcher{body: doc(strconv.Quote(pem))}
-			r := federation.NewResolver(repo, noteRepo, urls, swappable, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, swappable, idGen)
 			pkRepo := &stubPublickeyRepo{}
 			r.SetPublickeyRepo(pkRepo)
 			r.SetActorTTL(time.Nanosecond)
@@ -6758,7 +6758,7 @@ func TestResolveActor_InboxHostBinding(t *testing.T) {
 		noteRepo := testutil.NewMockNoteRepository()
 		urls := activitypub.NewURLBuilder("https://example.com")
 		idGen, _ := id.NewGenerator("aidx")
-		return federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+		return federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 	}
 	const uri = "https://remote.example/users/alice"
 
@@ -6901,7 +6901,7 @@ func TestResolveActor_UnreadableAssertionMethodKeepsCachedKeys(t *testing.T) {
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
 			swappable := &swappableFetcher{body: doc(seed)}
-			r := federation.NewResolver(repo, noteRepo, urls, swappable, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, swappable, idGen)
 			extra := &stubPublickeyExtraRepo{}
 			r.SetPublickeyExtraRepo(extra)
 			r.SetActorTTL(time.Nanosecond)
@@ -6967,7 +6967,7 @@ func TestResolveActor_RefreshRemovesStaleAssertionMethod(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	swappable := &swappableFetcher{body: bodyTwoKeys}
-	r := federation.NewResolver(repo, noteRepo, urls, swappable, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, swappable, idGen)
 	extra := &stubPublickeyExtraRepo{}
 	r.SetPublickeyExtraRepo(extra)
 	r.SetActorTTL(time.Nanosecond) // 即時 refresh をトリガするため極短 TTL
@@ -7025,7 +7025,7 @@ func TestResolver_KeysMapConcurrentAccessIsRaceFree(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	pkRepo := &stubPublickeyRepo{entries: map[string]*model.UserPublickey{}}
 	for i := 0; i < 4; i++ {
@@ -7059,7 +7059,7 @@ func TestIngestNote_MentionLimitExceededReturnsSentinel(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	// 21 件 = limit (20) + 1 の local user URI を tag に並べる。Mock urls の
 	// UserURI prefix は "https://example.com/users/" なので ExtractLocalUserID
@@ -7095,7 +7095,7 @@ func TestIngestNote_MentionLimitRawCountExceeded(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	var tagJSON string
 	for i := 1; i <= corenote.DefaultMentionLimit+1; i++ {
@@ -7125,7 +7125,7 @@ func TestIngestNote_MentionLimitBoundaryAccepted(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	var tagJSON string
 	for i := 1; i <= corenote.DefaultMentionLimit; i++ {
@@ -7213,7 +7213,7 @@ func TestIngestNote_QuoteMisskeyQuote(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	// attributedTo の actor 解決のみ fetch (quote は DB hit)。
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
@@ -7241,7 +7241,7 @@ func TestIngestNote_QuoteUrlFallback(t *testing.T) {
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
@@ -7272,7 +7272,7 @@ func TestIngestNote_QuoteFetchesUnknownTarget(t *testing.T) {
 		"to": ["https://www.w3.org/ns/activitystreams#Public"]
 	}`
 	fetcher := &scriptedFetcher{bodies: [][]byte{[]byte(sampleActor), []byte(quotedNote), []byte(sampleActor)}}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
@@ -7293,7 +7293,7 @@ func TestIngestNote_NoQuote(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	got, err := r.IngestNote([]byte(sampleRemoteNote))
 	require.NoError(t, err)
 	assert.Nil(t, got.RenoteID)
@@ -7307,7 +7307,7 @@ func TestIngestNote_QuoteUnresolvableDegrades(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	// actor は解決できるが quote fetch は失敗する。
 	fetcher := &scriptedFetcher{bodies: [][]byte{[]byte(sampleActor)}}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7340,7 +7340,7 @@ func TestIngestNote_QuoteCycleNoInfiniteRecursion(t *testing.T) {
 		"to": ["https://www.w3.org/ns/activitystreams#Public"]
 	}`
 	fetcher := &scriptedFetcher{bodies: [][]byte{[]byte(sampleActor), []byte(bNote)}}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 	aBody := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/A",
 		"type": "Note",
@@ -7385,7 +7385,7 @@ func TestIngestNote_QuoteLocalNote(t *testing.T) {
 	noteRepo.Notes["localq1"] = &model.Note{ID: "localq1", UserID: "localuser"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7406,7 +7406,7 @@ func TestIngestNote_QuoteLocalNoteMissing(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7429,7 +7429,7 @@ func TestIngestNote_QuoteIncrementsRenoteCountAndSetsHost(t *testing.T) {
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu", UserHost: strPtr("other.example")}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7455,7 +7455,7 @@ func TestIngestNote_SelfQuoteNoIncrement(t *testing.T) {
 	repo.Users["ualice"] = &model.User{ID: "ualice", Username: "alice", Host: strPtr("remote.example"), URI: strPtr("https://remote.example/users/alice")}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7480,7 +7480,7 @@ func TestIngestNote_ReplyAndQuote(t *testing.T) {
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7509,7 +7509,7 @@ func TestIngestNote_QuotePrefersResolvableUrl(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	// _misskey_quote は未知 remote (fetch 失敗); quoteUrl は local 解決可。
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7537,7 +7537,7 @@ func TestIngestNote_QuoteFollowersTargetDegrades(t *testing.T) {
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu", Visibility: model.NoteVisibilityFollowers}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7562,7 +7562,7 @@ func TestIngestNote_QuoteSpecifiedTargetDegrades(t *testing.T) {
 	noteRepo.Notes["dm1"] = &model.Note{ID: "dm1", URI: &quotedURI, UserID: "qu", Visibility: model.NoteVisibilitySpecified}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7585,7 +7585,7 @@ func TestIngestNote_QuoteHomeTargetLinks(t *testing.T) {
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu", Visibility: model.NoteVisibilityHome}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/q1",
 		"type": "Note",
@@ -7634,7 +7634,7 @@ func TestIngestNote_DedupRaceOnUniqueViolation(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	got, created, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	require.NoError(t, err, "unique violation should be treated as dedup hit, not an error")
@@ -7651,7 +7651,7 @@ func TestIngestNote_CreateErrorNonDedupPropagates(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	_, _, err := r.IngestNoteWithCreated([]byte(sampleRemoteNote), "")
 	assert.Error(t, err, "non-dedup create error must propagate")
@@ -7669,7 +7669,7 @@ func TestIngestNote_DedupRaceOnQuoteNoDoubleRenoteCount(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, raceRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := `{ "@context": "https://www.w3.org/ns/activitystreams", 
 		"id": "https://remote.example/notes/n1",
@@ -7765,7 +7765,7 @@ func TestRefreshActor_StampsMovedAtOnlyOnTransition(t *testing.T) {
 			noteRepo := testutil.NewMockNoteRepository()
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(body)}, idGen)
 
 			user, err := r.ResolveActor(uri)
 			require.NoError(t, err)
@@ -7868,7 +7868,7 @@ func TestRefreshActor_ProcessesRemoteMove(t *testing.T) {
 			}`
 			urls := activitypub.NewURLBuilder("https://local.example")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+			r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 				&stubFetcher{body: []byte(body)}, idGen)
 			mp := &fakeMoveProcessor{}
 			r.SetMoveProcessor(mp)
@@ -7913,7 +7913,7 @@ func TestRefreshActor_RemoteMoveNotRetriggeredOnSameTarget(t *testing.T) {
 	}`
 	urls := activitypub.NewURLBuilder("https://local.example")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 		&stubFetcher{body: []byte(body)}, idGen)
 	mp := &fakeMoveProcessor{}
 	r.SetMoveProcessor(mp)
@@ -7941,7 +7941,7 @@ func TestRefreshActor_RemoteMoveToSelfIsIgnored(t *testing.T) {
 	}`
 	urls := activitypub.NewURLBuilder("https://local.example")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 		&stubFetcher{body: []byte(body)}, idGen)
 	mp := &fakeMoveProcessor{}
 	r.SetMoveProcessor(mp)
@@ -7972,7 +7972,7 @@ func TestRefreshActor_RemoteMoveToUnknownLocalURIIsRejected(t *testing.T) {
 	}`
 	urls := activitypub.NewURLBuilder("https://local.example")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 		&stubFetcher{body: []byte(body)}, idGen)
 	mp := &fakeMoveProcessor{}
 	r.SetMoveProcessor(mp)
@@ -7990,7 +7990,7 @@ func TestProcessRemoteMove_Gates(t *testing.T) {
 	newResolver := func(repo *testutil.MockUserRepository) (*federation.Resolver, *fakeMoveProcessor) {
 		urls := activitypub.NewURLBuilder("https://local.example")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+		r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 			&stubFetcher{body: []byte(`{}`)}, idGen)
 		mp := &fakeMoveProcessor{}
 		r.SetMoveProcessor(mp)
@@ -8085,7 +8085,7 @@ func TestProcessRemoteMove_Gates(t *testing.T) {
 	t.Run("processor 未配線なら何もしない", func(t *testing.T) {
 		urls := activitypub.NewURLBuilder("https://local.example")
 		idGen, _ := id.NewGenerator("aidx")
-		r := federation.NewResolver(seed(), testutil.NewMockNoteRepository(), urls,
+		r := federation.NewResolverNilDeps(seed(), testutil.NewMockNoteRepository(), urls,
 			&stubFetcher{body: []byte(`{}`)}, idGen)
 		src := &model.User{ID: "s", URI: strPtr(srcURI), MovedToURI: strPtr(dstURI)}
 		assert.NotPanics(t, func() { r.ProcessRemoteMove(src, nil, nil) })
@@ -8110,7 +8110,7 @@ func TestProcessRemoteMove_LocalDestination(t *testing.T) {
 	}
 	urls := activitypub.NewURLBuilder("https://local.example")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(), urls,
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls,
 		&stubFetcher{body: []byte(`{}`)}, idGen)
 	mp := &fakeMoveProcessor{}
 	r.SetMoveProcessor(mp)
@@ -8141,7 +8141,7 @@ func TestIngestNote_PollLookupFailurePropagates(t *testing.T) {
 	pollRepo.FindErr = boom
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetPollRepo(pollRepo)
 	voter := &stubPollVoter{}
 	r.SetPollVoter(voter)
@@ -8172,7 +8172,7 @@ func TestPublicKeyForActor_DBFailureIsVerifyUnavailable(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	pkRepo := &stubPublickeyRepo{findErr: boom}
 	r.SetPublickeyRepo(pkRepo)
 
@@ -8195,7 +8195,7 @@ func TestPublicKeyForKeyID_DBFailureIsVerifyUnavailable(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	extra := &stubPublickeyExtraRepo{findErr: boom}
 	r.SetPublickeyExtraRepo(extra)
 	// fallback 先には鍵がある。**落とすと verify が「鍵はある」で進んでしまう**
@@ -8232,7 +8232,7 @@ func TestIngestNote_UnknownReplyTargetStillIngests(t *testing.T) {
 			noteRepo := testutil.NewMockNoteRepository()
 			urls := activitypub.NewURLBuilder("https://example.com")
 			idGen, _ := id.NewGenerator("aidx")
-			r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 			body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 				"id": "https://remote.example/notes/orphanreply",
@@ -8260,7 +8260,7 @@ func TestIngestNote_MissingPollRowFallsThroughToReply(t *testing.T) {
 	pollRepo := testutil.NewMockPollRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	r.SetPollRepo(pollRepo)
 	voter := &stubPollVoter{}
 	r.SetPollVoter(voter)
@@ -8292,7 +8292,7 @@ func TestResolveActor_DBFailureIsLookupUnavailable(t *testing.T) {
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	fetcher := &countingFetcher{body: []byte(sampleActor)}
-	r := federation.NewResolver(repo, noteRepo, urls, fetcher, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, fetcher, idGen)
 
 	_, err := r.ResolveActor("https://remote.example/users/alice")
 	require.ErrorIs(t, err, federation.ErrLookupUnavailable, "DB 障害を「まだ知らない actor」に倒している")
@@ -8322,7 +8322,7 @@ func TestIngestNote_SpecifiedDMRecipientLookupFailurePropagates(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
-	r := federation.NewResolver(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/dm2",

@@ -36,7 +36,7 @@ func newRacingResolver(t *testing.T, repo *racingUserRepo) *federation.Resolver 
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	f := &collectionFetcher{docs: map[string]string{cvActorURI: cvActorDoc("", "")}}
-	return federation.NewResolver(repo, testutil.NewMockNoteRepository(),
+	return federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), f, idGen)
 }
 
@@ -102,7 +102,7 @@ func TestResolveActor_ConcurrentCreateKeepsKeyAndFeatured(t *testing.T) {
 	}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), f, idGen)
 	r.SetPinningRepo(testutil.NewMockUserNotePiningRepository(), idGen)
 
@@ -128,7 +128,7 @@ func TestResolveActor_ConcurrentCreateKeepsEd25519Key(t *testing.T) {
 	}
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
-	r := federation.NewResolver(repo, testutil.NewMockNoteRepository(),
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(),
 		activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(ed25519ActorBody(t, edKeyID))}, idGen)
 	extra := &stubPublickeyExtraRepo{}
 	r.SetPublickeyExtraRepo(extra)
