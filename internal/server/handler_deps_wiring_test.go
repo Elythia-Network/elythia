@@ -298,6 +298,8 @@ var requiredDepChecks = []string{
 	"inboxProcessor.metadataRefresher", "inboxProcessor.replayGuard",
 	// ここから #3831 (notes の handler)。
 	"notes.noteHider", "notes.entityPacker", "notes.policyProvider", "notes.ugcVisibilityFn",
+	"notes.driveFileRepo", "notes.metaRepo", "notes.blockingRepo", "notes.mutingRepo",
+	"notes.renoteMutingRepo", "notes.channelMutingRepo", "notes.userFollowingRepo",
 }
 
 // nestedDepChecks names dependencies whose own fields must be non-nil too,

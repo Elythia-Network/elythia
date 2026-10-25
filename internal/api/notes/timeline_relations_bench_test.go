@@ -104,12 +104,12 @@ func BenchmarkHomeTimelineViewerRelations(b *testing.B) {
 	tlService.SetFanoutToggle(benchFanoutOff{})
 	h := newHandlerNilDeps(noteRepo, nil, nil, nil, tlService, nil, nil, nil, benchIDGen(b))
 	h.SetUserRepo(userRepo)
-	h.SetMetaRepo(repository.NewCachedMetaRepository(repository.NewMetaRepository(db)))
-	h.SetMutingRepo(repository.NewMutingRepository(db))
-	h.SetRenoteMutingRepo(repository.NewRenoteMutingRepository(db))
-	h.SetBlockingRepo(repository.NewBlockingRepository(db))
-	h.SetUserFollowingRepo(followingRepo)
-	h.SetChannelMutingRepo(repository.NewChannelMutingRepository(db))
+	h.metaRepo = repository.NewCachedMetaRepository(repository.NewMetaRepository(db))
+	h.mutingRepo = repository.NewMutingRepository(db)
+	h.renoteMutingRepo = repository.NewRenoteMutingRepository(db)
+	h.blockingRepo = repository.NewBlockingRepository(db)
+	h.userFollowingRepo = followingRepo
+	h.channelMutingRepo = repository.NewChannelMutingRepository(db)
 	h.SetChannelFollowingRepo(repository.NewChannelFollowingRepository(db))
 	if os.Getenv("BENCH_RELATION_NOCACHE") == "" {
 		h.SetRelationCache(repository.NewRelationCache(db))

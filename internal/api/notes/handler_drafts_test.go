@@ -299,7 +299,7 @@ func TestDraftsCreate_BlockedAndChannelValidation(t *testing.T) {
 	h.queryService = corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository())
 	blk := testutil.NewMockBlockingRepository()
 	blk.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "blocker", BlockeeID: "u1"}
-	h.SetBlockingRepo(blk)
+	h.blockingRepo = blk
 	chRepo := testutil.NewMockChannelRepository()
 	owner := "owner"
 	chRepo.Channels["ch1"] = &model.Channel{ID: "ch1", Name: "c", UserID: &owner, AllowRenoteToExternal: false}
@@ -656,7 +656,7 @@ func TestDraftsCreate_UnownedFileRejected(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
 	fileRepo := testutil.NewMockDriveFileRepository()
 	seedDraftFile(fileRepo, "f1", "u1")
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 	// f2 は存在しない (= 所有検証で落ちる)。
 	rec := postDraft(h.DraftsCreate, `{"text":"t","fileIds":["f1","f2"]}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -670,7 +670,7 @@ func TestDraftsCreate_OtherUserFileRejected(t *testing.T) {
 	h, _ := newDraftHandlerWithRepo()
 	fileRepo := testutil.NewMockDriveFileRepository()
 	seedDraftFile(fileRepo, "f1", "someone-else")
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 	rec := postDraft(h.DraftsCreate, `{"text":"t","fileIds":["f1"]}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_FILE")
@@ -681,7 +681,7 @@ func TestDraftsUpdate_UnownedFileRejected(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
 	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Visibility: "public"}
 	fileRepo := testutil.NewMockDriveFileRepository()
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 	rec := postDraft(h.DraftsUpdate, `{"draftId":"d1","fileIds":["ghost"]}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_FILE")
@@ -694,7 +694,7 @@ func TestDraftsCreate_OwnedFilesResolvedInOrder(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	seedDraftFile(fileRepo, "f1", "u1")
 	seedDraftFile(fileRepo, "f2", "u1")
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 	// fileIds を逆順 [f2,f1] で渡し、その順で files が並ぶことを確認。
 	rec := postDraft(h.DraftsCreate, `{"text":"t","fileIds":["f2","f1"]}`, &model.User{ID: "u1"})
 	require.Equal(t, http.StatusOK, rec.Code)

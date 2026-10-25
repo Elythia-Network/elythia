@@ -1686,15 +1686,32 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   同じ規則で見る。テストの組み立て(test mode・miniredis)でnilだったのは`timelineCache`の1つで、
   許可リストに足した。`enableTimelineCache`(`MK_ENABLETIMELINECACHE`)を有効にしたときだけ
   `EnableTimelineJSONCache`で作り、既定は無効
+- **3段目は可視性のfilterに使うrepositoryの7行。** `notes.NewHandler`は、2段目の13個に続けて
+  `driveFileRepo`・`metaRepo`・`blockingRepo`・`mutingRepo`・`renoteMutingRepo`・
+  `channelMutingRepo`・`userFollowingRepo`を受ける(`setupRoutes()`では`followingRepo`を渡す)。
+  どれも`setupRoutes()`の先頭で作ってあり、元のsetterは構築子の直後の数行にあったので、依存を
+  入れる時点はほぼ変わらない(間にあるのは同じhandlerの残したsetterだけ)
+- **置き換えたsetter 7本と`Has…`の7本は消した。** テストの補助関数`newHandlerNilDeps`は、
+  置き換えた引数に続けてnilを補う。置き換えたsetterを呼んでいたテスト(73か所)は、フィールドへ
+  直接代入する。`wiring_predicate_test.go`(`Has…`のテスト)と、`setters_test.go`の
+  `SetDriveFileRepo`のテストは消した。`TestNewHandlerKeepsDependencies`に7つを足した。repositoryは
+  どれも別のinterfaceなので、引数の取り違えはほぼ型で落ちる。同じmockが2つのinterfaceを満たす
+  形は、`assert.Same`で捕まえる
+- **`requiredDepChecks`に置き換えた7つの欄を足した。** 許可リストは2段目から変わらない
+  (`notes.timelineCache`の1つ)
 
-| | #3831の前(`988d002543`) | 1段目の後 | 2段目の後 |
-|---|---|---|---|
-| `criticalWiringCount` | 39 | 39 | 35 |
-| `setupRoutes()`の本文で、行頭が`notesHandler.Set`の行 | 33 | 33 | 29 |
-| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 331 | 331 | 327 |
-| そのsetterを呼ぶhandler(受け手) | 39 | 39 | 39 |
+| | #3831の前(`988d002543`) | 1段目の後 | 2段目の後 | 3段目の後 |
+|---|---|---|---|---|
+| `criticalWiringCount` | 39 | 39 | 35 | 28 |
+| `setupRoutes()`の本文で、行頭が`notesHandler.Set`の行 | 33 | 33 | 29 | 22 |
+| `setupRoutes()`の本文で、行頭が`<名前>Handler.Set`の行 | 331 | 331 | 327 | 320 |
+| そのsetterを呼ぶhandler(受け手) | 39 | 39 | 39 | 39 |
+| `setupRoutes()`の本文で、行頭が`<変数>.Set`の行 | 616 | 616 | 612 | 605 |
+| その受け手 | 107 | 107 | 107 | 107 |
 
-数え方: 段(1)の表と同じ。`notesHandler.Set`の行は、同じ本文で行頭の空白の後が`notesHandler.Set`の行。
+数え方: 段(1)・段(4)の表と同じ。`notesHandler.Set`の行は、同じ本文で行頭の空白の後が
+`notesHandler.Set`の行。2段目と3段目で受け手が減らないのは、notesのhandlerに表に無いsetter
+(`SetPiningRepo`・`SetTranslator`など)が残っているため。
 
 #### /api のルートの登録 (#3697)
 

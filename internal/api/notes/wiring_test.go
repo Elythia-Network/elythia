@@ -33,7 +33,7 @@ func TestBlockedHosts(t *testing.T) {
 
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x", BlockedHosts: []string{"bad.example"}}
-	h.SetMetaRepo(metaRepo)
+	h.metaRepo = metaRepo
 	hosts, err = h.blockedHosts()
 	require.NoError(t, err)
 	assert.Equal(t, []string{"bad.example"}, hosts)
@@ -43,7 +43,7 @@ func TestBlockedHosts(t *testing.T) {
 func TestBlockedHosts_FetchError(t *testing.T) {
 	h, _ := newTestHandler(t)
 	// Meta 未設定の mock は Fetch でエラーを返す。
-	h.SetMetaRepo(testutil.NewMockMetaRepository())
+	h.metaRepo = testutil.NewMockMetaRepository()
 
 	_, err := h.blockedHosts()
 	assert.Error(t, err)

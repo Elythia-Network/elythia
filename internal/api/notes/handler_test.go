@@ -216,7 +216,7 @@ func TestShow_AttachmentEmbedsFolderAndUser(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 	h.SetDriveFolderRepo(folderRepo)
 	h.SetUserRepo(userRepo)
 
@@ -274,7 +274,7 @@ func TestShow_AttachmentWithoutRepos_OmitsFolderUser(t *testing.T) {
 		URL:    fileURL,
 		Name:   "pic.png",
 	}
-	h.SetDriveFileRepo(fileRepo)
+	h.driveFileRepo = fileRepo
 
 	text := "note with attachment"
 	noteRepo.Notes["n1"] = &model.Note{

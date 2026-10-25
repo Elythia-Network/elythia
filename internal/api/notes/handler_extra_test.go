@@ -377,8 +377,8 @@ func TestFeatured_FiltersMutedAuthor(t *testing.T) {
 	mutingRepo.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = testutil.NewMockBlockingRepository()
 	h.SetUserRepo(userRepo)
 
 	rec := postExtra(h.Featured, `{}`, &model.User{ID: "viewer"})
@@ -547,8 +547,8 @@ func TestMentions_FiltersMutedAuthor(t *testing.T) {
 	mutingRepo.Mutings["mx"] = &model.Muting{ID: "mx", MuterID: "u1", MuteeID: "muted"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "u1", UsernameLower: "u1"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = testutil.NewMockBlockingRepository()
 	h.SetUserRepo(userRepo)
 
 	ids := mentionIDs(t, postExtra(h.Mentions, `{}`, &model.User{ID: "u1"}))
@@ -875,8 +875,8 @@ func TestSearchByTag_FiltersMutedAuthor(t *testing.T) {
 	mutingRepo.Mutings["m1"] = &model.Muting{ID: "m1", MuterID: "viewer", MuteeID: "muted"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.Users["viewer"] = &model.User{ID: "viewer", Username: "viewer", UsernameLower: "viewer"}
-	h.SetMutingRepo(mutingRepo)
-	h.SetBlockingRepo(testutil.NewMockBlockingRepository())
+	h.mutingRepo = mutingRepo
+	h.blockingRepo = testutil.NewMockBlockingRepository()
 	h.SetUserRepo(userRepo)
 
 	rec := postExtra(h.SearchByTag, `{"tag":"t"}`, &model.User{ID: "viewer"})
