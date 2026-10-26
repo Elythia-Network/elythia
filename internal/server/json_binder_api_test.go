@@ -281,12 +281,14 @@ func TestRouter_NonObjectBodyOnEndpointWithoutParams(t *testing.T) {
 		})
 	}
 	// i/revoke-token は本家でも requireCredential を持たず、認証を exec の中で
-	// 確かめる (ajv の後)。object でない body は認証より先に 400 になる。
+	// 確かめる (ajv の後)。object でない body は認証より先に 400 になる。paramDef が
+	// anyOf なので、本家の ajv と同じく #/anyOf/0/type で答える (本家の paramDef で
+	// 検証するようになった #3851 から)。
 	t.Run("revoke-token validates before its in-handler credential check", func(t *testing.T) {
 		code, out := serveBody(t, srv.echo, "/api/i/revoke-token", echo.MIMEApplicationJSON, `null`)
 		assert.Equal(t, http.StatusBadRequest, code, out)
 		errObj, _ := out["error"].(map[string]any)
-		assert.Equal(t, mustBeObject, errObj["info"])
+		assert.Equal(t, map[string]any{"param": "#/anyOf/0/type", "reason": "must be object"}, errObj["info"])
 	})
 }
 

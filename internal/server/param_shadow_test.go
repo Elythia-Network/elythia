@@ -69,7 +69,7 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	api.Use(mw)
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/clips/show", ok)
-	api.POST("/i/pin", ok)
+	api.POST("/admin/show-user", ok)
 	serve := func(target, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -80,11 +80,11 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	rec := serve("/api/clips/show", `{"clipId":"a-b"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"param":"#/properties/clipId/format"`)
-	assert.Equal(t, http.StatusNoContent, serve("/api/i/pin", `{"noteId":"a-b"}`).Code)
+	assert.Equal(t, http.StatusNoContent, serve("/api/admin/show-user", `{"userId":"a-b"}`).Code)
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	assert.NotContains(t, logs.String(), "paramshadow divergence")
-	assert.NotContains(t, logs.String(), "i/pin")
+	assert.NotContains(t, logs.String(), "admin/show-user")
 }
 
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
@@ -106,7 +106,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		return func(c echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
 	}
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
-	api.POST("/i/pin", ok)
+	api.POST("/admin/show-user", ok)
 	api.POST("/notes/create", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/federation/instances", ok)
 	api.GET("/charts/notes", ok)
@@ -119,7 +119,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/i/pin", `{"noteId":"a-b"}`))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/admin/show-user", `{"userId":"a-b"}`))
 	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/instances?limit=0", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/federation/instances", `{"limit":101}`))
@@ -130,12 +130,12 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodGet, "/api/charts/notes?span=week", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
-	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/i/pin", `null`))
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/admin/show-user", `null`))
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
-		`"endpoint":"i/pin","kind":"rejected_handler_ok","schemaPath":"#/properties/noteId/format"`,
+		`"endpoint":"admin/show-user","kind":"rejected_handler_ok","schemaPath":"#/properties/userId/format"`,
 		`"endpoint":"federation/instances","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/minimum"`,
 		`"endpoint":"federation/instances","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/maximum"`,
 		`"msg":"paramshadow summary"`,
@@ -428,9 +428,9 @@ func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/i/pin", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/admin/show-user", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/i/pin", strings.NewReader(`{"noteId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/show-user", strings.NewReader(`{"userId":"abc"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}
@@ -463,9 +463,9 @@ func TestParamShadowSummaryAfterTheGenerationStopped(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/i/pin", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/admin/show-user", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/i/pin", strings.NewReader(`{"noteId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/show-user", strings.NewReader(`{"userId":"abc"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}
