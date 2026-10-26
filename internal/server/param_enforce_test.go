@@ -79,6 +79,28 @@ var enforcementPending = map[string]string{
 	"federation/instances": `{"sort":"+host"}`,
 }
 
+// handlerStricterThanUpstream lists the accepted corpus inputs an enforced
+// endpoint still rejects with INVALID_PARAM on purpose, because upstream
+// answers them with a 500. Each entry must match at least one corpus input.
+var handlerStricterThanUpstream = map[string]func(in map[string]any) bool{
+	// 本家は絵文字を含まない reaction を normalizeEmojiString が素の Error で
+	// 投げて 500 にする (ChatService.react)。利用者の入力の誤りなので、Elythia は
+	// 400 INVALID_PARAM にしている (#3841)。corpus の値は ASCII だけなので、
+	// ASCII だけで :name: の形でないものを絵文字の無い値とみなす。
+	"chat/messages/react": func(in map[string]any) bool {
+		r, ok := in["reaction"].(string)
+		if !ok || (strings.HasPrefix(r, ":") && strings.HasSuffix(r, ":") && len(r) > 2) {
+			return false
+		}
+		for _, c := range r {
+			if c > 0x7f {
+				return false
+			}
+		}
+		return true
+	},
+}
+
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
 // names upstream has, and to whole packages: an endpoint of a package left
 // out would keep the handwritten checks only, unless enforcementPending
@@ -153,6 +175,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// NO_SUCH_FILE / NO_SUCH_FOLDER で止まる。upload-from-url の受理の入力の url には
 		// host が無く、取得の前に invalid url で止まるので、外へは出ない。
 		require.NoError(t, db.Exec(`DELETE FROM drive_folder WHERE "userId" = ?`, userID).Error)
+		// chat/* の受理の入力で実際に書き込むのは chat/rooms/create だけ (#3841)。ほかの
+		// 書き込み系は、corpus の id の利用者・部屋・メッセージが無いので、書き込みや
+		// 外向きの配送の前に NO_SUCH_* で止まる。chat_room は利用者の削除で消える
+		// (ON DELETE CASCADE) が、何を作るかが読めるように明示して消す。
+		require.NoError(t, db.Exec(`DELETE FROM chat_room WHERE "ownerId" = ?`, userID).Error)
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -201,6 +228,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.Positive(t, seen[name][1], "the corpus has no rejected input for %s", name)
 	}
 
+	stricterSeen := map[string]int{}
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -233,6 +261,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			continue
 		}
 		if tc.ok {
+			var in map[string]any
+			if stricter := handlerStricterThanUpstream[tc.ep]; stricter != nil && json.Unmarshal(tc.in, &in) == nil && stricter(in) {
+				stricterSeen[tc.ep]++
+				assert.Equal(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				continue
+			}
 			assert.NotEqual(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): ajv accepts it; body %s", name, tc.line, rec.Body.String())
 			continue
 		}
@@ -241,6 +275,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.Equal(t, tc.path, env.Error.Info.Param, name)
 			assert.Equal(t, tc.msg, env.Error.Info.Reason, name)
 		}
+	}
+	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
+	for ep := range handlerStricterThanUpstream {
+		assert.Positive(t, stricterSeen[ep], "handlerStricterThanUpstream[%s] matches no accepted corpus input", ep)
 	}
 }
 
