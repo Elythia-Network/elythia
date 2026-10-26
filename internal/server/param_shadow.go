@@ -26,7 +26,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // username/available, ap/*, bubble-game/ranking and bubble-game/register in
 // #3768; federation/* except federation/instances in #3770; pages/* and
 // page-push in #3772; the read-only top-level endpoints in #3774; users and
-// users/* in #3837; drive and drive/* in #3839; chat/* in #3841).
+// users/* in #3837; drive and drive/* in #3839; chat/* in #3841; reversi/* except reversi/match in #3843).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -265,6 +265,12 @@ var paramEnforcedEndpoints = []string{
 	"chat/rooms/owned",
 	"chat/rooms/show",
 	"chat/rooms/update",
+	"reversi/cancel-match",
+	"reversi/games",
+	"reversi/invitations",
+	"reversi/show-game",
+	"reversi/surrender",
+	"reversi/verify",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

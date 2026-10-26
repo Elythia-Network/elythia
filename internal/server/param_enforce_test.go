@@ -77,6 +77,10 @@ var enforcementPending = map[string]string{
 	// 本家のsortのenumに、Elythia独自の+host / -hostが無い。enumに値を
 	// 重ねる仕組みは、独自の引数の宣言(#3667の(4))で作る(#3770)。
 	"federation/instances": `{"sort":"+host"}`,
+	// userId に @user@host の形 (acct) を受ける。cherrypick 由来の拡張で、
+	// tests/e2e-federation の対局が使う。本家の misskey:id の形には無いので、
+	// 独自の引数の宣言(#3667の(4))で重ねるまで載せない(#3843)。
+	"reversi/match": `{"userId":"@alice@remote.example"}`,
 }
 
 // handlerStricterThanUpstream lists the accepted corpus inputs an enforced
@@ -224,7 +228,13 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	for _, name := range paramEnforcedEndpoints {
 		// 何も流さずに緑にならないよう、各endpointに受理と拒否の両方を要求する。
+		// paramDef が {} で何でも通す endpoint (reversi/invitations) には拒否の
+		// 入力が無いので、受理だけを要求する (#3843)。
 		require.Positive(t, seen[name][0], "the corpus has no accepted input for %s", name)
+		if anyBodyEndpoints()[name] {
+			require.Zero(t, seen[name][1], "the corpus rejects an input of %s, whose paramDef accepts any body", name)
+			continue
+		}
 		require.Positive(t, seen[name][1], "the corpus has no rejected input for %s", name)
 	}
 
