@@ -103,10 +103,23 @@ func TestVerifyEmail_InvalidCode(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestVerifyEmail_EmptyCodeRejected(t *testing.T) {
+func TestVerifyEmail_MissingCodeRejected(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	rec := postExtra(h.VerifyEmail, `{}`, stubUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// 本家の paramDef は code を required の string とするだけなので、空文字は該当する
+// コードが無いものとして NO_SUCH_CODE にする。空のコードを持つ profile があっても
+// 当てない (#3845)。
+func TestVerifyEmail_EmptyCodeIsNoSuchCode(t *testing.T) {
+	h, repo := newExtraHandler(t)
+	empty := ""
+	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", EmailVerifyCode: &empty}
+	rec := postExtra(h.VerifyEmail, `{"code":""}`, stubUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_CODE")
+	assert.False(t, repo.Profiles["u1"].EmailVerified)
 }
 
 func TestVerifyEmail_Success(t *testing.T) {

@@ -62,13 +62,16 @@ func (h *Handler) SetServerURL(u string) { h.serverURL = u }
 // RequestReset handles POST /api/request-reset-password.
 // ユーザーが見つからない/email不一致/未認証でも成功レスポンスを返す（情報漏洩防止）。
 func (h *Handler) RequestReset(c echo.Context) error {
-	var req struct {
-		Username string `json:"username"`
-		Email    string `json:"email"`
+	var raw struct {
+		Username *string `json:"username"`
+		Email    *string `json:"email"`
 	}
-	if err := c.Bind(&req); err != nil || req.Username == "" || req.Email == "" {
+	// 本家の paramDef は username・email を required の string とするだけなので、
+	// 空文字も通し、該当する利用者がいないので 204 を返す (#3845)。
+	if err := c.Bind(&raw); err != nil || raw.Username == nil || raw.Email == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "username and email are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	req := struct{ Username, Email string }{*raw.Username, *raw.Email}
 
 	// ユーザー検索 (ローカルのみ)
 	user, err := h.userRepo.FindByUsernameLower(req.Username, nil)
@@ -131,19 +134,20 @@ func (h *Handler) RequestReset(c echo.Context) error {
 
 // Reset handles POST /api/reset-password.
 func (h *Handler) Reset(c echo.Context) error {
-	var req struct {
-		Token    string `json:"token"`
-		Password string `json:"password"`
+	var raw struct {
+		Token    *string `json:"token"`
+		Password *string `json:"password"`
 	}
-	if err := c.Bind(&req); err != nil || req.Token == "" || req.Password == "" {
+	if err := c.Bind(&raw); err != nil || raw.Token == nil || raw.Password == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "token and password are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	req := struct{ Token, Password string }{*raw.Token, *raw.Password}
 
-	// bcryptは72バイトまでしか受け付けない
-	if len(req.Password) > 72 {
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Password too long.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	// 本家の paramDef は token・password を required の string とするだけで、
+	// 空文字も通す。空の token は存在しない token と同じ応答にする (#3845)。
+	if req.Token == "" {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid token.", "6382759e-0a0d-4e32-893e-0e1e66cec4d5"))
 	}
-
 	resetReq, err := h.resetRepo.FindByToken(req.Token)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
@@ -175,6 +179,17 @@ func (h *Handler) Reset(c echo.Context) error {
 	if err == nil && target.IsPluginManaged() {
 		_ = h.resetRepo.Delete(resetReq.ID)
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid token.", "6382759e-0a0d-4e32-893e-0e1e66cec4d5"))
+	}
+
+	// 空の password と、bcrypt が受け付けない 72 バイトを超える password は拒否する。
+	// 本家は空の password をそのままハッシュにし、72 バイトを超えた分は bcrypt が
+	// 切り詰めて設定するが、どちらも利用者の意図と違うパスワードになる。token の
+	// 照合の後で見るので、本家と同じく無効な token には token の誤りを返す (#3845)。
+	if req.Password == "" {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Password is empty.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if len(req.Password) > 72 {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Password too long.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
 	// cost は misc/password に集約してある。**ここだけ 8 を直書きしていたので、
