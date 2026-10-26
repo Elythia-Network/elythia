@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/bgwork"
@@ -137,9 +138,9 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 	return h.emojiRepo
 }
 
-// upstream paramDef の maxLength 定数 (#1564)。ajv の maxLength は UTF-16
-// code unit 基準だが mk-go は rune 数で近似する (多バイト文字を過剰に弾か
-// ない側。サロゲートペア絵文字は upstream より長く受理される既知の差)。
+// upstream paramDef の maxLength 定数 (#1564)。ajv の maxLength は ucs2length
+// でサロゲートペアを 1 文字と数える code point 基準なので、rune 数で判定すれば
+// 本家と同じ結果になる (#3839)。
 const (
 	// maxDriveCommentLength は drive/files/{create,update,upload-from-url}
 	// の comment maxLength (= upstream DB_MAX_IMAGE_COMMENT_LENGTH)。
@@ -485,30 +486,49 @@ type FileIDRequest struct {
 // url / webpublicUrl / thumbnailUrl の OR 一致で検索する (#1564)。
 func (h *Handler) FilesShow(c echo.Context) error {
 	user := middleware.GetUser(c)
-	// fileId / url は「キー存在」で anyOf を判定する (upstream の required は
-	// presence のみで、`{"url":""}` は lookup に進んで 404 NO_SUCH_FILE になる)
-	// (#1564 review)。fileId は format misskey:id なので空文字は INVALID_PARAM。
 	var req struct {
-		FileID *string `json:"fileId"`
-		URL    *string `json:"url"`
+		FileID json.RawMessage `json:"fileId"`
+		URL    json.RawMessage `json:"url"`
 	}
-	if err := c.Bind(&req); err != nil || (req.FileID == nil && req.URL == nil) {
+	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
+	// 本家の paramDef は anyOf で、{fileId: misskey:id} か {url: string} の片方を
+	// 満たせば、もう片方の値の型は問わない。実行部は `'fileId' in ps` で分岐する
+	// ので、url で通った入力でも fileId のキーがあれば fileId で引く (#3839)。
+	fileID, fileIDIsString := rawJSONString(req.FileID)
+	urlValue, urlIsString := rawJSONString(req.URL)
+	if !(fileIDIsString && misskeyIDRe.MatchString(fileID)) && !urlIsString {
 		return apierr.JSONInvalidParam(c)
 	}
 	var f *model.DriveFile
 	var err error
-	if req.FileID != nil {
-		if *req.FileID == "" {
-			return apierr.JSONInvalidParam(c)
-		}
-		f, err = h.svc.Show(user, *req.FileID)
-	} else {
-		f, err = h.svc.ShowByURL(user, *req.URL)
+	switch {
+	case len(req.FileID) == 0:
+		f, err = h.svc.ShowByURL(user, urlValue)
+	case fileIDIsString:
+		f, err = h.svc.Show(user, fileID)
+	default:
+		// 文字列でない fileId (null を含む) に当たるファイルは無い。本家は null だと
+		// TypeORM が条件を落として任意の1件を引くが、意味が無いので無いものとして扱う。
+		err = coredrive.ErrFileNotFound
 	}
 	if err != nil {
 		return mapFileError(c, err, fileEndpointShow)
 	}
 	return c.JSON(http.StatusOK, h.packDriveFileShow(f))
+}
+
+// misskeyIDRe is upstream's ajv format `misskey:id`.
+var misskeyIDRe = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+
+// rawJSONString decodes raw as a JSON string. ok is false when raw is absent,
+// null or not a string.
+func rawJSONString(raw json.RawMessage) (s string, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	return s, json.Unmarshal(raw, &s) == nil
 }
 
 // packDriveFileShow is the drive/files/show pack: upstream は pack(file,
@@ -952,14 +972,14 @@ func emptyFolderIDToNil(s *string) *string {
 func (h *Handler) FilesList(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit     *int    `json:"limit"`
-		SinceID   string  `json:"sinceId"`
-		UntilID   string  `json:"untilId"`
-		SinceDate *int64  `json:"sinceDate"`
-		UntilDate *int64  `json:"untilDate"`
-		FolderID  *string `json:"folderId"`
-		Type      string  `json:"type"`
-		Sort      string  `json:"sort"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		FolderID  *string    `json:"folderId"`
+		Type      string     `json:"type"`
+		Sort      string     `json:"sort"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -972,7 +992,7 @@ func (h *Handler) FilesList(c echo.Context) error {
 	if req.Type != "" && !driveTypePatternRe.MatchString(req.Type) {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -980,7 +1000,7 @@ func (h *Handler) FilesList(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1038,15 +1058,17 @@ func (h *Handler) FilesFind(c echo.Context) error {
 func (h *Handler) FilesCheckExistence(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		MD5 string `json:"md5"`
+		MD5 *string `json:"md5"`
 	}
-	if err := c.Bind(&req); err != nil || req.MD5 == "" {
+	// 本家の paramDef は md5 を required の string とするだけなので、空文字も
+	// 通して false を返す (#3839)。
+	if err := c.Bind(&req); err != nil || req.MD5 == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.fileRepo == nil {
 		return c.JSON(http.StatusOK, false)
 	}
-	exists, _ := h.fileRepo.ExistsByMD5(user.ID, req.MD5)
+	exists, _ := h.fileRepo.ExistsByMD5(user.ID, *req.MD5)
 	return c.JSON(http.StatusOK, exists)
 }
 
@@ -1071,12 +1093,12 @@ func (h *Handler) FilesCheckExistence(c echo.Context) error {
 func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
-		FileID    string `json:"fileId"`
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		FileID    string     `json:"fileId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -1106,11 +1128,11 @@ func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1143,19 +1165,20 @@ func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 func (h *Handler) FilesUploadFromURL(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		URL         string  `json:"url"`
+		URL         *string `json:"url"`
 		FolderID    *string `json:"folderId"`
 		IsSensitive bool    `json:"isSensitive"`
 		Comment     *string `json:"comment"`
 		Marker      *string `json:"marker"`
 		Force       bool    `json:"force"`
 	}
-	if err := c.Bind(&req); err != nil || req.URL == "" {
+	// 本家の paramDef は url を required の string とするだけなので、空文字も
+	// 通して 204 を返す。取得は裏で invalid url として失敗し、外へは出ない (#3839)。
+	if err := c.Bind(&req); err != nil || req.URL == nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// upstream paramDef は comment maxLength=512。ajv の maxLength は文字数
-	// (code unit) 基準なので byte 長ではなく rune 数で判定する (多バイト文字を
-	// 過剰に弾かないため)。超過は INVALID_PARAM。
+	// upstream paramDef は comment maxLength=512。ajv の maxLength は code point
+	// 基準なので byte 長ではなく rune 数で判定する (#3839)。超過は INVALID_PARAM。
 	if req.Comment != nil && !colfit.Fits(*req.Comment, maxDriveCommentLength) {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1168,7 +1191,7 @@ func (h *Handler) FilesUploadFromURL(c echo.Context) error {
 	// 切れ、download を打ち切る (#3661)。
 	in := URLUploadInput{
 		User:        user,
-		URL:         req.URL,
+		URL:         *req.URL,
 		FolderID:    req.FolderID,
 		Comment:     req.Comment,
 		Marker:      req.Marker,
@@ -1234,12 +1257,12 @@ func (h *Handler) FilesMoveBulk(c echo.Context) error {
 func (h *Handler) Stream(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		Type      string `json:"type"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		Type      string     `json:"type"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -1248,7 +1271,7 @@ func (h *Handler) Stream(c echo.Context) error {
 	if req.Type != "" && !driveTypePatternRe.MatchString(req.Type) {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1256,7 +1279,7 @@ func (h *Handler) Stream(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1277,17 +1300,17 @@ func (h *Handler) Stream(c echo.Context) error {
 func (h *Handler) FoldersList(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit     *int    `json:"limit"`
-		SinceID   string  `json:"sinceId"`
-		UntilID   string  `json:"untilId"`
-		SinceDate *int64  `json:"sinceDate"`
-		UntilDate *int64  `json:"untilDate"`
-		FolderID  *string `json:"folderId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		FolderID  *string    `json:"folderId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1295,7 +1318,7 @@ func (h *Handler) FoldersList(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

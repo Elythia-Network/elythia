@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
+	"github.com/elythia-network/elythia/internal/api/pagination"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/userpack"
@@ -638,22 +640,22 @@ func (h *Handler) jsonOK(c echo.Context, v any) error {
 func (h *Handler) AttachedChatMessages(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		FileID    string `json:"fileId"`
-		Limit     int    `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		FileID    string     `json:"fileId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	// upstream paramDef は limit を minimum:1 / maximum:100 / default:10 で
-	// clamp する。> 100 は default に落とさず max へ clamp して挙動を揃える。
-	if req.Limit <= 0 {
-		req.Limit = 10
-	} else if req.Limit > 100 {
-		req.Limit = 100
+	// upstream paramDef は limit を minimum:1 / maximum:100 / default:10 とし、
+	// 範囲外は丸めずに拒否する。検証器が飛ばす入力 (対になっていないサロゲート
+	// など) でも同じに見る (#3839)。
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
+	if !limitOK {
+		return apierr.JSONInvalidParam(c)
 	}
 	if h.fileRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
@@ -672,11 +674,11 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 	if !isMod && (file.UserID == nil || *file.UserID != user.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "Some files are not found.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	msgs, err := h.repo.ListMessagesByFileID(req.FileID, untilID, sinceID, req.Limit)
+	msgs, err := h.repo.ListMessagesByFileID(req.FileID, untilID, sinceID, limit)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

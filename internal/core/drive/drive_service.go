@@ -154,7 +154,8 @@ func (s *Service) MaxUploadBytes(user *model.User) (int64, bool) {
 // ValidateFileName mirrors upstream DriveFileEntityService.validateFileName:
 // the trimmed name must be non-empty, at most 200 characters, and must not
 // contain a backslash, a slash, or "..". 長さは JS の String.length (UTF-16)
-// に対し rune 数で近似する (upload-from-url の comment 512 判定と同方針)。
+// に対し rune 数で近似する。ajv の maxLength (code point で数える) と違い、
+// サロゲートペアの文字を含む名前では本家より緩い (#3369)。
 //
 // **NUL と不正な UTF-8 もここで落とす (#3037)。** `drive_file.name` は
 // varchar なので、そのまま INSERT / UPDATE すると PostgreSQL が SQLSTATE 22021
