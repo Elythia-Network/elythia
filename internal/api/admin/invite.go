@@ -53,7 +53,9 @@ func (h *Handler) InviteCreate(c echo.Context) error {
 	if user != nil {
 		createdByID = &user.ID
 	}
-	tickets := make([]*model.RegistrationTicket, 0, count)
+	// count は 1〜100 に丸めてあるが、CodeQL (go/uncontrolled-allocation-size) は
+	// jsnum.Int からの変換を経た丸めを追えないので、容量を指定せずに確保する。
+	var tickets []*model.RegistrationTicket
 	for i := 0; i < count; i++ {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
