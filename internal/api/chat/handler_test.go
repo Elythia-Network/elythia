@@ -2115,6 +2115,36 @@ func TestAttachedChatMessages_OwnerSeesMessages(t *testing.T) {
 	assert.Len(t, out, 2)
 }
 
+// 本家の paramDef は整数の値を持つ小数 (1e0、10.0) を integer として通す。
+// limit の値もそのまま効く (#3839)。
+func TestAttachedChatMessages_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, repo, fileRepo := attachedHandler(t)
+	owner := u1.ID
+	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
+	seedFileMsg(repo, "m1", "f1")
+	seedFileMsg(repo, "m2", "f1")
+
+	rec := post(h.AttachedChatMessages, `{"fileId":"f1","limit":1e0,"sinceDate":10.0,"untilDate":4102444800000.0}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	assert.Len(t, out, 1)
+}
+
+// 本家は limit の範囲外を丸めずに拒否する。検証器が飛ばす入力でも handler が
+// 同じに見る (#3839)。
+func TestAttachedChatMessages_RejectsOutOfRangeLimit(t *testing.T) {
+	h, repo, fileRepo := attachedHandler(t)
+	owner := u1.ID
+	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
+	seedFileMsg(repo, "m1", "f1")
+	for _, limit := range []string{"0", "-1", "101"} {
+		rec := post(h.AttachedChatMessages, `{"fileId":"f1","limit":`+limit+`}`, u1)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, limit)
+		assert.Contains(t, rec.Body.String(), "INVALID_PARAM", limit)
+	}
+}
+
 func TestAttachedChatMessages_NonOwnerRejected(t *testing.T) {
 	h, repo, fileRepo := attachedHandler(t)
 	owner := u1.ID
