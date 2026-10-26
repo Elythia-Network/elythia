@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/reaction"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -88,13 +89,13 @@ func (h *Handler) ReactionsDelete(c echo.Context) error {
 
 // ReactionsListRequest is the request body for notes/reactions.
 type ReactionsListRequest struct {
-	NoteID    string `json:"noteId" query:"noteId"`
-	Type      string `json:"type" query:"type"`
-	Limit     *int   `json:"limit" query:"limit"`
-	SinceID   string `json:"sinceId" query:"sinceId"`
-	UntilID   string `json:"untilId" query:"untilId"`
-	SinceDate *int64 `json:"sinceDate" query:"sinceDate"`
-	UntilDate *int64 `json:"untilDate" query:"untilDate"`
+	NoteID    string     `json:"noteId" query:"noteId"`
+	Type      string     `json:"type" query:"type"`
+	Limit     *jsnum.Int `json:"limit" query:"limit"`
+	SinceID   string     `json:"sinceId" query:"sinceId"`
+	UntilID   string     `json:"untilId" query:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate" query:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate" query:"untilDate"`
 }
 
 // Reactions handles POST /api/notes/reactions.
@@ -103,13 +104,13 @@ func (h *Handler) Reactions(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

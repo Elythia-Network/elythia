@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	coreachievement "github.com/elythia-network/elythia/internal/core/achievement"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -128,23 +129,23 @@ func (h *Handler) FavoritesDelete(c echo.Context) error {
 func (h *Handler) Featured(c echo.Context) error {
 	// GET でも受ける (本家は allowGet: true) ので query の名前も付ける。無いと GET の
 	// channelId / limit が読まれず、別の内容の応答が public でキャッシュされる (#3593)。
+	// 本家の paramDef は limit・untilId・channelId だけを持つ。以前は本家に無い
+	// offset・untilDate も読んでいたが、型の違う値 (offset: "x") を 400 にし、本家が
+	// 無視する値で件数を飛ばしていたので、読まない (#3847)。frontend は untilId で送る。
 	var req struct {
-		Limit     *int   `json:"limit" query:"limit"`
-		Offset    int    `json:"offset" query:"offset"`
-		ChannelID string `json:"channelId" query:"channelId"`
-		UntilID   string `json:"untilId" query:"untilId"`
-		UntilDate *int64 `json:"untilDate" query:"untilDate"`
+		Limit     *jsnum.Int `json:"limit" query:"limit"`
+		ChannelID string     `json:"channelId" query:"channelId"`
+		UntilID   string     `json:"untilId" query:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		// GET の query で数値に読めない値は、本家と同じ cast のエラーにする。
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	// untilDate を aidx prefix に正規化 (#1166)。
-	_, untilID, cursorOK := id.NormalizeCursor("", req.UntilID, nil, req.UntilDate)
+	_, untilID, cursorOK := id.NormalizeCursor("", req.UntilID, nil, nil)
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -159,7 +160,7 @@ func (h *Handler) Featured(c echo.Context) error {
 		}
 		localOnly = policy == ugcvisibility.Local
 	}
-	notes, err := h.featuredNotes(c.Request().Context(), viewer, req.ChannelID, untilID, limit, req.Offset, localOnly)
+	notes, err := h.featuredNotes(c.Request().Context(), viewer, req.ChannelID, untilID, limit, 0, localOnly)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -349,23 +350,23 @@ func (h *Handler) Unrenote(c echo.Context) error {
 func (h *Handler) Mentions(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit      *int   `json:"limit"`
-		SinceID    string `json:"sinceId"`
-		UntilID    string `json:"untilId"`
-		SinceDate  *int64 `json:"sinceDate"`
-		UntilDate  *int64 `json:"untilDate"`
-		Visibility string `json:"visibility"`
-		Following  bool   `json:"following"`
+		Limit      *jsnum.Int `json:"limit"`
+		SinceID    string     `json:"sinceId"`
+		UntilID    string     `json:"untilId"`
+		SinceDate  *jsnum.Int `json:"sinceDate"`
+		UntilDate  *jsnum.Int `json:"untilDate"`
+		Visibility string     `json:"visibility"`
+		Following  bool       `json:"following"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -403,22 +404,22 @@ func (h *Handler) Mentions(c echo.Context) error {
 func (h *Handler) UserListTimeline(c echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
-		ListID                string `json:"listId"`
-		Limit                 *int   `json:"limit"`
-		SinceID               string `json:"sinceId"`
-		UntilID               string `json:"untilId"`
-		SinceDate             *int64 `json:"sinceDate"`
-		UntilDate             *int64 `json:"untilDate"`
-		WithFiles             bool   `json:"withFiles"`
-		WithRenotes           *bool  `json:"withRenotes"`
-		IncludeMyRenotes      *bool  `json:"includeMyRenotes"`
-		IncludeRenotedMyNotes *bool  `json:"includeRenotedMyNotes"`
-		IncludeLocalRenotes   *bool  `json:"includeLocalRenotes"`
+		ListID                string     `json:"listId"`
+		Limit                 *jsnum.Int `json:"limit"`
+		SinceID               string     `json:"sinceId"`
+		UntilID               string     `json:"untilId"`
+		SinceDate             *jsnum.Int `json:"sinceDate"`
+		UntilDate             *jsnum.Int `json:"untilDate"`
+		WithFiles             bool       `json:"withFiles"`
+		WithRenotes           *bool      `json:"withRenotes"`
+		IncludeMyRenotes      *bool      `json:"includeMyRenotes"`
+		IncludeRenotedMyNotes *bool      `json:"includeRenotedMyNotes"`
+		IncludeLocalRenotes   *bool      `json:"includeLocalRenotes"`
 	}
 	if err := c.Bind(&req); err != nil || req.ListID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "listId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -437,7 +438,7 @@ func (h *Handler) UserListTimeline(c echo.Context) error {
 		}
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -497,11 +498,11 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	var req struct {
 		Tag       string     `json:"tag"`
 		Query     [][]string `json:"query"`
-		Limit     *int       `json:"limit"`
+		Limit     *jsnum.Int `json:"limit"`
 		SinceID   string     `json:"sinceId"`
 		UntilID   string     `json:"untilId"`
-		SinceDate *int64     `json:"sinceDate"`
-		UntilDate *int64     `json:"untilDate"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 		Reply     *bool      `json:"reply"`
 		Renote    *bool      `json:"renote"`
 		Poll      *bool      `json:"poll"`
@@ -556,12 +557,12 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 	if len(tagGroups) == 0 {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "tag is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -698,10 +699,10 @@ func (h *Handler) Clips(c echo.Context) error {
 // Translate handles POST /api/notes/translate.
 func (h *Handler) Translate(c echo.Context) error {
 	var req struct {
-		NoteID     string `json:"noteId"`
-		TargetLang string `json:"targetLang"`
+		NoteID     string  `json:"noteId"`
+		TargetLang *string `json:"targetLang"`
 	}
-	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.TargetLang == "" {
+	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.TargetLang == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "noteId and targetLang are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
@@ -779,7 +780,24 @@ func (h *Handler) Translate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("UNAVAILABLE", "Translate of notes unavailable.", "50a70314-2d8a-431b-b433-efa5cc56444c"))
 	}
 
-	result, err := h.translator.Translate(c.Request().Context(), text, req.TargetLang)
+	// 本家の paramDef は targetLang を string とするだけで、空文字も通す。ノートの
+	// 照合・可視性・空の本文・翻訳の設定の判定は本家と同じ順で先に済ませ、翻訳に
+	// 回す直前で拒否する (#3847)。本家は空の言語を DeepL へ送り、500 になる。
+	if *req.TargetLang == "" {
+		if cc, ok := h.translator.(translatorConfigured); ok {
+			configured, err := cc.Configured()
+			if err != nil {
+				slog.Error("notes/translate: reading translator settings failed", "err", err)
+				return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Translation failed.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+			}
+			if !configured {
+				return c.JSON(http.StatusBadRequest, apierr.Error("UNAVAILABLE", "Translate of notes unavailable.", "50a70314-2d8a-431b-b433-efa5cc56444c"))
+			}
+		}
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "targetLang is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+
+	result, err := h.translator.Translate(c.Request().Context(), text, *req.TargetLang)
 	if errors.Is(err, translate.ErrNotConfigured) {
 		// キーは翻訳のたびに meta から読む (#3663)。未設定は本家の
 		// `deeplAuthKey == null` と同じ unavailable にする (上の nil と同じ応答)。
@@ -796,6 +814,13 @@ func (h *Handler) Translate(c echo.Context) error {
 		"sourceLang": result.SourceLang,
 		"text":       result.Text,
 	})
+}
+
+// translatorConfigured is implemented by translators that read their settings
+// per call (translate.MetaDeepL), so the handler can answer UNAVAILABLE before
+// rejecting an empty targetLang, in upstream's order.
+type translatorConfigured interface {
+	Configured() (bool, error)
 }
 
 // translateHiddenByAuthorPrefs reports whether the packed note would carry

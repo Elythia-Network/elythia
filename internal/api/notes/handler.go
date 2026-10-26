@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/note"
@@ -788,26 +789,27 @@ func (h *Handler) Delete(c echo.Context) error {
 
 // listRequest is the common pagination request shared by renotes/replies/children.
 type listRequest struct {
-	NoteID    string `json:"noteId"`
-	Limit     *int   `json:"limit"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	NoteID    string     `json:"noteId"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // normalize validates limit and resolves the date cursors. ok=false は
 // limit が upstream paramDef の範囲外で、呼び出し側は 400 を返す。
 func (r *listRequest) normalize() bool {
-	limit, ok := pagination.ResolveLimit(r.Limit, 10, 100)
+	limit, ok := pagination.ResolveLimit(r.Limit.IntPtr(), 10, 100)
 	if !ok {
 		return false
 	}
-	r.Limit = &limit
+	v := jsnum.Int(limit)
+	r.Limit = &v
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。serveList から
 	// 呼ばれて Renotes / Replies / Children の 3 handler で一括適用される。
 	// **列に入らないカーソルもここで ok=false にする (#3025)。**
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(r.SinceID, r.UntilID, r.SinceDate, r.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(r.SinceID, r.UntilID, r.SinceDate.Int64Ptr(), r.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return false
 	}
@@ -818,21 +820,21 @@ func (r *listRequest) normalize() bool {
 // Renotes handles POST /api/notes/renotes.
 func (h *Handler) Renotes(c echo.Context) error {
 	return h.serveList(c, "12908022-2e21-46cd-ba6a-3edaf6093f46", func(viewer *model.User, req listRequest) ([]*model.Note, error) {
-		return h.queryService.ListRenotes(viewer, req.NoteID, req.UntilID, req.SinceID, *req.Limit)
+		return h.queryService.ListRenotes(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
 // Replies handles POST /api/notes/replies.
 func (h *Handler) Replies(c echo.Context) error {
 	return h.serveList(c, apierr.UUIDNoSuchNote, func(viewer *model.User, req listRequest) ([]*model.Note, error) {
-		return h.queryService.ListReplies(viewer, req.NoteID, req.UntilID, req.SinceID, *req.Limit)
+		return h.queryService.ListReplies(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
 // Children handles POST /api/notes/children.
 func (h *Handler) Children(c echo.Context) error {
 	return h.serveList(c, apierr.UUIDNoSuchNote, func(viewer *model.User, req listRequest) ([]*model.Note, error) {
-		return h.queryService.ListChildren(viewer, req.NoteID, req.UntilID, req.SinceID, *req.Limit)
+		return h.queryService.ListChildren(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
@@ -1011,20 +1013,20 @@ func (h *Handler) applyThreadMute(viewer *model.User, notes []*model.Note) ([]*m
 // が指定されたときは ID generator で対応する note ID に変換し、`sinceId` /
 // `untilId` のフォールバックとして使う。`host == "."` はローカル限定検索。
 type SearchRequest struct {
-	Query     string `json:"query"`
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
-	UserID    string `json:"userId"`
-	ChannelID string `json:"channelId"`
-	Host      string `json:"host"`
+	Query     string     `json:"query"`
+	Limit     *jsnum.Int `json:"limit"`
+	Offset    jsnum.Int  `json:"offset"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
+	UserID    string     `json:"userId"`
+	ChannelID string     `json:"channelId"`
+	Host      string     `json:"host"`
 	// rangeStartAt / rangeEndAt は投稿日時範囲 (epoch ms、upstream #16119 #2069)。
 	// sinceDate/untilDate (cursor 正規化用) とは別物で、cursor と独立に AND される。
-	RangeStartAt *int64 `json:"rangeStartAt"`
-	RangeEndAt   *int64 `json:"rangeEndAt"`
+	RangeStartAt *jsnum.Int `json:"rangeStartAt"`
+	RangeEndAt   *jsnum.Int `json:"rangeEndAt"`
 }
 
 // Search handles POST /api/notes/search.
@@ -1036,13 +1038,13 @@ func (h *Handler) Search(c echo.Context) error {
 	if h.searchService == nil {
 		return apierr.JSONInternalError(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1081,8 +1083,8 @@ func (h *Handler) Search(c echo.Context) error {
 		UserID:         req.UserID,
 		ChannelID:      req.ChannelID,
 		Host:           req.Host,
-		RangeStartAt:   req.RangeStartAt,
-		RangeEndAt:     req.RangeEndAt,
+		RangeStartAt:   req.RangeStartAt.Int64Ptr(),
+		RangeEndAt:     req.RangeEndAt.Int64Ptr(),
 		LocalUsersOnly: localUsersOnly,
 	}
 	// upstream searchNoteByLike / searchNoteByMeilisearch は generateBaseNoteFilteringQuery
@@ -1091,7 +1093,7 @@ func (h *Handler) Search(c echo.Context) error {
 	// applyMuteBlock を適用する (#1938、searchVisiblePage の中)。upstream search は
 	// thread-mute を掛けないため applyThreadMute は不要。
 	packed, err := h.searchVisiblePage(c.Request().Context(), viewer, limit,
-		searchPage{sinceID: sinceID, untilID: untilID, offset: req.Offset},
+		searchPage{sinceID: sinceID, untilID: untilID, offset: int(req.Offset)},
 		func(p searchPage) ([]*model.Note, error) {
 			o := opts
 			o.Offset = p.offset
@@ -1223,9 +1225,9 @@ func (h *Handler) State(c echo.Context) error {
 
 // ConversationRequest is the request body for notes/conversation.
 type ConversationRequest struct {
-	NoteID string `json:"noteId"`
-	Limit  *int   `json:"limit"`
-	Offset int    `json:"offset"`
+	NoteID string     `json:"noteId"`
+	Limit  *jsnum.Int `json:"limit"`
+	Offset jsnum.Int  `json:"offset"`
 }
 
 // Conversation handles POST /api/notes/conversation.
@@ -1234,7 +1236,7 @@ func (h *Handler) Conversation(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -1248,7 +1250,7 @@ func (h *Handler) Conversation(c echo.Context) error {
 	if h.visitorHidesAll(viewer) {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	notes, err := h.queryService.Conversation(viewer, req.NoteID, limit, req.Offset)
+	notes, err := h.queryService.Conversation(viewer, req.NoteID, limit, int(req.Offset))
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (#2799)。`Conversation` は #2799 で
 		// raw DB error も返すようになったので、sentinel かどうかで分ける。
@@ -1290,16 +1292,16 @@ func (h *Handler) BulkShow(c echo.Context) error {
 	var req struct {
 		NoteIDs []string `json:"noteIds"`
 		// upstream notes.ts public-note timeline params (noteIds 不在時に使用)。
-		Local     bool   `json:"local"`
-		Reply     *bool  `json:"reply"`
-		Renote    *bool  `json:"renote"`
-		WithFiles *bool  `json:"withFiles"`
-		Poll      *bool  `json:"poll"`
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		Local     bool       `json:"local"`
+		Reply     *bool      `json:"reply"`
+		Renote    *bool      `json:"renote"`
+		WithFiles *bool      `json:"withFiles"`
+		Poll      *bool      `json:"poll"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -1327,11 +1329,11 @@ func (h *Handler) BulkShow(c echo.Context) error {
 	// noteIds 不在時は upstream notes.ts の public note 一覧。public note のみなので追加の
 	// visibility filter は不要 (upstream も requireCredential:false)。未ログインの閲覧者
 	// 向けの ugcVisibilityForVisitor は下で掛ける。
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

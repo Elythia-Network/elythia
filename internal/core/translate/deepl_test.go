@@ -180,3 +180,25 @@ func TestNewMetaDeepL_DefaultEndpoints(t *testing.T) {
 	assert.Equal(t, deeplProURL, m.proURL)
 	assert.Same(t, http.DefaultClient, m.client)
 }
+
+// Configured reads the current settings: true only when a key is set, and
+// ErrSettingsUnavailable when the settings cannot be read (#3847).
+func TestMetaDeepL_Configured(t *testing.T) {
+	key, settingsErr := "", error(nil)
+	m := NewMetaDeepL(func() (string, bool, error) { return key, false, settingsErr }, nil)
+
+	ok, err := m.Configured()
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	key = "free-key"
+	ok, err = m.Configured()
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	settingsErr = errors.New("db down")
+	ok, err = m.Configured()
+	require.ErrorIs(t, err, ErrSettingsUnavailable)
+	assert.Contains(t, err.Error(), "db down")
+	assert.False(t, ok)
+}

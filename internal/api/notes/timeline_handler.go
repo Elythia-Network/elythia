@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/core/timeline"
@@ -20,18 +21,18 @@ import (
 
 // TimelineRequest is the common request body for the four timeline endpoints.
 type TimelineRequest struct {
-	Limit                 *int   `json:"limit"`
-	SinceID               string `json:"sinceId"`
-	UntilID               string `json:"untilId"`
-	SinceDate             *int64 `json:"sinceDate"`
-	UntilDate             *int64 `json:"untilDate"`
-	WithFiles             bool   `json:"withFiles"`
-	WithRenotes           *bool  `json:"withRenotes"`
-	WithReplies           *bool  `json:"withReplies"`
-	IncludeMyRenotes      *bool  `json:"includeMyRenotes"`
-	IncludeRenotedMyNotes *bool  `json:"includeRenotedMyNotes"`
-	IncludeLocalRenotes   *bool  `json:"includeLocalRenotes"`
-	AllowPartial          bool   `json:"allowPartial"`
+	Limit                 *jsnum.Int `json:"limit"`
+	SinceID               string     `json:"sinceId"`
+	UntilID               string     `json:"untilId"`
+	SinceDate             *jsnum.Int `json:"sinceDate"`
+	UntilDate             *jsnum.Int `json:"untilDate"`
+	WithFiles             bool       `json:"withFiles"`
+	WithRenotes           *bool      `json:"withRenotes"`
+	WithReplies           *bool      `json:"withReplies"`
+	IncludeMyRenotes      *bool      `json:"includeMyRenotes"`
+	IncludeRenotedMyNotes *bool      `json:"includeRenotedMyNotes"`
+	IncludeLocalRenotes   *bool      `json:"includeLocalRenotes"`
+	AllowPartial          bool       `json:"allowPartial"`
 
 	// visitorPolicy is meta.ugcVisibilityForVisitor resolved once per request
 	// by serveTimeline (empty for signed-in viewers).
@@ -47,11 +48,12 @@ type TimelineRequest struct {
 // normalize validates limit against upstream の paramDef。ok=false は範囲外で、
 // 呼び出し側は 400 INVALID_PARAM を返す。
 func (r *TimelineRequest) normalize() bool {
-	limit, ok := pagination.ResolveLimit(r.Limit, 10, 100)
+	limit, ok := pagination.ResolveLimit(r.Limit.IntPtr(), 10, 100)
 	if !ok {
 		return false
 	}
-	r.Limit = &limit
+	v := jsnum.Int(limit)
+	r.Limit = &v
 	return true
 }
 
@@ -101,7 +103,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 			FollowedChannelIDs:    req.rel.timelineFollowedChannelIDs(),
 			FollowingIDs:          req.rel.timelineFollowingIDs(),
 		}
-		return h.timelineService.HomeTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, *req.Limit, f)
+		return h.timelineService.HomeTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, true)
 }
 
@@ -123,7 +125,7 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 			BlockerIDs:         req.rel.timelineBlockerIDs(),
 			MutedInstances:     h.loadMutedInstances(viewer),
 		}
-		return h.timelineService.LocalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, *req.Limit, f)
+		return h.timelineService.LocalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, false)
 }
 
@@ -149,7 +151,7 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 			// Redis 経路と DB 経路の両方で落とす。
 			LocalUsersOnly: req.visitorPolicy == ugcvisibility.Local,
 		}
-		return h.timelineService.GlobalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, *req.Limit, f)
+		return h.timelineService.GlobalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, false)
 }
 
@@ -184,7 +186,7 @@ func (h *Handler) HybridTimeline(c echo.Context) error {
 			FollowedChannelIDs: req.rel.timelineFollowedChannelIDs(),
 			FollowingIDs:       req.rel.timelineFollowingIDs(),
 		}
-		return h.timelineService.HybridTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, *req.Limit, f)
+		return h.timelineService.HybridTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, true)
 }
 
@@ -387,7 +389,7 @@ func (h *Handler) serveTimeline(
 	// を生成していたが、SQL `id > Generate(time)` 比較では同 msec の早期 ID
 	// を取りこぼすバグがあった。AidxCutoffPrefix (= time prefix + "00000000")
 	// で deterministic + 同 msec 内全 ID を含む正しい cutoff に修正。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

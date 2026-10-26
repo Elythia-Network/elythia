@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -12,8 +13,8 @@ import (
 
 // PollVoteRequest is the request body for notes/polls/vote.
 type PollVoteRequest struct {
-	NoteID string `json:"noteId"`
-	Choice *int   `json:"choice"`
+	NoteID string     `json:"noteId"`
+	Choice *jsnum.Int `json:"choice"`
 }
 
 // PollsVote handles POST /api/notes/polls/vote.
@@ -24,7 +25,7 @@ func (h *Handler) PollsVote(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	if err := h.pollService.Vote(user, req.NoteID, *req.Choice); err != nil {
+	if err := h.pollService.Vote(user, req.NoteID, int(*req.Choice)); err != nil {
 		switch {
 		case errors.Is(err, poll.ErrNoteNotFound), errors.Is(err, poll.ErrNoteNotVisible):
 			// 見えないノートは、存在しないノートと同じ応答にする。本家 vote.ts も
