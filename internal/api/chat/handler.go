@@ -30,30 +30,33 @@ func legacyNow() time.Time { return time.Now() }
 // chatPageParams holds the standard chat list pagination params (#1747)。
 // 各 list endpoint の request struct に埋め込んで limit + 4 cursor を受ける。
 type chatPageParams struct {
-	Limit     int    `json:"limit"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // cursor normalizes the 4 cursor params to (sinceID, untilID) via
 // id.NormalizeCursor (sinceDate/untilDate を aidx prefix へ変換)。
 //
-// ok=false は列に入らないカーソルで、呼び出し側は 400 を返すこと (#3025)。
+// ok=false は列に入らないカーソルか範囲外の limit で、呼び出し側は 400 を
+// 返すこと (#3025)。本家の paramDef は limit を minimum:1 / maximum:100 とし、
+// 範囲外は丸めずに拒否する。検証器が飛ばす入力でも同じに見る (#3841)。
 func (p chatPageParams) cursor() (string, string, bool) {
-	return id.NormalizeCursor(p.SinceID, p.UntilID, p.SinceDate, p.UntilDate)
+	if p.Limit != nil && (*p.Limit < 1 || *p.Limit > 100) {
+		return "", "", false
+	}
+	return id.NormalizeCursor(p.SinceID, p.UntilID, p.SinceDate.Int64Ptr(), p.UntilDate.Int64Ptr())
 }
 
-// clampedLimit resolves limit<=0 to def and caps at 100 (upstream maximum)。
-func (p chatPageParams) clampedLimit(def int) int {
-	if p.Limit <= 0 {
+// limitOr resolves an omitted limit to def. The range is checked by
+// cursor.
+func (p chatPageParams) limitOr(def int) int {
+	if p.Limit == nil {
 		return def
 	}
-	if p.Limit > 100 {
-		return 100
-	}
-	return p.Limit
+	return int(*p.Limit)
 }
 
 // Handler handles chat/* endpoints.
@@ -691,19 +694,21 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 func (h *Handler) RoomsCreate(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name        *string `json:"name"`
+		Description string  `json:"description"`
 	}
-	if err := c.Bind(&req); err != nil || req.Name == "" {
+	// 本家の paramDef は name を required の string とするだけなので、空文字の
+	// 名前でも部屋を作る (#3841)。
+	if err := c.Bind(&req); err != nil || req.Name == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name maxLength:256 / description maxLength:1024
 	// (chat/rooms/create.ts)。超過は schema validation で弾かれるため INVALID_PARAM。
-	if utf8.RuneCountInString(req.Name) > 256 || utf8.RuneCountInString(req.Description) > 1024 {
+	if utf8.RuneCountInString(*req.Name) > 256 || utf8.RuneCountInString(req.Description) > 1024 {
 		return apierr.JSONInvalidParam(c)
 	}
 	room := &model.ChatRoom{
-		ID: h.idGen.Generate(time.Now()), Name: req.Name,
+		ID: h.idGen.Generate(time.Now()), Name: *req.Name,
 		OwnerID: user.ID, Description: req.Description,
 	}
 	if err := h.repo.CreateRoom(room); err != nil {
@@ -834,7 +839,7 @@ func (h *Handler) RoomsOwned(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rooms, _ := h.repo.ListRoomsByOwner(user.ID, sinceID, untilID, req.clampedLimit(30))
+	rooms, _ := h.repo.ListRoomsByOwner(user.ID, sinceID, untilID, req.limitOr(30))
 	result := make([]map[string]any, len(rooms))
 	for i, r := range rooms {
 		// 全 room の owner = user.ID (= 一覧の filter 条件)。packRoomDetailed は
@@ -852,11 +857,22 @@ func (h *Handler) RoomsJoined(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	// rooms/joined は Elythia 独自の endpoint で、limit の 0 以下を既定の 30、
+	// 101 以上を 100 に丸めると宣言している (elythia-js)。本家に揃えた cursor の
+	// 範囲検査より先に丸め、独自の endpoint の意味を変えない (#3841)。
+	if req.Limit != nil {
+		if *req.Limit < 1 {
+			req.Limit = nil
+		} else if *req.Limit > 100 {
+			capped := jsnum.Int(100)
+			req.Limit = &capped
+		}
+	}
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rooms, _ := h.repo.ListJoinedRooms(user.ID, sinceID, untilID, req.clampedLimit(30))
+	rooms, _ := h.repo.ListJoinedRooms(user.ID, sinceID, untilID, req.limitOr(30))
 	result := make([]map[string]any, len(rooms))
 	for i, r := range rooms {
 		// joined 一覧は本人が member の room なので room ごとに membership
@@ -1343,12 +1359,17 @@ func (h *Handler) Messages(c echo.Context) error {
 func (h *Handler) MessagesSearch(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Query  string `json:"query"`
-		Limit  int    `json:"limit"`
-		UserID string `json:"userId"`
-		RoomID string `json:"roomId"`
+		Query  string     `json:"query"`
+		Limit  *jsnum.Int `json:"limit"`
+		UserID string     `json:"userId"`
+		RoomID string     `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil {
+		return apierr.JSONInvalidParam(c)
+	}
+	// 本家の paramDef は limit を 1〜100 (既定 10) とし、範囲外は拒否する (#3841)。
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
+	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// roomId 指定時は upstream search.ts と同じく room が存在し、かつ自分が member
@@ -1364,7 +1385,7 @@ func (h *Handler) MessagesSearch(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROOM", "No such room.", "460b3669-81b0-4dc9-a997-44442141bf83"))
 		}
 	}
-	msgs, _ := h.repo.SearchMessages(user.ID, req.Query, req.Limit, req.UserID, req.RoomID)
+	msgs, _ := h.repo.SearchMessages(user.ID, req.Query, limit, req.UserID, req.RoomID)
 	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
 
@@ -1391,14 +1412,16 @@ func (h *Handler) ReactionsCreate(c echo.Context) error {
 func (h *Handler) ReactionsDelete(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		MessageID string `json:"messageId"`
-		Reaction  string `json:"reaction"`
+		MessageID string  `json:"messageId"`
+		Reaction  *string `json:"reaction"`
 	}
-	if err := c.Bind(&req); err != nil || req.MessageID == "" || req.Reaction == "" {
+	// 本家の paramDef は reaction を required の string とするだけなので、空文字も
+	// 通す (#3841)。
+	if err := c.Bind(&req); err != nil || req.MessageID == "" || req.Reaction == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// service 経由で RemoveReaction + unreact stream event を発火する (#1549)。
-	if err := h.svc.Unreact(c.Request().Context(), req.MessageID, user, req.Reaction); err != nil {
+	if err := h.svc.Unreact(c.Request().Context(), req.MessageID, user, *req.Reaction); err != nil {
 		return reactionErr(c, err, chatUnreactNoSuchMessageID)
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -1772,7 +1795,7 @@ func (h *Handler) UserTimeline(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	msgs, err := h.repo.ListMessagesByUser(user.ID, req.UserID, sinceID, untilID, req.clampedLimit(10))
+	msgs, err := h.repo.ListMessagesByUser(user.ID, req.UserID, sinceID, untilID, req.limitOr(10))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -1813,7 +1836,7 @@ func (h *Handler) RoomTimeline(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	msgs, err := h.repo.ListMessagesByRoom(req.RoomID, sinceID, untilID, req.clampedLimit(10))
+	msgs, err := h.repo.ListMessagesByRoom(req.RoomID, sinceID, untilID, req.limitOr(10))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -1859,7 +1882,7 @@ func (h *Handler) InvitationsInbox(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.repo.ListInvitationsByUser(user.ID, false, sinceID, untilID, req.clampedLimit(30))
+	rows, err := h.repo.ListInvitationsByUser(user.ID, false, sinceID, untilID, req.limitOr(30))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -1898,7 +1921,7 @@ func (h *Handler) InvitationsOutbox(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.repo.ListInvitationsByRoom(req.RoomID, sinceID, untilID, req.clampedLimit(30))
+	rows, err := h.repo.ListInvitationsByRoom(req.RoomID, sinceID, untilID, req.limitOr(30))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -1982,7 +2005,7 @@ func (h *Handler) RoomsJoining(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.repo.ListMembershipsByUser(user.ID, sinceID, untilID, req.clampedLimit(30))
+	rows, err := h.repo.ListMembershipsByUser(user.ID, sinceID, untilID, req.limitOr(30))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -2021,7 +2044,7 @@ func (h *Handler) RoomsMembers(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	members, err := h.repo.ListMembersByRoomPaged(req.RoomID, sinceID, untilID, req.clampedLimit(30))
+	members, err := h.repo.ListMembersByRoomPaged(req.RoomID, sinceID, untilID, req.limitOr(30))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -2055,8 +2078,8 @@ func (h *Handler) RoomsMembers(c echo.Context) error {
 func (h *Handler) History(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit int  `json:"limit"`
-		Room  bool `json:"room"`
+		Limit *jsnum.Int `json:"limit"`
+		Room  bool       `json:"room"`
 		// UntilID is an Elythia addition (#3653): the id of the last message
 		// of the previous page. Upstream has no way to read past `limit`
 		// conversations.
@@ -2071,20 +2094,19 @@ func (h *Handler) History(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	if req.Limit <= 0 {
-		req.Limit = 10
-	}
-	if req.Limit > 100 {
-		req.Limit = 100
+	// 本家の paramDef は limit を 1〜100 (既定 10) とし、範囲外は丸めずに拒否する (#3841)。
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
+	if !limitOK {
+		return apierr.JSONInvalidParam(c)
 	}
 	var (
 		msgs []*model.ChatMessage
 		err  error
 	)
 	if req.Room {
-		msgs, err = h.repo.ListRoomHistory(user.ID, req.Limit, untilID)
+		msgs, err = h.repo.ListRoomHistory(user.ID, limit, untilID)
 	} else {
-		msgs, err = h.repo.ListUserHistory(user.ID, req.Limit, untilID)
+		msgs, err = h.repo.ListUserHistory(user.ID, limit, untilID)
 	}
 	if err != nil {
 		return apierr.JSONInternalError(c)
