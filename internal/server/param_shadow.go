@@ -33,7 +33,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // i/notifications-grouped in #3851; admin/ad/*, admin/announcements/*,
 // admin/avatar-decorations/*, admin/invite/*, admin/promo/create, admin/meta,
 // admin/server-info, admin/get-index-stats, admin/get-table-stats and
-// admin/show-moderation-logs in #3854).
+// admin/show-moderation-logs in #3854; admin/drive/* except admin/drive/files
+// and admin/emoji/* except admin/emoji/add in #3857).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -393,6 +394,21 @@ var paramEnforcedEndpoints = []string{
 	"admin/meta",
 	"admin/server-info",
 	"admin/show-moderation-logs",
+	"admin/drive/clean-remote-files",
+	"admin/drive/cleanup",
+	"admin/drive/show-file",
+	"admin/emoji/add-aliases-bulk",
+	"admin/emoji/copy",
+	"admin/emoji/delete",
+	"admin/emoji/delete-bulk",
+	"admin/emoji/import-zip",
+	"admin/emoji/list",
+	"admin/emoji/list-remote",
+	"admin/emoji/remove-aliases-bulk",
+	"admin/emoji/set-aliases-bulk",
+	"admin/emoji/set-category-bulk",
+	"admin/emoji/set-license-bulk",
+	"admin/emoji/update",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
