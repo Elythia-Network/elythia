@@ -1515,9 +1515,9 @@ func TestHistory(t *testing.T) {
 	// room=true → ListRoomHistory に dispatch (#692)
 	rec3 := post(h.History, `{"room":true,"limit":3}`, u1)
 	assert.Equal(t, http.StatusOK, rec3.Code)
-	// limit clamp: 0 → 10, 9999 → 100 (内部分岐の coverage 確保)
-	assert.Equal(t, http.StatusOK, post(h.History, `{"limit":0}`, u1).Code)
-	assert.Equal(t, http.StatusOK, post(h.History, `{"limit":9999}`, u1).Code)
+	// 本家の paramDef は limit を 1〜100 とし、範囲外は丸めずに拒否する (#3841)。
+	assert.Equal(t, http.StatusBadRequest, post(h.History, `{"limit":0}`, u1).Code)
+	assert.Equal(t, http.StatusBadRequest, post(h.History, `{"limit":9999}`, u1).Code)
 }
 
 // historyRepo overrides ListUserHistory / ListRoomHistory to return seeded
