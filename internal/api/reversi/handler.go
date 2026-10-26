@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
+	"github.com/elythia-network/elythia/internal/api/pagination"
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -259,33 +261,33 @@ func (h *Handler) resolveAcct(acct string) (string, error) {
 // ページを繰り返しロードするので必須 (#417 P1 UDS 検証で発覚)。
 func (h *Handler) Games(c echo.Context) error {
 	var req struct {
-		Limit     int    `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		My        bool   `json:"my"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		My        bool       `json:"my"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	if req.Limit <= 0 {
-		req.Limit = 10
-	}
-	if req.Limit > 100 {
-		req.Limit = 100
+	// 本家の paramDef は limit を 1〜100 (既定 10) とし、範囲外は丸めずに拒否する。
+	// 検証器が飛ばす入力でも同じに見る (#3843)。
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
+	if !limitOK {
+		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	viewer := middleware.GetUser(c)
 	var games []*model.ReversiGame
 	if req.My && viewer != nil {
-		games, _ = h.repo.ListByUserCursor(viewer.ID, sinceID, untilID, req.Limit)
+		games, _ = h.repo.ListByUserCursor(viewer.ID, sinceID, untilID, limit)
 	} else {
-		games, _ = h.repo.ListStartedCursor(sinceID, untilID, req.Limit)
+		games, _ = h.repo.ListStartedCursor(sinceID, untilID, limit)
 	}
 	// #2106 L15 (cherrypick-lineage divergence): vanilla の reversi/games は ReversiGameLite
 	// (form1/form2/logs/map を含まない) を返すが、mk-go は cherrypick 系統 + 連合対戦拡張
@@ -418,6 +420,23 @@ func (h *Handler) Match(c echo.Context) error {
 		return h.matchAny(c, user, req.NoIrregularRules, req.Multiple)
 	}
 
+	// target user を一度だけ引いて pre-check と deliver 両方で使い回す
+	// (#417 P3 Devin review: 元実装では pre-check と delivery で 2 回
+	// FindByID していた)。本家 match.ts は相手を引けなければ招待より先に
+	// NO_SUCH_USER を返す。以前は引けないまま game 行を作り、FK 違反の 500 に
+	// なっていた (#3843)。DB の障害は not-found に丸めない (#2792)。
+	var targetUser *model.User
+	if h.userRepo != nil {
+		u, err := h.userRepo.FindByID(req.UserID)
+		if err != nil {
+			if !repository.IsNotFound(err) {
+				return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+			}
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "0b4f0559-b484-4e31-9581-3f73cee89b28"))
+		}
+		targetUser = u
+	}
+
 	// 既に相手から招待を受けている pending game があれば、それを accept 扱いで
 	// 再利用する (#417 P1)。CherryPick 本家の matchSpecificUser と同じ動作:
 	// inbound Invite 経由で作成された reversi_game 行 (User1=相手, User2=自分)
@@ -442,16 +461,6 @@ func (h *Handler) Match(c echo.Context) error {
 			// (match.ts:68 `if (game == null) return;`)。200 で game を返すと
 			// フロントが即ゲーム画面に遷移してしまう (#1553 と同じ罠)。
 			return c.NoContent(http.StatusNoContent)
-		}
-	}
-
-	// target user を一度だけ引いて pre-check と deliver 両方で使い回す
-	// (#417 P3 Devin review: 元実装では pre-check と delivery で 2 回
-	// FindByID していた)。
-	var targetUser *model.User
-	if h.userRepo != nil {
-		if u, err := h.userRepo.FindByID(req.UserID); err == nil {
-			targetUser = u
 		}
 	}
 
@@ -714,12 +723,14 @@ func surrenderErrorResponse(c echo.Context, err error) error {
 // 走らせる。一致なら `{desynced: false}` のみ。
 func (h *Handler) Verify(c echo.Context) error {
 	var req struct {
-		GameID string `json:"gameId"`
-		CRC32  string `json:"crc32"`
+		GameID string  `json:"gameId"`
+		CRC32  *string `json:"crc32"`
 	}
 	// crc32 は upstream verify.ts:38-41 で required (gameId と同列)。欠落を
 	// 黙って desynced=false にすると client 側の desync が一生検出されない。
-	if err := c.Bind(&req); err != nil || req.GameID == "" || req.CRC32 == "" {
+	// 本家は required の string とするだけなので、空文字は通して保存済みの値と
+	// 比べる (#3843)。
+	if err := c.Bind(&req); err != nil || req.GameID == "" || req.CRC32 == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	game, err := h.repo.FindByID(req.GameID)
@@ -737,7 +748,7 @@ func (h *Handler) Verify(c echo.Context) error {
 	// なり desync 判定が本家と乖離するため、StartGame / PutStone が更新する
 	// 保存値をそのまま使う (#1553)。保存値が無い (開始前) 場合は本家同様
 	// 不一致 = desynced 扱いになり、client は game から状態を復元する。
-	desynced := game.CRC32 == nil || *game.CRC32 != req.CRC32
+	desynced := game.CRC32 == nil || *game.CRC32 != *req.CRC32
 	resp := map[string]any{"desynced": desynced}
 	if desynced {
 		resp["game"] = packGame(h.entityPacker, game, h.idGen)
