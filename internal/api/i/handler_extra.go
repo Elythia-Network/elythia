@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -37,11 +38,13 @@ const verifierRetryAfterSeconds = "360"
 func (h *Handler) ChangePassword(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		CurrentPassword string `json:"currentPassword"`
-		NewPassword     string `json:"newPassword"`
-		Token           string `json:"token"`
+		CurrentPassword *string `json:"currentPassword"`
+		NewPassword     string  `json:"newPassword"`
+		Token           string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
+	// 空のcurrentPasswordは照合に通し、「パスワードが違う」で返す。本家は空でも
+	// bcrypt.compareに渡す(一致しないので500)。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.CurrentPassword == nil || req.NewPassword == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "currentPassword and newPassword are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
@@ -86,7 +89,7 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 	if !ok {
 		return nil
 	}
-	scheme, outcome := password.Verify(c.Request().Context(), *profile.Password, req.CurrentPassword)
+	scheme, outcome := password.Verify(c.Request().Context(), *profile.Password, *req.CurrentPassword)
 	if outcome == password.OutcomeUnavailable {
 		// 照合していないので失敗として数えない。
 		attempt.Release(context.WithoutCancel(c.Request().Context()))
@@ -154,10 +157,12 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	}
 
 	var req struct {
-		Password string `json:"password"`
-		Token    string `json:"token"`
+		Password *string `json:"password"`
+		Token    string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" {
+	// 空のpasswordは照合に通し、「パスワードが違う」で返す。本家は空でも
+	// bcrypt.compareに渡す(一致しないので500)。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
@@ -193,7 +198,7 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	// upstream は素の `throw new Error('incorrect password')` で、ApiCallService が
 	// 500 INTERNAL_ERROR に包む。Elythia は理由が伝わるよう 400 INCORRECT_PASSWORD を
 	// 返す (comparePassword)。
-	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
+	if !h.comparePassword(c, u.ID, *profile.Password, *req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
 		return nil
 	}
 
@@ -346,11 +351,11 @@ func (h *Handler) isProtectedSelfDelete(u *model.User) (bool, error) {
 func (h *Handler) Favorites(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -359,11 +364,11 @@ func (h *Handler) Favorites(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -413,10 +418,12 @@ func (h *Handler) Favorites(c echo.Context) error {
 func (h *Handler) RegenerateToken(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Password string `json:"password"`
-		Token    string `json:"token"`
+		Password *string `json:"password"`
+		Token    string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" {
+	// 空のpasswordは照合に通し、「パスワードが違う」で返す。本家は空でも
+	// bcrypt.compareに渡す(一致しないので500)。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "password is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
@@ -456,7 +463,7 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 	// upstream は素の `throw new Error('incorrect password')` で、ApiCallService が
 	// 500 INTERNAL_ERROR に包む。Elythia は理由が伝わるよう 400 INCORRECT_PASSWORD を
 	// 返す (comparePassword)。
-	if !h.comparePassword(c, u.ID, *profile.Password, req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
+	if !h.comparePassword(c, u.ID, *profile.Password, *req.Password, "932c904e-9460-45b7-9ce6-7ed33be7eb2c") {
 		return nil
 	}
 

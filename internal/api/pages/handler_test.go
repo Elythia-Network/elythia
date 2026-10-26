@@ -513,6 +513,37 @@ func TestMy_RepoError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// mySpyRepo records the limit and offset ListByUser was called with.
+type mySpyRepo struct {
+	*testutil.MockPageRepository
+	gotLimit, gotOffset int
+}
+
+func (r *mySpyRepo) ListByUser(userID, since, until string, limit, offset int) ([]*model.Page, error) {
+	r.gotLimit, r.gotOffset = limit, offset
+	return r.MockPageRepository.ListByUser(userID, since, until, limit, offset)
+}
+
+// i/pages の整数は、本家の ajv と同じく 10.0 や 1e1 も受ける。本家の paramDef に
+// offset は無いので、型によらず読まない (#3851)。
+func TestMy_IntegerParamsLikeUpstream(t *testing.T) {
+	repo := &mySpyRepo{MockPageRepository: testutil.NewMockPageRepository()}
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen), idGen, nil, nil, nil)
+	for _, body := range []string{
+		`{"limit":1e1,"sinceDate":1.0,"untilDate":4102444800000.0}`,
+		`{"limit":10.0,"offset":"x"}`,
+		`{"limit":10,"offset":5}`,
+	} {
+		c, rec := newReq(t, body)
+		setUser(c, "alice")
+		require.NoError(t, h.My(c))
+		assert.Equal(t, http.StatusOK, rec.Code, body)
+		assert.Equal(t, 10, repo.gotLimit, body)
+		assert.Equal(t, 0, repo.gotOffset, body)
+	}
+}
+
 // --- Featured --------------------------------------------------------------
 
 func TestFeatured_Success(t *testing.T) {

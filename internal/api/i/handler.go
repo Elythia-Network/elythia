@@ -792,20 +792,22 @@ func (h *Handler) SetRegistryRepo(r repository.RegistryRepository) {
 func (h *Handler) RegistryGet(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Key    string   `json:"key"`
+		Key    *string  `json:"key"`
 		Scope  []string `json:"scope"`
 		Domain *string  `json:"domain"`
 	}
-	if err := c.Bind(&req); err != nil || req.Key == "" {
+	// 空のkeyは本家と同じく引きに行き、一致する値が無いのでNO_SUCH_KEYで返す。
+	// キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Key == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "key is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	if req.Scope == nil {
 		req.Scope = []string{}
 	}
-	if !validRegistryScope(req.Scope) || !storableRegistryValue(req.Key, req.Domain) {
+	if !validRegistryScope(req.Scope) || !storableRegistryValue(*req.Key, req.Domain) {
 		return apierr.JSONInvalidParam(c)
 	}
-	item, err := h.registryRepo.Get(u.ID, req.Key, req.Scope, registryEffectiveDomain(c, req.Domain))
+	item, err := h.registryRepo.Get(u.ID, *req.Key, req.Scope, registryEffectiveDomain(c, req.Domain))
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を「そんなキーは無い」にしない** (#2792)。registry は
 		// クライアントの設定同期に使うので、障害を 400 で返すと「消えた」と
@@ -927,20 +929,22 @@ func (h *Handler) RegistryKeysWithType(c echo.Context) error {
 func (h *Handler) RegistryRemove(c echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
-		Key    string   `json:"key"`
+		Key    *string  `json:"key"`
 		Scope  []string `json:"scope"`
 		Domain *string  `json:"domain"`
 	}
-	if err := c.Bind(&req); err != nil || req.Key == "" {
+	// 空のkeyは本家と同じく消しに行き、一致する値が無いので何も消さずに204を
+	// 返す。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Key == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "key is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	if req.Scope == nil {
 		req.Scope = []string{}
 	}
-	if !validRegistryScope(req.Scope) || !storableRegistryValue(req.Key, req.Domain) {
+	if !validRegistryScope(req.Scope) || !storableRegistryValue(*req.Key, req.Domain) {
 		return apierr.JSONInvalidParam(c)
 	}
-	if err := h.registryRepo.Remove(u.ID, req.Key, req.Scope, registryEffectiveDomain(c, req.Domain)); err != nil {
+	if err := h.registryRepo.Remove(u.ID, *req.Key, req.Scope, registryEffectiveDomain(c, req.Domain)); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	return c.NoContent(http.StatusNoContent)

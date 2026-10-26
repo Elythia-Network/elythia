@@ -25,10 +25,12 @@ import (
 func (h *Handler) TwoFARegister(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Password string `json:"password"`
-		Token    string `json:"token"`
+		Password *string `json:"password"`
+		Token    string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" {
+	// 空のpasswordは本家と同じく照合に通し、INCORRECT_PASSWORDで返す。キーが
+	// 無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	profile, perr := h.userService.GetProfileErr(user.ID)
@@ -61,7 +63,7 @@ func (h *Handler) TwoFARegister(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "78d6c839-20c9-4c66-b90a-fc0542168b48") {
+	if !h.comparePassword(c, user.ID, *profile.Password, *req.Password, "78d6c839-20c9-4c66-b90a-fc0542168b48") {
 		return nil
 	}
 
@@ -126,9 +128,11 @@ func (h *Handler) twoFAIssuer() string {
 func (h *Handler) TwoFADone(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Token string `json:"token"`
+		Token *string `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Token == "" {
+	// 空のtokenを先に拒否しない。ほかのtokenと同じく、設定を始めていなければ
+	// 400、始めていれば照合して403にする(#3851)。キーが無いものは本家も400。
+	if err := c.Bind(&req); err != nil || req.Token == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
@@ -150,7 +154,7 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 	// upstream done.ts:54 は `ps.token.replace(/\s/g, '')` で TOTP code から
 	// 全空白を除去してから検証する (authenticator が "123 456" のように表示する
 	// code を受け付ける、#1767)。strings.Fields は連続空白も畳む。
-	token := strings.Join(strings.Fields(req.Token), "")
+	token := strings.Join(strings.Fields(*req.Token), "")
 	// 仮の秘密は発行から PendingTTL のあいだ、PendingMaxAttempts 回まで確かめる
 	// (本家には期限も上限も無い)。超えた仮の秘密は捨て、register からやり直させる。
 	if h.twoFAPending != nil {
@@ -211,10 +215,12 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 func (h *Handler) TwoFAUnregister(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Password string `json:"password"`
-		Token    string `json:"token"`
+		Password *string `json:"password"`
+		Token    string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" {
+	// 空のpasswordは本家と同じく照合に通し、INCORRECT_PASSWORDで返す。キーが
+	// 無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	profile, perr := h.userService.GetProfileErr(user.ID)
@@ -247,7 +253,7 @@ func (h *Handler) TwoFAUnregister(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "7add0395-9901-4098-82f9-4f67af65f775") {
+	if !h.comparePassword(c, user.ID, *profile.Password, *req.Password, "7add0395-9901-4098-82f9-4f67af65f775") {
 		return nil
 	}
 
@@ -476,13 +482,15 @@ func twoFAKeyNameTooLong(c echo.Context) error {
 // は upstream と独立に維持する。
 func (h *Handler) TwoFARegisterKey(c echo.Context) error {
 	var req struct {
-		Password string `json:"password"`
-		Token    string `json:"token"`
+		Password *string `json:"password"`
+		Token    string  `json:"token"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" {
+	// 空のpasswordは本家と同じく照合に通し、INCORRECT_PASSWORDで返す。キーが
+	// 無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	user, profile, ok := h.requireWebAuthn(c, req.Password, "38769596-efe2-4faf-9bec-abbb3f2cd9ba")
+	user, profile, ok := h.requireWebAuthn(c, *req.Password, "38769596-efe2-4faf-9bec-abbb3f2cd9ba")
 	if !ok {
 		return nil
 	}
@@ -517,12 +525,14 @@ func (h *Handler) TwoFARegisterKey(c echo.Context) error {
 // 認証順序は TwoFARegisterKey と同じ (password → 2FA token)。
 func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 	var req struct {
-		Password   string          `json:"password"`
+		Password   *string         `json:"password"`
 		Token      string          `json:"token"`
 		Name       string          `json:"name"`
 		Credential json.RawMessage `json:"credential"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" || len(req.Credential) == 0 {
+	// 空のpasswordは本家と同じく照合に通し、INCORRECT_PASSWORDで返す。キーが
+	// 無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil || len(req.Credential) == 0 {
 		return apierr.JSONInvalidParam(c)
 	}
 	if req.Name == "" {
@@ -531,7 +541,7 @@ func (h *Handler) TwoFAKeyDone(c echo.Context) error {
 	if utf8.RuneCountInString(req.Name) > twoFAKeyNameMaxLen {
 		return twoFAKeyNameTooLong(c)
 	}
-	user, profile, ok := h.requireWebAuthn(c, req.Password, "0d7ec6d2-e652-443e-a7bf-9ee9a0cd77b0")
+	user, profile, ok := h.requireWebAuthn(c, *req.Password, "0d7ec6d2-e652-443e-a7bf-9ee9a0cd77b0")
 	if !ok {
 		return nil
 	}
@@ -637,11 +647,14 @@ func (h *Handler) publishMeUpdatedPartial(userID string, fields map[string]any) 
 // INVALID_TOKEN)。drop-in 互換性のため upstream 順で並べ直す。
 func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 	var req struct {
-		Password     string `json:"password"`
-		Token        string `json:"token"`
-		CredentialID string `json:"credentialId"`
+		Password     *string `json:"password"`
+		Token        string  `json:"token"`
+		CredentialID *string `json:"credentialId"`
 	}
-	if err := c.Bind(&req); err != nil || req.Password == "" || req.CredentialID == "" {
+	// 空のpasswordは本家と同じく照合に通し、INCORRECT_PASSWORDで返す。空の
+	// credentialIdも本家と同じく照合の後で消しに行き、一致する鍵が無いので何も
+	// 消さずに{}を返す。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Password == nil || req.CredentialID == nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.webauthnSvc == nil || h.securityKeyRepo == nil {
@@ -676,14 +689,14 @@ func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 			use.Rollback()
 		}
 	}()
-	if !h.comparePassword(c, user.ID, *profile.Password, req.Password, "141c598d-a825-44c8-9173-cfb9d92be493") {
+	if !h.comparePassword(c, user.ID, *profile.Password, *req.Password, "141c598d-a825-44c8-9173-cfb9d92be493") {
 		return nil
 	}
 
 	// upstream remove-key.ts:74-78 は delete を無条件に実行し no-match でも
 	// 成功 ({}) を返す (NO_SUCH_KEY error は定義されていない、#1767)。no-match
 	// (ErrRecordNotFound) は成功扱いで素通りし、実 DB error のみ 500 にする。
-	if err := h.securityKeyRepo.Delete(req.CredentialID, user.ID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := h.securityKeyRepo.Delete(*req.CredentialID, user.ID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return apierr.JSONInternalError(c)
 	}
 
@@ -710,10 +723,12 @@ func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 // 鍵の表示名を変更する。
 func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
 	var req struct {
-		CredentialID string `json:"credentialId"`
-		Name         string `json:"name"`
+		CredentialID *string `json:"credentialId"`
+		Name         string  `json:"name"`
 	}
-	if err := c.Bind(&req); err != nil || req.CredentialID == "" || req.Name == "" {
+	// 空のcredentialIdは本家と同じく鍵を引きに行き、NO_SUCH_KEYで返す。キーが
+	// 無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.CredentialID == nil || req.Name == "" {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name: { minLength: 1, maxLength: 30 }。TwoFAKeyDone と
@@ -739,7 +754,7 @@ func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
 	// upstream update-key.ts の noSuchKey / accessDenied は httpStatusCode 未指定
 	// = kind 'client' default = 400 (#1767)。code/id は一致させつつ status を
 	// 400 に揃える (以前は 404 / 403 を返していた)。
-	key, err := h.securityKeyRepo.FindByID(req.CredentialID)
+	key, err := h.securityKeyRepo.FindByID(*req.CredentialID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
@@ -750,7 +765,7 @@ func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
 	if key.UserID != user.ID {
 		return c.JSON(http.StatusBadRequest, apierr.AccessDenied())
 	}
-	if err := h.securityKeyRepo.UpdateName(req.CredentialID, user.ID, req.Name); err != nil {
+	if err := h.securityKeyRepo.UpdateName(*req.CredentialID, user.ID, req.Name); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.NoSuchKey())
 	}
 	// 表示名変更も meUpdated で UI 反映 (#707)。

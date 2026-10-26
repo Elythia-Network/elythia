@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
+	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -118,9 +120,9 @@ func (h *Handler) AuthorizedApps(c echo.Context) error {
 	}
 	u := middleware.GetUser(c)
 	var req struct {
-		Limit  *int   `json:"limit"`
-		Offset int    `json:"offset"`
-		Sort   string `json:"sort"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset jsnum.Int  `json:"offset"`
+		Sort   string     `json:"sort"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -128,7 +130,7 @@ func (h *Handler) AuthorizedApps(c echo.Context) error {
 	// limit: default 10, clamp 1..100 (authorized-apps.ts paramDef)。
 	limit := 10
 	if req.Limit != nil {
-		limit = *req.Limit
+		limit = int(*req.Limit)
 	}
 	if limit < 1 {
 		limit = 1
@@ -136,7 +138,7 @@ func (h *Handler) AuthorizedApps(c echo.Context) error {
 	if limit > 100 {
 		limit = 100
 	}
-	offset := req.Offset
+	offset := int(req.Offset)
 	if offset < 0 {
 		offset = 0
 	}
@@ -194,26 +196,32 @@ func (h *Handler) RevokeToken(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	var req struct {
-		TokenID string `json:"tokenId"`
-		Token   string `json:"token"`
+		TokenID *string                   `json:"tokenId"`
+		Token   optional.Nullable[string] `json:"token"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	if req.TokenID == "" && req.Token == "" {
+	if req.TokenID == nil && !req.Token.Present {
 		return apierr.JSONInvalidParam(c)
 	}
 	var tok *model.AccessToken
 	var err error
-	if req.TokenID != "" {
-		tok, err = h.accessTokenRepo.FindByID(req.TokenID)
-	} else {
+	switch {
+	case req.TokenID != nil:
+		tok, err = h.accessTokenRepo.FindByID(*req.TokenID)
+	case req.Token.Value == nil || *req.Token.Value == "":
+		// 本家と同じく、nullや空のtokenは何もせずに204を返す
+		// (revoke-token.tsの`if (ps.token == null || ps.token === '') return;`)。
+		// 以前は400にしていた(#3851)。
+		return c.NoContent(http.StatusNoContent)
+	default:
 		// hash 列 (miauth: sha256(token)) と token 列 (raw, app/auth) を 1 query
 		// で OR 検索する。middleware と同じ pattern (#910 / #913)。これにより
 		// app/auth flow で発行された access token も raw token 文字列で revoke
 		// できる。
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(req.Token)))
-		tok, err = h.accessTokenRepo.FindByHashOrToken(hash, req.Token)
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(*req.Token.Value)))
+		tok, err = h.accessTokenRepo.FindByHashOrToken(hash, *req.Token.Value)
 	}
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を「失効した」(204) に丸めない** (#2792)。呼び出し側は成功と

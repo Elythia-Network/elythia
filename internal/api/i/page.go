@@ -18,7 +18,7 @@ import (
 // 渡しているので、`page.user.username` を含む full entity が必要。
 //
 // 経路:
-//  1. page_like list (cursor 無し、limit/offset のみ)
+//  1. page_like list (limit と sinceId / untilId / sinceDate / untilDate)
 //  2. page を FindManyByIDs で 1 batch fetch
 //  3. ユニークな page owner を FindManyByIDs で 1 batch fetch
 //  4. page or owner が解決できない like 行は drop (= upstream packMany と同 fail-soft)
@@ -27,11 +27,11 @@ func (h *Handler) PageLikes(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	u := middleware.GetUser(c)
-	limit, offset, sinceID, untilID, cursorOK := paginationFromRequest(c)
+	limit, sinceID, untilID, cursorOK := paginationFromRequest(c)
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	likes, err := h.pageLikeRepo.ListByUser(u.ID, sinceID, untilID, limit, offset)
+	likes, err := h.pageLikeRepo.ListByUser(u.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

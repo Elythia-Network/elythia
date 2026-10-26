@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -11,29 +12,31 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// paginationFromRequest reads optional limit / offset / sinceId / untilId
-// JSON fields, with Misskey-friendly defaults (limit=10, offset=0,
-// limit clamped to 100). Cursor 指定時は frontend Paginator が untilId
-// / sinceId を投げてくる経路 (#493)。
+// paginationFromRequest reads optional limit / sinceId / untilId / sinceDate /
+// untilDate JSON fields, with Misskey-friendly defaults (limit=10, limit
+// clamped to 1..100). Cursor 指定時は frontend Paginator が untilId / sinceId を
+// 投げてくる経路 (#493)。
+//
+// 本家のi/gallery/likes・i/gallery/posts・i/page-likesのparamDefにoffsetは無いので
+// 読まない(#3851)。読むと、本家が無視する値で件数を飛ばし、型の違う値を400にする。
 //
 // ok=false は bind の失敗か列に入らないカーソルで、呼び出し側は 400 を返すこと
 // (#3025 / #3330)。
-func paginationFromRequest(c echo.Context) (limit, offset int, sinceID, untilID string, ok bool) {
+func paginationFromRequest(c echo.Context) (limit int, sinceID, untilID string, ok bool) {
 	var req struct {
-		Limit     *int   `json:"limit"`
-		Offset    *int   `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		// 本家は body の型違いや object でない body を ajv で 400 にする (#3330)。
-		return 0, 0, "", "", false
+		return 0, "", "", false
 	}
 	limit = 10
 	if req.Limit != nil {
-		limit = *req.Limit
+		limit = int(*req.Limit)
 	}
 	if limit < 1 {
 		limit = 1
@@ -41,16 +44,12 @@ func paginationFromRequest(c echo.Context) (limit, offset int, sinceID, untilID 
 	if limit > 100 {
 		limit = 100
 	}
-	if req.Offset != nil && *req.Offset > 0 {
-		offset = *req.Offset
-	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
-		return 0, 0, "", "", false
+		return 0, "", "", false
 	}
-	sinceID, untilID = cursorSince, cursorUntil
-	return limit, offset, sinceID, untilID, true
+	return limit, cursorSince, cursorUntil, true
 }
 
 // GalleryLikes handles POST /api/i/gallery/likes.
@@ -66,11 +65,11 @@ func (h *Handler) GalleryLikes(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	u := middleware.GetUser(c)
-	limit, offset, sinceID, untilID, cursorOK := paginationFromRequest(c)
+	limit, sinceID, untilID, cursorOK := paginationFromRequest(c)
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	likes, err := h.galleryRepo.ListLikesByUser(u.ID, sinceID, untilID, limit, offset)
+	likes, err := h.galleryRepo.ListLikesByUser(u.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -188,11 +187,11 @@ func (h *Handler) GalleryPosts(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	u := middleware.GetUser(c)
-	limit, offset, sinceID, untilID, cursorOK := paginationFromRequest(c)
+	limit, sinceID, untilID, cursorOK := paginationFromRequest(c)
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	posts, err := h.galleryRepo.ListByUser(u.ID, sinceID, untilID, limit, offset)
+	posts, err := h.galleryRepo.ListByUser(u.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

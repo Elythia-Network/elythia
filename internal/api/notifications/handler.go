@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -315,13 +316,13 @@ func (h *Handler) SetFollowRequestRepo(r repository.FollowRequestRepository) {
 
 // ListRequest is the request body for notifications.
 type ListRequest struct {
-	Limit        *int     `json:"limit"`
-	IncludeTypes []string `json:"includeTypes"`
-	ExcludeTypes []string `json:"excludeTypes"`
-	SinceID      string   `json:"sinceId"`
-	UntilID      string   `json:"untilId"`
-	SinceDate    *int64   `json:"sinceDate"`
-	UntilDate    *int64   `json:"untilDate"`
+	Limit        *jsnum.Int `json:"limit"`
+	IncludeTypes []string   `json:"includeTypes"`
+	ExcludeTypes []string   `json:"excludeTypes"`
+	SinceID      string     `json:"sinceId"`
+	UntilID      string     `json:"untilId"`
+	SinceDate    *jsnum.Int `json:"sinceDate"`
+	UntilDate    *jsnum.Int `json:"untilDate"`
 	// MarkAsRead controls whether fetching the notification list implicitly
 	// marks all notifications as read. nil / true means "mark as read"
 	// (default), explicit false leaves the read state untouched.
@@ -531,16 +532,17 @@ func (h *Handler) bindListRequest(c echo.Context) (ListRequest, bool) {
 	// (= aidx) で判定する設計なので adapter pattern で完結する。
 	// **列に入らないカーソルもここで ok=false にする (#3025)。** そのまま渡すと
 	// `id < ?` の bind parameter で落ちて 500 になる。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return req, false
 	}
 	req.SinceID, req.UntilID = cursorSince, cursorUntil
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return req, false
 	}
-	req.Limit = &limit
+	resolved := jsnum.Int(limit)
+	req.Limit = &resolved
 	return req, true
 }
 
@@ -607,7 +609,7 @@ func (h *Handler) collectNotificationsWithDropped(c echo.Context, user *model.Us
 	// 返す (#1953)。ここではその後段の drop (解決済み follow request / invalid
 	// notifier / 削除済 note) を適用する。**不可視 note の drop は mk-go 独自**で、
 	// upstream は hideNote で blank するだけで行を残す (下の #1953 ブロック参照)。
-	rows, err := h.svc.List(c.Request().Context(), user.ID, req.SinceID, req.UntilID, (*req.Limit), req.IncludeTypes, req.ExcludeTypes)
+	rows, err := h.svc.List(c.Request().Context(), user.ID, req.SinceID, req.UntilID, int(*req.Limit), req.IncludeTypes, req.ExcludeTypes)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
