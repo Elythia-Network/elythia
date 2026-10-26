@@ -153,7 +153,7 @@ func TestSetupRoutes_CacheInvalidationReachesOtherProcess(t *testing.T) {
 	require.NoError(t, db.Create(&model.AvatarDecoration{ID: decoID, URL: "https://example.test/deco0.png", Name: prefix + "deco"}).Error)
 	_, ok = parts.decorations.LookupURL(decoID)
 	require.False(t, ok, "B answers from its cached catalog")
-	require.Equal(t, http.StatusOK, post("/api/admin/avatar-decorations/create", `{"name":"`+prefix+`deco","url":"https://example.test/deco.png"}`))
+	require.Equal(t, http.StatusOK, post("/api/admin/avatar-decorations/create", `{"name":"`+prefix+`deco","description":"","url":"https://example.test/deco.png"}`))
 	waitFor(cachebus.TopicAvatarDecoration, `"catalog":true`)
 	require.Eventually(t, func() bool {
 		_, ok := parts.decorations.LookupURL(decoID)

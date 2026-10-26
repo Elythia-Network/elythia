@@ -30,7 +30,10 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // fetch-external-resources, request-reset-password, reset-password,
 // verify-email and v2/admin/emoji/list in #3845; notes and notes/* except
 // notes/create in #3847; i and i/* except i/update, i/notifications and
-// i/notifications-grouped in #3851).
+// i/notifications-grouped in #3851; admin/ad/*, admin/announcements/*,
+// admin/avatar-decorations/*, admin/invite/*, admin/promo/create, admin/meta,
+// admin/server-info, admin/get-index-stats, admin/get-table-stats and
+// admin/show-moderation-logs in #3854).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -370,6 +373,26 @@ var paramEnforcedEndpoints = []string{
 	"i/webhooks/show",
 	"i/webhooks/test",
 	"i/webhooks/update",
+	"admin/ad/create",
+	"admin/ad/delete",
+	"admin/ad/list",
+	"admin/ad/update",
+	"admin/announcements/create",
+	"admin/announcements/delete",
+	"admin/announcements/list",
+	"admin/announcements/update",
+	"admin/avatar-decorations/create",
+	"admin/avatar-decorations/delete",
+	"admin/avatar-decorations/list",
+	"admin/avatar-decorations/update",
+	"admin/invite/create",
+	"admin/invite/list",
+	"admin/promo/create",
+	"admin/get-index-stats",
+	"admin/get-table-stats",
+	"admin/meta",
+	"admin/server-info",
+	"admin/show-moderation-logs",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
