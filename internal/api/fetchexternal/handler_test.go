@@ -4,6 +4,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,8 +93,24 @@ func TestFetch_ConnectionFailureIsInvalidSchema(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "EXT_RESOURCE_RETURNED_INVALID_SCHEMA")
 }
 
+// noNetworkClient fails the test when the handler sends a request. The
+// inputs it is used with must be rejected before any fetch.
+//
+// 検査を外す変異で、本物の外部へ取得しに行かないようにする (#3845)。
+func noNetworkClient(t *testing.T) *http.Client {
+	t.Helper()
+	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("unexpected outbound request to %s", r.URL)
+		return nil, errors.New("no network in this test")
+	})}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestFetch_MissingParams(t *testing.T) {
-	h := New(http.DefaultClient, "mk-test")
+	h := New(noNetworkClient(t), "mk-test")
 	for _, body := range []string{`{}`, `{"url":"https://e.com"}`, `{"hash":"x"}`} {
 		rec := do(t, h, body)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -102,7 +119,7 @@ func TestFetch_MissingParams(t *testing.T) {
 }
 
 func TestFetch_NonHTTPScheme(t *testing.T) {
-	h := New(http.DefaultClient, "mk-test")
+	h := New(noNetworkClient(t), "mk-test")
 	rec := do(t, h, `{"url":"file:///etc/passwd","hash":"x"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
@@ -120,4 +137,24 @@ func TestFetch_CRLFNormalizedHash(t *testing.T) {
 func mustJSON(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// 本家の paramDef は url・hash を required の string とするだけなので、空の hash も
+// 通し、取得した本文のハッシュと一致しないので EXT_RESOURCE_HASH_DIDNT_MATCH になる。
+// 空の url と相対の url は取得の前に 400 にする (#3845)。
+func TestFetch_EmptyStringsLikeUpstream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"type":"theme","data":"x"}`))
+	}))
+	t.Cleanup(srv.Close)
+	rec := do(t, New(srv.Client(), "mk-test"), `{"url":"`+srv.URL+`","hash":""}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "EXT_RESOURCE_HASH_DIDNT_MATCH")
+
+	h := New(noNetworkClient(t), "mk-test")
+	for _, body := range []string{`{"url":"","hash":"x"}`, `{"url":"hello","hash":""}`, `{"url":null,"hash":"x"}`} {
+		rec := do(t, h, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), "INVALID_PARAM", body)
+	}
 }

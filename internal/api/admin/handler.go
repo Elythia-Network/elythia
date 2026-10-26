@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/bgwork"
@@ -4086,10 +4087,10 @@ func (h *Handler) EmojiListV2(c echo.Context) error {
 		Query     *emojiV2QueryReq `json:"query"`
 		SinceID   string           `json:"sinceId"`
 		UntilID   string           `json:"untilId"`
-		SinceDate *int64           `json:"sinceDate"`
-		UntilDate *int64           `json:"untilDate"`
-		Limit     *int             `json:"limit"`
-		Page      int              `json:"page"`
+		SinceDate *jsnum.Int       `json:"sinceDate"`
+		UntilDate *jsnum.Int       `json:"untilDate"`
+		Limit     *jsnum.Int       `json:"limit"`
+		Page      jsnum.Int        `json:"page"`
 		SortKeys  []string         `json:"sortKeys"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -4104,13 +4105,13 @@ func (h *Handler) EmojiListV2(c echo.Context) error {
 		})
 	}
 
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -4124,7 +4125,7 @@ func (h *Handler) EmojiListV2(c echo.Context) error {
 		SinceID:  sinceID,
 		UntilID:  untilID,
 		Limit:    limit,
-		Page:     req.Page,
+		Page:     int(req.Page),
 		SortKeys: req.SortKeys,
 	}
 	if req.Query != nil {

@@ -843,6 +843,22 @@ func TestEmojiListV2_Basic(t *testing.T) {
 	}
 }
 
+// 本家の paramDef は整数の値を持つ小数 (10.0、1e1) を integer として通す。limit と
+// page の値もそのまま効く (#3845)。
+func TestEmojiListV2_AcceptsIntegerValuedFractions(t *testing.T) {
+	h, _ := setupEmojiHandler(t,
+		&model.Emoji{ID: "e1", Name: "a", PublicURL: "https://example.com/a.png"},
+		&model.Emoji{ID: "e2", Name: "b", PublicURL: "https://example.com/b.png"},
+		&model.Emoji{ID: "e3", Name: "c", PublicURL: "https://example.com/c.png"},
+	)
+	rec := doPost(h.EmojiListV2, `{"limit":2.0,"page":1e0,"sinceDate":1e1,"untilDate":4102444800000.0}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Len(t, resp["emojis"], 2)
+	assert.EqualValues(t, 2, resp["allPages"])
+}
+
 // updatedAtFrom / updatedAtTo は日付として読める値だけを通す (#3518)。
 //
 // **通すと 500 になる。** 値は `CAST("updatedAt" AS DATE)` との比較にそのまま

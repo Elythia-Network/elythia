@@ -44,13 +44,22 @@ func New(httpClient *http.Client, userAgent string) *Handler {
 
 // Fetch handles POST /api/fetch-external-resources.
 func (h *Handler) Fetch(c echo.Context) error {
-	var req struct {
-		URL  string `json:"url"`
-		Hash string `json:"hash"`
+	var raw struct {
+		URL  *string `json:"url"`
+		Hash *string `json:"hash"`
 	}
-	if err := c.Bind(&req); err != nil || req.URL == "" || req.Hash == "" {
+	if err := c.Bind(&raw); err != nil || raw.URL == nil || raw.Hash == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	req := struct{ URL, Hash string }{*raw.URL, *raw.Hash}
+	// 本家の paramDef は url・hash を required の string とするだけで、空文字も
+	// 通す。空の hash は取得した本文のハッシュと一致しないので、本家と同じく
+	// EXT_RESOURCE_HASH_DIDNT_MATCH になる (#3845)。
+	//
+	// 絶対の http(s) の URL でないものは、取得の前に 400 にする。本家は相対の URL や
+	// http(s) 以外の scheme では fetch が例外を投げて 500 になるが、呼び出し側の
+	// 誤りなので 500 にはしない。data: の URL は本家では取得できるが、Elythia は
+	// 外部のリソースとして扱わず拒否する (以前から)。
 	if u, err := url.Parse(req.URL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return apierr.JSONInvalidParam(c)
 	}
