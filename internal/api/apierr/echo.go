@@ -41,8 +41,9 @@ func markedFailure(c echo.Context) map[string]any {
 	if cf, ok := c.Get(castFailureContextKey).(castFailure); ok {
 		return InvalidParamCast(cf.param, cf.typ)
 	}
-	// 本家は全 endpoint の paramDef が type: 'object' で、body が object でない
-	// ときは ajv の最初の違反が必ず #/type になる (endpoint-base.ts)。handler が
+	// 本家は bind する endpoint の paramDef がどれも type: 'object' で、body が
+	// object でないときは ajv の最初の違反が必ず #/type になる (endpoint-base.ts)。
+	// paramDef が {} の 2 件は bind しないので、この印は付かない (#3843)。handler が
 	// どの理由で INVALID_PARAM を返そうとしていても、本家ではこの違反が先に出る。
 	if notObject, _ := c.Get(BodyNotObjectContextKey).(bool); notObject {
 		return InvalidParamClient("#/type", "must be object")
