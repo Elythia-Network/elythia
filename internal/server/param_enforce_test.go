@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -93,6 +94,14 @@ var enforcementPending = map[string]string{
 	// 宣言する仕組み (#3667 の (4)) で enum を重ねるまで載せない (#3851)。
 	"i/notifications":         `{"includeTypes":["importCompleted"]}`,
 	"i/notifications-grouped": `{"excludeTypes":["importCompleted"]}`,
+	// userId に、システム所有のファイルを一覧する @system を受ける (#686)。本家の
+	// misskey:id の形には無いので、独自の値を宣言する仕組み (#3667 の (4)) で
+	// 重ねるまで載せない (#3857)。同梱の frontend は送らない。
+	"admin/drive/files": `{"userId":"@system"}`,
+	// fileId の無い、url だけの経路を受ける。本家の paramDef は fileId を必須に
+	// するので、独自の引数を宣言する仕組み (#3667 の (4)) で重ねるまで載せない
+	// (#3857)。同梱の frontend は送らない。
+	"admin/emoji/add": `{"name":"hello","url":"http://192.0.2.1/emoji.png"}`,
 }
 
 // enforcementDeferred lists the endpoints of an enforced package that are
@@ -201,6 +210,14 @@ var passwordCheckedEndpoints = []string{
 	"i/update-email",
 }
 
+// jobEnqueuingEndpoints are the enforced admin/* endpoints whose accepted
+// corpus inputs reach the job queue. The test server's Redis (miniredis) has
+// no cmsgpack, so the enqueue fails with a 500.
+var jobEnqueuingEndpoints = []string{"admin/drive/clean-remote-files", "admin/emoji/import-zip"}
+
+// testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
+var testNet1 = &net.IPNet{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)}
+
 // enforcementPackage returns the package TestEnforcedEndpointsAreUpstreamEndpoints
 // counts the endpoint in: the first segment of the path (notes for notes and
 // notes/*), and for admin the first two (admin/ad for admin/ad/*). A top-level
@@ -255,8 +272,9 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
 	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
 	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
-	// 要求する (#3854)。
-	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta"} {
+	// 要求する (#3854、#3857)。
+	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
+		"admin/drive", "admin/emoji"} {
 		require.True(t, packages[pkg], "package %s is not counted", pkg)
 	}
 	for name := range eps {
@@ -329,14 +347,21 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM user_profile WHERE "userId" = ?`, userID).Error)
 	}
 	// resetAdmin removes what the admin/* inputs write to the tables without
-	// an owner column: the ads, announcements and avatar decorations made
-	// after the test started (keep holds the ids that were there before), the
-	// seeded ones (abc123) included, and the promotion of the seeded note.
-	const seedID = "abc123"
-	var keepAds, keepAnnouncements, keepDecorations []string
+	// an owner column: the ads, announcements, avatar decorations, emojis and
+	// drive files made after the test started (keep holds the ids that were
+	// there before), the seeded ones (abc123, abc1231) included, and the
+	// promotion of the seeded note.
+	const seedID, seedID2 = "abc123", "abc1231"
+	// guardFileID is a file of the test user that admin/drive/cleanup must not
+	// delete (see the check after the loop).
+	const guardFileID = "penforce-guard-file"
+	var keepAds, keepAnnouncements, keepDecorations, keepEmojis, keepFiles []string
 	require.NoError(t, db.Raw(`SELECT id FROM ad WHERE id <> ?`, seedID).Scan(&keepAds).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM announcement WHERE id <> ?`, seedID).Scan(&keepAnnouncements).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM avatar_decoration WHERE id <> ?`, seedID).Scan(&keepDecorations).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM emoji WHERE id NOT IN (?, ?)`, seedID, seedID2).Scan(&keepEmojis).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM drive_file WHERE id NOT IN (?, ?)`, seedID, guardFileID).Scan(&keepFiles).Error)
+	keepFiles = append(keepFiles, guardFileID)
 	resetAdmin := func() {
 		require.NoError(t, db.Exec(`DELETE FROM promo_note WHERE "noteId" = ? OR "userId" = ?`, seedID, userID).Error)
 		// 一覧が nil だと NULL を渡すことになり、NOT (id = ANY(NULL)) は何も消さない。
@@ -345,6 +370,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM ad WHERE NOT (id = ANY(?::varchar[]))`, keep(keepAds)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM announcement WHERE NOT (id = ANY(?::varchar[]))`, keep(keepAnnouncements)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM avatar_decoration WHERE NOT (id = ANY(?::varchar[]))`, keep(keepDecorations)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM emoji WHERE NOT (id = ANY(?::varchar[]))`, keep(keepEmojis)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM drive_file WHERE NOT (id = ANY(?::varchar[]))`, keep(keepFiles)).Error)
 	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
@@ -367,6 +394,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// NO_SUCH_FILE / NO_SUCH_FOLDER で止まる。upload-from-url の受理の入力の url には
 		// host が無く、取得の前に invalid url で止まるので、外へは出ない。
 		require.NoError(t, db.Exec(`DELETE FROM drive_folder WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM drive_file WHERE id = ?`, guardFileID).Error)
 		// chat/* の受理の入力で実際に書き込むのは chat/rooms/create だけ (#3841)。ほかの
 		// 書き込み系は、corpus の id の利用者・部屋・メッセージが無いので、書き込みや
 		// 外向きの配送の前に NO_SUCH_* で止まる。chat_room は利用者の削除で消える
@@ -397,6 +425,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// 招待・プロモーション、それらを記録するモデレーションログを書き込む (#3854)。
 		// 広告・お知らせ・デコレーションには作った人の列が無いので、テストの前に
 		// あった id を覚えておき、それ以外を消す。
+		// admin/drive/*・admin/emoji/* の受理の入力は、入力ごとに置き直すドライブの
+		// ファイルと絵文字 (abc123・abc1231)、emoji/copy が足す絵文字、それらを記録する
+		// モデレーションログを書き込む (#3857)。絵文字とシステム所有のファイルにも
+		// 作った人の列が無いので、同じくテストの前にあった id 以外を消す。
 		resetAdmin()
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, adminID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM moderation_log WHERE "userId" = ?`, adminID).Error)
@@ -438,6 +470,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		ID: adminRoleID, Name: "penforce-admin-role", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true,
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
+	// admin/drive/cleanup が消してよいのは、参照されていないシステム所有のファイル
+	// だけ。利用者のファイルを 1 つ置き、ループの後に残っていることを確かめる (#3857)。
+	guardOwner := userID
+	require.NoError(t, db.Create(&model.DriveFile{
+		ID: guardFileID, UserID: &guardOwner, Name: "guard.png", Type: "image/png", URL: "http://192.0.2.1/guard.png",
+	}).Error)
 	// 外向きの通信が起きないことを確かめるため、外へ出る経路の proxy に、届いた
 	// リクエストを数えるだけのサーバーを置く (#3847)。
 	var outbound atomic.Int64
@@ -527,7 +565,61 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// 利用者が持つ公開のノート (abc123) も置き直し、前の入力が作ったプロモーションを
 	// 消す (ALREADY_PROMOTED で止めない)。プロモーションはノートを消すと消える
 	// (ON DELETE CASCADE) が、何を消すかが読めるように明示して消す。
-	seedAdmin := func() {
+	// admin/drive/*・admin/emoji/* の受理の入力の多くは、corpus の id (abc123) の
+	// ファイルや絵文字が無いと、handler の検査より先に NO_SUCH_FILE・NO_SUCH_EMOJI で
+	// 止まる。受理の入力ごとに、システム所有の画像のファイル (abc123) と、ローカルの
+	// 絵文字 abc123 (名前は hello)・abc1231 (hello1) を置き直す (#3857)。ファイルは
+	// accessKey を持たないので、emoji/update の fileId で使っても、削除系で消しても、
+	// ストレージへの書き込みも削除も起きない。システム所有なので、emoji/update は
+	// 複製を作らない。emoji/copy には、abc123 をリモートの絵文字として置く。
+	// originalUrl が空なので、画像を取りに行かずに複製する (取りに行くと外向きの
+	// 通信になる)。
+	//
+	// 種の URL にホスト名を使わない。外向きの HTTP クライアント (safehttp) は、
+	// proxy に渡す前に宛先を手元で名前解決するので、下の proxy では名前解決を
+	// 数えられない。ホスト名の無い URL (TEST-NET-1 の IP) にしておけば、取りに
+	// 行っても名前解決は起きず、proxy に届いて数えられる。
+	seedDriveEmoji := func(remoteCopySource bool) {
+		const base = "http://192.0.2.1/penforce/"
+		thumb := base + "thumb.png"
+		require.NoError(t, db.Create(&model.DriveFile{
+			ID: seedID, Name: "penforce.png", Type: "image/png", URL: base + "file.png", ThumbnailURL: &thumb,
+		}).Error)
+		if remoteCopySource {
+			host := "192.0.2.1"
+			require.NoError(t, db.Create(&model.Emoji{
+				ID: seedID, Name: "hello", Host: &host, OriginalURL: "", PublicURL: base + "remote.png",
+			}).Error)
+		} else {
+			for _, e := range []struct{ id, name string }{{seedID, "hello"}, {seedID2, "hello1"}} {
+				require.NoError(t, db.Create(&model.Emoji{
+					ID: e.id, Name: e.name, OriginalURL: base + "file.png", PublicURL: base + "file.png",
+				}).Error)
+			}
+		}
+		// 置いた行の URL に、ホスト名が無いことを確かめる。
+		var urls []string
+		require.NoError(t, db.Raw(`SELECT u FROM (
+			SELECT url AS u FROM drive_file WHERE id = ?
+			UNION ALL SELECT "thumbnailUrl" FROM drive_file WHERE id = ?
+			UNION ALL SELECT "webpublicUrl" FROM drive_file WHERE id = ?
+			UNION ALL SELECT uri FROM drive_file WHERE id = ?
+			UNION ALL SELECT "originalUrl" FROM emoji WHERE id IN (?, ?)
+			UNION ALL SELECT "publicUrl" FROM emoji WHERE id IN (?, ?)
+			UNION ALL SELECT uri FROM emoji WHERE id IN (?, ?)
+		) s WHERE u IS NOT NULL`, seedID, seedID, seedID, seedID, seedID, seedID2, seedID, seedID2, seedID, seedID2).Scan(&urls).Error)
+		require.NotEmpty(t, urls)
+		for _, raw := range urls {
+			if raw == "" {
+				continue
+			}
+			u, err := url.Parse(raw)
+			require.NoError(t, err, raw)
+			ip := net.ParseIP(u.Hostname())
+			require.True(t, ip != nil && testNet1.Contains(ip), "seeded url %q has a host name or an address outside TEST-NET-1", raw)
+		}
+	}
+	seedAdmin := func(ep string) {
 		seedNotes()
 		resetAdmin()
 		future := time.Now().Add(24 * time.Hour)
@@ -539,6 +631,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Create(&model.AvatarDecoration{
 			ID: seedID, Name: "penforce", URL: "https://remote.example/deco.png", RoleIDs: model.StringArray{},
 		}).Error)
+		if strings.HasPrefix(ep, "admin/drive/") || strings.HasPrefix(ep, "admin/emoji/") {
+			seedDriveEmoji(ep == "admin/emoji/copy")
+		}
 	}
 	// テストの管理者と meta が、admin/* の入力で変わらないことを最後に確かめるため、
 	// 流す前の状態を覚えておく (#3854)。
@@ -594,6 +689,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 
 	stricterSeen := map[string]int{}
 	seedReached := map[string]int{}
+	jobReached := map[string]int{}
 	adminSeeded := false
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
@@ -602,7 +698,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		isAdmin := strings.HasPrefix(tc.ep, "admin/")
 		switch {
 		case tc.ok && isAdmin:
-			seedAdmin()
+			seedAdmin(tc.ep)
 			adminSeeded = true
 		case adminSeeded && !isAdmin:
 			// 置いたお知らせなどを、admin/* でない endpoint (i/read-announcement など)
@@ -685,14 +781,28 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		if tc.ok && isAdmin {
 			// 置いた広告・お知らせ・デコレーション・ノートを指す入力が、handler の
 			// 検査まで届いたこと (見つからないで止まっていないこと) を確かめる (#3854)。
+			// ファイルと絵文字 (#3857) も同じ。
 			var in struct {
-				ID     string `json:"id"`
-				NoteID string `json:"noteId"`
+				ID      string `json:"id"`
+				NoteID  string `json:"noteId"`
+				EmojiID string `json:"emojiId"`
+				FileID  string `json:"fileId"`
 			}
-			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID) {
-				assert.NotContains(t, []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED"},
-					env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID || in.EmojiID == seedID || in.FileID == seedID) {
+				notFound := []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED", "NO_SUCH_EMOJI"}
+				if in.FileID == seedID {
+					notFound = append(notFound, "NO_SUCH_FILE")
+				}
+				assert.NotContains(t, notFound, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				seedReached[tc.ep]++
+			}
+			// ジョブを積む 2 件は、テストの Redis (miniredis) に cmsgpack が無いので
+			// 積めずに 500 になる。積む手前の検査を通り、積むところまで届いたことを
+			// 確かめる (#3857)。
+			if slices.Contains(jobEnqueuingEndpoints, tc.ep) {
+				assert.Equal(t, http.StatusInternalServerError, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				assert.Equal(t, "INTERNAL_ERROR", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				jobReached[tc.ep]++
 			}
 		}
 		if tc.ok {
@@ -721,9 +831,18 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// 置き直しが空振りしていないこと: 置いたものを指す受理の入力が、各 endpoint に
 	// あること (#3854)。
 	for _, ep := range []string{"admin/ad/delete", "admin/ad/update", "admin/announcements/delete", "admin/announcements/update",
-		"admin/avatar-decorations/delete", "admin/avatar-decorations/update", "admin/promo/create"} {
+		"admin/avatar-decorations/delete", "admin/avatar-decorations/update", "admin/promo/create",
+		"admin/drive/show-file", "admin/emoji/copy", "admin/emoji/delete", "admin/emoji/import-zip", "admin/emoji/update"} {
 		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
 	}
+	for _, ep := range jobEnqueuingEndpoints {
+		assert.Positive(t, jobReached[ep], "no accepted corpus input of %s", ep)
+	}
+	// admin/drive/cleanup が、置いたもの以外のファイル (テストの前からあったものと、
+	// 利用者のファイル) を消していないこと (#3857)。
+	var keptFiles int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM drive_file WHERE id = ANY(?::varchar[])`, model.StringArray(keepFiles)).Scan(&keptFiles).Error)
+	assert.EqualValues(t, len(keepFiles), keptFiles, "admin/drive/cleanup deleted a file it does not own")
 	// テストの管理者 (削除・凍結・トークン・ロール) と meta が変わっていないこと (#3854)。
 	assert.Equal(t, adminBefore, readAdmin())
 	assert.Equal(t, []string{adminRoleID}, adminBefore.Roles)
