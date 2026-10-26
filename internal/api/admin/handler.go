@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -3633,19 +3635,30 @@ func preferWebpublicType(f *model.DriveFile) *string {
 // と判定しており、空配列送信なら全削除、フィールド欠落なら現状維持。
 func (h *Handler) EmojiUpdate(c echo.Context) error {
 	var req struct {
-		ID          string   `json:"id"`
-		Name        *string  `json:"name"`
-		FileID      *string  `json:"fileId"`
-		Category    *string  `json:"category"`
-		Aliases     []string `json:"aliases"`
-		License     *string  `json:"license"`
-		IsSensitive *bool    `json:"isSensitive"`
-		LocalOnly   *bool    `json:"localOnly"`
-		RoleIDs     []string `json:"roleIdsThatCanBeUsedThisEmojiAsReaction"`
+		// 本家はanyOfの{name}の枝で通った入力でも、idの値をそのまま
+		// CustomEmojiService.updateへ渡し、`data.id ? getEmojiById : getEmojiByName`
+		// で真偽値として見る(#3857)。JavaScriptで偽になる値(null・空文字・0・false)
+		// ならnameで引き、文字列でない真の値({"id":123,"name":"hello"}など)は当たる
+		// 絵文字が無いのでNO_SUCH_EMOJIになる。以前はstringで受けていたので、文字列で
+		// ないidをBindのエラーで400にしていた。
+		ID          json.RawMessage `json:"id"`
+		Name        *string         `json:"name"`
+		FileID      *string         `json:"fileId"`
+		Category    *string         `json:"category"`
+		Aliases     []string        `json:"aliases"`
+		License     *string         `json:"license"`
+		IsSensitive *bool           `json:"isSensitive"`
+		LocalOnly   *bool           `json:"localOnly"`
+		RoleIDs     []string        `json:"roleIdsThatCanBeUsedThisEmojiAsReaction"`
 	}
 	// upstream update.ts paramDef は allOf+anyOf で {id} または {name} の
 	// どちらか必須。id 無し name 指定時は local emoji を name で解決する (#1543)。
-	if err := c.Bind(&req); err != nil || (req.ID == "" && (req.Name == nil || *req.Name == "")) {
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "id or name is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	reqID, idIsString := rawJSONString(req.ID)
+	idNotString := !idIsString && jsTruthy(req.ID)
+	if reqID == "" && !idNotString && (req.Name == nil || *req.Name == "") {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "id or name is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	if h.emojiRepo == nil {
@@ -3677,9 +3690,13 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 	// CustomEmojiService.update は `data.id ? getEmojiById : getEmojiByName` (#1543)。
 	var before *model.Emoji
 	var err error
-	if req.ID != "" {
-		before, err = h.emojiRepo.FindByID(req.ID)
-	} else {
+	switch {
+	case idNotString:
+		// 文字列でない id に当たる絵文字は無い。
+		err = repository.ErrNotFound
+	case reqID != "":
+		before, err = h.emojiRepo.FindByID(reqID)
+	default:
 		before, err = h.emojiRepo.FindByNameAndHost(*req.Name, nil)
 	}
 	if err != nil || before == nil {
@@ -3687,11 +3704,11 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 		// log に残す。frontend 側で stale id を握っているのか、repo 側で
 		// 何か起きているのか切り分けに使う。
 		slog.WarnContext(c.Request().Context(), "EmojiUpdate: NO_SUCH_EMOJI on lookup",
-			"id", req.ID, "err", err)
+			"id", reqID, "rawId", string(req.ID), "err", err)
 		return c.JSON(http.StatusNotFound, apierr.NoSuchEmoji())
 	}
 	// 以降の UpdateFields / moderation log は解決済み id を使う。
-	req.ID = before.ID
+	reqID = before.ID
 	// name 変更判定用に旧 name を UpdateFields 前に控える (#2046 broadcast 用。
 	// GORM では before は別 struct だが、in-place 更新する実装に依らず安全側)。
 	oldName := before.Name
@@ -3729,7 +3746,7 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 			if derr != nil && !repository.IsNotFound(derr) {
 				return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 			}
-			if derr == nil && dup != nil && dup.ID != req.ID {
+			if derr == nil && dup != nil && dup.ID != reqID {
 				return c.JSON(http.StatusBadRequest, apierr.Error("SAME_NAME_EMOJI_EXISTS", "Emoji with the same name already exists.", "7180fe9d-1ee3-bff9-647d-fe9896d2ffb8"))
 			}
 		}
@@ -3823,7 +3840,7 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 			}
 			if cerr != nil {
 				slog.WarnContext(ctx, "emoji update: drive copy failed",
-					"emojiId", req.ID, "fileId", *req.FileID, "err", cerr)
+					"emojiId", reqID, "fileId", *req.FileID, "err", cerr)
 				// **絵文字を書き換えない。** 元ファイルを指して更新すると、直そうと
 				// している依存をそのまま作ることになる。差し替え前の画像は生きて
 				// いるので、失敗しても表示は壊れない。
@@ -3892,33 +3909,33 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 		// 何も変更しないリクエストは log を書かずに 204 で返す。
 		return c.NoContent(http.StatusNoContent)
 	}
-	if err := h.emojiRepo.UpdateFields(req.ID, fields); err != nil {
+	if err := h.emojiRepo.UpdateFields(reqID, fields); err != nil {
 		if !repository.IsNotFound(err) {
 			// **DB 障害を not-found に丸めない (#2792)。** 接続断が「そんな絵文字は
 			// 無い」に化けると、クライアントからは区別できず監視でも 5xx が立たない。
 			slog.ErrorContext(c.Request().Context(), "EmojiUpdate: UpdateFields failed",
-				"id", req.ID, "fields", fieldKeys(fields), "systemFileId", systemFileID, "err", err)
-			h.cleanupUnreferencedEmojiCopy(c.Request().Context(), req.ID, systemFileID, systemFileURL)
+				"id", reqID, "fields", fieldKeys(fields), "systemFileId", systemFileID, "err", err)
+			h.cleanupUnreferencedEmojiCopy(c.Request().Context(), reqID, systemFileID, systemFileURL)
 			return apierr.JSONInternalError(c)
 		}
 		// #729: FindByID 直後の RowsAffected==0 はほぼ起こらない (concurrent
 		// delete 等のレース) ので診断 log で気付けるようにする。
 		slog.WarnContext(c.Request().Context(), "EmojiUpdate: NO_SUCH_EMOJI on UpdateFields",
-			"id", req.ID, "fields", fieldKeys(fields), "err", err)
+			"id", reqID, "fields", fieldKeys(fields), "err", err)
 		// **載らなかった複製を片付ける (#3014)。** 行がもう無い (= `RowsAffected==0`
 		// の昇格を含む) ので更新は載っておらず、絵文字は差し替え前の URL を指した
 		// まま。作った複製は誰からも参照されない孤児として残る。
 		h.deleteSystemEmojiFile(c.Request().Context(), systemFileID)
 		return c.JSON(http.StatusNotFound, apierr.NoSuchEmoji())
 	}
-	after, err := h.emojiRepo.FindByID(req.ID)
+	after, err := h.emojiRepo.FindByID(reqID)
 	if err != nil {
 		// ここに到達するのは UpdateFields 直後の row 消失 (race) のみ。
 		// 操作自体は成功しているので 204 を返す。
 		return c.NoContent(http.StatusNoContent)
 	}
 	h.logModeration(c, moderationlog.LogUpdateCustomEmoji, map[string]any{
-		"emojiId": req.ID,
+		"emojiId": reqID,
 		"before":  before,
 		"after":   after,
 	})
@@ -4046,17 +4063,48 @@ func (h *Handler) EmojiDelete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// jsTruthy reports whether raw, a JSON value, is truthy in JavaScript: false
+// for an absent value, null, false, "" and any zero number (0, -0, 0.0, 1e-400
+// after underflow), true for everything else (other numbers, true, non-empty
+// strings, objects and arrays, empty ones included).
+func jsTruthy(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return false
+	}
+	switch x := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return x
+	case string:
+		return x != ""
+	case json.Number:
+		// ParseFloatはJavaScriptと同じく、範囲外を±Inf(真)、下へ溢れた値を0(偽)にする。
+		f, _ := strconv.ParseFloat(string(x), 64)
+		return f != 0
+	default:
+		return true
+	}
+}
+
 // EmojiList handles POST /api/admin/emoji/list.
 func (h *Handler) EmojiList(c echo.Context) error {
 	var req struct {
-		Query     string `json:"query"`
-		Category  string `json:"category"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
+		Query string `json:"query"`
+		// categoryは本家のparamDefに無いElythia独自の引数(#3857)。本家は知らない
+		// 項目として無視するので、文字列でない値も400にせず、絞り込まずに返す。
+		Category  json.RawMessage `json:"category"`
+		SinceID   string          `json:"sinceId"`
+		UntilID   string          `json:"untilId"`
+		SinceDate *jsnum.Int      `json:"sinceDate"`
+		UntilDate *jsnum.Int      `json:"untilDate"`
+		Limit     *jsnum.Int      `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -4065,15 +4113,18 @@ func (h *Handler) EmojiList(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	emojis, err := h.emojiRepo.ListWithFilter(req.Query, req.Category, true, sinceID, untilID, limit, req.Offset)
+	// 本家のparamDefにoffsetは無いので読まない(#3857)。本家が無視する値で件数を
+	// 飛ばし、型の違う値を400にしていた。同梱のfrontendはuntilIdで送るので影響しない。
+	category, _ := rawJSONString(req.Category)
+	emojis, err := h.emojiRepo.ListWithFilter(req.Query, category, true, sinceID, untilID, limit, 0)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
