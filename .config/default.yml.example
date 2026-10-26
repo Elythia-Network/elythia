@@ -101,9 +101,9 @@ port: 3000
 # endpoints such as meta and emojis, users and users/*, drive and drive/*,
 # chat/*, reversi/* except reversi/match, export-custom-emojis,
 # fetch-external-resources, request-reset-password, reset-password,
-# verify-email, v2/admin/emoji/list, notes and notes/* except notes/create)
-# are validated and rejected regardless of this setting. See
-# docs/param-shadow.md.
+# verify-email, v2/admin/emoji/list, notes and notes/* except notes/create,
+# i and i/* except i/update, i/notifications and i/notifications-grouped) are
+# validated and rejected regardless of this setting. See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600
