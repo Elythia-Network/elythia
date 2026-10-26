@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -19,16 +20,16 @@ func (h *Handler) AdCreate(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	var req struct {
-		URL         string `json:"url"`
-		ImageURL    string `json:"imageUrl"`
-		Place       string `json:"place"`
-		Memo        string `json:"memo"`
-		Priority    string `json:"priority"`
-		Ratio       int    `json:"ratio"`
-		DayOfWeek   int    `json:"dayOfWeek"`
-		ExpiresAt   int64  `json:"expiresAt"`
-		StartsAt    int64  `json:"startsAt"`
-		IsSensitive bool   `json:"isSensitive"`
+		URL         string    `json:"url"`
+		ImageURL    string    `json:"imageUrl"`
+		Place       string    `json:"place"`
+		Memo        string    `json:"memo"`
+		Priority    string    `json:"priority"`
+		Ratio       jsnum.Int `json:"ratio"`
+		DayOfWeek   jsnum.Int `json:"dayOfWeek"`
+		ExpiresAt   jsnum.Int `json:"expiresAt"`
+		StartsAt    jsnum.Int `json:"startsAt"`
+		IsSensitive bool      `json:"isSensitive"`
 	}
 	if err := c.Bind(&req); err != nil || req.URL == "" || req.ImageURL == "" {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
@@ -49,11 +50,11 @@ func (h *Handler) AdCreate(c echo.Context) error {
 		Place:       req.Place,
 		Memo:        req.Memo,
 		Priority:    req.Priority,
-		Ratio:       req.Ratio,
-		DayOfWeek:   req.DayOfWeek,
+		Ratio:       int(req.Ratio),
+		DayOfWeek:   int(req.DayOfWeek),
 		IsSensitive: req.IsSensitive,
-		StartsAt:    millisOrNow(req.StartsAt),
-		ExpiresAt:   millisOrDefault(req.ExpiresAt, time.Now().Add(30*24*time.Hour)),
+		StartsAt:    millisOrNow(int64(req.StartsAt)),
+		ExpiresAt:   millisOrDefault(int64(req.ExpiresAt), time.Now().Add(30*24*time.Hour)),
 	}
 	if err := h.adRepo.Create(ad); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -133,36 +134,28 @@ func (h *Handler) AdList(c echo.Context) error {
 	}
 	// upstream admin/ad/list: {limit, sinceId, untilId, sinceDate, untilDate,
 	// publishing(boolean,nullable)} の cursor pagination + 配信中フィルタ (#1545)。
+	//
+	// 本家のparamDefにoffsetは無いので読まない(#3854)。以前は旧クライアント向けに
+	// offsetの経路を残していたが、本家が無視する値で件数を飛ばし、型の違う値を400に
+	// していた。同梱のfrontendはuntilIdで送るので影響しない。
 	var req struct {
-		Limit      *int   `json:"limit"`
-		Offset     int    `json:"offset"` // 後方互換 (cursor / publishing 未指定時のみ)
-		SinceID    string `json:"sinceId"`
-		UntilID    string `json:"untilId"`
-		SinceDate  *int64 `json:"sinceDate"`
-		UntilDate  *int64 `json:"untilDate"`
-		Publishing *bool  `json:"publishing"`
+		Limit      *jsnum.Int `json:"limit"`
+		SinceID    string     `json:"sinceId"`
+		UntilID    string     `json:"untilId"`
+		SinceDate  *jsnum.Int `json:"sinceDate"`
+		UntilDate  *jsnum.Int `json:"untilDate"`
+		Publishing *bool      `json:"publishing"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
-	}
-	// cursor も publishing も無く offset 指定がある旧クライアント向けに offset 経路を維持。
-	if sinceID == "" && untilID == "" && req.Publishing == nil && req.Offset > 0 {
-		rows, err := h.adRepo.List(limit, req.Offset)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
-		}
-		if rows == nil {
-			return c.JSON(http.StatusOK, []any{})
-		}
-		return c.JSON(http.StatusOK, packAds(rows))
 	}
 	rows, err := h.adRepo.ListFiltered(req.Publishing, sinceID, untilID, limit, time.Now())
 	if err != nil {
@@ -183,17 +176,17 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	var req struct {
-		ID          string  `json:"id"`
-		URL         *string `json:"url"`
-		ImageURL    *string `json:"imageUrl"`
-		Place       *string `json:"place"`
-		Memo        *string `json:"memo"`
-		Priority    *string `json:"priority"`
-		Ratio       *int    `json:"ratio"`
-		DayOfWeek   *int    `json:"dayOfWeek"`
-		ExpiresAt   *int64  `json:"expiresAt"`
-		StartsAt    *int64  `json:"startsAt"`
-		IsSensitive *bool   `json:"isSensitive"`
+		ID          string     `json:"id"`
+		URL         *string    `json:"url"`
+		ImageURL    *string    `json:"imageUrl"`
+		Place       *string    `json:"place"`
+		Memo        *string    `json:"memo"`
+		Priority    *string    `json:"priority"`
+		Ratio       *jsnum.Int `json:"ratio"`
+		DayOfWeek   *jsnum.Int `json:"dayOfWeek"`
+		ExpiresAt   *jsnum.Int `json:"expiresAt"`
+		StartsAt    *jsnum.Int `json:"startsAt"`
+		IsSensitive *bool      `json:"isSensitive"`
 	}
 	if err := c.Bind(&req); err != nil || req.ID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
@@ -223,22 +216,25 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 		fields["priority"] = *req.Priority
 	}
 	if req.Ratio != nil {
-		fields["ratio"] = *req.Ratio
+		fields["ratio"] = int(*req.Ratio)
 	}
 	if req.DayOfWeek != nil {
-		fields["dayOfWeek"] = *req.DayOfWeek
+		fields["dayOfWeek"] = int(*req.DayOfWeek)
 	}
 	if req.IsSensitive != nil {
 		fields["isSensitive"] = *req.IsSensitive
 	}
 	// pointer 型フィールドは nil (未指定) と 0 (明示的に 0) を区別できるので、
 	// 受け取った値をそのまま UnixMilli に変換する。Create 側と違い 0 を now に
-	// 読み替えない。
+	// 読み替えない。本家の update.ts は`ps.expiresAt ? new Date(ps.expiresAt) :
+	// undefined`なので 0 を「変えない」として無視するが、Elythia は 0 を1970年
+	// (エポック)として保存する。以前からの差で、docs/divergence/approximations.md に
+	// 書いている(#3854)。
 	if req.StartsAt != nil {
-		fields["startsAt"] = time.UnixMilli(*req.StartsAt)
+		fields["startsAt"] = time.UnixMilli(int64(*req.StartsAt))
 	}
 	if req.ExpiresAt != nil {
-		fields["expiresAt"] = time.UnixMilli(*req.ExpiresAt)
+		fields["expiresAt"] = time.UnixMilli(int64(*req.ExpiresAt))
 	}
 	if len(fields) == 0 {
 		return c.NoContent(http.StatusNoContent)

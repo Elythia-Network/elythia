@@ -510,6 +510,36 @@ func TestAdminList_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+// 整数の引数は、本家の ajv の "type": "integer" と同じく 10.0 や 1e1 も受ける (#3854)。
+func TestAdminList_IntegerParamsAcceptFractionForms(t *testing.T) {
+	h, repo := newTestHandler(t)
+	repo.Items["a1"] = &model.Announcement{ID: "a1", IsActive: true}
+	repo.Items["a2"] = &model.Announcement{ID: "a2", IsActive: true}
+	rec := doPost(h.AdminList, `{"limit":1.0,"sinceDate":1e1,"untilDate":4102444800000.0}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = doPost(h.AdminList, `{"limit":1e0}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 1, "limit 1e0 is 1")
+}
+
+// 本家の admin/announcements/list の paramDef に offset は無い。本家は読まないので、
+// 型の違う値も通し、件数も飛ばさない (#3854)。
+func TestAdminList_OffsetIsNotRead(t *testing.T) {
+	h, repo := newTestHandler(t)
+	for _, id := range []string{"a1", "a2", "a3"} {
+		repo.Items[id] = &model.Announcement{ID: id, IsActive: true}
+	}
+	for _, body := range []string{`{"offset":2}`, `{"offset":"x"}`} {
+		rec := doPost(h.AdminList, body, nil)
+		require.Equal(t, http.StatusOK, rec.Code, body)
+		var rows []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		assert.Len(t, rows, 3, body)
+	}
+}
+
 // #1967: admin/announcements/list は upstream の生 row 形 (forYou/isRead 無し、
 // imageUrl は raw)。public list 用の packAnnouncement を流用しない。
 func TestAdminList_ShapeMatchesUpstream(t *testing.T) {

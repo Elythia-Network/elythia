@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -20,7 +21,8 @@ func (h *Handler) PromoCreate(c echo.Context) error {
 		NoteID string `json:"noteId"`
 		// upstream promo/create.ts は required:['noteId','expiresAt']。欠落を 0 (=epoch)
 		// で保存しないよう pointer で受け、nil を弾く (#1539)。
-		ExpiresAt *int64 `json:"expiresAt"`
+		// 本家と同じく 10.0 や 1e1 も整数として受ける (#3854)。
+		ExpiresAt *jsnum.Int `json:"expiresAt"`
 	}
 	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.ExpiresAt == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "noteId and expiresAt are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -68,7 +70,7 @@ func (h *Handler) PromoCreate(c echo.Context) error {
 
 	promo := &model.PromoNote{
 		NoteID:    req.NoteID,
-		ExpiresAt: time.UnixMilli(*req.ExpiresAt),
+		ExpiresAt: time.UnixMilli(int64(*req.ExpiresAt)),
 		UserID:    targetUserID,
 	}
 	if err := h.promoNoteRepo.Create(promo); err != nil {

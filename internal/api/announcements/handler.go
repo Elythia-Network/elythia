@@ -529,31 +529,32 @@ func (h *Handler) AdminDelete(c echo.Context) error {
 //   - status: "active" / "archived" / "all" (default "active").
 //   - Each row carries a reads count (announcement_read row count).
 func (h *Handler) AdminList(c echo.Context) error {
+	// 本家のparamDefにoffsetは無いので読まない(#3854)。読むと、本家が無視する値で
+	// 件数を飛ばし、型の違う値を400にする。同梱のfrontendはuntilIdで送るので影響しない。
 	var req struct {
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		UserID    string `json:"userId"`
-		Status    string `json:"status"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Status    string     `json:"status"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// 絞り込みと isActive の計算は同じ「今」で行う (本家も 1 つの now を使う)。
 	now := h.clock()
-	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, req.Offset, sinceID, untilID, now)
+	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, 0, sinceID, untilID, now)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}

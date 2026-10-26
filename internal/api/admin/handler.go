@@ -4657,25 +4657,25 @@ func (h *Handler) inactiveAbuseWebhookIDs() []string {
 // と同じく "2006-01-02T15:04:05.000Z" 形式 (Misskey の標準)。
 func (h *Handler) ShowModerationLogs(c echo.Context) error {
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		Type      string `json:"type"`
-		UserID    string `json:"userId"`
-		Search    string `json:"search"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		Type      string     `json:"type"`
+		UserID    string     `json:"userId"`
+		Search    string     `json:"search"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate/untilDate を aidx prefix に正規化し、type/userId/search で絞る
 	// (upstream show-moderation-logs.ts, #1539)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
