@@ -195,7 +195,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 
 なお待機者の確保だけは upstream より厳密にしてある。upstream は `ZRANGE` → `ZREM` の順で **`ZREM` の戻り値を見ない**ため、同じ待機者を 2 人が同時に見つけると両方が対局を作る。Elythia は `ZREM` が 1 を返した呼び出しだけが対局を作る (#2407)。
 
-**reversi は endpoint レベルの差分ゼロ。** Elythia の 7 本 (`games` / `invitations` / `show-game` / `match` / `cancel-match` / `surrender` / `verify`) は upstream 2026.7.0 と完全一致。`crc32` カラムと `reversi/verify` も upstream 標準 (`models/ReversiGame.ts` / `endpoints/reversi/verify.ts`)。**cherrypick 由来の拡張は ActivityPub 層と、packed game レスポンスに `crc32` 等を additive に載せる点に現れる** (§3-1 参照)。
+**reversi の endpoint は本家と同じ 7 本。** Elythia の 7 本 (`games` / `invitations` / `show-game` / `match` / `cancel-match` / `surrender` / `verify`) は upstream 2026.7.0 と同じ名前・同じ引数で、引数で違うのは 1 つだけ: `reversi/match` の `userId` に、利用者の id に加えて `@user` / `@user@host` の形 (acct) を受ける (cherrypick 由来。連合の対局の e2e が使う)。本家の `paramDef` (`misskey:id`) では 400 になる入力なので、`reversi/match` は本家の `paramDef` での拒否に載せず保留している (#3843、[approximations.md](approximations.md#本家のparamdefで引数を検証するendpoint-3742))。`crc32` カラムと `reversi/verify` も upstream 標準 (`models/ReversiGame.ts` / `endpoints/reversi/verify.ts`)。**cherrypick 由来の拡張は ActivityPub 層と、packed game レスポンスに `crc32` 等を additive に載せる点に現れる** (§3-1 参照)。
 
 ### 1-1b. レスポンスの additive field
 

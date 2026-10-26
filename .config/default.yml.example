@@ -99,8 +99,8 @@ port: 3000
 # ap/*, bubble-game/ranking, bubble-game/register, federation/* except
 # federation/instances, pages/*, page-push, the read-only top-level
 # endpoints such as meta and emojis, users and users/*, drive and drive/*,
-# chat/*) are validated and rejected regardless of this setting. See
-# docs/param-shadow.md.
+# chat/*, reversi/* except reversi/match) are validated and rejected
+# regardless of this setting. See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600
