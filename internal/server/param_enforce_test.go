@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -17,10 +18,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/config"
+	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -84,6 +87,12 @@ var enforcementPending = map[string]string{
 	// tests/e2e-federation の対局が使う。本家の misskey:id の形には無いので、
 	// 独自の引数の宣言(#3667の(4))で重ねるまで載せない(#3843)。
 	"reversi/match": `{"userId":"@alice@remote.example"}`,
+	// includeTypes・excludeTypes に、Elythia 独自の通知の型 (importCompleted・
+	// abuseReport・emojiApplicationProcessed・emojiApplicationReceived・
+	// signupApplicationReceived) を受ける。本家の enum には無いので、独自の値を
+	// 宣言する仕組み (#3667 の (4)) で enum を重ねるまで載せない (#3851)。
+	"i/notifications":         `{"includeTypes":["importCompleted"]}`,
+	"i/notifications-grouped": `{"excludeTypes":["importCompleted"]}`,
 }
 
 // enforcementDeferred lists the endpoints of an enforced package that are
@@ -94,6 +103,9 @@ var enforcementDeferred = map[string]string{
 	// text、poll.choices の __proto__ の重複など) の扱いを、admin/update-meta・
 	// i/update と一緒に最後の段で決める (#3667、#3847)。
 	"notes/create": "decided with admin/update-meta and i/update in the last stage of #3667",
+	// 親 issue の方針どおり、admin/update-meta・notes/create と一緒に最後の段で
+	// 決める (#3667、#3851)。
+	"i/update": "decided with admin/update-meta and notes/create in the last stage of #3667",
 }
 
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
@@ -170,6 +182,25 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 	}},
 }
 
+// sixDigits matches a token that could be a valid TOTP code (i/2fa/done
+// removes the whitespace first).
+var sixDigits = regexp.MustCompile(`^[0-9]{6}$`)
+
+// passwordCheckedEndpoints are the i/* endpoints whose accepted corpus inputs
+// TestEnforcedEndpointsMatchTheCorpus expects to stop at the password check:
+// the test user's password is not in the corpus.
+var passwordCheckedEndpoints = []string{
+	"i/2fa/key-done",
+	"i/2fa/register",
+	"i/2fa/register-key",
+	"i/2fa/remove-key",
+	"i/2fa/unregister",
+	"i/change-password",
+	"i/delete-account",
+	"i/regenerate-token",
+	"i/update-email",
+}
+
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
 // names upstream has, and to whole packages: an endpoint of a package left
 // out would keep the handwritten checks only, unless enforcementPending or
@@ -232,6 +263,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	const roleID, assignID = "penforce-role", "penforce-assign"
 	const adminID, adminToken = "penforce-admin", "penforceadmintk1"
 	const adminRoleID, adminAssignID = "penforce-admin-role", "penforce-admin-assign"
+	const iPassword = "penforce-not-in-corpus"
+	iEmail := "penforce@example.com"
 	// resetNotes removes what the notes/* inputs write: the seeded note, poll,
 	// draft and list, and the favorites, reactions, votes and thread mutings
 	// of the test user.
@@ -244,6 +277,14 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM poll WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM note WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM user_list WHERE "userId" = ?`, userID).Error)
+	}
+	// resetI removes what the i/* inputs write: the profile, webhooks, registry
+	// items and pinned notes of the test user.
+	resetI := func() {
+		require.NoError(t, db.Exec(`DELETE FROM webhook WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM registry_item WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM user_note_pining WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM user_profile WHERE "userId" = ?`, userID).Error)
 	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
@@ -273,16 +314,24 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM chat_room WHERE "ownerId" = ?`, userID).Error)
 		// export-custom-emojis・fetch-external-resources・request-reset-password・
 		// reset-password・verify-email・v2/admin/emoji/list の受理の入力は書き込まない
-		// (#3845)。export はテストごとの Redis にジョブを積むだけで、worker がいないので
-		// 走らない。fetch-external-resources の corpus の url には host が無く、取得の
-		// 前に止まる。request-reset-password は corpus の名前の利用者がいないので、
-		// password_reset_request の行を作らない。
+		// (#3845)。export はジョブを積もうとするが、テストの Redis (miniredis) には
+		// cmsgpack が無く、mkq の投入が失敗して 500 になる (ジョブは積まれない。
+		// i/export-* も同じ。#3851)。fetch-external-resources の corpus の url には
+		// host が無く、取得の前に止まる。request-reset-password は corpus の名前の
+		// 利用者がいないので、password_reset_request の行を作らない。
 		// notes/* の受理の入力は、入力ごとに置き直すノート・投票・下書き・リストと、
 		// そこへのお気に入り・リアクション・投票・スレッドのミュートを書き込む
 		// (#3847)。どれも利用者の削除で消える (ON DELETE CASCADE) が、何を作るかが
 		// 読めるように明示して消す。hashtag の行を作る notes/create は載せていない
 		// (enforcementDeferred) ので、hashtag は書き込まない。
 		resetNotes()
+		// i/* の受理の入力は、入力ごとに置き直すプロフィール・Webhook・レジストリの値と、
+		// webhooks/create・registry/set・pin が足す行を書き込む (#3851)。パスワードを
+		// 要る操作 (削除・トークンの再発行・パスワードやメールの変更・2 段階認証) は、
+		// corpus に無いパスワードで「パスワードが違う」に止まるので書き込まない
+		// (ループの中で確かめる)。どれも利用者の削除で消える (ON DELETE CASCADE) が、
+		// 何を作るかが読めるように明示して消す。
+		resetI()
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -304,7 +353,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		ID: roleID, Name: "penforce-role", UpdatedAt: now, LastUsedAt: now,
 		Policies: datatypes.JSON(`{"canInvite":{"useDefault":false,"priority":0,"value":true},` +
 			`"canSearchNotes":{"useDefault":false,"priority":0,"value":true},` +
-			`"canUseTranslator":{"useDefault":false,"priority":0,"value":true}}`),
+			`"canUseTranslator":{"useDefault":false,"priority":0,"value":true},` +
+			`"canImportAntennas":{"useDefault":false,"priority":0,"value":true},` +
+			`"canImportBlocking":{"useDefault":false,"priority":0,"value":true},` +
+			`"canImportFollowing":{"useDefault":false,"priority":0,"value":true},` +
+			`"canImportMuting":{"useDefault":false,"priority":0,"value":true},` +
+			`"canImportUserLists":{"useDefault":false,"priority":0,"value":true}}`),
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: assignID, UserID: userID, RoleID: roleID}).Error)
 	adminTok := adminToken
@@ -355,6 +409,50 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Create(&model.UserList{ID: seedID, UserID: userID, Name: "penforce"}).Error)
 	}
 
+	// i/* の受理の入力の多くは、プロフィール (パスワード)・corpus の id (abc123) の
+	// Webhook・key が hello のレジストリの値が無いと、handler の検査より先に止まる。
+	// 受理の入力ごとに置き直し、handler の検査まで届かせる (#3851)。i/pin のために
+	// ノートも置き直す。webhooks/create は 1 人 3 件までなので、毎回消してから作る。
+	// パスワードは corpus に無い値にし、パスワードを要る操作を「パスワードが違う」で
+	// 止める。照合に失敗した回数の制限 (passwordguard、10 回) に当たらないよう、
+	// その記録も毎回消す。
+	//
+	// i/2fa/done は、2 段階認証の設定を始めた状態 (仮の秘密と、その期限と試行の
+	// 回数の記録) を置き、token の照合 (403 INVALID_TOKEN) まで届かせる (#3851)。
+	// 置かないと「設定を始めていない」の 400 で止まり、照合の手前で受理の入力を
+	// 拒否する回帰を見逃す。テストのサーバーは testMode で、そのままでは任意の
+	// token を受けて 2 段階認証が有効になってしまうので、本家と同じ
+	// MISSKEY_TEST_CHECK_DUPLICATED_TOTP=1 でテスト用のバイパスを止める。corpus の
+	// token は 6 桁の数字でない (下で確かめる) ので、たまたま正しい TOTP にはならない。
+	t.Setenv("MISSKEY_TEST_CHECK_DUPLICATED_TOTP", "1")
+	const tempSecret = "JBSWY3DPEHPK3PXP"
+	pending := coretwofactor.NewRedisPendingGuard(on.redis.Default)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(iPassword), bcrypt.MinCost)
+	require.NoError(t, err)
+	hash := string(passwordHash)
+	seedI := func(ep string) {
+		seedNotes()
+		resetI()
+		profile := &model.UserProfile{UserID: userID, Password: &hash, Email: &iEmail}
+		if ep == "i/2fa/done" {
+			secret := tempSecret
+			profile.TwoFactorTempSecret = &secret
+			require.NoError(t, pending.Start(t.Context(), userID, tempSecret))
+		}
+		require.NoError(t, db.Create(profile).Error)
+		require.NoError(t, db.Create(&model.Webhook{
+			ID: seedID, UserID: userID, Name: "penforce", URL: "https://remote.example/hook", Secret: "s", On: model.StringArray{"note"},
+		}).Error)
+		require.NoError(t, db.Create(&model.RegistryItem{
+			ID: seedID, UpdatedAt: time.Now(), UserID: userID, Key: "hello", Value: datatypes.JSON(`"v"`), Scope: model.StringArray{},
+		}).Error)
+		keys, err := on.redis.Default.Keys(t.Context(), "passwordguard:failures:"+userID+"*").Result()
+		require.NoError(t, err)
+		if len(keys) > 0 {
+			require.NoError(t, on.redis.Default.Del(t.Context(), keys...).Err())
+		}
+	}
+
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)
@@ -384,6 +482,18 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
 			seedNotes()
+		}
+		isI := tc.ep == "i" || strings.HasPrefix(tc.ep, "i/")
+		if isI {
+			require.NotContains(t, string(tc.in), iPassword, "corpus line %d has the test user's password", tc.line)
+		}
+		if tc.ok && tc.ep == "i/2fa/done" {
+			var in struct{ Token string }
+			require.NoError(t, json.Unmarshal(tc.in, &in), "corpus line %d", tc.line)
+			require.False(t, sixDigits.MatchString(strings.Join(strings.Fields(in.Token), "")), "corpus line %d: the token may be a valid TOTP", tc.line)
+		}
+		if tc.ok && isI {
+			seedI(tc.ep)
 		}
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -416,6 +526,35 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.Empty(t, rec.Body.String(), name)
 			continue
 		}
+		if tc.ok && isI {
+			// パスワードを要る操作が、handler の照合まで届いて止まったことと、
+			// 利用者に壊す変更 (削除・トークンの再発行・パスワードやメールの変更・
+			// 2 段階認証の設定・移行) が起きていないことを確かめる (#3851)。
+			if slices.Contains(passwordCheckedEndpoints, tc.ep) {
+				assert.Equal(t, "INCORRECT_PASSWORD", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			}
+			if tc.ep == "i/2fa/done" {
+				assert.Equal(t, "INVALID_TOKEN", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			}
+			var u model.User
+			require.NoError(t, db.First(&u, "id = ?", userID).Error, name)
+			assert.Equal(t, &tok, u.Token, name)
+			assert.False(t, u.IsDeleted, name)
+			assert.Nil(t, u.MovedToURI, name)
+			var p model.UserProfile
+			require.NoError(t, db.First(&p, `"userId" = ?`, userID).Error, name)
+			assert.Equal(t, &hash, p.Password, name)
+			assert.Equal(t, &iEmail, p.Email, name)
+			if tc.ep == "i/2fa/done" {
+				// 照合に失敗したので、置いた仮の秘密はそのまま残る。
+				secret := tempSecret
+				assert.Equal(t, &secret, p.TwoFactorTempSecret, name)
+			} else {
+				assert.Nil(t, p.TwoFactorTempSecret, name)
+			}
+			assert.Nil(t, p.TwoFactorSecret, name)
+			assert.False(t, p.TwoFactorEnabled, name)
+		}
 		if tc.ok {
 			var in map[string]any
 			if stricter, ok := handlerStricterThanUpstream[tc.ep]; ok && json.Unmarshal(tc.in, &in) == nil && stricter.match(in) {
@@ -434,6 +573,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 	}
 	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
+	// 全部を流した後も、利用者が残り、トークンが変わっていないこと (#3851)。
+	var after model.User
+	require.NoError(t, db.First(&after, "id = ?", userID).Error)
+	assert.Equal(t, &tok, after.Token)
+	assert.False(t, after.IsDeleted)
 	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
 	for ep := range handlerStricterThanUpstream {
 		assert.Positive(t, stricterSeen[ep], "handlerStricterThanUpstream[%s] matches no accepted corpus input", ep)
