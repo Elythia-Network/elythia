@@ -37,11 +37,19 @@ import (
 func (h *Handler) Move(c echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
-		MoveToAccount string `json:"moveToAccount"`
-		Password      string `json:"password"`
+		MoveToAccount *string `json:"moveToAccount"`
+		Password      string  `json:"password"`
 	}
-	if err := c.Bind(&req); err != nil || req.MoveToAccount == "" {
+	if err := c.Bind(&req); err != nil || req.MoveToAccount == nil {
 		return apierr.JSONInvalidParam(c)
+	}
+	// 空のmoveToAccountは、本家と同じくrootの判定より先にNO_SUCH_USERで返す
+	// (move.tsの`if (!ps.moveToAccount)`)。以前は400にしていた(#3851)。
+	if *req.MoveToAccount == "" {
+		return c.JSON(http.StatusNotFound, apierr.Error(
+			"NO_SUCH_USER", "No such user.",
+			"fcd2eef9-a9b2-4c4f-8624-038099e90aa5",
+		))
 	}
 	// root ユーザーは移行不可 (upstream move.ts: rootUserId === me.id)。
 	// meta.rootUserId と user.isRoot の両方を見る (role_service.isRootUser と同 doctrine)。
@@ -96,7 +104,7 @@ func (h *Handler) Move(c echo.Context) error {
 	}
 	// acct 形式 (@user@host) は canonical URI へ解決してから mover に渡す。
 	// URI 形式 (http/https) はそのまま渡す。
-	moveTo := req.MoveToAccount
+	moveTo := *req.MoveToAccount
 	if !strings.HasPrefix(moveTo, "http://") && !strings.HasPrefix(moveTo, "https://") {
 		u := h.lookupAlsoKnownAsTarget(moveTo)
 		if u == nil {

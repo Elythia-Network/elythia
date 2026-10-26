@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -399,13 +400,14 @@ func (h *Handler) Delete(c echo.Context) error {
 }
 
 // MyRequest is the request body for i/pages (own pages list).
+//
+// 本家のparamDefにoffsetは無いので読まない(#3851)。
 type MyRequest struct {
-	Limit     *int   `json:"limit"`
-	Offset    int    `json:"offset"`
-	SinceID   string `json:"sinceId"`
-	UntilID   string `json:"untilId"`
-	SinceDate *int64 `json:"sinceDate"`
-	UntilDate *int64 `json:"untilDate"`
+	Limit     *jsnum.Int `json:"limit"`
+	SinceID   string     `json:"sinceId"`
+	UntilID   string     `json:"untilId"`
+	SinceDate *jsnum.Int `json:"sinceDate"`
+	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
 // My handles POST /api/i/pages.
@@ -420,15 +422,15 @@ func (h *Handler) My(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.svc.ListByUser(user.ID, sinceID, untilID, limit, req.Offset)
+	rows, err := h.svc.ListByUser(user.ID, sinceID, untilID, limit, 0)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

@@ -91,8 +91,8 @@ func (h *Handler) Grouped(c echo.Context) error {
 	// **現状は到達しない** — collectNotifications が svc.List に limit を渡して既に
 	// 切っており、grouping は件数を増やさないため。upstream と同じ位置に置くことで、
 	// 将来 fetch 側が多めに取るようになっても upstream と同じ行が返るようにしてある。
-	if len(grouped) > (*req.Limit) {
-		grouped = grouped[:(*req.Limit)]
+	if len(grouped) > int(*req.Limit) {
+		grouped = grouped[:int(*req.Limit)]
 	}
 
 	// **取得が 0 件なら既読化しない** (#2833)。upstream i/notifications-grouped.ts は

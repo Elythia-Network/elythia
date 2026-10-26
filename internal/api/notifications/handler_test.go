@@ -18,6 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/datatypes"
 
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -155,6 +156,33 @@ func TestShow_SinceDate_EpochIncludesAll(t *testing.T) {
 	var resp []map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Len(t, resp, 1, "sinceDate=0 (= 1970) で全件含まれること")
+}
+
+// i/notifications・i/notifications-grouped の整数は、本家の ajv と同じく 10.0 や
+// 1e1 も受ける (#3851)。
+func TestShowAndGrouped_IntegerParamsAcceptFractionForms(t *testing.T) {
+	h, svc := newTestHandler(t)
+	ctx := context.Background()
+	for _, notifier := range []string{"bob", "carol"} {
+		_, err := svc.Create(ctx, notification.CreateInput{
+			NotifieeID: "alice", NotifierID: notifier, Type: notification.TypeFollow,
+		})
+		require.NoError(t, err)
+	}
+	for name, fn := range map[string]func(echo.Context) error{"i/notifications": h.Show, "i/notifications-grouped": h.Grouped} {
+		for body, want := range map[string]int{
+			`{"limit":1e1,"sinceDate":0.0,"untilDate":4102444800000.0}`: 2,
+			`{"limit":1.0}`: 1,
+		} {
+			c, rec := newJSONRequest(t, "/api/"+name, body)
+			setAuth(c, &model.User{ID: "alice"})
+			require.NoError(t, fn(c))
+			require.Equal(t, http.StatusOK, rec.Code, "%s %s: %s", name, body, rec.Body.String())
+			var resp []map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Len(t, resp, want, "%s %s", name, body)
+		}
+	}
 }
 
 // untilDate を未来に設定したら全 notification が post-fetch filter を通過する
@@ -1495,7 +1523,7 @@ func TestCollectNotificationsWithDropped_ExplicitEmptyIncludeTypesReturnsNothing
 	})
 	require.NoError(t, err)
 
-	limit := 10
+	limit := jsnum.Int(10)
 	c, _ := newJSONRequest(t, "/api/i/notifications", `{}`)
 	user := &model.User{ID: "alice"}
 
