@@ -201,10 +201,46 @@ var passwordCheckedEndpoints = []string{
 	"i/update-email",
 }
 
+// enforcementPackage returns the package TestEnforcedEndpointsAreUpstreamEndpoints
+// counts the endpoint in: the first segment of the path (notes for notes and
+// notes/*), and for admin the first two (admin/ad for admin/ad/*). A top-level
+// endpoint (meta, admin/meta) is a package of its own.
+//
+// admin/* は 102 件あり、性質ごとに段を分けて載せる (#3854)。1 段目で数えると、
+// 一部を載せた時点で残り (#3854 の 20 件なら 82 件) を enforcementDeferred に並べる
+// ことになるので、admin だけは 2 段目までを 1 つのパッケージとして数える。
+func enforcementPackage(name string) string {
+	first, rest, ok := strings.Cut(name, "/")
+	if !ok || first != "admin" {
+		return first
+	}
+	second, _, ok := strings.Cut(rest, "/")
+	if !ok {
+		return name
+	}
+	return first + "/" + second
+}
+
+func TestEnforcementPackage(t *testing.T) {
+	for name, want := range map[string]string{
+		"meta":                          "meta",
+		"notes":                         "notes",
+		"notes/create":                  "notes",
+		"notes/polls/vote":              "notes",
+		"v2/admin/emoji/list":           "v2",
+		"admin/meta":                    "admin/meta",
+		"admin/ad/create":               "admin/ad",
+		"admin/emoji/set-category-bulk": "admin/emoji",
+		"admin/abuse-report/notification-recipient/create": "admin/abuse-report",
+	} {
+		assert.Equal(t, want, enforcementPackage(name), name)
+	}
+}
+
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
-// names upstream has, and to whole packages: an endpoint of a package left
-// out would keep the handwritten checks only, unless enforcementPending or
-// enforcementDeferred names it.
+// names upstream has, and to whole packages (see enforcementPackage): an
+// endpoint of a package left out would keep the handwritten checks only,
+// unless enforcementPending or enforcementDeferred names it.
 func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -213,19 +249,25 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 		ep, ok := eps[name]
 		require.True(t, ok, "%s is not an upstream endpoint", name)
 		require.NoError(t, ep.CompileErr, name)
-		pkg, _, _ := strings.Cut(name, "/")
-		packages[pkg] = true
+		packages[enforcementPackage(name)] = true
 	}
 	require.NotEmpty(t, packages)
+	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
+	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
+	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
+	// 要求する (#3854)。
+	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta"} {
+		require.True(t, packages[pkg], "package %s is not counted", pkg)
+	}
 	for name := range eps {
-		pkg, _, _ := strings.Cut(name, "/")
+		pkg := enforcementPackage(name)
 		if packages[pkg] && enforcementPending[name] == "" && enforcementDeferred[name] == "" {
 			assert.Contains(t, paramEnforcedEndpoints, name, "package %s is enforced, but not %s", pkg, name)
 		}
 	}
 	// 使われなくなった項目を残さない: 載せたか、パッケージごと外したら消す。
 	for name, body := range enforcementPending {
-		pkg, _, _ := strings.Cut(name, "/")
+		pkg := enforcementPackage(name)
 		ep, ok := eps[name]
 		if assert.True(t, ok, "pending %s is not an upstream endpoint", name) {
 			// 本家がその入力を通すようになったら、除外の理由は無くなる。
@@ -237,7 +279,7 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 		assert.True(t, packages[pkg], "pending %s: package %s is not enforced; drop it from enforcementPending", name, pkg)
 	}
 	for name, reason := range enforcementDeferred {
-		pkg, _, _ := strings.Cut(name, "/")
+		pkg := enforcementPackage(name)
 		assert.NotEmpty(t, reason, name)
 		_, ok := eps[name]
 		assert.True(t, ok, "deferred %s is not an upstream endpoint", name)
@@ -286,6 +328,24 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM user_note_pining WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM user_profile WHERE "userId" = ?`, userID).Error)
 	}
+	// resetAdmin removes what the admin/* inputs write to the tables without
+	// an owner column: the ads, announcements and avatar decorations made
+	// after the test started (keep holds the ids that were there before), the
+	// seeded ones (abc123) included, and the promotion of the seeded note.
+	const seedID = "abc123"
+	var keepAds, keepAnnouncements, keepDecorations []string
+	require.NoError(t, db.Raw(`SELECT id FROM ad WHERE id <> ?`, seedID).Scan(&keepAds).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM announcement WHERE id <> ?`, seedID).Scan(&keepAnnouncements).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM avatar_decoration WHERE id <> ?`, seedID).Scan(&keepDecorations).Error)
+	resetAdmin := func() {
+		require.NoError(t, db.Exec(`DELETE FROM promo_note WHERE "noteId" = ? OR "userId" = ?`, seedID, userID).Error)
+		// 一覧が nil だと NULL を渡すことになり、NOT (id = ANY(NULL)) は何も消さない。
+		// 空でも配列 ('{}') として渡す。
+		keep := func(ids []string) model.StringArray { return append(model.StringArray{}, ids...) }
+		require.NoError(t, db.Exec(`DELETE FROM ad WHERE NOT (id = ANY(?::varchar[]))`, keep(keepAds)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM announcement WHERE NOT (id = ANY(?::varchar[]))`, keep(keepAnnouncements)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM avatar_decoration WHERE NOT (id = ANY(?::varchar[]))`, keep(keepDecorations)).Error)
+	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
 		require.NoError(t, db.Where("id IN ?", []string{roleID, adminRoleID}).Delete(&model.Role{}).Error)
@@ -332,6 +392,14 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// (ループの中で確かめる)。どれも利用者の削除で消える (ON DELETE CASCADE) が、
 		// 何を作るかが読めるように明示して消す。
 		resetI()
+		// admin/* の受理の入力は、入力ごとに置き直す corpus の id (abc123) の広告・
+		// お知らせ・デコレーションと、作成の endpoint が足す広告・お知らせ・デコレーション・
+		// 招待・プロモーション、それらを記録するモデレーションログを書き込む (#3854)。
+		// 広告・お知らせ・デコレーションには作った人の列が無いので、テストの前に
+		// あった id を覚えておき、それ以外を消す。
+		resetAdmin()
+		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, adminID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM moderation_log WHERE "userId" = ?`, adminID).Error)
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -347,7 +415,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// requiredRolePolicy を引数の検証より先に見るので順は同じで、検証まで届かせる
 	// には利用者に canInvite が要る (#3762)。管理者限定の ap/get も同じ理由で、
 	// 管理者のトークンで送る。他のendpointは、管理者でない利用者の経路で
-	// 確かめたいので、管理者は ap/get だけに使う (#3768)。
+	// 確かめたいので、管理者は ap/get・v2/admin/emoji/list と admin/* だけに使う
+	// (#3768、#3854)。
 	now := time.Now()
 	require.NoError(t, db.Create(&model.Role{
 		ID: roleID, Name: "penforce-role", UpdatedAt: now, LastUsedAt: now,
@@ -394,7 +463,6 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// handler の検査より先に NO_SUCH_NOTE などで止まる。受理の入力ごとに、利用者が持つ
 	// 公開のノート (投票付き)・下書き・リストを abc123 で置き直し、handler の検査まで
 	// 届かせる (#3847)。notes/delete などが消したり書き足したりするので、毎回作り直す。
-	const seedID = "abc123"
 	seedNotes := func() {
 		resetNotes()
 		text := "hello"
@@ -453,6 +521,52 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 	}
 
+	// admin/* の受理の入力の多くは、corpus の id (abc123) の広告・お知らせ・
+	// デコレーションが無いと、handler の検査より先に NOT_FOUND などで止まる。受理の
+	// 入力ごとに置き直し、handler の検査まで届かせる (#3854)。promo/create のために、
+	// 利用者が持つ公開のノート (abc123) も置き直し、前の入力が作ったプロモーションを
+	// 消す (ALREADY_PROMOTED で止めない)。プロモーションはノートを消すと消える
+	// (ON DELETE CASCADE) が、何を消すかが読めるように明示して消す。
+	seedAdmin := func() {
+		seedNotes()
+		resetAdmin()
+		future := time.Now().Add(24 * time.Hour)
+		require.NoError(t, db.Create(&model.Ad{
+			ID: seedID, URL: "https://remote.example/ad", ImageURL: "https://remote.example/ad.png", Place: "square",
+			Priority: "middle", Ratio: 1, StartsAt: time.Now(), ExpiresAt: future,
+		}).Error)
+		require.NoError(t, db.Create(&model.Announcement{ID: seedID, Title: "penforce", Text: "penforce", IsActive: true}).Error)
+		require.NoError(t, db.Create(&model.AvatarDecoration{
+			ID: seedID, Name: "penforce", URL: "https://remote.example/deco.png", RoleIDs: model.StringArray{},
+		}).Error)
+	}
+	// テストの管理者と meta が、admin/* の入力で変わらないことを最後に確かめるため、
+	// 流す前の状態を覚えておく (#3854)。
+	type adminState struct {
+		Token       *string
+		IsDeleted   bool
+		IsSuspended bool
+		Roles       []string
+		Tokens      int64
+	}
+	readAdmin := func() adminState {
+		var u model.User
+		require.NoError(t, db.First(&u, "id = ?", adminID).Error)
+		st := adminState{Token: u.Token, IsDeleted: u.IsDeleted, IsSuspended: u.IsSuspended}
+		require.NoError(t, db.Raw(`SELECT "roleId" FROM role_assignment WHERE "userId" = ? ORDER BY "roleId"`, adminID).Scan(&st.Roles).Error)
+		require.NoError(t, db.Raw(`SELECT count(*) FROM access_token WHERE "userId" = ?`, adminID).Scan(&st.Tokens).Error)
+		return st
+	}
+	readMeta := func() []string {
+		var rows []string
+		require.NoError(t, db.Raw(`SELECT row_to_json(m)::text FROM meta m ORDER BY id`).Scan(&rows).Error)
+		return rows
+	}
+	adminBefore := readAdmin()
+	metaBefore := readMeta()
+	// 行が無いと、変わらないことの確かめが空振りする。
+	require.Len(t, metaBefore, 1)
+
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)
@@ -479,9 +593,22 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 
 	stricterSeen := map[string]int{}
+	seedReached := map[string]int{}
+	adminSeeded := false
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
 			seedNotes()
+		}
+		isAdmin := strings.HasPrefix(tc.ep, "admin/")
+		switch {
+		case tc.ok && isAdmin:
+			seedAdmin()
+			adminSeeded = true
+		case adminSeeded && !isAdmin:
+			// 置いたお知らせなどを、admin/* でない endpoint (i/read-announcement など)
+			// に見せない。
+			resetAdmin()
+			adminSeeded = false
 		}
 		isI := tc.ep == "i" || strings.HasPrefix(tc.ep, "i/")
 		if isI {
@@ -498,7 +625,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		bearer := token
-		if tc.ep == "ap/get" || tc.ep == "v2/admin/emoji/list" {
+		if tc.ep == "ap/get" || tc.ep == "v2/admin/emoji/list" || isAdmin {
 			bearer = adminToken
 		}
 		req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
@@ -555,6 +682,19 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.Nil(t, p.TwoFactorSecret, name)
 			assert.False(t, p.TwoFactorEnabled, name)
 		}
+		if tc.ok && isAdmin {
+			// 置いた広告・お知らせ・デコレーション・ノートを指す入力が、handler の
+			// 検査まで届いたこと (見つからないで止まっていないこと) を確かめる (#3854)。
+			var in struct {
+				ID     string `json:"id"`
+				NoteID string `json:"noteId"`
+			}
+			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID) {
+				assert.NotContains(t, []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED"},
+					env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				seedReached[tc.ep]++
+			}
+		}
 		if tc.ok {
 			var in map[string]any
 			if stricter, ok := handlerStricterThanUpstream[tc.ep]; ok && json.Unmarshal(tc.in, &in) == nil && stricter.match(in) {
@@ -578,6 +718,16 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, db.First(&after, "id = ?", userID).Error)
 	assert.Equal(t, &tok, after.Token)
 	assert.False(t, after.IsDeleted)
+	// 置き直しが空振りしていないこと: 置いたものを指す受理の入力が、各 endpoint に
+	// あること (#3854)。
+	for _, ep := range []string{"admin/ad/delete", "admin/ad/update", "admin/announcements/delete", "admin/announcements/update",
+		"admin/avatar-decorations/delete", "admin/avatar-decorations/update", "admin/promo/create"} {
+		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
+	}
+	// テストの管理者 (削除・凍結・トークン・ロール) と meta が変わっていないこと (#3854)。
+	assert.Equal(t, adminBefore, readAdmin())
+	assert.Equal(t, []string{adminRoleID}, adminBefore.Roles)
+	assert.Equal(t, metaBefore, readMeta())
 	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
 	for ep := range handlerStricterThanUpstream {
 		assert.Positive(t, stricterSeen[ep], "handlerStricterThanUpstream[%s] matches no accepted corpus input", ep)
