@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -111,12 +112,12 @@ func (h *Handler) AvatarDecorationsList(c echo.Context) error {
 	// を受け取るが、実装は avatarDecorationService.getAll(true) で全件返す。mk-go も
 	// これに揃えて全件返す。params は受理するが結果には影響しない (#1543)。
 	var req struct {
-		Limit     int     `json:"limit"`
-		SinceID   string  `json:"sinceId"`
-		UntilID   string  `json:"untilId"`
-		SinceDate *int64  `json:"sinceDate"`
-		UntilDate *int64  `json:"untilDate"`
-		UserID    *string `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		UserID    *string    `json:"userId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
@@ -125,7 +126,7 @@ func (h *Handler) AvatarDecorationsList(c echo.Context) error {
 	// `misskey:id` (`^[a-zA-Z0-9]+$`) なので ajv が 400 で弾く。ここだけ 200 を
 	// 返すと「カーソルは 400」という規則の例外になり、`untilId` を bind する
 	// handler が正規化を通っているかを機械的に見られなくなる。
-	if _, _, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate); !cursorOK {
+	if _, _, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr()); !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.avatarDecoRepo == nil {
