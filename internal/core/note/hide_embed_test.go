@@ -377,6 +377,24 @@ func TestAnonymousPublicationAllowed_PinnedUnknownPreferencesFailsClosed(t *test
 	}
 }
 
+// AnonymousPublicationAllowed publishes public and home notes only; followers
+// and specified notes are never published to an anonymous visitor (#3848).
+func TestAnonymousPublicationAllowed_Visibility(t *testing.T) {
+	for vis, want := range map[model.NoteVisibility]bool{
+		model.NoteVisibilityPublic:    true,
+		model.NoteVisibilityHome:      true,
+		model.NoteVisibilityFollowers: false,
+		model.NoteVisibilitySpecified: false,
+	} {
+		facts := EmbedFacts{Visibility: string(vis), AuthorPrefsKnown: true}
+		for _, pinned := range []bool{false, true} {
+			if got := AnonymousPublicationAllowed(facts, pinned, hideTestNowMs); got != want {
+				t.Errorf("visibility %s pinned=%v: got %v, want %v", vis, pinned, got, want)
+			}
+		}
+	}
+}
+
 func TestShouldHideNoteByTime(t *testing.T) {
 	const now int64 = 1_700_000_000_000
 	tests := []struct {

@@ -404,9 +404,10 @@ func (h *ssrMetaHandler) summaryMap(note *model.Note, hydrate bool) map[string]a
 		return nil
 	}
 	m := map[string]any{}
-	if note.Visibility != model.NoteVisibilityPublic {
-		// viewer なしでは読めない note。upstream の packed note と同じく
-		// isHidden として扱い、本文を出さない。
+	if note.Visibility != model.NoteVisibilityPublic && note.Visibility != model.NoteVisibilityHome {
+		// viewer なしでは読めない note (followers / specified)。upstream の
+		// packed note と同じく isHidden として扱い、本文を出さない。home は
+		// 未ログインでも読めるので、upstream と同じく本文を出す (#3848)。
 		m["isHidden"] = true
 		return m
 	}
@@ -716,11 +717,14 @@ func (h *ssrMetaHandler) NotePage(c echo.Context) error {
 	if err != nil || note == nil {
 		return h.renderPlain(c)
 	}
-	// visibility が public 以外の note は meta を出さない。クローラや
-	// リンク展開に非公開投稿の本文・著者を渡さないため (upstream も
-	// public 以外は SSR しない)。
+	// visibility が public / home 以外 (followers / specified) の note は meta を
+	// 出さない。クローラやリンク展開に、未ログインでは読めない投稿の本文・著者を
+	// 渡さないため。upstream も /notes/:id を visibility In(['public', 'home'])
+	// で引く (ClientServerService)。以前はピン留めしていない home を出して
+	// いなかったので、home のノートのリンクがサーバー全体の meta だけのカードに
+	// なっていた (#3848)。
 	pinned := h.noteIsCurrentlyPinned(note)
-	if note.Visibility != model.NoteVisibilityPublic && !(pinned && note.Visibility == model.NoteVisibilityHome) {
+	if note.Visibility != model.NoteVisibilityPublic && note.Visibility != model.NoteVisibilityHome {
 		return h.renderBareShell(c, noteIsRemote(note))
 	}
 	// 投稿者が「ログインしないと見せない」設定なら meta も出さない。
