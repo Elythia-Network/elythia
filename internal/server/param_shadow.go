@@ -26,7 +26,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // username/available, ap/*, bubble-game/ranking and bubble-game/register in
 // #3768; federation/* except federation/instances in #3770; pages/* and
 // page-push in #3772; the read-only top-level endpoints in #3774; users and
-// users/* in #3837).
+// users/* in #3837; drive and drive/* in #3839).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -220,6 +220,26 @@ var paramEnforcedEndpoints = []string{
 	"users/search-by-username-and-host",
 	"users/show",
 	"users/update-memo",
+	"drive",
+	"drive/files",
+	"drive/files/attached-chat-messages",
+	"drive/files/attached-notes",
+	"drive/files/check-existence",
+	"drive/files/create",
+	"drive/files/delete",
+	"drive/files/find",
+	"drive/files/find-by-hash",
+	"drive/files/move-bulk",
+	"drive/files/show",
+	"drive/files/update",
+	"drive/files/upload-from-url",
+	"drive/folders",
+	"drive/folders/create",
+	"drive/folders/delete",
+	"drive/folders/find",
+	"drive/folders/show",
+	"drive/folders/update",
+	"drive/stream",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

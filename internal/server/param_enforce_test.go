@@ -148,6 +148,11 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// NO_SUCH_USER / NO_SUCH_LIST で止まる。user_list は利用者の削除で消える (ON DELETE
 		// CASCADE) が、何を作るかが読めるように明示して消す。
 		require.NoError(t, db.Exec(`DELETE FROM user_list WHERE "userId" = ?`, userID).Error)
+		// drive/* の受理の入力で実際に書き込むのは drive/folders/create だけ (#3839)。ほかの
+		// 書き込み系は、corpus の id のファイルやフォルダが無いので、書き込みの前に
+		// NO_SUCH_FILE / NO_SUCH_FOLDER で止まる。upload-from-url の受理の入力の url には
+		// host が無く、取得の前に invalid url で止まるので、外へは出ない。
+		require.NoError(t, db.Exec(`DELETE FROM drive_folder WHERE "userId" = ?`, userID).Error)
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -177,6 +182,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
 	_, on, _ := newParamShadowServers(t)
 
+	eps, err := paramschema.Upstream()
+	require.NoError(t, err)
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)
 	seen := map[string][2]int{}
 	for _, tc := range cases {
@@ -216,6 +223,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &env)
 		name := tc.ep + " " + string(tc.in)
+		if eps[tc.ep].RequireFile {
+			// 本家は requireFile の endpoint (drive/files/create) の引数を multipart の
+			// field から読み、JSON の body には ajv より先に本文の無い 400 を返す
+			// (handleMultipartRequest)。Elythia は RequireMultipartFile が同じ 400 を返す。
+			// 検証器は multipart を検証しないので、ajv の判定によらずこの応答になる (#3839)。
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "%s (corpus line %d)", name, tc.line)
+			assert.Empty(t, rec.Body.String(), name)
+			continue
+		}
 		if tc.ok {
 			assert.NotEqual(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): ajv accepts it; body %s", name, tc.line, rec.Body.String())
 			continue
