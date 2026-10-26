@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -40,21 +41,21 @@ func (h *Handler) DraftsList(c echo.Context) error {
 	// aidx で時刻を内包するので、sinceDate/untilDate は id cursor に正規化して
 	// keyset pagination に乗せる (#1948-19)。
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		Scheduled *bool  `json:"scheduled"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		Scheduled *bool      `json:"scheduled"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -99,7 +100,7 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 		ChannelID           *string    `json:"channelId"`
 		Hashtag             *string    `json:"hashtag"`
 		Poll                *draftPoll `json:"poll"`
-		ScheduledAt         *int64     `json:"scheduledAt"`
+		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled bool       `json:"isActuallyScheduled"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -124,7 +125,7 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 	now := time.Now()
 	var scheduledAt *time.Time
 	if req.ScheduledAt != nil {
-		t := time.UnixMilli(*req.ScheduledAt)
+		t := time.UnixMilli(int64(*req.ScheduledAt))
 		scheduledAt = &t
 	}
 	if req.IsActuallyScheduled {
@@ -247,7 +248,7 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		ChannelID           *string    `json:"channelId"`
 		Hashtag             *string    `json:"hashtag"`
 		Poll                *draftPoll `json:"poll"`
-		ScheduledAt         *int64     `json:"scheduledAt"`
+		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled *bool      `json:"isActuallyScheduled"`
 	}
 	if err := c.Bind(&req); err != nil || req.DraftID == "" {
@@ -332,7 +333,7 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		applyDraftPoll(draft, req.Poll)
 	}
 	if req.ScheduledAt != nil {
-		t := time.UnixMilli(*req.ScheduledAt)
+		t := time.UnixMilli(int64(*req.ScheduledAt))
 		draft.ScheduledAt = &t
 		scheduleChanged = true
 	}
@@ -433,10 +434,10 @@ func validateDraftLengths(text, cw, hashtag *string, fileIDs []string, poll *dra
 
 // draftPoll mirrors the upstream notes/drafts poll param object.
 type draftPoll struct {
-	Choices      []string `json:"choices"`
-	Multiple     bool     `json:"multiple"`
-	ExpiresAt    *int64   `json:"expiresAt"`
-	ExpiredAfter *int64   `json:"expiredAfter"`
+	Choices      []string   `json:"choices"`
+	Multiple     bool       `json:"multiple"`
+	ExpiresAt    *jsnum.Int `json:"expiresAt"`
+	ExpiredAfter *jsnum.Int `json:"expiredAfter"`
 }
 
 // draftReplyRenoteErrs holds the 4 reply/renote error responses that differ
@@ -593,7 +594,7 @@ func (h *Handler) allDraftFilesOwned(fileIDs []string, userID string) bool {
 
 // pollAlreadyExpired reports whether the poll's expiresAt is in the past.
 func pollAlreadyExpired(p *draftPoll, now time.Time) bool {
-	return p != nil && p.ExpiresAt != nil && time.UnixMilli(*p.ExpiresAt).Before(now)
+	return p != nil && p.ExpiresAt != nil && time.UnixMilli(int64(*p.ExpiresAt)).Before(now)
 }
 
 // applyDraftPoll writes poll fields into the draft. nil clears the poll
@@ -610,9 +611,9 @@ func applyDraftPoll(d *model.NoteDraft, p *draftPoll) {
 	d.HasPoll = true
 	d.PollChoices = model.StringArray(p.Choices)
 	d.PollMultiple = p.Multiple
-	d.PollExpiredAfter = p.ExpiredAfter
+	d.PollExpiredAfter = p.ExpiredAfter.Int64Ptr()
 	if p.ExpiresAt != nil {
-		t := time.UnixMilli(*p.ExpiresAt)
+		t := time.UnixMilli(int64(*p.ExpiresAt))
 		d.PollExpiresAt = &t
 	} else {
 		d.PollExpiresAt = nil
@@ -772,8 +773,8 @@ func (h *Handler) ThreadMutingDelete(c echo.Context) error {
 func (h *Handler) PollsRecommendation(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		Limit  *int `json:"limit"`
-		Offset int  `json:"offset"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset jsnum.Int  `json:"offset"`
 		// upstream recommendation.ts:35 は excludeChannels を boolean で受け、
 		// true のとき全 channel poll を除外する (#1765。以前は []string だった)。
 		ExcludeChannels bool `json:"excludeChannels"`
@@ -784,7 +785,7 @@ func (h *Handler) PollsRecommendation(c echo.Context) error {
 	if h.pollRepo == nil || h.noteRepo == nil {
 		return c.JSON(http.StatusOK, []entity.NoteEntity{})
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -792,7 +793,7 @@ func (h *Handler) PollsRecommendation(c echo.Context) error {
 	if h.mutingRepo != nil {
 		muted, _ = h.mutingRepo.ListMuteeIDs(user.ID)
 	}
-	noteIDs, err := h.pollRepo.ListRecommendation(user.ID, muted, req.ExcludeChannels, limit, req.Offset)
+	noteIDs, err := h.pollRepo.ListRecommendation(user.ID, muted, req.ExcludeChannels, limit, int(req.Offset))
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}

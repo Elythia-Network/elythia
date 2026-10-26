@@ -85,6 +85,16 @@ func NewMetaDeepL(settings DeepLSettings, client *http.Client) *MetaDeepL {
 	return &MetaDeepL{settings: settings, client: client, freeURL: deeplFreeURL, proURL: deeplProURL}
 }
 
+// Configured reports whether an auth key is currently set. err is
+// ErrSettingsUnavailable when the settings could not be read.
+func (m *MetaDeepL) Configured() (bool, error) {
+	key, _, err := m.settings()
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrSettingsUnavailable, err)
+	}
+	return key != "", nil
+}
+
 // Translate reads the current settings and translates text. It returns
 // ErrNotConfigured when no auth key is set.
 func (m *MetaDeepL) Translate(ctx context.Context, text, targetLang string) (*TranslateResult, error) {

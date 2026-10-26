@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -77,4 +79,4 @@ func TestTimelineJSONCache_Bounded(t *testing.T) {
 	assert.Equal(t, "4", string(body))
 }
 
-func intPtr(v int) *int { return &v }
+func intPtr(v int) *jsnum.Int { n := jsnum.Int(v); return &n }

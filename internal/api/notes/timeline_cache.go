@@ -112,7 +112,7 @@ func timelineCacheKey(kind, viewerID string, req TimelineRequest) string {
 	return strings.Join([]string{
 		kind,
 		viewerID,
-		strconv.Itoa(*req.Limit),
+		strconv.Itoa(int(*req.Limit)),
 		boolKey(req.WithFiles),
 		ptrBoolKey(req.WithRenotes),
 		ptrBoolKey(req.WithReplies),
