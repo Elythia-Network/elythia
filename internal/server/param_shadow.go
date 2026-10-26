@@ -28,7 +28,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // page-push in #3772; the read-only top-level endpoints in #3774; users and
 // users/* in #3837; drive and drive/* in #3839; chat/* in #3841; reversi/* except reversi/match in #3843; export-custom-emojis,
 // fetch-external-resources, request-reset-password, reset-password,
-// verify-email and v2/admin/emoji/list in #3845).
+// verify-email and v2/admin/emoji/list in #3845; notes and notes/* except
+// notes/create in #3847).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -279,6 +280,41 @@ var paramEnforcedEndpoints = []string{
 	"reset-password",
 	"verify-email",
 	"v2/admin/emoji/list",
+	"notes",
+	"notes/children",
+	"notes/clips",
+	"notes/conversation",
+	"notes/delete",
+	"notes/drafts/count",
+	"notes/drafts/create",
+	"notes/drafts/delete",
+	"notes/drafts/list",
+	"notes/drafts/update",
+	"notes/favorites/create",
+	"notes/favorites/delete",
+	"notes/featured",
+	"notes/global-timeline",
+	"notes/hybrid-timeline",
+	"notes/local-timeline",
+	"notes/mentions",
+	"notes/polls/recommendation",
+	"notes/polls/vote",
+	"notes/reactions",
+	"notes/reactions/create",
+	"notes/reactions/delete",
+	"notes/renotes",
+	"notes/replies",
+	"notes/search",
+	"notes/search-by-tag",
+	"notes/show",
+	"notes/show-partial-bulk",
+	"notes/state",
+	"notes/thread-muting/create",
+	"notes/thread-muting/delete",
+	"notes/timeline",
+	"notes/translate",
+	"notes/unrenote",
+	"notes/user-list-timeline",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

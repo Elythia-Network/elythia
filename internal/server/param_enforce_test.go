@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"gorm.io/datatypes"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
+	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -84,6 +86,16 @@ var enforcementPending = map[string]string{
 	"reversi/match": `{"userId":"@alice@remote.example"}`,
 }
 
+// enforcementDeferred lists the endpoints of an enforced package that are
+// left to a later stage, with the reason. Unlike enforcementPending, they
+// have no Elythia-only input that upstream's paramDef rejects.
+var enforcementDeferred = map[string]string{
+	// 独自の引数は無いが、本家と判定が分かれる入力 (U+0085 だけの text、NUL を含む
+	// text、poll.choices の __proto__ の重複など) の扱いを、admin/update-meta・
+	// i/update と一緒に最後の段で決める (#3667、#3847)。
+	"notes/create": "decided with admin/update-meta and i/update in the last stage of #3667",
+}
+
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
 // inputs it matches, and the id of the INVALID_PARAM the handler answers.
 type stricterCase struct {
@@ -96,7 +108,9 @@ const ajvInvalidParamID = "3d81ceae-475f-4600-b2a8-2bc116157532"
 
 // handlerStricterThanUpstream lists the accepted corpus inputs an enforced
 // endpoint still rejects with INVALID_PARAM on purpose, because upstream
-// answers them with a 500. Each entry must match at least one corpus input.
+// answers them with a 500 (or, for notes/search's empty query, with a search
+// of every note; see docs/divergence/approximations.md). Each entry must match
+// at least one corpus input.
 var handlerStricterThanUpstream = map[string]stricterCase{
 	// 本家は絵文字を含まない reaction を normalizeEmojiString が素の Error で
 	// 投げて 500 にする (ChatService.react)。利用者の入力の誤りなので、Elythia は
@@ -113,6 +127,18 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 			}
 		}
 		return true
+	}},
+	// 本家は note_visibility_enum に無い visibility を PostgreSQL の型変換で 500 に
+	// する。Elythia は引く前に 400 にしている (#3518)。空文字は未指定と同じに扱う。
+	"notes/mentions": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		v, ok := in["visibility"].(string)
+		return ok && !slices.Contains([]string{"", "public", "home", "followers", "specified"}, v)
+	}},
+	// 本家は空の検索語で絞り込まずに返す (LIKE '%%' でも meilisearch でも)。検索語の
+	// 無い検索は検索として意味を持たないので、Elythia は以前からの 400 のままにし、
+	// 残す差として docs/divergence/approximations.md に書いている (#3847)。
+	"notes/search": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		return in["query"] == ""
 	}},
 	// 本家は相対の url や http(s) 以外の scheme を fetch に渡し、例外で 500 になる。
 	// 取得の前に 400 にしている (#3845)。corpus の url はどれもこの形で、本家でも
@@ -146,8 +172,8 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
 // names upstream has, and to whole packages: an endpoint of a package left
-// out would keep the handwritten checks only, unless enforcementPending
-// names it.
+// out would keep the handwritten checks only, unless enforcementPending or
+// enforcementDeferred names it.
 func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -162,7 +188,7 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	require.NotEmpty(t, packages)
 	for name := range eps {
 		pkg, _, _ := strings.Cut(name, "/")
-		if packages[pkg] && enforcementPending[name] == "" {
+		if packages[pkg] && enforcementPending[name] == "" && enforcementDeferred[name] == "" {
 			assert.Contains(t, paramEnforcedEndpoints, name, "package %s is enforced, but not %s", pkg, name)
 		}
 	}
@@ -178,6 +204,15 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 		}
 		assert.NotContains(t, paramEnforcedEndpoints, name, "pending %s is enforced; drop it from enforcementPending", name)
 		assert.True(t, packages[pkg], "pending %s: package %s is not enforced; drop it from enforcementPending", name, pkg)
+	}
+	for name, reason := range enforcementDeferred {
+		pkg, _, _ := strings.Cut(name, "/")
+		assert.NotEmpty(t, reason, name)
+		_, ok := eps[name]
+		assert.True(t, ok, "deferred %s is not an upstream endpoint", name)
+		assert.NotContains(t, paramEnforcedEndpoints, name, "deferred %s is enforced; drop it from enforcementDeferred", name)
+		assert.Empty(t, enforcementPending[name], "%s is both pending and deferred", name)
+		assert.True(t, packages[pkg], "deferred %s: package %s is not enforced; drop it from enforcementDeferred", name, pkg)
 	}
 }
 
@@ -197,6 +232,19 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	const roleID, assignID = "penforce-role", "penforce-assign"
 	const adminID, adminToken = "penforce-admin", "penforceadmintk1"
 	const adminRoleID, adminAssignID = "penforce-admin-role", "penforce-admin-assign"
+	// resetNotes removes what the notes/* inputs write: the seeded note, poll,
+	// draft and list, and the favorites, reactions, votes and thread mutings
+	// of the test user.
+	resetNotes := func() {
+		require.NoError(t, db.Exec(`DELETE FROM note_favorite WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM note_reaction WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM poll_vote WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM note_thread_muting WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM note_draft WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM poll WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM note WHERE "userId" = ?`, userID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM user_list WHERE "userId" = ?`, userID).Error)
+	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
 		require.NoError(t, db.Where("id IN ?", []string{roleID, adminRoleID}).Delete(&model.Role{}).Error)
@@ -229,6 +277,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// 走らない。fetch-external-resources の corpus の url には host が無く、取得の
 		// 前に止まる。request-reset-password は corpus の名前の利用者がいないので、
 		// password_reset_request の行を作らない。
+		// notes/* の受理の入力は、入力ごとに置き直すノート・投票・下書き・リストと、
+		// そこへのお気に入り・リアクション・投票・スレッドのミュートを書き込む
+		// (#3847)。どれも利用者の削除で消える (ON DELETE CASCADE) が、何を作るかが
+		// 読めるように明示して消す。hashtag の行を作る notes/create は載せていない
+		// (enforcementDeferred) ので、hashtag は書き込まない。
+		resetNotes()
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -237,6 +291,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
 		ID: userID, Username: "penforce", UsernameLower: "penforce", Token: &tok,
 	}))
+	// notes/search と notes/translate は、本家と同じく canSearchNotes・canUseTranslator
+	// が無いと引数を見る前に UNAVAILABLE を返す。handler の検査まで届かせるため、
+	// 利用者に与える (#3847)。
 	// invite/* は route の canInvite の検査が引数の検証より先に 403 を返す。本家も
 	// requiredRolePolicy を引数の検証より先に見るので順は同じで、検証まで届かせる
 	// には利用者に canInvite が要る (#3762)。管理者限定の ap/get も同じ理由で、
@@ -245,7 +302,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	now := time.Now()
 	require.NoError(t, db.Create(&model.Role{
 		ID: roleID, Name: "penforce-role", UpdatedAt: now, LastUsedAt: now,
-		Policies: datatypes.JSON(`{"canInvite":{"useDefault":false,"priority":0,"value":true}}`),
+		Policies: datatypes.JSON(`{"canInvite":{"useDefault":false,"priority":0,"value":true},` +
+			`"canSearchNotes":{"useDefault":false,"priority":0,"value":true},` +
+			`"canUseTranslator":{"useDefault":false,"priority":0,"value":true}}`),
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: assignID, UserID: userID, RoleID: roleID}).Error)
 	adminTok := adminToken
@@ -256,7 +315,45 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		ID: adminRoleID, Name: "penforce-admin-role", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true,
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
-	_, on, _ := newParamShadowServers(t)
+	// 外向きの通信が起きないことを確かめるため、外へ出る経路の proxy に、届いた
+	// リクエストを数えるだけのサーバーを置く (#3847)。
+	var outbound atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		outbound.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	_, on, _ := newParamShadowServers(t, func(cfg *config.Config) {
+		cfg.Proxy = proxy.URL
+		// 下の確かめに使う宛先。TEST-NET-1 で、どこへも届かない。
+		cfg.AllowedPrivateNetworks = []string{"192.0.2.0/24"}
+	})
+	// proxy が外向きの通信を実際に拾えることを先に確かめる。拾えないと、下の 0 件は
+	// 何も見ていないのと同じになる。
+	if res, err := on.outboundClient(5 * time.Second).Get("http://192.0.2.1/probe"); err == nil {
+		require.NoError(t, res.Body.Close())
+	}
+	require.EqualValues(t, 1, outbound.Load(), "the recording proxy does not see the outbound requests")
+	outbound.Store(0)
+
+	// notes/* の受理の入力の多くは、corpus の id (abc123) のノートや下書きが無いと
+	// handler の検査より先に NO_SUCH_NOTE などで止まる。受理の入力ごとに、利用者が持つ
+	// 公開のノート (投票付き)・下書き・リストを abc123 で置き直し、handler の検査まで
+	// 届かせる (#3847)。notes/delete などが消したり書き足したりするので、毎回作り直す。
+	const seedID = "abc123"
+	seedNotes := func() {
+		resetNotes()
+		text := "hello"
+		require.NoError(t, db.Create(&model.Note{
+			ID: seedID, UserID: userID, Text: &text, Visibility: model.NoteVisibilityPublic, HasPoll: true,
+		}).Error)
+		require.NoError(t, db.Create(&model.Poll{
+			NoteID: seedID, UserID: userID, Choices: model.StringArray{"a", "b"}, Votes: model.Int64Array{0, 0},
+			NoteVisibility: model.NoteVisibilityPublic,
+		}).Error)
+		require.NoError(t, db.Create(&model.NoteDraft{ID: seedID, UserID: userID, Text: &text, Visibility: "public"}).Error)
+		require.NoError(t, db.Create(&model.UserList{ID: seedID, UserID: userID, Name: "penforce"}).Error)
+	}
 
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -285,6 +382,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 
 	stricterSeen := map[string]int{}
 	for _, tc := range cases {
+		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
+			seedNotes()
+		}
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		bearer := token
@@ -333,6 +433,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.Equal(t, tc.msg, env.Error.Info.Reason, name)
 		}
 	}
+	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
 	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
 	for ep := range handlerStricterThanUpstream {
 		assert.Positive(t, stricterSeen[ep], "handlerStricterThanUpstream[%s] matches no accepted corpus input", ep)
@@ -342,7 +443,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 // TestEnforcedGETMatchesUpstream sends GET queries to the enforced allowGet
 // endpoints of a real server (charts/*, bubble-game/ranking, federation/stats,
 // the top-level emoji, emojis, fetch-rss, get-online-users-count,
-// retention and server-info, and users/featured-notes) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
+// retention and server-info, users/featured-notes and notes/featured) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
 // are written out here (#3744).
 func TestEnforcedGETMatchesUpstream(t *testing.T) {
@@ -434,6 +535,25 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "users/featured-notes?userId=", id: ajvID, param: "#/properties/userId/format", reason: `must match format "misskey:id"`},
 		{query: "users/featured-notes?userId=a&userId=b", id: ajvID, param: "#/properties/userId/type", reason: "must be string"},
 		{query: "users/featured-notes?userId=abc123&untilId=x-y", id: ajvID, param: "#/properties/untilId/format", reason: `must match format "misskey:id"`},
+		// notes/featuredは本家もallowGetで、本家のparamDefに無いoffset・untilDateは読まない(#3847)。
+		{query: "notes/featured", ok: true},
+		{query: "notes/featured?limit=10.0", ok: true},
+		{query: "notes/featured?limit=1e1", ok: true},
+		{query: "notes/featured?limit=100e0", ok: true},
+		{query: "notes/featured?untilId=abc123", ok: true},
+		{query: "notes/featured?channelId=abc123", ok: true},
+		{query: "notes/featured?unknown=1", ok: true},
+		{query: "notes/featured?offset=x&untilDate=x", ok: true},
+		{query: "notes/featured?limit=abc", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "notes/featured?limit=", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "notes/featured?limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "notes/featured?limit=10.5", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "notes/featured?limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
+		{query: "notes/featured?limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
+		{query: "notes/featured?limit=1&limit=2", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
+		{query: "notes/featured?untilId=x-y", id: ajvID, param: "#/properties/untilId/format", reason: `must match format "misskey:id"`},
+		{query: "notes/featured?channelId=", id: ajvID, param: "#/properties/channelId/format", reason: `must match format "misskey:id"`},
+		{query: "notes/featured?channelId=a&channelId=b", id: ajvID, param: "#/properties/channelId/type", reason: "must be string"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/"+tc.query, nil)
 		rec := httptest.NewRecorder()
