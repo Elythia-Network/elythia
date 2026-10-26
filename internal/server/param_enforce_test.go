@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -83,15 +84,25 @@ var enforcementPending = map[string]string{
 	"reversi/match": `{"userId":"@alice@remote.example"}`,
 }
 
+// stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
+// inputs it matches, and the id of the INVALID_PARAM the handler answers.
+type stricterCase struct {
+	match func(in map[string]any) bool
+	id    string
+}
+
+// ajvInvalidParamID is upstream's id of the INVALID_PARAM ajv answers.
+const ajvInvalidParamID = "3d81ceae-475f-4600-b2a8-2bc116157532"
+
 // handlerStricterThanUpstream lists the accepted corpus inputs an enforced
 // endpoint still rejects with INVALID_PARAM on purpose, because upstream
 // answers them with a 500. Each entry must match at least one corpus input.
-var handlerStricterThanUpstream = map[string]func(in map[string]any) bool{
+var handlerStricterThanUpstream = map[string]stricterCase{
 	// 本家は絵文字を含まない reaction を normalizeEmojiString が素の Error で
 	// 投げて 500 にする (ChatService.react)。利用者の入力の誤りなので、Elythia は
 	// 400 INVALID_PARAM にしている (#3841)。corpus の値は ASCII だけなので、
 	// ASCII だけで :name: の形でないものを絵文字の無い値とみなす。
-	"chat/messages/react": func(in map[string]any) bool {
+	"chat/messages/react": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
 		r, ok := in["reaction"].(string)
 		if !ok || (strings.HasPrefix(r, ":") && strings.HasSuffix(r, ":") && len(r) > 2) {
 			return false
@@ -102,7 +113,35 @@ var handlerStricterThanUpstream = map[string]func(in map[string]any) bool{
 			}
 		}
 		return true
-	},
+	}},
+	// 本家は相対の url や http(s) 以外の scheme を fetch に渡し、例外で 500 になる。
+	// 取得の前に 400 にしている (#3845)。corpus の url はどれもこの形で、本家でも
+	// 取得できる data: の url は無い。
+	"fetch-external-resources": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		raw, ok := in["url"].(string)
+		if !ok {
+			return false
+		}
+		u, err := url.Parse(raw)
+		return err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https")
+	}},
+	// 本家は存在しない token を findOneByOrFail で 500 にする。Elythia は独自の id の
+	// 「Invalid token.」を返す (#3845)。corpus の token はどれも存在しない。
+	"reset-password": {id: "6382759e-0a0d-4e32-893e-0e1e66cec4d5", match: func(map[string]any) bool { return true }},
+	// 本家は日付として読めない updatedAtFrom / updatedAtTo を PostgreSQL の型変換で
+	// 500 にする。Elythia は引く前に 400 にしている (#3518)。
+	"v2/admin/emoji/list": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		q, ok := in["query"].(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, k := range []string{"updatedAtFrom", "updatedAtTo"} {
+			if v, ok := q[k].(string); ok && !repository.ValidEmojiUpdatedAtFilter(v) {
+				return true
+			}
+		}
+		return false
+	}},
 }
 
 // TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
@@ -184,6 +223,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// 外向きの配送の前に NO_SUCH_* で止まる。chat_room は利用者の削除で消える
 		// (ON DELETE CASCADE) が、何を作るかが読めるように明示して消す。
 		require.NoError(t, db.Exec(`DELETE FROM chat_room WHERE "ownerId" = ?`, userID).Error)
+		// export-custom-emojis・fetch-external-resources・request-reset-password・
+		// reset-password・verify-email・v2/admin/emoji/list の受理の入力は書き込まない
+		// (#3845)。export はテストごとの Redis にジョブを積むだけで、worker がいないので
+		// 走らない。fetch-external-resources の corpus の url には host が無く、取得の
+		// 前に止まる。request-reset-password は corpus の名前の利用者がいないので、
+		// password_reset_request の行を作らない。
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
@@ -243,7 +288,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		bearer := token
-		if tc.ep == "ap/get" {
+		if tc.ep == "ap/get" || tc.ep == "v2/admin/emoji/list" {
 			bearer = adminToken
 		}
 		req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
@@ -253,6 +298,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		var env struct {
 			Error struct {
 				Code string `json:"code"`
+				ID   string `json:"id"`
 				Info struct {
 					Param  string `json:"param"`
 					Reason string `json:"reason"`
@@ -272,9 +318,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		if tc.ok {
 			var in map[string]any
-			if stricter := handlerStricterThanUpstream[tc.ep]; stricter != nil && json.Unmarshal(tc.in, &in) == nil && stricter(in) {
+			if stricter, ok := handlerStricterThanUpstream[tc.ep]; ok && json.Unmarshal(tc.in, &in) == nil && stricter.match(in) {
 				stricterSeen[tc.ep]++
 				assert.Equal(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				assert.Equal(t, stricter.id, env.Error.ID, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				continue
 			}
 			assert.NotEqual(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): ajv accepts it; body %s", name, tc.line, rec.Body.String())
