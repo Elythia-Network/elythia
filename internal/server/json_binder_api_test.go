@@ -312,6 +312,12 @@ func TestRequireObjectBody(t *testing.T) {
 		{"HEAD", http.MethodHead, "/api/x", "", ``, false},
 		{"non-endpoint route", http.MethodPost, "/api/signup", echo.MIMEApplicationJSON, `null`, false},
 		{"non-API route", http.MethodPost, "/inbox", echo.MIMEApplicationJSON, `null`, false},
+		// 本家の paramDef が {} の endpoint は、何でも ajv を通る (#3843)。
+		{"any-body endpoint JSON null", http.MethodPost, "/api/reversi/invitations", echo.MIMEApplicationJSON, `null`, false},
+		{"any-body endpoint JSON array", http.MethodPost, "/api/admin/captcha/current", echo.MIMEApplicationJSON, `[1]`, false},
+		{"any-body endpoint no body", http.MethodPost, "/api/reversi/invitations", "", ``, false},
+		{"any-body endpoint text/plain", http.MethodPost, "/api/reversi/invitations", "text/plain", `x`, false},
+		{"object endpoint JSON null", http.MethodPost, "/api/reversi/games", echo.MIMEApplicationJSON, `null`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -344,6 +350,15 @@ func TestRequireObjectBody(t *testing.T) {
 			assert.Equal(t, tc.body, seen)
 		})
 	}
+}
+
+// TestAnyBodyEndpoints pins the endpoints whose upstream paramDef accepts a
+// non-object body. An empty set would mean the golden lookup silently failed.
+func TestAnyBodyEndpoints(t *testing.T) {
+	assert.Equal(t, map[string]bool{
+		"admin/captcha/current": true,
+		"reversi/invitations":   true,
+	}, anyBodyEndpoints())
 }
 
 // TestRequireObjectBody_ReadErrorPassesThrough pins that a body read error

@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
@@ -224,6 +226,9 @@ func isTextPlain(ct string) bool {
 // text/plain body. It answers like the binder does (INVALID_PARAM with
 // info {param: "#/type", reason: "must be object"}).
 //
+// The endpoints whose upstream paramDef accepts a non-object body
+// (anyBodyEndpoints) are let through, as upstream does.
+//
 // apiRoutes appends it as the last route middleware, so it runs after the
 // route's credential / permission checks and right before the handler —
 // the same place upstream's ajv validation has in ApiCallService.call. It
@@ -232,6 +237,9 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()
 		if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) {
+			return next(c)
+		}
+		if anyBodyEndpoints()[strings.TrimPrefix(c.Path(), "/api/")] {
 			return next(c)
 		}
 		ct := req.Header.Get(echo.HeaderContentType)
@@ -269,6 +277,27 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 		return apierr.JSONInvalidParam(c)
 	}
 }
+
+// anyBodyEndpoints returns the upstream endpoints whose paramDef accepts a
+// body that is not an object (its paramDef is `{}`: reversi/invitations and
+// admin/captcha/current). Upstream hands any body to ajv, which passes it, so
+// requireObjectBody lets these through.
+//
+// 本家の paramDef に type が無いと、ajv は null・配列・文字列も通す。名前を手で
+// 書くと本家の版上げで取り残されるので、golden の schema から求める (#3843)。
+var anyBodyEndpoints = sync.OnceValue(func() map[string]bool {
+	out := map[string]bool{}
+	eps, err := paramschema.Upstream()
+	if err != nil {
+		return out
+	}
+	for name, ep := range eps {
+		if ep.Schema != nil && ep.CompileErr == nil && ep.Schema.Validate(nil) == nil && ep.Schema.Validate("x") == nil {
+			out[name] = true
+		}
+	}
+	return out
+})
 
 // apiRoutes is the /api group whose POST and Match registrations get
 // withParamShadow and requireObjectBody as their last route middleware, and
