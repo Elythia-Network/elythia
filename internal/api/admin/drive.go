@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -192,26 +193,26 @@ func (h *Handler) DriveFiles(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	var req struct {
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		UserID    string `json:"userId"`
-		Origin    string `json:"origin"`
-		Host      string `json:"host"`
-		Hostname  string `json:"hostname"`
-		Type      string `json:"type"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Origin    string     `json:"origin"`
+		Host      string     `json:"host"`
+		Hostname  string     `json:"hostname"`
+		Type      string     `json:"type"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -280,19 +281,38 @@ func (h *Handler) packDriveFileAdmin(f *model.DriveFile) entity.DriveFileEntity 
 // 形に揃え、`requestIp` / `requestHeaders` を含む (frontend admin-file の
 // IP タブで参照、それ以外は PackDriveFile + admin only field の合成、#1148)。
 func (h *Handler) DriveShowFile(c echo.Context) error {
+	// 本家のparamDefはanyOfで、{fileId: misskey:id}か{url: string}の片方を満たせば、
+	// もう片方の値の型は問わない。実行部は'fileId' in psで分岐するので、fileIdの
+	// キーがあればurlは見ない(#3857)。以前はstringで受けていたので、型の違うもう
+	// 片方をBindのエラーで400にし、値が空かどうかで分岐して{"url":""}を
+	// INVALID_PARAMにしていた。
+	//
+	// fileIdが文字列でもnullでもなければ、当たるファイルは無いのでNO_SUCH_FILE
+	// (本家もfindOneBy({id: 123})で見つからない)。nullは欠けと同じに扱い、urlで
+	// 引く。本家はTypeORMがnullの条件を落として任意の1件を返す見込みで、意味が
+	// 無いので揃えない(docs/divergence/approximations.md)。
 	var req struct {
-		FileID string `json:"fileId"`
-		URL    string `json:"url"`
+		FileID json.RawMessage `json:"fileId"`
+		URL    json.RawMessage `json:"url"`
 	}
-	if err := c.Bind(&req); err != nil || (req.FileID == "" && req.URL == "") {
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "fileId or url is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	hasFileID := len(req.FileID) > 0 && string(req.FileID) != "null"
+	fileID, fileIDIsString := rawJSONString(req.FileID)
+	rawURL, urlIsString := rawJSONString(req.URL)
+	if !hasFileID && !urlIsString {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "fileId or url is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	if h.driveFileRepo == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "caf3ca38-c6e5-472e-a30c-b05377dcc240"))
 	}
 	viewer := middleware.GetUser(c)
-	if req.FileID != "" {
-		file, err := h.driveFileRepo.FindByID(req.FileID)
+	if hasFileID {
+		if !fileIDIsString || fileID == "" {
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "caf3ca38-c6e5-472e-a30c-b05377dcc240"))
+		}
+		file, err := h.driveFileRepo.FindByID(fileID)
 		if err != nil && !repository.IsNotFound(err) {
 			// **DB 障害を not-found に丸めない** (#2792)。
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
@@ -307,14 +327,29 @@ func (h *Handler) DriveShowFile(c echo.Context) error {
 	if h.adminDB == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "caf3ca38-c6e5-472e-a30c-b05377dcc240"))
 	}
+	// 空のurlでは引かない。本家は空のまま引くが、本家にはurl・thumbnailUrl・webpublicUrlに
+	// 空文字を保存する経路は無いので、本家でもNO_SUCH_FILEになる。空の値を持つ行が
+	// あっても、条件に合う任意の1件を返さないよう先に止める(#3857)。
+	if rawURL == "" {
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "caf3ca38-c6e5-472e-a30c-b05377dcc240"))
+	}
 	var file model.DriveFile
 	if err := h.adminDB.Where(
 		`"url" = ? OR "thumbnailUrl" = ? OR "webpublicUrl" = ?`,
-		req.URL, req.URL, req.URL,
+		rawURL, rawURL, rawURL,
 	).First(&file).Error; err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "caf3ca38-c6e5-472e-a30c-b05377dcc240"))
 	}
 	return c.JSON(http.StatusOK, h.packAdminDriveShowFile(&file, viewer))
+}
+
+// rawJSONString decodes raw as a JSON string. ok is false when raw is absent,
+// null or not a string.
+func rawJSONString(raw json.RawMessage) (s string, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	return s, json.Unmarshal(raw, &s) == nil
 }
 
 // packAdminDriveShowFile builds the upstream-compatible admin/drive/show-file

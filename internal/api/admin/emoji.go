@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -548,24 +549,23 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	var req struct {
-		Query     string `json:"query"`
-		Host      string `json:"host"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
-		Limit     *int   `json:"limit"`
-		Offset    int    `json:"offset"`
+		Query     string     `json:"query"`
+		Host      string     `json:"host"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
+		Limit     *jsnum.Int `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -579,7 +579,8 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 	if host != "" {
 		host = toPunyHost(host)
 	}
-	emojis, err := h.emojiRepo.ListRemoteWithFilter(req.Query, host, sinceID, untilID, limit, req.Offset)
+	// 本家のparamDefにoffsetは無いので読まない(#3857)。admin/emoji/listと同じ。
+	emojis, err := h.emojiRepo.ListRemoteWithFilter(req.Query, host, sinceID, untilID, limit, 0)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
