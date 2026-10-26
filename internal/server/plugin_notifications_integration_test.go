@@ -299,8 +299,8 @@ func TestPluginNotifications_DeliversToManagingPlugin_RealDB(t *testing.T) {
 	h := newPluginNotificationsHarness(t)
 	users := []string{"pn_bot_a", "pn_bot_b", "pn_bot_c", "pn_alice", "pn_carol"}
 	cleanupPluginNotificationRows(t, h.db, users...)
-	createLocalUser(t, h.db, "pn-alice", "pn_alice", "pnalicetoken0016", "alice-pass", false)
-	createLocalUser(t, h.db, "pn-carol", "pn_carol", "pncaroltoken0016", "carol-pass", false)
+	createLocalUser(t, h.db, "pnalice", "pn_alice", "pnalicetoken0016", "alice-pass", false)
+	createLocalUser(t, h.db, "pncarol", "pn_carol", "pncaroltoken0016", "carol-pass", false)
 	const alice, carol = "pnalicetoken0016", "pncaroltoken0016"
 	ctx := context.Background()
 
@@ -318,7 +318,7 @@ func TestPluginNotifications_DeliversToManagingPlugin_RealDB(t *testing.T) {
 	}))
 	jA := h.waitJob("bot-a", "mention", botA.ID)
 	assert.Equal(t, mention, h.waitJob("bot-b", "mention", botB.ID).ev.NoteID)
-	assert.Equal(t, "pn-alice", jA.ev.UserID)
+	assert.Equal(t, "pnalice", jA.ev.UserID)
 	assert.Equal(t, mention, jA.ev.NoteID)
 	assert.NotEmpty(t, jA.ev.ID)
 	for _, j := range h.rec.notificationJobs(t, "bot-a") {
@@ -340,7 +340,7 @@ func TestPluginNotifications_DeliversToManagingPlugin_RealDB(t *testing.T) {
 	got := h.receivedBy("bot-a")
 	require.Len(t, got, 1)
 	assert.Equal(t, plugin.Notification{
-		ID: jA.ev.ID, Type: plugin.NotificationMention, AccountID: botA.ID, UserID: "pn-alice",
+		ID: jA.ev.ID, Type: plugin.NotificationMention, AccountID: botA.ID, UserID: "pnalice",
 		NoteID: mention, NoteVisibility: "public", CreatedAt: jA.ev.CreatedAt,
 	}, got[0])
 	assert.False(t, got[0].CreatedAt.IsZero())
@@ -367,10 +367,10 @@ func TestPluginNotifications_DeliversToManagingPlugin_RealDB(t *testing.T) {
 
 	// follow / followRequest。
 	h.post(alice, "following/create", map[string]any{"userId": botA.ID})
-	assert.Equal(t, "pn-alice", h.waitJob("bot-a", "follow", botA.ID).ev.UserID)
+	assert.Equal(t, "pnalice", h.waitJob("bot-a", "follow", botA.ID).ev.UserID)
 	asBot(t, h.ctxA, botA.ID, "i/update", map[string]any{"isLocked": true})
 	h.post(carol, "following/create", map[string]any{"userId": botA.ID})
-	assert.Equal(t, "pn-carol", h.waitJob("bot-a", "receiveFollowRequest", botA.ID).ev.UserID)
+	assert.Equal(t, "pncarol", h.waitJob("bot-a", "receiveFollowRequest", botA.ID).ev.UserID)
 
 	// chat: 1:1 のメッセージ。
 	asBot(t, h.ctxA, botA.ID, "i/update", map[string]any{"chatScope": "everyone"})
@@ -378,17 +378,17 @@ func TestPluginNotifications_DeliversToManagingPlugin_RealDB(t *testing.T) {
 	chat := h.waitJob("bot-a", "chatMessage", botA.ID)
 	assert.Equal(t, msg["id"], chat.ev.ChatMessageID)
 	assert.Equal(t, chat.ev.ChatMessageID, chat.ev.ID)
-	assert.Equal(t, "pn-alice", chat.ev.UserID)
+	assert.Equal(t, "pnalice", chat.ev.UserID)
 	require.NoError(t, h.run(chat))
 	got = h.receivedBy("bot-a")
 	assert.Equal(t, plugin.NotificationChatMessage, got[len(got)-1].Type)
 
 	// 普通の利用者へのチャットは積まない。
 	h.post(carol, "i/update", map[string]any{"chatScope": "everyone"})
-	h.post(alice, "chat/messages/create-to-user", map[string]any{"toUserId": "pn-carol", "text": "hi carol"})
+	h.post(alice, "chat/messages/create-to-user", map[string]any{"toUserId": "pncarol", "text": "hi carol"})
 	for _, name := range []string{"bot-a", "bot-b", "bot-c"} {
 		for _, j := range h.rec.notificationJobs(t, name) {
-			assert.NotEqual(t, "pn-carol", j.ev.AccountID)
+			assert.NotEqual(t, "pncarol", j.ev.AccountID)
 		}
 	}
 }

@@ -30,8 +30,8 @@ func TestSetupRoutes_ChatMessageCreateRejectsMovedAccount(t *testing.T) {
 	db := serverIntegrationDB
 
 	const (
-		movedID, movedToken   = "chat-moved-user", "chatmovedtoken01"
-		activeID, activeToken = "chat-active-user", "chatactivetoken1"
+		movedID, movedToken   = "chatmoveduser", "chatmovedtoken01"
+		activeID, activeToken = "chatactiveuser", "chatactivetoken1"
 	)
 	ids := []string{movedID, activeID}
 	cleanup := func() {
@@ -78,7 +78,7 @@ func TestSetupRoutes_ChatMessageCreateRejectsMovedAccount(t *testing.T) {
 	}{
 		{"create", "/api/chat/messages/create", `{"text":"hi","toUserId":"{self}"}`, "RECIPIENT_IS_YOURSELF"},
 		{"create-to-user", "/api/chat/messages/create-to-user", `{"text":"hi","toUserId":"{self}"}`, "RECIPIENT_IS_YOURSELF"},
-		{"create-to-room", "/api/chat/messages/create-to-room", `{"text":"hi","toRoomId":"chat-moved-no-room"}`, "NO_SUCH_ROOM"},
+		{"create-to-room", "/api/chat/messages/create-to-room", `{"text":"hi","toRoomId":"chatmovednoroom"}`, "NO_SUCH_ROOM"},
 	}
 
 	var movedBodies []string
