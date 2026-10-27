@@ -17,6 +17,19 @@ import type { FederationInstance, FollowApprovalAction, Page, PageVisibility, Si
  * (internal/entitycompat) の対象ではない。
  */
 export type ElythiaRequestExtensions = {
+	'admin/abuse-user-reports': {
+		/**
+		 * Filters by whether the report is resolved. Read only when `state` is
+		 * `all`, empty or `null` (it predates `state`).
+		 */
+		resolved?: boolean | null;
+		/** Returns only this report, for the link of the abuse report notification (#2868). */
+		reportId?: string;
+	};
+	'admin/drive/files': {
+		/** The host of the files. Wins over `hostname`. */
+		host?: string | null;
+	};
 	'admin/emoji/copy': {
 		/**
 		 * Overrides the name of the copied emoji (`^[a-zA-Z0-9_]+$`, up to 128
@@ -31,6 +44,23 @@ export type ElythiaRequestExtensions = {
 		license?: string | null;
 		/** Overrides the sensitive flag. `null` is the same as omitting it. */
 		isSensitive?: boolean | null;
+	};
+	'admin/emoji/list': {
+		/** Filters by the exact category (#3857). */
+		category?: string | null;
+	};
+	'admin/queue/jobs': {
+		/**
+		 * The jobs of a page, from 1 to 100. Giving `limit` or `page` pages the
+		 * jobs instead of listing them per state like upstream (#3167).
+		 */
+		limit?: number;
+		/** The page, from 1. */
+		page?: number;
+	};
+	'admin/show-user': {
+		/** `false` leaves out the sign-in history. `null` is the same as omitting it. */
+		withSignins?: boolean | null;
 	};
 	'admin/update-meta': {
 		/** Accepts signups only through applications that a moderator approves. */
@@ -88,17 +118,45 @@ export type ElythiaRequestExtensions = {
 		 */
 		followApprovalAction?: FollowApprovalAction;
 	};
+	'federation/instances': {
+		/** The cursor of the paginator (#493). */
+		sinceId?: string;
+		/** The cursor of the paginator (#493). */
+		untilId?: string;
+		/** The cursor by date, in milliseconds (#1173). */
+		sinceDate?: number;
+		/** The cursor by date, in milliseconds (#1173). */
+		untilDate?: number;
+	};
+	'i/move': {
+		/** The password of the account, checked when given (#1546). */
+		password?: string | null;
+	};
 	'i/regenerate-token': {
 		/** The two-factor authentication code. Required when two-factor authentication is enabled. */
 		token?: string | null;
+	};
+	'notes/global-timeline': {
+		/**
+		 * Returns fewer notes than `limit` instead of reading on. Upstream has it on
+		 * the other timelines only.
+		 */
+		allowPartial?: boolean;
+	};
+	'notes': {
+		/**
+		 * Returns these notes (up to 100) instead of the public notes, like
+		 * `notes/show-partial-bulk`.
+		 */
+		noteIds?: string[];
 	};
 	'pages/create': {
 		/** Who can see the Page (#3479). Defaults to `public`. */
 		visibility?: PageVisibility;
 	};
 	'pages/update': {
-		/** Who can see the Page (#3479). Omitting it keeps the current value. */
-		visibility?: PageVisibility;
+		/** Who can see the Page (#3479). Omitting it (or `null`) keeps the current value. */
+		visibility?: PageVisibility | null;
 	};
 };
 

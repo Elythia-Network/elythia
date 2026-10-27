@@ -172,3 +172,52 @@ func TestPluginQueueNamePatternMatchesTheQueuePackage(t *testing.T) {
 		}
 	}
 }
+
+// TestAddedPropertiesMatchElythiaJS keeps the properties Elythia adds to
+// upstream endpoints (x-elythia-properties of elythia_overlays.json) and the
+// request fields elythia-js declares for them (ElythiaRequestExtensions of
+// extensions.ts) to the same names (#3867). i/update and admin/update-meta
+// are declared in the last stage of #3667; they are only in extensions.ts.
+func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
+	src, err := os.ReadFile("../../frontend/packages/elythia-js/src/extensions.ts")
+	require.NoError(t, err)
+	block := regexp.MustCompile(`(?s)export type ElythiaRequestExtensions = \{\n(.*?)\n\};`).FindSubmatch(src)
+	require.NotNil(t, block, "ElythiaRequestExtensions not found in extensions.ts")
+	ts := map[string][]string{}
+	ep := ""
+	for _, line := range strings.Split(string(block[1]), "\n") {
+		if m := regexp.MustCompile(`^\t'([^']+)': \{`).FindStringSubmatch(line); m != nil {
+			ep = m[1]
+			ts[ep] = []string{}
+			continue
+		}
+		if m := regexp.MustCompile(`^\t\t'?([A-Za-z0-9_]+)'?\??: `).FindStringSubmatch(line); m != nil {
+			require.NotEmpty(t, ep, line)
+			ts[ep] = append(ts[ep], m[1])
+		}
+	}
+	require.NotEmpty(t, ts)
+
+	var ov map[string]struct {
+		Added map[string]json.RawMessage `json:"x-elythia-properties"`
+	}
+	require.NoError(t, json.Unmarshal(paramschema.ElythiaOverlays(), &ov))
+	added := map[string][]string{}
+	for name, o := range ov {
+		for prop := range o.Added {
+			added[name] = append(added[name], prop)
+		}
+	}
+	require.NotEmpty(t, added)
+	lastStage := map[string]bool{"i/update": true, "admin/update-meta": true}
+	for name, fields := range ts {
+		if lastStage[name] {
+			assert.NotContains(t, added, name, "%s is declared in the last stage of #3667", name)
+			continue
+		}
+		assert.Equal(t, sorted(fields), sorted(added[name]), "%s: extensions.ts and x-elythia-properties differ", name)
+	}
+	for name := range added {
+		assert.Contains(t, ts, name, "%s adds properties that extensions.ts does not declare", name)
+	}
+}
