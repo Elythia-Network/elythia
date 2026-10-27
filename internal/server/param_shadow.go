@@ -38,7 +38,9 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // admin/abuse-report/*, admin/abuse-user-reports,
 // admin/forward-abuse-user-report, admin/resolve-abuse-user-report,
 // admin/update-abuse-user-report, admin/system-webhook/* and admin/captcha/*
-// in #3859).
+// in #3859; admin/accounts/*, admin/federation/*, admin/relays/* and the
+// admin/* endpoints that manage users, send mail or update the proxy account
+// in #3861).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -439,6 +441,30 @@ var paramEnforcedEndpoints = []string{
 	"admin/system-webhook/update",
 	"admin/captcha/current",
 	"admin/captcha/save",
+	"admin/accounts/create",
+	"admin/accounts/delete",
+	"admin/accounts/find-by-email",
+	"admin/delete-account",
+	"admin/delete-all-files-of-a-user",
+	"admin/federation/delete-all-files",
+	"admin/federation/refresh-remote-instance-metadata",
+	"admin/federation/remove-all-following",
+	"admin/federation/update-instance",
+	"admin/get-user-ips",
+	"admin/relays/add",
+	"admin/relays/list",
+	"admin/relays/remove",
+	"admin/reset-password",
+	"admin/send-email",
+	"admin/show-user",
+	"admin/show-users",
+	"admin/suspend-user",
+	"admin/unset-mfa",
+	"admin/unset-user-avatar",
+	"admin/unset-user-banner",
+	"admin/unsuspend-user",
+	"admin/update-proxy-account",
+	"admin/update-user-note",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

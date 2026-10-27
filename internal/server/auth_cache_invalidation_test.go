@@ -59,7 +59,7 @@ func TestSetupRoutes_AuthCacheInvalidationReachesOtherProcess(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srvB.Shutdown(context.Background())) })
 
-	const prefix = "ainv3664_"
+	const prefix = "ainv3664"
 	cleanup := func() { db.Exec(`DELETE FROM "user" WHERE id LIKE ?`, prefix+"%") }
 	cleanup()
 	t.Cleanup(cleanup)

@@ -304,8 +304,8 @@ func TestPluginAccounts_ScopedPerPlugin_RealDB(t *testing.T) {
 func TestPluginAccounts_TokenOnlyInProcess_RealDB(t *testing.T) {
 	h := newPluginAccountsHarness(t, nil)
 	cleanupPluginAccountUsers(t, h.db, "pt_bot", "pt_normal", "pt_root")
-	createLocalUser(t, h.db, "pt-normal", "pt_normal", "ptnormaltoken016", "normal-pass", false)
-	createLocalUser(t, h.db, "pt-root", "pt_root", "ptroottokenxx016", "root-pass", true)
+	createLocalUser(t, h.db, "ptnormal", "pt_normal", "ptnormaltoken016", "normal-pass", false)
+	createLocalUser(t, h.db, "ptroot", "pt_root", "ptroottokenxx016", "root-pass", true)
 	ctx := context.Background()
 
 	bot, err := h.ctxA.Accounts().Create(ctx, "pt_bot")
@@ -354,7 +354,7 @@ func TestPluginAccounts_TokenOnlyInProcess_RealDB(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &shown))
 	assert.Equal(t, "bot-a", shown["managedByPlugin"])
 	assert.NotContains(t, rec.Body.String(), token)
-	rec = h.do(http.MethodPost, "/api/admin/show-user", "ptroottokenxx016", map[string]any{"userId": "pt-normal"})
+	rec = h.do(http.MethodPost, "/api/admin/show-user", "ptroottokenxx016", map[string]any{"userId": "ptnormal"})
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &shown))
 	v, ok := shown["managedByPlugin"]
@@ -370,8 +370,8 @@ func TestPluginAccounts_TokenOnlyInProcess_RealDB(t *testing.T) {
 func TestPluginAccounts_EveryLoginPathRefused_RealDB(t *testing.T) {
 	h := newPluginAccountsHarness(t, nil)
 	cleanupPluginAccountUsers(t, h.db, "pl_bot", "pl_normal", "pl_root")
-	createLocalUser(t, h.db, "pl-normal", "pl_normal", "plnormaltoken016", "same-pass", false)
-	createLocalUser(t, h.db, "pl-root", "pl_root", "plroottokenxx016", "root-pass", true)
+	createLocalUser(t, h.db, "plnormal", "pl_normal", "plnormaltoken016", "same-pass", false)
+	createLocalUser(t, h.db, "plroot", "pl_root", "plroottokenxx016", "root-pass", true)
 	ctx := context.Background()
 
 	bot, err := h.ctxA.Accounts().Create(ctx, "pl_bot")
@@ -384,7 +384,7 @@ func TestPluginAccounts_EveryLoginPathRefused_RealDB(t *testing.T) {
 
 	type target struct{ id, username string }
 	managed := target{bot.ID, "pl_bot"}
-	normal := target{"pl-normal", "pl_normal"}
+	normal := target{"plnormal", "pl_normal"}
 
 	resetRequests := func(userID string) int64 {
 		var n int64

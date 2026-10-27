@@ -235,7 +235,8 @@ var metaWritingEndpoints = []string{"admin/roles/update-default-policies", "admi
 
 // moderationEndpoint reports whether TestEnforcedEndpointsMatchTheCorpus seeds
 // the remote user, role, system webhook, notification recipient and abuse
-// report for the accepted inputs of the admin/* endpoint ep (#3859).
+// report for the accepted inputs of the admin/* endpoint ep (#3859), and the
+// admin/* endpoints that take the userId of the remote user (#3861).
 func moderationEndpoint(ep string) bool {
 	for _, prefix := range []string{"admin/roles/", "admin/abuse-report/", "admin/system-webhook/"} {
 		if strings.HasPrefix(ep, prefix) {
@@ -243,7 +244,15 @@ func moderationEndpoint(ep string) bool {
 		}
 	}
 	return slices.Contains([]string{"admin/abuse-user-reports", "admin/forward-abuse-user-report",
-		"admin/resolve-abuse-user-report", "admin/update-abuse-user-report"}, ep)
+		"admin/resolve-abuse-user-report", "admin/update-abuse-user-report"}, ep) || slices.Contains(userTargetEndpoints, ep)
+}
+
+// userTargetEndpoints are the enforced admin/* endpoints that act on the user
+// named by userId (#3861). The corpus names the seeded remote user (abc123).
+var userTargetEndpoints = []string{
+	"admin/accounts/delete", "admin/delete-account", "admin/delete-all-files-of-a-user", "admin/get-user-ips",
+	"admin/reset-password", "admin/show-user", "admin/suspend-user", "admin/unset-mfa", "admin/unset-user-avatar",
+	"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note",
 }
 
 // testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
@@ -303,9 +312,10 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
 	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
 	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
-	// 要求する (#3854、#3857、#3859)。
+	// 要求する (#3854、#3857、#3859、#3861)。
 	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
-		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha"} {
+		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha",
+		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account"} {
 		require.True(t, packages[pkg], "package %s is not counted", pkg)
 	}
 	for name := range eps {
@@ -399,6 +409,28 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT id FROM system_webhook WHERE id <> ?`, seedID).Scan(&keepWebhooks).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM abuse_report_notification_recipient WHERE id <> ?`, seedID).Scan(&keepRecipients).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM abuse_user_report WHERE id <> ?`, seedID).Scan(&keepReports).Error)
+	// admin/accounts/create は本物のローカルの利用者を作り、名前を used_username に
+	// 記録する (#3861)。テストの前にあった利用者と名前を覚えておき、それ以外を消す。
+	// テストの利用者・管理者は cleanup が消し、システムアカウント (instance.actor・
+	// proxy.actor) は作り直さずに使い回されるので残す。
+	// 中断された前回の実行 (タイムアウトの panic など) が t.Cleanup を通らずに残した、
+	// accounts/create の利用者と名前を、控えを取る前に消す。控えに入ると消されずに
+	// 残り続け、以後の実行が 409 で止まる。
+	var createdNames []string
+	for _, c := range readAJVCorpus(t, []string{"admin/accounts/create"}) {
+		var in struct{ Username string }
+		if c.ok && json.Unmarshal(c.in, &in) == nil && in.Username != "" {
+			createdNames = append(createdNames, strings.ToLower(in.Username))
+		}
+	}
+	require.NotEmpty(t, createdNames)
+	require.NoError(t, db.Exec(`DELETE FROM "user" u WHERE u.host IS NULL AND u."usernameLower" = ANY(?::varchar[])
+		AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = u.id)`, model.StringArray(createdNames)).Error)
+	require.NoError(t, db.Exec(`DELETE FROM used_username WHERE lower(username) = ANY(?::varchar[])`, model.StringArray(createdNames)).Error)
+	var keepUsers, keepUsedNames []string
+	require.NoError(t, db.Raw(`SELECT id FROM "user" WHERE id NOT IN (?, ?, ?)`, seedID, userID, adminID).Scan(&keepUsers).Error)
+	keepUsers = append(keepUsers, userID, adminID)
+	require.NoError(t, db.Raw(`SELECT username FROM used_username`).Scan(&keepUsedNames).Error)
 	resetAdmin := func() {
 		require.NoError(t, db.Exec(`DELETE FROM promo_note WHERE "noteId" = ? OR "userId" = ?`, seedID, userID).Error)
 		// 一覧が nil だと NULL を渡すことになり、NOT (id = ANY(NULL)) は何も消さない。
@@ -415,6 +447,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE "userId" = ? OR NOT ("roleId" = ANY(?::varchar[]))`, seedID, keep(keepRoles)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM role WHERE NOT (id = ANY(?::varchar[]))`, keep(keepRoles)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "user" WHERE id = ?`, seedID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM "user" u WHERE NOT (u.id = ANY(?::varchar[]))
+			AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = u.id)`, keep(keepUsers)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM used_username WHERE NOT (username = ANY(?::varchar[]))`, keep(keepUsedNames)).Error)
 	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
@@ -478,7 +513,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// (#3859)。どれも作った人の列が無いので、テストの前にあった id 以外を消す。
 		// forward-abuse-user-report が作るインスタンスのシステムアカウント
 		// (instance.actor) は、作り直さずに使い回されるので残す。
+		// 利用者の管理・連合・リレー・メールの受理の入力は、置き直すリモートの利用者
+		// (abc123) と accounts/create が作るローカルの利用者、プロキシのアカウントの
+		// 説明、IP の閲覧の記録 (ip_lookup_log) を書き込む (#3861)。説明は入力ごとに
+		// 戻す (ループの中)。ip_lookup_log には外部キーが無いので、明示して消す。
 		resetAdmin()
+		require.NoError(t, db.Exec(`DELETE FROM ip_lookup_log WHERE "userId" = ?`, adminID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, adminID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM moderation_log WHERE "userId" = ?`, adminID).Error)
 		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
@@ -759,6 +799,25 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	metaBefore := readMeta()
 	// 行が無いと、変わらないことの確かめが空振りする。
 	require.Len(t, metaBefore, 1)
+	// admin/send-email は、メールが有効だと SMTP で外へ送る。無効であることを
+	// 確かめる (#3861)。
+	var enableEmail bool
+	require.NoError(t, db.Raw(`SELECT "enableEmail" FROM meta`).Scan(&enableEmail).Error)
+	require.False(t, enableEmail, "admin/send-email would send mail")
+	// admin/update-proxy-account はプロキシのアカウントの説明を書き換えるので、
+	// 入力ごとに流す前の値へ戻す (#3861)。アカウントがまだ無ければ、作られたときの
+	// 説明は空 (NULL) になる。
+	readProxyDescription := func() *string {
+		var rows []struct{ Description *string }
+		require.NoError(t, db.Raw(`SELECT p.description FROM user_profile p
+			JOIN system_account s ON s."userId" = p."userId" WHERE s.type = 'proxy'`).Scan(&rows).Error)
+		require.LessOrEqual(t, len(rows), 1)
+		if len(rows) == 0 {
+			return nil
+		}
+		return rows[0].Description
+	}
+	proxyDescriptionBefore := readProxyDescription()
 	// roles/update-default-policies と captcha/save の受理の入力は meta を書き換える
 	// (#3859)。入力ごとに、流す前の行へ戻す。列は流す前の行の JSON から読み直す。
 	// 戻すと、それより前の入力が meta を書き換えていても消えてしまうので、流す前に
@@ -844,10 +903,32 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		if metaWriting {
 			require.Equal(t, metaBefore, readMeta(), "meta changed before %s (corpus line %d)", tc.ep, tc.line)
 		}
+		if tc.ok {
+			// 外へ出る手前で止まることを確かめる (#3861)。refresh-remote-instance-metadata
+			// は instance があると、その host の nodeinfo を取りに行く (名前解決が起きる)。
+			// relays/add は https の inbox だと、リレーへ Follow を送る。
+			var in struct {
+				Host  string `json:"host"`
+				Inbox string `json:"inbox"`
+			}
+			_ = json.Unmarshal(tc.in, &in)
+			switch tc.ep {
+			case "admin/federation/refresh-remote-instance-metadata":
+				var n int64
+				require.NoError(t, db.Raw(`SELECT count(*) FROM instance WHERE host = lower(?)`, in.Host).Scan(&n).Error)
+				require.Zero(t, n, "corpus line %d: the instance %q exists and would be fetched", tc.line, in.Host)
+			case "admin/relays/add":
+				require.False(t, strings.HasPrefix(strings.ToLower(in.Inbox), "https://"), "corpus line %d: relays/add would follow %q", tc.line, in.Inbox)
+			}
+		}
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
 		if metaWriting {
 			restoreMeta()
+		}
+		if tc.ep == "admin/update-proxy-account" {
+			require.NoError(t, db.Exec(`UPDATE user_profile SET description = ?
+				WHERE "userId" IN (SELECT "userId" FROM system_account WHERE type = 'proxy')`, proxyDescriptionBefore).Error)
 		}
 
 		var env struct {
@@ -916,13 +997,17 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 				WebhookID string `json:"webhookId"`
 			}
 			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID || in.EmojiID == seedID || in.FileID == seedID ||
-				in.RoleID == seedID || in.ReportID == seedID || in.WebhookID == seedID) {
+				in.RoleID == seedID || in.ReportID == seedID || in.WebhookID == seedID || in.UserID == seedID) {
 				notFound := []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED", "NO_SUCH_EMOJI",
-					"NO_SUCH_ROLE", "NO_SUCH_ABUSE_REPORT", "NO_SUCH_SYSTEM_WEBHOOK", "NO_SUCH_WEBHOOK", "NO_SUCH_RECIPIENT"}
+					"NO_SUCH_ABUSE_REPORT", "NO_SUCH_SYSTEM_WEBHOOK", "NO_SUCH_WEBHOOK", "NO_SUCH_RECIPIENT"}
 				if in.FileID == seedID {
 					notFound = append(notFound, "NO_SUCH_FILE")
 				}
-				// roles/assign・unassign の userId は、置いた利用者を指すときだけ見る。
+				// roleId・userId は、置いたロール・利用者を指すときだけ見る (roles/assign の
+				// 置いていない roleId は NO_SUCH_ROLE で止まってよい)。
+				if in.RoleID == seedID {
+					notFound = append(notFound, "NO_SUCH_ROLE")
+				}
 				if in.UserID == seedID {
 					notFound = append(notFound, "NO_SUCH_USER", "NOT_ASSIGNED")
 				}
@@ -936,6 +1021,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 				assert.Equal(t, http.StatusInternalServerError, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				assert.Equal(t, "INTERNAL_ERROR", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				jobReached[tc.ep]++
+			}
+			// accounts/create の受理の入力は、利用者を作るところまで届く (#3861)。前の
+			// 入力や前の実行が作った利用者と名前 (used_username) が残っていると、409
+			// USERNAME_ALREADY_EXISTS で止まる。
+			if tc.ep == "admin/accounts/create" {
+				assert.Equal(t, http.StatusOK, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 			}
 		}
 		if tc.ok {
@@ -970,7 +1061,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		"admin/abuse-report/notification-recipient/delete", "admin/abuse-report/notification-recipient/show",
 		"admin/abuse-report/notification-recipient/update", "admin/forward-abuse-user-report", "admin/resolve-abuse-user-report",
 		"admin/update-abuse-user-report", "admin/system-webhook/delete", "admin/system-webhook/show", "admin/system-webhook/test",
-		"admin/system-webhook/update"} {
+		"admin/system-webhook/update",
+		"admin/accounts/delete", "admin/delete-account", "admin/delete-all-files-of-a-user", "admin/get-user-ips",
+		"admin/reset-password", "admin/show-user", "admin/suspend-user", "admin/unset-mfa", "admin/unset-user-avatar",
+		"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note"} {
 		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
 	}
 	for _, ep := range jobEnqueuingEndpoints {
@@ -983,6 +1077,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	assert.EqualValues(t, len(keepFiles), keptFiles, "admin/drive/cleanup deleted a file it does not own")
 	// テストの管理者 (削除・凍結・トークン・ロール) と meta が変わっていないこと (#3854)。
 	assert.Equal(t, adminBefore, readAdmin())
+	assert.Equal(t, proxyDescriptionBefore, readProxyDescription())
 	assert.Equal(t, []string{adminRoleID}, adminBefore.Roles)
 	assert.Equal(t, metaBefore, readMeta())
 	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
