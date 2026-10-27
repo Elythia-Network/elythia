@@ -297,7 +297,7 @@ func TestQueueShowJob_Found(t *testing.T) {
 	}
 	h.SetQueueInspector(insp)
 
-	rec := doPost(h.QueueShowJob, `{"queue":"deliver","id":"tid1"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"tid1"}`, adminUser)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -328,14 +328,14 @@ func TestQueueShowJob_ProcessedBy(t *testing.T) {
 		},
 	})
 
-	rec := doPost(h.QueueShowJob, `{"queue":"deliver","id":"withpb"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"withpb"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	shapetest.AssertExcept(t, "QueueJob", got, "failedReason", "returnValue")
 	assert.Equal(t, "worker-host-1", got["processedBy"], "non-empty ProcessedBy must be output")
 
-	rec2 := doPost(h.QueueShowJob, `{"queue":"deliver","id":"nopb"}`, adminUser)
+	rec2 := doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"nopb"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec2.Code)
 	var got2 map[string]any
 	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &got2))
@@ -347,7 +347,7 @@ func TestQueueShowJob_NotFoundWithInspector(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	insp := &stubQueueInspector{}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueShowJob, `{"queue":"deliver","id":"ghost"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"ghost"}`, adminUser)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -362,7 +362,7 @@ func TestQueueRemoveJob_Success(t *testing.T) {
 		},
 	}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","id":"tid1"}`, adminUser)
+	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","jobId":"tid1"}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, []string{"tid1"}, insp.deleted)
 }
@@ -373,7 +373,7 @@ func TestQueueRemoveJob_NotFound(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	insp := &stubQueueInspector{}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","id":"x"}`, adminUser)
+	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","jobId":"x"}`, adminUser)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -388,7 +388,7 @@ func TestQueueRemoveJob_DeleteTaskError(t *testing.T) {
 		deleteErr: errors.New("not found"),
 	}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","id":"tid1"}`, adminUser)
+	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","jobId":"tid1"}`, adminUser)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -400,7 +400,7 @@ func TestQueueRetryJob_Success(t *testing.T) {
 		},
 	}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","id":"tid1"}`, adminUser)
+	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","jobId":"tid1"}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, []string{"tid1"}, insp.runCalls)
 }
@@ -410,7 +410,7 @@ func TestQueueRetryJob_NotFound(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	insp := &stubQueueInspector{}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","id":"x"}`, adminUser)
+	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","jobId":"x"}`, adminUser)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -425,7 +425,7 @@ func TestQueueRetryJob_RunTaskError(t *testing.T) {
 		runErr: errors.New("not found"),
 	}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","id":"tid1"}`, adminUser)
+	rec := doPost(h.QueueRetryJob, `{"queue":"deliver","jobId":"tid1"}`, adminUser)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -873,20 +873,20 @@ func TestQueueRemoveJob(t *testing.T) {
 	// queue/id 欠落は 400
 	assert.Equal(t, http.StatusBadRequest, doPost(h.QueueRemoveJob, `{}`, adminUser).Code)
 	// inspector 未注入は 204
-	assert.Equal(t, http.StatusNoContent, doPost(h.QueueRemoveJob, `{"queue":"deliver","id":"x"}`, adminUser).Code)
+	assert.Equal(t, http.StatusNoContent, doPost(h.QueueRemoveJob, `{"queue":"deliver","jobId":"x"}`, adminUser).Code)
 }
 
 func TestQueueRetryJob(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	assert.Equal(t, http.StatusBadRequest, doPost(h.QueueRetryJob, `{}`, adminUser).Code)
-	assert.Equal(t, http.StatusNoContent, doPost(h.QueueRetryJob, `{"queue":"deliver","id":"x"}`, adminUser).Code)
+	assert.Equal(t, http.StatusNoContent, doPost(h.QueueRetryJob, `{"queue":"deliver","jobId":"x"}`, adminUser).Code)
 }
 
 func TestQueueShowJob(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	// queue/id 欠落は 400、inspector 未注入 + 正規 bind は 404
 	assert.Equal(t, http.StatusBadRequest, doPost(h.QueueShowJob, `{}`, adminUser).Code)
-	assert.Equal(t, http.StatusNotFound, doPost(h.QueueShowJob, `{"queue":"deliver","id":"x"}`, adminUser).Code)
+	assert.Equal(t, http.StatusNotFound, doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"x"}`, adminUser).Code)
 }
 
 func TestQueueShowJobLogs(t *testing.T) {
@@ -1161,17 +1161,36 @@ func TestQueueJobs_SearchFilter(t *testing.T) {
 	assert.Equal(t, "p1", rows[0]["id"])
 }
 
-// jobId と id を両方送ると jobId が優先される (後方互換の優先順位)。
-func TestQueueRemoveJob_JobIdWinsOverId(t *testing.T) {
+// jobId の代わりの id は読まない (#3865)。本家の paramDef と同じく jobId が要る。
+func TestQueueJobOps_IDIsNotRead(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	insp := &stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{
 		"j1": {ID: "j1", Queue: "deliver"},
 	}}
 	h.SetQueueInspector(insp)
-	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","jobId":"j1","id":"OTHER"}`, adminUser)
-	require.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Contains(t, insp.deleted, "j1")
-	assert.NotContains(t, insp.deleted, "OTHER")
+	rec := doPost(h.QueueRemoveJob, `{"queue":"deliver","id":"j1"}`, adminUser)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.NotContains(t, insp.deleted, "j1")
+}
+
+// 空の jobId は、本家と同じく INVALID_PARAM にせず、見つからない job として扱う
+// (#3865。本家は getJob("") で見つからない)。見つからない job への応答 (404) は
+// 本家 (remove-job・retry-job は 204、show-job は 500) と違う
+// (docs/divergence/approximations.md)。
+func TestQueueJobOps_EmptyJobIDIsNotFound(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	insp := &stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{
+		"": {ID: "", Queue: "deliver"},
+	}}
+	h.SetQueueInspector(insp)
+	body := `{"queue":"deliver","jobId":""}`
+	assert.Equal(t, http.StatusNotFound, doPost(h.QueueRemoveJob, body, adminUser).Code)
+	assert.Equal(t, http.StatusNotFound, doPost(h.QueueRetryJob, body, adminUser).Code)
+	assert.Equal(t, http.StatusNotFound, doPost(h.QueueShowJob, body, adminUser).Code)
+	rec := doPost(h.QueueShowJobLogs, body, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `[]`, rec.Body.String())
+	assert.Empty(t, insp.deleted)
 }
 
 // clear state=delayed は scheduled + retry の両方を消す。
@@ -1446,7 +1465,7 @@ func TestQueueShowJob_PassesThroughBullFields(t *testing.T) {
 		},
 	})
 
-	rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"failed"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"failed"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1479,7 +1498,7 @@ func TestQueueShowJob_IsFailedFromStacktraceAlone(t *testing.T) {
 			"st": {ID: "st", Queue: "inbox", Type: "ap:inbox", State: "failed", Stacktrace: []string{"boom"}},
 		},
 	})
-	rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"st"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"st"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1497,7 +1516,7 @@ func TestQueueShowJob_DataKeepsTaskType(t *testing.T) {
 			"d": {ID: "d", Queue: "inbox", Type: "ap:inbox", State: "wait", Payload: []byte(`{"path":"/inbox"}`)},
 		},
 	})
-	rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"d"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"d"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1542,7 +1561,7 @@ func TestQueueShowJob_ReturnValueNullIsOmitted(t *testing.T) {
 		},
 	})
 
-	rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"done"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"done"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1552,7 +1571,7 @@ func TestQueueShowJob_ReturnValueNullIsOmitted(t *testing.T) {
 
 	rec2 := doPost(h.QueueShowJobLogs, `{"queue":"inbox","jobId":"broken"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec2.Code)
-	rec3 := doPost(h.QueueShowJob, `{"queue":"inbox","id":"broken"}`, adminUser)
+	rec3 := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"broken"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec3.Code)
 	var got3 map[string]any
 	require.NoError(t, json.Unmarshal(rec3.Body.Bytes(), &got3))
@@ -1575,7 +1594,7 @@ func TestQueueShowJob_MaxRetryFromOpts(t *testing.T) {
 		},
 	})
 	for id, want := range map[string]int{"a": 8, "b": 3} {
-		rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"`+id+`"}`, adminUser)
+		rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"`+id+`"}`, adminUser)
 		require.Equal(t, http.StatusOK, rec.Code)
 		var got map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1672,7 +1691,7 @@ func TestQueueShowJob_AttemptsAt(t *testing.T) {
 		},
 	})
 
-	rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"retried"}`, adminUser)
+	rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"retried"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -1680,7 +1699,7 @@ func TestQueueShowJob_AttemptsAt(t *testing.T) {
 
 	// **記録が無くても null にしない。** 配列を期待する frontend が
 	// `job.attemptsAt.length` で落ちる。
-	rec2 := doPost(h.QueueShowJob, `{"queue":"inbox","id":"legacy"}`, adminUser)
+	rec2 := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"legacy"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec2.Code)
 	var got2 map[string]any
 	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &got2))
@@ -2083,7 +2102,7 @@ func TestQueueShowJob_DataExpandsActivityBody(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, _, _ := newTestHandler(t)
 			h.SetQueueInspector(&stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{"d": tc.task}})
-			rec := doPost(h.QueueShowJob, `{"queue":"deliver","id":"d"}`, adminUser)
+			rec := doPost(h.QueueShowJob, `{"queue":"deliver","jobId":"d"}`, adminUser)
 			require.Equal(t, http.StatusOK, rec.Code)
 			var got map[string]any
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
@@ -2161,7 +2180,7 @@ func TestQueueShowJob_ActivityBodyEmbeddingLimits(t *testing.T) {
 				h.SetQueueInspector(&stubQueueInspector{task: map[string]*apiadmin.QueueTaskSummary{
 					"d": {ID: "d", Type: queue.TaskTypeInbox, Payload: payload},
 				}})
-				rec := doPost(h.QueueShowJob, `{"queue":"inbox","id":"d"}`, adminUser)
+				rec := doPost(h.QueueShowJob, `{"queue":"inbox","jobId":"d"}`, adminUser)
 				require.Equal(t, http.StatusOK, rec.Code)
 				var got map[string]any
 				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))

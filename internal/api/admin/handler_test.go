@@ -3317,7 +3317,8 @@ func TestEmojiAdd_Success(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	emojiRepo := testutil.NewMockEmojiRepository()
 	h.SetEmojiRepo(emojiRepo)
-	rec := doPost(h.EmojiAdd, `{"name":"smile","url":"https://example.com/smile.png"}`, nil)
+	systemEmojiFile(t, h, "https://example.com/smile.png")
+	rec := doPost(h.EmojiAdd, `{"name":"smile","fileId":"f_sys_emoji"}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -3329,7 +3330,7 @@ func TestEmojiAdd_InvalidParam(t *testing.T) {
 
 func TestEmojiAdd_NilRepo(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	rec := doPost(h.EmojiAdd, `{"name":"x","url":"u"}`, nil)
+	rec := doPost(h.EmojiAdd, `{"name":"x","fileId":"f"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -3352,7 +3353,8 @@ func TestEmoji_BroadcastEvents(t *testing.T) {
 	h.SetBroadcastPublisher(bc)
 
 	// add → emojiAdded。
-	rec := doPost(h.EmojiAdd, `{"name":"smile","url":"https://example.com/s.png"}`, nil)
+	systemEmojiFile(t, h, "https://example.com/s.png")
+	rec := doPost(h.EmojiAdd, `{"name":"smile","fileId":"f_sys_emoji"}`, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, []string{"emojiAdded"}, bc.events)
 
@@ -3510,7 +3512,8 @@ func (f *failingCreateEmojiRepo) Create(_ *model.Emoji) error { return assert.An
 func TestEmojiAdd_CreateError(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	h.SetEmojiRepo(&failingCreateEmojiRepo{testutil.NewMockEmojiRepository()})
-	rec := doPost(h.EmojiAdd, `{"name":"x","url":"u"}`, nil)
+	systemEmojiFile(t, h, "https://example.com/x.png")
+	rec := doPost(h.EmojiAdd, `{"name":"x","fileId":"f_sys_emoji"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 

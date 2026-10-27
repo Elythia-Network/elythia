@@ -42,6 +42,14 @@ func ownedDriveFile(t *testing.T, h *apiadmin.Handler, f *model.DriveFile) *test
 	return dr
 }
 
+// systemEmojiFile wires a drive repo holding the system-owned image file
+// "f_sys_emoji" at url. admin/emoji/add uses a system-owned file as is,
+// without a copy, so the emoji gets url as its originalUrl.
+func systemEmojiFile(t *testing.T, h *apiadmin.Handler, url string) {
+	t.Helper()
+	ownedDriveFile(t, h, &model.DriveFile{ID: "f_sys_emoji", Type: "image/png", URL: url})
+}
+
 func errorID(t *testing.T, body []byte) (code, id string) {
 	t.Helper()
 	var resp struct {
@@ -328,21 +336,6 @@ func TestEmojiAdd_CreateFailureDeletesSystemCopy(t *testing.T) {
 	assert.Equal(t, []string{"sys5"}, fetcher.deletedIDs, "作成に失敗した複製が孤児として残っている")
 }
 
-// legacy の `url` 直接指定は取り込まない (所有者の概念が無く、外部 URL も指せる)。
-func TestEmojiAdd_URLPathDoesNotCopy(t *testing.T) {
-	h, repo := setupEmojiHandler(t)
-	fetcher := &fakeEmojiImageFetcher{copyDF: systemCopy("sys6", "https://example/system/copy.png", "", "")}
-	h.SetEmojiImageFetcherForTest(fetcher)
-
-	rec := doPost(h.EmojiAdd, `{"name":"happy","url":"https://cdn.example/happy.png"}`, adminUser)
-	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Empty(t, fetcher.copyCalls)
-	assert.Empty(t, fetcher.calls, "url 経路で HTTP 取り込みを走らせない")
-	got, err := repo.FindByNameAndHost("happy", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "https://cdn.example/happy.png", got.OriginalURL)
-}
-
 // fetcher 未配線なら drive の URL をそのまま使う (EmojiCopy と同じ degradation)。
 // 未配線そのものは router の起動時チェックが知らせる。
 func TestEmojiAdd_FetcherUnsetKeepsDriveURL(t *testing.T) {
@@ -400,8 +393,8 @@ func TestEmojiAdd_UnknownFileIDReturnsNoSuchFile(t *testing.T) {
 	assert.Empty(t, fetcher.copyCalls)
 }
 
-// url も fileId も無ければ 400 INVALID_PARAM (drive repo が配線済みでも同じ)。
-func TestEmojiAdd_NeitherURLNorFileIDReturns400(t *testing.T) {
+// fileId が無ければ 400 INVALID_PARAM (drive repo が配線済みでも同じ)。
+func TestEmojiAdd_NoFileIDReturns400(t *testing.T) {
 	h, _ := setupEmojiHandler(t)
 	ownedDriveFile(t, h, &model.DriveFile{ID: "f_img", Type: "image/png", URL: "https://example/x.png"})
 

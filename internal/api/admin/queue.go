@@ -867,8 +867,12 @@ func (h *Handler) QueueRemoveJob(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	// driver の DeleteTask は不明 task id でも nil error を返しうる
-	// (= idempotent) が、upstream Misskey TS は 4xx を返す。drop-in 互換の
-	// ため事前に GetTaskInfo で存在確認して、無ければ 404 を返す (#929)。
+	// (= idempotent)。事前に GetTaskInfo で存在確認して、無ければ 404 を返す
+	// (#929)。本家は見つからない job を何もせずに 204 で返すので、ここは本家と
+	// 違う (docs/divergence/approximations.md)。
+	if id == "" {
+		return c.JSON(http.StatusNotFound, apierr.NotFound())
+	}
 	if _, err := h.queueInspector.GetTaskInfo(queue, id); err != nil {
 		return c.JSON(http.StatusNotFound, apierr.NotFound())
 	}
@@ -880,25 +884,19 @@ func (h *Handler) QueueRemoveJob(c echo.Context) error {
 
 // bindQueueJobReq binds the shared {queue, jobId} param of remove-job /
 // retry-job / show-job / show-job-logs. upstream の required は (queue, jobId)。
-// 旧 mk-go の `id` キーも後方互換で受ける (jobId 優先)。queue と job id が
-// 揃わなければ ok=false。
+// queue が空か、jobId が無ければ ok=false。空の jobId は ok=true で返し、
+// 呼び出し側が見つからない job として扱う (本家は getJob("") で見つからない。
+// #3865)。以前は jobId の代わりに `id` も受けていたが、同梱の frontend は送らず、
+// #3865 で消した。
 func bindQueueJobReq(c echo.Context) (queue, id string, ok bool) {
 	var req struct {
-		Queue string `json:"queue"`
-		JobID string `json:"jobId"`
-		ID    string `json:"id"`
+		Queue string  `json:"queue"`
+		JobID *string `json:"jobId"`
 	}
-	if err := c.Bind(&req); err != nil {
+	if err := c.Bind(&req); err != nil || req.Queue == "" || req.JobID == nil {
 		return "", "", false
 	}
-	id = req.JobID
-	if id == "" {
-		id = req.ID
-	}
-	if req.Queue == "" || id == "" {
-		return "", "", false
-	}
-	return req.Queue, id, true
+	return req.Queue, *req.JobID, true
 }
 
 // QueueRetryJob handles POST /api/admin/queue/retry-job.
@@ -910,8 +908,11 @@ func (h *Handler) QueueRetryJob(c echo.Context) error {
 	if h.queueInspector == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
-	// RunTask も不明 id で nil を返しうる idempotent 挙動。drop-in 互換の
-	// ため事前に GetTaskInfo で存在確認 (#929)。
+	// RunTask も不明 id で nil を返しうる idempotent 挙動。事前に GetTaskInfo で
+	// 存在確認して 404 を返す (#929。本家は 204、remove-job と同じく本家と違う)。
+	if id == "" {
+		return c.JSON(http.StatusNotFound, apierr.NotFound())
+	}
 	if _, err := h.queueInspector.GetTaskInfo(queue, id); err != nil {
 		return c.JSON(http.StatusNotFound, apierr.NotFound())
 	}
@@ -928,6 +929,9 @@ func (h *Handler) QueueShowJob(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
 	}
 	if h.queueInspector == nil {
+		return c.JSON(http.StatusNotFound, apierr.NotFound())
+	}
+	if id == "" {
 		return c.JSON(http.StatusNotFound, apierr.NotFound())
 	}
 	t, err := h.queueInspector.GetTaskInfo(queue, id)
@@ -948,7 +952,7 @@ func (h *Handler) QueueShowJobLogs(c echo.Context) error {
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
 	}
-	if h.queueInspector == nil {
+	if h.queueInspector == nil || id == "" {
 		return c.JSON(http.StatusOK, []string{})
 	}
 	logs, _, err := h.queueInspector.GetTaskLogs(queue, id, 0, -1)

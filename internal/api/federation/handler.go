@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/meself"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
@@ -137,21 +138,21 @@ func (h *Handler) requesterIsModerator(c echo.Context) bool {
 // 束縛しない。frontend welcome.entrance.classic.vue は misskeyApiGet で sort/limit/blocked
 // 等を渡すため、これらが無いと表示順・件数・block 除外が全て効かなくなる。
 type InstancesRequest struct {
-	Host          string `json:"host" query:"host"`
-	Suspended     *bool  `json:"suspended" query:"suspended"`
-	NotResponding *bool  `json:"notResponding" query:"notResponding"`
-	Blocked       *bool  `json:"blocked" query:"blocked"`
-	Silenced      *bool  `json:"silenced" query:"silenced"`
-	Federating    *bool  `json:"federating" query:"federating"`
-	Subscribing   *bool  `json:"subscribing" query:"subscribing"`
-	Publishing    *bool  `json:"publishing" query:"publishing"`
-	Sort          string `json:"sort" query:"sort"`
-	Limit         *int   `json:"limit" query:"limit"`
-	Offset        int    `json:"offset" query:"offset"`
-	SinceID       string `json:"sinceId" query:"sinceId"`
-	UntilID       string `json:"untilId" query:"untilId"`
-	SinceDate     *int64 `json:"sinceDate" query:"sinceDate"`
-	UntilDate     *int64 `json:"untilDate" query:"untilDate"`
+	Host          string     `json:"host" query:"host"`
+	Suspended     *bool      `json:"suspended" query:"suspended"`
+	NotResponding *bool      `json:"notResponding" query:"notResponding"`
+	Blocked       *bool      `json:"blocked" query:"blocked"`
+	Silenced      *bool      `json:"silenced" query:"silenced"`
+	Federating    *bool      `json:"federating" query:"federating"`
+	Subscribing   *bool      `json:"subscribing" query:"subscribing"`
+	Publishing    *bool      `json:"publishing" query:"publishing"`
+	Sort          string     `json:"sort" query:"sort"`
+	Limit         *jsnum.Int `json:"limit" query:"limit"`
+	Offset        *jsnum.Int `json:"offset" query:"offset"`
+	SinceID       string     `json:"sinceId" query:"sinceId"`
+	UntilID       string     `json:"untilId" query:"untilId"`
+	SinceDate     *int64     `json:"sinceDate" query:"sinceDate"`
+	UntilDate     *int64     `json:"untilDate" query:"untilDate"`
 }
 
 // Instances handles POST /api/federation/instances.
@@ -174,9 +175,13 @@ func (h *Handler) Instances(c echo.Context) error {
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
+	}
+	offset := 0
+	if p := req.Offset.IntPtr(); p != nil {
+		offset = *p
 	}
 	filter := model.InstanceListFilter{
 		Host:          req.Host,
@@ -191,7 +196,7 @@ func (h *Handler) Instances(c echo.Context) error {
 		Publishing:    req.Publishing,
 		SortBy:        req.Sort,
 		Limit:         limit,
-		Offset:        req.Offset,
+		Offset:        offset,
 		SinceID:       sinceID,
 		UntilID:       untilID,
 	}

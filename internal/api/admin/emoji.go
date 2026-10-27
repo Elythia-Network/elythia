@@ -28,9 +28,9 @@ const (
 	emojiAliasMaxRunes    = 128
 	emojiLicenseMaxRunes  = 1024
 	emojiRoleIDMaxRunes   = 128
-	// `emoji.originalUrl` / `publicUrl` は varchar(512)。利用者の文字列が直接入る
-	// のは `admin/emoji/add` の `url` 直接指定 (mk-go 独自の legacy 経路) だけだが、
-	// drive が作った URL も同じ列に入るので #3023 でそちらにも掛けている。
+	// `emoji.originalUrl` / `publicUrl` は varchar(512)。drive が作った URL が入る
+	// (#3023)。利用者の文字列が直接入る `admin/emoji/add` の `url` 直接指定は
+	// #3865 で消した。
 	emojiURLMaxRunes = 512
 )
 
