@@ -184,6 +184,14 @@ func (r *instanceRepository) ListPeerHosts() ([]string, error) {
 	return hosts, nil
 }
 
+// InstanceSortHostAsc and InstanceSortHostDesc are the federation/instances
+// sort values Elythia handles besides upstream's (by host). They are declared
+// on top of upstream's paramDef in paramschema's elythia_overlays.json (#3865).
+const (
+	InstanceSortHostAsc  = "+host"
+	InstanceSortHostDesc = "-host"
+)
+
 // List returns instances matching the filter, ordered by the requested sort.
 func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Instance, error) {
 	// 列に入らない文字は保存された値に現れないので、一致しえない (#3025)。
@@ -306,9 +314,9 @@ func (r *instanceRepository) List(filter model.InstanceListFilter) ([]*model.Ins
 			q = q.Order("\"latestRequestReceivedAt\" DESC NULLS LAST")
 		case "-latestRequestReceivedAt":
 			q = q.Order("\"latestRequestReceivedAt\" ASC NULLS FIRST")
-		case "+host":
+		case InstanceSortHostAsc:
 			q = q.Order("host ASC")
-		case "-host":
+		case InstanceSortHostDesc:
 			q = q.Order("host DESC")
 		default:
 			// 本家 TS は sort 未指定時 instance.id DESC (= aidx なので新しい順)。
