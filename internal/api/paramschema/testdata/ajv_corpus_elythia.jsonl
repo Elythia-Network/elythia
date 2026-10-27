@@ -1,0 +1,1194 @@
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"5e448632d3ebff347e7b7ce67c0bdda58d41e7423410335fd2a1013e6354453e","cases":1165}
+{"ep":"admin/database-health"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/drive/usage"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"forceRecalc":null},"ok":false,"path":"#/properties/forceRecalc/type","msg":"must be boolean"}
+{"in":{"forceRecalc":0},"ok":false,"path":"#/properties/forceRecalc/type","msg":"must be boolean"}
+{"in":{"forceRecalc":"true"},"ok":false,"path":"#/properties/forceRecalc/type","msg":"must be boolean"}
+{"in":{"forceRecalc":false},"ok":true}
+{"ep":"admin/emoji-application/list"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"filter":null},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":123},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":true},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":[]},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":"pending"},"ok":true}
+{"in":{"filter":"processed"},"ok":true}
+{"in":{"filter":"all"},"ok":true}
+{"in":{"filter":""},"ok":false,"path":"#/properties/filter/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"filter":"x-y"},"ok":false,"path":"#/properties/filter/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"untilId":null},"ok":true}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"filter":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"filter":{"bad":1}},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"ep":"admin/emoji-application/list-by-user"}
+{"in":{"userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC"},"ok":true}
+{"in":{"userId":"0"},"ok":true}
+{"in":{"userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","status":null},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","status":123},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","status":true},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","status":[]},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","status":"all"},"ok":true}
+{"in":{"userId":"abc123","status":"pending"},"ok":true}
+{"in":{"userId":"abc123","status":"approved"},"ok":true}
+{"in":{"userId":"abc123","status":"rejected"},"ok":true}
+{"in":{"userId":"abc123","status":"canceled"},"ok":true}
+{"in":{"userId":"abc123","status":""},"ok":false,"path":"#/properties/status/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"userId":"abc123","status":"x-y"},"ok":false,"path":"#/properties/status/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"userId":"abc123","query":null},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":123},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":true},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":[]},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":""},"ok":true}
+{"in":{"userId":"abc123","query":"x-y"},"ok":true}
+{"in":{"userId":"abc123","query":"hello"},"ok":true}
+{"in":{"userId":"abc123","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":10.0},"ok":true}
+{"in":{"userId":"abc123","limit":1e1},"ok":true}
+{"in":{"userId":"abc123","limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1},"ok":true}
+{"in":{"userId":"abc123","limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1.0},"ok":true}
+{"in":{"userId":"abc123","limit":100},"ok":true}
+{"in":{"userId":"abc123","limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"userId":"abc123","limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":100e0},"ok":true}
+{"in":{"userId":"abc123","limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","untilId":null},"ok":true}
+{"in":{"userId":"abc123","untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"userId":"abc123","untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"userId":"abc123","untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"userId":"abc123","untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"abc123"},"ok":true}
+{"in":{"userId":"abc123","untilId":"ABC"},"ok":true}
+{"in":{"userId":"abc123","untilId":"0"},"ok":true}
+{"in":{"userId":"abc123","untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":{"bad":1},"status":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":"abc123","status":{"bad":1},"query":{"bad":1}},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":{"bad":1},"status":{"bad":1}},"ok":false,"path":"#/properties/status/type","msg":"must be string"}
+{"in":{"userId":"abc123","query":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","limit":{"bad":1},"query":{"bad":1}},"ok":false,"path":"#/properties/query/type","msg":"must be string"}
+{"in":{"userId":"abc123","limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"ep":"admin/emoji-application/related"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":10.0},"ok":true}
+{"in":{"applicationId":"abc123","limit":1e1},"ok":true}
+{"in":{"applicationId":"abc123","limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"applicationId":"abc123","limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":1},"ok":true}
+{"in":{"applicationId":"abc123","limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"applicationId":"abc123","limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":1.0},"ok":true}
+{"in":{"applicationId":"abc123","limit":100},"ok":true}
+{"in":{"applicationId":"abc123","limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"applicationId":"abc123","limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","limit":100e0},"ok":true}
+{"in":{"applicationId":"abc123","limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"applicationId":"abc123","untilId":null},"ok":true}
+{"in":{"applicationId":"abc123","untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"abc123"},"ok":true}
+{"in":{"applicationId":"abc123","untilId":"ABC"},"ok":true}
+{"in":{"applicationId":"abc123","untilId":"0"},"ok":true}
+{"in":{"applicationId":"abc123","untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"applicationId":"abc123","untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"ep":"admin/emoji-application/user-summary"}
+{"in":{"userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC"},"ok":true}
+{"in":{"userId":"0"},"ok":true}
+{"in":{"userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"ep":"admin/federation/delivery-health"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"windowSeconds":null},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":10.0},"ok":true}
+{"in":{"windowSeconds":1e1},"ok":true}
+{"in":{"windowSeconds":1e400},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":-0},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"in":{"windowSeconds":"1"},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":true},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1},"ok":true}
+{"in":{"windowSeconds":0},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"in":{"windowSeconds":0.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1.0},"ok":true}
+{"in":{"windowSeconds":3600},"ok":true}
+{"in":{"windowSeconds":3601},"ok":false,"path":"#/properties/windowSeconds/maximum","msg":"must be <= 3600"}
+{"in":{"windowSeconds":3600.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":3600e0},"ok":true}
+{"in":{"windowSeconds":-1},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"ep":"admin/federation/gone-instances"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/federation/inbox-health"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"windowSeconds":null},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":10.0},"ok":true}
+{"in":{"windowSeconds":1e1},"ok":true}
+{"in":{"windowSeconds":1e400},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":-0},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"in":{"windowSeconds":"1"},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":true},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1},"ok":true}
+{"in":{"windowSeconds":0},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"in":{"windowSeconds":0.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":1.0},"ok":true}
+{"in":{"windowSeconds":3600},"ok":true}
+{"in":{"windowSeconds":3601},"ok":false,"path":"#/properties/windowSeconds/maximum","msg":"must be <= 3600"}
+{"in":{"windowSeconds":3600.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
+{"in":{"windowSeconds":3600e0},"ok":true}
+{"in":{"windowSeconds":-1},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"ep":"admin/federation/rules/hits"}
+{"in":{"ruleId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"ruleId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"ruleId":null},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":123},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":true},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":[]},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":""},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"x-y"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ABC"},"ok":true}
+{"in":{"ruleId":"0"},"ok":true}
+{"in":{"ruleId":"a_b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a-b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":" abc"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\n"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"日本"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ａｂｃ"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\u0000"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc123","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":10.0},"ok":true}
+{"in":{"ruleId":"abc123","limit":1e1},"ok":true}
+{"in":{"ruleId":"abc123","limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ruleId":"abc123","limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":1},"ok":true}
+{"in":{"ruleId":"abc123","limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ruleId":"abc123","limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":1.0},"ok":true}
+{"in":{"ruleId":"abc123","limit":50},"ok":true}
+{"in":{"ruleId":"abc123","limit":51},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 50"}
+{"in":{"ruleId":"abc123","limit":50.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","limit":50e0},"ok":true}
+{"in":{"ruleId":"abc123","limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ruleId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"limit":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
+{"ep":"admin/federation/rules/list"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/ip/accounts"}
+{"in":{"ip":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ip'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"ip":"hello","unknownProperty":1},"ok":true}
+{"in":{"ip":null},"ok":false,"path":"#/properties/ip/type","msg":"must be string"}
+{"in":{"ip":123},"ok":false,"path":"#/properties/ip/type","msg":"must be string"}
+{"in":{"ip":true},"ok":false,"path":"#/properties/ip/type","msg":"must be string"}
+{"in":{"ip":[]},"ok":false,"path":"#/properties/ip/type","msg":"must be string"}
+{"in":{"ip":""},"ok":true}
+{"in":{"ip":"x-y"},"ok":true}
+{"in":{"ip":"hello","sinceDays":null},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":1.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":10.0},"ok":true}
+{"in":{"ip":"hello","sinceDays":1e1},"ok":true}
+{"in":{"ip":"hello","sinceDays":1e400},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":-0},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","sinceDays":"1"},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":true},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":1},"ok":true}
+{"in":{"ip":"hello","sinceDays":0},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","sinceDays":0.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":1.0},"ok":true}
+{"in":{"ip":"hello","sinceDays":3650},"ok":true}
+{"in":{"ip":"hello","sinceDays":3651},"ok":false,"path":"#/properties/sinceDays/maximum","msg":"must be <= 3650"}
+{"in":{"ip":"hello","sinceDays":3650.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","sinceDays":3650e0},"ok":true}
+{"in":{"ip":"hello","sinceDays":-1},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":10.0},"ok":true}
+{"in":{"ip":"hello","limit":1e1},"ok":true}
+{"in":{"ip":"hello","limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":1},"ok":true}
+{"in":{"ip":"hello","limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":1.0},"ok":true}
+{"in":{"ip":"hello","limit":100},"ok":true}
+{"in":{"ip":"hello","limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"ip":"hello","limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":100e0},"ok":true}
+{"in":{"ip":"hello","limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"ip":"hello","offset":null},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":1.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":10.0},"ok":true}
+{"in":{"ip":"hello","offset":1e1},"ok":true}
+{"in":{"ip":"hello","offset":1e400},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":-0},"ok":true}
+{"in":{"ip":"hello","offset":"1"},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":true},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":0},"ok":true}
+{"in":{"ip":"hello","offset":-1},"ok":false,"path":"#/properties/offset/minimum","msg":"must be >= 0"}
+{"in":{"ip":"hello","offset":-0.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":0.0},"ok":true}
+{"in":{"ip":"hello","offset":10000},"ok":true}
+{"in":{"ip":"hello","offset":10001},"ok":false,"path":"#/properties/offset/maximum","msg":"must be <= 10000"}
+{"in":{"ip":"hello","offset":10000.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":10000e0},"ok":true}
+{"in":{"ip":{"bad":1},"sinceDays":{"bad":1}},"ok":false,"path":"#/properties/ip/type","msg":"must be string"}
+{"in":{"ip":"hello","sinceDays":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":{"bad":1},"sinceDays":{"bad":1}},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"ip":"hello","limit":{"bad":1},"offset":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"ip":"hello","offset":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"offset":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'ip'"}
+{"ep":"admin/ip/lookup-log"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"offset":null},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":1.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":10.0},"ok":true}
+{"in":{"offset":1e1},"ok":true}
+{"in":{"offset":1e400},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":-0},"ok":true}
+{"in":{"offset":"1"},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":true},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":0},"ok":true}
+{"in":{"offset":-1},"ok":false,"path":"#/properties/offset/minimum","msg":"must be >= 0"}
+{"in":{"offset":-0.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":0.0},"ok":true}
+{"in":{"offset":10000},"ok":true}
+{"in":{"offset":10001},"ok":false,"path":"#/properties/offset/maximum","msg":"must be <= 10000"}
+{"in":{"offset":10000.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":10000e0},"ok":true}
+{"in":{"limit":{"bad":1},"offset":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"offset":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"ep":"admin/ip/related-accounts"}
+{"in":{"userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC"},"ok":true}
+{"in":{"userId":"0"},"ok":true}
+{"in":{"userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","sinceDays":null},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":1.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":10.0},"ok":true}
+{"in":{"userId":"abc123","sinceDays":1e1},"ok":true}
+{"in":{"userId":"abc123","sinceDays":1e400},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":-0},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","sinceDays":"1"},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":true},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":1},"ok":true}
+{"in":{"userId":"abc123","sinceDays":0},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","sinceDays":0.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":1.0},"ok":true}
+{"in":{"userId":"abc123","sinceDays":3650},"ok":true}
+{"in":{"userId":"abc123","sinceDays":3651},"ok":false,"path":"#/properties/sinceDays/maximum","msg":"must be <= 3650"}
+{"in":{"userId":"abc123","sinceDays":3650.5},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","sinceDays":3650e0},"ok":true}
+{"in":{"userId":"abc123","sinceDays":-1},"ok":false,"path":"#/properties/sinceDays/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":10.0},"ok":true}
+{"in":{"userId":"abc123","limit":1e1},"ok":true}
+{"in":{"userId":"abc123","limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1},"ok":true}
+{"in":{"userId":"abc123","limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":1.0},"ok":true}
+{"in":{"userId":"abc123","limit":100},"ok":true}
+{"in":{"userId":"abc123","limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"userId":"abc123","limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":100e0},"ok":true}
+{"in":{"userId":"abc123","limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"userId":"abc123","offset":null},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":1.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":10.0},"ok":true}
+{"in":{"userId":"abc123","offset":1e1},"ok":true}
+{"in":{"userId":"abc123","offset":1e400},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":-0},"ok":true}
+{"in":{"userId":"abc123","offset":"1"},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":true},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":0},"ok":true}
+{"in":{"userId":"abc123","offset":-1},"ok":false,"path":"#/properties/offset/minimum","msg":"must be >= 0"}
+{"in":{"userId":"abc123","offset":-0.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":0.0},"ok":true}
+{"in":{"userId":"abc123","offset":10000},"ok":true}
+{"in":{"userId":"abc123","offset":10001},"ok":false,"path":"#/properties/offset/maximum","msg":"must be <= 10000"}
+{"in":{"userId":"abc123","offset":10000.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":10000e0},"ok":true}
+{"in":{"userId":{"bad":1},"sinceDays":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":"abc123","sinceDays":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":{"bad":1},"sinceDays":{"bad":1}},"ok":false,"path":"#/properties/sinceDays/type","msg":"must be integer"}
+{"in":{"userId":"abc123","limit":{"bad":1},"offset":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"userId":"abc123","offset":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"offset":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"ep":"admin/roles/assignment-show"}
+{"in":{"userId":"abc123","roleId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","roleId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"roleId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"userId":null,"roleId":"abc123"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123,"roleId":"abc123"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true,"roleId":"abc123"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[],"roleId":"abc123"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":"","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC","roleId":"abc123"},"ok":true}
+{"in":{"userId":"0","roleId":"abc123"},"ok":true}
+{"in":{"userId":"a_b","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000","roleId":"abc123"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'roleId'"}
+{"in":{"userId":"abc123","roleId":null},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"userId":"abc123","roleId":123},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"userId":"abc123","roleId":true},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"userId":"abc123","roleId":[]},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"userId":"abc123","roleId":""},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"x-y"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"ABC"},"ok":true}
+{"in":{"userId":"abc123","roleId":"0"},"ok":true}
+{"in":{"userId":"abc123","roleId":"a_b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"a-b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"a b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":" abc"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"abc\n"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"日本"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"ａｂｃ"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123","roleId":"abc\u0000"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":{"bad":1},"roleId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roleId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"ep":"admin/server-metrics"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/server-plugins"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/signup-application/list"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"filter":null},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":123},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":true},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":[]},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"filter":"pending"},"ok":true}
+{"in":{"filter":"approved"},"ok":true}
+{"in":{"filter":"processed"},"ok":true}
+{"in":{"filter":"all"},"ok":true}
+{"in":{"filter":""},"ok":false,"path":"#/properties/filter/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"filter":"x-y"},"ok":false,"path":"#/properties/filter/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"offset":null},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":1.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":10.0},"ok":true}
+{"in":{"offset":1e1},"ok":true}
+{"in":{"offset":1e400},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":-0},"ok":true}
+{"in":{"offset":"1"},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":true},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":0},"ok":true}
+{"in":{"offset":-1},"ok":false,"path":"#/properties/offset/minimum","msg":"must be >= 0"}
+{"in":{"offset":-0.5},"ok":false,"path":"#/properties/offset/type","msg":"must be integer"}
+{"in":{"offset":0.0},"ok":true}
+{"in":{"filter":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"filter":{"bad":1}},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"offset":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"offset":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"ep":"bubble-game/versus/history"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123"},"ok":true}
+{"in":{"userId":"ABC"},"ok":true}
+{"in":{"userId":"0"},"ok":true}
+{"in":{"userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"untilId":null},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilDate":null},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":1.5},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":10.0},"ok":true}
+{"in":{"untilDate":1e1},"ok":true}
+{"in":{"untilDate":1e400},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-0},"ok":true}
+{"in":{"untilDate":"1"},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":true},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-1},"ok":true}
+{"in":{"untilDate":1},"ok":true}
+{"in":{"userId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilDate":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/invitations"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"bubble-game/versus/record"}
+{"in":{"matchId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"matchId":null},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":""},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC"},"ok":true}
+{"in":{"matchId":"0"},"ok":true}
+{"in":{"matchId":"a_b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/show"}
+{"in":{"matchId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"matchId":null},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":""},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC"},"ok":true}
+{"in":{"matchId":"0"},"ok":true}
+{"in":{"matchId":"a_b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"emoji-application/list-mine"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"untilId":null},"ok":true}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"ep":"following/silent/list"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"sinceId":null},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":123},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":true},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":[]},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":""},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"x-y"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc123"},"ok":true}
+{"in":{"sinceId":"ABC"},"ok":true}
+{"in":{"sinceId":"0"},"ok":true}
+{"in":{"sinceId":"a_b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a-b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":" abc"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\n"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"日本"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"ａｂｃ"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\u0000"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":null},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceDate":null},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":1.5},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":10.0},"ok":true}
+{"in":{"sinceDate":1e1},"ok":true}
+{"in":{"sinceDate":1e400},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-0},"ok":true}
+{"in":{"sinceDate":"1"},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":true},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-1},"ok":true}
+{"in":{"sinceDate":1},"ok":true}
+{"in":{"untilDate":null},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":1.5},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":10.0},"ok":true}
+{"in":{"untilDate":1e1},"ok":true}
+{"in":{"untilDate":1e400},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-0},"ok":true}
+{"in":{"untilDate":"1"},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":true},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-1},"ok":true}
+{"in":{"untilDate":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"sinceId":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"limit":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"ep":"i/flashs"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"sinceId":null},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":123},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":true},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":[]},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":""},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"x-y"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc123"},"ok":true}
+{"in":{"sinceId":"ABC"},"ok":true}
+{"in":{"sinceId":"0"},"ok":true}
+{"in":{"sinceId":"a_b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a-b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":" abc"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\n"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"日本"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"ａｂｃ"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\u0000"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":null},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceDate":null},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":1.5},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":10.0},"ok":true}
+{"in":{"sinceDate":1e1},"ok":true}
+{"in":{"sinceDate":1e400},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-0},"ok":true}
+{"in":{"sinceDate":"1"},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":true},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-1},"ok":true}
+{"in":{"sinceDate":1},"ok":true}
+{"in":{"untilDate":null},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":1.5},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":10.0},"ok":true}
+{"in":{"untilDate":1e1},"ok":true}
+{"in":{"untilDate":1e400},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-0},"ok":true}
+{"in":{"untilDate":"1"},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":true},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-1},"ok":true}
+{"in":{"untilDate":1},"ok":true}
+{"in":{"limit":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"ep":"i/flashs/likes"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"sinceId":null},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":123},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":true},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":[]},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":""},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"x-y"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc123"},"ok":true}
+{"in":{"sinceId":"ABC"},"ok":true}
+{"in":{"sinceId":"0"},"ok":true}
+{"in":{"sinceId":"a_b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a-b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":" abc"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\n"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"日本"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"ａｂｃ"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\u0000"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":null},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceDate":null},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":1.5},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":10.0},"ok":true}
+{"in":{"sinceDate":1e1},"ok":true}
+{"in":{"sinceDate":1e400},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-0},"ok":true}
+{"in":{"sinceDate":"1"},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":true},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-1},"ok":true}
+{"in":{"sinceDate":1},"ok":true}
+{"in":{"untilDate":null},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":1.5},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":10.0},"ok":true}
+{"in":{"untilDate":1e1},"ok":true}
+{"in":{"untilDate":1e400},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-0},"ok":true}
+{"in":{"untilDate":"1"},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":true},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-1},"ok":true}
+{"in":{"untilDate":1},"ok":true}
+{"in":{"search":null},"ok":true}
+{"in":{"search":123},"ok":false,"path":"#/properties/search/type","msg":"must be string"}
+{"in":{"search":true},"ok":false,"path":"#/properties/search/type","msg":"must be string"}
+{"in":{"search":[]},"ok":false,"path":"#/properties/search/type","msg":"must be string"}
+{"in":{"search":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"search":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/search/maxLength","msg":"must NOT have more than 100 characters"}
+{"in":{"search":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"search":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/search/maxLength","msg":"must NOT have more than 100 characters"}
+{"in":{"search":""},"ok":false,"path":"#/properties/search/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"search":"a"},"ok":true}
+{"in":{"search":"😀"},"ok":true}
+{"in":{"search":"x-y"},"ok":true}
+{"in":{"search":"hello"},"ok":true}
+{"in":{"limit":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"search":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"search":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"ep":"roles/assignment-show"}
+{"in":{"roleId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roleId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roleId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"roleId":null},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"roleId":123},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"roleId":true},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"roleId":[]},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"in":{"roleId":""},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"x-y"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"ABC"},"ok":true}
+{"in":{"roleId":"0"},"ok":true}
+{"in":{"roleId":"a_b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"a-b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"a b"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":" abc"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"abc\n"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"日本"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"ａｂｃ"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":"abc\u0000"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roleId":{"bad":1}},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"ep":"signup-application/status"}
+{"in":{"claimCode":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"claimCode":"hello","unknownProperty":1},"ok":true}
+{"in":{"claimCode":null},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":123},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":true},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":[]},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":""},"ok":false,"path":"#/properties/claimCode/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"claimCode":"a"},"ok":true}
+{"in":{"claimCode":"😀"},"ok":true}
+{"in":{"claimCode":"x-y"},"ok":true}
+{"in":{"claimCode":{"bad":1}},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}

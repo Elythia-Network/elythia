@@ -27,6 +27,9 @@ type Endpoint struct {
 	// RequireFile is meta.requireFile: upstream reads the params from the
 	// multipart fields.
 	RequireFile bool
+	// Elythia marks an endpoint upstream does not have, declared in
+	// elythia_paramdefs.json (#3869). Only Effective has them.
+	Elythia bool
 }
 
 // ScalarParam is a top-level property upstream casts from a string for GET

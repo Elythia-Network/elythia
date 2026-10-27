@@ -18,13 +18,22 @@ import (
 var elythiaOverlays []byte
 
 var effectiveOnce = sync.OnceValues(func() (map[string]Endpoint, error) {
-	return parseEffective(upstreamGolden, elythiaOverlays)
+	eps, err := parseEffective(upstreamGolden, elythiaOverlays)
+	if err != nil {
+		return nil, err
+	}
+	if err := addElythiaEndpoints(eps, elythiaParamDefs); err != nil {
+		return nil, err
+	}
+	return eps, nil
 })
 
 // Effective returns the upstream endpoints of Upstream with the values
-// Elythia accepts on top of upstream's paramDef overlaid (#3865). The request
-// validation uses it; Upstream stays upstream's paramDef as is, for the
-// conformance with ajv. The map is shared and must not be modified.
+// Elythia accepts on top of upstream's paramDef overlaid (#3865), and the
+// endpoints upstream does not have with their paramDef from
+// elythia_paramdefs.json (#3869, marked Elythia). The request validation uses
+// it; Upstream stays upstream's paramDef as is, for the conformance with ajv.
+// The map is shared and must not be modified.
 //
 // 重ねる宣言はelythia_overlays.jsonに、本家のparamDefと同じ形(properties・
 // items・enum)で書く。足すことしかできない: 本家のenumに値を足す
@@ -225,12 +234,12 @@ func collectPropertyNames(n *node, names map[string]bool) {
 	}
 }
 
-// checkNoDefault refuses a default anywhere in the added schema o. The
+// checkNoDefault refuses a default anywhere in the schema o. The
 // values of properties are schemas by name: a property named "default" is
 // not the keyword.
 func checkNoDefault(o *orderedObject, path string) error {
 	if _, ok := o.get("default"); ok {
-		return fmt.Errorf("%s: an added property cannot have a default", path)
+		return fmt.Errorf("%s: cannot have a default", path)
 	}
 	for _, k := range o.keys {
 		switch v := o.vals[k].(type) {

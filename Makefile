@@ -1339,15 +1339,26 @@ upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSIO
 # した照合のcorpusを作る。internal/api/paramschemaの検証器は、このcorpusの
 # 全件と判定・最初のエラー・defaultを入れた後の値が一致することをテストで守る。
 # ajvはfrontend/に推移的に入っている、本家のpackage.jsonと同じ版を使う。
+#
+# Elythia独自のendpointの宣言(elythia_paramdefs.json、#3869)のcorpusは、本家の
+# 分とは別のファイルに作る(elythia-paramdef-gen)。宣言を書き換えるたびに、本家の
+# ソースを要らずに作り直せるようにするため。ajvの版と設定は本家のgoldenから読む
+# ので、本家のgoldenを作り直したら、こちらも作り直す(paramdef-genが続けて回す)。
 PARAMDEF_JSON = internal/api/paramschema/upstream_paramdefs.json
 PARAMDEF_CORPUS = internal/api/paramschema/testdata/ajv_corpus.jsonl
-PARAMDEF_GOLDEN = $(PARAMDEF_JSON) $(PARAMDEF_CORPUS)
+ELYTHIA_PARAMDEF_JSON = internal/api/paramschema/elythia_paramdefs.json
+ELYTHIA_PARAMDEF_CORPUS = internal/api/paramschema/testdata/ajv_corpus_elythia.jsonl
+PARAMDEF_GOLDEN = $(PARAMDEF_JSON) $(PARAMDEF_CORPUS) $(ELYTHIA_PARAMDEF_CORPUS)
 PARAMDEF_NODE_MODULES ?= frontend/node_modules
-.PHONY: paramdef-gen
+.PHONY: paramdef-gen elythia-paramdef-gen
 paramdef-gen: ## 本家のparamDefのgoldenと、ajvの照合corpusを作り直す(nodeとfrontend/node_modulesが要る)
 	@test -d "$(PARAMDEF_NODE_MODULES)/typescript" || { echo "$(PARAMDEF_NODE_MODULES)/typescript が無い。frontend/ で pnpm install する" >&2; exit 1; }
 	node tools/paramdefspec/extract.mjs --typescript "$(PARAMDEF_NODE_MODULES)/typescript" --upstream "$(UPSTREAM_DIR)" --out $(PARAMDEF_JSON)
 	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --synthetic tools/paramdefspec/synthetic.json --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(PARAMDEF_CORPUS)
+	$(MAKE) elythia-paramdef-gen
+
+elythia-paramdef-gen: ## Elythia独自のendpointのparamDef(elythia_paramdefs.json)から、ajvの照合corpusを作り直す(nodeとfrontend/node_modulesが要る)
+	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --elythia $(ELYTHIA_PARAMDEF_JSON) --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(ELYTHIA_PARAMDEF_CORPUS)
 
 # /api.json(internal/api/openapi)の本家互換の部分が、本家の/api.jsonと項目の
 # 順まで一致するかを見る(#3810)。本家の公式imageの中で本家のgenOpenapiSpecを
