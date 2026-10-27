@@ -1,12 +1,17 @@
 package entitycompat
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/elythia-network/elythia/internal/api/paramschema"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // frontend/packages/elythia-js は Elythia 独自のエンドポイントの型を持つ (#3417)。
@@ -168,4 +173,20 @@ func TestElythiaJS_EndpointsMatchRouter(t *testing.T) {
 	report(pendingOnly, "pending-endpoints.txt に、サーバーに無いエンドポイントがある")
 	report(both, "型を書いたエンドポイントが pending-endpoints.txt に残っている (外す)")
 	report(dup, "elythia-js に同じエンドポイントが 2 回以上ある")
+}
+
+// TestElythiaParamDefsNameElythiaOnlyEndpoints keeps the declarations of
+// elythia_paramdefs.json (#3869) to the POST endpoints only Elythia has: a
+// name the router does not have would declare nothing, and an upstream name
+// is refused by paramschema.Effective.
+func TestElythiaParamDefsNameElythiaOnlyEndpoints(t *testing.T) {
+	var f struct {
+		Endpoints map[string]json.RawMessage `json:"endpoints"`
+	}
+	require.NoError(t, json.Unmarshal(paramschema.ElythiaParamDefs(), &f))
+	require.NotEmpty(t, f.Endpoints)
+	server := elythiaOnlyPostEndpoints(t)
+	for name := range f.Endpoints {
+		assert.Contains(t, server, name, "elythia_paramdefs.json declares %s, which is not a POST endpoint only Elythia has", name)
+	}
 }
