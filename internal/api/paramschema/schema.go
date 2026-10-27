@@ -71,13 +71,16 @@ type node struct {
 	typeUpFront bool
 	inGroupType string
 
-	enum  []any
-	anyOf []*node
-	oneOf []*node
-	allOf []*node
-	ifN   *node
-	thenN *node
-	elseN *node
+	enum []any
+	// enumPattern is a string pattern that also passes enum. Only an Elythia
+	// overlay sets it (x-elythia-enumPattern, overlay.go).
+	enumPattern *regexp.Regexp
+	anyOf       []*node
+	oneOf       []*node
+	allOf       []*node
+	ifN         *node
+	thenN       *node
+	elseN       *node
 
 	maximum, minimum *float64
 
