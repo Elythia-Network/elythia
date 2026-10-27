@@ -239,7 +239,7 @@ func (h *Handler) FederationRemoveAllFollowing(c echo.Context) error {
 // 操作しても効果なし、将来 schema 拡張で対応 column が増えたら updates()
 // に変換 case を足す。
 type federationUpdateInstanceRequest struct {
-	Host           string  `json:"host"`
+	Host           *string `json:"host"`
 	IsSuspended    *bool   `json:"isSuspended"`
 	IsBlocked      *bool   `json:"isBlocked"`
 	IsSilenced     *bool   `json:"isSilenced"`
@@ -294,13 +294,19 @@ func (h *Handler) FederationUpdateInstance(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	var req federationUpdateInstanceRequest
-	if err := c.Bind(&req); err != nil || req.Host == "" {
+	if err := c.Bind(&req); err != nil || req.Host == nil {
 		// 本家は paramDef の ajv 検査で 400 にする (#3330)。
 		return apierr.JSONInvalidParam(c)
 	}
+	// 空のhostは、ほかの存在しないhostと同じく404にする (#3861)。本家の
+	// paramDefはminLengthを持たず、空のhostはinstanceが見つからずに500になる
+	// 見込み。
+	if *req.Host == "" {
+		return apierr.JSONNotFound(c)
+	}
 	// upstream は lookup 前に toPuny(host) で punycode / 小文字化する。IDN / 大文字
 	// host でも instance を引けるよう正規化してから FindByHost / UpdateFields に渡す。
-	host := toPunyHost(req.Host)
+	host := toPunyHost(*req.Host)
 	// before snapshot for moderation log diff (`isSuspended` の変化判定 +
 	// `moderationNote` の before/after)。
 	beforePtr, err := h.instanceRepo.FindByHost(host)

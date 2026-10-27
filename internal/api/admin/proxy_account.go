@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -16,11 +17,23 @@ import (
 // 呼び出すのでこれに合わせる。Response は upstream update-proxy-account.ts と同じく
 // MeDetailed schema で返す (#1539)。
 func (h *Handler) UpdateProxyAccount(c echo.Context) error {
+	// descriptionは、欠け(変えない)とnull(消す)を見分ける。本家のparamDefは
+	// nullableで、本家はnullをそのまま書いて説明を消す。以前は*stringで受けて
+	// いたので、nullを欠けと同じに扱い、説明を消せなかった (#3861)。
 	var req struct {
-		Description *string `json:"description"`
+		Description json.RawMessage `json:"description"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
+	var description *string
+	present := len(req.Description) > 0
+	if present && string(req.Description) != "null" {
+		var s string
+		if err := json.Unmarshal(req.Description, &s); err != nil {
+			return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+		}
+		description = &s
 	}
 	if h.systemAccountFetcher == nil || h.userRepo == nil {
 		return c.NoContent(http.StatusNoContent)
@@ -29,7 +42,7 @@ func (h *Handler) UpdateProxyAccount(c echo.Context) error {
 	if err != nil || proxy == nil {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
-	if req.Description != nil {
+	if present {
 		// **変更前の値を残す。** upstream update-proxy-account.ts は before を null で
 		// 記録する (TODO のまま) が、それでは何から何へ変えたかが追えない。形
 		// ({before, after}) は同じなので、表示はそのまま使える。
@@ -37,12 +50,12 @@ func (h *Handler) UpdateProxyAccount(c echo.Context) error {
 		if prev, perr := h.userRepo.FindProfileByUserID(proxy.ID); perr == nil && prev != nil {
 			before = prev.Description
 		}
-		if err := h.userRepo.UpdateProfile(proxy.ID, map[string]any{"description": req.Description}); err != nil {
+		if err := h.userRepo.UpdateProfile(proxy.ID, map[string]any{"description": description}); err != nil {
 			return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 		}
 		h.logModeration(c, moderationlog.LogUpdateProxyAccountDescription, map[string]any{
 			"before": before,
-			"after":  req.Description,
+			"after":  description,
 		})
 	}
 	// 更新後 profile を再取得して MeDetailed を返す (upstream schema 'MeDetailed')。
