@@ -592,7 +592,8 @@ const proxyAccountForm = useForm({
 	description: proxyAccount.description,
 }, async (state) => {
 	await os.apiWithDialog('admin/update-proxy-account', {
-		description: state.description,
+		// 本家のparamDefは空文字を拒否する(minLength: 1)ので、空にするときはnullで消す (#3861)。
+		description: state.description === '' ? null : state.description,
 	});
 	fetchInstance(true);
 });
