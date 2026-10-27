@@ -3063,14 +3063,23 @@ func TestAbuseReports_LegacyResolvedBool_StillRespected(t *testing.T) {
 	assert.Equal(t, "res", resp[0]["id"])
 }
 
-// 不正 state 値は 400 で reject。silent fallback (= 全件返す) を許すと
-// 「`state` の typo に気付かず全部表示される drop-in regression」が
-// 静かに起きるため、PR #1102 / #1108 と同方針で明示 reject。
-func TestAbuseReports_InvalidState_Rejected(t *testing.T) {
+// 知らない state の値は、本家と同じく絞り込まずに全件を返す (#3859)。
+// 本家のparamDefはstateをenumにしておらず、switchのどれにも当たらない。
+func TestAbuseReports_UnknownState_ReturnsAll(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	h.SetAbuseRepo(testutil.NewMockAbuseReportRepository())
-	rec := doPost(h.AbuseReports, `{"state":"bogus"}`, nil)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	abuseRepo := testutil.NewMockAbuseReportRepository()
+	abuseRepo.Reports["unr"] = &model.AbuseUserReport{ID: "unr", Resolved: false}
+	abuseRepo.Reports["res"] = &model.AbuseUserReport{ID: "res", Resolved: true}
+	h.SetAbuseRepo(abuseRepo)
+
+	// 本家は独自の resolved を知らないので、一緒に送っても全件になる。
+	for _, body := range []string{`{"state":"bogus"}`, `{"state":"bogus","resolved":true}`} {
+		rec := doPost(h.AbuseReports, body, nil)
+		assert.Equal(t, http.StatusOK, rec.Code, body)
+		var resp []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Len(t, resp, 2, body)
+	}
 }
 
 // reporterOrigin / targetUserOrigin の不正値も 400 で reject。

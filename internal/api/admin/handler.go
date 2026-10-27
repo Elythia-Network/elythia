@@ -2579,7 +2579,7 @@ func (h *Handler) RolesCreate(c echo.Context) error {
 		AsBadge                         *bool           `json:"asBadge"`
 		CanEditMembersByModerator       *bool           `json:"canEditMembersByModerator"`
 		PreserveAssignmentOnMoveAccount *bool           `json:"preserveAssignmentOnMoveAccount"`
-		DisplayOrder                    *int            `json:"displayOrder"`
+		DisplayOrder                    *jsnum.Int      `json:"displayOrder"`
 		Policies                        *map[string]any `json:"policies"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -2591,7 +2591,8 @@ func (h *Handler) RolesCreate(c echo.Context) error {
 	// 送出時に Go の `*string` が nil になり「field 不在」と区別できない
 	// ため required check から除外する (= TS は `null` 可で accept、mk-go
 	// では実 require は省略するが TS frontend の payload は通る)。
-	if req.Name == nil || *req.Name == "" ||
+	// nameの空文字は、本家と同じく受ける (#3859)。
+	if req.Name == nil ||
 		req.Description == nil ||
 		req.Target == nil ||
 		req.CondFormula == nil ||
@@ -2612,7 +2613,7 @@ func (h *Handler) RolesCreate(c echo.Context) error {
 		IsAdministrator:           *req.IsAdministrator,
 		AsBadge:                   *req.AsBadge,
 		IsExplorable:              req.IsExplorable != nil && *req.IsExplorable,
-		DisplayOrder:              *req.DisplayOrder,
+		DisplayOrder:              int(*req.DisplayOrder),
 		CanEditMembersByModerator: *req.CanEditMembersByModerator,
 	}
 	if req.PreserveAssignmentOnMoveAccount != nil {
@@ -2789,7 +2790,7 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		AsBadge                         *bool           `json:"asBadge"`
 		CanEditMembersByModerator       *bool           `json:"canEditMembersByModerator"`
 		PreserveAssignmentOnMoveAccount *bool           `json:"preserveAssignmentOnMoveAccount"`
-		DisplayOrder                    *int            `json:"displayOrder"`
+		DisplayOrder                    *jsnum.Int      `json:"displayOrder"`
 		Policies                        *map[string]any `json:"policies"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoleID == "" {
@@ -2875,7 +2876,7 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		fields["preserveAssignmentOnMoveAccount"] = *req.PreserveAssignmentOnMoveAccount
 	}
 	if req.DisplayOrder != nil {
-		fields["displayOrder"] = *req.DisplayOrder
+		fields["displayOrder"] = int(*req.DisplayOrder)
 	}
 	if req.Policies != nil {
 		if key := invalidRolePolicyKey(*req.Policies); key != "" {
@@ -2947,8 +2948,9 @@ func (h *Handler) RolesAssign(c echo.Context) error {
 		// = epoch ms。frontend も epoch ms (number) を送るため *int64 で受ける。
 		// 以前は *string + RFC3339 parse だったが、JSON number を *string に
 		// bind すると unmarshal error → 400 となり期限付き role 付与が常に
-		// 失敗していた (#1542)。
-		ExpiresAt *int64 `json:"expiresAt"`
+		// 失敗していた (#1542)。本家と同じく、整数を小数の形で書いた値
+		// (1.0e12など)も受ける (#3859)。
+		ExpiresAt *jsnum.Int `json:"expiresAt"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" || req.RoleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "userId and roleId are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -2971,8 +2973,10 @@ func (h *Handler) RolesAssign(c echo.Context) error {
 		}
 	}
 	var expiresAt *time.Time
-	if req.ExpiresAt != nil {
-		t := time.UnixMilli(*req.ExpiresAt)
+	// 本家はexpiresAtを真偽値として見る(ps.expiresAt && ...)ので、0は期限の
+	// 無い付与になる (#3859)。
+	if ms := req.ExpiresAt.Int64Ptr(); ms != nil && *ms != 0 {
+		t := time.UnixMilli(*ms)
 		// upstream assign.ts:83-85: 過去 (現在以下) の expiresAt は no-op で
 		// return する (過去日時付与の無効化)。
 		if !t.After(time.Now()) {
@@ -3105,22 +3109,22 @@ func (h *Handler) RolesUnassign(c echo.Context) error {
 // RolesUsers handles POST /api/admin/roles/users.
 func (h *Handler) RolesUsers(c echo.Context) error {
 	var req struct {
-		RoleID    string `json:"roleId"`
-		Limit     *int   `json:"limit"`
-		SinceID   string `json:"sinceId"`
-		UntilID   string `json:"untilId"`
-		SinceDate *int64 `json:"sinceDate"`
-		UntilDate *int64 `json:"untilDate"`
+		RoleID    string     `json:"roleId"`
+		Limit     *jsnum.Int `json:"limit"`
+		SinceID   string     `json:"sinceId"`
+		UntilID   string     `json:"untilId"`
+		SinceDate *jsnum.Int `json:"sinceDate"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roleId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -3203,6 +3207,11 @@ func (h *Handler) RolesUpdateDefaultPolicies(c echo.Context) error {
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	// policiesの欠けとnullを拒否する (#3859)。nilのmapをそのまま書くと、
+	// jsonbの列にJSONのnullが入り、既定のpolicyが全部消えていた。
+	if req.Policies == nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "policies is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 	// **値の型を見る (#3037)。** ここは既定 policy そのものなので、数値の
 	// policy に文字列が入ると**全利用者でその上限が消える**。
@@ -4335,7 +4344,7 @@ func packEmojiDetailedAdmin(e *model.Emoji, roleByID map[string]*model.Role) map
 // + pages/admin/abuses.vue) と互換にする:
 //
 //   - sinceId / untilId — cursor pagination (#1114 root cause)
-//   - state             — 'all' | 'unresolved' | 'resolved'
+//   - state             — 'all' | 'unresolved' | 'resolved'。他の値は全件
 //   - reporterOrigin    — 'combined' | 'local' | 'remote'
 //   - targetUserOrigin  — 'combined' | 'local' | 'remote'
 //   - limit             — default 10 / max 100
@@ -4347,18 +4356,19 @@ func packEmojiDetailedAdmin(e *model.Emoji, roleByID map[string]*model.Role) map
 //
 // 後方互換: 旧 `resolved` boolean field は引き続き受け付ける (= 旧 client /
 // 既存 e2e 互換)。`state` と `resolved` の両方が来た場合は `state` を優先
-// する (= upstream paramDef での enum 優先 pattern と同じ)。
+// する (= upstream paramDef での enum 優先 pattern と同じ)。`state` が 'all'・
+// 空文字・null のときだけ `resolved` を見る。
 func (h *Handler) AbuseReports(c echo.Context) error {
 	var req struct {
-		Resolved         *bool  `json:"resolved"`
-		State            string `json:"state"`
-		ReporterOrigin   string `json:"reporterOrigin"`
-		TargetUserOrigin string `json:"targetUserOrigin"`
-		SinceID          string `json:"sinceId"`
-		UntilID          string `json:"untilId"`
-		SinceDate        *int64 `json:"sinceDate"`
-		UntilDate        *int64 `json:"untilDate"`
-		Limit            *int   `json:"limit"`
+		Resolved         *bool      `json:"resolved"`
+		State            string     `json:"state"`
+		ReporterOrigin   string     `json:"reporterOrigin"`
+		TargetUserOrigin string     `json:"targetUserOrigin"`
+		SinceID          string     `json:"sinceId"`
+		UntilID          string     `json:"untilId"`
+		SinceDate        *jsnum.Int `json:"sinceDate"`
+		UntilDate        *jsnum.Int `json:"untilDate"`
+		Limit            *jsnum.Int `json:"limit"`
 		// ReportID は mk-go 独自の additive パラメータ (#2868)。通報の通知から
 		// 該当の 1 件へ飛ぶために使う。
 		ReportID string `json:"reportId"`
@@ -4370,7 +4380,10 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// state enum 優先、無ければ legacy boolean fallback。'all' / 空文字列は
-	// 「フィルタなし (= resolved 列で絞らない)」を意味する。
+	// 「フィルタなし (= resolved 列で絞らない)」を意味する。本家のparamDefは
+	// stateをenumにしておらず、知らない値は絞り込まずに返す。本家は独自の
+	// resolvedを知らないので、知らないstateはresolvedがあっても全件にする
+	// (#3859)。
 	resolved := req.Resolved
 	switch req.State {
 	case "unresolved":
@@ -4382,7 +4395,7 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 	case "all", "":
 		// 何もしない (= legacy boolean fallback または「全件」)
 	default:
-		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "state must be 'all', 'unresolved', or 'resolved'.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+		resolved = nil
 	}
 	// origin enum 検証: 空文字列 / 'combined' / 'local' / 'remote' 以外は reject
 	// (= silent fallback で全件返すと「local だけ見たかった」が裏切られて
@@ -4415,11 +4428,11 @@ func (h *Handler) AbuseReports(c echo.Context) error {
 		return c.JSON(http.StatusOK, []packedAbuseReport{h.packAbuseReport(ctx, r, h.abuseUsers(ctx, single))})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
