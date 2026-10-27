@@ -1350,15 +1350,22 @@ ELYTHIA_PARAMDEF_JSON = internal/api/paramschema/elythia_paramdefs.json
 ELYTHIA_PARAMDEF_CORPUS = internal/api/paramschema/testdata/ajv_corpus_elythia.jsonl
 PARAMDEF_GOLDEN = $(PARAMDEF_JSON) $(PARAMDEF_CORPUS) $(ELYTHIA_PARAMDEF_CORPUS)
 PARAMDEF_NODE_MODULES ?= frontend/node_modules
-.PHONY: paramdef-gen elythia-paramdef-gen
+.PHONY: paramdef-gen elythia-paramdef-gen elythia-js-paramdefs
 paramdef-gen: ## 本家のparamDefのgoldenと、ajvの照合corpusを作り直す(nodeとfrontend/node_modulesが要る)
 	@test -d "$(PARAMDEF_NODE_MODULES)/typescript" || { echo "$(PARAMDEF_NODE_MODULES)/typescript が無い。frontend/ で pnpm install する" >&2; exit 1; }
 	node tools/paramdefspec/extract.mjs --typescript "$(PARAMDEF_NODE_MODULES)/typescript" --upstream "$(UPSTREAM_DIR)" --out $(PARAMDEF_JSON)
 	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --synthetic tools/paramdefspec/synthetic.json --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(PARAMDEF_CORPUS)
 	$(MAKE) elythia-paramdef-gen
 
-elythia-paramdef-gen: ## Elythia独自のendpointのparamDef(elythia_paramdefs.json)から、ajvの照合corpusを作り直す(nodeとfrontend/node_modulesが要る)
+elythia-paramdef-gen: ## Elythia独自のendpointのparamDef(elythia_paramdefs.json)から、ajvの照合corpusとelythia-jsの型の検査を作り直す(nodeとfrontend/node_modulesが要る)
 	node tools/paramdefspec/corpus.mjs --paramdefs $(PARAMDEF_JSON) --elythia $(ELYTHIA_PARAMDEF_JSON) --node-modules "$(PARAMDEF_NODE_MODULES)" --out $(ELYTHIA_PARAMDEF_CORPUS)
+	$(MAKE) elythia-js-paramdefs
+
+# 宣言の項目名と必須の項目が、elythia-jsのリクエストの型と一致するかの検査を、
+# 宣言から生成する(internal/api/paramschema/elythiajs)。検査そのものはelythia-js
+# の型検査(frontendのcheck)が回し、生成物が宣言に追いついているかはGoのテストが見る。
+elythia-js-paramdefs: ## elythia_paramdefs.jsonから、elythia-jsの型と突き合わせる型の検査を作り直す
+	go run ./tools/elythiajsparamdefs
 
 # /api.json(internal/api/openapi)の本家互換の部分が、本家の/api.jsonと項目の
 # 順まで一致するかを見る(#3810)。本家の公式imageの中で本家のgenOpenapiSpecを
