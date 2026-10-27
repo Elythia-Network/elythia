@@ -122,6 +122,9 @@ const DefaultEnforcedMaxBody = 16 << 10
 // 同梱のエディタのbodyではtextのブロック29個からトークンの上限を超える(#3772)。
 // users/showのuserIdsとusers/relationのuserIdの配列も本家に数の上限が無く、
 // `i`と一緒に送るbodyでは250件からトークンの上限を超える(#3837)。
+// admin/roles/create・updateも、本家がpoliciesの中身を決めず、同梱のロールの
+// エディタは全部のポリシーを埋めて送るので、普段の保存で超える(updateは
+// ポリシー24件から、roleIdの無いcreateは25件から。#3859)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is

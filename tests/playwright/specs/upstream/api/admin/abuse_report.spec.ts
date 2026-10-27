@@ -107,7 +107,9 @@ test.describe('admin/abuse-* shape compat', () => {
     const updResp = await callApi(
       request,
       'admin/abuse-report/notification-recipient/update',
-      { i: root.token, id: recipientId, isActive: false },
+      // 本家の paramDef は name と method も必須にする (#3859)。method='email' は
+      // userId の相関 check があるので、作成と同じ userId も送る。
+      { i: root.token, id: recipientId, isActive: false, name, method: 'email', userId: root.id },
     );
     expect(updResp.status()).toBe(200);
     const updated = (await updResp.json()) as Recipient;

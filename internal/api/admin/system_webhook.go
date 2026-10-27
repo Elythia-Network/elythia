@@ -390,6 +390,8 @@ func (h *Handler) SystemWebhookUpdate(c echo.Context) error {
 	// mk-go は意図的に partial update (id 以外は省略可) を許す superset 挙動を維持
 	// する (#1772 で確認)。frontend MkSystemWebhookEditor は常に全フィールドを送る
 	// ため drop-in 互換に影響せず、partial 対応は mk-go の追加の柔軟性。
+	// #3859で本家のparamDefで検証して拒否するようになり、HTTPの経路では必須
+	// 項目の欠けとnullはhandlerに届く前に本家と同じ400になる。
 	// 存在確認 (GORM Updates(map) は 0 行影響でも nil を返すため)
 	before, err := h.systemWebhookRepo.FindByID(req.ID)
 	if err != nil && !repository.IsNotFound(err) {
