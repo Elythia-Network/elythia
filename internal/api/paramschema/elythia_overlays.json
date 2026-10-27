@@ -1,0 +1,231 @@
+{
+	"admin/queue/clear": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/jobs": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/pause": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/promote-jobs": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/queue-stats": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/remove-job": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/resume": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/retry-job": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/show-job": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"admin/queue/show-job-logs": {
+		"properties": {
+			"queue": {
+				"description": "Elythia operates these queues besides upstream's (queue.AllQueueNames), and the queues of plugins (queue.PluginQueuePrefix), which admin/queue/queues lists and the job queue page opens.",
+				"enum": [
+					"push",
+					"export",
+					"webhook",
+					"maintenance"
+				],
+				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
+			}
+		}
+	},
+	"i/notifications": {
+		"properties": {
+			"includeTypes": {
+				"items": {
+					"description": "Elythia's own notification types (notification.MkGoTypeNames).",
+					"enum": [
+						"importCompleted",
+						"abuseReport",
+						"emojiApplicationProcessed",
+						"emojiApplicationReceived",
+						"signupApplicationReceived"
+					]
+				}
+			},
+			"excludeTypes": {
+				"items": {
+					"description": "Elythia's own notification types (notification.MkGoTypeNames).",
+					"enum": [
+						"importCompleted",
+						"abuseReport",
+						"emojiApplicationProcessed",
+						"emojiApplicationReceived",
+						"signupApplicationReceived"
+					]
+				}
+			}
+		}
+	},
+	"i/notifications-grouped": {
+		"properties": {
+			"includeTypes": {
+				"items": {
+					"description": "Elythia's own notification types (notification.MkGoTypeNames).",
+					"enum": [
+						"importCompleted",
+						"abuseReport",
+						"emojiApplicationProcessed",
+						"emojiApplicationReceived",
+						"signupApplicationReceived"
+					]
+				}
+			},
+			"excludeTypes": {
+				"items": {
+					"description": "Elythia's own notification types (notification.MkGoTypeNames).",
+					"enum": [
+						"importCompleted",
+						"abuseReport",
+						"emojiApplicationProcessed",
+						"emojiApplicationReceived",
+						"signupApplicationReceived"
+					]
+				}
+			}
+		}
+	},
+	"federation/instances": {
+		"properties": {
+			"sort": {
+				"description": "Elythia also sorts by host (docs/divergence/operations.md).",
+				"enum": [
+					"+host",
+					"-host"
+				]
+			}
+		}
+	},
+	"reversi/match": {
+		"properties": {
+			"userId": {
+				"description": "An acct (@user or @user@host) names the opponent, for federated games.",
+				"x-elythia-formatAlso": {
+					"pattern": "^@[^@\\s]+(@[^@\\s]+)?$"
+				}
+			}
+		}
+	},
+	"admin/drive/files": {
+		"properties": {
+			"userId": {
+				"description": "@system lists the files the system owns (#686).",
+				"x-elythia-formatAlso": {
+					"values": [
+						"@system"
+					]
+				}
+			}
+		}
+	}
+}

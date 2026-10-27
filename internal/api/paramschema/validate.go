@@ -99,6 +99,9 @@ func (v *validation) untypedGroup(n *node, data any) bool {
 				break
 			}
 		}
+		if s, ok := data.(string); ok && !found && n.enumPattern != nil {
+			found = n.enumPattern.MatchString(s)
+		}
 		if !found {
 			return v.fail(n, "enum", "must be equal to one of the allowed values")
 		}
