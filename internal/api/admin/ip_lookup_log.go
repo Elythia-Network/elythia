@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/iplookuplog"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -36,14 +37,14 @@ func (h *Handler) IPLookupLog(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		Limit  *int `json:"limit"`
-		Offset *int `json:"offset"`
+		Limit  *jsnum.Int `json:"limit"`
+		Offset *jsnum.Int `json:"offset"`
 	}
 	// Bind のエラーを捨てない (理由は `IPAccounts` と同じ)。
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, ipLookupLogDefaultLimit, ipLookupLogMaxLimit)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), ipLookupLogDefaultLimit, ipLookupLogMaxLimit)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -52,7 +53,7 @@ func (h *Handler) IPLookupLog(c echo.Context) error {
 		if *req.Offset < 0 || *req.Offset > ipSearchMaxOffset {
 			return apierr.JSONInvalidParam(c)
 		}
-		offset = *req.Offset
+		offset = int(*req.Offset)
 	}
 
 	// +1 件引いて「次がある」を判断する (総件数は数えない)。

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/model"
@@ -67,23 +68,23 @@ func (h *Handler) SignupApplicationList(c echo.Context) error {
 			apierr.Error("UNAVAILABLE", "Approval-based signup is not configured.", "0c5b7d0e-2b7e-4d0e-9f0e-6a3f4b1f5c21"))
 	}
 	var req struct {
-		Filter string `json:"filter"`
-		Limit  int    `json:"limit"`
-		Offset int    `json:"offset"`
+		Filter string    `json:"filter"`
+		Limit  jsnum.Int `json:"limit"`
+		Offset jsnum.Int `json:"offset"`
 	}
 	// body 無しでも既定値で応答する (管理画面が引数なしで叩く)。
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
 
-	limit := req.Limit
+	limit := int(req.Limit)
 	if limit <= 0 {
 		limit = defaultSignupApplicationLimit
 	}
 	if limit > maxSignupApplicationLimit {
 		limit = maxSignupApplicationLimit
 	}
-	offset := req.Offset
+	offset := int(req.Offset)
 	if offset < 0 {
 		offset = 0
 	}

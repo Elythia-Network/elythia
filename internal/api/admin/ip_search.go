@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/iplog"
 	"github.com/elythia-network/elythia/internal/core/iplookuplog"
@@ -79,10 +80,10 @@ func (h *Handler) IPAccounts(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		IP        string `json:"ip"`
-		SinceDays *int   `json:"sinceDays"`
-		Limit     *int   `json:"limit"`
-		Offset    *int   `json:"offset"`
+		IP        string     `json:"ip"`
+		SinceDays *jsnum.Int `json:"sinceDays"`
+		Limit     *jsnum.Int `json:"limit"`
+		Offset    *jsnum.Int `json:"offset"`
 	}
 	// **Bind のエラーを捨てない。** `encoding/json` は `*int` のポインタを
 	// **デコードする前に**確保するので、`{"offset":"99"}` のような型違いでも
@@ -99,7 +100,7 @@ func (h *Handler) IPAccounts(c echo.Context) error {
 	if !ok {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, ipSearchDefaultLimit, ipSearchMaxLimit)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), ipSearchDefaultLimit, ipSearchMaxLimit)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -108,14 +109,14 @@ func (h *Handler) IPAccounts(c echo.Context) error {
 		if *req.SinceDays < 1 || *req.SinceDays > ipSearchMaxSinceDays {
 			return apierr.JSONInvalidParam(c)
 		}
-		sinceDays = *req.SinceDays
+		sinceDays = int(*req.SinceDays)
 	}
 	offset := 0
 	if req.Offset != nil {
 		if *req.Offset < 0 || *req.Offset > ipSearchMaxOffset {
 			return apierr.JSONInvalidParam(c)
 		}
-		offset = *req.Offset
+		offset = int(*req.Offset)
 	}
 
 	// **記録が有効かと、記録が 1 件でもあるかを別々に返す。** #3066 §7 は

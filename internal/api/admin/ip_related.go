@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/iplookuplog"
 	"github.com/elythia-network/elythia/internal/core/iprelation"
@@ -49,16 +50,16 @@ func (h *Handler) IPRelatedAccounts(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		UserID    string `json:"userId"`
-		SinceDays *int   `json:"sinceDays"`
-		Limit     *int   `json:"limit"`
-		Offset    *int   `json:"offset"`
+		UserID    string     `json:"userId"`
+		SinceDays *jsnum.Int `json:"sinceDays"`
+		Limit     *jsnum.Int `json:"limit"`
+		Offset    *jsnum.Int `json:"offset"`
 	}
 	// Bind のエラーを捨てない (理由は `IPAccounts` と同じ)。
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, ipRelatedDefaultLimit, ipRelatedMaxLimit)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), ipRelatedDefaultLimit, ipRelatedMaxLimit)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -67,14 +68,14 @@ func (h *Handler) IPRelatedAccounts(c echo.Context) error {
 		if *req.SinceDays < 1 || *req.SinceDays > ipSearchMaxSinceDays {
 			return apierr.JSONInvalidParam(c)
 		}
-		sinceDays = *req.SinceDays
+		sinceDays = int(*req.SinceDays)
 	}
 	offset := 0
 	if req.Offset != nil {
 		if *req.Offset < 0 || *req.Offset > ipSearchMaxOffset {
 			return apierr.JSONInvalidParam(c)
 		}
-		offset = *req.Offset
+		offset = int(*req.Offset)
 	}
 
 	// **対象ユーザーを先に解決する。** 画面に出す基本情報が要るうえ、ここで

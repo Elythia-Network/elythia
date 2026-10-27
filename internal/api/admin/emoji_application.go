@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/core/emojiapplication"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -58,9 +59,9 @@ func (h *Handler) EmojiApplicationList(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		Filter  string `json:"filter"`
-		Limit   int    `json:"limit"`
-		UntilID string `json:"untilId"`
+		Filter  string    `json:"filter"`
+		Limit   jsnum.Int `json:"limit"`
+		UntilID string    `json:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -79,7 +80,7 @@ func (h *Handler) EmojiApplicationList(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.emojiApplicationRepo.List(req.Filter, req.Limit, untilID)
+	rows, err := h.emojiApplicationRepo.List(req.Filter, int(req.Limit), untilID)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -767,9 +768,9 @@ func (h *Handler) EmojiApplicationRelated(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		ApplicationID string `json:"applicationId"`
-		Limit         int    `json:"limit"`
-		UntilID       string `json:"untilId"`
+		ApplicationID string    `json:"applicationId"`
+		Limit         jsnum.Int `json:"limit"`
+		UntilID       string    `json:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil || req.ApplicationID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error(
@@ -810,7 +811,7 @@ func (h *Handler) EmojiApplicationRelated(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.emojiApplicationRepo.FindRelated(app, req.Limit, untilID)
+	rows, err := h.emojiApplicationRepo.FindRelated(app, int(req.Limit), untilID)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -850,11 +851,11 @@ func (h *Handler) EmojiApplicationListByUser(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	var req struct {
-		UserID  string `json:"userId"`
-		Status  string `json:"status"`
-		Query   string `json:"query"`
-		Limit   int    `json:"limit"`
-		UntilID string `json:"untilId"`
+		UserID  string    `json:"userId"`
+		Status  string    `json:"status"`
+		Query   string    `json:"query"`
+		Limit   jsnum.Int `json:"limit"`
+		UntilID string    `json:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error(
@@ -877,7 +878,7 @@ func (h *Handler) EmojiApplicationListByUser(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.emojiApplicationRepo.ListByUserFiltered(req.UserID, req.Status, req.Query, req.Limit, untilID)
+	rows, err := h.emojiApplicationRepo.ListByUserFiltered(req.UserID, req.Status, req.Query, int(req.Limit), untilID)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
