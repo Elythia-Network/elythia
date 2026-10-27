@@ -334,3 +334,149 @@ func TestEmojiUpdate_LogsRawNonStringID(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 	assert.Contains(t, buf.String(), "rawId=123")
 }
+
+// TestRolesAbuseLists_IntegerParamsAcceptFractionForms pins that the limit,
+// sinceDate and untilDate of admin/roles/users and admin/abuse-user-reports
+// accept every JSON number with an integer value (10.0, 1e1), as upstream's
+// ajv "type": "integer" does, and read it as that integer (#3859).
+func TestRolesAbuseLists_IntegerParamsAcceptFractionForms(t *testing.T) {
+	// sinceDate (2e3) より前の id と、後の id を 2 件ずつ置く。limit (1.0) と
+	// sinceDate を読めば、後の 1 件だけが返る。
+	cut := id.AidxCutoffPrefix(time.UnixMilli(2000))
+	ids := []string{"0", "00", cut + "a", cut + "b"}
+	const body = `{"limit":1.0,"sinceDate":2e3}`
+	check := func(t *testing.T, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var rows []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		require.Len(t, rows, 1)
+		// sinceDate を読めば、カーソルより後を古い順に返すので、先頭は cut+"a"。
+		assert.Equal(t, cut+"a", rows[0]["id"])
+	}
+	t.Run("admin/roles/users", func(t *testing.T) {
+		h, userRepo, roleRepo, assignRepo := rolesUsersFixture(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1"}
+		for n, i := range ids {
+			uid := fmt.Sprintf("u%d", n)
+			require.NoError(t, userRepo.Create(&model.User{ID: uid, Username: uid}))
+			require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: i, UserID: uid, RoleID: "r1"}))
+		}
+		rec := doPost(h.RolesUsers, `{"roleId":"r1","limit":10.0,"sinceDate":1e1,"untilDate":4102444800000.0}`, adminUser)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		check(t, doPost(h.RolesUsers, `{"roleId":"r1","limit":1.0,"sinceDate":2e3}`, adminUser))
+	})
+	t.Run("admin/abuse-user-reports", func(t *testing.T) {
+		h, _, _, _ := newTestHandler(t)
+		abuseRepo := testutil.NewMockAbuseReportRepository()
+		for _, i := range ids {
+			abuseRepo.Reports[i] = &model.AbuseUserReport{ID: i}
+		}
+		h.SetAbuseRepo(abuseRepo)
+		rec := doPost(h.AbuseReports, listCursor, adminUser)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		check(t, doPost(h.AbuseReports, body, adminUser))
+	})
+}
+
+// 本家 admin/roles/assign の expiresAt も ajv の "type": "integer" なので、
+// 整数を小数の形で書いた値を受け、その整数として読む (#3859)。
+func TestRolesAssign_ExpiresAtAcceptsFractionForm(t *testing.T) {
+	future := time.Date(4099, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	t.Run("future", func(t *testing.T) {
+		h, userRepo, _, roleRepo, assignRepo := newTestHandlerWithAssign(t)
+		userRepo.Users["u1"] = &model.User{ID: "u1"}
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", CanEditMembersByModerator: true}
+		rec := doPost(h.RolesAssign, fmt.Sprintf(`{"userId":"u1","roleId":"r1","expiresAt":%d.0}`, future), adminUser)
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		var got *model.RoleAssignment
+		for _, a := range assignRepo.Assignments {
+			if a.UserID == "u1" && a.RoleID == "r1" {
+				got = a
+			}
+		}
+		require.NotNil(t, got)
+		require.NotNil(t, got.ExpiresAt)
+		assert.Equal(t, future, got.ExpiresAt.UnixMilli())
+	})
+	t.Run("past", func(t *testing.T) {
+		h, userRepo, _, roleRepo, assignRepo := newTestHandlerWithAssign(t)
+		userRepo.Users["u1"] = &model.User{ID: "u1"}
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", CanEditMembersByModerator: true}
+		rec := doPost(h.RolesAssign, `{"userId":"u1","roleId":"r1","expiresAt":1e3}`, adminUser)
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		exists, _ := assignRepo.Exists("u1", "r1")
+		assert.False(t, exists, "past expiresAt must not create an assignment")
+	})
+}
+
+// 本家 admin/roles/create の name は minLength を持たないので、空文字も受けて
+// 空の名前のロールを作る (#3859)。
+func TestRolesCreate_AcceptsEmptyName(t *testing.T) {
+	h, _, _, roleRepo := newTestHandler(t)
+	body := strings.Replace(fullRoleCreatePayload, `"name": "Admin"`, `"name": ""`, 1)
+	require.NotEqual(t, fullRoleCreatePayload, body)
+	rec := doPost(h.RolesCreate, body, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, roleRepo.Roles, 1)
+	for _, r := range roleRepo.Roles {
+		assert.Equal(t, "", r.Name)
+	}
+}
+
+// policies の欠けと null を拒否し、meta に書かない (#3859)。以前は nil の
+// map をそのまま書き、既定の policy が JSON の null で消えていた。
+func TestRolesUpdateDefaultPolicies_RejectsMissingOrNullPolicies(t *testing.T) {
+	for _, body := range []string{`{}`, `{"policies":null}`} {
+		t.Run(body, func(t *testing.T) {
+			h, _, metaRepo, _, _ := newTestHandlerWithAssign(t)
+			metaRepo.Meta.Policies = []byte(`{"canInvite":true}`)
+			rec := doPost(h.RolesUpdateDefaultPolicies, body, adminUser)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+			assert.Nil(t, metaRepo.LastUpdateFields)
+			assert.JSONEq(t, `{"canInvite":true}`, string(metaRepo.Meta.Policies))
+		})
+	}
+}
+
+// 本家 admin/roles/create・update の displayOrder は number なので、整数を
+// 小数の形で書いた値も受け、その整数として書く (#3859)。
+func TestRolesDisplayOrder_AcceptsFractionForm(t *testing.T) {
+	t.Run("admin/roles/create", func(t *testing.T) {
+		h, _, _, roleRepo := newTestHandler(t)
+		body := strings.Replace(fullRoleCreatePayload, `"displayOrder": 0`, `"displayOrder": 1e1`, 1)
+		require.NotEqual(t, fullRoleCreatePayload, body)
+		rec := doPost(h.RolesCreate, body, nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Len(t, roleRepo.Roles, 1)
+		for _, r := range roleRepo.Roles {
+			assert.Equal(t, 10, r.DisplayOrder)
+		}
+	})
+	t.Run("admin/roles/update", func(t *testing.T) {
+		h, _, _, roleRepo := newTestHandler(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "r"}
+		rec := doPost(h.RolesUpdate, `{"roleId":"r1","displayOrder":3.0}`, nil)
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		assert.Equal(t, 3, roleRepo.Roles["r1"].DisplayOrder)
+	})
+}
+
+// 本家 admin/roles/assign は expiresAt を真偽値として見るので、0 は期限の
+// 無い付与になる (#3859)。
+func TestRolesAssign_ZeroExpiresAtAssignsWithoutExpiry(t *testing.T) {
+	h, userRepo, _, roleRepo, assignRepo := newTestHandlerWithAssign(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1"}
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", CanEditMembersByModerator: true}
+	rec := doPost(h.RolesAssign, `{"userId":"u1","roleId":"r1","expiresAt":0}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	var got *model.RoleAssignment
+	for _, a := range assignRepo.Assignments {
+		if a.UserID == "u1" && a.RoleID == "r1" {
+			got = a
+		}
+	}
+	require.NotNil(t, got, "expiresAt 0 must assign the role")
+	assert.Nil(t, got.ExpiresAt)
+}
