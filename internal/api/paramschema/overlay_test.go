@@ -197,6 +197,17 @@ func TestApplyOverlaysRejects(t *testing.T) {
 		{"formatAlso duplicate value", `{"admin/drive/files":{"properties":{"userId":{"x-elythia-formatAlso":{"values":["@a","@a"]}}}}}`, "distinct strings"},
 		{"formatAlso pattern not a string", `{"admin/drive/files":{"properties":{"userId":{"x-elythia-formatAlso":{"pattern":1}}}}}`, "pattern must be a string"},
 		{"formatAlso bad pattern", `{"admin/drive/files":{"properties":{"userId":{"x-elythia-formatAlso":{"pattern":"("}}}}}`, "#/properties/userId"},
+		{"added properties not an object", `{"antennas/update":{"x-elythia-properties":[]}}`, "x-elythia-properties must be a non-empty object"},
+		{"added properties empty", `{"antennas/update":{"x-elythia-properties":{}}}`, "x-elythia-properties must be a non-empty object"},
+		{"added property of upstream", `{"antennas/update":{"x-elythia-properties":{"name":{"type":"string"}}}}`, `upstream has the property "name"`},
+		{"added property inherited", `{"antennas/update":{"x-elythia-properties":{"__proto__":{"type":"string"}}}}`, "inherited by every JavaScript object"},
+		{"added property not an object", `{"antennas/update":{"x-elythia-properties":{"isActive":true}}}`, "schema must be an object"},
+		{"added property with a default", `{"antennas/update":{"x-elythia-properties":{"isActive":{"type":"boolean","default":true}}}}`, "cannot have a default"},
+		{"added property with a nested default", `{"antennas/update":{"x-elythia-properties":{"x":{"type":"object","properties":{"y":{"type":"string","default":"z"}}}}}}`, "cannot have a default"},
+		{"added property with a default in an array", `{"antennas/update":{"x-elythia-properties":{"x":{"anyOf":[{"type":"string","default":"z"}]}}}}`, "cannot have a default"},
+		{"added property bad schema", `{"antennas/update":{"x-elythia-properties":{"isActive":{"type":"bool"}}}}`, "unsupported type"},
+		{"added property of upstream in anyOf", `{"users/show":{"x-elythia-properties":{"userId":{"type":"integer"}}}}`, `upstream has the property "userId"`},
+		{"added properties on a string", `{"admin/drive/files":{"properties":{"userId":{"x-elythia-properties":{"x":{"type":"string"}}}}}}`, "x-elythia-properties on a string"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parseEffective(upstreamGolden, []byte(tc.overlay))
@@ -204,4 +215,151 @@ func TestApplyOverlaysRejects(t *testing.T) {
 			assert.True(t, strings.Contains(err.Error(), tc.want), "got %v, want it to contain %q", err, tc.want)
 		})
 	}
+}
+
+// x-elythia-properties adds a property upstream does not have: a value of
+// another type is rejected with upstream's form of error at the added path,
+// and upstream's own errors still come first (#3867).
+func TestOverlayAddsProperties(t *testing.T) {
+	eps, err := parseEffective(upstreamGolden, []byte(`{"antennas/update":{"x-elythia-properties":{"isActive":{"type":"boolean","nullable":true}}}}`))
+	require.NoError(t, err)
+	up, err := Upstream()
+	require.NoError(t, err)
+	s := eps["antennas/update"].Schema
+	validate := func(in string) *Error {
+		t.Helper()
+		var data any
+		require.NoError(t, json.Unmarshal([]byte(in), &data))
+		return s.Validate(data)
+	}
+	const ok = `"antennaId":"abc","name":"a","src":"all","keywords":[["a"]],"excludeKeywords":[],"users":[],"caseSensitive":false,"withReplies":false,"withFile":false`
+	assert.Nil(t, validate(`{`+ok+`,"isActive":true}`))
+	assert.Nil(t, validate(`{`+ok+`,"isActive":null}`))
+	assert.Nil(t, validate(`{`+ok+`}`))
+	got := validate(`{` + ok + `,"isActive":"yes"}`)
+	if assert.NotNil(t, got) {
+		assert.Equal(t, "#/properties/isActive/type", got.SchemaPath)
+		assert.Equal(t, "must be boolean", got.Message)
+	}
+	var data any
+	require.NoError(t, json.Unmarshal([]byte(`{`+ok+`,"isActive":"yes"}`), &data))
+	assert.Nil(t, up["antennas/update"].Schema.Validate(data), "upstream accepts the unknown property")
+	// 本家の項目の誤りが先に返る。
+	got = validate(`{"antennaId":"a-b","isActive":"yes"}`)
+	if assert.NotNil(t, got) {
+		assert.Equal(t, "#/properties/antennaId/format", got.SchemaPath)
+	}
+	// 本家の paramDef に object の組の keyword が無い endpoint にも足せる。
+	eps, err = parseEffective(upstreamGolden, []byte(`{"admin/captcha/current":{"x-elythia-properties":{"x":{"type":"string"}}}}`))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(`{"x":1}`), &data))
+	got = eps["admin/captcha/current"].Schema.Validate(data)
+	if assert.NotNil(t, got) {
+		assert.Equal(t, "#/properties/x/type", got.SchemaPath)
+	}
+}
+
+// TestEffectiveDeclaresTheAddedProperties pins the properties Elythia adds to
+// upstream endpoints (#3867): on top of an input upstream accepts (the first
+// accepted corpus input of the endpoint), each valid value passes and each
+// value outside the declaration gets upstream's form of error at the added
+// property, where upstream passed it as an unknown property.
+func TestEffectiveDeclaresTheAddedProperties(t *testing.T) {
+	eff, err := Effective()
+	require.NoError(t, err)
+	up, err := Upstream()
+	require.NoError(t, err)
+	_, eps, cases := readCorpus(t)
+	base := map[string]json.RawMessage{}
+	for _, c := range cases {
+		if _, ok := base[c.ep]; !ok && *c.OK && eps[c.ep].ParamDef == nil && bytes.HasPrefix(bytes.TrimSpace(c.In), []byte("{")) {
+			base[c.ep] = c.In
+		}
+	}
+	type bad struct {
+		v         any
+		path, msg string
+	}
+	long := strings.Repeat("a", 129)
+	for _, tc := range []struct {
+		ep, prop string
+		good     []any
+		bad      []bad
+	}{
+		{"admin/abuse-user-reports", "resolved", []any{true, false, nil}, []bad{{"yes", "type", "must be boolean"}}},
+		{"admin/abuse-user-reports", "reportId", []any{"abc123"}, []bad{{"", "format", `must match format "misskey:id"`}, {nil, "type", "must be string"}}},
+		{"admin/emoji/copy", "name", []any{"a_b", nil, strings.Repeat("a", 128)}, []bad{{"a b", "pattern", `must match pattern "^[a-zA-Z0-9_]+$"`}, {long, "maxLength", "must NOT have more than 128 characters"}}},
+		{"admin/emoji/copy", "category", []any{"", "face", nil}, []bad{{1.0, "type", "must be string"}}},
+		{"admin/emoji/copy", "aliases", []any{[]any{}, []any{"a"}, nil}, []bad{{"a", "type", "must be array"}}},
+		{"admin/emoji/copy", "license", []any{"", nil}, []bad{{true, "type", "must be string"}}},
+		{"admin/emoji/copy", "isSensitive", []any{true, nil}, []bad{{"true", "type", "must be boolean"}}},
+		{"admin/emoji/list", "category", []any{"face", "", nil}, []bad{{1.0, "type", "must be string"}}},
+		{"admin/queue/jobs", "limit", []any{1.0, 100.0}, []bad{{0.0, "minimum", "must be >= 1"}, {101.0, "maximum", "must be <= 100"}, {1.5, "type", "must be integer"}, {nil, "type", "must be integer"}}},
+		{"admin/queue/jobs", "page", []any{1.0, 1000.0}, []bad{{0.0, "minimum", "must be >= 1"}}},
+		{"antennas/update", "isActive", []any{true, nil}, []bad{{"yes", "type", "must be boolean"}}},
+		{"chat/history", "untilId", []any{"abc123"}, []bad{{"", "format", `must match format "misskey:id"`}}},
+		{"pages/create", "visibility", []any{"public", "private"}, []bad{{"", "enum", "must be equal to one of the allowed values"}, {nil, "type", "must be string"}}},
+		{"pages/update", "visibility", []any{"public", "private", nil}, []bad{{"secret", "enum", "must be equal to one of the allowed values"}}},
+		{"i/regenerate-token", "token", []any{"123456", nil}, []bad{{123456.0, "type", "must be string"}}},
+		{"admin/show-user", "withSignins", []any{false, nil}, []bad{{"false", "type", "must be boolean"}}},
+		{"notes", "noteIds", []any{[]any{}, []any{"abc123"}}, []bad{{[]any{"a-b"}, "items/format", `must match format "misskey:id"`}, {nil, "type", "must be array"}}},
+		{"admin/drive/files", "host", []any{"remote.example", nil}, []bad{{1.0, "type", "must be string"}}},
+		{"i/move", "password", []any{"", "p", nil}, []bad{{1.0, "type", "must be string"}}},
+		{"notes/global-timeline", "allowPartial", []any{true, false}, []bad{{"true", "type", "must be boolean"}, {nil, "type", "must be boolean"}}},
+		{"federation/instances", "untilId", []any{"abc123"}, []bad{{"a-b", "format", `must match format "misskey:id"`}}},
+		{"federation/instances", "sinceId", []any{"abc123"}, []bad{{1.0, "type", "must be string"}}},
+		{"federation/instances", "sinceDate", []any{0.0, 1e12}, []bad{{1.5, "type", "must be integer"}}},
+		{"federation/instances", "untilDate", []any{1e12}, []bad{{"1", "type", "must be integer"}}},
+	} {
+		raw, ok := base[tc.ep]
+		require.True(t, ok, "the corpus has no accepted object input for %s", tc.ep)
+		with := func(v any) map[string]any {
+			var m map[string]any
+			require.NoError(t, json.Unmarshal(raw, &m))
+			m[tc.prop] = v
+			return m
+		}
+		for _, v := range tc.good {
+			assert.Nil(t, eff[tc.ep].Schema.Validate(with(v)), "%s %s=%v", tc.ep, tc.prop, v)
+		}
+		for _, b := range tc.bad {
+			assert.Nil(t, up[tc.ep].Schema.Validate(with(b.v)), "%s %s=%v: upstream rejects it already", tc.ep, tc.prop, b.v)
+			got := eff[tc.ep].Schema.Validate(with(b.v))
+			if assert.NotNil(t, got, "%s %s=%v", tc.ep, tc.prop, b.v) {
+				assert.Equal(t, "#/properties/"+tc.prop+"/"+b.path, got.SchemaPath, "%s %s=%v", tc.ep, tc.prop, b.v)
+				assert.Equal(t, b.msg, got.Message, "%s %s=%v", tc.ep, tc.prop, b.v)
+			}
+		}
+	}
+	// noteIds は notes/show-partial-bulk と同じく 100 件まで。
+	ids := make([]any, 101)
+	for i := range ids {
+		ids[i] = "abc"
+	}
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(base["notes"], &m))
+	m["noteIds"] = ids
+	got := eff["notes"].Schema.Validate(m)
+	if assert.NotNil(t, got) {
+		assert.Equal(t, "#/properties/noteIds/maxItems", got.SchemaPath)
+	}
+}
+
+// A property named "default" inside an added object schema is a name, not the
+// keyword, so checkNoDefault lets it through (#3867).
+func TestOverlayAddsAPropertyNamedDefault(t *testing.T) {
+	_, err := parseEffective(upstreamGolden, []byte(`{"antennas/update":{"x-elythia-properties":{"x":{"type":"object","properties":{"default":{"type":"string"}}}}}}`))
+	require.NoError(t, err)
+}
+
+// A name upstream only lists in required (no properties entry) is accepted
+// with any value upstream, so it cannot be added either (#3867). The golden
+// has no such name now; a synthetic one pins it.
+func TestOverlayRefusesAPropertyOnlyInRequired(t *testing.T) {
+	golden := []byte(`{"endpoints":{"x/y":{"paramDef":{"type":"object","properties":{"b":{"type":"string"}},"required":["a"]},"meta":{}}}}`)
+	_, err := parseEffective(golden, []byte(`{"x/y":{"x-elythia-properties":{"a":{"type":"integer"}}}}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `upstream has the property "a"`)
+	_, err = parseEffective(golden, []byte(`{"x/y":{"x-elythia-properties":{"c":{"type":"integer"}}}}`))
+	require.NoError(t, err)
 }
