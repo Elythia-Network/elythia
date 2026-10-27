@@ -92,10 +92,11 @@ routeのmiddlewareで401や403になったリクエストは、6に届かない�
 
 Elythiaは、本家の`paramDef`の外の値をいくつか受ける(独自のキューの名前など)。そのままでは本家の`paramDef`がこれを拒否するので、`internal/api/paramschema/elythia_overlays.json`に宣言して、本家の`paramDef`に重ねる。検証(拒否と、数えるだけの検証の両方)は、重ねた後のもの(`paramschema.Effective`)で行う。`paramschema.Upstream`は本家の`paramDef`のままで、ajvのcorpusとの照合に使う。
 
-- **宣言は本家の`paramDef`と同じ形で書く。** endpointの名前ごとに、`properties`・`items`で重ねる項目までたどり、そこで操作を書く。操作は3つだけ
+- **宣言は本家の`paramDef`と同じ形で書く。** endpointの名前ごとに、`properties`・`items`で重ねる項目までたどり、そこで操作を書く。操作は4つだけ
   - `enum`: 本家のenumに値を足す。既にある値、項目の型に合わない値、`x-elythia-enumPattern`が既に通す値を足す宣言は拒否する
   - `x-elythia-enumPattern`: 本家のenumに、patternに合う文字列を足す(プラグインのキュー`plugin:<名前>`)。既にある値に合うpatternは拒否する
   - `x-elythia-formatAlso`: 本家の形式(`misskey:id`)に、別の値(`values`)かpatternに合う値(`pattern`)を許す。形式の名前は変えないので、どちらにも合わない値には本家と同じエラー(`must match format "misskey:id"`)を返す。既に形式に合う値を足す宣言は拒否する
+  - `x-elythia-properties`: 本家の`paramDef`に無い項目(Elythia独自の引数)を、項目ごとに本家と同じ形の完全なスキーマで足す(#3867)。本家にある項目を書く宣言、`default`を持つ宣言は拒否する(検証器が写しに入れる値が変わると、本家が受理する入力のdefaultの照合が崩れる)。足した項目は本家の項目の後に検証するので、本家が拒否する入力の最初のエラーは変わらない。本家は知らない項目として何でも通していたので、足した項目に宣言から外れる値を持つ入力だけが、受理から拒否に変わる
 - **足すことしかできない。** 本家に無い項目・enum・形式に重ねる宣言や、知らないキーワード(`required`を外すなど)は、読み込みで拒否する。読み込めないと、本家の`paramDef`での検証ごと止まる(起動時に警告を出す)
 - **テストで守ること**(`internal/api/paramschema`): ajvのcorpusの全件を重ねた後のもので流し、本家が受理する入力は同じdefaultで受理され、本家が拒否する入力は同じ最初のエラーを返すこと(重ねたキーワードで落ちた入力が通るようになるものだけ例外)。宣言した値が受理され、外の値に本家と同じエラーを返すこと
 - **値の出どころと突き合わせる**(`internal/server`の`TestElythiaOverlaysMatchTheImplementation`): キューは`queue.AllQueueNames()`から本家のenumを除いたものと、プラグインのキューは`queue.PluginQueueNames`がキューを作る名前とちょうど同じ名前を受けること(振る舞いで比べる)、通知の型は`notification.MkGoTypeNames()`と、`federation/instances`の並べ替えは`repository`の定数と一致すること。同梱のfrontendが送るキューの名前(`misskey-js`の`queueTypes`)が、本家のenumか重ねた値に入っていること
@@ -110,7 +111,9 @@ Elythiaは、本家の`paramDef`の外の値をいくつか受ける(独自の�
 | `reversi/match` | `userId` | acct(`@user`・`@user@host`。`x-elythia-formatAlso`のpattern) |
 | `admin/drive/files` | `userId` | `@system`(`x-elythia-formatAlso`のvalues) |
 
-項目を足す操作と、必須を外した別の経路を足す操作は、要る段(Elythia独自のエンドポイントと独自の引数の宣言、#3667の(4))で足す。
+必須を外した別の経路を足す操作は、要る段(Elythia独自のエンドポイントの宣言、#3667の(4))で足す。
+
+足した独自の引数(`x-elythia-properties`)の一覧と意味は、[divergence/api.md](divergence/api.md#1-1c-リクエストパラメータの-additive)の表にある(`i/update`と`admin/update-meta`の分は最後の段で宣言する。`i/regenerate-token`の`token`は[divergence/security.md](divergence/security.md))。`internal/server`の`TestAddedPropertiesMatchElythiaJS`が、足した項目の名前と`elythia-js`の`extensions.ts`の`ElythiaRequestExtensions`の項目の名前が一致することを確かめる。
 
 ## 数える種類
 
