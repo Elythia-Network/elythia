@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -175,6 +176,11 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 	// 本家は存在しない token を findOneByOrFail で 500 にする。Elythia は独自の id の
 	// 「Invalid token.」を返す (#3845)。corpus の token はどれも存在しない。
 	"reset-password": {id: "6382759e-0a0d-4e32-893e-0e1e66cec4d5", match: func(map[string]any) bool { return true }},
+	// 本家は整数でない displayOrder を、integer の列への書き込みで PostgreSQL の型
+	// 変換の 500 にする見込み (ソースからの推定)。Elythia は書き込む前に 400 にして
+	// いる (#3859)。paramDef の displayOrder は number なので、ajv は通す。
+	"admin/roles/create": {id: ajvInvalidParamID, match: nonIntegerDisplayOrder},
+	"admin/roles/update": {id: ajvInvalidParamID, match: nonIntegerDisplayOrder},
 	// 本家は日付として読めない updatedAtFrom / updatedAtTo を PostgreSQL の型変換で
 	// 500 にする。Elythia は引く前に 400 にしている (#3518)。
 	"v2/admin/emoji/list": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
@@ -189,6 +195,13 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 		}
 		return false
 	}},
+}
+
+// nonIntegerDisplayOrder matches an input whose displayOrder is a number
+// without an integer value (1.5).
+func nonIntegerDisplayOrder(in map[string]any) bool {
+	v, ok := in["displayOrder"].(float64)
+	return ok && v != math.Trunc(v)
 }
 
 // sixDigits matches a token that could be a valid TOTP code (i/2fa/done
@@ -214,6 +227,24 @@ var passwordCheckedEndpoints = []string{
 // corpus inputs reach the job queue. The test server's Redis (miniredis) has
 // no cmsgpack, so the enqueue fails with a 500.
 var jobEnqueuingEndpoints = []string{"admin/drive/clean-remote-files", "admin/emoji/import-zip"}
+
+// metaWritingEndpoints are the enforced admin/* endpoints whose accepted
+// corpus inputs write meta. TestEnforcedEndpointsMatchTheCorpus puts the row
+// back after each of them.
+var metaWritingEndpoints = []string{"admin/roles/update-default-policies", "admin/captcha/save"}
+
+// moderationEndpoint reports whether TestEnforcedEndpointsMatchTheCorpus seeds
+// the remote user, role, system webhook, notification recipient and abuse
+// report for the accepted inputs of the admin/* endpoint ep (#3859).
+func moderationEndpoint(ep string) bool {
+	for _, prefix := range []string{"admin/roles/", "admin/abuse-report/", "admin/system-webhook/"} {
+		if strings.HasPrefix(ep, prefix) {
+			return true
+		}
+	}
+	return slices.Contains([]string{"admin/abuse-user-reports", "admin/forward-abuse-user-report",
+		"admin/resolve-abuse-user-report", "admin/update-abuse-user-report"}, ep)
+}
 
 // testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
 var testNet1 = &net.IPNet{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)}
@@ -272,9 +303,9 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
 	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
 	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
-	// 要求する (#3854、#3857)。
+	// 要求する (#3854、#3857、#3859)。
 	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
-		"admin/drive", "admin/emoji"} {
+		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha"} {
 		require.True(t, packages[pkg], "package %s is not counted", pkg)
 	}
 	for name := range eps {
@@ -362,6 +393,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT id FROM emoji WHERE id NOT IN (?, ?)`, seedID, seedID2).Scan(&keepEmojis).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM drive_file WHERE id NOT IN (?, ?)`, seedID, guardFileID).Scan(&keepFiles).Error)
 	keepFiles = append(keepFiles, guardFileID)
+	var keepRoles, keepWebhooks, keepRecipients, keepReports []string
+	require.NoError(t, db.Raw(`SELECT id FROM role WHERE id NOT IN (?, ?, ?)`, seedID, roleID, adminRoleID).Scan(&keepRoles).Error)
+	keepRoles = append(keepRoles, roleID, adminRoleID)
+	require.NoError(t, db.Raw(`SELECT id FROM system_webhook WHERE id <> ?`, seedID).Scan(&keepWebhooks).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM abuse_report_notification_recipient WHERE id <> ?`, seedID).Scan(&keepRecipients).Error)
+	require.NoError(t, db.Raw(`SELECT id FROM abuse_user_report WHERE id <> ?`, seedID).Scan(&keepReports).Error)
 	resetAdmin := func() {
 		require.NoError(t, db.Exec(`DELETE FROM promo_note WHERE "noteId" = ? OR "userId" = ?`, seedID, userID).Error)
 		// 一覧が nil だと NULL を渡すことになり、NOT (id = ANY(NULL)) は何も消さない。
@@ -372,6 +409,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM avatar_decoration WHERE NOT (id = ANY(?::varchar[]))`, keep(keepDecorations)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM emoji WHERE NOT (id = ANY(?::varchar[]))`, keep(keepEmojis)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM drive_file WHERE NOT (id = ANY(?::varchar[]))`, keep(keepFiles)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM abuse_user_report WHERE NOT (id = ANY(?::varchar[]))`, keep(keepReports)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM abuse_report_notification_recipient WHERE NOT (id = ANY(?::varchar[]))`, keep(keepRecipients)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM system_webhook WHERE NOT (id = ANY(?::varchar[]))`, keep(keepWebhooks)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE "userId" = ? OR NOT ("roleId" = ANY(?::varchar[]))`, seedID, keep(keepRoles)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM role WHERE NOT (id = ANY(?::varchar[]))`, keep(keepRoles)).Error)
+		require.NoError(t, db.Exec(`DELETE FROM "user" WHERE id = ?`, seedID).Error)
 	}
 	cleanup := func() {
 		require.NoError(t, db.Where("id IN ?", []string{assignID, adminAssignID}).Delete(&model.RoleAssignment{}).Error)
@@ -429,6 +472,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// ファイルと絵文字 (abc123・abc1231)、emoji/copy が足す絵文字、それらを記録する
 		// モデレーションログを書き込む (#3857)。絵文字とシステム所有のファイルにも
 		// 作った人の列が無いので、同じくテストの前にあった id 以外を消す。
+		// ロール・通報・通報先・システム Webhook の受理の入力は、入力ごとに置き直す
+		// リモートの利用者・ロール・通報・通報先・システム Webhook (abc123) と、作成の
+		// endpoint が足すロール・通報先・システム Webhook、ロールの付与を書き込む
+		// (#3859)。どれも作った人の列が無いので、テストの前にあった id 以外を消す。
+		// forward-abuse-user-report が作るインスタンスのシステムアカウント
+		// (instance.actor) は、作り直さずに使い回されるので残す。
 		resetAdmin()
 		require.NoError(t, db.Exec(`DELETE FROM registration_ticket WHERE "createdById" = ?`, adminID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM moderation_log WHERE "userId" = ?`, adminID).Error)
@@ -619,6 +668,52 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			require.True(t, ip != nil && testNet1.Contains(ip), "seeded url %q has a host name or an address outside TEST-NET-1", raw)
 		}
 	}
+	// ロール・通報・通報先・システム Webhook の受理の入力の多くは、corpus の id
+	// (abc123) の利用者・ロール・通報・Webhook が無いと、handler の検査より先に
+	// NO_SUCH_ROLE などで止まる。受理の入力ごとに、リモートの利用者 (abc123)、
+	// ロール、システム Webhook、通報先、その利用者への通報を置き直す (#3859)。
+	// roles/unassign には、利用者へのロールの付与も置く (置かないと NOT_ASSIGNED で
+	// 止まる)。ロールの condFormula と policies は空にし、テストの利用者の権限を
+	// 変えない。利用者・Webhook の URL は TEST-NET-1 の IP にし、配送をキューに積む
+	// system-webhook/test・forward-abuse-user-report でも名前解決が起きないように
+	// する。
+	seedModeration := func(ep string) {
+		const base = "http://192.0.2.1"
+		host := "192.0.2.1"
+		inbox, uri := base+"/inbox", base+"/users/abc123"
+		require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
+			ID: seedID, Username: "penforceremote", UsernameLower: "penforceremote", Host: &host, Inbox: &inbox, URI: &uri,
+		}))
+		require.NoError(t, db.Create(&model.Role{
+			ID: seedID, Name: "penforce-seed-role", UpdatedAt: now, LastUsedAt: now,
+			CondFormula: datatypes.JSON(`{}`), Policies: datatypes.JSON(`{}`),
+		}).Error)
+		if ep == "admin/roles/unassign" {
+			require.NoError(t, db.Create(&model.RoleAssignment{ID: seedID, UserID: seedID, RoleID: seedID}).Error)
+		}
+		require.NoError(t, db.Create(&model.SystemWebhook{
+			ID: seedID, Name: "penforce", URL: base + "/hook", Secret: "s", On: model.StringArray{},
+		}).Error)
+		require.NoError(t, db.Create(&model.AbuseReportNotificationRecipient{ID: seedID, Name: "penforce", Method: "email"}).Error)
+		require.NoError(t, db.Create(&model.AbuseUserReport{
+			ID: seedID, TargetUserID: seedID, ReporterID: userID, Comment: "penforce", TargetUserHost: &host,
+		}).Error)
+		// 置いた行の URL に、ホスト名が無いことを確かめる。
+		var urls []string
+		require.NoError(t, db.Raw(`SELECT u FROM (
+			SELECT inbox AS u FROM "user" WHERE id = ?
+			UNION ALL SELECT "sharedInbox" FROM "user" WHERE id = ?
+			UNION ALL SELECT uri FROM "user" WHERE id = ?
+			UNION ALL SELECT url FROM system_webhook WHERE id = ?
+		) s WHERE u IS NOT NULL`, seedID, seedID, seedID, seedID).Scan(&urls).Error)
+		require.Len(t, urls, 3)
+		for _, raw := range urls {
+			u, err := url.Parse(raw)
+			require.NoError(t, err, raw)
+			ip := net.ParseIP(u.Hostname())
+			require.True(t, ip != nil && testNet1.Contains(ip), "seeded url %q has a host name or an address outside TEST-NET-1", raw)
+		}
+	}
 	seedAdmin := func(ep string) {
 		seedNotes()
 		resetAdmin()
@@ -633,6 +728,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}).Error)
 		if strings.HasPrefix(ep, "admin/drive/") || strings.HasPrefix(ep, "admin/emoji/") {
 			seedDriveEmoji(ep == "admin/emoji/copy")
+		}
+		if moderationEndpoint(ep) {
+			seedModeration(ep)
 		}
 	}
 	// テストの管理者と meta が、admin/* の入力で変わらないことを最後に確かめるため、
@@ -661,6 +759,23 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	metaBefore := readMeta()
 	// 行が無いと、変わらないことの確かめが空振りする。
 	require.Len(t, metaBefore, 1)
+	// roles/update-default-policies と captcha/save の受理の入力は meta を書き換える
+	// (#3859)。入力ごとに、流す前の行へ戻す。列は流す前の行の JSON から読み直す。
+	// 戻すと、それより前の入力が meta を書き換えていても消えてしまうので、流す前に
+	// 変わっていないことを確かめてから戻す。
+	var metaCols []string
+	require.NoError(t, db.Raw(`SELECT column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'meta' AND column_name <> 'id' ORDER BY column_name`).Scan(&metaCols).Error)
+	require.NotEmpty(t, metaCols)
+	quoted := make([]string, len(metaCols))
+	for i, c := range metaCols {
+		quoted[i] = `"` + c + `"`
+	}
+	restoreMetaSQL := `UPDATE meta SET (` + strings.Join(quoted, ", ") + `) = (SELECT ` + strings.Join(quoted, ", ") +
+		` FROM json_populate_record(NULL::meta, ?::json))`
+	restoreMeta := func() {
+		require.NoError(t, db.Exec(restoreMetaSQL, metaBefore[0]).Error)
+	}
 
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -725,8 +840,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			bearer = adminToken
 		}
 		req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
+		metaWriting := slices.Contains(metaWritingEndpoints, tc.ep)
+		if metaWriting {
+			require.Equal(t, metaBefore, readMeta(), "meta changed before %s (corpus line %d)", tc.ep, tc.line)
+		}
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
+		if metaWriting {
+			restoreMeta()
+		}
 
 		var env struct {
 			Error struct {
@@ -782,16 +904,27 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			// 置いた広告・お知らせ・デコレーション・ノートを指す入力が、handler の
 			// 検査まで届いたこと (見つからないで止まっていないこと) を確かめる (#3854)。
 			// ファイルと絵文字 (#3857) も同じ。
+			// ロール・通報・Webhook (#3859) も同じ。
 			var in struct {
-				ID      string `json:"id"`
-				NoteID  string `json:"noteId"`
-				EmojiID string `json:"emojiId"`
-				FileID  string `json:"fileId"`
+				ID        string `json:"id"`
+				NoteID    string `json:"noteId"`
+				EmojiID   string `json:"emojiId"`
+				FileID    string `json:"fileId"`
+				RoleID    string `json:"roleId"`
+				UserID    string `json:"userId"`
+				ReportID  string `json:"reportId"`
+				WebhookID string `json:"webhookId"`
 			}
-			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID || in.EmojiID == seedID || in.FileID == seedID) {
-				notFound := []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED", "NO_SUCH_EMOJI"}
+			if json.Unmarshal(tc.in, &in) == nil && (in.ID == seedID || in.NoteID == seedID || in.EmojiID == seedID || in.FileID == seedID ||
+				in.RoleID == seedID || in.ReportID == seedID || in.WebhookID == seedID) {
+				notFound := []string{"NOT_FOUND", "NO_SUCH_AD", "NO_SUCH_ANNOUNCEMENT", "NO_SUCH_NOTE", "ALREADY_PROMOTED", "NO_SUCH_EMOJI",
+					"NO_SUCH_ROLE", "NO_SUCH_ABUSE_REPORT", "NO_SUCH_SYSTEM_WEBHOOK", "NO_SUCH_WEBHOOK", "NO_SUCH_RECIPIENT"}
 				if in.FileID == seedID {
 					notFound = append(notFound, "NO_SUCH_FILE")
+				}
+				// roles/assign・unassign の userId は、置いた利用者を指すときだけ見る。
+				if in.UserID == seedID {
+					notFound = append(notFound, "NO_SUCH_USER", "NOT_ASSIGNED")
 				}
 				assert.NotContains(t, notFound, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				seedReached[tc.ep]++
@@ -832,7 +965,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// あること (#3854)。
 	for _, ep := range []string{"admin/ad/delete", "admin/ad/update", "admin/announcements/delete", "admin/announcements/update",
 		"admin/avatar-decorations/delete", "admin/avatar-decorations/update", "admin/promo/create",
-		"admin/drive/show-file", "admin/emoji/copy", "admin/emoji/delete", "admin/emoji/import-zip", "admin/emoji/update"} {
+		"admin/drive/show-file", "admin/emoji/copy", "admin/emoji/delete", "admin/emoji/import-zip", "admin/emoji/update",
+		"admin/roles/assign", "admin/roles/delete", "admin/roles/show", "admin/roles/unassign", "admin/roles/update", "admin/roles/users",
+		"admin/abuse-report/notification-recipient/delete", "admin/abuse-report/notification-recipient/show",
+		"admin/abuse-report/notification-recipient/update", "admin/forward-abuse-user-report", "admin/resolve-abuse-user-report",
+		"admin/update-abuse-user-report", "admin/system-webhook/delete", "admin/system-webhook/show", "admin/system-webhook/test",
+		"admin/system-webhook/update"} {
 		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
 	}
 	for _, ep := range jobEnqueuingEndpoints {

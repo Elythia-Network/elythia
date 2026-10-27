@@ -34,7 +34,11 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // admin/avatar-decorations/*, admin/invite/*, admin/promo/create, admin/meta,
 // admin/server-info, admin/get-index-stats, admin/get-table-stats and
 // admin/show-moderation-logs in #3854; admin/drive/* except admin/drive/files
-// and admin/emoji/* except admin/emoji/add in #3857).
+// and admin/emoji/* except admin/emoji/add in #3857; admin/roles/*,
+// admin/abuse-report/*, admin/abuse-user-reports,
+// admin/forward-abuse-user-report, admin/resolve-abuse-user-report,
+// admin/update-abuse-user-report, admin/system-webhook/* and admin/captcha/*
+// in #3859).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -409,6 +413,32 @@ var paramEnforcedEndpoints = []string{
 	"admin/emoji/set-category-bulk",
 	"admin/emoji/set-license-bulk",
 	"admin/emoji/update",
+	"admin/roles/assign",
+	"admin/roles/create",
+	"admin/roles/delete",
+	"admin/roles/list",
+	"admin/roles/show",
+	"admin/roles/unassign",
+	"admin/roles/update",
+	"admin/roles/update-default-policies",
+	"admin/roles/users",
+	"admin/abuse-report/notification-recipient/create",
+	"admin/abuse-report/notification-recipient/delete",
+	"admin/abuse-report/notification-recipient/list",
+	"admin/abuse-report/notification-recipient/show",
+	"admin/abuse-report/notification-recipient/update",
+	"admin/abuse-user-reports",
+	"admin/forward-abuse-user-report",
+	"admin/resolve-abuse-user-report",
+	"admin/update-abuse-user-report",
+	"admin/system-webhook/create",
+	"admin/system-webhook/delete",
+	"admin/system-webhook/list",
+	"admin/system-webhook/show",
+	"admin/system-webhook/test",
+	"admin/system-webhook/update",
+	"admin/captcha/current",
+	"admin/captcha/save",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
