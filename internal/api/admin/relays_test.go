@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeRelaySvc records calls + returns configurable results for the
@@ -94,21 +95,70 @@ func TestRelaysRemove(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, doPost(h.RelaysRemove, `{}`, adminUser).Code)
 }
 
-func TestRelaysRemove_WithService(t *testing.T) {
-	h, _, _, _ := newTestHandler(t)
-	svc := &fakeRelaySvc{}
-	h.SetRelayService(svc)
-	rec := doPost(h.RelaysRemove, `{"id":"rel1"}`, adminUser)
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Equal(t, []string{"rel1"}, svc.removed)
+// relays/remove は本家と同じく inbox で引く。独自の id は読まない (#3867)。
+func TestRelaysRemove_LooksUpByInbox(t *testing.T) {
+	if integrationDB == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	const relID, inbox = "relremove3867", "https://192.0.2.1/relay-3867/inbox"
+	seed := func(t *testing.T) {
+		t.Helper()
+		require.NoError(t, integrationDB.Exec(`DELETE FROM relay WHERE id = ?`, relID).Error)
+		require.NoError(t, integrationDB.Create(&model.Relay{ID: relID, Inbox: inbox, Status: "accepted"}).Error)
+		t.Cleanup(func() { require.NoError(t, integrationDB.Exec(`DELETE FROM relay WHERE id = ?`, relID).Error) })
+	}
+	t.Run("with the relay service", func(t *testing.T) {
+		seed(t)
+		h, _, _, _ := newTestHandler(t)
+		h.SetAdminDB(integrationDB)
+		svc := &fakeRelaySvc{}
+		h.SetRelayService(svc)
+		assert.Equal(t, http.StatusNoContent, doPost(h.RelaysRemove, `{"id":"`+relID+`"}`, adminUser).Code)
+		assert.Empty(t, svc.removed, "the id is not read")
+		assert.Equal(t, http.StatusNoContent, doPost(h.RelaysRemove, `{"inbox":"`+inbox+`"}`, adminUser).Code)
+		assert.Equal(t, []string{relID}, svc.removed)
+	})
+	t.Run("without the relay service", func(t *testing.T) {
+		seed(t)
+		h, _, _, _ := newTestHandler(t)
+		h.SetAdminDB(integrationDB)
+		count := func() int64 {
+			var n int64
+			require.NoError(t, integrationDB.Model(&model.Relay{}).Where("id = ?", relID).Count(&n).Error)
+			return n
+		}
+		assert.Equal(t, http.StatusNoContent, doPost(h.RelaysRemove, `{"id":"`+relID+`"}`, adminUser).Code)
+		assert.EqualValues(t, 1, count(), "the id is not read")
+		assert.Equal(t, http.StatusNoContent, doPost(h.RelaysRemove, `{"inbox":"`+inbox+`"}`, adminUser).Code)
+		assert.EqualValues(t, 0, count())
+	})
 }
 
 func TestRelaysRemove_WithService_NoID(t *testing.T) {
-	// id も inbox も無い場合はスキップして 204 を返す
+	// inbox が無い場合はスキップして 204 を返す
 	h, _, _, _ := newTestHandler(t)
 	svc := &fakeRelaySvc{}
 	h.SetRelayService(svc)
 	rec := doPost(h.RelaysRemove, `{}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Empty(t, svc.removed)
+}
+
+// DB の障害を「見つからない・消した」の 204 に丸めない (#2792、#3867)。
+func TestRelaysRemove_DBFailureIsInternalError(t *testing.T) {
+	if integrationDB == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	broken := integrationDB.WithContext(ctx)
+	for _, withService := range []bool{true, false} {
+		h, _, _, _ := newTestHandler(t)
+		h.SetAdminDB(broken)
+		if withService {
+			h.SetRelayService(&fakeRelaySvc{})
+		}
+		rec := doPost(h.RelaysRemove, `{"inbox":"https://192.0.2.1/inbox"}`, adminUser)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code, "relay service: %v", withService)
+	}
 }

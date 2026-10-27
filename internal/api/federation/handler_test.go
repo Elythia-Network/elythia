@@ -550,3 +550,12 @@ func TestInstances_IntegerParamsAcceptFractionForms(t *testing.T) {
 	// limit だけなら、既定の 30 ではなく 1 件だけが返る。
 	assert.Equal(t, 1, count(t, `{"limit":1.0}`))
 }
+
+// federation/instances の独自の sinceDate・untilDate も integer として宣言した
+// (#3867)。整数を小数の形で書いた値を受ける。
+func TestInstances_DateCursorAcceptsFractionForms(t *testing.T) {
+	h, _ := newHandler(t)
+	c, rec := newReq(t, `{"sinceDate":1.0,"untilDate":4102444800000.0}`)
+	require.NoError(t, h.Instances(c))
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}

@@ -241,8 +241,9 @@ func (h *Handler) DriveFiles(c echo.Context) error {
 	default:
 		req.Origin = "combined"
 	}
-	// upstream は host も hostname もどちらも受けて同じ意味で扱う。
-	// frontend (admin/instance-info) が hostname で投げるため互換上両方サポート。
+	// 本家の paramDef にあるのは hostname だけで、host は Elythia 独自の引数
+	// (#3867 で本家の paramDef に重ねて宣言した)。同梱の frontend
+	// (admin/instance-info) は hostname で送る。host があれば hostname より優先する。
 	host := req.Host
 	if host == "" {
 		host = req.Hostname

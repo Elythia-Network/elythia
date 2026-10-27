@@ -2198,3 +2198,21 @@ func TestQueueShowJob_ActivityBodyEmbeddingLimits(t *testing.T) {
 		}
 	}
 }
+
+// admin/queue/jobs の独自の limit・page は integer として宣言した (#3867)。
+// 本家の ajv と同じく、整数を小数の形で書いた値も受け、その整数として読む。
+func TestQueueJobs_LimitAndPageAcceptFractionForms(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	insp := &stubQueueInspector{
+		pending: map[string][]*apiadmin.QueueTaskSummary{
+			"deliver": {{ID: "d1"}, {ID: "d2"}, {ID: "d3"}},
+		},
+	}
+	h.SetQueueInspector(insp)
+
+	rec := doPost(h.QueueJobs, `{"queue":"deliver","state":"wait","limit":2.0,"page":1e0}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 2)
+}
