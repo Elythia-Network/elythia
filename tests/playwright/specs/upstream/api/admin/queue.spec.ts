@@ -10,11 +10,11 @@
 //     - queues / queue-stats / stats: queue 集計の object/array
 //     - jobs / deliver-delayed / inbox-delayed: 配列
 //     - show-job-logs: 配列 (mk-go 自身は log を書かないので通常は空)
-//     - show-job: 不明 id で 4xx
+//     - show-job: 不明 id で 404 (Elythia) か 500 (本家)
 //   mutation:
 //     - clear → 204 (= 全 queue の pending を消す、test 環境で empty なので no-op)
 //     - promote-jobs → 200 + { promoted: 0 } (= scheduled/retry を即実行、空なので 0)
-//     - retry-job / remove-job: 不明 id で 4xx (= 既存 job 不要)
+//     - retry-job / remove-job: 不明 id で 404 (Elythia) か 204 (本家) (= 既存 job 不要)
 //
 // 全 endpoint admin/moderator 権限要、root token を再利用する。
 
@@ -121,32 +121,34 @@ test.describe('admin/queue/* shape compat', () => {
     expect([200, 204]).toContain(resp.status());
   });
 
-  test('admin/queue/show-job returns 4xx for unknown id', async ({ request }) => {
+  // Elythia は見つからない job を GetTaskInfo で確かめて 404 を返す (#929)。本家は
+  // retry-job・remove-job を何もせずに 204、show-job を 500 で返す
+  // (docs/divergence/approximations.md)。upstream/ の spec は TS backend でも
+  // 通すので、両方の応答を許す。jobId で送る (#3865 で id の別名を消した)。
+  test('admin/queue/show-job answers 404 or 500 for unknown id', async ({ request }) => {
     const resp = await callApi(request, 'admin/queue/show-job', {
       i: root.token,
       queue: 'deliver',
-      id: 'nonexistent-job-id',
+      jobId: 'nonexistent-job-id',
     });
-    expect([400, 404]).toContain(resp.status());
+    expect([404, 500]).toContain(resp.status());
   });
 
-  // mk-go は driver の DeleteTask / RunTask の idempotent 挙動を GetTaskInfo
-  // precheck で TS と同じ 4xx に揃えた (#929 B)。
-  test('admin/queue/retry-job returns 4xx for unknown id', async ({ request }) => {
+  test('admin/queue/retry-job answers 204 or 404 for unknown id', async ({ request }) => {
     const resp = await callApi(request, 'admin/queue/retry-job', {
       i: root.token,
       queue: 'deliver',
-      id: 'nonexistent-job-id',
+      jobId: 'nonexistent-job-id',
     });
-    expect([400, 404]).toContain(resp.status());
+    expect([204, 404]).toContain(resp.status());
   });
 
-  test('admin/queue/remove-job returns 4xx for unknown id', async ({ request }) => {
+  test('admin/queue/remove-job answers 204 or 404 for unknown id', async ({ request }) => {
     const resp = await callApi(request, 'admin/queue/remove-job', {
       i: root.token,
       queue: 'deliver',
-      id: 'nonexistent-job-id',
+      jobId: 'nonexistent-job-id',
     });
-    expect([400, 404]).toContain(resp.status());
+    expect([204, 404]).toContain(resp.status());
   });
 });

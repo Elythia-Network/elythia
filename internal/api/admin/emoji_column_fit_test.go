@@ -33,7 +33,6 @@ const (
 	licAtLimit    = 1024
 	aliasAtLimit  = 128
 	roleIDAtLimit = 128
-	urlAtLimit    = 512
 	invalidUUID   = "3d81ceae-475f-4600-b2a8-2bc116157532"
 )
 
@@ -67,8 +66,9 @@ func TestEmojiAdd_RejectsUnstorableBody(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, repo := setupEmojiHandler(t)
+			systemEmojiFile(t, h, "https://cdn.example/x.png")
 			body, err := json.Marshal(map[string]any{
-				"name": "happy", "url": "https://cdn.example/x.png", tc.field: tc.value,
+				"name": "happy", "fileId": "f_sys_emoji", tc.field: tc.value,
 			})
 			require.NoError(t, err)
 
@@ -87,9 +87,10 @@ func TestEmojiAdd_RejectsUnstorableBody(t *testing.T) {
 // 上限ちょうどは通し、値を切らずに保存する (境界を off-by-one で締めない)。
 func TestEmojiAdd_AcceptsBodyAtLimit(t *testing.T) {
 	h, repo := setupEmojiHandler(t)
+	systemEmojiFile(t, h, "https://cdn.example/x.png")
 	cat, lic := runes(catAtLimit, "あ"), runes(licAtLimit, "い")
 	body, err := json.Marshal(map[string]any{
-		"name": "happy", "url": "https://cdn.example/x.png", "category": cat, "license": lic,
+		"name": "happy", "fileId": "f_sys_emoji", "category": cat, "license": lic,
 	})
 	require.NoError(t, err)
 
@@ -107,8 +108,9 @@ func TestEmojiAdd_AcceptsBodyAtLimit(t *testing.T) {
 // NUL は落としてから判定するので、NUL だけの要素は空になって消える。
 func TestEmojiAdd_DropsUnstorableAliases(t *testing.T) {
 	h, repo := setupEmojiHandler(t)
+	systemEmojiFile(t, h, "https://cdn.example/x.png")
 	body, err := json.Marshal(map[string]any{
-		"name": "happy", "url": "https://cdn.example/x.png",
+		"name": "happy", "fileId": "f_sys_emoji",
 		"aliases": []string{"ok", runes(aliasAtLimit+1, "あ"), "", "a\x00b", "\x00"},
 	})
 	require.NoError(t, err)
@@ -265,8 +267,9 @@ func TestEmojiColumnFit_RejectsWhenEveryElementDropped(t *testing.T) {
 
 	t.Run("add", func(t *testing.T) {
 		h, repo := setupEmojiHandler(t)
+		systemEmojiFile(t, h, "https://cdn.example/x.png")
 		body, err := json.Marshal(map[string]any{
-			"name": "happy", "url": "https://cdn.example/x.png", "aliases": []string{long},
+			"name": "happy", "fileId": "f_sys_emoji", "aliases": []string{long},
 		})
 		require.NoError(t, err)
 
@@ -409,8 +412,8 @@ func TestEmojiAddAliasesBulk_DropsUnstorable(t *testing.T) {
 // `add.ts` は noSuchFile → duplicateName → unsupportedFileType、`update.ts` は
 // noSuchFile → noSuchEmoji の順に宣言している。
 //
-// **`unsupportedFileType` より前になるのは意図的** — MIME の検査は `fileId` 経路の
-// 中にあり、その後ろへ置くと `url` 経路が検査から外れる。
+// **`unsupportedFileType` より前になるのは意図的** — MIME の検査は複製と同じ所に
+// あり、その後ろへ置くと 400 のたびに複製が残る。
 func TestEmojiColumnFit_DoesNotPreemptUpstreamErrors(t *testing.T) {
 	longCat := runes(catAtLimit+1, "あ")
 
@@ -428,8 +431,9 @@ func TestEmojiColumnFit_DoesNotPreemptUpstreamErrors(t *testing.T) {
 
 	t.Run("add: 重複名が先", func(t *testing.T) {
 		h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "happy"})
+		systemEmojiFile(t, h, "https://cdn.example/x.png")
 		body, err := json.Marshal(map[string]any{
-			"name": "happy", "url": "https://cdn.example/x.png", "category": longCat,
+			"name": "happy", "fileId": "f_sys_emoji", "category": longCat,
 		})
 		require.NoError(t, err)
 
@@ -471,8 +475,9 @@ func TestEmojiColumnFit_DropsUnstorableRoleIDs(t *testing.T) {
 
 	t.Run("add", func(t *testing.T) {
 		h, repo := setupEmojiHandler(t)
+		systemEmojiFile(t, h, "https://cdn.example/x.png")
 		body, err := json.Marshal(map[string]any{
-			"name": "happy", "url": "https://cdn.example/x.png",
+			"name": "happy", "fileId": "f_sys_emoji",
 			"roleIdsThatCanBeUsedThisEmojiAsReaction": []string{"role1", long},
 		})
 		require.NoError(t, err)
@@ -524,39 +529,6 @@ func TestEmojiSetAliasesBulk_EmptyArrayClears(t *testing.T) {
 	assert.Empty(t, []string(findEmojiByID(t, repo, "e1").Aliases))
 }
 
-// `url` 直接指定 (mk-go 独自の legacy 経路) も列に入らなければ 400 (#3018)。
-// `emoji.originalUrl` / `publicUrl` は varchar(512) で、この経路は利用者の文字列を
-// そのまま両方へ入れる。
-func TestEmojiAdd_RejectsUnstorableURL(t *testing.T) {
-	long := "https://cdn.example/" + strings.Repeat("a", 512)
-	h, repo := setupEmojiHandler(t)
-	body, err := json.Marshal(map[string]any{"name": "happy", "url": long})
-	require.NoError(t, err)
-
-	rec := doPost(h.EmojiAdd, string(body), adminUser)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	code, id := errorID(t, rec.Body.Bytes())
-	assert.Equal(t, "INVALID_PARAM", code)
-	assert.Equal(t, invalidUUID, id)
-	assert.Contains(t, errorMessage(t, rec.Body.Bytes()), "url", "どの列で弾いたか分からない")
-	_, ferr := repo.FindByNameAndHost("happy", nil)
-	assert.Error(t, ferr, "弾いたのに絵文字が作られている")
-}
-
-// 上限ちょうどの URL は通す。**全角で作る** — byte で数える実装なら落ちる。
-func TestEmojiAdd_AcceptsURLAtLimit(t *testing.T) {
-	h, repo := setupEmojiHandler(t)
-	url := "https://cdn.example/" + runes(urlAtLimit-len("https://cdn.example/"), "あ")
-	require.Equal(t, urlAtLimit, len([]rune(url)))
-	body, err := json.Marshal(map[string]any{"name": "happy", "url": url})
-	require.NoError(t, err)
-
-	require.Equal(t, http.StatusOK, doPost(h.EmojiAdd, string(body), adminUser).Code)
-	got, err := repo.FindByNameAndHost("happy", nil)
-	require.NoError(t, err)
-	assert.Equal(t, url, got.OriginalURL)
-}
-
 // 上限ちょうどの license を一括編集で通す (`set-category-bulk` と同じ理由で、
 // 上限の取り違えをここで落とす)。
 func TestEmojiSetLicenseBulk_AcceptsAtLimit(t *testing.T) {
@@ -569,34 +541,6 @@ func TestEmojiSetLicenseBulk_AcceptsAtLimit(t *testing.T) {
 	got := findEmojiByID(t, repo, "e1")
 	require.NotNil(t, got.License)
 	assert.Equal(t, lic, *got.License)
-}
-
-// `url` も NUL を通さない (長さと同じく SQLSTATE 22021 で 500 になる)。
-func TestEmojiAdd_RejectsURLWithNUL(t *testing.T) {
-	h, repo := setupEmojiHandler(t)
-	body, err := json.Marshal(map[string]any{"name": "happy", "url": "https://cdn.example/a\x00b.png"})
-	require.NoError(t, err)
-
-	rec := doPost(h.EmojiAdd, string(body), adminUser)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	code, _ := errorID(t, rec.Body.Bytes())
-	assert.Equal(t, "INVALID_PARAM", code)
-	_, ferr := repo.FindByNameAndHost("happy", nil)
-	assert.Error(t, ferr)
-}
-
-// `url` の 400 も upstream の error を先取りしない (`category` と同じ規則)。
-func TestEmojiAdd_URLCheckDoesNotPreemptDuplicate(t *testing.T) {
-	h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "happy"})
-	body, err := json.Marshal(map[string]any{
-		"name": "happy", "url": "https://cdn.example/" + strings.Repeat("a", 512),
-	})
-	require.NoError(t, err)
-
-	rec := doPost(h.EmojiAdd, string(body), adminUser)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	code, _ := errorID(t, rec.Body.Bytes())
-	assert.Equal(t, "DUPLICATE_NAME", code, "upstream の error 順序が変わっている")
 }
 
 // 一括編集も NUL を通さない (呼び出し側だけ長さ判定に差し替える形を止める)。

@@ -528,3 +528,25 @@ func TestShowInstance_InboxSuspended(t *testing.T) {
 		assert.Equal(t, "none", resp["suspensionState"])
 	}
 }
+
+// 本家 federation/instances の limit・offset は ajv の "type": "integer" なので、
+// 整数を小数の形で書いた値を受け、その整数として読む (#3865)。
+func TestInstances_IntegerParamsAcceptFractionForms(t *testing.T) {
+	h, repo := newHandler(t)
+	for _, host := range []string{"a.example", "b.example", "c.example", "d.example"} {
+		seedInstance(t, repo, host)
+	}
+	count := func(t *testing.T, body string) int {
+		t.Helper()
+		c, rec := newReq(t, body)
+		require.NoError(t, h.Instances(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var rows []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+		return len(rows)
+	}
+	// 4 件のうち offset (3) を飛ばせば、limit (2) に届かず 1 件だけが返る。
+	assert.Equal(t, 1, count(t, `{"limit":2.0,"offset":3e0}`))
+	// limit だけなら、既定の 30 ではなく 1 件だけが返る。
+	assert.Equal(t, 1, count(t, `{"limit":1.0}`))
+}
