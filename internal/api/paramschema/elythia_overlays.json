@@ -25,6 +25,19 @@
 				],
 				"x-elythia-enumPattern": "^plugin:[a-z0-9][a-z0-9-]*$"
 			}
+		},
+		"x-elythia-properties": {
+			"limit": {
+				"description": "The jobs of a page; giving limit or page pages the jobs instead of listing them like upstream (#3167).",
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 100
+			},
+			"page": {
+				"description": "The page, from 1.",
+				"type": "integer",
+				"minimum": 1
+			}
 		}
 	},
 	"admin/queue/pause": {
@@ -204,6 +217,26 @@
 					"-host"
 				]
 			}
+		},
+		"x-elythia-properties": {
+			"sinceId": {
+				"description": "The cursor of the paginator (#493).",
+				"type": "string",
+				"format": "misskey:id"
+			},
+			"untilId": {
+				"description": "The cursor of the paginator (#493).",
+				"type": "string",
+				"format": "misskey:id"
+			},
+			"sinceDate": {
+				"description": "The cursor by date (#1173).",
+				"type": "integer"
+			},
+			"untilDate": {
+				"description": "The cursor by date (#1173).",
+				"type": "integer"
+			}
 		}
 	},
 	"reversi/match": {
@@ -225,6 +258,162 @@
 						"@system"
 					]
 				}
+			}
+		},
+		"x-elythia-properties": {
+			"host": {
+				"description": "The host of the files, preferred to hostname.",
+				"type": "string",
+				"nullable": true
+			}
+		}
+	},
+	"admin/abuse-user-reports": {
+		"x-elythia-properties": {
+			"resolved": {
+				"description": "Filters by whether the report is resolved, read when state is all, empty or null (before state existed).",
+				"type": "boolean",
+				"nullable": true
+			},
+			"reportId": {
+				"description": "Returns only this report, for the link of the abuse report notification (#2868).",
+				"type": "string",
+				"format": "misskey:id"
+			}
+		}
+	},
+	"admin/emoji/copy": {
+		"x-elythia-properties": {
+			"name": {
+				"description": "The name of the copy; null keeps the name of the source.",
+				"type": "string",
+				"nullable": true,
+				"pattern": "^[a-zA-Z0-9_]+$",
+				"maxLength": 128
+			},
+			"category": {
+				"description": "The category of the copy; null keeps the source's.",
+				"type": "string",
+				"nullable": true
+			},
+			"aliases": {
+				"description": "The aliases of the copy; null keeps the source's.",
+				"type": "array",
+				"nullable": true,
+				"items": {
+					"type": "string"
+				}
+			},
+			"license": {
+				"description": "The license of the copy; null keeps the source's.",
+				"type": "string",
+				"nullable": true
+			},
+			"isSensitive": {
+				"description": "Whether the copy is sensitive; null keeps the source's.",
+				"type": "boolean",
+				"nullable": true
+			}
+		}
+	},
+	"admin/emoji/list": {
+		"x-elythia-properties": {
+			"category": {
+				"description": "Filters by the exact category (#3857).",
+				"type": "string",
+				"nullable": true
+			}
+		}
+	},
+	"antennas/update": {
+		"x-elythia-properties": {
+			"isActive": {
+				"description": "Whether the antenna is active; null and absent make it active again, like upstream does on an edit.",
+				"type": "boolean",
+				"nullable": true
+			}
+		}
+	},
+	"chat/history": {
+		"x-elythia-properties": {
+			"untilId": {
+				"description": "The cursor of the next page.",
+				"type": "string",
+				"format": "misskey:id"
+			}
+		}
+	},
+	"pages/create": {
+		"x-elythia-properties": {
+			"visibility": {
+				"description": "Who can see the page (#3479).",
+				"type": "string",
+				"enum": [
+					"public",
+					"private"
+				]
+			}
+		}
+	},
+	"pages/update": {
+		"x-elythia-properties": {
+			"visibility": {
+				"description": "Who can see the page (#3479); null keeps it.",
+				"type": "string",
+				"nullable": true,
+				"enum": [
+					"public",
+					"private",
+					null
+				]
+			}
+		}
+	},
+	"i/regenerate-token": {
+		"x-elythia-properties": {
+			"token": {
+				"description": "The two-factor authentication code; the bundled frontend sends null when two-factor authentication is off.",
+				"type": "string",
+				"nullable": true
+			}
+		}
+	},
+	"admin/show-user": {
+		"x-elythia-properties": {
+			"withSignins": {
+				"description": "false leaves out the sign-in history; null and absent include it.",
+				"type": "boolean",
+				"nullable": true
+			}
+		}
+	},
+	"notes": {
+		"x-elythia-properties": {
+			"noteIds": {
+				"description": "Returns these notes instead of the public notes (up to 100, like notes/show-partial-bulk).",
+				"type": "array",
+				"maxItems": 100,
+				"items": {
+					"type": "string",
+					"format": "misskey:id"
+				}
+			}
+		}
+	},
+	"i/move": {
+		"x-elythia-properties": {
+			"password": {
+				"description": "The password of the account, checked when given (#1546).",
+				"type": "string",
+				"nullable": true
+			}
+		}
+	},
+	"notes/global-timeline": {
+		"x-elythia-properties": {
+			"allowPartial": {
+				"description": "Returns fewer notes than limit instead of reading on, like upstream does for the other timelines (the bundled frontend sends it to every timeline).",
+				"type": "boolean"
 			}
 		}
 	}

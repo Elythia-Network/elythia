@@ -28,9 +28,11 @@ var effectiveOnce = sync.OnceValues(func() (map[string]Endpoint, error) {
 //
 // 重ねる宣言はelythia_overlays.jsonに、本家のparamDefと同じ形(properties・
 // items・enum)で書く。足すことしかできない: 本家のenumに値を足す
-// (enum、x-elythia-enumPattern)か、本家の形式に別の値を許す
-// (x-elythia-formatAlso)だけで、本家が受理する入力はすべて受理され、本家が
-// 拒否する入力の最初のエラーは、足した値に当たるもの以外は変わらない。
+// (enum、x-elythia-enumPattern)、本家の形式に別の値を許す
+// (x-elythia-formatAlso)、本家に無い項目を足す(x-elythia-properties、#3867)
+// だけで、本家が拒否する入力の最初のエラーは、足した値に当たるもの以外は
+// 変わらない。本家が受理する入力は、足した項目に宣言から外れる値を持つもの
+// (本家は知らない項目として通していた)だけが拒否に変わる。
 func Effective() (map[string]Endpoint, error) {
 	return effectiveOnce()
 }
@@ -107,6 +109,8 @@ func applyOverlay(n *node, o *orderedObject) error {
 			}
 		case "properties":
 			err = overlayProperties(n, v)
+		case "x-elythia-properties":
+			err = overlayAddProperties(n, v)
 		case "items":
 			err = overlayItems(n, v)
 		case "enum":
@@ -116,7 +120,7 @@ func applyOverlay(n *node, o *orderedObject) error {
 		case "x-elythia-formatAlso":
 			err = overlayFormatAlso(n, v)
 		default:
-			// 項目を足す・必須を外すなどの操作は、要る段で足す(#3667の(4))。
+			// 必須を外すなどの操作は、要る段で足す(#3667の(4))。
 			err = fmt.Errorf("%s: unsupported overlay keyword %q", n.path, k)
 		}
 		if err != nil {
@@ -148,6 +152,110 @@ func overlayProperties(n *node, v any) error {
 		}
 		if err := applyOverlay(child, o); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// overlayAddProperties adds the properties upstream's paramDef does not have,
+// each a full paramDef schema (#3867). They are checked after upstream's own
+// properties, so an input upstream rejects keeps its first error.
+//
+// 本家にある項目はここで書けない(propertiesで重ねる)。同じキーで両方を
+// 受けると、本家の項目の名前を打ち間違えた宣言が、黙って新しい項目になる。
+// defaultも書けない: 検証器が写しに入れる値が変わり、本家が受理する入力の
+// defaultを入れた後の値が本家と食い違う。
+func overlayAddProperties(n *node, v any) error {
+	props, ok := v.(*orderedObject)
+	if !ok || len(props.keys) == 0 {
+		return fmt.Errorf("%s: x-elythia-properties must be a non-empty object", n.path)
+	}
+	// objectでない値の項目は検証されないので、足しても何も変わらない。
+	if n.typeName != "" && n.typeName != "object" {
+		return fmt.Errorf("%s: x-elythia-properties on a %s", n.path, n.typeName)
+	}
+	// 本家の項目は、anyOf・oneOf・allOf・if / then / elseの中にもある
+	// (users/showなど)。そこにある名前を足すと、本家が受理する値を黙って
+	// 拒否しうる。
+	upstream := map[string]bool{}
+	collectPropertyNames(n, upstream)
+	for _, name := range props.keys {
+		path := n.path + "/properties/" + escapeFragment(name)
+		if objectPrototypeNames[name] {
+			return fmt.Errorf("%s: property %q is inherited by every JavaScript object", n.path, name)
+		}
+		if upstream[name] {
+			return fmt.Errorf("%s: upstream has the property %q; overlay it with properties", n.path, name)
+		}
+		o, ok := props.vals[name].(*orderedObject)
+		if !ok {
+			return fmt.Errorf("%s: schema must be an object", path)
+		}
+		if err := checkNoDefault(o, path); err != nil {
+			return err
+		}
+		child, err := compileNode(o, path, false)
+		if err != nil {
+			return err
+		}
+		n.properties = append(n.properties, property{name: name, node: child})
+		// 本家のparamDefにobjectの組のkeywordが無いと、検証はpropertiesを見ない。
+		n.usesGroup["object"] = true
+	}
+	return nil
+}
+
+// collectPropertyNames adds the names of the properties and required of n
+// and of the schemas its applicators hold to names.
+func collectPropertyNames(n *node, names map[string]bool) {
+	if n == nil {
+		return
+	}
+	for _, p := range n.properties {
+		names[p.name] = true
+	}
+	// requiredだけに挙げた名前も、本家は型を問わずに受けている。
+	for _, name := range n.required {
+		names[name] = true
+	}
+	for _, subs := range [][]*node{n.anyOf, n.oneOf, n.allOf, {n.ifN, n.thenN, n.elseN}} {
+		for _, sub := range subs {
+			collectPropertyNames(sub, names)
+		}
+	}
+}
+
+// checkNoDefault refuses a default anywhere in the added schema o. The
+// values of properties are schemas by name: a property named "default" is
+// not the keyword.
+func checkNoDefault(o *orderedObject, path string) error {
+	if _, ok := o.get("default"); ok {
+		return fmt.Errorf("%s: an added property cannot have a default", path)
+	}
+	for _, k := range o.keys {
+		switch v := o.vals[k].(type) {
+		case *orderedObject:
+			if k == "properties" {
+				for _, name := range v.keys {
+					if sub, ok := v.vals[name].(*orderedObject); ok {
+						if err := checkNoDefault(sub, path+"/properties/"+escapeFragment(name)); err != nil {
+							return err
+						}
+					}
+				}
+				continue
+			}
+			if err := checkNoDefault(v, path+"/"+k); err != nil {
+				return err
+			}
+		case []any:
+			for i, x := range v {
+				if sub, ok := x.(*orderedObject); ok {
+					if err := checkNoDefault(sub, fmt.Sprintf("%s/%s/%d", path, k, i)); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	return nil
