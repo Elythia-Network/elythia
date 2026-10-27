@@ -197,6 +197,17 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 
 **reversi の endpoint は本家と同じ 7 本。** Elythia の 7 本 (`games` / `invitations` / `show-game` / `match` / `cancel-match` / `surrender` / `verify`) は upstream 2026.7.0 と同じ名前・同じ引数で、引数で違うのは 1 つだけ: `reversi/match` の `userId` に、利用者の id に加えて `@user` / `@user@host` の形 (acct) を受ける (cherrypick 由来。連合の対局の e2e が使う)。本家の `paramDef` (`misskey:id`) では 400 になる入力なので、#3843 では本家の `paramDef` での拒否に載せず保留し、#3865 でこの形を本家の `paramDef` に重ねて載せた ([approximations.md](approximations.md#本家のparamdefで引数を検証するendpoint-3742))。`crc32` カラムと `reversi/verify` も upstream 標準 (`models/ReversiGame.ts` / `endpoints/reversi/verify.ts`)。**cherrypick 由来の拡張は ActivityPub 層と、packed game レスポンスに `crc32` 等を additive に載せる点に現れる** (§3-1 参照)。
 
+**引数の宣言 (#3869)。** Elythiaにしかないendpointにも、本家と同じ形の`paramDef`を`internal/api/paramschema/elythia_paramdefs.json`に書き、宣言から外れる値を本家のendpointと同じ形の400 (`INVALID_PARAM`、`info`付き) で拒否する ([param-shadow.md](../param-shadow.md#elythia独自のendpointの宣言3869))。最初の段 (#3869) は、外向きの通信の無い参照だけの28件 (管理画面の参照18件と、`following/silent/list`・`i/flashs`・`i/flashs/likes`・`roles/assignment-show`・`emoji-application/list-mine`・`bubble-game/versus/invitations`・`show`・`history`・`record`・`signup-application/status`)。範囲は本家の慣習で絞り (`limit`は1〜100、`offset`は0以上、idは`misskey:id`)、決まった値の集合を持つ引数はenumにした。次の差が変わった。
+- 範囲の外の値は400になる。以前は黙って丸めて200だった。対象は`admin/emoji-application/list`・`list-by-user`・`emoji-application/list-mine`の`limit` (以前は30)、`admin/emoji-application/related`の`limit` (以前は10)、`admin/federation/rules/hits`の`limit` (1〜50、以前は50)、`admin/signup-application/list`の`limit` (以前は30か100) と`offset` (以前は0)、`admin/federation/delivery-health`・`inbox-health`の`windowSeconds` (1〜3600、以前は3600)
+- 知らない`filter`は400になる。以前は全件を返した (`admin/signup-application/list`・`admin/emoji-application/list`)。空の`filter` (以前は既定の`pending`か全件) と、`admin/emoji-application/list-by-user`の空の`status` (以前は全件) も400になる。同梱のfrontendは選択肢の値だけを送る
+- `misskey:id`の形でないidは400になる。以前は、idで引くものは見つからない応答 (`bubble-game/versus/show`・`record`の`matchId`は404の`NO_SUCH_MATCH`、`admin/ip/related-accounts`の`userId`は`NO_SUCH_USER`など)、カーソル (`sinceId`・`untilId`) は200だった。`misskey:id`の形で長すぎる`matchId` (33文字以上) と`applicationId`は、以前と同じく404。同梱のfrontendの対戦とリプレイの画面は`NO_SUCH_MATCH`だけを「見つからない」と出すので、英数字でない`matchId`をURLに手で打つと、一般のエラーの表示になる
+- `i/flashs/likes`の`search`は、空文字と101文字以上が400になる (本家の`flash/my-likes`と同じ)。以前は200だった
+- 整数を小数の形で書いた値 (`10.0`、`1e1`) は、整数として受ける。以前は、Goの`int`で受ける項目では400だった
+- `null`は400になる。以前は省略と同じだった。例外は2つ。`admin/emoji-application/list`・`list-by-user`・`related`と`emoji-application/list-mine`の`untilId`は`null`を許す (同梱のfrontendが`related`・`list-by-user`に`null`を送り、elythia-jsの型が4件とも`null`を省略と同じとしている)。本家の`flash/my-likes`を写した`i/flashs/likes`の`search`も、本家と同じく`null`を許す
+- 引数の検証がhandlerより先に走るので、宣言から外れる値は、handlerが先に返していた応答より先に400になる。承認制が無効な構成の`signup-application/status`・`admin/signup-application/list` (以前は503の`UNAVAILABLE`が先)、配送の記録が無い構成の`admin/federation/delivery-health`・`inbox-health` (以前は引数を読まずに200) が当たる
+
+`admin/ip/accounts`の`ip`がIPアドレス (か`ip:port`) として読めるかと、`admin/ip/related-accounts`の`userId`がリモートの利用者でないかは、`paramDef`では書けないので、宣言は文字列とidの形までにし、以前どおりhandlerが400 `INVALID_PARAM`にする。
+
 ### 1-1b. レスポンスの additive field
 
 | endpoint | field | 内容 |
