@@ -89,9 +89,9 @@ func TestNewServer_WiresTheConfiguredBcryptCost(t *testing.T) {
 	srv := newServerWithConfig(t, func(cfg *config.Config) { cfg.BcryptCost = configured })
 	db := serverIntegrationDB
 	cleanupPluginAccountUsers(t, db, "ph_root", "ph_target", "ph_weak", "ph_created")
-	createLocalUser(t, db, "ph-root", "ph_root", "phroottokenxx780", "root-pass", true)
-	createLocalUser(t, db, "ph-target", "ph_target", "phtargettoken780", "target-pass", false)
-	createLocalUser(t, db, "ph-weak", "ph_weak", "phweaktokenxx780", "weak-pass", false)
+	createLocalUser(t, db, "phroot", "ph_root", "phroottokenxx780", "root-pass", true)
+	createLocalUser(t, db, "phtarget", "ph_target", "phtargettoken780", "target-pass", false)
+	createLocalUser(t, db, "phweak", "ph_weak", "phweaktokenxx780", "weak-pass", false)
 
 	storedCost := func(t *testing.T, userID string) int {
 		t.Helper()
@@ -106,12 +106,12 @@ func TestNewServer_WiresTheConfiguredBcryptCost(t *testing.T) {
 	t.Run("signin rehashes to the configured cost", func(t *testing.T) {
 		weak, err := bcrypt.GenerateFromPassword([]byte("weak-pass"), bcrypt.MinCost)
 		require.NoError(t, err)
-		require.NoError(t, db.Model(&model.UserProfile{}).Where(`"userId" = ?`, "ph-weak").
+		require.NoError(t, db.Model(&model.UserProfile{}).Where(`"userId" = ?`, "phweak").
 			Update("password", string(weak)).Error)
 
 		rec := postJSON(t, srv, "/api/signin-flow", "", map[string]any{"username": "ph_weak", "password": "weak-pass"})
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, configured, storedCost(t, "ph-weak"))
+		assert.Equal(t, configured, storedCost(t, "phweak"))
 	})
 
 	t.Run("admin/accounts/create (signup service)", func(t *testing.T) {
@@ -124,9 +124,9 @@ func TestNewServer_WiresTheConfiguredBcryptCost(t *testing.T) {
 	})
 
 	t.Run("admin/reset-password", func(t *testing.T) {
-		rec := postJSON(t, srv, "/api/admin/reset-password", "phroottokenxx780", map[string]any{"userId": "ph-target"})
+		rec := postJSON(t, srv, "/api/admin/reset-password", "phroottokenxx780", map[string]any{"userId": "phtarget"})
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, configured, storedCost(t, "ph-target"))
+		assert.Equal(t, configured, storedCost(t, "phtarget"))
 
 		var body struct {
 			Password string `json:"password"`
@@ -137,22 +137,22 @@ func TestNewServer_WiresTheConfiguredBcryptCost(t *testing.T) {
 			rec := postJSON(t, srv, "/api/i/change-password", "phtargettoken780",
 				map[string]any{"currentPassword": body.Password, "newPassword": "changed-pass"})
 			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
-			assert.Equal(t, configured, storedCost(t, "ph-target"))
+			assert.Equal(t, configured, storedCost(t, "phtarget"))
 		})
 	})
 
 	t.Run("reset-password", func(t *testing.T) {
-		require.NoError(t, db.Model(&model.UserProfile{}).Where(`"userId" = ?`, "ph-weak").
+		require.NoError(t, db.Model(&model.UserProfile{}).Where(`"userId" = ?`, "phweak").
 			Update("password", mustBcrypt(t, "weak-pass", bcrypt.MinCost)).Error)
 		const tok = "resettoken-ph780"
 		// 再設定の要求はIDの時刻で期限を見るので、今の時刻で作る。
 		idGen, err := id.NewGenerator("aidx")
 		require.NoError(t, err)
 		require.NoError(t, db.Exec(`INSERT INTO "password_reset_request" ("id", "token", "userId") VALUES (?, ?, ?)`,
-			idGen.Generate(time.Now()), tok, "ph-weak").Error)
+			idGen.Generate(time.Now()), tok, "phweak").Error)
 		rec := postJSON(t, srv, "/api/reset-password", "", map[string]any{"token": tok, "password": "reset-pass"})
 		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
-		assert.Equal(t, configured, storedCost(t, "ph-weak"))
+		assert.Equal(t, configured, storedCost(t, "phweak"))
 	})
 }
 
