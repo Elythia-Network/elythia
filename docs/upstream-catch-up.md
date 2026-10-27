@@ -224,9 +224,9 @@ git add internal/entitycompat/testdata/
 
 ```bash
 make upstream-fetch                    # UPSTREAM_MISSKEY_VERSION の本家を取得
-make paramdef-gen                      # 抜き出し (extract.mjs) → corpus (corpus.mjs)
-go test ./internal/api/paramschema/    # 検証器が新しい paramDef と corpus に合うか
-git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschema/testdata/ajv_corpus.jsonl
+make paramdef-gen                      # 抜き出し (extract.mjs) → corpus (corpus.mjs) → Elythia の宣言の corpus
+go test ./internal/api/paramschema/... # 検証器が新しい paramDef と corpus に合うか
+git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschema/testdata/ajv_corpus.jsonl internal/api/paramschema/testdata/ajv_corpus_elythia.jsonl
 ```
 
 - **`frontend/node_modules`が要る。** 抜き出しは本家の`.ts`を`frontend/node_modules/typescript`のパーサーで読み(実行はしない)、corpusは`frontend/node_modules/.pnpm/ajv@<版>`のajvで判定する。ajvの版は本家の`packages/backend/package.json`から読む。frontendはajvに直接依存しておらず、推移的に入っている版を名指しして読むので、本家がajvを上げてその版が`frontend/`の依存に無いと`paramdef-gen`が落ちる。そのときは`frontend/package.json`のdevDependenciesにその版のajvを足し、`make upstream-sync-lock`でlockを作り直す
@@ -239,6 +239,7 @@ git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschem
 - 落ちたテストの読み方
   - `TestGoldenMatchesPinnedUpstream`: goldenが`UPSTREAM_MISSKEY_VERSION`の版から作られていない。`make paramdef-gen`を流す
   - `TestConformsToAJVCorpus`の`was not built from the current`: goldenだけを作り直し、corpusを作り直していない(corpusのヘッダーにgoldenのsha256がある)
+  - `TestElythiaConformsToAJVCorpus`の`was not built from the current`: Elythia独自のendpointの宣言(`elythia_paramdefs.json`、#3869)のcorpusを作り直していない。ajvの版と設定を本家のgoldenから読むので、ヘッダーに本家のgoldenと宣言の両方のsha256がある。`paramdef-gen`は続けて`make elythia-paramdef-gen`を回すので、手で回すのは宣言だけを変えたとき([param-shadow.md](param-shadow.md#elythia独自のendpointの宣言3869))
   - `TestEveryUpstreamParamDefCompiles`: 本家が、検証器の扱わないkeyword・format・正規表現の構文を使い始めた。enumのobject・配列の値と、型の無い(またはobject・配列の)itemsへの`uniqueItems`もここで落ちる。ajvはこれらをfast-deep-equalで比べ、比べるobjectの`constructor` / `toString` / `valueOf`キーで判定が変わる(または例外を投げる)ので、検証器は写さずに拒んでいる。`internal/api/paramschema`に足し、ajvでの挙動を`synthetic.json`に足してcorpusで確かめる
   - `TestGoldenAJVConfigIsWhatThisPackageImplements`: 本家がajvの版・設定・formatを変えた。ajvの変更点を読み、検証器の挙動を合わせてからテストの期待値を更新する
   - `TestCorpusRejectsAtEveryReachableKeyword`: 本家のparamDefのkeywordの位置のうち、corpusにそのschemaPathで拒否されたcaseが無いものがある。新しい形のparamDefに生成器(`corpus.mjs`の`mutate`)が届いていない。生成器を直す。errors[0]にならない位置なら、`coverage_test.go`の規則か個別の項目に理由と一緒に足す(使われなくなった規則や項目があっても落ちる)
