@@ -110,8 +110,14 @@ port: 3000
 # admin/emoji/add, admin/roles/*, admin/abuse-report/*,
 # admin/abuse-user-reports, admin/forward-abuse-user-report,
 # admin/resolve-abuse-user-report, admin/update-abuse-user-report,
-# admin/system-webhook/*, admin/captcha/*) are validated and rejected
-# regardless of this setting. See docs/param-shadow.md.
+# admin/system-webhook/*, admin/captcha/*, admin/accounts/*,
+# admin/federation/*, admin/relays/*, admin/delete-account,
+# admin/delete-all-files-of-a-user, admin/get-user-ips, admin/reset-password,
+# admin/send-email, admin/show-user, admin/show-users, admin/suspend-user,
+# admin/unset-mfa, admin/unset-user-avatar, admin/unset-user-banner,
+# admin/unsuspend-user, admin/update-proxy-account, admin/update-user-note)
+# are validated and rejected regardless of this setting. See
+# docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600

@@ -248,6 +248,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | endpoint | パラメータ | 内容 |
 |---|---|---|
 | `admin/update-meta` | `inboxSuspendedSoftware` | 受信を拒否するソフトウェアの一覧 (#3362)。`deliverSuspendedSoftware` と同じく、**各要素の `software` / `versionRange` が文字列でなければ `INVALID_PARAM` (400)** にする (`deliverSuspendedSoftware` の検査は upstream の paramDef に揃えたもの。#3362 より前の Elythia は検査せずに保存していた) |
+| `admin/relays/remove` | `id` | 外すリレーをidで指す。`inbox`と一緒に送ると`id`を優先する。**本家の`paramDef`は`inbox`を必須にするので、#3861で検証に載せてから、`id`だけの入力は本家と同じ400になる** (`inbox`も送れば通る)。同梱のfrontendは`inbox`だけを送る |
 | `admin/abuse-user-reports` | `resolved` | 解決済みかどうかで絞り込む、`state`より前からの真偽値の引数。旧来のクライアントのために受ける。**`state`が`all`・空文字・null (省略を含む) のときだけ効き**、`unresolved` / `resolved`と知らない値 (本家と同じく全件、#3859) では無視する。同梱のfrontendは送らない |
 | `admin/abuse-user-reports` | `reportId` | 通報の通知から該当の 1 件を開くための additive パラメータ (#2868)。**指定時は `state` / `reporterOrigin` / `targetUserOrigin` / cursor の絞りを無視する** — 一覧の既定は `state=unresolved` なので、他のモデレーターが先に解決した通報に通知から飛べなくなる。1 件を名指しで引く以上、絞り込みは意味を持たない。存在しない ID は 404 ではなく空配列 (一覧 endpoint なので) |
 | `admin/queue/jobs` | `limit` / `page` | 1 ページの件数 (既定 30、上限 100) とページ番号。**指定したときだけ効く** (`limit: 0` は省略と区別できないので省略扱い) — 省略時は upstream と同じく state ごとに新しい順で最大 101 件 (`getJobs(types, 0, 100)` は終端を含む) を state の指定順に連結して返す (#3167)。指定時は**全 state 合計**で `limit` 件に切る (state を順に詰めるので、後ろの state は前が埋めると出ない)。同梱フロントは指定しない。以前は省略時にも既定の 30 件が合計に効き、しかも古い順だったので、「すべて」タブが古い完了済みだけで埋まって失敗が 1 件も見えなかった |
