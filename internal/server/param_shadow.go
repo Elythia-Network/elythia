@@ -15,8 +15,8 @@ import (
 // hands the param shadow validation (#3677) to withParamShadow.
 const paramShadowContextKey = "mk.server.paramShadow"
 
-// paramEnforcedEndpoints are the upstream endpoints whose params are
-// validated with upstream's paramDef and rejected with upstream's 400
+// paramEnforcedEndpoints are the endpoints whose params are
+// validated with their paramDef and rejected with upstream's 400
 // (clips/* in #3742, the first step of #3667; charts/* in #3744; hashtags/*
 // in #3746; antennas/* in #3748; flash/* in #3750; gallery/* in #3754;
 // following/* in #3756; channels/* in #3758; blocking/*, mute/* and
@@ -43,7 +43,9 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // in #3861; admin/queue/*, admin/drive/files, admin/emoji/add,
 // federation/instances, i/notifications, i/notifications-grouped and
 // reversi/match in #3865, with the values Elythia accepts on top of upstream's
-// paramDef overlaid (paramschema.Effective)).
+// paramDef overlaid (paramschema.Effective)), and the endpoints Elythia has
+// and upstream does not, with their paramDef from elythia_paramdefs.json: the
+// read-only ones without outgoing requests in #3869.
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -488,6 +490,34 @@ var paramEnforcedEndpoints = []string{
 	"i/notifications",
 	"i/notifications-grouped",
 	"reversi/match",
+	"admin/database-health",
+	"admin/drive/usage",
+	"admin/server-metrics",
+	"admin/server-plugins",
+	"admin/federation/delivery-health",
+	"admin/federation/inbox-health",
+	"admin/federation/gone-instances",
+	"admin/federation/rules/list",
+	"admin/federation/rules/hits",
+	"admin/ip/accounts",
+	"admin/ip/lookup-log",
+	"admin/ip/related-accounts",
+	"admin/roles/assignment-show",
+	"admin/signup-application/list",
+	"admin/emoji-application/list",
+	"admin/emoji-application/list-by-user",
+	"admin/emoji-application/related",
+	"admin/emoji-application/user-summary",
+	"following/silent/list",
+	"i/flashs",
+	"i/flashs/likes",
+	"roles/assignment-show",
+	"emoji-application/list-mine",
+	"bubble-game/versus/invitations",
+	"bubble-game/versus/show",
+	"bubble-game/versus/history",
+	"bubble-game/versus/record",
+	"signup-application/status",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

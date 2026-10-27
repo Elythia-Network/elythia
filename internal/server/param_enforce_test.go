@@ -28,12 +28,17 @@ import (
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/config"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
+	"github.com/elythia-network/elythia/internal/misc/ipnorm"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
-// ajvCorpusFile is the corpus of upstream's ajv verdicts (#3673).
-const ajvCorpusFile = "../api/paramschema/testdata/ajv_corpus.jsonl"
+// ajvCorpusFiles are the corpora of ajv's verdicts: on upstream's paramDefs
+// (#3673), and on Elythia's own (elythia_paramdefs.json, #3869).
+var ajvCorpusFiles = []string{
+	"../api/paramschema/testdata/ajv_corpus.jsonl",
+	"../api/paramschema/testdata/ajv_corpus_elythia.jsonl",
+}
 
 // ajvCase is one input of the corpus and ajv's verdict on it.
 type ajvCase struct {
@@ -48,7 +53,16 @@ type ajvCase struct {
 // readAJVCorpus returns the corpus cases of the endpoints in eps.
 func readAJVCorpus(t *testing.T, eps []string) []ajvCase {
 	t.Helper()
-	b, err := os.ReadFile(ajvCorpusFile)
+	var cases []ajvCase
+	for _, f := range ajvCorpusFiles {
+		cases = append(cases, readAJVCorpusFile(t, f, eps)...)
+	}
+	return cases
+}
+
+func readAJVCorpusFile(t *testing.T, file string, eps []string) []ajvCase {
+	t.Helper()
+	b, err := os.ReadFile(file)
 	require.NoError(t, err)
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
@@ -116,9 +130,28 @@ const ajvInvalidParamID = "3d81ceae-475f-4600-b2a8-2bc116157532"
 // handlerStricterThanUpstream lists the accepted corpus inputs an enforced
 // endpoint still rejects with INVALID_PARAM on purpose, because upstream
 // answers them with a 500 (or, for notes/search's empty query, with a search
-// of every note; see docs/divergence/approximations.md). Each entry must match
-// at least one corpus input.
+// of every note; see docs/divergence/approximations.md), or, for an Elythia
+// endpoint (#3869), because the check is one a paramDef cannot express. Each
+// entry must match at least one corpus input.
 var handlerStricterThanUpstream = map[string]stricterCase{
+	// IP アドレス (と ip:port) として読めるかは、paramDef の pattern では書き切れない
+	// (IPv6 の省略形・zone・IPv4-mapped)。宣言は文字列までにし、読めない値は handler
+	// が 400 INVALID_PARAM にする (#3869)。corpus の ip はどれも IP として読めない。
+	"admin/ip/accounts": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		ip, ok := in["ip"].(string)
+		if !ok {
+			return false
+		}
+		_, valid := ipnorm.Normalize(ip)
+		return !valid
+	}},
+	// リモートの利用者は対象にしない (user_ip は自インスタンスで認証した利用者しか
+	// 書かないので、必ず「候補なし」になり、関連が無いと読まれる)。利用者がリモート
+	// かは paramDef では書けないので、handler が 400 INVALID_PARAM にする (#3869)。
+	// corpus の userId は、置いたリモートの利用者 (abc123) を指す。
+	"admin/ip/related-accounts": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		return in["userId"] == "abc123"
+	}},
 	// 本家は絵文字を含まない reaction を normalizeEmojiString が素の Error で
 	// 投げて 500 にする (ChatService.react)。利用者の入力の誤りなので、Elythia は
 	// 400 INVALID_PARAM にしている (#3841)。corpus の値は ASCII だけなので、
@@ -238,18 +271,19 @@ func moderationEndpoint(ep string) bool {
 		"admin/resolve-abuse-user-report", "admin/update-abuse-user-report"}, ep) || slices.Contains(userTargetEndpoints, ep)
 }
 
-// userTargetEndpoints are the enforced admin/* endpoints that act on the user
-// named by userId (#3861). The corpus names the seeded remote user (abc123).
+// userTargetEndpoints are the enforced admin/* endpoints that act on, or look
+// up, the user named by userId (#3861; admin/ip/related-accounts in #3869).
+// The corpus names the seeded remote user (abc123).
 var userTargetEndpoints = []string{
 	"admin/accounts/delete", "admin/delete-account", "admin/delete-all-files-of-a-user", "admin/get-user-ips",
 	"admin/reset-password", "admin/show-user", "admin/suspend-user", "admin/unset-mfa", "admin/unset-user-avatar",
-	"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note",
+	"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note", "admin/ip/related-accounts",
 }
 
 // testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
 var testNet1 = &net.IPNet{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)}
 
-// enforcementPackage returns the package TestEnforcedEndpointsAreUpstreamEndpoints
+// enforcementPackage returns the package TestEnforcedEndpointsAreDeclared
 // counts the endpoint in: the first segment of the path (notes for notes and
 // notes/*), and for admin the first two (admin/ad for admin/ad/*). A top-level
 // endpoint (meta, admin/meta) is a package of its own.
@@ -285,19 +319,38 @@ func TestEnforcementPackage(t *testing.T) {
 	}
 }
 
-// TestEnforcedEndpointsAreUpstreamEndpoints keeps paramEnforcedEndpoints to
-// names upstream has, and to whole packages (see enforcementPackage): an
+// TestEnforcedEndpointsAreDeclared keeps paramEnforcedEndpoints to names
+// with a paramDef: upstream's, or Elythia's own (elythia_paramdefs.json,
+// #3869). The upstream ones go by whole packages (see enforcementPackage): an
 // endpoint of a package left out would keep the handwritten checks only,
-// unless enforcementPending or enforcementDeferred names it.
-func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
+// unless enforcementPending or enforcementDeferred names it. Every Elythia
+// endpoint with a paramDef is enforced: the declaration is written to be
+// enforced, in steps of #3667.
+func TestEnforcedEndpointsAreDeclared(t *testing.T) {
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
+	eff, err := paramschema.Effective()
+	require.NoError(t, err)
 	packages := map[string]bool{}
+	elythia := 0
 	for _, name := range paramEnforcedEndpoints {
+		if ep, ok := eff[name]; ok && ep.Elythia {
+			require.NoError(t, ep.CompileErr, name)
+			elythia++
+			continue
+		}
 		ep, ok := eps[name]
-		require.True(t, ok, "%s is not an upstream endpoint", name)
+		require.True(t, ok, "%s has no paramDef: neither upstream nor elythia_paramdefs.json declares it", name)
 		require.NoError(t, ep.CompileErr, name)
 		packages[enforcementPackage(name)] = true
+	}
+	// 独自のendpointを1件も数えなくなる(Elythiaの印が付かなくなる)と、下の
+	// 検査が空振りする。
+	require.Positive(t, elythia, "no Elythia endpoint is enforced")
+	for name, ep := range eff {
+		if ep.Elythia {
+			assert.Contains(t, paramEnforcedEndpoints, name, "%s is declared in elythia_paramdefs.json, but not enforced", name)
+		}
 	}
 	require.NotEmpty(t, packages)
 	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
