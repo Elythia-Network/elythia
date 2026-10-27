@@ -107,8 +107,11 @@ port: 3000
 # admin/invite/*, admin/promo/create, admin/meta, admin/server-info,
 # admin/get-index-stats, admin/get-table-stats, admin/show-moderation-logs,
 # admin/drive/* except admin/drive/files, admin/emoji/* except
-# admin/emoji/add) are validated and rejected regardless of this setting.
-# See docs/param-shadow.md.
+# admin/emoji/add, admin/roles/*, admin/abuse-report/*,
+# admin/abuse-user-reports, admin/forward-abuse-user-report,
+# admin/resolve-abuse-user-report, admin/update-abuse-user-report,
+# admin/system-webhook/*, admin/captcha/*) are validated and rejected
+# regardless of this setting. See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600
