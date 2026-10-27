@@ -387,8 +387,11 @@ func (h *Handler) QueueJobs(c echo.Context) error {
 		page = 1
 	}
 
-	seen := make(map[string]struct{}, limit)
-	out := make([]map[string]any, 0, limit)
+	// limit は 1〜100 に丸めてあるが、CodeQL (go/uncontrolled-allocation-size) は
+	// jsnum.Int からの変換を経た丸めを追えないので、容量を指定せずに確保する。
+	// out は空でも [] で返すため nil にしない。
+	seen := map[string]struct{}{}
+	out := []map[string]any{}
 outer:
 	for _, state := range states {
 		rows, err := h.listTasksForState(req.Queue, state, page, limit)
