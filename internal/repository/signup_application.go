@@ -135,7 +135,9 @@ func (r *signupApplicationRepository) UpdateFieldsTx(tx *gorm.DB, id string, fie
 }
 
 // applySignupApplicationFilter narrows a query to the requested status set. Unknown values fall
-// through to "all" so a stale client cannot make the admin list fail.
+// through to "all". admin/signup-application/list rejects them with a 400 before it gets here
+// (elythia_paramdefs.json, #3869); this covers the requests the validation skips (a body over
+// its size limit and the like).
 func applySignupApplicationFilter(q *gorm.DB, filter string) *gorm.DB {
 	switch filter {
 	case SignupApplicationFilterPending:

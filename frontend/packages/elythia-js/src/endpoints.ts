@@ -142,7 +142,7 @@ export type ElythiaEndpoints = {
 		req: {
 			/** Defaults to `pending`. `processed` is approved, rejected and canceled. */
 			filter?: 'all' | 'pending' | 'processed';
-			/** Defaults to 30 (also when out of 1-100). */
+			/** From 1 to 100. Defaults to 30. */
 			limit?: number;
 			/** `null` is the same as omitting it. */
 			untilId?: string | null;
@@ -155,7 +155,7 @@ export type ElythiaEndpoints = {
 			/** Defaults to all. An unknown value is rejected. */
 			status?: 'all' | EmojiApplicationStatus;
 			query?: string;
-			/** Defaults to 30 (also when out of 1-100). */
+			/** From 1 to 100. Defaults to 30. */
 			limit?: number;
 			/** `null` is the same as omitting it. */
 			untilId?: string | null;
@@ -172,7 +172,7 @@ export type ElythiaEndpoints = {
 	'admin/emoji-application/related': {
 		req: {
 			applicationId: string;
-			/** Defaults to 10 (also when out of 1-100). */
+			/** From 1 to 100. Defaults to 10. */
 			limit?: number;
 			/** `null` is the same as omitting it. */
 			untilId?: string | null;
@@ -236,7 +236,7 @@ export type ElythiaEndpoints = {
 	};
 	'admin/federation/delivery-health': {
 		req: {
-			/** Defaults to 3600 (also when 0 or less), capped at 3600. Aggregated in whole minutes. */
+			/** From 1 to 3600. Defaults to 3600. Aggregated in whole minutes. */
 			windowSeconds?: number;
 		};
 		res: FederationHealthReport<DeliveryOutcomeClass>;
@@ -247,7 +247,7 @@ export type ElythiaEndpoints = {
 	};
 	'admin/federation/inbox-health': {
 		req: {
-			/** Defaults to 3600 (also when 0 or less), capped at 3600. Aggregated in whole minutes. */
+			/** From 1 to 3600. Defaults to 3600. Aggregated in whole minutes. */
 			windowSeconds?: number;
 		};
 		res: FederationHealthReport<InboxOutcomeClass>;
@@ -263,7 +263,7 @@ export type ElythiaEndpoints = {
 	'admin/federation/rules/hits': {
 		req: {
 			ruleId: string;
-			/** Defaults to 50, the most kept (also when out of 1-50). */
+			/** From 1 to 50. Defaults to 50, the most kept. */
 			limit?: number;
 		};
 		/** Newest first. */
@@ -353,8 +353,9 @@ export type ElythiaEndpoints = {
 		req: {
 			/** Defaults to `all`. `processed` is rejected, expired and completed. */
 			filter?: 'all' | 'pending' | 'approved' | 'processed';
-			/** Defaults to 30, capped at 100. */
+			/** From 1 to 100. Defaults to 30. */
 			limit?: number;
+			/** 0 or more. */
 			offset?: number;
 		};
 		res: {
@@ -640,7 +641,7 @@ export type ElythiaEndpoints = {
 	};
 	'emoji-application/list-mine': {
 		req: {
-			/** Defaults to 30 (also when out of 1-100). */
+			/** From 1 to 100. Defaults to 30. */
 			limit?: number;
 			/** `null` is the same as omitting it. */
 			untilId?: string | null;
