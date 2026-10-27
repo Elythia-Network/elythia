@@ -2216,3 +2216,15 @@ func TestQueueJobs_LimitAndPageAcceptFractionForms(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
 	assert.Len(t, rows, 2)
 }
+
+// limit・page を指定してjobが1件も無いときも、null ではなく [] を返す。同梱の
+// frontend は配列として読む (CodeQL のために容量の指定をやめたので、nil の
+// slice に戻さないことをここで守る)。
+func TestQueueJobs_PagedEmptyIsArray(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	h.SetQueueInspector(&stubQueueInspector{})
+
+	rec := doPost(h.QueueJobs, `{"queue":"deliver","state":"wait","limit":5}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `[]`, rec.Body.String())
+}
