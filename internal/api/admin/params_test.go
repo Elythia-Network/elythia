@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -479,4 +481,83 @@ func TestRolesAssign_ZeroExpiresAtAssignsWithoutExpiry(t *testing.T) {
 	}
 	require.NotNil(t, got, "expiresAt 0 must assign the role")
 	assert.Nil(t, got.ExpiresAt)
+}
+
+// 本家 admin/show-users の limit・offset も ajv の "type": "integer" なので、
+// 整数を小数の形で書いた値を受け、その整数として読む (#3861)。
+func TestShowUsers_IntegerParamsAcceptFractionForms(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	for _, u := range []string{"u1", "u2", "u3", "u4"} {
+		require.NoError(t, userRepo.Create(&model.User{ID: u, Username: u, UsernameLower: u}))
+	}
+	// 4 人のうち offset (3) を飛ばせば、limit (2) に届かず 1 人だけが返る。
+	rec := doPost(h.ShowUsers, `{"limit":2.0,"offset":3e0}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 1)
+	// limit だけを小数の形で送れば、既定の 10 ではなく 1 人だけが返る。
+	rec = doPost(h.ShowUsers, `{"limit":1.0}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 1)
+}
+
+// 本家 admin/send-email の to・subject・text は minLength を持たないので、空文字
+// も受ける。宛先が空なら送れる相手がいないので、送らずに 204 を返す (#3861)。
+func TestSendEmail_AcceptsEmptyValues(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	g := bgwork.New()
+	h.SetBackgroundForTest(g)
+	t.Cleanup(func() { g.Stop(context.Background()) })
+	require.Zero(t, g.Stop(context.Background()))
+
+	rec := doPost(h.SendEmail, `{"to":"a@example.com","subject":"","text":""}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.EqualValues(t, 1, g.Dropped(), "空の件名と本文でも送信を始める")
+
+	rec = doPost(h.SendEmail, `{"to":"","subject":"s","text":"t"}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.EqualValues(t, 1, g.Dropped(), "空の宛先には送信を始めない")
+}
+
+// 本家 admin/accounts/find-by-email の空の email は、見つからずに USER_NOT_FOUND
+// になる (#3861)。email が空の利用者がいても当てない。
+func TestAccountsFindByEmail_EmptyEmailIsUserNotFound(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	empty := ""
+	require.NoError(t, userRepo.Create(&model.User{ID: "u1", Username: "u1", UsernameLower: "u1"}))
+	require.NoError(t, userRepo.CreateProfile(&model.UserProfile{UserID: "u1", Email: &empty}))
+	// 文言も本家と同じにする。
+	const want = `{"error":{"code":"USER_NOT_FOUND","id":"cb865949-8af5-4062-a88c-ef55e8786d1d","kind":"client","message":"No such user who has the email address."}}`
+	rec := doPost(h.AccountsFindByEmail, `{"email":""}`, adminUser)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.JSONEq(t, want, rec.Body.String())
+	rec = doPost(h.AccountsFindByEmail, `{"email":"ghost@example.com"}`, adminUser)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.JSONEq(t, want, rec.Body.String())
+}
+
+// 本家 admin/update-proxy-account の description は nullable で、null は説明を
+// 消す。省いたときは変えない (#3861)。
+func TestUpdateProxyAccount_NullClearsDescription(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	proxy := &model.User{ID: "u-proxy", Username: "proxy.actor", UsernameLower: "proxy.actor"}
+	require.NoError(t, userRepo.Create(proxy))
+	desc := "hello"
+	require.NoError(t, userRepo.CreateProfile(&model.UserProfile{UserID: proxy.ID, Description: &desc}))
+	h.SetSystemAccountFetcher(&stubSystemAccountFetcher{user: proxy})
+
+	require.Equal(t, http.StatusOK, doPost(h.UpdateProxyAccount, `{}`, adminUser).Code)
+	prof, err := userRepo.FindProfileByUserID(proxy.ID)
+	require.NoError(t, err)
+	require.NotNil(t, prof.Description, "省いたときは変えない")
+	assert.Equal(t, "hello", *prof.Description)
+
+	require.Equal(t, http.StatusOK, doPost(h.UpdateProxyAccount, `{"description":null}`, adminUser).Code)
+	prof, err = userRepo.FindProfileByUserID(proxy.ID)
+	require.NoError(t, err)
+	assert.Nil(t, prof.Description, "null は説明を消す")
+
+	assert.Equal(t, http.StatusBadRequest, doPost(h.UpdateProxyAccount, `{"description":1}`, adminUser).Code)
 }

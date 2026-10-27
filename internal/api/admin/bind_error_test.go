@@ -78,11 +78,12 @@ func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	})
 	// 空の host は本家だと instance が見つからず 500 になるが、mk-go は呼び出し側
-	// の誤りとして 400 にする (docs/divergence/security.md §7)。
+	// の誤りとして、存在しない host と同じ 404 にする。本家の paramDef は空の host
+	// を通すので INVALID_PARAM にはしない (docs/divergence/security.md §7、#3861)。
 	t.Run("FederationUpdateInstance with an empty host", func(t *testing.T) {
 		rec := doPost(h.FederationUpdateInstance, `{"host":""}`, adminUser)
-		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-		assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "NOT_FOUND")
 	})
 	for name, fn := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -1230,21 +1230,25 @@ func (h *Handler) ShowUser(c echo.Context) error {
 // ShowUsers handles POST /api/admin/show-users.
 func (h *Handler) ShowUsers(c echo.Context) error {
 	var req struct {
-		State    string `json:"state"`
-		Origin   string `json:"origin"`
-		Hostname string `json:"hostname"`
-		Username string `json:"username"`
-		Sort     string `json:"sort"`
-		Limit    *int   `json:"limit"`
-		Offset   int    `json:"offset"`
+		State    string     `json:"state"`
+		Origin   string     `json:"origin"`
+		Hostname string     `json:"hostname"`
+		Username string     `json:"username"`
+		Sort     string     `json:"sort"`
+		Limit    *jsnum.Int `json:"limit"`
+		Offset   *jsnum.Int `json:"offset"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
 
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
+	}
+	offset := 0
+	if p := req.Offset.IntPtr(); p != nil {
+		offset = *p
 	}
 	users, err := h.userRepo.ListUsers(model.UserListFilter{
 		State:    req.State,
@@ -1253,7 +1257,7 @@ func (h *Handler) ShowUsers(c echo.Context) error {
 		Username: req.Username,
 		Sort:     req.Sort,
 		Limit:    limit,
-		Offset:   req.Offset,
+		Offset:   offset,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
