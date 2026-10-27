@@ -96,18 +96,17 @@ port: 3000
 # channels/*, blocking/*, mute/*, renote-mute/*, roles/*, invite/*,
 # notifications/*, app/*, auth/*, miauth/gen-token, my/apps, sw/*,
 # announcements, promo/read, email-address/available, username/available,
-# ap/*, bubble-game/ranking, bubble-game/register, federation/* except
-# federation/instances, pages/*, page-push, the read-only top-level
-# endpoints such as meta and emojis, users and users/*, drive and drive/*,
-# chat/*, reversi/* except reversi/match, export-custom-emojis,
+# ap/*, bubble-game/ranking, bubble-game/register, federation/*, pages/*,
+# page-push, the read-only top-level endpoints such as meta and emojis,
+# users and users/*, drive and drive/*, chat/*, reversi/*,
+# export-custom-emojis,
 # fetch-external-resources, request-reset-password, reset-password,
 # verify-email, v2/admin/emoji/list, notes and notes/* except notes/create,
-# i and i/* except i/update, i/notifications and i/notifications-grouped,
+# i and i/* except i/update,
 # admin/ad/*, admin/announcements/*, admin/avatar-decorations/*,
 # admin/invite/*, admin/promo/create, admin/meta, admin/server-info,
 # admin/get-index-stats, admin/get-table-stats, admin/show-moderation-logs,
-# admin/drive/* except admin/drive/files, admin/emoji/* except
-# admin/emoji/add, admin/roles/*, admin/abuse-report/*,
+# admin/drive/*, admin/emoji/*, admin/roles/*, admin/abuse-report/*,
 # admin/abuse-user-reports, admin/forward-abuse-user-report,
 # admin/resolve-abuse-user-report, admin/update-abuse-user-report,
 # admin/system-webhook/*, admin/captcha/*, admin/accounts/*,
@@ -115,9 +114,9 @@ port: 3000
 # admin/delete-all-files-of-a-user, admin/get-user-ips, admin/reset-password,
 # admin/send-email, admin/show-user, admin/show-users, admin/suspend-user,
 # admin/unset-mfa, admin/unset-user-avatar, admin/unset-user-banner,
-# admin/unsuspend-user, admin/update-proxy-account, admin/update-user-note)
-# are validated and rejected regardless of this setting. See
-# docs/param-shadow.md.
+# admin/unsuspend-user, admin/update-proxy-account, admin/update-user-note,
+# admin/queue/*) are validated and rejected regardless of this setting.
+# See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).
 #paramShadowLogSeconds: 600

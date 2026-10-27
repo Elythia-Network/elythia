@@ -1873,10 +1873,10 @@ drive にあるファイルはそのまま残る (バッチと同じ判断)。�
 
 **このバッチが直すのは申請経由の絵文字だけ。** `admin/emoji/add` は #2999、
 `admin/emoji/update` は #3014 で system 所有へ複製するようになったが、**それ以前に登録・
-差し替えた絵文字は対象外のまま**。**管理画面が使う経路 (`fileId`) からはもう増えない**が、
-`admin/emoji/add` の **`url` 直接指定** (Elythia 独自の escape hatch。「この URL を指す」が
-意味なので取り込まない。`docs/divergence/security.md` §7) に利用者のファイルの URL を渡せば、
-同じ形は今でも作れる。該当するかは以下で分かる (読み取りのみ)。
+差し替えた絵文字は対象外のまま**。**新しくは増えない** — 管理画面が使う経路 (`fileId`) は
+複製し、#3865 より前にあった `admin/emoji/add` の **`url` 直接指定** (Elythia 独自の
+escape hatch。利用者のファイルの URL を渡すと同じ形を作れた) は #3865 で消した。
+該当するかは以下で分かる (読み取りのみ)。
 
 ```sql
 SELECT DISTINCT e.id, e.name, e."originalUrl"
