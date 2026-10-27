@@ -36,6 +36,10 @@ const PluginQueuePrefix = "plugin:"
 // 弾くが、こちらは通す。取りこぼしはあっても誤って拒否はしない側なので、
 // この向きの緩さは意図的 — 厳しくすると plugin 側の規則を 2 箇所で保つ
 // ことになり、片方だけ変えたときに正当なプラグインが黙って積めなくなる。
+// **paramschema の elythia_overlays.json の `x-elythia-enumPattern` も同じ形を
+// 持つ** (admin/queue/* がプラグインのキューの名前を受けるため、#3865)。変えたら
+// 両方を変える。internal/server の TestPluginQueueNamePatternMatchesTheQueuePackage
+// が振る舞いで突き合わせる。
 var pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // pluginJobNamePattern bounds a job name so the task type stays parseable.

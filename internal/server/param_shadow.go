@@ -40,7 +40,10 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // admin/update-abuse-user-report, admin/system-webhook/* and admin/captcha/*
 // in #3859; admin/accounts/*, admin/federation/*, admin/relays/* and the
 // admin/* endpoints that manage users, send mail or update the proxy account
-// in #3861).
+// in #3861; admin/queue/*, admin/drive/files, admin/emoji/add,
+// federation/instances, i/notifications, i/notifications-grouped and
+// reversi/match in #3865, with the values Elythia accepts on top of upstream's
+// paramDef overlaid (paramschema.Effective)).
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -465,6 +468,26 @@ var paramEnforcedEndpoints = []string{
 	"admin/unsuspend-user",
 	"admin/update-proxy-account",
 	"admin/update-user-note",
+	"admin/queue/clear",
+	"admin/queue/deliver-delayed",
+	"admin/queue/inbox-delayed",
+	"admin/queue/jobs",
+	"admin/queue/pause",
+	"admin/queue/promote-jobs",
+	"admin/queue/queue-stats",
+	"admin/queue/queues",
+	"admin/queue/remove-job",
+	"admin/queue/resume",
+	"admin/queue/retry-job",
+	"admin/queue/show-job",
+	"admin/queue/show-job-logs",
+	"admin/queue/stats",
+	"admin/drive/files",
+	"admin/emoji/add",
+	"federation/instances",
+	"i/notifications",
+	"i/notifications-grouped",
+	"reversi/match",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the
@@ -478,9 +501,11 @@ var paramEnforcedEndpoints = []string{
 // It also adds the part paramShadowRecorder (#3699), whose stop writes the
 // counts of this server generation.
 func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
-	eps, err := paramschema.Upstream()
+	// 本家のparamDefに、Elythiaが本家の外で受ける値を重ねたものを使う(#3865)。
+	// 数えるだけの検証も同じものを使うので、独自の値を差として数えない。
+	eps, err := paramschema.Effective()
 	if err != nil {
-		slog.Warn("param validation disabled: the embedded upstream paramDefs do not load", "err", err)
+		slog.Warn("param validation disabled: the embedded upstream paramDefs or Elythia's overlays do not load", "err", err)
 		return nil
 	}
 	opts := []paramshadow.Option{paramshadow.WithEnforced(paramEnforcedEndpoints...)}

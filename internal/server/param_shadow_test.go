@@ -69,7 +69,7 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	api.Use(mw)
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/clips/show", ok)
-	api.POST("/admin/drive/files", ok)
+	api.POST("/i/update", ok)
 	serve := func(target, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -80,11 +80,11 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	rec := serve("/api/clips/show", `{"clipId":"a-b"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"param":"#/properties/clipId/format"`)
-	assert.Equal(t, http.StatusNoContent, serve("/api/admin/drive/files", `{"userId":"a-b"}`).Code)
+	assert.Equal(t, http.StatusNoContent, serve("/api/i/update", `{"avatarId":"a-b"}`).Code)
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	assert.NotContains(t, logs.String(), "paramshadow divergence")
-	assert.NotContains(t, logs.String(), "admin/drive/files")
+	assert.NotContains(t, logs.String(), "i/update")
 }
 
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
@@ -106,7 +106,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		return func(c echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
 	}
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
-	api.POST("/admin/drive/files", ok)
+	api.POST("/i/update", ok)
 	api.POST("/notes/create", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/federation/instances", ok)
 	api.GET("/charts/notes", ok)
@@ -119,32 +119,32 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/admin/drive/files", `{"userId":"a-b"}`))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/i/update", `{"avatarId":"a-b"}`))
 	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/instances?limit=0", ""))
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/federation/instances", `{"limit":101}`))
+	// 数えるだけのallowGetのendpointは、#3865でfederation/instancesも本家に揃えた
+	// ので、もう無い。Match(GETとPOST)の登録は、本家に揃えたfederation/instancesが
+	// どちらでも検証して拒否することで、GETの登録はcharts/notesで確かめる。
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodGet, "/api/federation/instances?limit=0", ""))
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/federation/instances", `{"limit":101}`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/instances?x=1", ""))
-	// 数えるだけのallowGetのendpointは、federation/instancesのほかに無い(#3847)。
-	// GETの登録は、本家に揃えたcharts/notesが検証で拒否することで確かめる。
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/charts/notes?span=day", ""))
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodGet, "/api/charts/notes?span=week", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
-	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/admin/drive/files", `null`))
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/i/update", `null`))
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
-		`"endpoint":"admin/drive/files","kind":"rejected_handler_ok","schemaPath":"#/properties/userId/format"`,
-		`"endpoint":"federation/instances","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/minimum"`,
-		`"endpoint":"federation/instances","kind":"rejected_handler_ok","schemaPath":"#/properties/limit/maximum"`,
+		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/avatarId/format"`,
 		`"msg":"paramshadow summary"`,
-		`"agreed":2,"diverged":3,"skipped":0`,
+		`"agreed":1,"diverged":1,"skipped":0`,
 	} {
 		assert.Contains(t, out, want)
 	}
 	assert.NotContains(t, out, `"endpoint":"notes/create"`, "a request the route denied was validated")
 	assert.NotContains(t, out, "elythia-only")
+	assert.NotContains(t, out, `"endpoint":"federation/instances"`, "an enforced endpoint was counted")
 }
 
 func TestWithParamShadowWithoutTheGroupMiddleware(t *testing.T) {
@@ -232,20 +232,19 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/notes/create", `{"text":"a","visibility":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, false, true},
-		// 数えるだけの例は、#3851 で本家に揃える i/* を避け、i/notifications・
-		// notes/create・reversi/match に置く。
-		{http.MethodPost, "/api/i/notifications", `{"limit":10}`, true, false},
-		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
-		{http.MethodPost, "/api/i/notifications", `{"limit":10.0}`, true, false},
-		{http.MethodPost, "/api/i/notifications", `{"limit":1e400}`, true, false},
+		// 数えるだけの例は、本家に揃えていない notes/create・i/update に置く
+		// (i/notifications・reversi/match は #3865 で揃えた)。
 		{http.MethodPost, "/api/notes/create", `{"text":"a","poll":{"choices":["a","b"],"expiredAfter":1e4}}`, true, true},
-		{http.MethodPost, "/api/reversi/match", `{"userId":"abc-def"}`, true, false},
+		{http.MethodPost, "/api/notes/create", `{"text":"a","replyId":"abc-def"}`, true, true},
+		{http.MethodPost, "/api/notes/create", `{"text":"a","cw":1e400}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":"影の検証"}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"isCat":"yes"}`, true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
-		{http.MethodPost, "/api/i/notifications", `{"limit":"yes"}`, true, false},
-		{http.MethodPost, "/api/reversi/match", `null`, true, false},
-		{http.MethodPost, "/api/reversi/match", "{\"userId\":\"\\ud800\"}", true, false},
+		// 本家に揃えた endpoint は、検証を止めた server でも同じに拒否する。
+		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
+		{http.MethodPost, "/api/notes/create", `null`, true, true},
+		{http.MethodPost, "/api/notes/create", "{\"text\":\"\\ud800\"}", true, true},
 		{http.MethodGet, "/api/charts/notes?span=day&limit=x", "", false, false},
 		{http.MethodGet, "/api/charts/notes?span=day&limit=2", "", false, false},
 		{http.MethodGet, "/api/federation/instances", "", false, false},
@@ -295,10 +294,10 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	for _, want := range []string{
 		`"endpoint":"notes/create","kind":"rejected_handler_ok","schemaPath":"#/properties/fileIds/minItems"`,
 		`"endpoint":"notes/create","kind":"rejected_handler_ok","schemaPath":"#/properties/visibility/enum"`,
-		`"endpoint":"reversi/match","kind":"rejected_handler_other_error","schemaPath":"#/properties/userId/format"`,
+		`"endpoint":"notes/create","kind":"rejected_handler_other_error","schemaPath":"#/properties/replyId/format"`,
 		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/isCat/type"`,
 		`"endpoint":"notes/create","kind":"accepted_handler_invalid_param","schemaPath":""`,
-		`"endpoint":"i/notifications","kind":"param_mismatch","schemaPath":"#/properties/limit/minimum"`,
+		`"endpoint":"notes/create","kind":"param_mismatch","schemaPath":"#/then/properties/text/minLength"`,
 		`"msg":"paramshadow summary"`,
 		`"lone_surrogate":1`,
 	} {
@@ -428,9 +427,9 @@ func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/admin/drive/files", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/i/update", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/drive/files", strings.NewReader(`{"userId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/i/update", strings.NewReader(`{"avatarId":"abc"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}
@@ -463,9 +462,9 @@ func TestParamShadowSummaryAfterTheGenerationStopped(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/admin/drive/files", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/i/update", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/drive/files", strings.NewReader(`{"userId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/i/update", strings.NewReader(`{"avatarId":"abc"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}

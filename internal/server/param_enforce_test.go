@@ -12,10 +12,12 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -82,27 +84,10 @@ func readAJVCorpus(t *testing.T, eps []string) []ajvCase {
 // enforced yet, with a JSON body Elythia accepts but upstream's paramDef
 // rejects.
 var enforcementPending = map[string]string{
-	// 本家のsortのenumに、Elythia独自の+host / -hostが無い。enumに値を
-	// 重ねる仕組みは、独自の引数の宣言(#3667の(4))で作る(#3770)。
-	"federation/instances": `{"sort":"+host"}`,
-	// userId に @user@host の形 (acct) を受ける。cherrypick 由来の拡張で、
-	// tests/e2e-federation の対局が使う。本家の misskey:id の形には無いので、
-	// 独自の引数の宣言(#3667の(4))で重ねるまで載せない(#3843)。
-	"reversi/match": `{"userId":"@alice@remote.example"}`,
-	// includeTypes・excludeTypes に、Elythia 独自の通知の型 (importCompleted・
-	// abuseReport・emojiApplicationProcessed・emojiApplicationReceived・
-	// signupApplicationReceived) を受ける。本家の enum には無いので、独自の値を
-	// 宣言する仕組み (#3667 の (4)) で enum を重ねるまで載せない (#3851)。
-	"i/notifications":         `{"includeTypes":["importCompleted"]}`,
-	"i/notifications-grouped": `{"excludeTypes":["importCompleted"]}`,
-	// userId に、システム所有のファイルを一覧する @system を受ける (#686)。本家の
-	// misskey:id の形には無いので、独自の値を宣言する仕組み (#3667 の (4)) で
-	// 重ねるまで載せない (#3857)。同梱の frontend は送らない。
-	"admin/drive/files": `{"userId":"@system"}`,
-	// fileId の無い、url だけの経路を受ける。本家の paramDef は fileId を必須に
-	// するので、独自の引数を宣言する仕組み (#3667 の (4)) で重ねるまで載せない
-	// (#3857)。同梱の frontend は送らない。
-	"admin/emoji/add": `{"name":"hello","url":"http://192.0.2.1/emoji.png"}`,
+	// 保留していた federation/instances・reversi/match・i/notifications・
+	// i/notifications-grouped・admin/drive/files は、Elythia 独自の値を本家の
+	// paramDef に重ねて(paramschema.Effective、elythia_overlays.json)載せた。
+	// admin/emoji/add の url だけの経路は消した(#3865)。
 }
 
 // enforcementDeferred lists the endpoints of an enforced package that are
@@ -181,6 +166,12 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 	// いる (#3859)。paramDef の displayOrder は number なので、ajv は通す。
 	"admin/roles/create": {id: ajvInvalidParamID, match: nonIntegerDisplayOrder},
 	"admin/roles/update": {id: ajvInvalidParamID, match: nonIntegerDisplayOrder},
+	// 本家は 129 文字以上の name を、varchar(128) の列への書き込みで 500 にする
+	// 見込み。Elythia は書き込む前に 400 にしている (#2998、#3865)。
+	"admin/emoji/add": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		name, ok := in["name"].(string)
+		return ok && utf8.RuneCountInString(name) > 128
+	}},
 	// 本家は日付として読めない updatedAtFrom / updatedAtTo を PostgreSQL の型変換で
 	// 500 にする。Elythia は引く前に 400 にしている (#3518)。
 	"v2/admin/emoji/list": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
@@ -312,10 +303,10 @@ func TestEnforcedEndpointsAreUpstreamEndpoints(t *testing.T) {
 	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
 	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
 	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
-	// 要求する (#3854、#3857、#3859、#3861)。
+	// 要求する (#3854、#3857、#3859、#3861、#3865)。
 	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
 		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha",
-		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account"} {
+		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account", "admin/queue"} {
 		require.True(t, packages[pkg], "package %s is not counted", pkg)
 	}
 	for name := range eps {
@@ -431,7 +422,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT id FROM "user" WHERE id NOT IN (?, ?, ?)`, seedID, userID, adminID).Scan(&keepUsers).Error)
 	keepUsers = append(keepUsers, userID, adminID)
 	require.NoError(t, db.Raw(`SELECT username FROM used_username`).Scan(&keepUsedNames).Error)
+	// dropUserCache drops the users the server process caches. The seeded
+	// remote user is deleted by SQL, which the cache does not see: a later
+	// input would find it there and talk to its host (reversi/match fetches the
+	// nodeinfo of the opponent's host, #3865). It is set once the server is up.
+	var dropUserCache func()
 	resetAdmin := func() {
+		if dropUserCache != nil {
+			defer dropUserCache()
+		}
 		require.NoError(t, db.Exec(`DELETE FROM promo_note WHERE "noteId" = ? OR "userId" = ?`, seedID, userID).Error)
 		// 一覧が nil だと NULL を渡すことになり、NOT (id = ANY(NULL)) は何も消さない。
 		// 空でも配列 ('{}') として渡す。
@@ -578,6 +577,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// 下の確かめに使う宛先。TEST-NET-1 で、どこへも届かない。
 		cfg.AllowedPrivateNetworks = []string{"192.0.2.0/24"}
 	})
+	dropUserCache = on.userCache.DropLocal
 	// proxy が外向きの通信を実際に拾えることを先に確かめる。拾えないと、下の 0 件は
 	// 何も見ていないのと同じになる。
 	if res, err := on.outboundClient(5 * time.Second).Get("http://192.0.2.1/probe"); err == nil {
@@ -862,6 +862,27 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 
 	stricterSeen := map[string]int{}
+	// pausedQueues counts the queues the accepted admin/queue/pause inputs
+	// actually paused.
+	pausedQueues := 0
+	adminPost := func(ep, body string, wantStatus int) []byte {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/"+ep, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+adminToken)
+		rec := httptest.NewRecorder()
+		on.Handler().ServeHTTP(rec, req)
+		require.Equal(t, wantStatus, rec.Code, "%s %s: %s", ep, body, rec.Body.String())
+		return rec.Body.Bytes()
+	}
+	queuePaused := func(name string) bool {
+		t.Helper()
+		var stats struct {
+			IsPaused bool `json:"isPaused"`
+		}
+		require.NoError(t, json.Unmarshal(adminPost("admin/queue/queue-stats", `{"queue":`+strconv.Quote(name)+`}`, http.StatusOK), &stats))
+		return stats.IsPaused
+	}
 	seedReached := map[string]int{}
 	jobReached := map[string]int{}
 	adminSeeded := false
@@ -929,6 +950,19 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		if tc.ep == "admin/update-proxy-account" {
 			require.NoError(t, db.Exec(`UPDATE user_profile SET description = ?
 				WHERE "userId" IN (SELECT "userId" FROM system_account WHERE type = 'proxy')`, proxyDescriptionBefore).Error)
+		}
+		// admin/queue/pause の受理の入力は、テストの Redis のキューを止める (Elythia が
+		// 運用していないキューは何もせずに 204)。実際に止まったキューは、すぐに同じ
+		// 名前で再開し、動いていることを確かめる。後の入力や最後の確かめに残さない
+		// (#3865)。
+		if tc.ok && tc.ep == "admin/queue/pause" && rec.Code == http.StatusNoContent {
+			var in struct{ Queue string }
+			require.NoError(t, json.Unmarshal(tc.in, &in))
+			if queuePaused(in.Queue) {
+				pausedQueues++
+				adminPost("admin/queue/resume", `{"queue":`+strconv.Quote(in.Queue)+`}`, http.StatusNoContent)
+				assert.False(t, queuePaused(in.Queue), "resume did not restart %s", in.Queue)
+			}
 		}
 
 		var env struct {
@@ -1078,6 +1112,18 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// テストの管理者 (削除・凍結・トークン・ロール) と meta が変わっていないこと (#3854)。
 	assert.Equal(t, adminBefore, readAdmin())
 	assert.Equal(t, proxyDescriptionBefore, readProxyDescription())
+	// どのキューも止まっていないこと (#3865)。実際に止まった入力が無いと、ループの
+	// 中の再開の確かめは何も見ていないのと同じになる。
+	assert.Positive(t, pausedQueues, "no accepted corpus input of admin/queue/pause paused a queue")
+	var queues []struct {
+		Name     string `json:"name"`
+		IsPaused bool   `json:"isPaused"`
+	}
+	require.NoError(t, json.Unmarshal(adminPost("admin/queue/queues", `{}`, http.StatusOK), &queues))
+	require.NotEmpty(t, queues)
+	for _, q := range queues {
+		assert.False(t, q.IsPaused, "the queue %s is left paused", q.Name)
+	}
 	assert.Equal(t, []string{adminRoleID}, adminBefore.Roles)
 	assert.Equal(t, metaBefore, readMeta())
 	// 使われなくなった項目を残さない: corpus のどの入力にも当たらない例外は消す。
@@ -1088,6 +1134,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 
 // TestEnforcedGETMatchesUpstream sends GET queries to the enforced allowGet
 // endpoints of a real server (charts/*, bubble-game/ranking, federation/stats,
+// federation/instances,
 // the top-level emoji, emojis, fetch-rss, get-online-users-count,
 // retention and server-info, users/featured-notes and notes/featured) and compares the answers with upstream's: the cast step (JSON.parse of integer params, 0b5f1631-… on failure), then
 // ajv on the cast values. The corpus has JSON bodies only, so the queries
@@ -1150,6 +1197,17 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 		{query: "federation/stats?limit=null", id: ajvID, param: "#/properties/limit/type", reason: "must be integer"},
 		{query: "federation/stats?limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
 		{query: "federation/stats?limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
+		// federation/instancesはwelcome画面とadmin/federationがGETで呼ぶ。sortの
+		// +host・-hostはElythiaが重ねた値(#3865)。queryの+は%2Bで送る。
+		{query: "federation/instances", ok: true},
+		{query: "federation/instances?limit=10.0&offset=1e1", ok: true},
+		{query: "federation/instances?sort=%2Bhost", ok: true},
+		{query: "federation/instances?sort=-host", ok: true},
+		{query: "federation/instances?sort=%2BpubSub", ok: true},
+		{query: "federation/instances?sort=bogus", id: ajvID, param: "#/properties/sort/enum", reason: "must be equal to one of the allowed values"},
+		{query: "federation/instances?limit=abc", id: castID, param: "limit", reason: "cannot cast to integer"},
+		{query: "federation/instances?limit=0", id: ajvID, param: "#/properties/limit/minimum", reason: "must be >= 1"},
+		{query: "federation/instances?limit=101", id: ajvID, param: "#/properties/limit/maximum", reason: "must be <= 100"},
 		// 参照だけのトップレベルのendpoint(#3774)。
 		{query: "emoji?name=hello", ok: true, code: "NO_SUCH_EMOJI"},
 		{query: "emoji?name=", ok: true, code: "NO_SUCH_EMOJI"},
