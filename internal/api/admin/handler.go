@@ -4084,8 +4084,10 @@ func jsTruthy(raw json.RawMessage) bool {
 func (h *Handler) EmojiList(c echo.Context) error {
 	var req struct {
 		Query string `json:"query"`
-		// categoryは本家のparamDefに無いElythia独自の引数(#3857)。本家は知らない
-		// 項目として無視するので、文字列でない値も400にせず、絞り込まずに返す。
+		// categoryは本家のparamDefに無いElythia独自の引数(#3857)。#3867で
+		// string(null可)として本家のparamDefに重ねて宣言したので、文字列でない
+		// 値は検証が先に400で拒否する。検証しない入力(上限を超えたbodyなど)の
+		// ために、ここでは文字列でない値を絞り込まずに返す扱いを残す。
 		Category  json.RawMessage `json:"category"`
 		SinceID   string          `json:"sinceId"`
 		UntilID   string          `json:"untilId"`

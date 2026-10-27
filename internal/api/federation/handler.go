@@ -151,8 +151,8 @@ type InstancesRequest struct {
 	Offset        *jsnum.Int `json:"offset" query:"offset"`
 	SinceID       string     `json:"sinceId" query:"sinceId"`
 	UntilID       string     `json:"untilId" query:"untilId"`
-	SinceDate     *int64     `json:"sinceDate" query:"sinceDate"`
-	UntilDate     *int64     `json:"untilDate" query:"untilDate"`
+	SinceDate     *jsnum.Int `json:"sinceDate" query:"sinceDate"`
+	UntilDate     *jsnum.Int `json:"untilDate" query:"untilDate"`
 }
 
 // Instances handles POST /api/federation/instances.
@@ -164,7 +164,7 @@ func (h *Handler) Instances(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate, req.UntilDate)
+	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/labstack/echo/v4"
@@ -349,8 +350,8 @@ func (h *Handler) QueueJobs(c echo.Context) error {
 	var req struct {
 		Queue  string          `json:"queue"`
 		State  json.RawMessage `json:"state"`
-		Limit  int             `json:"limit"`
-		Page   int             `json:"page"`
+		Limit  jsnum.Int       `json:"limit"`
+		Page   jsnum.Int       `json:"page"`
 		Search string          `json:"search"`
 	}
 	if err := c.Bind(&req); err != nil || req.Queue == "" || len(req.State) == 0 {
@@ -371,26 +372,31 @@ func (h *Handler) QueueJobs(c echo.Context) error {
 	// フロントは渡さないので、未指定のときは upstream と同じ形で返す (#3167)。
 	// 以前は既定の 30 件が全 state 合計に効き、state を順に詰めるので「すべて」
 	// タブが完了済みだけで埋まって失敗が 1 件も見えなかった。
-	if req.Limit == 0 && req.Page == 0 {
+	// 本家の慣習どおり limit は 1〜100、page は 1 以上として宣言している
+	// (elythia_overlays.json、#3867)。整数を小数の形で書いた値 (5.0) も受ける。
+	// 宣言の外の値は検証が先に拒否するが、検証しない入力 (上限を超えた body
+	// など) のために丸めは残す。
+	limit, page := int(req.Limit), int(req.Page)
+	if limit == 0 && page == 0 {
 		return c.JSON(http.StatusOK, h.upstreamQueueJobs(req.Queue, states))
 	}
-	if req.Limit <= 0 || req.Limit > 100 {
-		req.Limit = 30
+	if limit <= 0 || limit > 100 {
+		limit = 30
 	}
-	if req.Page < 1 {
-		req.Page = 1
+	if page < 1 {
+		page = 1
 	}
 
-	seen := make(map[string]struct{}, req.Limit)
-	out := make([]map[string]any, 0, req.Limit)
+	seen := make(map[string]struct{}, limit)
+	out := make([]map[string]any, 0, limit)
 outer:
 	for _, state := range states {
-		rows, err := h.listTasksForState(req.Queue, state, req.Page, req.Limit)
+		rows, err := h.listTasksForState(req.Queue, state, page, limit)
 		if err != nil {
 			continue
 		}
 		for _, t := range rows {
-			if len(out) >= req.Limit {
+			if len(out) >= limit {
 				break outer
 			}
 			// state指定が複数重なる (例: all タブ) とき同じ task が
