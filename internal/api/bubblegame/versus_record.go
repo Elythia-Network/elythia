@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/bubbleversus"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -129,19 +130,19 @@ func packRecord(pk *entity.Packer, rec *model.BubbleGameVersusRecord, withLogs b
 func (h *VersusHandler) History(c echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
-		UserID    string `json:"userId"`
-		Limit     *int   `json:"limit"`
-		UntilID   string `json:"untilId"`
-		UntilDate *int64 `json:"untilDate"`
+		UserID    string     `json:"userId"`
+		Limit     *jsnum.Int `json:"limit"`
+		UntilID   string     `json:"untilId"`
+		UntilDate *jsnum.Int `json:"untilDate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, errVersusInvalidP)
 	}
-	limit, limitOK := pagination.ResolveLimit(req.Limit, 10, 100)
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 10, 100)
 	if !limitOK {
 		return c.JSON(http.StatusBadRequest, errVersusInvalidP)
 	}
-	_, untilID, cursorOK := id.NormalizeCursor("", req.UntilID, nil, req.UntilDate)
+	_, untilID, cursorOK := id.NormalizeCursor("", req.UntilID, nil, req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return c.JSON(http.StatusBadRequest, errVersusInvalidP)
 	}

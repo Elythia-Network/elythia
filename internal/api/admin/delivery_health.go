@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
 	"github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -120,7 +121,7 @@ func (h *Handler) federationHealth(c echo.Context, provider DeliveryHealthProvid
 	}
 	var req struct {
 		// WindowSeconds は遡る秒数。上限は deliveryhealth.MaxWindow。
-		WindowSeconds int `json:"windowSeconds"`
+		WindowSeconds jsnum.Int `json:"windowSeconds"`
 	}
 	// windowSeconds 省略 (`{}`) は既定値で応答する (管理画面が引数なしで叩く)。
 	// object でない body は本家の endpoint と同じく 400 にする (#3330)。
@@ -133,7 +134,7 @@ func (h *Handler) federationHealth(c echo.Context, provider DeliveryHealthProvid
 	// 負の値などに化け、上限の比較をすり抜ける (#3440)。
 	window := defaultDeliveryHealthWindow
 	switch {
-	case req.WindowSeconds > int(deliveryhealth.MaxWindow/time.Second):
+	case req.WindowSeconds > jsnum.Int(deliveryhealth.MaxWindow/time.Second):
 		window = deliveryhealth.MaxWindow
 	case req.WindowSeconds > 0:
 		window = time.Duration(req.WindowSeconds) * time.Second

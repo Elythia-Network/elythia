@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/model"
@@ -143,8 +144,8 @@ func (h *Handler) FederationRules(c echo.Context) error {
 // 新しい順に返す。record のルールで誤爆していないかを確かめるためのもの。
 func (h *Handler) FederationRuleHits(c echo.Context) error {
 	var req struct {
-		RuleID string `json:"ruleId"`
-		Limit  int    `json:"limit"`
+		RuleID string    `json:"ruleId"`
+		Limit  jsnum.Int `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -155,7 +156,7 @@ func (h *Handler) FederationRuleHits(c echo.Context) error {
 	if h.fedRules == nil {
 		return noSuchFederationRule(c)
 	}
-	hits, err := h.fedRules.Samples(c.Request().Context(), req.RuleID, req.Limit)
+	hits, err := h.fedRules.Samples(c.Request().Context(), req.RuleID, int(req.Limit))
 	if err != nil {
 		return federationRuleError(c, err)
 	}

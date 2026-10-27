@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/emojiapplication"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -214,8 +215,8 @@ func (h *Handler) ListMine(c echo.Context) error {
 			"1384574d-a912-4b81-8601-c7b1c4085df1"))
 	}
 	var req struct {
-		Limit   int    `json:"limit"`
-		UntilID string `json:"untilId"`
+		Limit   jsnum.Int `json:"limit"`
+		UntilID string    `json:"untilId"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -231,7 +232,7 @@ func (h *Handler) ListMine(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	rows, err := h.apps.ListByUser(me.ID, req.Limit, untilID)
+	rows, err := h.apps.ListByUser(me.ID, int(req.Limit), untilID)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
