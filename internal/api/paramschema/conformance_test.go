@@ -13,13 +13,20 @@ import (
 	"testing"
 )
 
-const corpusFile = "testdata/ajv_corpus.jsonl"
+const (
+	corpusFile = "testdata/ajv_corpus.jsonl"
+	// elythiaCorpusFile is the corpus of elythia_paramdefs.json (#3869, make
+	// elythia-paramdef-gen).
+	elythiaCorpusFile = "testdata/ajv_corpus_elythia.jsonl"
+)
 
 type corpusHeader struct {
 	MisskeyVersion  string `json:"misskeyVersion"`
 	AJV             string `json:"ajv"`
 	ParamdefsSha256 string `json:"paramdefsSha256"`
-	Cases           int    `json:"cases"`
+	// ElythiaParamdefsSha256 is set on the corpus of elythia_paramdefs.json.
+	ElythiaParamdefsSha256 string `json:"elythiaParamdefsSha256"`
+	Cases                  int    `json:"cases"`
 }
 
 type corpusLine struct {
@@ -44,7 +51,12 @@ type corpusCase struct {
 
 func readCorpus(t *testing.T) (corpusHeader, map[string]corpusLine, []corpusCase) {
 	t.Helper()
-	b, err := os.ReadFile(corpusFile)
+	return readCorpusFile(t, corpusFile)
+}
+
+func readCorpusFile(t *testing.T, file string) (corpusHeader, map[string]corpusLine, []corpusCase) {
+	t.Helper()
+	b, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("read corpus (make paramdef-gen): %v", err)
 	}
@@ -197,6 +209,97 @@ func TestConformsToAJVCorpus(t *testing.T) {
 	// 型の違う入力(null、配列、文字列、数、真偽値)を必ず作る。
 	for name := range schemas {
 		if _, upstream := g.Endpoints[name]; upstream && seenEP[name] < 6 || seenEP[name] == 0 {
+			t.Errorf("corpus has only %d cases for %s", seenEP[name], name)
+		}
+	}
+}
+
+// readElythiaParamDefs returns the paramDefs of elythia_paramdefs.json by
+// endpoint name.
+func readElythiaParamDefs(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	var f struct {
+		Endpoints map[string]struct {
+			ParamDef json.RawMessage `json:"paramDef"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal(ElythiaParamDefs(), &f); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]json.RawMessage{}
+	for name, ep := range f.Endpoints {
+		out[name] = ep.ParamDef
+	}
+	return out
+}
+
+// TestElythiaConformsToAJVCorpus replays every case ajv judged against the
+// paramDefs of elythia_paramdefs.json (#3869) on the schemas Effective
+// compiled from them, like TestConformsToAJVCorpus does for upstream's.
+func TestElythiaConformsToAJVCorpus(t *testing.T) {
+	g := readGolden(t)
+	h, eps, cases := readCorpusFile(t, elythiaCorpusFile)
+	sum := sha256.Sum256(g.raw)
+	esum := sha256.Sum256(ElythiaParamDefs())
+	if h.ParamdefsSha256 != hex.EncodeToString(sum[:]) || h.ElythiaParamdefsSha256 != hex.EncodeToString(esum[:]) {
+		t.Fatalf("%s was not built from the current %s and elythia_paramdefs.json (run make elythia-paramdef-gen)", elythiaCorpusFile, goldenFile)
+	}
+	if h.AJV != g.AJV.Version {
+		t.Fatalf("corpus header %+v does not match the golden (ajv %s)", h, g.AJV.Version)
+	}
+	if len(cases) != h.Cases {
+		t.Fatalf("corpus has %d cases, header says %d", len(cases), h.Cases)
+	}
+	eff, err := Effective()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := readElythiaParamDefs(t)
+	if len(declared) == 0 {
+		t.Fatal("elythia_paramdefs.json declares no endpoint")
+	}
+	for name := range declared {
+		if _, ok := eps[name]; !ok {
+			t.Errorf("corpus lacks %s", name)
+		}
+		if ep := eff[name]; !ep.Elythia || ep.Schema == nil {
+			t.Errorf("Effective does not have %s as an Elythia endpoint", name)
+		}
+	}
+	for name := range eps {
+		if _, ok := declared[name]; !ok {
+			t.Errorf("corpus has %s, which elythia_paramdefs.json does not", name)
+		}
+	}
+	seenEP := map[string]int{}
+	failures := 0
+	for _, c := range cases {
+		ep, ok := eff[c.ep]
+		if !ok || ep.Schema == nil {
+			t.Fatalf("line %d: unknown endpoint %s", c.line, c.ep)
+		}
+		seenEP[c.ep]++
+		for _, useNumber := range []bool{true, false} {
+			data, err := decodeInput(c.In, useNumber)
+			if err != nil {
+				if !useNumber {
+					continue
+				}
+				t.Fatalf("line %d: %v", c.line, err)
+			}
+			if msg := checkCase(t, ep.Schema, c, data); msg != "" {
+				failures++
+				if failures <= 30 {
+					t.Errorf("line %d %s in=%s useNumber=%v: %s", c.line, c.ep, c.In, useNumber, msg)
+				}
+			}
+		}
+	}
+	if failures > 0 {
+		t.Fatalf("%d mismatches", failures)
+	}
+	for name := range declared {
+		if seenEP[name] < 6 {
 			t.Errorf("corpus has only %d cases for %s", seenEP[name], name)
 		}
 	}

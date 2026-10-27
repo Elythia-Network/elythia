@@ -10,6 +10,11 @@
 // Usage (see `make paramdef-gen`):
 //
 //	node tools/paramdefspec/corpus.mjs --paramdefs <file> --synthetic <file> --node-modules <dir> --out <file>
+//	node tools/paramdefspec/corpus.mjs --paramdefs <file> --elythia <file> --node-modules <dir> --out <file>
+//
+// With --elythia, the corpus is built for the endpoints of that file (Elythia's
+// own paramDefs, elythia_paramdefs.json, #3869) instead, with the ajv version,
+// options and formats of the upstream golden, and without synthetic schemas.
 //
 // synthetic.json adds hand-written schemas and inputs that probe keyword order
 // and edge cases the upstream paramDefs do not reach; ajv judges them too, and
@@ -31,13 +36,15 @@ const { values: args } = parseArgs({
 	options: {
 		paramdefs: { type: 'string' },
 		synthetic: { type: 'string' },
+		elythia: { type: 'string' },
 		'node-modules': { type: 'string' },
 		out: { type: 'string' },
 	},
 });
-for (const k of ['paramdefs', 'synthetic', 'node-modules', 'out']) {
+for (const k of ['paramdefs', 'node-modules', 'out']) {
 	if (!args[k]) fail(`--${k} is required`);
 }
+if (!args.synthetic === !args.elythia) fail('give either --synthetic or --elythia');
 
 function fail(msg) {
 	console.error(`paramdefspec/corpus: ${msg}`);
@@ -329,8 +336,11 @@ class RawText {
 	}
 }
 
-for (const ep of Object.keys(golden.endpoints).sort()) {
-	const pd = golden.endpoints[ep].paramDef;
+// --elythiaのときは、本家のgoldenからはajvの版・設定・形式だけを使う。
+const elythiaBytes = args.elythia ? fs.readFileSync(args.elythia) : null;
+const endpoints = elythiaBytes ? JSON.parse(elythiaBytes.toString('utf8')).endpoints : golden.endpoints;
+for (const ep of Object.keys(endpoints).sort()) {
+	const pd = endpoints[ep].paramDef;
 	const base = sample(pd);
 	lines.push(`{"ep":${JSON.stringify(ep)}}`);
 	runCases(ajv.compile(pd), [base, {}, null, [], 'x', 1, true, new RawNum('1.0'), ...mutate(pd, base, 0)]);
@@ -341,7 +351,7 @@ for (const ep of Object.keys(golden.endpoints).sort()) {
 // 本家と同じ設定にlogger: falseだけを足す(strictTypesの警告を出さないため。判定は変わらない)。
 const quietAjv = new Ajv({ ...golden.ajv.options, logger: false });
 for (const [name, { source, flags }] of Object.entries(golden.ajv.formats)) quietAjv.addFormat(name, new RegExp(source, flags));
-const synthetic = JSON.parse(fs.readFileSync(args.synthetic, 'utf8'));
+const synthetic = args.synthetic ? JSON.parse(fs.readFileSync(args.synthetic, 'utf8')) : [];
 for (const { name, paramDef, inputs, compileError } of synthetic) {
 	const ep = `synthetic:${name}`;
 	let validate;
@@ -363,6 +373,8 @@ const header = {
 	// どのparamDefのgoldenから作ったか。Goのテストがこれを見て、goldenだけを
 	// 作り直してcorpusを作り直し忘れた状態を落とす。
 	paramdefsSha256: crypto.createHash('sha256').update(goldenBytes).digest('hex'),
+	// Elythiaの宣言から作ったときは、その宣言のhashも書く。
+	...(elythiaBytes ? { elythiaParamdefsSha256: crypto.createHash('sha256').update(elythiaBytes).digest('hex') } : {}),
 	cases: total,
 };
 fs.writeFileSync(args.out, `${JSON.stringify(header)}\n${lines.join('\n')}\n`);

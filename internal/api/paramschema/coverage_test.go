@@ -291,6 +291,18 @@ func init() {
 func TestCorpusRejectsAtEveryReachableKeyword(t *testing.T) {
 	g := readGolden(t)
 	_, _, cases := readCorpus(t)
+	// Elythiaの宣言(#3869)も、本家のものと同じく全部の位置で拒否されること
+	// を求める。名前は本家と重ならない(addElythiaEndpointsが拒否する)。
+	_, _, elythiaCases := readCorpusFile(t, elythiaCorpusFile)
+	cases = append(cases, elythiaCases...)
+	paramDefs := map[string]json.RawMessage{}
+	for name, ep := range g.Endpoints {
+		paramDefs[name] = ep.ParamDef
+	}
+	elythia := readElythiaParamDefs(t)
+	for name, pd := range elythia {
+		paramDefs[name] = pd
+	}
 	rejected := map[string]bool{}
 	for _, c := range cases {
 		if !*c.OK {
@@ -301,13 +313,17 @@ func TestCorpusRejectsAtEveryReachableKeyword(t *testing.T) {
 	entryUsed := map[string]bool{}
 	var missing []string
 	positions := 0
-	for name, ep := range g.Endpoints {
+	elythiaPositions := 0
+	for name, pd := range paramDefs {
 		var root map[string]any
-		if err := json.Unmarshal(ep.ParamDef, &root); err != nil {
+		if err := json.Unmarshal(pd, &root); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		for _, p := range keywordPositions(name, root) {
 			positions++
+			if _, ok := elythia[name]; ok {
+				elythiaPositions++
+			}
 			key := p.ep + " " + p.path
 			matched := false
 			for _, r := range unreachableRules {
@@ -337,8 +353,8 @@ func TestCorpusRejectsAtEveryReachableKeyword(t *testing.T) {
 		}
 	}
 	// 位置を1つも数えられないなら、走査が壊れている。
-	if positions < len(g.Endpoints) {
-		t.Fatalf("found only %d keyword positions", positions)
+	if positions < len(g.Endpoints) || elythiaPositions < len(elythia) {
+		t.Fatalf("found only %d keyword positions (%d of Elythia's)", positions, elythiaPositions)
 	}
 	sort.Strings(missing)
 	for _, m := range missing {

@@ -1,0 +1,536 @@
+{
+	"endpoints": {
+		"admin/database-health": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/drive/usage": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"forceRecalc": {
+						"type": "boolean"
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/emoji-application/list": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"filter": {
+						"type": "string",
+						"enum": [
+							"pending",
+							"processed",
+							"all"
+						]
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/emoji-application/list-by-user": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"status": {
+						"type": "string",
+						"enum": [
+							"all",
+							"pending",
+							"approved",
+							"rejected",
+							"canceled"
+						]
+					},
+					"query": {
+						"type": "string"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					}
+				},
+				"required": [
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/emoji-application/related": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/emoji-application/user-summary": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/delivery-health": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"windowSeconds": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 3600
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/federation/gone-instances": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/federation/inbox-health": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"windowSeconds": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 3600
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/federation/rules/hits": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"ruleId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 50
+					}
+				},
+				"required": [
+					"ruleId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/rules/list": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/ip/accounts": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"ip": {
+						"type": "string"
+					},
+					"sinceDays": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 3650
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 10000
+					}
+				},
+				"required": [
+					"ip"
+				]
+			},
+			"meta": {}
+		},
+		"admin/ip/lookup-log": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 10000
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/ip/related-accounts": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"sinceDays": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 3650
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 10000
+					}
+				},
+				"required": [
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/roles/assignment-show": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"roleId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"userId",
+					"roleId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/server-metrics": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/server-plugins": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/signup-application/list": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"filter": {
+						"type": "string",
+						"enum": [
+							"pending",
+							"approved",
+							"processed",
+							"all"
+						]
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/history": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"untilDate": {
+						"type": "integer"
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/invitations": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/record": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"matchId"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/show": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"matchId"
+				]
+			},
+			"meta": {}
+		},
+		"emoji-application/list-mine": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"following/silent/list": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"sinceId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"sinceDate": {
+						"type": "integer"
+					},
+					"untilDate": {
+						"type": "integer"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"i/flashs": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"sinceId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"sinceDate": {
+						"type": "integer"
+					},
+					"untilDate": {
+						"type": "integer"
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"i/flashs/likes": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"sinceId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"sinceDate": {
+						"type": "integer"
+					},
+					"untilDate": {
+						"type": "integer"
+					},
+					"search": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 100,
+						"nullable": true
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"roles/assignment-show": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roleId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roleId"
+				]
+			},
+			"meta": {}
+		},
+		"signup-application/status": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"claimCode": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"claimCode"
+				]
+			},
+			"meta": {}
+		}
+	}
+}
