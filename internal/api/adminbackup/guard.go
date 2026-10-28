@@ -54,50 +54,61 @@ func subject(c echo.Context) strongauth.Subject {
 	}
 }
 
-// Guard requires every strongauth condition, including the re-authentication
-// sent in the body (`password` and either `token` or `credential`).
+// reauthenticate checks every strongauth condition, including the
+// re-authentication sent in the body (`password` and either `token` or
+// `credential`). When the request may not proceed, it writes the response
+// and returns false.
 //
 // ルートの登録 (internal/server の routes_admin.go) の RequireAdmin / RequireSecure と重なるが、ここでも全条件を見る。
-// route の middleware を付け忘れても閉じたままにするためと、メンテナンス中に
-// バックアップ用のサービスが同じ判定を使えるようにするため (#3463)。
-func Guard(v *strongauth.Verifier) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			req := c.Request()
-			var body []byte
-			if req.Body != nil {
-				b, err := io.ReadAll(io.LimitReader(req.Body, reauthBodyLimit+1))
-				if err != nil || len(b) > reauthBodyLimit {
-					return apierr.JSONInvalidParam(c)
-				}
-				body = b
-				// handler が同じ body を Bind できるよう戻す。
-				req.Body = io.NopCloser(bytes.NewReader(body))
-			}
-			var f reauthFields
-			if len(bytes.TrimSpace(body)) > 0 {
-				// handler の Bind は Content-Type に従って読むので、JSON 以外で
-				// 送られると再認証だけ通って (TOTP を消費して) から落ちる。読み方を
-				// 揃えるため、JSON だけを受ける。
-				if !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
-					return apierr.JSONInvalidParam(c)
-				}
-				if err := json.Unmarshal(body, &f); err != nil {
-					return apierr.JSONInvalidParam(c)
-				}
-			}
-			err := v.Verify(req.Context(), subject(c), strongauth.Reauth{
-				Password:   f.Password,
-				Token:      f.Token,
-				Credential: f.Credential,
-				Request:    req,
-			})
-			if err != nil {
-				return refusal(c, err)
-			}
-			return next(c)
+// route の middleware を付け忘れても閉じたままにするため。断り方 (Refusal) は、
+// メンテナンス中にバックアップ用のサービスも同じものを使う (#3463)。
+//
+// **route の middleware でなく handler の中で呼ぶ。** route の middleware は引数の
+// 検証 (internal/server の withParamShadow) より先に走るので、そこで再認証すると、
+// 形の誤った本文でも TOTP のコードを使い切ってから 400 になる。本家の i/2fa/* と
+// 同じく、検証を先にする (#3878)。
+func reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
+	req := c.Request()
+	var body []byte
+	if req.Body != nil {
+		b, err := io.ReadAll(io.LimitReader(req.Body, reauthBodyLimit+1))
+		if err != nil || len(b) > reauthBodyLimit {
+			return false, apierr.JSONInvalidParam(c)
+		}
+		body = b
+		// handler が同じ body を Bind できるよう戻す。
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	var f reauthFields
+	if len(bytes.TrimSpace(body)) > 0 {
+		// handler の Bind は Content-Type に従って読むので、JSON 以外で
+		// 送られると再認証だけ通って (TOTP を消費して) から落ちる。読み方を
+		// 揃えるため、JSON だけを受ける。
+		if !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
+			return false, apierr.JSONInvalidParam(c)
+		}
+		if err := json.Unmarshal(body, &f); err != nil {
+			return false, apierr.JSONInvalidParam(c)
 		}
 	}
+	err := v.Verify(req.Context(), subject(c), strongauth.Reauth{
+		Password:   f.Password,
+		Token:      f.Token,
+		Credential: f.Credential,
+		Request:    req,
+	})
+	if err != nil {
+		return false, refusal(c, err)
+	}
+	return true, nil
+}
+
+// guarded runs next after reauthenticate.
+func (h *Handler) guarded(c echo.Context, next echo.HandlerFunc) error {
+	if ok, err := reauthenticate(h.verifier, c); !ok {
+		return err
+	}
+	return next(c)
 }
 
 // refusal writes the response for a strongauth refusal.

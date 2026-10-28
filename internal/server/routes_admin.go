@@ -6,12 +6,11 @@ import (
 	apiannouncements "github.com/elythia-network/elythia/internal/api/announcements"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
 )
 
 // registerAdminRoutes registers the admin routes (admin/* and
 // v2/admin/emoji/list) on the /api group.
-func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announcementHandler *apiannouncements.Handler, backupHandler *adminbackup.Handler, roleService *corerole.Service, backupGuard echo.MiddlewareFunc) {
+func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announcementHandler *apiannouncements.Handler, backupHandler *adminbackup.Handler, roleService *corerole.Service) {
 	api.POST("/admin/accounts/create", adminHandler.AccountsCreate)
 	api.POST("/admin/show-user", adminHandler.ShowUser, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:show-user"))
 	api.POST("/admin/show-users", adminHandler.ShowUsers, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:show-user"))
@@ -104,15 +103,20 @@ func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announce
 	// 照合し、DB を引かない。
 	api.POST("/admin/backup/restore/status", backupHandler.RestoreStatus)
 	// 退避した DB の一覧 (#3463 (6d))。一覧 (admin/backup/list) と同じく、本体が
-	// backupGuard で再認証してから daemon へ転送する (daemon は照合しない)。閲覧だけで
+	// 再認証してから daemon へ転送する (daemon は照合しない)。閲覧だけで
 	// DB を変えないので、操作のように daemon に照合させる理由が無い。メンテナンス中は
 	// 転送しない (maintenance.go の ForwardPaths に無い)。
-	api.POST("/admin/backup/restore/candidates", backupHandler.RestoreCandidates, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/delete", backupHandler.Delete, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
-	api.POST("/admin/backup/download", backupHandler.Download, middleware.RequireAdmin(roleService), middleware.RequireSecure(), backupGuard)
+	//
+	// この 6 件の再認証は、route の middleware でなく handler の中で行う
+	// (adminbackup の guarded)。route の middleware は引数の検証 (withParamShadow) より
+	// 先に走るので、そこに置くと、形の誤った本文でも TOTP のコードを使い切ってから
+	// 400 になる。本家の i/2fa/* と同じく、検証を先にする (#3878)。
+	api.POST("/admin/backup/restore/candidates", backupHandler.RestoreCandidates, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/list", backupHandler.List, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/take", backupHandler.Take, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/verify", backupHandler.Verify, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/delete", backupHandler.Delete, middleware.RequireAdmin(roleService), middleware.RequireSecure())
+	api.POST("/admin/backup/download", backupHandler.Download, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 	api.POST("/admin/backup/reauth-challenge", backupHandler.ReauthChallenge, middleware.RequireAdmin(roleService), middleware.RequireSecure())
 
 	api.POST("/admin/server-info", adminHandler.ServerInfo, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:server-info"))

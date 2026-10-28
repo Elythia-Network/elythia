@@ -109,7 +109,7 @@ func TestSetupRoutes_RestoreIsForwardedWithoutTheGuard(t *testing.T) {
 	for _, op := range []string{"prepare", "confirm", "abort", "candidates"} {
 		assert.Equal(t, http.StatusUnauthorized, post(op, "").Code, op)
 	}
-	// 退避した DB の一覧は、本体の再認証 (backupGuard) を通ってからでないと転送しない。
+	// 退避した DB の一覧は、本体の再認証 (handler の中の guarded) を通ってからでないと転送しない。
 	// root はプロフィールも 2FA も持たないので、照合で断られる (下の paths に出ない)。
 	crec := post("candidates", rootToken)
 	assert.NotEqual(t, http.StatusOK, crec.Code, crec.Body.String())

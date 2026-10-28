@@ -307,7 +307,7 @@ func mountRestore(mux *http.ServeMux, rs *Restore, log *slog.Logger) {
 // restores and rollbacks, which a rollback can swap back in.
 //
 // 本体の admin/backup/restore/candidates は、一覧 (admin/backup/list) と同じく
-// 本体の再認証 (backupGuard) を通ってから転送する。ここでは照合しない (同じ TOTP の
+// 本体の再認証 (adminbackup の guarded) を通ってから転送する。ここでは照合しない (同じ TOTP の
 // コードを本体と daemon で二重に消費しないため)。制御 API の serviceToken は
 // 通っている。操作を変える要求と同じく 1 つずつにする (一覧は退避した DB へ短く
 // 繋ぐので、準備の接続の確認と重ねない)。
