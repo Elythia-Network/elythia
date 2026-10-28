@@ -102,7 +102,7 @@ port: 3000
 # export-custom-emojis,
 # fetch-external-resources, request-reset-password, reset-password,
 # verify-email, v2/admin/emoji/list, notes and notes/*,
-# i and i/* except i/update,
+# i and i/*,
 # admin/ad/*, admin/announcements/*, admin/avatar-decorations/*,
 # admin/invite/*, admin/promo/create, admin/meta, admin/server-info,
 # admin/get-index-stats, admin/get-table-stats, admin/show-moderation-logs,

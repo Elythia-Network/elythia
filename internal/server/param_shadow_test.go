@@ -70,7 +70,7 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	api.Use(mw)
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/clips/show", ok)
-	api.POST("/i/update", ok)
+	api.POST("/admin/update-meta", ok)
 	serve := func(target, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -81,11 +81,11 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	rec := serve("/api/clips/show", `{"clipId":"a-b"}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"param":"#/properties/clipId/format"`)
-	assert.Equal(t, http.StatusNoContent, serve("/api/i/update", `{"avatarId":"a-b"}`).Code)
+	assert.Equal(t, http.StatusNoContent, serve("/api/admin/update-meta", `{"themeColor":"#fff"}`).Code)
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	assert.NotContains(t, logs.String(), "paramshadow divergence")
-	assert.NotContains(t, logs.String(), "i/update")
+	assert.NotContains(t, logs.String(), "admin/update-meta")
 }
 
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
@@ -107,7 +107,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		return func(c echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
 	}
 	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
-	api.POST("/i/update", ok)
+	api.POST("/admin/update-meta", ok)
 	api.POST("/notes/create", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/federation/instances", ok)
 	api.GET("/charts/notes", ok)
@@ -120,7 +120,7 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/i/update", `{"avatarId":"a-b"}`))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/admin/update-meta", `{"themeColor":"#fff"}`))
 	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
 	// 数えるだけのallowGetのendpointは、#3865でfederation/instancesも本家に揃えた
 	// ので、もう無い。Match(GETとPOST)の登録は、本家に揃えたfederation/instancesが
@@ -132,12 +132,12 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodGet, "/api/charts/notes?span=week", ""))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
-	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/i/update", `null`))
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/admin/update-meta", `null`))
 
 	require.NoError(t, s.lifecycle.stopAll(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
-		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/avatarId/format"`,
+		`"endpoint":"admin/update-meta","kind":"rejected_handler_ok","schemaPath":"#/properties/themeColor/pattern"`,
 		`"msg":"paramshadow summary"`,
 		`"agreed":1,"diverged":1,"skipped":0`,
 	} {
@@ -214,16 +214,43 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	}
 	db := serverIntegrationDB
 	const userID, token = "pshadow-user", "pshadowtoken0001"
+	const adminID, adminToken = "pshadow-admin", "pshadowadmintok1"
+	const adminRoleID, adminAssignID = "pshadow-admin-role", "pshadow-admin-assign"
+	// 数えるだけの例は admin/update-meta に置く (下の requests)。受理する入力は
+	// meta を書き換えるので、流す前の行へ戻す。
+	var metaBefore []string
+	require.NoError(t, db.Raw(`SELECT row_to_json(m)::text FROM meta m ORDER BY id`).Scan(&metaBefore).Error)
+	require.Len(t, metaBefore, 1)
+	var metaCols []string
+	require.NoError(t, db.Raw(`SELECT column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'meta' AND column_name <> 'id' ORDER BY column_name`).Scan(&metaCols).Error)
+	require.NotEmpty(t, metaCols)
+	quoted := make([]string, len(metaCols))
+	for i, c := range metaCols {
+		quoted[i] = `"` + c + `"`
+	}
 	cleanup := func() {
+		require.NoError(t, db.Exec(`UPDATE meta SET (`+strings.Join(quoted, ", ")+`) = (SELECT `+strings.Join(quoted, ", ")+
+			` FROM json_populate_record(NULL::meta, ?::json))`, metaBefore[0]).Error)
 		require.NoError(t, db.Exec(`DELETE FROM note WHERE "userId" = ?`, userID).Error)
-		require.NoError(t, db.Where("id = ?", userID).Delete(&model.User{}).Error)
+		require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE id = ?`, adminAssignID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM role WHERE id = ?`, adminRoleID).Error)
+		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	tok := token
+	tok, adminTok := token, adminToken
 	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
 		ID: userID, Username: "pshadow", UsernameLower: "pshadow", Token: &tok,
 	}))
+	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
+		ID: adminID, Username: "pshadowadmin", UsernameLower: "pshadowadmin", Token: &adminTok,
+	}))
+	now := time.Now()
+	require.NoError(t, db.Create(&model.Role{
+		ID: adminRoleID, Name: "pshadow-admin-role", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true,
+	}).Error)
+	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
 
 	off, on, logs := newParamShadowServers(t)
 
@@ -232,6 +259,7 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		auth               bool
 		// mutates: the request changes the DB, so the two answers can differ
 		// in ids and dates; only the status and the error code are compared.
+		// An authenticated request to admin/* is sent as the administrator.
 		mutates bool
 	}
 	requests := []request{
@@ -240,20 +268,25 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/notes/create", `{"text":"a","visibility":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, false, true},
-		// 数えるだけの例は、本家に揃えていない i/update に置く (i/notifications・
-		// reversi/match は #3865、notes/create は #3884 で揃えた)。
-		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"name":"影の検証"}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"isCat":"yes"}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"name":"a\u0000"}`, true, true},
-		{http.MethodPost, "/api/i/update", "{\"location\":\"\\ud800\"}", true, true},
+		// 数えるだけの例は、本家に揃えていない admin/update-meta に置く
+		// (i/notifications・reversi/match は #3865、notes/create は #3884、i/update は
+		// #3886 で揃えた)。pinnedUsers の要素の型の誤りは、handler が 500 を返す
+		// (#3667 の admin/update-meta の段で揃える)。
+		{http.MethodPost, "/api/admin/update-meta", `{"themeColor":"影の検証"}`, true, true},
+		{http.MethodPost, "/api/admin/update-meta", `{"pinnedUsers":[1]}`, true, true},
+		{http.MethodPost, "/api/admin/update-meta", `{"minimumUsernameLength":0}`, true, true},
+		{http.MethodPost, "/api/admin/update-meta", `{"disableRegistration":"yes"}`, true, true},
+		{http.MethodPost, "/api/admin/update-meta", "{\"name\":\"\\ud800\"}", true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
 		// 本家に揃えた endpoint は、検証を止めた server でも同じ応答になる (宣言から
 		// 外れる値は同じに拒否し、宣言を満たす値は同じに通す)。先頭の notes/create の
-		// 例も、#3884 から本家に揃えた endpoint の例になった。
+		// 例も #3884 から、i/update の例も #3886 から、本家に揃えた endpoint の例に
+		// なった。
 		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
+		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"description":null}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"a","poll":{"choices":["a","b"],"expiredAfter":1e4}}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"a","replyId":"abc-def"}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"a","cw":1e400}`, true, true},
@@ -272,7 +305,11 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		}
 		if r.auth {
-			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+			bearer := token
+			if strings.HasPrefix(r.path, "/api/admin/") {
+				bearer = adminToken
+			}
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
 		}
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
@@ -306,18 +343,19 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	require.NoError(t, on.Shutdown(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
-		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/name/minLength"`,
-		`"endpoint":"i/update","kind":"rejected_handler_other_error","schemaPath":"#/properties/avatarId/format"`,
-		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/isCat/type"`,
-		`"endpoint":"i/update","kind":"accepted_handler_invalid_param","schemaPath":""`,
-		`"endpoint":"i/update","kind":"param_mismatch","schemaPath":"#/properties/isCat/type"`,
+		`"endpoint":"admin/update-meta","kind":"rejected_handler_ok","schemaPath":"#/properties/themeColor/pattern"`,
+		`"endpoint":"admin/update-meta","kind":"rejected_handler_other_error","schemaPath":"#/properties/pinnedUsers/items/type"`,
+		`"endpoint":"admin/update-meta","kind":"accepted_handler_invalid_param","schemaPath":""`,
+		`"endpoint":"admin/update-meta","kind":"param_mismatch","schemaPath":"#/properties/disableRegistration/type"`,
 		`"msg":"paramshadow summary"`,
 		`"lone_surrogate":1`,
 	} {
 		assert.Contains(t, out, want)
 	}
 	assert.NotContains(t, out, token)
+	assert.NotContains(t, out, adminToken)
 	assert.NotContains(t, out, "影の検証")
+	assert.NotContains(t, out, `"endpoint":"i/update"`, "an enforced endpoint was counted")
 }
 
 // apiRegistrationAllowed are the /api registrations that bypass apiRoutes'
@@ -440,9 +478,9 @@ func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/i/update", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/admin/update-meta", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/i/update", strings.NewReader(`{"avatarId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/update-meta", strings.NewReader(`{"themeColor":"#ffffff"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}
@@ -475,9 +513,9 @@ func TestParamShadowSummaryAfterTheGenerationStopped(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
-	api.POST("/i/update", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	api.POST("/admin/update-meta", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/i/update", strings.NewReader(`{"avatarId":"abc"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/update-meta", strings.NewReader(`{"themeColor":"#ffffff"}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		e.ServeHTTP(httptest.NewRecorder(), req)
 	}

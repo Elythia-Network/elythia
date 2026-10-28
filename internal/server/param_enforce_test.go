@@ -145,9 +145,7 @@ var enforcementPending = map[string]string{
 // left to a later stage, with the reason. Unlike enforcementPending, they
 // have no Elythia-only input that upstream's paramDef rejects.
 var enforcementDeferred = map[string]string{
-	// 親 issue の方針どおり、admin/update-meta と一緒に最後の段で決める (#3667、
-	// #3851)。
-	"i/update": "decided with admin/update-meta in the last stage of #3667",
+	// i/update は #3886 で載せた。
 }
 
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
@@ -965,6 +963,29 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	restoreMeta := func() {
 		require.NoError(t, db.Exec(restoreMetaSQL, metaBefore[0]).Error)
 	}
+	// i/update の受理の入力は、利用者の user の列 (isLocked・isBot・name・
+	// avatarDecorations・makeNotes*Before など) を書き換える。seedI が置き直すのは
+	// user_profile だけなので、後に流れる入力の判定に効かないよう、i/* の入力ごとに
+	// 流す前の行へ戻す (#3886)。列は meta と同じく行の JSON から読み直す。
+	var userCols []string
+	require.NoError(t, db.Raw(`SELECT column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'user' AND column_name <> 'id' ORDER BY column_name`).Scan(&userCols).Error)
+	require.NotEmpty(t, userCols)
+	quotedUser := make([]string, len(userCols))
+	for i, c := range userCols {
+		quotedUser[i] = `"` + c + `"`
+	}
+	restoreUserSQL := `UPDATE "user" SET (` + strings.Join(quotedUser, ", ") + `) = (SELECT ` + strings.Join(quotedUser, ", ") +
+		` FROM json_populate_record(NULL::"user", ?::json)) WHERE id = ?`
+	readUser := func() string {
+		var rows []string
+		require.NoError(t, db.Raw(`SELECT row_to_json(u)::text FROM "user" u WHERE id = ?`, userID).Scan(&rows).Error)
+		require.Len(t, rows, 1)
+		return rows[0]
+	}
+	// userRewritten counts the i/update inputs that changed the user row, so
+	// that restoring it is not vacuous.
+	userRewritten := 0
 
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
@@ -992,6 +1013,17 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 
 	stricterSeen := map[string]int{}
+	effective, err := paramschema.Effective()
+	require.NoError(t, err)
+	// overlayAccepted counts the rejected corpus inputs that the overlays of
+	// elythia_overlays.json accept, by endpoint and upstream's first error.
+	overlayAccepted := map[string]int{}
+	var overlays map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(paramschema.ElythiaOverlays(), &overlays))
+	overlaid := map[string]bool{}
+	for ep := range overlays {
+		overlaid[ep] = true
+	}
 	// pausedQueues counts the queues the accepted admin/queue/pause inputs
 	// actually paused.
 	pausedQueues := 0
@@ -1080,10 +1112,23 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 				require.False(t, strings.HasPrefix(strings.ToLower(in.Inbox), "https://"), "corpus line %d: relays/add would follow %q", tc.line, in.Inbox)
 			}
 		}
+		var userBefore string
+		if isI {
+			userBefore = readUser()
+		}
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
 		if metaWriting {
 			restoreMeta()
+		}
+		if isI {
+			if readUser() != userBefore {
+				if tc.ep == "i/update" {
+					userRewritten++
+				}
+				require.NoError(t, db.Exec(restoreUserSQL, userBefore, userID).Error)
+				require.Equal(t, userBefore, readUser(), "the user row was not restored after %s (corpus line %d)", tc.ep, tc.line)
+			}
 		}
 		if tc.ep == "admin/update-proxy-account" {
 			require.NoError(t, db.Exec(`UPDATE user_profile SET description = ?
@@ -1232,13 +1277,46 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.NotEqual(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): ajv accepts it; body %s", name, tc.line, rec.Body.String())
 			continue
 		}
+		// 本家が拒否する値を Elythia が重ねる宣言 (elythia_overlays.json) で許して
+		// いれば、検証器は本家の 400 を返さない (#3886。i/update のデコレーションの
+		// id: "")。重ねた宣言でも拒否する入力は、本家と同じ最初のエラーになる。
+		if overlaid[tc.ep] {
+			// 数は json.Number のまま読む (検証器と同じ。1e400 を誤りにしない)。
+			dec := json.NewDecoder(bytes.NewReader(tc.in))
+			dec.UseNumber()
+			var data any
+			require.NoError(t, dec.Decode(&data), name)
+			// 本家の paramDef の判定が corpus と一致することを先に確かめる。確かめずに
+			// Effective の判定を期待値にすると、server と同じ Effective との比較になり、
+			// 重ねた宣言の誤りを見逃す。
+			if uerr := eps[tc.ep].Schema.Validate(data); assert.NotNil(t, uerr, name) {
+				assert.Equal(t, tc.path, uerr.SchemaPath, name)
+				assert.Equal(t, tc.msg, uerr.Message, name)
+			}
+			// 重ねた宣言が変えてよいのは、許すと決めた値だけ。許した入力は本家が拒否した
+			// 位置ごとに数え、ループの後で許すと決めた位置だけであることを確かめる。
+			verr := effective[tc.ep].Schema.Validate(data)
+			if verr == nil {
+				overlayAccepted[tc.ep+" "+tc.path]++
+				assert.False(t, env.Error.Code == "INVALID_PARAM" && env.Error.Info.Param != "",
+					"%s (corpus line %d): the overlay accepts it; body %s", name, tc.line, rec.Body.String())
+				continue
+			}
+			assert.Equal(t, tc.path, verr.SchemaPath, "%s (corpus line %d): the overlay changes upstream's first error", name, tc.line)
+		}
 		if assert.Equal(t, http.StatusBadRequest, rec.Code, "%s (corpus line %d)", name, tc.line) {
 			assert.Equal(t, "INVALID_PARAM", env.Error.Code, name)
 			assert.Equal(t, tc.path, env.Error.Info.Param, name)
 			assert.Equal(t, tc.msg, env.Error.Info.Reason, name)
 		}
 	}
+	// 重ねる宣言が本家の拒否する corpus の入力を許すのは、デコレーションの id: "" だけ。
+	// 許した入力が流れたこと (宣言が効いていること) を、本家が拒否した位置ごとに
+	// 確かめ、他の位置で許したら気付く。
+	assert.Equal(t, map[string]int{"i/update #/properties/avatarDecorations/items/properties/id/format": 1}, overlayAccepted,
+		"the rejected corpus inputs the overlays accept, by upstream's first error")
 	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
+	assert.Positive(t, userRewritten, "no accepted corpus input of i/update changed the user row")
 	// 診断の偽物が呼ばれた回数は、200 を返した受理の入力の数と一致する。偽物が
 	// 組み立てで使われていないと、本物が外へ取りに行き、回数は 0 になる。
 	assert.Positive(t, diagAccepted["admin/self-check"], "no accepted corpus input of admin/self-check ran the self-check")
