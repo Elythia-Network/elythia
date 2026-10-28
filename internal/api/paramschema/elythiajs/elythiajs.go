@@ -10,7 +10,10 @@
 // request types instead: each branch picks the member that requires the
 // branch's required properties, whose property names and required properties
 // are checked as above (the paramDef's plus the branch's), and the members
-// the branches pick must make up the whole union.
+// the branches pick must make up the whole union. A top-level if / then
+// (emoji-application/create, #3875) adds no check: a type cannot make a
+// property required on the value of another, so elythia-js leaves it
+// optional; the properties if and then name must be the paramDef's.
 // elythia-js's typecheck (the required frontend check) runs them; the tests
 // of this package keep the file current with the declarations (make
 // elythia-js-paramdefs rewrites it).
@@ -99,6 +102,9 @@ func Render(defs []byte) ([]byte, error) {
 				return nil, fmt.Errorf("elythiajs: %s: required %s is not a property", name, r)
 			}
 		}
+		if err := checkCondition(pd, props); err != nil {
+			return nil, fmt.Errorf("elythiajs: %s: %w", name, err)
+		}
 		ep := quote(name)
 		if len(pd.anyOf) == 0 {
 			fmt.Fprintf(&b, "\tCheck<Equal<Keys<Req<%s>>, %s>>,\n", ep, union(sorted(props)))
@@ -145,10 +151,14 @@ type paramDef struct {
 	properties map[string]json.RawMessage
 	required   []string
 	anyOf      []paramDef
+	// ifN and thenN are the top-level if / then; the checks only require that
+	// the properties they name are the paramDef's.
+	ifN, thenN *paramDef
 }
 
 // parseParamDef reads raw, refusing a keyword the checks would ignore: a
-// paramDef may only have type, properties, required and (at the top) anyOf.
+// paramDef may only have type, properties, required and (at the top) anyOf,
+// if and then.
 // 読まない語を黙って飛ばすと、型の検査がその語の分だけ何も確かめなくなる。
 func parseParamDef(raw map[string]json.RawMessage, top bool) (paramDef, error) {
 	var pd paramDef
@@ -172,6 +182,20 @@ func parseParamDef(raw map[string]json.RawMessage, top bool) (paramDef, error) {
 				}
 				pd.anyOf = append(pd.anyOf, p)
 			}
+		case (k == "if" || k == "then") && top:
+			var sub map[string]json.RawMessage
+			if err = json.Unmarshal(v, &sub); err != nil {
+				break
+			}
+			p, serr := parseParamDef(sub, false)
+			if serr != nil {
+				return pd, fmt.Errorf("%s: %w", k, serr)
+			}
+			if k == "if" {
+				pd.ifN = &p
+			} else {
+				pd.thenN = &p
+			}
 		default:
 			return pd, fmt.Errorf("%s is not supported", k)
 		}
@@ -180,6 +204,26 @@ func parseParamDef(raw map[string]json.RawMessage, top bool) (paramDef, error) {
 		}
 	}
 	return pd, nil
+}
+
+// checkCondition requires a top-level if to come with then (and the other way
+// round), and the properties both name to be the paramDef's.
+// 条件の側にしか無い項目は、elythia-jsの型にも無いので、型の検査をすり抜ける。
+func checkCondition(pd paramDef, props map[string]bool) error {
+	if (pd.ifN == nil) != (pd.thenN == nil) {
+		return errors.New("if and then must come together")
+	}
+	for kw, c := range map[string]*paramDef{"if": pd.ifN, "then": pd.thenN} {
+		if c == nil {
+			continue
+		}
+		for _, p := range append(sorted(propertySet(c.properties)), c.required...) {
+			if !props[p] {
+				return fmt.Errorf("%s: %s is not a property", kw, p)
+			}
+		}
+	}
+	return nil
 }
 
 // propertySet returns the names of the properties as a set.

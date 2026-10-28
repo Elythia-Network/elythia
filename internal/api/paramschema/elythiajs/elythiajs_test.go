@@ -74,6 +74,18 @@ func TestRenderAnyOf(t *testing.T) {
 	}, "\n")), string(b))
 }
 
+// 最上位の if / then は検査を足さない。条件つきの必須は型に書けないので、
+// elythia-js では省略できる項目のままになる (#3875)。
+func TestRenderIfThen(t *testing.T) {
+	b, err := Render([]byte(`{"endpoints":{
+		"e/c":{"paramDef":{"type":"object","properties":{"kind":{"type":"string"},"host":{"type":"string"}},"required":[],
+			"if":{"properties":{"kind":{"enum":["remote"]}},"required":["kind"]},"then":{"properties":{"host":{"minLength":1}},"required":["host"]}},"meta":{}}
+	}}`))
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(string(b), "\tCheck<Equal<Keys<Req<'e/c'>>, 'host' | 'kind'>>,\n\tCheck<Equal<RequiredKeys<Req<'e/c'>>, never>>,\n];\n"), string(b))
+	assert.True(t, strings.HasPrefix(string(b), header+checksHeader), "if / then needs none of the types for anyOf")
+}
+
 func TestRenderRefuses(t *testing.T) {
 	for _, tc := range []struct {
 		name, defs, want string
@@ -81,6 +93,13 @@ func TestRenderRefuses(t *testing.T) {
 		{"not JSON", `{`, "elythiajs:"},
 		{"no endpoints", `{"endpoints":{}}`, "no endpoints"},
 		{"required without a property", `{"endpoints":{"a":{"paramDef":{"properties":{"x":{}},"required":["y"]}}}}`, "required y is not a property"},
+		{"if without then", `{"endpoints":{"a":{"paramDef":{"properties":{"x":{}},"if":{"required":["x"]}}}}}`, "a: if and then must come together"},
+		{"then without if", `{"endpoints":{"a":{"paramDef":{"properties":{"x":{}},"then":{"required":["x"]}}}}}`, "a: if and then must come together"},
+		{"then naming no property", `{"endpoints":{"a":{"paramDef":{"properties":{"x":{}},"if":{"required":["x"]},"then":{"properties":{"y":{}}}}}}}`, "a: then: y is not a property"},
+		{"if requiring no property", `{"endpoints":{"a":{"paramDef":{"properties":{"x":{}},"if":{"required":["y"]},"then":{"required":["x"]}}}}}`, "a: if: y is not a property"},
+		{"malformed then", `{"endpoints":{"a":{"paramDef":{"if":{},"then":[]}}}}`, "a: then:"},
+		{"else", `{"endpoints":{"a":{"paramDef":{"else":{}}}}}`, "a: else is not supported"},
+		{"if in a condition", `{"endpoints":{"a":{"paramDef":{"if":{"if":{}},"then":{}}}}}`, "a: if: if is not supported"},
 		{"unsupported keyword", `{"endpoints":{"a":{"paramDef":{"properties":{},"oneOf":[]}}}}`, "a: oneOf is not supported"},
 		{"anyOf in a branch", `{"endpoints":{"a":{"paramDef":{"anyOf":[{"anyOf":[]}]}}}}`, "a: anyOf/0: anyOf is not supported"},
 		{"malformed properties", `{"endpoints":{"a":{"paramDef":{"properties":[]}}}}`, "a: properties:"},
