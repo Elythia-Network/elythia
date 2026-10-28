@@ -16,6 +16,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
@@ -29,6 +30,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/misc/langmap"
 	"github.com/elythia-network/elythia/internal/misc/password"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
@@ -1134,15 +1136,16 @@ func (h *Handler) me(c echo.Context, allowSecrets bool) error {
 // 各フィールドはポインタで「未指定なら変更しない」セマンティクスを持つ。
 // 文字列のnullable化はrawMessageでなくJSONで対応するため省略している。
 type UpdateRequest struct {
-	// Name / Birthday は「キー省略 = 不変」「null = クリア」「文字列 = 設定」を
-	// 区別する必要があるので RawMessage で受ける (*string だと省略と null が
-	// どちらも nil になる)。
+	// Name / Description / Location / Birthday / Lang / FollowedMessage は
+	// 「キー省略 = 不変」「null = クリア」「文字列 = 設定」を区別する必要が
+	// あるので RawMessage で受ける (*string だと省略と null がどちらも nil に
+	// なり、frontend が空欄を null で送っても消えなかった。#3886)。
 	Name              json.RawMessage `json:"name"`
-	Description       *string         `json:"description"`
-	Location          *string         `json:"location"`
+	Description       json.RawMessage `json:"description"`
+	Location          json.RawMessage `json:"location"`
 	Birthday          json.RawMessage `json:"birthday"`
-	Lang              *string         `json:"lang"`
-	FollowedMessage   *string         `json:"followedMessage"`
+	Lang              json.RawMessage `json:"lang"`
+	FollowedMessage   json.RawMessage `json:"followedMessage"`
 	PublicReactions   *bool           `json:"publicReactions"`
 	IsLocked          *bool           `json:"isLocked"`
 	IsBot             *bool           `json:"isBot"`
@@ -1172,9 +1175,6 @@ type UpdateRequest struct {
 	// privacy 上の drift だったため write を追加する。
 	FollowingVisibility *string `json:"followingVisibility"`
 	FollowersVisibility *string `json:"followersVisibility"`
-	// Room は frontend の「部屋」機能用の任意スキーマ jsonb。
-	// 本家も object をそのまま受け取って上書き保存する (部分マージはしない)。
-	Room json.RawMessage `json:"room"`
 	// AvatarID / BannerID — drive_file の ID。upstream は「キー省略は不変、
 	// null は CLEAR、文字列値は SET」なので json.RawMessage で 3 状態を
 	// 区別する (*string では省略と null が同じ nil になってしまう)。
@@ -1498,8 +1498,10 @@ func containsProhibitedWord(name string, words []string) bool {
 // parseNullableInt decodes a request json.RawMessage for an integer-nullable
 // i/update field into the **int 3-state convention used by user.UpdateInput
 // (#1546): absent (len 0) → (nil,false) no change; explicit null →
-// (&(*int)(nil),true) clear; integer value → (&&v,true) set. A non-integer,
-// non-null body is a bind error.
+// (&(*int)(nil),true) clear; integer value → (&&v,true) set. Integral numbers
+// written with a fraction or an exponent (10.0, 1e1) are integers, as
+// upstream's ajv `type: integer` judges them (#3886). A fraction (1.5) or a
+// non-number is a bind error.
 func parseNullableInt(raw json.RawMessage) (**int, bool, error) {
 	if len(raw) == 0 {
 		return nil, false, nil
@@ -1508,11 +1510,12 @@ func parseNullableInt(raw json.RawMessage) (**int, bool, error) {
 		var clear *int
 		return &clear, true, nil
 	}
-	var n int
+	var n jsnum.Int
 	if err := json.Unmarshal(raw, &n); err != nil {
 		return nil, false, err
 	}
-	p := &n
+	v := int(n)
+	p := &v
 	return &p, true, nil
 }
 
@@ -1526,8 +1529,7 @@ var errInvalidSeconds = errors.New("invalid seconds")
 // fraction or an exponent (2.0, 1e3), as upstream's ajv `type: integer` does,
 // and rejects 1.5.
 //
-// parseNullableInt は他の項目 (makeNotes*Before) と共有しているので、挙動を
-// 変えずに期間 (#3466) 専用のものを分けた。
+// parseNullableInt と違い、期間 (#3466) の範囲も見る。
 func parseNullableSeconds(raw json.RawMessage, maxSeconds int) (**int, bool, error) {
 	if len(raw) == 0 {
 		return nil, false, nil
@@ -1576,18 +1578,6 @@ func profileTextWithinLimit(s *string, max int) bool {
 	return colfit.Fits(*s, max)
 }
 
-// jsWhitespace mirrors the code points JavaScript's String.prototype.trim
-// removes (WhiteSpace + LineTerminator + BOM)。Go の strings.TrimSpace は
-// Unicode White_Space しか見ないので \ufeff が落ちず、本家と結果がずれる。
-const jsWhitespace = "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680" +
-	"\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a" +
-	"\u2028\u2029\u202f\u205f\u3000\ufeff"
-
-// trimJSWhitespace trims the same set of characters as JavaScript's trim().
-func trimJSWhitespace(s string) string {
-	return strings.Trim(s, jsWhitespace)
-}
-
 // decodeNullableString maps the 3 JSON states of a nullable string field onto
 // the core layer's `**string`. ok=false は「キー省略 = 不変」、返り値 nil は
 // 「null = クリア」、非 nil は「設定」。
@@ -1605,6 +1595,30 @@ func decodeNullableString(raw json.RawMessage) (*string, bool) {
 		return nil, false
 	}
 	return &v, true
+}
+
+// nullableStringParam decodes a nullable string param of i/update into the
+// core layer's `**string`: nil for an absent key (no change), a pointer to
+// nil for null (clear), and a pointer to the string otherwise. A value of
+// another type is an error.
+func nullableStringParam(raw json.RawMessage) (**string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var v *string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// deref returns the value nullableStringParam decoded, or nil for an absent
+// key or null.
+func deref(v **string) *string {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // driveIDUpdate decodes an avatarId / bannerId field into the core layer's
@@ -1644,7 +1658,7 @@ func (h *Handler) Update(c echo.Context) error {
 	// `string`) で、`core/user` が marshal し直してから jsonb へ渡すので、
 	// 判定も要素ごとに下で行う。手で持つ一覧の失敗形として 1 度漏らしている。
 	for _, raw := range []json.RawMessage{
-		req.Room, req.MutedWords, req.HardMutedWords,
+		req.MutedWords, req.HardMutedWords,
 		req.NotificationRecieveConfig, req.MutedInstances, req.EmailNotificationTypes,
 	} {
 		if !colfit.JSONStorable(raw) {
@@ -1658,16 +1672,23 @@ func (h *Handler) Update(c echo.Context) error {
 	// クリア要求として通すため検証は非空値のみに適用し、違反は INVALID_PARAM(400)。
 	nameValue, _ := decodeNullableString(req.Name)
 	birthdayValue, _ := decodeNullableString(req.Birthday)
+	description, errDescription := nullableStringParam(req.Description)
+	location, errLocation := nullableStringParam(req.Location)
+	lang, errLang := nullableStringParam(req.Lang)
+	followedMessage, errFollowedMessage := nullableStringParam(req.FollowedMessage)
+	if errors.Join(errDescription, errLocation, errLang, errFollowedMessage) != nil {
+		return apierr.JSONInvalidParam(c)
+	}
 	if !profileTextWithinLimit(nameValue, 50) ||
-		!profileTextWithinLimit(req.Description, 1500) ||
-		!profileTextWithinLimit(req.Location, 50) ||
-		!profileTextWithinLimit(req.FollowedMessage, 256) {
+		!profileTextWithinLimit(deref(description), 1500) ||
+		!profileTextWithinLimit(deref(location), 50) ||
+		!profileTextWithinLimit(deref(followedMessage), 256) {
 		return apierr.JSONInvalidParam(c)
 	}
 	if birthdayValue != nil && *birthdayValue != "" && !birthdayPattern.MatchString(*birthdayValue) {
 		return apierr.JSONInvalidParam(c)
 	}
-	if req.Lang != nil && *req.Lang != "" && !langmap.IsValid(*req.Lang) {
+	if l := deref(lang); l != nil && *l != "" && !langmap.IsValid(*l) {
 		return apierr.JSONInvalidParam(c)
 	}
 
@@ -1709,7 +1730,7 @@ func (h *Handler) Update(c echo.Context) error {
 		// upstream update.ts:280-287 と同じ: null はそのまま null、文字列は
 		// trim して空になったら null にする。
 		if name != nil {
-			trimmed := trimJSWhitespace(*name)
+			trimmed := jsstr.Trim(*name)
 			if trimmed == "" {
 				name = nil
 			} else {
@@ -1728,27 +1749,13 @@ func (h *Handler) Update(c echo.Context) error {
 		}
 		in.Name = &name
 	}
-	if req.Description != nil {
-		in.Description = &req.Description
-	}
-	if req.Location != nil {
-		in.Location = &req.Location
-	}
+	in.Description = description
+	in.Location = location
 	if birthday, ok := decodeNullableString(req.Birthday); ok {
 		in.Birthday = &birthday
 	}
-	if req.Lang != nil {
-		in.Lang = &req.Lang
-	}
-	if req.FollowedMessage != nil {
-		in.FollowedMessage = &req.FollowedMessage
-	}
-	if len(req.Room) > 0 {
-		// json.RawMessage は親の Unmarshal が構文チェック済みの
-		// バイト列を格納する。改変されないよう独自のスライスにコピーする。
-		room := append(json.RawMessage(nil), req.Room...)
-		in.Room = &room
-	}
+	in.Lang = lang
+	in.FollowedMessage = followedMessage
 	// ワードミュート (#787)。空 byte = field 未指定 (omit) なので不変。
 	// `[]` (= 2 byte の空配列) はクリア要求として通す。validation は配列形式
 	// であることだけ。upstream paramDef も内側構造は `array of (string |

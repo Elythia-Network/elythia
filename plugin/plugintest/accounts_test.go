@@ -11,6 +11,23 @@ import (
 	"github.com/elythia-network/elythia/plugin/plugintest"
 )
 
+// フェイクの UpdateProfile も、本番と同じく "" で表示名と自己紹介を未設定に
+// 戻す (#3886)。
+func TestAccounts_FakeClearsProfileTextWithEmptyString(t *testing.T) {
+	h := plugintest.New(t).WithName("bot")
+	acc := h.Context().Accounts()
+	ctx := context.Background()
+	mine, err := acc.Create(ctx, "mine")
+	require.NoError(t, err)
+	name, desc, empty := "Bot", "hello", ""
+	require.NoError(t, acc.UpdateProfile(ctx, mine.ID, plugin.ProfileUpdate{Name: &name, Description: &desc}))
+	require.NoError(t, acc.UpdateProfile(ctx, mine.ID, plugin.ProfileUpdate{Name: &empty, Description: &empty}))
+	all := h.ManagedAccounts()
+	require.Len(t, all, 1)
+	assert.Nil(t, all[0].Name)
+	assert.Nil(t, all[0].Description)
+}
+
 // フェイクの Accounts は、本番と同じ理由で拒否する (#3468)。他のプラグインの
 // アカウントは ErrAccountNotFound、形式の違う名前は ErrInvalidUsername、使用済み
 // (削除済みを含む) の名前は ErrUsernameUnavailable。

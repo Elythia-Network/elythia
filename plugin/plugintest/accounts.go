@@ -123,11 +123,12 @@ func (a *fakeAccounts) UpdateProfile(_ context.Context, userID string, p plugin.
 			return fmt.Errorf("plugintest: 画像が空です")
 		}
 	}
+	// "" は本番と同じく未設定 (nil) に戻す (#3886)。
 	if p.Name != nil {
-		acc.Name = p.Name
+		acc.Name = clearable(p.Name)
 	}
 	if p.Description != nil {
-		acc.Description = p.Description
+		acc.Description = clearable(p.Description)
 	}
 	if p.Avatar != nil {
 		acc.Avatar = p.Avatar
@@ -136,6 +137,15 @@ func (a *fakeAccounts) UpdateProfile(_ context.Context, userID string, p plugin.
 		acc.Banner = p.Banner
 	}
 	return nil
+}
+
+// clearable maps a pointer to "" to nil, as the host's i/update clears the
+// profile text for "".
+func clearable(v *string) *string {
+	if *v == "" {
+		return nil
+	}
+	return v
 }
 
 func (a *fakeAccounts) Delete(_ context.Context, userID string) error {

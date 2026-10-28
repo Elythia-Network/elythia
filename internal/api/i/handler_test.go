@@ -1429,6 +1429,79 @@ func TestUpdate_MakeNotesBeforeSetAndClear(t *testing.T) {
 	require.NotNil(t, repo.Users["user1"].MakeNotesHiddenBefore)
 }
 
+// makeNotes*Before are `type: integer` in upstream's paramDef, and ajv takes
+// an integral number written with a fraction or an exponent as an integer
+// (#3886).
+func TestUpdate_MakeNotesBeforeAcceptsIntegerForms(t *testing.T) {
+	h, repo, _, _ := newTestHandler(t)
+	user := newProfileUser(repo)
+	rec := post(h.Update, `{"makeNotesFollowersOnlyBefore":1700000000.0,"makeNotesHiddenBefore":17e8}`, user)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, repo.Users["user1"].MakeNotesFollowersOnlyBefore)
+	assert.Equal(t, 1700000000, *repo.Users["user1"].MakeNotesFollowersOnlyBefore)
+	require.NotNil(t, repo.Users["user1"].MakeNotesHiddenBefore)
+	assert.Equal(t, 1700000000, *repo.Users["user1"].MakeNotesHiddenBefore)
+
+	for _, body := range []string{`{"makeNotesFollowersOnlyBefore":1.5}`, `{"makeNotesHiddenBefore":"1"}`} {
+		rec := post(h.Update, body, user)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}
+
+// The display name is trimmed like JavaScript's String.prototype.trim, as
+// upstream's i/update does: U+FEFF is whitespace and U+0085 is not (#3886).
+func TestUpdate_NameTrimmedLikeJavaScript(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want *string
+	}{
+		{name: "bom trimmed", body: `{"name":"\ufeffb\ufeff"}`, want: strPtr("b")},
+		{name: "nel kept", body: `{"name":"\u0085a\u0085"}`, want: strPtr("\u0085a\u0085")},
+		{name: "nel only is a name", body: `{"name":"\u0085"}`, want: strPtr("\u0085")},
+		{name: "spaces only clears", body: `{"name":"\u3000\ufeff "}`, want: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo, _, _ := newTestHandler(t)
+			user := newProfileUser(repo)
+			before := "before"
+			repo.Users["user1"].Name = &before
+			rec := post(h.Update, tc.body, user)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tc.want, repo.Users["user1"].Name)
+		})
+	}
+}
+
+// null clears description, location, followedMessage and lang, as upstream
+// does; the bundled frontend sends null for an emptied field. An omitted key
+// leaves the value as it is (#3886).
+func TestUpdate_ProfileTextsClearedByNull(t *testing.T) {
+	h, repo, _, _ := newTestHandler(t)
+	user := newProfileUser(repo)
+	p := repo.Profiles["user1"]
+	p.Description, p.Location, p.FollowedMessage, p.Lang = strPtr("bio"), strPtr("here"), strPtr("thanks"), strPtr("ja")
+
+	rec := post(h.Update, `{"description":null,"location":null}`, user)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	p = repo.Profiles["user1"]
+	assert.Nil(t, p.Description)
+	assert.Nil(t, p.Location)
+	assert.Equal(t, strPtr("thanks"), p.FollowedMessage)
+	assert.Equal(t, strPtr("ja"), p.Lang)
+
+	rec = post(h.Update, `{"followedMessage":null,"lang":null}`, user)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	p = repo.Profiles["user1"]
+	assert.Nil(t, p.FollowedMessage)
+	assert.Nil(t, p.Lang)
+
+	for _, body := range []string{`{"description":1}`, `{"location":true}`, `{"lang":[]}`, `{"followedMessage":{}}`} {
+		rec := post(h.Update, body, user)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}
+
 func TestUpdate_PinnedPageOwned(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := newProfileUser(repo)
@@ -1622,7 +1695,10 @@ func TestUpdate_InternalError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-func TestUpdate_RoomAccepted(t *testing.T) {
+// room is not a param of upstream's i/update and nothing reads it, so the
+// handler ignores it like any unknown key instead of writing the column
+// (#3886).
+func TestUpdate_RoomIsNotWritten(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{
 		ID:                "user1",
@@ -1630,18 +1706,22 @@ func TestUpdate_RoomAccepted(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 	repo.Users["user1"] = user
-	repo.Profiles["user1"] = &model.UserProfile{UserID: "user1", Fields: datatypes.JSON([]byte("[]"))}
+	repo.Profiles["user1"] = &model.UserProfile{
+		UserID: "user1",
+		Room:   datatypes.JSON([]byte(`{"keep":true}`)),
+		Fields: datatypes.JSON([]byte("[]")),
+	}
 
-	rec := post(h.Update, `{"room":{"furnitures":[{"id":"bed1"}],"seed":42}}`, user)
-	assert.Equal(t, http.StatusOK, rec.Code)
+	rec := post(h.Update, `{"room":{"furnitures":[{"id":"bed1"}],"seed":42},"name":"renamed"}`, user)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	// profile 側に反映されていること。
 	got := repo.Profiles["user1"]
 	require.NotNil(t, got)
-	assert.JSONEq(t, `{"furnitures":[{"id":"bed1"}],"seed":42}`, string(got.Room))
+	assert.JSONEq(t, `{"keep":true}`, string(got.Room))
+	assert.Equal(t, "renamed", *repo.Users["user1"].Name)
 }
 
-func TestUpdate_RoomMalformedOuterJSONRejected(t *testing.T) {
+func TestUpdate_MalformedJSONRejected(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := &model.User{
 		ID:                "user1",
@@ -2931,7 +3011,6 @@ func TestRegistryRejectsUnstorableKeyAndDomain(t *testing.T) {
 func TestUpdate_UnstorableJSONBFieldsAre400(t *testing.T) {
 	esc := `\u0000`
 	for name, body := range map[string]string{
-		"room":                      `{"room":{"a":"x` + esc + `y"}}`,
 		"mutedWords":                `[["x` + esc + `y"]]`,
 		"notificationRecieveConfig": `{"notificationRecieveConfig":{"x` + esc + `y":{"type":"all"}}}`,
 		"mutedInstances":            `{"mutedInstances":["x` + esc + `y"]}`,
@@ -2955,7 +3034,7 @@ func TestUpdate_UnstorableJSONBFieldsAre400(t *testing.T) {
 func TestUpdate_OrdinaryJSONBFieldsStillPass(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	user := updateUser(repo)
-	rec := post(h.Update, `{"room":{"あ":"絵文字"},"mutedInstances":["example.com"]}`, user)
+	rec := post(h.Update, `{"mutedWords":[["絵文字"]],"mutedInstances":["example.com"]}`, user)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
 

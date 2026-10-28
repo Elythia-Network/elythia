@@ -516,9 +516,6 @@ type UpdateInput struct {
 	// (Misskey TS と同じ enum)。enum 検証は呼び出し側 (api/i ハンドラ) で行う。
 	FollowingVisibility *string
 	FollowersVisibility *string
-	// Room は jsonb 列に書き込む生バイト列。nil の場合は更新しない。
-	// 呼び出し側で JSON として妥当であることを保証する必要がある。
-	Room *json.RawMessage
 	// AvatarID / BannerID は drive_file の ID。
 	//   nil       → 不変 (no change)
 	//   &"<id>"   → SET (drive_file 行を引いて所有権 + image MIME 検証)
@@ -718,12 +715,9 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 	if in.FollowersVisibility != nil {
 		profileFields["followersVisibility"] = *in.FollowersVisibility
 	}
-	if in.Room != nil {
+	if in.MutedWords != nil {
 		// GORM は map で渡された値を jsonb 列に直接書き込む。
 		// []byte を渡すと bytea 扱いされてしまうので string にキャストする。
-		profileFields["room"] = string(*in.Room)
-	}
-	if in.MutedWords != nil {
 		profileFields["mutedWords"] = string(*in.MutedWords)
 	}
 	if in.HardMutedWords != nil {
@@ -731,7 +725,7 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 	}
 	if in.AvatarDecorations != nil {
 		// avatarDecorations は user (not user_profile) 側の jsonb 列。
-		// Room と同じく []byte ではなく string で渡して bytea 化を防ぐ。
+		// mutedWords と同じく []byte ではなく string で渡して bytea 化を防ぐ。
 		userFields["avatarDecorations"] = string(*in.AvatarDecorations)
 	}
 	var newFields []FieldItem
@@ -767,7 +761,7 @@ func (s *Service) UpdateProfile(userID string, in UpdateInput) (*UserWithProfile
 			userFields["alsoKnownAs"] = strings.Join(*in.AlsoKnownAs, ",")
 		}
 	}
-	// #1546 i/update 残り field。jsonb 列は Room と同じく string キャストで
+	// #1546 i/update 残り field。jsonb 列は mutedWords と同じく string キャストで
 	// bytea 化を防ぐ。
 	if in.NotificationRecieveConfig != nil {
 		profileFields["notificationRecieveConfig"] = string(*in.NotificationRecieveConfig)
