@@ -195,8 +195,8 @@ type fixture struct {
 func dumpBytes() []byte { return []byte("0123456789abcdef") }
 
 // newFixture builds an echo app with the admin/backup routes. guardOnly
-// leaves out RequireAdmin / RequireSecure to show that the guard alone keeps
-// every endpoint closed.
+// leaves out RequireAdmin / RequireSecure to show that the re-authentication
+// in the handlers alone keeps every endpoint closed.
 func newFixture(t *testing.T, guardOnly bool) *fixture {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -248,17 +248,19 @@ func newFixture(t *testing.T, guardOnly bool) *fixture {
 			return next(c)
 		}
 	}
-	chain := []echo.MiddlewareFunc{setUser, middleware.RequireAdmin(roles{}), middleware.RequireSecure(), hd.Guard()}
-	pre := []echo.MiddlewareFunc{setUser, middleware.RequireAdmin(roles{}), middleware.RequireSecure()}
+	// 再認証は handler の中で行う (#3878)。guardOnly は route の middleware を付けず、
+	// handler の中の再認証だけで全条件を断ることを確かめる。
+	chain := []echo.MiddlewareFunc{setUser, middleware.RequireAdmin(roles{}), middleware.RequireSecure()}
 	if guardOnly {
-		chain = []echo.MiddlewareFunc{setUser, hd.Guard()}
-		pre = []echo.MiddlewareFunc{setUser}
+		chain = []echo.MiddlewareFunc{setUser}
 	}
+	pre := chain
 	e.POST("/api/admin/backup/list", hd.List, chain...)
 	e.POST("/api/admin/backup/take", hd.Take, chain...)
 	e.POST("/api/admin/backup/verify", hd.Verify, chain...)
 	e.POST("/api/admin/backup/delete", hd.Delete, chain...)
 	e.POST("/api/admin/backup/download", hd.Download, chain...)
+	e.POST("/api/admin/backup/restore/candidates", hd.RestoreCandidates, chain...)
 	e.POST("/api/admin/backup/reauth-challenge", hd.ReauthChallenge, pre...)
 	e.GET("/backup-download", hd.ServeDownload)
 	return &fixture{e: e, storage: st, control: ctl, log: lg, secret: secret, keys: k, tokens: tokens}
@@ -510,6 +512,25 @@ func TestServeDownload(t *testing.T) {
 	f.storage.getErr = nil
 	delete(f.storage.objs, backup.Key(gen1, backup.DumpFile))
 	assert.Equal(t, http.StatusNotFound, get("/backup-download?token="+tok).Code)
+}
+
+// TestRestoreCandidatesReauthenticates checks that the listing of the kept
+// databases re-authenticates in the handler (#3878): it reaches the backup
+// service only with the full re-authentication.
+func TestRestoreCandidatesReauthenticates(t *testing.T) {
+	const path = "/api/admin/backup/restore/candidates"
+	for _, guardOnly := range []bool{false, true} {
+		f := newFixture(t, guardOnly)
+		rec := f.post(t, path, native(adminID), map[string]any{"password": password})
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.Equal(t, "REAUTHENTICATION_REQUIRED", errCode(t, rec))
+		rec = f.post(t, path, native(no2faID), map[string]any{"password": password, "token": "123456"})
+		assert.Equal(t, "TWO_FACTOR_REQUIRED", errCode(t, rec))
+		// 再認証を通ると転送の段まで届く (このfixtureにはバックアップ用のサービスが無い)。
+		rec = f.post(t, path, native(adminID), map[string]any{"password": password, "token": f.code(t)})
+		assert.Equal(t, "BACKUP_SERVICE_NOT_CONFIGURED", errCode(t, rec))
+		assert.Empty(t, f.log.entries)
+	}
 }
 
 func TestReauthChallenge(t *testing.T) {

@@ -28,7 +28,7 @@ const RestorePathPrefix = "/api/admin/backup/restore/"
 var RestoreOps = []string{"prepare", "confirm", "abort", "status", "candidates"}
 
 // opCandidates lists the kept databases. The server re-authenticates it
-// (backupGuard) like admin/backup/list, so only the session token is sent.
+// like admin/backup/list, so only the session token is sent.
 const opCandidates = "candidates"
 
 // ServiceAuthChallenge is the WWW-Authenticate the backup service sends when
@@ -136,7 +136,7 @@ func (f *Forwarder) Serve(w http.ResponseWriter, r *http.Request, op, clientIP s
 		}
 	}
 	if op == opCandidates {
-		// 一覧は本体の backupGuard で照合済み。パスワードとコードを daemon へ渡さない
+		// 一覧は本体の再認証 (guarded) で照合済み。パスワードとコードを daemon へ渡さない
 		// (daemon は使わない)。
 		fields = map[string]json.RawMessage{"i": fields["i"]}
 		if fields["i"] == nil {
@@ -231,12 +231,17 @@ func (h *Handler) RestoreConfirm(c echo.Context) error { return h.restore(c, "co
 // RestoreAbort handles POST /api/admin/backup/restore/abort.
 func (h *Handler) RestoreAbort(c echo.Context) error { return h.restore(c, "abort") }
 
-// RestoreCandidates handles POST /api/admin/backup/restore/candidates.
+// RestoreCandidates handles POST /api/admin/backup/restore/candidates, after
+// the re-authentication.
 //
 // 一覧 (admin/backup/list の listBackups) と同じく、閲覧も記録する。退避した DB には
 // 利用者の秘密鍵などがそのまま入っており、その名前と大きさを誰がいつ見たかを追える
 // ようにする。成立した (daemon が 200 を返した) ときだけ書く。
 func (h *Handler) RestoreCandidates(c echo.Context) error {
+	return h.guarded(c, h.restoreCandidates)
+}
+
+func (h *Handler) restoreCandidates(c echo.Context) error {
 	cw := &capturedResponse{header: http.Header{}, status: http.StatusOK}
 	h.forwarder.Serve(cw, c.Request(), opCandidates, c.RealIP())
 	if cw.status == http.StatusOK {

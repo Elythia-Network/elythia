@@ -3526,9 +3526,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// DB のバックアップの管理画面 (#3462、Elythia 独自)。閲覧を含む全ての操作に、
 	// 管理者・ブラウザでログインした token・2FA かパスキーの登録・操作ごとの
 	// 再認証を課す (strongauth)。RequireAdmin / RequireSecure は gate が読む
-	// 目印でもあり、backupGuard が同じ条件をもう一度見る (付け忘れても閉じる)。
-	// reauth-challenge はパスキーの challenge を出すだけの前段なので、再認証は
-	// 課さず、それ以外の条件を handler の中で見る。
+	// 目印でもあり、handler の中の再認証が同じ条件をもう一度見る (付け忘れても閉じる)。
+	// 再認証は route の middleware でなく handler の中で行い、引数の検証より後に
+	// 走らせる (#3878)。reauth-challenge はパスキーの challenge を出すだけの前段
+	// なので、再認証は課さず、それ以外の条件を handler の中で見る。
 	backupVerifierDeps := strongauth.Deps{
 		Roles:    roleService,
 		Profiles: userService,
@@ -3544,9 +3545,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		panic("admin/backup: " + err.Error())
 	}
 	backupHandler := adminbackup.NewHandler(newBackupAdminService(s.config, s.redis.Default), backupVerifier, modLogService)
-	backupGuard := backupHandler.Guard()
-	// 画面からのリストア (#3463 (6c)) は daemon へ転送する。再認証 (backupGuard) は
-	// 付けない。付けると TOTP のコードを本体と daemon で二重に消費して落ちる。再認証を
+	// 画面からのリストア (#3463 (6c)) は daemon へ転送し、本体では再認証しない。本体でも
+	// 再認証すると、TOTP のコードを本体と daemon で二重に消費して落ちる。再認証を
 	// 含む全条件は daemon が DB を見て照合する。管理者と native token の確認は、本体が
 	// 動いている間の前段として残す (メンテナンス中は maintmode が転送するので通らない)。
 	backupHandler.SetForwarder(newRestoreForwarder(s.config))
@@ -3683,7 +3683,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registerChartsRoutes(api, chartsHandler)
 	registerRolesRoutes(api, rolesHandler)
 	registerAnnouncementsRoutes(api, announcementHandler)
-	registerAdminRoutes(api, adminHandler, announcementHandler, backupHandler, roleService, backupGuard)
+	registerAdminRoutes(api, adminHandler, announcementHandler, backupHandler, roleService)
 	registerGamesRoutes(api, reversiHandler, bubbleGameHandler, bubbleVersusHandler)
 	registerChatRoutes(api, chatHandler, roleService)
 	registerFetchRoutes(api, fetchExternalHandler, fetchRSSHandler)

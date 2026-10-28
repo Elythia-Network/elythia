@@ -44,10 +44,6 @@ func NewHandler(svc *backupadmin.Service, verifier *strongauth.Verifier, modlog 
 	return &Handler{svc: svc, verifier: verifier, modlog: modlog}
 }
 
-// Guard returns the strong authentication middleware for every
-// admin/backup/* route except ReauthChallenge.
-func (h *Handler) Guard() echo.MiddlewareFunc { return Guard(h.verifier) }
-
 // log records a moderation log. 操作が成立してから呼ぶ。
 func (h *Handler) log(c echo.Context, t moderationlog.LogType, info map[string]any) {
 	if h.modlog == nil {
@@ -103,8 +99,10 @@ func bindID(c echo.Context) (string, bool) {
 	return req.ID, true
 }
 
-// List handles POST /api/admin/backup/list.
-func (h *Handler) List(c echo.Context) error {
+// List handles POST /api/admin/backup/list, after the re-authentication.
+func (h *Handler) List(c echo.Context) error { return h.guarded(c, h.list) }
+
+func (h *Handler) list(c echo.Context) error {
 	ov, err := h.svc.List(c.Request().Context())
 	if err != nil {
 		return serviceError(c, "list", err)
@@ -118,8 +116,10 @@ func (h *Handler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, ov)
 }
 
-// Take handles POST /api/admin/backup/take.
-func (h *Handler) Take(c echo.Context) error {
+// Take handles POST /api/admin/backup/take, after the re-authentication.
+func (h *Handler) Take(c echo.Context) error { return h.guarded(c, h.take) }
+
+func (h *Handler) take(c echo.Context) error {
 	job, err := h.svc.Take(c.Request().Context(), c.RealIP())
 	if err != nil {
 		return serviceError(c, "take", err)
@@ -128,8 +128,10 @@ func (h *Handler) Take(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"accepted": true, "job": job})
 }
 
-// Verify handles POST /api/admin/backup/verify.
-func (h *Handler) Verify(c echo.Context) error {
+// Verify handles POST /api/admin/backup/verify, after the re-authentication.
+func (h *Handler) Verify(c echo.Context) error { return h.guarded(c, h.verify) }
+
+func (h *Handler) verify(c echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -142,8 +144,10 @@ func (h *Handler) Verify(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"accepted": true, "job": job})
 }
 
-// Delete handles POST /api/admin/backup/delete.
-func (h *Handler) Delete(c echo.Context) error {
+// Delete handles POST /api/admin/backup/delete, after the re-authentication.
+func (h *Handler) Delete(c echo.Context) error { return h.guarded(c, h.delete) }
+
+func (h *Handler) delete(c echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -161,8 +165,10 @@ func (h *Handler) Delete(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"freedBytes": freed})
 }
 
-// Download handles POST /api/admin/backup/download.
-func (h *Handler) Download(c echo.Context) error {
+// Download handles POST /api/admin/backup/download, after the re-authentication.
+func (h *Handler) Download(c echo.Context) error { return h.guarded(c, h.download) }
+
+func (h *Handler) download(c echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)

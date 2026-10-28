@@ -120,7 +120,8 @@ func TestRestoreCandidates_LogsTheListing(t *testing.T) {
 		c := e.NewContext(req, rec)
 		tok := "usertoken0000001"
 		c.Set(string(middleware.UserContextKey), &model.User{ID: "admin1", Token: &tok})
-		require.NoError(t, h.RestoreCandidates(c))
+		// 再認証 (guarded) の後の段を見る。再認証は TestRestoreCandidatesReauthenticates が見る。
+		require.NoError(t, h.restoreCandidates(c))
 		return rec, lg
 	}
 	body := `{"database":"app","databases":[{"name":"app_before_restore_20261001000000"},{"name":"app_rolled_back_20261002000000"}]}`
