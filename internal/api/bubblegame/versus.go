@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/bubbleversus"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
@@ -276,19 +277,20 @@ func (h *VersusHandler) Cancel(c echo.Context) error {
 func (h *VersusHandler) Report(c echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
-		MatchID string  `json:"matchId"`
-		Score   int64   `json:"score"`
-		Frame   int64   `json:"frame"`
-		Reason  string  `json:"reason"`
-		Logs    [][]any `json:"logs"`
+		MatchID string `json:"matchId"`
+		// 本家のajvと同じく、整数を小数の形で書いた値(10.0)も受ける(#3875)。
+		Score  jsnum.Int `json:"score"`
+		Frame  jsnum.Int `json:"frame"`
+		Reason string    `json:"reason"`
+		Logs   [][]any   `json:"logs"`
 		// エンジンの版 (#3232)。古いクライアントは送らないので省略できる。
-		GameVersion *int `json:"gameVersion"`
+		GameVersion *jsnum.Int `json:"gameVersion"`
 	}
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
 		return err
 	}
 	m, err := h.svc.SubmitReport(c.Request().Context(), me.ID, req.MatchID, bubbleversus.Report{
-		Score: req.Score, Frame: req.Frame, Reason: req.Reason, Logs: req.Logs, GameVersion: req.GameVersion,
+		Score: int64(req.Score), Frame: int64(req.Frame), Reason: req.Reason, Logs: req.Logs, GameVersion: req.GameVersion.IntPtr(),
 	})
 	if err != nil {
 		return h.fail(c, err)
