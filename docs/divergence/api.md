@@ -233,6 +233,18 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 
 ゲームの規則で決まる値 (`bubble-game/versus/invite`の`gameMode`、`report`の`reason`と`score`・`frame`・`logs`の範囲) と絵文字の名前は、宣言に値の一覧や範囲を写さず、以前どおりhandlerが専用のエラー (`INVALID_GAME_MODE`・`INVALID_REPORT`・`INVALID_EMOJI_NAME`) で拒否する。宣言に写すと、ゲームのエンジンや名前の規則と二重になる。宣言を通っても、以前どおりhandlerが400 (`info`無し) にする入力が残る。空白だけの値 (`admin/emoji-application/reset-user-quota`の`reason`、`kind`が`remote`の`emoji-application/create`の`remoteHost`・`remoteName`)、空白だけの値やhostとして読めない値 (`https://`・`/`など) の`host` (`admin/federation/close-delivery-breaker`・`clean-gone-instance`)、メールを必須にした構成の`signup-application/register`での`emailAddress`の欠けと空文字 (構成で決まる必須なので宣言に書けない)、int64に収まらない整数 (`bubble-game/versus/report`の`score`・`frame`・`gameVersion`) が当たる。範囲の外の`gameVersion` (1未満と2^20を超える値) は、以前どおり`INVALID_REPORT`になる。前後の空白を落とすと長すぎる値も、以前どおりhandlerが専用のエラーで拒否する。
 
+4段目 (#3877) は、連合のルールの`admin/federation/rules/create`・`update`・`delete`と、外向きの通信のある`admin/federation/check-host`・`admin/self-check`・`admin/emoji/fetch-remote-meta`の6件。ルールの宣言には形 (型・null・必須・`ruleId`の`misskey:id`・`mode`と`target`のenum) だけを書き、正規化した後に数える件数と長さ、条件と動作の有無などの意味の検査はhandlerに残した。`fetch-remote-meta`は`emojiId`か、`name`と`host`の両方を要求する (`anyOf`)。次の差が変わった。
+- 連合のルールの`create`・`update`の意味の誤り (長すぎる`name`、範囲の外の`position`・`newWithinHours`、知らない`activityTypes`、条件や動作の無いルールなど) は、400 `INVALID_RULE` (id `0bccabbe-44ed-4976-83dc-5867b317cb1e`) になる。以前は400 `INVALID_PARAM` (id `8efb928f-23d5-4af2-8459-e0b2e6c72e3c`、`info`無し) だった。messageは以前と同じ`Invalid rule: <項目>: <理由>`で、同梱のfrontendは`INVALID_PARAM`には決まった文言を出すので、以前は出ていなかった誤りの中身がダイアログに出るようになる
+- `misskey:id`の形でない`ruleId`は400になる。以前は、空の`ruleId`は400 (`info`無し)、それ以外は400 `NO_SUCH_RULE`だった。`update`では本文の意味の検査が`ruleId`の検索より先に走るので、本文に誤りがあれば以前も`INVALID_PARAM` (`Invalid rule: ...`) が先だった
+- `mode`・`target`の欠けと知らない値は、`info`付きの400になる。以前も400 `INVALID_PARAM`だったが`info`が無かった
+- `null`は400になる。以前は省略と同じだった (連合のルールの`position: null`は0、`name: null`は空の名前、`admin/federation/check-host`の`account: null`は`account`無し、`admin/emoji/fetch-remote-meta`の`emojiId: null`は`name`と`host`で引く)。配列の要素の`null` (`hosts: [null]`など) も400になる。以前は空の要素として捨てていた。例外は連合のルールの`isBot`・`newWithinHours`・`hasAttachment`・`cw`で、同梱のfrontendが「問わない」の意味で`null`を送るので許す
+- 整数を小数の形で書いた値 (`10.0`) は、`position`・`newWithinHours`でも整数として受ける。以前は400だった
+- `admin/federation/check-host`の空の`host`は`info`付きの400になる。以前も400 `INVALID_PARAM` (id `345fdd87-c6e3-46ad-b768-1c08eebd726e`、`info`無し) だった
+- `admin/emoji/fetch-remote-meta`の`emojiId`の空文字と、`misskey:id`の形でない`emojiId`は400になる。以前は、空文字は省略と同じ、形の違う値は400 `NO_SUCH_EMOJI`だった。`emojiId`と一緒に送った空の`name`・`host`も400になる。以前は`emojiId`が勝つので読まなかった。`emojiId`も、`name`と`host`の両方も無いときは`info`付きの400になる。以前も400 `INVALID_PARAM`だったが`info`が無かった
+- 引数の検証がhandlerより先に走るので、宣言から外れる値は、権限の検査の後、handlerの応答より先に400になる。`admin/federation/check-host`では、自ホストを指す`host`の`CANNOT_CHECK_SELF`より先に当たる
+
+宣言を通っても、以前どおりhandlerが拒否する入力が残る。連合のルールの意味の誤り (上の`INVALID_RULE`)、`admin/federation/check-host`の空白だけの`host`とhostとして読めない`host` (400 `INVALID_PARAM`、`info`無し)、別のhostを指す`account`や名前として読めない`account` (`INVALID_ACCOUNT`)、int64に収まらない整数の`position`・`newWithinHours` (400 `INVALID_PARAM`、id `8efb928f-23d5-4af2-8459-e0b2e6c72e3c`、`info`無し) が当たる。`admin/emoji/fetch-remote-meta`の`name`・`host`は前後の空白を落とさずに読むので、空白だけの値は見つからない応答 (`NO_SUCH_EMOJI`) になる。`admin/self-check`は引数を読まないので、応答は変わらない。objectでない本文は、以前から本家と同じ`info` (`#/type`) 付きの400になっていた。
+
 ### 1-1b. レスポンスの additive field
 
 | endpoint | field | 内容 |
