@@ -45,7 +45,8 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // reversi/match in #3865, with the values Elythia accepts on top of upstream's
 // paramDef overlaid (paramschema.Effective)), and the endpoints Elythia has
 // and upstream does not, with their paramDef from elythia_paramdefs.json: the
-// read-only ones without outgoing requests in #3869.
+// read-only ones without outgoing requests in #3869, and Elythia's own chat/*
+// endpoints and drive/files/create-chunked/* except append in #3872.
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -518,6 +519,24 @@ var paramEnforcedEndpoints = []string{
 	"bubble-game/versus/history",
 	"bubble-game/versus/record",
 	"signup-application/status",
+	"chat/messages",
+	"chat/messages/create",
+	"chat/messages/reactions/create",
+	"chat/messages/reactions/delete",
+	"chat/messages/read",
+	"chat/messages/update",
+	"chat/rooms/invitations/accept",
+	"chat/rooms/invitations/delete",
+	"chat/rooms/invitations/reject",
+	"chat/rooms/joined",
+	"chat/rooms/members/ban",
+	"chat/rooms/members/update-membership",
+	"chat/rooms/transfer-ownership",
+	"chat/rooms/unmute",
+	"chat/unread-count",
+	"drive/files/create-chunked/start",
+	"drive/files/create-chunked/finish",
+	"drive/files/create-chunked/abort",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

@@ -332,3 +332,64 @@ func checkCase(t *testing.T, s *Schema, c corpusCase, data any) string {
 	}
 	return ""
 }
+
+// TestElythiaCorpusAcceptsEveryAnyOfBranch requires, for each branch of a
+// top-level anyOf in elythia_paramdefs.json, an accepted case that has the
+// branch's required properties and misses one of every other branch.
+// 分岐を1つしか通らないcorpusでは、2つ目以降の分岐を通る入力が、検証器とも
+// handlerとも一度も照合されない(#3872のchat/messages/createのtoRoomId)。
+func TestElythiaCorpusAcceptsEveryAnyOfBranch(t *testing.T) {
+	_, _, cases := readCorpusFile(t, elythiaCorpusFile)
+	branches := 0
+	for name, raw := range readElythiaParamDefs(t) {
+		var pd struct {
+			AnyOf []struct {
+				Required []string `json:"required"`
+			} `json:"anyOf"`
+		}
+		if err := json.Unmarshal(raw, &pd); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for i, br := range pd.AnyOf {
+			branches++
+			found := false
+			for _, c := range cases {
+				var in map[string]any
+				if c.ep != name || c.OK == nil || !*c.OK || json.Unmarshal(c.In, &in) != nil {
+					continue
+				}
+				if hasAll(in, br.Required) && missesOneOfEveryOther(in, pd.AnyOf, i) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s: no accepted case takes only anyOf/%d (fix tools/paramdefspec/corpus.mjs)", name, i)
+			}
+		}
+	}
+	// 宣言にanyOfが無くなったら、この検査は何も見ない。
+	if branches == 0 {
+		t.Error("no anyOf in elythia_paramdefs.json; drop this test")
+	}
+}
+
+func hasAll(in map[string]any, keys []string) bool {
+	for _, k := range keys {
+		if _, ok := in[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func missesOneOfEveryOther(in map[string]any, branches []struct {
+	Required []string `json:"required"`
+}, self int) bool {
+	for j, br := range branches {
+		if j != self && hasAll(in, br.Required) {
+			return false
+		}
+	}
+	return true
+}
