@@ -138,6 +138,33 @@ func TestFederationRules_CreateListUpdateDelete(t *testing.T) {
 	assert.Equal(t, "ads2", types["deleteFederationRule"]["ruleName"])
 }
 
+func TestFederationRules_AcceptsIntegerForms(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	m, repo, _ := newRuleManager(t)
+	h.SetFederationRuleManager(m)
+
+	rec := doPost(h.FederationRuleCreate, `{"mode":"record","target":"note","position":10.0,
+		"newWithinHours":2.4e1,"hosts":["spam.example"],"reject":true}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, repo.rules, 1)
+	assert.Equal(t, 10, repo.rules[0].Position)
+	require.NotNil(t, repo.rules[0].NewWithinHours)
+	assert.Equal(t, 24, *repo.rules[0].NewWithinHours)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	assert.EqualValues(t, 10, created["position"])
+	assert.EqualValues(t, 24, created["newWithinHours"])
+
+	rec = doPost(h.FederationRuleUpdate, `{"ruleId":"`+repo.rules[0].ID+`","mode":"record","target":"note",
+		"position":3.0,"newWithinHours":null,"hosts":["spam.example"],"reject":true}`, adminUser)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 3, repo.rules[0].Position)
+	assert.Nil(t, repo.rules[0].NewWithinHours)
+
+	rec = doPost(h.FederationRuleCreate, `{"mode":"record","target":"note","position":1.5,"hosts":["spam.example"],"reject":true}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestFederationRules_Errors(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 
@@ -153,7 +180,8 @@ func TestFederationRules_Errors(t *testing.T) {
 	h.SetFederationRuleManager(m)
 	rec = doPost(h.FederationRuleCreate, `{"mode":"enforce","target":"note","reject":true}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+	assert.Contains(t, rec.Body.String(), "INVALID_RULE")
+	assert.Contains(t, rec.Body.String(), "0bccabbe-44ed-4976-83dc-5867b317cb1e")
 	assert.Contains(t, rec.Body.String(), "at least one condition")
 	rec = doPost(h.FederationRuleCreate, `{"hosts":"not-an-array"}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
