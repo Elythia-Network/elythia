@@ -319,3 +319,27 @@ func TestVersusReport_GameVersion(t *testing.T) {
 	assert.Equal(t, 4, *recs.versions[0])
 	assert.Nil(t, recs.versions[1], "版を送らない報告は nil のまま")
 }
+
+// 本家のajvと同じく、整数を小数の形で書いた score・frame・gameVersion も受ける
+// (#3875)。
+func TestVersusReport_AcceptsIntegerForms(t *testing.T) {
+	e := newVersus(t)
+	recs := &versionRecords{}
+	e.svc.SetRecordStore(recs)
+	mid := e.invite(t)
+	require.Equal(t, http.StatusOK, post(e.h.Accept, matchBody(mid), vBob).Code)
+	ctx := t.Context()
+	_, err := e.svc.Ready(ctx, "alice", mid, true)
+	require.NoError(t, err)
+	_, err = e.svc.Ready(ctx, "bob", mid, true)
+	require.NoError(t, err)
+	*e.now = e.now.Add(bubbleversus.Countdown)
+
+	rec := post(e.h.Report, fmt.Sprintf(`{"matchId":%q,"score":12.0,"frame":9e2,"reason":"gameOver","logs":[[40,0,200]],"gameVersion":4.0}`, mid), vBob)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := decode(t, rec.Body.Bytes())
+	assert.Equal(t, map[string]any{"score": float64(12), "frame": float64(900), "reason": "gameOver"}, body["user2Result"])
+	require.Len(t, recs.versions, 1)
+	require.NotNil(t, recs.versions[0])
+	assert.Equal(t, 4, *recs.versions[0])
+}
