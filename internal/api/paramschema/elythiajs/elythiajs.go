@@ -5,9 +5,15 @@
 // The rendered file holds, for each declared endpoint, two compile-time
 // assertions: the property names of ElythiaEndpoints[name]['req'] are the
 // names of the paramDef's properties, and its required properties are the
-// paramDef's required list. elythia-js's typecheck (the required frontend
-// check) runs them; the tests of this package keep the file current with the
-// declarations (make elythia-js-paramdefs rewrites it).
+// paramDef's required list. A paramDef whose anyOf branches each require
+// their own properties (chat/messages/create, #3872) matches a union of
+// request types instead: each branch picks the member that requires the
+// branch's required properties, whose property names and required properties
+// are checked as above (the paramDef's plus the branch's), and the members
+// the branches pick must make up the whole union.
+// elythia-js's typecheck (the required frontend check) runs them; the tests
+// of this package keep the file current with the declarations (make
+// elythia-js-paramdefs rewrites it).
 //
 // 型の名前はTypeScriptのコンパイラでしか解けない(別名・misskey-jsの生成した型・
 // 共通の型を通して書かれている)ので、Goで.tsを読む代わりに、型の検査を書いた
@@ -36,7 +42,11 @@ const header = `/*
 //
 // Each endpoint declared there has two checks: the property names of its
 // request type are the names of the paramDef's properties, and the required
-// ones are the paramDef's required list. tsc fails on a mismatch.
+// ones are the paramDef's required list. An endpoint whose paramDef has anyOf
+// has a union as its request type; each branch picks the member that requires
+// the branch's required properties and has the two checks, and one more checks
+// that the members picked make up the whole union.
+// tsc fails on a mismatch.
 
 import type { ElythiaEndpoints } from './endpoints.js';
 
@@ -46,7 +56,14 @@ type Req<E extends keyof ElythiaEndpoints> = NonNullable<ElythiaEndpoints[E]['re
 // An index signature (misskey-js's EmptyRequest) names no property.
 type Keys<T> = string extends keyof T ? never : keyof T;
 type RequiredKeys<T> = { [K in Keys<T>]-?: Partial<Pick<T, K>> extends Pick<T, K> ? never : K }[Keys<T>];
+`
 
+// anyOfHeader is added to header when a paramDef has anyOf. 使わない型を
+// 出すと、elythia-jsのeslintが未使用の型として警告する。
+const anyOfHeader = `type Member<T, K extends PropertyKey> = Extract<T, Record<K, unknown>>;
+`
+
+const checksHeader = `
 export type ParamDefChecks = [
 `
 
@@ -55,10 +72,7 @@ export type ParamDefChecks = [
 func Render(defs []byte) ([]byte, error) {
 	var f struct {
 		Endpoints map[string]struct {
-			ParamDef struct {
-				Properties map[string]json.RawMessage `json:"properties"`
-				Required   []string                   `json:"required"`
-			} `json:"paramDef"`
+			ParamDef map[string]json.RawMessage `json:"paramDef"`
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal(defs, &f); err != nil {
@@ -73,27 +87,127 @@ func Render(defs []byte) ([]byte, error) {
 	}
 	sort.Strings(names)
 	var b bytes.Buffer
-	b.WriteString(header)
+	usesAnyOf := false
 	for _, name := range names {
-		pd := f.Endpoints[name].ParamDef
-		props := make([]string, 0, len(pd.Properties))
-		for p := range pd.Properties {
-			props = append(props, p)
+		pd, err := parseParamDef(f.Endpoints[name].ParamDef, true)
+		if err != nil {
+			return nil, fmt.Errorf("elythiajs: %s: %w", name, err)
 		}
-		sort.Strings(props)
-		for _, r := range pd.Required {
-			if _, ok := pd.Properties[r]; !ok {
+		props := propertySet(pd.properties)
+		for _, r := range pd.required {
+			if !props[r] {
 				return nil, fmt.Errorf("elythiajs: %s: required %s is not a property", name, r)
 			}
 		}
-		req := append([]string(nil), pd.Required...)
-		sort.Strings(req)
 		ep := quote(name)
-		fmt.Fprintf(&b, "\tCheck<Equal<Keys<Req<%s>>, %s>>,\n", ep, union(props))
-		fmt.Fprintf(&b, "\tCheck<Equal<RequiredKeys<Req<%s>>, %s>>,\n", ep, union(req))
+		if len(pd.anyOf) == 0 {
+			fmt.Fprintf(&b, "\tCheck<Equal<Keys<Req<%s>>, %s>>,\n", ep, union(sorted(props)))
+			fmt.Fprintf(&b, "\tCheck<Equal<RequiredKeys<Req<%s>>, %s>>,\n", ep, union(sorted(nameSet(pd.required))))
+			continue
+		}
+		// unionの一人ひとりを、分岐の必須で選んで比べる。項目は、最上位の項目に
+		// その分岐の項目を足したもの(本家のdrive/files/showのように、分岐が自分の
+		// 項目を持つ書き方もある)、必須は、最上位の必須にその分岐の必須を足したもの。
+		// 全員の項目を足し合わせて比べるだけだと、一部の型に項目が欠けていても通る。
+		members := make([]string, len(pd.anyOf))
+		for i, br := range pd.anyOf {
+			if len(br.required) == 0 {
+				return nil, fmt.Errorf("elythiajs: %s: anyOf/%d requires nothing", name, i)
+			}
+			keys := propertySet(pd.properties)
+			for p := range br.properties {
+				keys[p] = true
+			}
+			req := nameSet(pd.required)
+			for _, r := range br.required {
+				if !keys[r] {
+					return nil, fmt.Errorf("elythiajs: %s: anyOf/%d: required %s is not a property", name, i, r)
+				}
+				req[r] = true
+			}
+			members[i] = fmt.Sprintf("Member<Req<%s>, %s>", ep, union(sorted(nameSet(br.required))))
+			fmt.Fprintf(&b, "\tCheck<Equal<Keys<%s>, %s>>,\n", members[i], union(sorted(keys)))
+			fmt.Fprintf(&b, "\tCheck<Equal<RequiredKeys<%s>, %s>>,\n", members[i], union(sorted(req)))
+		}
+		usesAnyOf = true
+		fmt.Fprintf(&b, "\tCheck<Equal<Req<%s>, %s>>,\n", ep, strings.Join(members, " | "))
 	}
 	b.WriteString("];\n")
-	return b.Bytes(), nil
+	out := header
+	if usesAnyOf {
+		out += anyOfHeader
+	}
+	return append([]byte(out+checksHeader), b.Bytes()...), nil
+}
+
+// paramDef is the part of a paramDef the checks are rendered from.
+type paramDef struct {
+	properties map[string]json.RawMessage
+	required   []string
+	anyOf      []paramDef
+}
+
+// parseParamDef reads raw, refusing a keyword the checks would ignore: a
+// paramDef may only have type, properties, required and (at the top) anyOf.
+// 読まない語を黙って飛ばすと、型の検査がその語の分だけ何も確かめなくなる。
+func parseParamDef(raw map[string]json.RawMessage, top bool) (paramDef, error) {
+	var pd paramDef
+	for k, v := range raw {
+		var err error
+		switch {
+		case k == "type":
+		case k == "properties":
+			err = json.Unmarshal(v, &pd.properties)
+		case k == "required":
+			err = json.Unmarshal(v, &pd.required)
+		case k == "anyOf" && top:
+			var branches []map[string]json.RawMessage
+			if err = json.Unmarshal(v, &branches); err != nil {
+				break
+			}
+			for i, br := range branches {
+				p, berr := parseParamDef(br, false)
+				if berr != nil {
+					return pd, fmt.Errorf("anyOf/%d: %w", i, berr)
+				}
+				pd.anyOf = append(pd.anyOf, p)
+			}
+		default:
+			return pd, fmt.Errorf("%s is not supported", k)
+		}
+		if err != nil {
+			return pd, fmt.Errorf("%s: %w", k, err)
+		}
+	}
+	return pd, nil
+}
+
+// propertySet returns the names of the properties as a set.
+func propertySet(props map[string]json.RawMessage) map[string]bool {
+	set := make(map[string]bool, len(props))
+	for k := range props {
+		set[k] = true
+	}
+	return set
+}
+
+// nameSet returns names as a set.
+func nameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, k := range names {
+		set[k] = true
+	}
+	return set
+}
+
+// sorted returns the names of set in order.
+func sorted(set map[string]bool) []string {
+	names := make([]string, 0, len(set))
+	for k := range set {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // union renders names as a union of string literal types, never for none.
