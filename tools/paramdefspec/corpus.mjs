@@ -244,10 +244,13 @@ function mutate(s, v, depth) {
 		for (const b of s[kw] ?? []) {
 			// 必須を分けるだけの分岐 (chat/messages/create、#3872) は、その分岐の必須を
 			// 満たすobjectを見本にし、親の項目を1つずつ壊す。分岐だけを見ると'x'になり、
-			// 2つ目以降の分岐を通る入力が作られない。
-			if (kw === 'anyOf' && (s.type === 'object' || s.properties) && isObj(b) && b.type === undefined && !b.properties) {
+			// 2つ目以降の分岐を通る入力が作られない。分岐が項目の値を絞るとき
+			// (admin/backup/restore/prepareのkind、#3878) は、親の必須も満たす見本から
+			// 分岐の項目も壊す。分岐だけの見本は親の必須を欠き、分岐を通る入力にならない。
+			if (kw === 'anyOf' && (s.type === 'object' || s.properties) && isObj(b) && b.type === undefined) {
 				const sb = sampleObject(s, b, depth);
 				out.push(sb, ...mutateObject(s, sb, depth));
+				if (b.properties) out.push(...mutateObject(b, sb, depth));
 				continue;
 			}
 			const sb = sample(b);
