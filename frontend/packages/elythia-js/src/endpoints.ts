@@ -202,7 +202,10 @@ export type ElythiaEndpoints = {
 		};
 	};
 	'admin/emoji/fetch-remote-meta': {
-		/** Either `emojiId`, or both `name` and `host`. `emojiId` wins when given. */
+		/**
+		 * Either `emojiId`, or both `name` and `host`. `emojiId` wins when given,
+		 * but an empty `name` or `host` is still rejected.
+		 */
 		req:
 			| { emojiId: string; name?: string; host?: string }
 			| { emojiId?: string; name: string; host: string };

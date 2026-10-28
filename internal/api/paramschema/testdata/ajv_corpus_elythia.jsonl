@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"a4001a0d1681a0fba120c82e868cca2c7abc1965243e0fa885d636a4de2c63aa","cases":2706}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"169425e5cf363abe0202d76f6fdce6d4dbe30afc62e0b3ec2a400bc12e94a480","cases":3221}
 {"ep":"admin/database-health"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -354,6 +354,119 @@
 {"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"ep":"admin/emoji/fetch-remote-meta"}
+{"in":{"emojiId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'emojiId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"emojiId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"emojiId":null},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"emojiId":123},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"emojiId":true},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"emojiId":[]},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"emojiId":""},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"x-y"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"ABC"},"ok":true}
+{"in":{"emojiId":"0"},"ok":true}
+{"in":{"emojiId":"a_b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"a-b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"a b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":" abc"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"abc\n"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"日本"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"ａｂｃ"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"abc\u0000"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"emojiId":"abc123","name":null},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","name":123},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","name":true},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","name":[]},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","name":""},"ok":false,"path":"#/properties/name/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"emojiId":"abc123","name":"a"},"ok":true}
+{"in":{"emojiId":"abc123","name":"😀"},"ok":true}
+{"in":{"emojiId":"abc123","name":"x-y"},"ok":true}
+{"in":{"emojiId":"abc123","name":"hello"},"ok":true}
+{"in":{"emojiId":"abc123","host":null},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","host":123},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","host":true},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","host":[]},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","host":""},"ok":false,"path":"#/properties/host/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"emojiId":"abc123","host":"a"},"ok":true}
+{"in":{"emojiId":"abc123","host":"😀"},"ok":true}
+{"in":{"emojiId":"abc123","host":"x-y"},"ok":true}
+{"in":{"emojiId":"abc123","host":"hello"},"ok":true}
+{"in":{"emojiId":{"bad":1},"name":{"bad":1}},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","name":{"bad":1},"host":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"emojiId":"abc123","host":{"bad":1},"name":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":"hello","host":"hello"},"ok":true}
+{"in":{"name":"hello","host":"hello","unknownProperty":1},"ok":true}
+{"in":{"name":"hello","host":"hello","emojiId":null},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"name":"hello","host":"hello","emojiId":123},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"name":"hello","host":"hello","emojiId":true},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"name":"hello","host":"hello","emojiId":[]},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"name":"hello","host":"hello","emojiId":""},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"x-y"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"abc123"},"ok":true}
+{"in":{"name":"hello","host":"hello","emojiId":"ABC"},"ok":true}
+{"in":{"name":"hello","host":"hello","emojiId":"0"},"ok":true}
+{"in":{"name":"hello","host":"hello","emojiId":"a_b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"a-b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"a b"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":" abc"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"abc\n"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"日本"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"ａｂｃ"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","host":"hello","emojiId":"abc\u0000"},"ok":false,"path":"#/properties/emojiId/format","msg":"must match format \"misskey:id\""}
+{"in":{"host":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'emojiId'"}
+{"in":{"name":null,"host":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":123,"host":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":true,"host":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":[],"host":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":"","host":"hello"},"ok":false,"path":"#/properties/name/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"name":"a","host":"hello"},"ok":true}
+{"in":{"name":"😀","host":"hello"},"ok":true}
+{"in":{"name":"x-y","host":"hello"},"ok":true}
+{"in":{"name":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'emojiId'"}
+{"in":{"name":"hello","host":null},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"name":"hello","host":123},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"name":"hello","host":true},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"name":"hello","host":[]},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"name":"hello","host":""},"ok":false,"path":"#/properties/host/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"name":"hello","host":"a"},"ok":true}
+{"in":{"name":"hello","host":"😀"},"ok":true}
+{"in":{"name":"hello","host":"x-y"},"ok":true}
+{"in":{"name":{"bad":1},"host":"hello","emojiId":{"bad":1}},"ok":false,"path":"#/properties/emojiId/type","msg":"must be string"}
+{"in":{"name":{"bad":1},"host":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"ep":"admin/federation/check-host"}
+{"in":{"host":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'host'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"host":"hello","unknownProperty":1},"ok":true}
+{"in":{"host":null},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":123},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":true},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":[]},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":""},"ok":false,"path":"#/properties/host/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"host":"a"},"ok":true}
+{"in":{"host":"😀"},"ok":true}
+{"in":{"host":"x-y"},"ok":true}
+{"in":{"host":"hello","account":null},"ok":false,"path":"#/properties/account/type","msg":"must be string"}
+{"in":{"host":"hello","account":123},"ok":false,"path":"#/properties/account/type","msg":"must be string"}
+{"in":{"host":"hello","account":true},"ok":false,"path":"#/properties/account/type","msg":"must be string"}
+{"in":{"host":"hello","account":[]},"ok":false,"path":"#/properties/account/type","msg":"must be string"}
+{"in":{"host":"hello","account":""},"ok":true}
+{"in":{"host":"hello","account":"x-y"},"ok":true}
+{"in":{"host":"hello","account":"hello"},"ok":true}
+{"in":{"host":{"bad":1},"account":{"bad":1}},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"account":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'host'"}
 {"ep":"admin/federation/clean-gone-instance"}
 {"in":{"host":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'host'"}
@@ -453,6 +566,210 @@
 {"in":{"windowSeconds":3600.5},"ok":false,"path":"#/properties/windowSeconds/type","msg":"must be integer"}
 {"in":{"windowSeconds":3600e0},"ok":true}
 {"in":{"windowSeconds":-1},"ok":false,"path":"#/properties/windowSeconds/minimum","msg":"must be >= 1"}
+{"ep":"admin/federation/rules/create"}
+{"in":{"mode":"disabled","target":"note"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'mode'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"mode":"disabled","target":"note","unknownProperty":1},"ok":true}
+{"in":{"mode":"disabled","target":"note","name":null},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","name":123},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","name":true},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","name":[]},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","name":""},"ok":true}
+{"in":{"mode":"disabled","target":"note","name":"x-y"},"ok":true}
+{"in":{"mode":"disabled","target":"note","name":"hello"},"ok":true}
+{"in":{"target":"note"},"ok":false,"path":"#/required","msg":"must have required property 'mode'"}
+{"in":{"mode":null,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"mode":123,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"mode":true,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"mode":[],"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"mode":"record","target":"note"},"ok":true}
+{"in":{"mode":"enforce","target":"note"},"ok":true}
+{"in":{"mode":"","target":"note"},"ok":false,"path":"#/properties/mode/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"mode":"x-y","target":"note"},"ok":false,"path":"#/properties/mode/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"mode":"disabled"},"ok":false,"path":"#/required","msg":"must have required property 'target'"}
+{"in":{"mode":"disabled","target":null},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":123},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":true},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":[]},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"activity"},"ok":true}
+{"in":{"mode":"disabled","target":""},"ok":false,"path":"#/properties/target/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"mode":"disabled","target":"x-y"},"ok":false,"path":"#/properties/target/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"mode":"disabled","target":"note","position":null},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","position":1.5},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","position":10.0},"ok":true}
+{"in":{"mode":"disabled","target":"note","position":1e1},"ok":true}
+{"in":{"mode":"disabled","target":"note","position":1e400},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","position":-0},"ok":true}
+{"in":{"mode":"disabled","target":"note","position":"1"},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","position":true},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","position":-1},"ok":true}
+{"in":{"mode":"disabled","target":"note","position":1},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":null},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","hosts":{}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","hosts":"x"},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","hosts":["hello","hello","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":["hello","hello1","hello"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":["x-y"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":[{"bad":1}]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":[null]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":["__proto__","__proto__"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":[null,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":[123,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":[true,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":[[],"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","hosts":["","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":["x-y","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hosts":[]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":null},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","activityTypes":{}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","activityTypes":"x"},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","activityTypes":["hello","hello","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":["hello","hello1","hello"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":["x-y"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":[{"bad":1}]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":[null]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":["__proto__","__proto__"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":[null,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":[123,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":[true,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":[[],"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","activityTypes":["","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":["x-y","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","activityTypes":[]},"ok":true}
+{"in":{"mode":"disabled","target":"note","isBot":null},"ok":true}
+{"in":{"mode":"disabled","target":"note","isBot":0},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","isBot":"true"},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","isBot":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":null},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":1.5},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":10.0},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":1e1},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":1e400},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":-0},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":"1"},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":true},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":-1},"ok":true}
+{"in":{"mode":"disabled","target":"note","newWithinHours":1},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":null},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","patterns":{}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","patterns":"x"},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","patterns":["hello","hello","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":["hello","hello1","hello"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":["x-y"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":[{"bad":1}]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":[null]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":["__proto__","__proto__"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":[null,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":[123,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":[true,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":[[],"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","patterns":["","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":["x-y","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","patterns":[]},"ok":true}
+{"in":{"mode":"disabled","target":"note","hasAttachment":null},"ok":true}
+{"in":{"mode":"disabled","target":"note","hasAttachment":0},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","hasAttachment":"true"},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","hasAttachment":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":null},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","tags":{}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","tags":"x"},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","tags":["hello","hello","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":["hello","hello1","hello"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":["x-y"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":[{"bad":1}]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":[null]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":["__proto__","__proto__"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":[null,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":[123,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":[true,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":[[],"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","tags":["","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":["x-y","hello1"]},"ok":true}
+{"in":{"mode":"disabled","target":"note","tags":[]},"ok":true}
+{"in":{"mode":"disabled","target":"note","reject":null},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","reject":0},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","reject":"true"},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","reject":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","stripMedia":null},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","stripMedia":0},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","stripMedia":"true"},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","stripMedia":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","sensitive":null},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","sensitive":0},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","sensitive":"true"},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","sensitive":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","unlist":null},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","unlist":0},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","unlist":"true"},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","unlist":false},"ok":true}
+{"in":{"mode":"disabled","target":"note","cw":null},"ok":true}
+{"in":{"mode":"disabled","target":"note","cw":123},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","cw":true},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","cw":[]},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","cw":""},"ok":true}
+{"in":{"mode":"disabled","target":"note","cw":"x-y"},"ok":true}
+{"in":{"mode":"disabled","target":"note","cw":"hello"},"ok":true}
+{"in":{"mode":{"bad":1},"target":"note","name":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"mode":{"bad":1},"target":{"bad":1}},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":{"bad":1},"position":{"bad":1}},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"mode":"disabled","target":"note","position":{"bad":1},"hosts":{"bad":1}},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","hosts":{"bad":1},"position":{"bad":1}},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","hosts":{"bad":1},"activityTypes":{"bad":1}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","activityTypes":{"bad":1},"hosts":{"bad":1}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","activityTypes":{"bad":1},"isBot":{"bad":1}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","isBot":{"bad":1},"activityTypes":{"bad":1}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","isBot":{"bad":1},"newWithinHours":{"bad":1}},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":{"bad":1},"isBot":{"bad":1}},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","newWithinHours":{"bad":1},"patterns":{"bad":1}},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","patterns":{"bad":1},"newWithinHours":{"bad":1}},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"mode":"disabled","target":"note","patterns":{"bad":1},"hasAttachment":{"bad":1}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","hasAttachment":{"bad":1},"patterns":{"bad":1}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","hasAttachment":{"bad":1},"tags":{"bad":1}},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","tags":{"bad":1},"hasAttachment":{"bad":1}},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","tags":{"bad":1},"reject":{"bad":1}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","reject":{"bad":1},"tags":{"bad":1}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"mode":"disabled","target":"note","reject":{"bad":1},"stripMedia":{"bad":1}},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","stripMedia":{"bad":1},"reject":{"bad":1}},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","stripMedia":{"bad":1},"sensitive":{"bad":1}},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","sensitive":{"bad":1},"stripMedia":{"bad":1}},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","sensitive":{"bad":1},"unlist":{"bad":1}},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","unlist":{"bad":1},"sensitive":{"bad":1}},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","unlist":{"bad":1},"cw":{"bad":1}},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"mode":"disabled","target":"note","cw":{"bad":1},"unlist":{"bad":1}},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"cw":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'mode'"}
+{"ep":"admin/federation/rules/delete"}
+{"in":{"ruleId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"ruleId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"ruleId":null},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":123},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":true},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":[]},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":""},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"x-y"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ABC"},"ok":true}
+{"in":{"ruleId":"0"},"ok":true}
+{"in":{"ruleId":"a_b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a-b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a b"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":" abc"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\n"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"日本"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ａｂｃ"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\u0000"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":{"bad":1}},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
 {"ep":"admin/federation/rules/hits"}
 {"in":{"ruleId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
@@ -507,6 +824,201 @@
 {"in":true,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/federation/rules/update"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unknownProperty":1},"ok":true}
+{"in":{"mode":"disabled","target":"note"},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
+{"in":{"ruleId":null,"mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":123,"mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":true,"mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":[],"mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":"","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"x-y","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ABC","mode":"disabled","target":"note"},"ok":true}
+{"in":{"ruleId":"0","mode":"disabled","target":"note"},"ok":true}
+{"in":{"ruleId":"a_b","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a-b","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"a b","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":" abc","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\n","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"日本","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"ａｂｃ","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc\u0000","mode":"disabled","target":"note"},"ok":false,"path":"#/properties/ruleId/format","msg":"must match format \"misskey:id\""}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":null},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":123},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":true},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":[]},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":""},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":"x-y"},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","name":"hello"},"ok":true}
+{"in":{"ruleId":"abc123","target":"note"},"ok":false,"path":"#/required","msg":"must have required property 'mode'"}
+{"in":{"ruleId":"abc123","mode":null,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":123,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":true,"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":[],"target":"note"},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"record","target":"note"},"ok":true}
+{"in":{"ruleId":"abc123","mode":"enforce","target":"note"},"ok":true}
+{"in":{"ruleId":"abc123","mode":"","target":"note"},"ok":false,"path":"#/properties/mode/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"ruleId":"abc123","mode":"x-y","target":"note"},"ok":false,"path":"#/properties/mode/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"ruleId":"abc123","mode":"disabled"},"ok":false,"path":"#/required","msg":"must have required property 'target'"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":null},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":123},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":true},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":[]},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"activity"},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":""},"ok":false,"path":"#/properties/target/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"x-y"},"ok":false,"path":"#/properties/target/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":null},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":1.5},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":10.0},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":1e1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":1e400},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":-0},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":"1"},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":true},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":-1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":null},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":{}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":"x"},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["hello","hello","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["hello","hello1","hello"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["x-y"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[{"bad":1}]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[null]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["__proto__","__proto__"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[null,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[123,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[true,"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[[],"hello1"]},"ok":false,"path":"#/properties/hosts/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":["x-y","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":[]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":null},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":{}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":"x"},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["hello","hello","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["hello","hello1","hello"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["x-y"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[{"bad":1}]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[null]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["__proto__","__proto__"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[null,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[123,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[true,"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[[],"hello1"]},"ok":false,"path":"#/properties/activityTypes/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":["x-y","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":[]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":null},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":0},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":"true"},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":null},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":1.5},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":10.0},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":1e1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":1e400},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":-0},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":"1"},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":true},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":-1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":1},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":null},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":{}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":"x"},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["hello","hello","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["hello","hello1","hello"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["x-y"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[{"bad":1}]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[null]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["__proto__","__proto__"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[null,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[123,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[true,"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[[],"hello1"]},"ok":false,"path":"#/properties/patterns/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":["x-y","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":[]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":null},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":0},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":"true"},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":null},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":{}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":"x"},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["hello","hello","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["hello","hello1","hello"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["x-y"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[{"bad":1}]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[null]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["__proto__","__proto__"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[null,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[123,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[true,"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[[],"hello1"]},"ok":false,"path":"#/properties/tags/items/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":["x-y","hello1"]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":[]},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":null},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":0},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":"true"},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":null},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":0},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":"true"},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":null},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":0},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":"true"},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":null},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":0},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":"true"},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":false},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":null},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":123},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":true},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":[]},"ok":false,"path":"#/properties/cw/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":""},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":"x-y"},"ok":true}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":"hello"},"ok":true}
+{"in":{"ruleId":{"bad":1},"mode":"disabled","target":"note","name":{"bad":1}},"ok":false,"path":"#/properties/ruleId/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":{"bad":1},"target":"note","name":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":{"bad":1},"target":{"bad":1}},"ok":false,"path":"#/properties/mode/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":{"bad":1},"position":{"bad":1}},"ok":false,"path":"#/properties/target/type","msg":"must be string"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","position":{"bad":1},"hosts":{"bad":1}},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":{"bad":1},"position":{"bad":1}},"ok":false,"path":"#/properties/position/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hosts":{"bad":1},"activityTypes":{"bad":1}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":{"bad":1},"hosts":{"bad":1}},"ok":false,"path":"#/properties/hosts/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","activityTypes":{"bad":1},"isBot":{"bad":1}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":{"bad":1},"activityTypes":{"bad":1}},"ok":false,"path":"#/properties/activityTypes/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","isBot":{"bad":1},"newWithinHours":{"bad":1}},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":{"bad":1},"isBot":{"bad":1}},"ok":false,"path":"#/properties/isBot/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","newWithinHours":{"bad":1},"patterns":{"bad":1}},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":{"bad":1},"newWithinHours":{"bad":1}},"ok":false,"path":"#/properties/newWithinHours/type","msg":"must be integer"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","patterns":{"bad":1},"hasAttachment":{"bad":1}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":{"bad":1},"patterns":{"bad":1}},"ok":false,"path":"#/properties/patterns/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","hasAttachment":{"bad":1},"tags":{"bad":1}},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":{"bad":1},"hasAttachment":{"bad":1}},"ok":false,"path":"#/properties/hasAttachment/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","tags":{"bad":1},"reject":{"bad":1}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":{"bad":1},"tags":{"bad":1}},"ok":false,"path":"#/properties/tags/type","msg":"must be array"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","reject":{"bad":1},"stripMedia":{"bad":1}},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":{"bad":1},"reject":{"bad":1}},"ok":false,"path":"#/properties/reject/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","stripMedia":{"bad":1},"sensitive":{"bad":1}},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":{"bad":1},"stripMedia":{"bad":1}},"ok":false,"path":"#/properties/stripMedia/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","sensitive":{"bad":1},"unlist":{"bad":1}},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":{"bad":1},"sensitive":{"bad":1}},"ok":false,"path":"#/properties/sensitive/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","unlist":{"bad":1},"cw":{"bad":1}},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"ruleId":"abc123","mode":"disabled","target":"note","cw":{"bad":1},"unlist":{"bad":1}},"ok":false,"path":"#/properties/unlist/type","msg":"must be boolean"}
+{"in":{"cw":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'ruleId'"}
 {"ep":"admin/ip/accounts"}
 {"in":{"ip":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'ip'"}
@@ -751,6 +1263,15 @@
 {"in":{"userId":"abc123","roleId":"abc\u0000"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
 {"in":{"userId":{"bad":1},"roleId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
 {"in":{"roleId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"ep":"admin/self-check"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
 {"ep":"admin/server-metrics"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}

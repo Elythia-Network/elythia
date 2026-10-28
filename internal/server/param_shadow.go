@@ -46,8 +46,9 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // paramDef overlaid (paramschema.Effective)), and the endpoints Elythia has
 // and upstream does not, with their paramDef from elythia_paramdefs.json: the
 // read-only ones without outgoing requests in #3869, and Elythia's own chat/*
-// endpoints and drive/files/create-chunked/* except append in #3872, and
-// the writes that stay within the database and Redis in #3875.
+// endpoints and drive/files/create-chunked/* except append in #3872, the
+// writes that stay within the database and Redis in #3875, and the federation
+// rules and the diagnostics with outgoing requests in #3877.
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -556,6 +557,12 @@ var paramEnforcedEndpoints = []string{
 	"admin/signup-application/reject",
 	"admin/federation/close-delivery-breaker",
 	"admin/federation/clean-gone-instance",
+	"admin/federation/rules/create",
+	"admin/federation/rules/update",
+	"admin/federation/rules/delete",
+	"admin/federation/check-host",
+	"admin/self-check",
+	"admin/emoji/fetch-remote-meta",
 }
 
 // paramShadowMiddleware returns the /api group middleware that enables the

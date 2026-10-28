@@ -178,6 +178,58 @@
 			},
 			"meta": {}
 		},
+		"admin/emoji/fetch-remote-meta": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"emojiId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"name": {
+						"type": "string",
+						"minLength": 1
+					},
+					"host": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [],
+				"anyOf": [
+					{
+						"required": [
+							"emojiId"
+						]
+					},
+					{
+						"required": [
+							"name",
+							"host"
+						]
+					}
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/check-host": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"host": {
+						"type": "string",
+						"minLength": 1
+					},
+					"account": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"host"
+				]
+			},
+			"meta": {}
+		},
 		"admin/federation/clean-gone-instance": {
 			"paramDef": {
 				"type": "object",
@@ -244,6 +296,106 @@
 			},
 			"meta": {}
 		},
+		"admin/federation/rules/create": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"name": {
+						"type": "string"
+					},
+					"mode": {
+						"type": "string",
+						"enum": [
+							"disabled",
+							"record",
+							"enforce"
+						]
+					},
+					"target": {
+						"type": "string",
+						"enum": [
+							"note",
+							"activity"
+						]
+					},
+					"position": {
+						"type": "integer"
+					},
+					"hosts": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"activityTypes": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"isBot": {
+						"type": "boolean",
+						"nullable": true
+					},
+					"newWithinHours": {
+						"type": "integer",
+						"nullable": true
+					},
+					"patterns": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"hasAttachment": {
+						"type": "boolean",
+						"nullable": true
+					},
+					"tags": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"reject": {
+						"type": "boolean"
+					},
+					"stripMedia": {
+						"type": "boolean"
+					},
+					"sensitive": {
+						"type": "boolean"
+					},
+					"unlist": {
+						"type": "boolean"
+					},
+					"cw": {
+						"type": "string",
+						"nullable": true
+					}
+				},
+				"required": [
+					"mode",
+					"target"
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/rules/delete": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"ruleId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"ruleId"
+				]
+			},
+			"meta": {}
+		},
 		"admin/federation/rules/hits": {
 			"paramDef": {
 				"type": "object",
@@ -269,6 +421,96 @@
 				"type": "object",
 				"properties": {},
 				"required": []
+			},
+			"meta": {}
+		},
+		"admin/federation/rules/update": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"ruleId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"name": {
+						"type": "string"
+					},
+					"mode": {
+						"type": "string",
+						"enum": [
+							"disabled",
+							"record",
+							"enforce"
+						]
+					},
+					"target": {
+						"type": "string",
+						"enum": [
+							"note",
+							"activity"
+						]
+					},
+					"position": {
+						"type": "integer"
+					},
+					"hosts": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"activityTypes": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"isBot": {
+						"type": "boolean",
+						"nullable": true
+					},
+					"newWithinHours": {
+						"type": "integer",
+						"nullable": true
+					},
+					"patterns": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"hasAttachment": {
+						"type": "boolean",
+						"nullable": true
+					},
+					"tags": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"reject": {
+						"type": "boolean"
+					},
+					"stripMedia": {
+						"type": "boolean"
+					},
+					"sensitive": {
+						"type": "boolean"
+					},
+					"unlist": {
+						"type": "boolean"
+					},
+					"cw": {
+						"type": "string",
+						"nullable": true
+					}
+				},
+				"required": [
+					"ruleId",
+					"mode",
+					"target"
+				]
 			},
 			"meta": {}
 		},
@@ -367,6 +609,14 @@
 					"userId",
 					"roleId"
 				]
+			},
+			"meta": {}
+		},
+		"admin/self-check": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
 			},
 			"meta": {}
 		},

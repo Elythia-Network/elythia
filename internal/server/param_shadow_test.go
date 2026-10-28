@@ -25,6 +25,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 type syncBuffer struct {
@@ -161,6 +162,13 @@ func TestWithParamShadowWithoutTheGroupMiddleware(t *testing.T) {
 // change the config of both.
 func newParamShadowServers(t *testing.T, opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
 	t.Helper()
+	return newParamShadowServersSetup(t, nil, opts...)
+}
+
+// newParamShadowServersSetup is newParamShadowServers with beforeSetup
+// functions applied to both servers.
+func newParamShadowServersSetup(t *testing.T, beforeSetup []func(*Server), opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
+	t.Helper()
 	t.Setenv(config.EnvOnlyServer, "1")
 	t.Setenv(config.EnvOnlyQueue, "")
 	mr := miniredis.RunT(t)
@@ -184,7 +192,7 @@ func newParamShadowServers(t *testing.T, opts ...func(*config.Config)) (off, on 
 		for _, opt := range opts {
 			opt(cfg)
 		}
-		srv, err := New(cfg, serverIntegrationDB, redisClients)
+		srv, err := newServer(cfg, serverIntegrationDB, redisClients, plugin.Registered(), nil, beforeSetup...)
 		require.NoError(t, err)
 		return srv
 	}
