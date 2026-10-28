@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","cases":27190}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","cases":27226}
 {"ep":"admin/abuse-report/notification-recipient/create"}
 {"in":{"isActive":false,"name":"hello","method":"email"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'isActive'"}
@@ -26460,6 +26460,24 @@
 {"in":null,"ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
 {"in":[],"ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
 {"in":"x","ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
+{"in":{"a":"x"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","unknownProperty":1},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":null},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":123},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":true},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":[]},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":""},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":"x-y"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"a":"x","x":"hello"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","unknownProperty":1},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":null},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":123},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":true},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":[]},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":""},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":"x-y"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
+{"in":{"b":"x","x":"hello"},"ok":false,"path":"#/oneOf/0/required","msg":"must have required property 'c'"}
 {"in":true,"ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
 {"in":123,"ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
 {"in":1.5,"ok":false,"path":"#/oneOf","msg":"must match exactly one schema in oneOf"}
@@ -26481,7 +26499,25 @@
 {"in":"x-y","ok":false,"path":"#/anyOf/0/type","msg":"must be object"}
 {"in":[],"ok":false,"path":"#/anyOf/0/type","msg":"must be object"}
 {"in":{},"ok":false,"path":"#/anyOf/0/anyOf/0/required","msg":"must have required property 'a'"}
+{"in":{"a":"x"},"ok":true}
 {"in":"x","ok":false,"path":"#/anyOf/0/type","msg":"must be object"}
+{"in":{"a":"x","unknownProperty":1},"ok":true}
+{"in":{"a":"x","x":null},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"a":"x","x":123},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"a":"x","x":true},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"a":"x","x":[]},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"a":"x","x":""},"ok":true}
+{"in":{"a":"x","x":"x-y"},"ok":true}
+{"in":{"a":"x","x":"hello"},"ok":true}
+{"in":{"b":"x"},"ok":true}
+{"in":{"b":"x","unknownProperty":1},"ok":true}
+{"in":{"b":"x","x":null},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"b":"x","x":123},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"b":"x","x":true},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"b":"x","x":[]},"ok":false,"path":"#/anyOf/0/properties/x/type","msg":"must be string"}
+{"in":{"b":"x","x":""},"ok":true}
+{"in":{"b":"x","x":"x-y"},"ok":true}
+{"in":{"b":"x","x":"hello"},"ok":true}
 {"in":{"z":"x"},"ok":true}
 {"in":{"z":"x","unknownProperty":1},"ok":true}
 {"ep":"synthetic:oneof-first-branches-pass","paramDef":{"oneOf":[{"type":"string"},{"type":"string"},{"type":"integer"}]}}
