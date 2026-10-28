@@ -8,7 +8,11 @@
 //
 // Each endpoint declared there has two checks: the property names of its
 // request type are the names of the paramDef's properties, and the required
-// ones are the paramDef's required list. tsc fails on a mismatch.
+// ones are the paramDef's required list. An endpoint whose paramDef has anyOf
+// has a union as its request type; each branch picks the member that requires
+// the branch's required properties and has the two checks, and one more checks
+// that the members picked make up the whole union.
+// tsc fails on a mismatch.
 
 import type { ElythiaEndpoints } from './endpoints.js';
 
