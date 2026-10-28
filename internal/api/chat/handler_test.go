@@ -528,6 +528,27 @@ func (m *mockMsgRepo) SearchMessages(_, _ string, _ int, _, _ string) ([]*model.
 	return []*model.ChatMessage{{ID: "m1", FromUserID: "u1", Reads: model.StringArray{}, Reactions: model.StringArray{}}}, nil
 }
 
+// limitRecordingRepo records the limit chat/messages passes to the repository.
+type limitRecordingRepo struct {
+	*testutil.MockChatRepository
+	gotLimit int
+}
+
+func (m *limitRecordingRepo) ListMessagesByUser(_, _, _, _ string, limit int) ([]*model.ChatMessage, error) {
+	m.gotLimit = limit
+	return nil, nil
+}
+
+// 本家のajvと同じく、整数を小数の形で書いた limit も受ける (#3872)。
+func TestMessages_AcceptsIntegerFormOfLimit(t *testing.T) {
+	repo := &limitRecordingRepo{MockChatRepository: testutil.NewMockChatRepository()}
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(repo, idGen, nil, nil, nil)
+	rec := post(h.Messages, `{"userId":"u2","limit":1e2}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 100, repo.gotLimit)
+}
+
 func TestMessages_WithData(t *testing.T) {
 	base := testutil.NewMockChatRepository()
 	idGen, _ := id.NewGenerator("aidx")

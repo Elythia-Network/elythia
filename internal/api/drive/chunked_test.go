@@ -129,6 +129,17 @@ func TestFilesCreateChunkedStart_Success(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "upload-")
 }
 
+// 本家のajvと同じく、整数を小数の形で書いた size も受ける (#3872)。
+func TestFilesCreateChunkedStart_AcceptsIntegerFormOfSize(t *testing.T) {
+	h, sessions, _ := newChunkedHandler(t)
+	c, rec := newJSONReq(t, `{"name":"video.bin","size":10485760.0}`)
+	setUser(c, "u1")
+	require.NoError(t, h.FilesCreateChunkedStart(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	id := decodeJSON(t, rec)["uploadId"].(string)
+	assert.Equal(t, int64(10485760), sessions.Get(id).TotalSize)
+}
+
 // ローカルストレージ構成 (= MultipartStorage 非対応) では start が通らない。
 func TestFilesCreateChunkedStart_Unavailable(t *testing.T) {
 	h, _, _ := newHandler(t)
