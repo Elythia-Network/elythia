@@ -15,6 +15,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/core/notification"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -129,6 +130,51 @@ func TestElythiaOverlaysMatchTheImplementation(t *testing.T) {
 	}
 }
 
+// TestIUpdateOverlay pins what elythia_overlays.json adds to i/update
+// (#3886): the follow approval action of #3466, and the emoji decorations of
+// #2975, whose new entry the bundled frontend sends with an empty id
+// (pages/settings/avatar-decoration.vue) and a scale the handler bounds to
+// 0.1..1.
+func TestIUpdateOverlay(t *testing.T) {
+	eff, err := paramschema.Effective()
+	require.NoError(t, err)
+	up, err := paramschema.Upstream()
+	require.NoError(t, err)
+	validate := func(eps map[string]paramschema.Endpoint, body string) *paramschema.Error {
+		t.Helper()
+		var data any
+		require.NoError(t, json.Unmarshal([]byte(body), &data), body)
+		return eps["i/update"].Schema.Validate(data)
+	}
+	for _, a := range []string{model.FollowApprovalActionRequest, model.FollowApprovalActionSilentRequest, model.FollowApprovalActionSilentFollow} {
+		assert.True(t, model.IsFollowApprovalAction(a))
+		assert.Nil(t, validate(eff, `{"followApprovalAction":"`+a+`"}`), a)
+	}
+	// null は省略と同じ (handler は *string で受けて変えない)。
+	assert.Nil(t, validate(eff, `{"followApprovalAction":null}`))
+	for _, body := range []string{`{"followApprovalAction":"follow"}`, `{"followApprovalAction":""}`, `{"followApprovalAction":1}`} {
+		assert.NotNil(t, validate(eff, body), body)
+	}
+
+	newEmoji := `{"avatarDecorations":[{"id":"","url":"https://example.test/e.png","emojiName":"blob","scale":0.5,"angle":0,"flipH":false,"offsetX":0,"offsetY":0}]}`
+	assert.Nil(t, validate(eff, newEmoji))
+	if err := validate(up, newEmoji); assert.NotNil(t, err) {
+		assert.Equal(t, "#/properties/avatarDecorations/items/properties/id/format", err.SchemaPath)
+	}
+	for body, ok := range map[string]bool{
+		`{"avatarDecorations":[{"id":"abc123","scale":0.1}]}`:   true,
+		`{"avatarDecorations":[{"id":"abc123","scale":1}]}`:     true,
+		`{"avatarDecorations":[{"id":"abc123","scale":null}]}`:  true,
+		`{"avatarDecorations":[{"id":"abc123","scale":0.09}]}`:  false,
+		`{"avatarDecorations":[{"id":"abc123","scale":1.01}]}`:  false,
+		`{"avatarDecorations":[{"id":"abc123","scale":"1"}]}`:   false,
+		`{"avatarDecorations":[{"id":"abc123","emojiName":1}]}`: false,
+		`{"avatarDecorations":[{"id":"a-b","emojiName":"x"}]}`:  false,
+	} {
+		assert.Equal(t, ok, validate(eff, body) == nil, body)
+	}
+}
+
 // The job queue page of the bundled frontend opens a queue by the name
 // admin/queue/queues lists, the queues of plugins included, and calls the
 // endpoints below with it (job-queue.vue, job-queue.job.vue). The effective
@@ -176,8 +222,8 @@ func TestPluginQueueNamePatternMatchesTheQueuePackage(t *testing.T) {
 // TestAddedPropertiesMatchElythiaJS keeps the properties Elythia adds to
 // upstream endpoints (x-elythia-properties of elythia_overlays.json) and the
 // request fields elythia-js declares for them (ElythiaRequestExtensions of
-// extensions.ts) to the same names (#3867). i/update and admin/update-meta
-// are declared in the last stage of #3667; they are only in extensions.ts.
+// extensions.ts) to the same names (#3867). admin/update-meta is declared in
+// the last stage of #3667; it is only in extensions.ts.
 func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 	src, err := os.ReadFile("../../frontend/packages/elythia-js/src/extensions.ts")
 	require.NoError(t, err)
@@ -209,7 +255,7 @@ func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, added)
-	lastStage := map[string]bool{"i/update": true, "admin/update-meta": true}
+	lastStage := map[string]bool{"admin/update-meta": true}
 	for name, fields := range ts {
 		if lastStage[name] {
 			assert.NotContains(t, added, name, "%s is declared in the last stage of #3667", name)

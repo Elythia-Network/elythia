@@ -416,5 +416,50 @@
 				"type": "boolean"
 			}
 		}
+	},
+	"i/update": {
+		"properties": {
+			"avatarDecorations": {
+				"items": {
+					"properties": {
+						"id": {
+							"description": "A decoration worn from a custom emoji has no id until it is saved: the bundled frontend sends an empty id with emojiName (#2975).",
+							"x-elythia-formatAlso": {
+								"values": [
+									""
+								]
+							}
+						}
+					},
+					"x-elythia-properties": {
+						"scale": {
+							"description": "The size of the decoration relative to upstream's; 1 when omitted (#2975).",
+							"type": "number",
+							"nullable": true,
+							"minimum": 0.1,
+							"maximum": 1
+						},
+						"emojiName": {
+							"description": "Wears the local custom emoji of this name instead of the decoration of id (#2975).",
+							"type": "string",
+							"nullable": true
+						}
+					}
+				}
+			}
+		},
+		"x-elythia-properties": {
+			"followApprovalAction": {
+				"description": "How a follow from an account younger than followApprovalLocalSeconds / followApprovalRemoteSeconds is handled (#3466); null leaves it as it is.",
+				"type": "string",
+				"nullable": true,
+				"enum": [
+					"request",
+					"silentRequest",
+					"silentFollow",
+					null
+				]
+			}
+		}
 	}
 }

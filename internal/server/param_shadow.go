@@ -30,7 +30,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // fetch-external-resources, request-reset-password, reset-password,
 // verify-email and v2/admin/emoji/list in #3845; notes and notes/* except
 // notes/create in #3847, and notes/create in #3884; i and i/* except i/update, i/notifications and
-// i/notifications-grouped in #3851; admin/ad/*, admin/announcements/*,
+// i/notifications-grouped in #3851, and i/update in #3886; admin/ad/*, admin/announcements/*,
 // admin/avatar-decorations/*, admin/invite/*, admin/promo/create, admin/meta,
 // admin/server-info, admin/get-index-stats, admin/get-table-stats and
 // admin/show-moderation-logs in #3854; admin/drive/* except admin/drive/files
@@ -383,6 +383,7 @@ var paramEnforcedEndpoints = []string{
 	"i/revoke-token",
 	"i/signin-history",
 	"i/unpin",
+	"i/update",
 	"i/update-email",
 	"i/webhooks/create",
 	"i/webhooks/delete",
