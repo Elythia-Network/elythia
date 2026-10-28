@@ -1,5 +1,291 @@
 {
 	"endpoints": {
+		"admin/backup/delete": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"id": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password",
+					"id"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/download": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"id": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password",
+					"id"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/list": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					}
+				},
+				"required": [
+					"password"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/reauth-challenge": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/backup/restore/abort": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"opId": {
+						"type": "string",
+						"minLength": 1
+					},
+					"ticket": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password",
+					"opId",
+					"ticket"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/restore/candidates": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					}
+				},
+				"required": [
+					"password"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/restore/confirm": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"opId": {
+						"type": "string",
+						"minLength": 1
+					},
+					"ticket": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password",
+					"opId",
+					"ticket"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/restore/prepare": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"kind": {},
+					"id": {
+						"type": "string",
+						"minLength": 1
+					},
+					"database": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password"
+				],
+				"anyOf": [
+					{
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"restore"
+								]
+							}
+						},
+						"required": [
+							"id"
+						]
+					},
+					{
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": [
+									"rollback"
+								]
+							}
+						},
+						"required": [
+							"kind",
+							"database"
+						]
+					}
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/restore/status": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"opId": {
+						"type": "string",
+						"minLength": 1
+					},
+					"ticket": {
+						"type": "string",
+						"minLength": 1
+					},
+					"session": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"opId",
+					"ticket",
+					"session"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/take": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					}
+				},
+				"required": [
+					"password"
+				]
+			},
+			"meta": {}
+		},
+		"admin/backup/verify": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					},
+					"id": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"password",
+					"id"
+				]
+			},
+			"meta": {}
+		},
 		"admin/database-health": {
 			"paramDef": {
 				"type": "object",
