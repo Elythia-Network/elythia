@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","cases":27226}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","cases":27234}
 {"ep":"admin/abuse-report/notification-recipient/create"}
 {"in":{"isActive":false,"name":"hello","method":"email"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'isActive'"}
@@ -26359,6 +26359,14 @@
 {"in":{"fromThen":""},"ok":true,"out":{"fromThen":"","fromAllOf":7}}
 {"in":{"fromThen":"x-y"},"ok":true,"out":{"fromThen":"x-y","fromAllOf":7}}
 {"in":{"fromThen":"hello"},"ok":true,"out":{"fromThen":"hello","fromAllOf":7}}
+{"in":{"flag":true,"unknownProperty":1},"ok":true,"out":{"flag":true,"unknownProperty":1,"fromAllOf":7,"fromThen":"t"}}
+{"in":{"flag":true,"fromThen":null},"ok":false,"path":"#/then/properties/fromThen/type","msg":"must be string"}
+{"in":{"flag":true,"fromThen":123},"ok":false,"path":"#/then/properties/fromThen/type","msg":"must be string"}
+{"in":{"flag":true,"fromThen":true},"ok":false,"path":"#/then/properties/fromThen/type","msg":"must be string"}
+{"in":{"flag":true,"fromThen":[]},"ok":false,"path":"#/then/properties/fromThen/type","msg":"must be string"}
+{"in":{"flag":true,"fromThen":""},"ok":true,"out":{"flag":true,"fromThen":"","fromAllOf":7}}
+{"in":{"flag":true,"fromThen":"x-y"},"ok":true,"out":{"flag":true,"fromThen":"x-y","fromAllOf":7}}
+{"in":{"flag":true,"fromThen":"hello"},"ok":true,"out":{"flag":true,"fromThen":"hello","fromAllOf":7}}
 {"ep":"synthetic:if-then-else","paramDef":{"type":"object","if":{"properties":{"kind":{"enum":["a"]}}},"then":{"required":["a"]},"else":{"required":["b"]}}}
 {"in":{},"ok":false,"path":"#/then/required","msg":"must have required property 'a'"}
 {"in":{"kind":"a"},"ok":false,"path":"#/then/required","msg":"must have required property 'a'"}

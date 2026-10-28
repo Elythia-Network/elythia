@@ -265,6 +265,16 @@ function mutate(s, v, depth) {
 	if (s.then) {
 		const cur = isObj(v) ? v : sample(s);
 		out.push(...mutate(s.then, cur, depth + 1));
+		// ifが項目を要求するとき (emoji-application/createのkind: remote、#3875) は、
+		// ifとthenの必須を満たす見本からもthenの項目を壊す。見本がifを満たさないと、
+		// thenの検査に届く入力が1つも作られない。
+		if (isObj(s.if) && requiredOf(s.if).size > 0) {
+			const on = { ...cur };
+			for (const k of [...requiredOf(s.if), ...requiredOf(s.then)]) {
+				if (!Object.hasOwn(on, k)) on[k] = sample({ ...s.properties?.[k], ...s.if.properties?.[k], ...s.then.properties?.[k] }, depth + 1);
+			}
+			out.push(on, ...mutate(s.then, on, depth + 1));
+		}
 		// thenの項目は、ifが外れる入力でも試す。そうしないとthenの検査が先に報告され、
 		// 外側のpropertiesの同じ項目の制限(notes/createのtextのmaxLengthなど)に届かない。
 		const ifProp = Object.keys(s.if?.properties ?? {}).find((k) => s.properties?.[k]);
