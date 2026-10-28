@@ -148,10 +148,10 @@ func (s *Service) UpdateProfile(ctx context.Context, pluginName, userID string, 
 	}
 	params := map[string]any{}
 	if in.Name != nil {
-		params["name"] = *in.Name
+		params["name"] = clearable(*in.Name)
 	}
 	if in.Description != nil {
-		params["description"] = *in.Description
+		params["description"] = clearable(*in.Description)
 	}
 	if in.Avatar != nil {
 		id, err := s.upload(ctx, u, in.Avatar, "avatar")
@@ -174,6 +174,18 @@ func (s *Service) UpdateProfile(ctx context.Context, pluginName, userID string, 
 		return errors.New("pluginaccount: profile updater is not wired")
 	}
 	return s.updater(ctx, u.ID, params)
+}
+
+// clearable maps "" to nil (JSON null), the value that clears a profile text
+// in i/update.
+//
+// プラグインの API は "" で消せると約束している (plugin.ProfileUpdate) が、
+// i/update は本家と同じく "" を minLength で拒否する (#3886)。
+func clearable(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
 }
 
 func (s *Service) upload(ctx context.Context, u *model.User, img *Image, fallbackName string) (string, error) {

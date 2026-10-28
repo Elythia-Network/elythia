@@ -271,13 +271,12 @@ func TestPluginAccounts_ScopedPerPlugin_RealDB(t *testing.T) {
 	assert.Equal(t, a1.ID, *avatar.UserID, "画像はそのアカウントのドライブに置く")
 	assert.Equal(t, "avatar.png", avatar.Name)
 
-	// 空文字は「消す」(name は null に、description は空になる。i/update と同じ)。
+	// 空文字は「消す」(name も description も null になる。i/update に null を
+	// 渡すのと同じ。#3886)。
 	empty := ""
 	require.NoError(t, accA.UpdateProfile(ctx, a1.ID, plugin.ProfileUpdate{Name: &empty, Description: &empty}))
 	assert.Nil(t, h.user(a1.ID).Name)
-	if d := h.profile(a1.ID).Description; d != nil {
-		assert.Empty(t, *d)
-	}
+	assert.Nil(t, h.profile(a1.ID).Description)
 
 	// 画像でないファイルは i/update が拒否する。
 	err = accA.UpdateProfile(ctx, a1.ID, plugin.ProfileUpdate{Avatar: &plugin.Image{Data: []byte("not an image at all")}})

@@ -71,8 +71,8 @@ type Account struct {
 // ProfileUpdate is a change to an account's profile. nil fields are left as
 // they are.
 //
-// 文字列は i/update にそのまま渡す。"" を渡すと、表示名は未設定 (null) に、
-// 自己紹介は空に戻る (i/update と同じ)。
+// 文字列は i/update に渡す。"" だけは null にして渡すので、表示名も自己紹介も
+// 未設定 (null) に戻る (#3886)。
 type ProfileUpdate struct {
 	// Name is the display name.
 	Name *string

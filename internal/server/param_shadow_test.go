@@ -247,7 +247,7 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/i/update", `{"isCat":"yes"}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"makeNotesHiddenBefore":10.0}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"name":"a\u0000"}`, true, true},
 		{http.MethodPost, "/api/i/update", "{\"location\":\"\\ud800\"}", true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
 		// 本家に揃えた endpoint は、検証を止めた server でも同じ応答になる (宣言から

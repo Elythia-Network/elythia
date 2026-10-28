@@ -165,14 +165,21 @@ func TestService_UpdateProfile(t *testing.T) {
 	}))
 	require.Len(t, f.updates, 1)
 	assert.Equal(t, a1.ID, f.updates[0].userID)
+	// "" は i/update が拒否するので、消す値の null にして渡す (#3886)。
 	assert.Equal(t, map[string]any{
-		"name": "Bot", "description": "", "avatarId": "file-a.png", "bannerId": "file-banner",
+		"name": "Bot", "description": nil, "avatarId": "file-a.png", "bannerId": "file-banner",
 	}, f.updates[0].params)
 	require.Len(t, f.uploader.inputs, 2)
 	for _, in := range f.uploader.inputs {
 		require.NotNil(t, in.User)
 		assert.Equal(t, a1.ID, in.User.ID, "画像はそのアカウントのドライブに置く")
 	}
+
+	empty, bio := "", "Hello"
+	require.NoError(t, f.svc.UpdateProfile(ctx, "plugin-a", a1.ID, pluginaccount.ProfileInput{Name: &empty, Description: &bio}))
+	require.Len(t, f.updates, 2)
+	assert.Equal(t, map[string]any{"name": nil, "description": "Hello"}, f.updates[1].params)
+	f.updates = f.updates[:1]
 
 	// 変える項目が無ければ何も呼ばない。
 	require.NoError(t, f.svc.UpdateProfile(ctx, "plugin-a", a1.ID, pluginaccount.ProfileInput{}))
