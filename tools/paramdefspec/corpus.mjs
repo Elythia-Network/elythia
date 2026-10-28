@@ -121,7 +121,9 @@ function requiredOf(s) {
 function sample(s, depth = 0) {
 	if (!isObj(s) || depth > 8) return 'x';
 	if (s.enum) return s.enum.find((v) => v !== null) ?? s.enum[0];
-	if (s.anyOf) return sample(s.anyOf[0], depth + 1);
+	// objectのnodeが持つanyOfは、分岐ごとに必須を分けるだけのことがある
+	// (chat/messages/create、#3872)。そのときは、最初の分岐の必須を足したobjectにする。
+	if (s.anyOf && s.type !== 'object' && !s.properties) return sample(s.anyOf[0], depth + 1);
 	if (s.oneOf) return sample(s.oneOf[0], depth + 1);
 	if (s.allOf) {
 		const o = {};
@@ -141,12 +143,21 @@ function sample(s, depth = 0) {
 		case 'object':
 		case undefined: {
 			if (s.type === undefined && !s.properties) return 'x';
-			const o = {};
-			for (const k of requiredOf(s)) o[k] = sample(s.properties?.[k] ?? s.then?.properties?.[k], depth + 1);
-			return o;
+			return sampleObject(s, s.anyOf?.[0], depth);
 		}
 	}
 	return 'x';
+}
+
+// sampleObject returns an object with the required properties of s and, when
+// given, of the anyOf branch b.
+function sampleObject(s, b, depth) {
+	const o = {};
+	for (const k of requiredOf(s)) o[k] = sample(s.properties?.[k] ?? s.then?.properties?.[k], depth + 1);
+	for (const k of isObj(b) ? requiredOf(b) : []) {
+		if (!Object.hasOwn(o, k)) o[k] = sample(b.properties?.[k] ?? s.properties?.[k], depth + 1);
+	}
+	return o;
 }
 
 // sampleArray returns n distinct items for the array schema s.
@@ -231,6 +242,14 @@ function mutate(s, v, depth) {
 	}
 	for (const kw of ['anyOf', 'oneOf']) {
 		for (const b of s[kw] ?? []) {
+			// 必須を分けるだけの分岐 (chat/messages/create、#3872) は、その分岐の必須を
+			// 満たすobjectを見本にし、親の項目を1つずつ壊す。分岐だけを見ると'x'になり、
+			// 2つ目以降の分岐を通る入力が作られない。
+			if (kw === 'anyOf' && (s.type === 'object' || s.properties) && isObj(b) && b.type === undefined && !b.properties) {
+				const sb = sampleObject(s, b, depth);
+				out.push(sb, ...mutateObject(s, sb, depth));
+				continue;
+			}
 			const sb = sample(b);
 			out.push(sb, ...mutate(b, sb, depth + 1));
 		}
