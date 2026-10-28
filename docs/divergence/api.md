@@ -221,6 +221,18 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 
 同梱のfrontendは、chatの15件をどれも呼ばない (本家の名前の`chat/messages/create-to-user`などを使う)。分割アップロードの`start`には`comment`・`folderId`に`null`を送るので、宣言は`null`を許す。`drive/files/create-chunked/append`はmultipartで、照合のテストがJSONしか送れないので、後の段に回した。
 
+3段目 (#3875) は、DBとRedisの中で閉じる書き込みの18件。バブルゲームの対戦 (`bubble-game/versus/invite`・`accept`・`decline`・`cancel`・`report`・`set-public`)、絵文字の申請 (`emoji-application/create`・`cancel`、`admin/emoji-application/approve`・`reject`・`reset-user-quota`)、登録の申請 (`signup-application/apply`・`form-token`・`register`、`admin/signup-application/approve`・`reject`)、`admin/federation/close-delivery-breaker`・`clean-gone-instance`。`emoji-application/create`の`kind`はenum (`own` / `remote`) にし、`remote`のときの`remoteHost`・`remoteName`の必須は`if`/`then`で書いた。次の差が変わった。
+- `misskey:id`の形でない`matchId`・`applicationId`・`userId`・`fileId`は400になる。以前は、空の`matchId`・`applicationId`・`userId`は400 (`info`無し)、それ以外は見つからない応答 (`bubble-game/versus/*`の404 `NO_SUCH_MATCH`、`emoji-application/cancel`・`admin/emoji-application/approve`・`reject`・`admin/signup-application/approve`・`reject`の404 `NO_SUCH_APPLICATION`、`bubble-game/versus/invite`・`admin/emoji-application/reset-user-quota`の`NO_SUCH_USER`、`emoji-application/create`の`NO_SUCH_FILE`) だった。`emoji-application/create`の`fileId`は、以前は`kind`が`own`のときだけ前後の空白を落として読み、`remote`のときは読まなかったので、`remote`での形の違う`fileId`や、前後に空白のある`fileId`も400になる。`signup-application/register`の空の`claimCode`も400になる。以前は400 `NO_SUCH_APPLICATION`だった
+- `emoji-application/create`の空の`kind`は400になる。以前は`own`として扱った。同梱のfrontendは`kind`を送らないか`remote`を送る
+- `bubble-game/versus/report`の`score`・`frame`・`reason`・`logs`の欠けは400になる。以前は、ゼロ値として扱い、`INVALID_REPORT`などの検査に掛けていた。同梱のfrontendは5つとも送る
+- `signup-application/apply`の`answers`の欠けは400になる。以前は空の回答として扱い、設問が0件のフォームでは申請を作っていた。同梱のfrontendは、設問が0件でも`answers: []`を送る
+- `null`は400になる。以前は省略と同じだった (`bubble-game/versus/report`の`gameVersion: null`は版なしの報告になった)。例外は`signup-application/apply`のcaptchaの5項目で、同梱のfrontendが`null`を送るので許す
+- 引数の誤りの400に`info`が付く。空の`gameMode`・`isPublic`の欠け・未知の`kind`・`remote`での`remoteHost`・`remoteName`の欠け・空の`username`・`password`・`host`などは、以前も400だったが`info`が無く、idも本家と違うものがあった
+- 整数を小数の形で書いた値 (`10.0`) は、`bubble-game/versus/report`の`score`・`frame`・`gameVersion`でも整数として受ける。以前は400だった
+- 引数の検証がhandlerより先に走るので、宣言から外れる値は、handlerが先に返していた応答より先に400になる。承認制が無効な構成や登録を閉じた構成の`signup-application/apply`・`register` (以前は503 `UNAVAILABLE`か登録停止の応答が先)、承認制が組み込まれていない構成の`admin/signup-application/approve`・`reject` (以前は503 `UNAVAILABLE`が先) が当たる
+
+ゲームの規則で決まる値 (`bubble-game/versus/invite`の`gameMode`、`report`の`reason`と`score`・`frame`・`logs`の範囲) と絵文字の名前は、宣言に値の一覧や範囲を写さず、以前どおりhandlerが専用のエラー (`INVALID_GAME_MODE`・`INVALID_REPORT`・`INVALID_EMOJI_NAME`) で拒否する。宣言に写すと、ゲームのエンジンや名前の規則と二重になる。宣言を通っても、以前どおりhandlerが400 (`info`無し) にする入力が残る。空白だけの値 (`admin/emoji-application/reset-user-quota`の`reason`、`kind`が`remote`の`emoji-application/create`の`remoteHost`・`remoteName`)、空白だけの値やhostとして読めない値 (`https://`・`/`など) の`host` (`admin/federation/close-delivery-breaker`・`clean-gone-instance`)、メールを必須にした構成の`signup-application/register`での`emailAddress`の欠けと空文字 (構成で決まる必須なので宣言に書けない)、int64に収まらない整数 (`bubble-game/versus/report`の`score`・`frame`・`gameVersion`) が当たる。範囲の外の`gameVersion` (1未満と2^20を超える値) は、以前どおり`INVALID_REPORT`になる。前後の空白を落とすと長すぎる値も、以前どおりhandlerが専用のエラーで拒否する。
+
 ### 1-1b. レスポンスの additive field
 
 | endpoint | field | 内容 |
