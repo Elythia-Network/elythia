@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
@@ -198,6 +199,11 @@ type Server struct {
 	// metaから設定を読み直し、flushを積むのはqueue roleだけ(#3663)。field化は
 	// constructor rollbackをsleep無しで検証し、起動前にownershipを登録するため。
 	reactionFlushWorker func(context.Context, func() error)
+	// selfCheckRunnerとremoteCheckerは、admin/self-checkとadmin/federation/check-hostの
+	// 実行元。nilなら組み立てで本物を作る。どちらも外へ取りに行く(self-checkはproxyも
+	// 通らない)ので、照合のテストがbeforeSetupで数えるだけの偽物を入れる(#3877)。
+	selfCheckRunner apiadmin.SelfCheckRunner
+	remoteChecker   apiadmin.RemoteChecker
 	// reactionCountWriter は世代のリアクションの書き込み先 (#3663)。テストが
 	// 取りこぼしたプロセスの状態を作るために読む。
 	reactionCountWriter *corereaction.SwitchableWriter

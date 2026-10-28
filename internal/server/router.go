@@ -3407,21 +3407,27 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// (server 側は既に migrate 済みで動いている前提。適用漏れの検出は
 	// `elythia doctor` の担当で、あちらは同梱ファイルを数えられる)。
 	adminHandler.SetDatabaseHealth(dbHealth)
-	adminHandler.SetSelfCheckRunner(&selfCheckAdapter{
-		checker: selfcheck.NewChecker(s.config.URL),
-		deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default, DBHealth: dbHealth.Report},
-	})
+	if s.selfCheckRunner == nil {
+		s.selfCheckRunner = &selfCheckAdapter{
+			checker: selfcheck.NewChecker(s.config.URL),
+			deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default, DBHealth: dbHealth.Report},
+		}
+	}
+	adminHandler.SetSelfCheckRunner(s.selfCheckRunner)
 	// 連合先との疎通の診断 (#3055)。**通信は SSRF-safe な outboundClient だけ**で、
 	// 上の self-check の client (ガード無し) とは繋がない。自ホストは断る。
-	adminHandler.SetRemoteChecker(s.newRemoteCheckAdapter(remoteCheckSources{
-		fetcher:   apFetcher,
-		instances: instanceService,
-		users:     repository.NewRemoteUserSampler(s.db),
-		sigCaps:   sigCapRepo,
-		degraded:  deliverProcessor.Ed25519Degraded,
-		delivery:  deliveryHealth,
-		breaker:   deliveryBreaker,
-	}), corefederation.NormalizeGateHost(s.config.URL))
+	if s.remoteChecker == nil {
+		s.remoteChecker = s.newRemoteCheckAdapter(remoteCheckSources{
+			fetcher:   apFetcher,
+			instances: instanceService,
+			users:     repository.NewRemoteUserSampler(s.db),
+			sigCaps:   sigCapRepo,
+			degraded:  deliverProcessor.Ed25519Degraded,
+			delivery:  deliveryHealth,
+			breaker:   deliveryBreaker,
+		})
+	}
+	adminHandler.SetRemoteChecker(s.remoteChecker, corefederation.NormalizeGateHost(s.config.URL))
 	// 消えたインスタンスとのフォロー関係の片付け (#3067)。自動では消さず、管理者が
 	// 候補を見て実行する。
 	adminHandler.SetGoneInstanceCleaner(gonecleanup.NewService(goneInstanceRepo, instanceService, followingService))

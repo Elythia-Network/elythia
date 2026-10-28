@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"math"
 	"net"
@@ -27,11 +28,30 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/remotecheck"
+	"github.com/elythia-network/elythia/internal/core/selfcheck"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/misc/ipnorm"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
+
+// countingDiagnostics stands in for the self-check and the remote host check,
+// which make outgoing requests, and counts the runs.
+type countingDiagnostics struct {
+	selfChecks   atomic.Int64
+	remoteChecks atomic.Int64
+}
+
+func (d *countingDiagnostics) RunSelfCheck(context.Context) selfcheck.Report {
+	d.selfChecks.Add(1)
+	return selfcheck.Report{}
+}
+
+func (d *countingDiagnostics) CheckRemoteHost(_ context.Context, req remotecheck.Request) remotecheck.Report {
+	d.remoteChecks.Add(1)
+	return remotecheck.Report{Host: req.Host}
+}
 
 // ajvCorpusFiles are the corpora of ajv's verdicts: on upstream's paramDefs
 // (#3673), and on Elythia's own (elythia_paramdefs.json, #3869).
@@ -636,7 +656,14 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	t.Cleanup(proxy.Close)
-	_, on, _ := newParamShadowServers(t, func(cfg *config.Config) {
+	// admin/self-check と admin/federation/check-host は外へ取りに行く。self-check は
+	// proxy を通らないので、上の proxy では数えられない。数えるだけの偽物に差し替え、
+	// 受理の入力が handler の診断まで届いたことを確かめる (#3877)。
+	diag := &countingDiagnostics{}
+	_, on, _ := newParamShadowServersSetup(t, []func(*Server){func(s *Server) {
+		s.selfCheckRunner = diag
+		s.remoteChecker = diag
+	}}, func(cfg *config.Config) {
 		cfg.Proxy = proxy.URL
 		// 下の確かめに使う宛先。TEST-NET-1 で、どこへも届かない。
 		cfg.AllowedPrivateNetworks = []string{"192.0.2.0/24"}
@@ -949,6 +976,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	seedReached := map[string]int{}
 	jobReached := map[string]int{}
+	diagAccepted := map[string]int{}
 	adminSeeded := false
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
@@ -1126,6 +1154,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			if tc.ep == "admin/accounts/create" {
 				assert.Equal(t, http.StatusOK, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 			}
+			if (tc.ep == "admin/self-check" || tc.ep == "admin/federation/check-host") && rec.Code == http.StatusOK {
+				diagAccepted[tc.ep]++
+			}
 		}
 		if tc.ok {
 			var in map[string]any
@@ -1145,6 +1176,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 	}
 	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
+	// 診断の偽物が呼ばれた回数は、200 を返した受理の入力の数と一致する。偽物が
+	// 組み立てで使われていないと、本物が外へ取りに行き、回数は 0 になる。
+	assert.Positive(t, diagAccepted["admin/self-check"], "no accepted corpus input of admin/self-check ran the self-check")
+	assert.Positive(t, diagAccepted["admin/federation/check-host"], "no accepted corpus input of admin/federation/check-host ran the check")
+	assert.EqualValues(t, diagAccepted["admin/self-check"], diag.selfChecks.Load())
+	assert.EqualValues(t, diagAccepted["admin/federation/check-host"], diag.remoteChecks.Load())
 	// 全部を流した後も、利用者が残り、トークンが変わっていないこと (#3851)。
 	var after model.User
 	require.NoError(t, db.First(&after, "id = ?", userID).Error)
