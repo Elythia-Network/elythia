@@ -85,8 +85,9 @@ type UserRepository interface {
 	// the address. 登録・変更の**書き込み側**で使う。
 	EmailVerifiedInUse(email string) (bool, error)
 	CountOnlineUsers() (int64, error)
-	// CountLocalUsers returns the number of non-deleted local users, used by
-	// nodeinfo `usage.users.total` (#403).
+	// CountLocalUsers returns the number of local users people use, used by
+	// nodeinfo `usage.users.total` (#403): it leaves out deleted users,
+	// system accounts and the accounts plugins manage (#3881).
 	CountLocalUsers() (int64, error)
 	// CountLocalUsersForSetup returns the number of non-deleted local users
 	// that are not managed by a plugin. The initial-setup window
@@ -886,8 +887,9 @@ func (r *userRepository) ListLocalUserIDsRegisteredAfter(idCursor string) ([]str
 // job to determine the "active today" cohort (#421)。
 //
 // 定着 (active) 側は削除済みユーザーを除外する。退会したアカウントを「定着」
-// と数えると分子が膨らんで誤った retention 率になるため。`CountLocalUsers`
-// /`CountLocalUsersActiveSince` と同じフィルタ方針。
+// と数えると分子が膨らんで誤った retention 率になるため。削除済みを外す点は
+// `CountLocalUsers` / `CountLocalUsersActiveSince` と同じ (`CountLocalUsers` は
+// さらにシステムアカウントとプラグインが管理するアカウントも外す、#3881)。
 func (r *userRepository) ListLocalUserIDsActiveSince(since time.Time) ([]string, error) {
 	var ids []string
 	err := r.db.Model(&model.User{}).
@@ -898,12 +900,20 @@ func (r *userRepository) ListLocalUserIDsActiveSince(since time.Time) ([]string,
 	return ids, err
 }
 
-// CountLocalUsers returns the number of non-deleted local users.
+// CountLocalUsers returns the number of local users people use: not
+// deleted, not a system account and not managed by a plugin.
+//
+// システムアカウント (instance・relay・proxy) とプラグインが管理するアカウントには
+// 誰もログインできない。数えると、人が 1 人のサーバーでも規模が大きく見える
+// (#3881)。本家は nodeinfo に利用者のチャートの値 (削除済みとシステムアカウントを
+// 含む) を出すので、ここは本家と違う。
 func (r *userRepository) CountLocalUsers() (int64, error) {
 	var count int64
 	err := r.db.Model(&model.User{}).
 		Where("host IS NULL").
 		Where(`"isDeleted" = false`).
+		Where(`"managedByPlugin" IS NULL`).
+		Where(`NOT EXISTS (SELECT 1 FROM "system_account" sa WHERE sa."userId" = "user".id)`).
 		Count(&count).Error
 	return count, err
 }
@@ -914,7 +924,7 @@ func (r *userRepository) CountLocalUsers() (int64, error) {
 // 作ると、新しいインスタンスでは最初の管理者を作る前にローカル利用者が 1 になり、
 // セットアップの窓が閉じて誰も管理者を作れなくなる (復旧する CLI も無い)。
 // 管理するアカウントには誰もログインできないので、窓を閉じる理由にならない。
-// nodeinfo などの利用者数は CountLocalUsers のまま (bot も利用者として数える)。
+// nodeinfo の利用者数 (CountLocalUsers) は、さらにシステムアカウントも外す (#3881)。
 func (r *userRepository) CountLocalUsersForSetup() (int64, error) {
 	var count int64
 	err := r.db.Model(&model.User{}).

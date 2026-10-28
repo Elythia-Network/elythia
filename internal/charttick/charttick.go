@@ -12,7 +12,7 @@ import (
 )
 
 // localRemoteCount は host 列の有無で local/remote を 1 クエリで集計するための
-// 共通ヘルパ。Users と Notes でロジックが同じなので集約してテスト面を縮める。
+// ヘルパ。利用者 (Users) は外すアカウントがあるので使わない (#3881)。
 func localRemoteCount(ctx context.Context, db *gorm.DB, table, hostCol string) (local, remote int64, err error) {
 	row := db.WithContext(ctx).Raw(
 		`SELECT COUNT(*) FILTER (WHERE "` + hostCol + `" IS NULL),
@@ -24,14 +24,27 @@ func localRemoteCount(ctx context.Context, db *gorm.DB, table, hostCol string) (
 }
 
 // Users returns a TickFunc that, on a major tick, recomputes the
-// instance-wide local / remote user totals against the live DB. Mirrors
-// upstream UsersChart.tickMajor; tickMinor is empty (returns nil).
+// instance-wide local / remote user totals against the live DB, like
+// upstream UsersChart.tickMajor; tickMinor is empty (returns nil). Unlike
+// upstream, it leaves out deleted users, and from the local total also
+// system accounts and the accounts plugins manage (#3881).
+//
+// どれも誰も使わないアカウントで、/api/stats の利用者数と管理画面のチャートを
+// 実際より大きく見せる。nodeinfo の利用者数 (repository の CountLocalUsers) と
+// 同じ数え方にする。
 func Users(db *gorm.DB) chart.TickFunc {
 	return func(ctx context.Context, _ string, major bool) (map[string]int64, error) {
 		if !major {
 			return nil, nil
 		}
-		local, remote, err := localRemoteCount(ctx, db, "user", "host")
+		var local, remote int64
+		err := db.WithContext(ctx).Raw(
+			`SELECT COUNT(*) FILTER (WHERE u."host" IS NULL AND u."managedByPlugin" IS NULL
+			            AND NOT EXISTS (SELECT 1 FROM "system_account" sa WHERE sa."userId" = u."id")),
+			        COUNT(*) FILTER (WHERE u."host" IS NOT NULL)
+			   FROM "user" u
+			  WHERE NOT u."isDeleted"`,
+		).Row().Scan(&local, &remote)
 		if err != nil {
 			return nil, err
 		}

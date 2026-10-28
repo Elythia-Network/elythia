@@ -63,7 +63,7 @@ func TestPluginAccountRepository_ListByPlugin(t *testing.T) {
 
 // CountLocalUsersForSetup は、初回セットアップの判定のために、プラグインが
 // 管理するアカウントを除いたローカル利用者を数える (#3468)。CountLocalUsers
-// (nodeinfo などの利用者数) は管理するアカウントも数える。
+// (nodeinfo の利用者数) は、さらにシステムアカウントも外す (#3881)。
 func TestUserRepository_CountLocalUsersForSetup(t *testing.T) {
 	db, err := testutil.OpenTestDBSchema("setupcount")
 	require.NoError(t, err)
@@ -90,11 +90,19 @@ func TestUserRepository_CountLocalUsersForSetup(t *testing.T) {
 	require.NoError(t, db.Create(&model.User{ID: "cs-remote", Username: "cs_remote", UsernameLower: "cs_remote", Host: &host}).Error)
 	require.NoError(t, db.Create(&model.User{ID: "cs-deleted", Username: "cs_deleted", UsernameLower: "cs_deleted", IsDeleted: true}).Error)
 	all, setup := counts()
-	assert.Equal(t, int64(1), all, "利用者数には bot も数える")
-	assert.Equal(t, int64(0), setup, "セットアップの判定には数えない")
+	assert.Equal(t, int64(0), all, "利用者数には bot を数えない")
+	assert.Equal(t, int64(0), setup, "セットアップの判定には bot を数えない")
+
+	// nodeinfo の利用者数はシステムアカウントも外す (#3881)。
+	require.NoError(t, db.Create(&model.User{ID: "cs-actor", Username: "instance.actor", UsernameLower: "instance.actor"}).Error)
+	require.NoError(t, db.Create(&model.SystemAccount{ID: "cs-sa", UserID: "cs-actor", Type: "instance"}).Error)
+	all, err = repo.CountLocalUsers()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), all, "利用者数にはシステムアカウントも数えない")
+	require.NoError(t, db.Exec(`DELETE FROM "user" WHERE id = 'cs-actor'`).Error)
 
 	require.NoError(t, db.Create(&model.User{ID: "cs-plain", Username: "cs_plain", UsernameLower: "cs_plain"}).Error)
 	all, setup = counts()
-	assert.Equal(t, int64(2), all)
+	assert.Equal(t, int64(1), all)
 	assert.Equal(t, int64(1), setup)
 }

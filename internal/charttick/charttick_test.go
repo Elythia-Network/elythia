@@ -60,6 +60,13 @@ func TestUsers_TickMajorCountsLocalRemote(t *testing.T) {
 	exec(`INSERT INTO "user" ("id","username","usernameLower","host") VALUES ('u3', 'c','c','remote.example')`)
 	exec(`INSERT INTO "user" ("id","username","usernameLower","host") VALUES ('u4', 'd','d','remote.example')`)
 	exec(`INSERT INTO "user" ("id","username","usernameLower","host") VALUES ('u5', 'e','e','other.example')`)
+	// 数えないもの (#3881): 削除済み (ローカルとリモート)、システムアカウント、
+	// プラグインが管理するアカウント。
+	exec(`INSERT INTO "user" ("id","username","usernameLower","isDeleted") VALUES ('u6', 'f','f', true)`)
+	exec(`INSERT INTO "user" ("id","username","usernameLower","host","isDeleted") VALUES ('u7', 'g','g','remote.example', true)`)
+	exec(`INSERT INTO "user" ("id","username","usernameLower") VALUES ('u8', 'instance.actor','instance.actor')`)
+	exec(`INSERT INTO "system_account" ("id","userId","type") VALUES ('sa1', 'u8', 'actor')`)
+	exec(`INSERT INTO "user" ("id","username","usernameLower","managedByPlugin") VALUES ('u9', 'bot','bot','plugin-a')`)
 
 	tick := charttick.Users(db)
 	got, err := tick(context.Background(), "", true)
