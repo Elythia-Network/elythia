@@ -94,6 +94,22 @@ Page に作者だけが見られる `private` を足し、公開範囲を `publi
 - 外す時点は違う。本家は積むとき (`updateHashtagsRanking`) に外し、ランキングは今の 1 時間の窓と 1 つ前の窓を読む。そのため、設定を変えても、すでに積んだ分は、積んだ窓と次の窓が終わるまで (最大で約 2 時間) ランキングに残る。設定を外しても、その間に積まなかった分は戻らない。Elythia は集計のたびに今の設定で外すので、設定の変更は次の呼び出しから両方向に効く (meta のキャッシュは `metaUpdated` で無効化される)。設定を変える前に始まっていた集計を待っていた呼び出しには、変える前の設定の結果が返る。meta が読めないときは、隠したタグを出さないよう 500 を返す
 - **`hashtag` テーブルへの記録では、Elythia だけがこの 2 つで外す (#3628 より前から)。** 本家の `updateHashtag` は、ランキング (`updateHashtagsRanking`) からは外すが、`hashtag` テーブルには設定に関係なく記録する。Elythia の記録 (`internal/core/hashtag` の `OnNoteCreated` / `UpdateUsertags` の追加側) は記録そのものを止めるので、隠したタグとセンシティブな語のタグは `hashtags/list` / `search` / `show` の元データ (`hashtag` テーブル) から抜け、設定を外しても抜けた分は戻らない。記録側の hiddenTags の比較は、正規化ではなく大文字小文字だけを無視する比較 (`strings.EqualFold`) で、trend の判定とは別。#3628 では記録側を変えていない
 
+## サーバーの利用者数の数え方 (#3881)
+
+nodeinfoの`usage.users.total`、`/api/stats`の`usersCount`・`originalUsersCount`、利用者のチャート (`charts/users`の`local.total`・`remote.total`) から、誰も使わないアカウントを外す。
+
+| 項目 | 本家 | Elythia |
+|---|---|---|
+| nodeinfoの`usage.users.total` | 利用者のチャートの`local.total` | DBのローカル利用者を数える (`repository`の`CountLocalUsers`)。削除済み・システムアカウント (`system_account`にある利用者。インスタンスのactor・リレー・プロキシ)・プラグインが管理するアカウント (`managedByPlugin`) を外す |
+| 利用者のチャートの`local.total` | 定期の集計 (`UsersChart.tickMajor`) で、`host`が無い利用者をすべて数える (削除済みとシステムアカウントを含む)。登録のたびにも+1する (`SignupService`) | 同じ定期の集計 (`charttick.Users`) で、上の3種類を外す。ローカルの登録で+1する経路は無く (#3881より前から)、定期の集計 (1日1回) でだけ動く |
+| 利用者のチャートの`remote.total` | `host`がある利用者をすべて数える (削除済みを含む) | 削除済みを外す |
+
+- どれも誰もログインできないアカウントで、数えるとサーバーの規模が実際より大きく見える。人が1人のサーバーでも、システムアカウント (Elythiaが作るのはインスタンスのactor・リレー・プロキシの最大3件で、どれも使ったときに作る) とプラグインのbotが数に入っていた。他のサーバーやサーバーの一覧サイトは、nodeinfoのこの値を読む
+- `/api/stats`の`usersCount`はチャートの`local.total`と`remote.total`の和、`originalUsersCount`は`local.total`なので、同じ数え方になる
+- リモートのインスタンスごとの`usersCount`は、本家どおり削除済みを含む。そのため、インスタンスごとの`usersCount`を合計しても`remote.total`とは一致しない
+- チャートの値は、次の定期の集計から新しい数え方になる。過去の行は書き換えないので、切り替わった日に総数が一度だけ下がる
+- #3468では、nodeinfoの利用者数にプラグインのbotも数えると決めていたが、#3881で改めた
+
 ## ハードミュート (`hardMutedWords`) をサーバー側で掛ける (#787 / #3369)
 
 本家 (2026.10.0) のサーバーは `hardMutedWords` を保存して `i` などで返すだけで、ノートの選別には使わない (`misc/check-word-mute.ts` はユニットテストからしか呼ばれていない)。隠すのは frontend で、ノートは届いたうえで描画しない。`withHardMute` を付けて描画するのは `MkNotesTimeline` / `MkStreamingNotesTimeline` / `MkStreamingNotificationsTimeline` の 3 つだけ。Elythia は frontend の判定 (本家と同じもの) に加えて、**本家の frontend がこの 3 つで描画する一覧**では、サーバーでも応答とストリームの配信から落とす。本家のクライアントにも、自分で判定しないクライアントにも、ミュートしたノートが届かないようにするため。
