@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -37,12 +38,13 @@ type ChunkedStartRequest struct {
 	Name string `json:"name"`
 	// Size is the total byte length the client intends to upload. It is
 	// validated against every quota up front and bounds what append accepts;
-	// the real size is re-derived from the assembled object at finish.
-	Size        int64   `json:"size"`
-	Comment     *string `json:"comment"`
-	FolderID    *string `json:"folderId"`
-	IsSensitive bool    `json:"isSensitive"`
-	Force       bool    `json:"force"`
+	// the real size is re-derived from the assembled object at finish. Like
+	// upstream's ajv, it takes an integer written as a decimal (10.0, #3872).
+	Size        jsnum.Int `json:"size"`
+	Comment     *string   `json:"comment"`
+	FolderID    *string   `json:"folderId"`
+	IsSensitive bool      `json:"isSensitive"`
+	Force       bool      `json:"force"`
 }
 
 // ChunkedSessionRequest identifies a session for finish / abort.
@@ -76,7 +78,7 @@ func (h *Handler) FilesCreateChunkedStart(c echo.Context) error {
 	in := coredrive.StartChunkedUploadInput{
 		User:        user,
 		Name:        name,
-		Size:        req.Size,
+		Size:        int64(req.Size),
 		Comment:     req.Comment,
 		FolderID:    req.FolderID,
 		IsSensitive: req.IsSensitive,

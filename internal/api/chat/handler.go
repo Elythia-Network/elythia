@@ -1325,12 +1325,17 @@ func (h *Handler) MessagesRead(c echo.Context) error {
 func (h *Handler) Messages(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		RoomID string `json:"roomId"`
-		UserID string `json:"userId"`
-		Limit  int    `json:"limit"`
+		RoomID string     `json:"roomId"`
+		UserID string     `json:"userId"`
+		Limit  *jsnum.Int `json:"limit"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
+	}
+	// 本家のajvと同じく、整数を小数の形で書いた値(10.0)も受ける(#3872)。
+	limit := 0
+	if req.Limit != nil {
+		limit = int(*req.Limit)
 	}
 	var msgs []*model.ChatMessage
 	if req.RoomID != "" {
@@ -1348,9 +1353,9 @@ func (h *Handler) Messages(c echo.Context) error {
 		if !h.isRoomMember(room, user.ID) && !h.isModerator(user.ID) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROOM", "No such room.", "c4d9f88c-9270-4632-b032-6ed8cee36f7f"))
 		}
-		msgs, _ = h.repo.ListMessagesByRoom(req.RoomID, "", "", req.Limit)
+		msgs, _ = h.repo.ListMessagesByRoom(req.RoomID, "", "", limit)
 	} else if req.UserID != "" {
-		msgs, _ = h.repo.ListMessagesByUser(user.ID, req.UserID, "", "", req.Limit)
+		msgs, _ = h.repo.ListMessagesByUser(user.ID, req.UserID, "", "", limit)
 	}
 	return h.jsonOK(c, h.packMessagesDetailed(msgs, user.ID))
 }
