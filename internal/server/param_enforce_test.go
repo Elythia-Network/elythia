@@ -278,12 +278,14 @@ func moderationEndpoint(ep string) bool {
 }
 
 // userTargetEndpoints are the enforced admin/* endpoints that act on, or look
-// up, the user named by userId (#3861; admin/ip/related-accounts in #3869).
+// up, the user named by userId (#3861; admin/ip/related-accounts in #3869,
+// admin/emoji-application/reset-user-quota in #3875).
 // The corpus names the seeded remote user (abc123).
 var userTargetEndpoints = []string{
 	"admin/accounts/delete", "admin/delete-account", "admin/delete-all-files-of-a-user", "admin/get-user-ips",
 	"admin/reset-password", "admin/show-user", "admin/suspend-user", "admin/unset-mfa", "admin/unset-user-avatar",
 	"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note", "admin/ip/related-accounts",
+	"admin/emoji-application/reset-user-quota",
 }
 
 // testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
@@ -504,6 +506,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, db.Exec(`DELETE FROM system_webhook WHERE NOT (id = ANY(?::varchar[]))`, keep(keepWebhooks)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE "userId" = ? OR NOT ("roleId" = ANY(?::varchar[]))`, seedID, keep(keepRoles)).Error)
 		require.NoError(t, db.Exec(`DELETE FROM role WHERE NOT (id = ANY(?::varchar[]))`, keep(keepRoles)).Error)
+		// admin/emoji-application/reset-user-quota が置いた利用者の枠を戻した記録
+		// (#3875)。利用者への外部キーが無いので、利用者を消しても残る。
+		require.NoError(t, db.Exec(`DELETE FROM emoji_application_quota_reset WHERE "userId" = ?`, seedID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "user" WHERE id = ?`, seedID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "user" u WHERE NOT (u.id = ANY(?::varchar[]))
 			AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = u.id)`, keep(keepUsers)).Error)
@@ -1157,7 +1162,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		"admin/system-webhook/update",
 		"admin/accounts/delete", "admin/delete-account", "admin/delete-all-files-of-a-user", "admin/get-user-ips",
 		"admin/reset-password", "admin/show-user", "admin/suspend-user", "admin/unset-mfa", "admin/unset-user-avatar",
-		"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note"} {
+		"admin/unset-user-banner", "admin/unsuspend-user", "admin/update-user-note",
+		"admin/emoji-application/reset-user-quota"} {
 		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
 	}
 	for _, ep := range jobEnqueuingEndpoints {

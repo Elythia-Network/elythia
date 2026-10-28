@@ -20,6 +20,21 @@
 			},
 			"meta": {}
 		},
+		"admin/emoji-application/approve": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
 		"admin/emoji-application/list": {
 			"paramDef": {
 				"type": "object",
@@ -85,6 +100,24 @@
 			},
 			"meta": {}
 		},
+		"admin/emoji-application/reject": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"reason": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
 		"admin/emoji-application/related": {
 			"paramDef": {
 				"type": "object",
@@ -110,6 +143,26 @@
 			},
 			"meta": {}
 		},
+		"admin/emoji-application/reset-user-quota": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"reason": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"userId",
+					"reason"
+				]
+			},
+			"meta": {}
+		},
 		"admin/emoji-application/user-summary": {
 			"paramDef": {
 				"type": "object",
@@ -121,6 +174,36 @@
 				},
 				"required": [
 					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/clean-gone-instance": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"host": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"host"
+				]
+			},
+			"meta": {}
+		},
+		"admin/federation/close-delivery-breaker": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"host": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"host"
 				]
 			},
 			"meta": {}
@@ -303,6 +386,21 @@
 			},
 			"meta": {}
 		},
+		"admin/signup-application/approve": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
 		"admin/signup-application/list": {
 			"paramDef": {
 				"type": "object",
@@ -327,6 +425,66 @@
 					}
 				},
 				"required": []
+			},
+			"meta": {}
+		},
+		"admin/signup-application/reject": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/accept": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"matchId"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/cancel": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"matchId"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/decline": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"matchId"
+				]
 			},
 			"meta": {}
 		},
@@ -363,6 +521,26 @@
 			},
 			"meta": {}
 		},
+		"bubble-game/versus/invite": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"gameMode": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": [
+					"userId",
+					"gameMode"
+				]
+			},
+			"meta": {}
+		},
 		"bubble-game/versus/record": {
 			"paramDef": {
 				"type": "object",
@@ -374,6 +552,65 @@
 				},
 				"required": [
 					"matchId"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/report": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"score": {
+						"type": "integer"
+					},
+					"frame": {
+						"type": "integer"
+					},
+					"reason": {
+						"type": "string"
+					},
+					"logs": {
+						"type": "array",
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "number"
+							}
+						}
+					},
+					"gameVersion": {
+						"type": "integer"
+					}
+				},
+				"required": [
+					"matchId",
+					"score",
+					"frame",
+					"reason",
+					"logs"
+				]
+			},
+			"meta": {}
+		},
+		"bubble-game/versus/set-public": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"matchId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"isPublic": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"matchId",
+					"isPublic"
 				]
 			},
 			"meta": {}
@@ -749,6 +986,98 @@
 			},
 			"meta": {}
 		},
+		"emoji-application/cancel": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"applicationId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"applicationId"
+				]
+			},
+			"meta": {}
+		},
+		"emoji-application/create": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"name": {
+						"type": "string"
+					},
+					"kind": {
+						"type": "string",
+						"enum": [
+							"own",
+							"remote"
+						]
+					},
+					"license": {
+						"type": "string"
+					},
+					"comment": {
+						"type": "string"
+					},
+					"fileId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"category": {
+						"type": "string"
+					},
+					"aliases": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"isSensitive": {
+						"type": "boolean"
+					},
+					"remoteHost": {
+						"type": "string"
+					},
+					"remoteName": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"name"
+				],
+				"if": {
+					"properties": {
+						"kind": {
+							"enum": [
+								"remote"
+							]
+						}
+					},
+					"required": [
+						"kind"
+					]
+				},
+				"then": {
+					"properties": {
+						"remoteHost": {
+							"type": "string",
+							"minLength": 1
+						},
+						"remoteName": {
+							"type": "string",
+							"minLength": 1
+						}
+					},
+					"required": [
+						"remoteHost",
+						"remoteName"
+					]
+				}
+			},
+			"meta": {}
+		},
 		"emoji-application/list-mine": {
 			"paramDef": {
 				"type": "object",
@@ -869,6 +1198,82 @@
 				},
 				"required": [
 					"roleId"
+				]
+			},
+			"meta": {}
+		},
+		"signup-application/apply": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"answers": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"formToken": {
+						"type": "string"
+					},
+					"hcaptcha-response": {
+						"type": "string",
+						"nullable": true
+					},
+					"g-recaptcha-response": {
+						"type": "string",
+						"nullable": true
+					},
+					"turnstile-response": {
+						"type": "string",
+						"nullable": true
+					},
+					"m-captcha-response": {
+						"type": "string",
+						"nullable": true
+					},
+					"testcaptcha-response": {
+						"type": "string",
+						"nullable": true
+					}
+				},
+				"required": [
+					"answers"
+				]
+			},
+			"meta": {}
+		},
+		"signup-application/form-token": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"signup-application/register": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"claimCode": {
+						"type": "string",
+						"minLength": 1
+					},
+					"username": {
+						"type": "string",
+						"minLength": 1
+					},
+					"password": {
+						"type": "string",
+						"minLength": 1
+					},
+					"emailAddress": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"claimCode",
+					"username",
+					"password"
 				]
 			},
 			"meta": {}
