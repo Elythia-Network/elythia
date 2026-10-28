@@ -1983,7 +1983,7 @@ setupRoutes()
 | `routes_charts.go` | `registerChartsRoutes` | `charts` 12・`retention` 2 | 14 | `chartsHandler` |
 | `routes_roles.go` | `registerRolesRoutes` | `roles` 5 | 5 | `rolesHandler` |
 | `routes_announcements.go` | `registerAnnouncementsRoutes` | `announcements` 2 | 2 | `announcementHandler` |
-| `routes_admin.go` | `registerAdminRoutes` | `admin` 144・`v2` 1 | 145 | `adminHandler`、`announcementHandler`、`backupHandler`、`roleService`、`backupGuard` |
+| `routes_admin.go` | `registerAdminRoutes` | `admin` 144・`v2` 1 | 145 | `adminHandler`、`announcementHandler`、`backupHandler`、`roleService` |
 | `routes_games.go` | `registerGamesRoutes` | `bubble-game` 13・`reversi` 7 | 20 | `reversiHandler`、`bubbleGameHandler`、`bubbleVersusHandler` |
 | `routes_chat.go` | `registerChatRoutes` | `chat` 40 | 40 | `chatHandler`、`roleService` |
 | `routes_fetch.go` | `registerFetchRoutes` | `fetch-rss` 2・`fetch-external-resources` 1 | 3 | `fetchExternalHandler`、`fetchRSSHandler` |
@@ -2008,7 +2008,10 @@ setupRoutes()
   `RequireNotMoved`・`RequireSecure`・`RequireModerator`・`RequireAdmin`・`RequireRolePolicy`・
   `RequireRolePolicyPublic`・`RejectAppToken`・`AdmitAppUser`、chat の `RequireChatAvailability`)
   だけ。どれも引数を閉じ込めた closure を返すだけで、ログ・metrics・Redis・`s.*` への代入を
-  持たない (本体を読んで確かめた)。`roleService` も `backupGuard` も書き換えていない
+  持たない (本体を読んで確かめた)。`roleService` も `backupGuard` も書き換えていない。
+  (後に #3878 で、再認証を引数の検証より後に走らせるため、`backupGuard` を route から外し、
+  再認証は `adminbackup` の handler の中で行うようになった。`registerAdminRoutes` も
+  `backupGuard` を受け取らない)
 - /api の行には、handler を関数リテラルで書いたものが無い
 
 **echo の登録の順は変わる。** `Echo.Routes()` は map から作るので順を持たない。
