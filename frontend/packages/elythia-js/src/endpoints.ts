@@ -452,7 +452,7 @@ export type ElythiaEndpoints = {
 			roomId?: string;
 			/** The other user of a one-to-one conversation with the caller. */
 			userId?: string;
-			/** Defaults to 20 (also when 0 or less), capped at 100. */
+			/** 1 to 100. Defaults to 20. */
 			limit?: number;
 		};
 		/** Newest first. */
@@ -464,7 +464,7 @@ export type ElythiaEndpoints = {
 		 * `chat/messages/create-to-room` (the same handler serves all three).
 		 * `toRoomId` wins when both are given.
 		 */
-		req: ({ toUserId: string } | { toRoomId: string }) & {
+		req: ({ toUserId: string; toRoomId?: string } | { toRoomId: string; toUserId?: string }) & {
 			/** Up to 2000 characters. Either `text` (an empty string counts) or `fileId` is required. */
 			text?: string | null;
 			/** A drive file of the caller. */
@@ -497,8 +497,7 @@ export type ElythiaEndpoints = {
 		res: undefined;
 	};
 	'chat/rooms/invitations/accept': {
-		// Go 側は invitationId も読むが使っていない。招待は (呼び出した人, roomId) で
-		// 引くので、型には載せない
+		// 招待は (呼び出した人, roomId) で引くので、invitationId は受けない
 		req: { roomId: string };
 		res: undefined;
 	};
@@ -514,7 +513,7 @@ export type ElythiaEndpoints = {
 	'chat/rooms/joined': {
 		/** The rooms the caller is a member of (not the ones the caller owns). */
 		req: {
-			/** Defaults to 30 (also when 0 or less), capped at 100. */
+			/** 1 to 100. Defaults to 30. */
 			limit?: number;
 			sinceId?: string;
 			untilId?: string;

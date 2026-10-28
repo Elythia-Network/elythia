@@ -857,17 +857,8 @@ func (h *Handler) RoomsJoined(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// rooms/joined は Elythia 独自の endpoint で、limit の 0 以下を既定の 30、
-	// 101 以上を 100 に丸めると宣言している (elythia-js)。本家に揃えた cursor の
-	// 範囲検査より先に丸め、独自の endpoint の意味を変えない (#3841)。
-	if req.Limit != nil {
-		if *req.Limit < 1 {
-			req.Limit = nil
-		} else if *req.Limit > 100 {
-			capped := jsnum.Int(100)
-			req.Limit = &capped
-		}
-	}
+	// limit は宣言 (elythia_paramdefs.json) どおり 1〜100 で、範囲の外は丸めずに
+	// 拒否する (#3872。以前は 0 以下を既定の 30、101 以上を 100 に丸めていた)。
 	sinceID, untilID, cursorOK := req.cursor()
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
@@ -1332,10 +1323,12 @@ func (h *Handler) Messages(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// 本家のajvと同じく、整数を小数の形で書いた値(10.0)も受ける(#3872)。
-	limit := 0
-	if req.Limit != nil {
-		limit = int(*req.Limit)
+	// 本家のajvと同じく、整数を小数の形で書いた値(10.0)も受ける。範囲は宣言
+	// (elythia_paramdefs.json) どおり 1〜100 で、範囲の外は丸めずに拒否する
+	// (#3872。以前は 0 以下を既定の 20、101 以上を 100 に丸めていた)。
+	limit, limitOK := pagination.ResolveLimit(req.Limit.IntPtr(), 20, 100)
+	if !limitOK {
+		return apierr.JSONInvalidParam(c)
 	}
 	var msgs []*model.ChatMessage
 	if req.RoomID != "" {
@@ -1587,9 +1580,11 @@ func (h *Handler) InvitationsDelete(c echo.Context) error {
 // InvitationsAccept handles POST /api/chat/rooms/invitations/accept.
 func (h *Handler) InvitationsAccept(c echo.Context) error {
 	user := middleware.GetUser(c)
+	// 招待は (呼び出した人, roomId) で引く。invitationId は読まない (宣言にも
+	// elythia-js の型にも無い。以前は読むだけで使わず、型の違う値を 400 にしていた。
+	// #3872)。
 	var req struct {
-		InvitationID string `json:"invitationId"`
-		RoomID       string `json:"roomId"`
+		RoomID string `json:"roomId"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
 		return apierr.JSONInvalidParam(c)

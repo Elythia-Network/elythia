@@ -393,6 +393,362 @@
 			},
 			"meta": {}
 		},
+		"chat/messages": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"chat/messages/create": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"toUserId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"toRoomId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"text": {
+						"type": "string",
+						"nullable": true,
+						"maxLength": 2000
+					},
+					"fileId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					}
+				},
+				"required": [],
+				"anyOf": [
+					{
+						"required": [
+							"toUserId"
+						]
+					},
+					{
+						"required": [
+							"toRoomId"
+						]
+					}
+				]
+			},
+			"meta": {}
+		},
+		"chat/messages/reactions/create": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"messageId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"reaction": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"messageId",
+					"reaction"
+				]
+			},
+			"meta": {}
+		},
+		"chat/messages/reactions/delete": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"messageId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"reaction": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"messageId",
+					"reaction"
+				]
+			},
+			"meta": {}
+		},
+		"chat/messages/read": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"messageId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"messageId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/messages/update": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"messageId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"text": {
+						"type": "string",
+						"nullable": true,
+						"maxLength": 2000
+					}
+				},
+				"required": [
+					"messageId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/invitations/accept": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roomId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/invitations/delete": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"invitationId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"invitationId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/invitations/reject": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roomId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/joined": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100
+					},
+					"sinceId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"untilId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"sinceDate": {
+						"type": "integer"
+					},
+					"untilDate": {
+						"type": "integer"
+					}
+				},
+				"required": []
+			},
+			"meta": {}
+		},
+		"chat/rooms/members/ban": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roomId",
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/members/update-membership": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"isMuted": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"roomId",
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/transfer-ownership": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"userId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roomId",
+					"userId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/rooms/unmute": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"roomId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"roomId"
+				]
+			},
+			"meta": {}
+		},
+		"chat/unread-count": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"drive/files/create-chunked/abort": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"uploadId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"uploadId"
+				]
+			},
+			"meta": {}
+		},
+		"drive/files/create-chunked/finish": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"uploadId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"uploadId"
+				]
+			},
+			"meta": {}
+		},
+		"drive/files/create-chunked/start": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"name": {
+						"type": "string"
+					},
+					"size": {
+						"type": "integer"
+					},
+					"comment": {
+						"type": "string",
+						"nullable": true,
+						"maxLength": 512
+					},
+					"folderId": {
+						"type": "string",
+						"format": "misskey:id",
+						"nullable": true
+					},
+					"isSensitive": {
+						"type": "boolean"
+					},
+					"force": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"size"
+				]
+			},
+			"meta": {}
+		},
 		"emoji-application/list-mine": {
 			"paramDef": {
 				"type": "object",

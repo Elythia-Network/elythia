@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,9 +104,9 @@ func TestReactionsDelete_EmptyReactionIsAccepted(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, post(h.ReactionsDelete, `{"messageId":"m1"}`, u1).Code)
 }
 
-// rooms/joined は Elythia 独自の endpoint で、limit の範囲外を丸めると宣言している
-// ので、本家に揃えた範囲検査で拒否しない (#3841)。
-func TestRoomsJoined_ClampsLimit(t *testing.T) {
+// rooms/joined の limit は宣言 (elythia_paramdefs.json) どおり 1〜100 で、範囲の
+// 外は丸めずに拒否する (#3872。以前は丸めていた)。
+func TestRoomsJoined_LimitRange(t *testing.T) {
 	h, repo := newTestHandler()
 	for i := range 120 {
 		id := fmt.Sprintf("a%03d", i)
@@ -112,9 +114,8 @@ func TestRoomsJoined_ClampsLimit(t *testing.T) {
 		repo.Memberships[u1.ID+":"+id] = &model.ChatRoomMembership{ID: "m" + id, UserID: u1.ID, RoomID: id}
 	}
 	for body, want := range map[string]int{
-		`{"limit":0}`:   30,
-		`{"limit":-1}`:  30,
-		`{"limit":500}`: 100,
+		`{"limit":1}`:   1,
+		`{"limit":100}`: 100,
 		`{"limit":2.0}`: 2,
 		`{}`:            30,
 	} {
@@ -122,4 +123,33 @@ func TestRoomsJoined_ClampsLimit(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, "%s: %s", body, rec.Body.String())
 		assert.Len(t, decodeList(t, rec), want, body)
 	}
+	for _, body := range []string{`{"limit":0}`, `{"limit":-1}`, `{"limit":101}`} {
+		assert.Equal(t, http.StatusBadRequest, post(h.RoomsJoined, body, u1).Code, body)
+	}
+}
+
+// chat/messages の limit も宣言どおり 1〜100 で、省略は既定の 20 (#3872。以前は
+// 0 以下を 20、101 以上を 100 に丸めていた)。
+func TestMessages_LimitRange(t *testing.T) {
+	repo := &limitRecordingRepo{MockChatRepository: testutil.NewMockChatRepository()}
+	idGen, _ := id.NewGenerator("aidx")
+	h := NewHandler(repo, idGen, nil, nil, nil)
+	require.Equal(t, http.StatusOK, post(h.Messages, `{"userId":"u2"}`, u1).Code)
+	assert.Equal(t, 20, repo.gotLimit)
+	require.Equal(t, http.StatusOK, post(h.Messages, `{"userId":"u2","limit":1}`, u1).Code)
+	assert.Equal(t, 1, repo.gotLimit)
+	for _, body := range []string{`{"userId":"u2","limit":0}`, `{"userId":"u2","limit":101}`} {
+		repo.gotLimit = -1
+		assert.Equal(t, http.StatusBadRequest, post(h.Messages, body, u1).Code, body)
+		assert.Equal(t, -1, repo.gotLimit, "%s must not reach the repository", body)
+	}
+}
+
+// invitations/accept は invitationId を読まない (#3872)。宣言にも elythia-js の型にも
+// 無い項目なので、型の違う値でも拒否せず、招待を (呼び出した人, roomId) で引く。
+func TestInvitationsAccept_IgnoresInvitationID(t *testing.T) {
+	h, _ := newTestHandler()
+	rec := post(h.InvitationsAccept, `{"roomId":"r1","invitationId":1}`, u1)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	assertErrorCode(t, rec, "NO_SUCH_INVITATION", "8c8f38f0-3b7e-4f5e-9c6d-2e3f4a5b6c7d")
 }

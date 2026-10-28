@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"5e448632d3ebff347e7b7ce67c0bdda58d41e7423410335fd2a1013e6354453e","cases":1165}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"e3a2e275cab3b6ca74f50a142f60285b4cdffba0b5205b1bc5e5481a83d6a762","cases":1965}
 {"ep":"admin/database-health"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -822,6 +822,824 @@
 {"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
 {"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
 {"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"chat/messages"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"roomId":null},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[]},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":""},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123"},"ok":true}
+{"in":{"roomId":"ABC"},"ok":true}
+{"in":{"roomId":"0"},"ok":true}
+{"in":{"roomId":"a_b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123"},"ok":true}
+{"in":{"userId":"ABC"},"ok":true}
+{"in":{"userId":"0"},"ok":true}
+{"in":{"userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"roomId":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"userId":{"bad":1},"roomId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"userId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"limit":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"ep":"chat/messages/create"}
+{"in":{"toUserId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'toUserId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"toUserId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"toUserId":null},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toUserId":123},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toUserId":true},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toUserId":[]},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toUserId":""},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"x-y"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"ABC"},"ok":true}
+{"in":{"toUserId":"0"},"ok":true}
+{"in":{"toUserId":"a_b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"a-b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"a b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":" abc"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc\n"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"日本"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"ａｂｃ"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc\u0000"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":null},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","toRoomId":123},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","toRoomId":true},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","toRoomId":[]},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","toRoomId":""},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"x-y"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"abc123"},"ok":true}
+{"in":{"toUserId":"abc123","toRoomId":"ABC"},"ok":true}
+{"in":{"toUserId":"abc123","toRoomId":"0"},"ok":true}
+{"in":{"toUserId":"abc123","toRoomId":"a_b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"a-b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"a b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":" abc"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"abc\n"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"日本"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"ａｂｃ"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","toRoomId":"abc\u0000"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","text":null},"ok":true}
+{"in":{"toUserId":"abc123","text":123},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","text":true},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","text":[]},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"toUserId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"toUserId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"toUserId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"toUserId":"abc123","text":""},"ok":true}
+{"in":{"toUserId":"abc123","text":"x-y"},"ok":true}
+{"in":{"toUserId":"abc123","text":"hello"},"ok":true}
+{"in":{"toUserId":"abc123","fileId":null},"ok":true}
+{"in":{"toUserId":"abc123","fileId":123},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","fileId":true},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","fileId":[]},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","fileId":""},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"x-y"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"abc123"},"ok":true}
+{"in":{"toUserId":"abc123","fileId":"ABC"},"ok":true}
+{"in":{"toUserId":"abc123","fileId":"0"},"ok":true}
+{"in":{"toUserId":"abc123","fileId":"a_b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"a-b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"a b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":" abc"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"abc\n"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"日本"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"ａｂｃ"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":"abc123","fileId":"abc\u0000"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toUserId":{"bad":1},"toRoomId":{"bad":1}},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","toRoomId":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","text":{"bad":1},"toRoomId":{"bad":1}},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","text":{"bad":1},"fileId":{"bad":1}},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toUserId":"abc123","fileId":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123"},"ok":true}
+{"in":{"toRoomId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"toRoomId":"abc123","toUserId":null},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","toUserId":123},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","toUserId":true},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","toUserId":[]},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","toUserId":""},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"x-y"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"abc123"},"ok":true}
+{"in":{"toRoomId":"abc123","toUserId":"ABC"},"ok":true}
+{"in":{"toRoomId":"abc123","toUserId":"0"},"ok":true}
+{"in":{"toRoomId":"abc123","toUserId":"a_b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"a-b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"a b"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":" abc"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"abc\n"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"日本"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"ａｂｃ"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","toUserId":"abc\u0000"},"ok":false,"path":"#/properties/toUserId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":null},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toRoomId":123},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toRoomId":true},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toRoomId":[]},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toRoomId":""},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"x-y"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"ABC"},"ok":true}
+{"in":{"toRoomId":"0"},"ok":true}
+{"in":{"toRoomId":"a_b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"a-b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"a b"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":" abc"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc\n"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"日本"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"ａｂｃ"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc\u0000"},"ok":false,"path":"#/properties/toRoomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","text":null},"ok":true}
+{"in":{"toRoomId":"abc123","text":123},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","text":true},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","text":[]},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"toRoomId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"toRoomId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"toRoomId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"toRoomId":"abc123","text":""},"ok":true}
+{"in":{"toRoomId":"abc123","text":"x-y"},"ok":true}
+{"in":{"toRoomId":"abc123","text":"hello"},"ok":true}
+{"in":{"toRoomId":"abc123","fileId":null},"ok":true}
+{"in":{"toRoomId":"abc123","fileId":123},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","fileId":true},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","fileId":[]},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","fileId":""},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"x-y"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"abc123"},"ok":true}
+{"in":{"toRoomId":"abc123","fileId":"ABC"},"ok":true}
+{"in":{"toRoomId":"abc123","fileId":"0"},"ok":true}
+{"in":{"toRoomId":"abc123","fileId":"a_b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"a-b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"a b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":" abc"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"abc\n"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"日本"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"ａｂｃ"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":"abc123","fileId":"abc\u0000"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"toRoomId":{"bad":1},"toUserId":{"bad":1}},"ok":false,"path":"#/properties/toUserId/type","msg":"must be string"}
+{"in":{"toRoomId":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/toRoomId/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","text":{"bad":1},"fileId":{"bad":1}},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"toRoomId":"abc123","fileId":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"ep":"chat/messages/reactions/create"}
+{"in":{"messageId":"abc123","reaction":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"messageId":"abc123","reaction":"hello","unknownProperty":1},"ok":true}
+{"in":{"reaction":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":{"messageId":null,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":123,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":true,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":[],"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":"","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"x-y","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ABC","reaction":"hello"},"ok":true}
+{"in":{"messageId":"0","reaction":"hello"},"ok":true}
+{"in":{"messageId":"a_b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a-b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":" abc","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\n","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"日本","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ａｂｃ","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\u0000","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'reaction'"}
+{"in":{"messageId":"abc123","reaction":null},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":123},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":true},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":[]},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":""},"ok":true}
+{"in":{"messageId":"abc123","reaction":"x-y"},"ok":true}
+{"in":{"messageId":{"bad":1},"reaction":{"bad":1}},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"reaction":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"ep":"chat/messages/reactions/delete"}
+{"in":{"messageId":"abc123","reaction":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"messageId":"abc123","reaction":"hello","unknownProperty":1},"ok":true}
+{"in":{"reaction":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":{"messageId":null,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":123,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":true,"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":[],"reaction":"hello"},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":"","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"x-y","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ABC","reaction":"hello"},"ok":true}
+{"in":{"messageId":"0","reaction":"hello"},"ok":true}
+{"in":{"messageId":"a_b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a-b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a b","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":" abc","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\n","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"日本","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ａｂｃ","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\u0000","reaction":"hello"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'reaction'"}
+{"in":{"messageId":"abc123","reaction":null},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":123},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":true},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":[]},"ok":false,"path":"#/properties/reaction/type","msg":"must be string"}
+{"in":{"messageId":"abc123","reaction":""},"ok":true}
+{"in":{"messageId":"abc123","reaction":"x-y"},"ok":true}
+{"in":{"messageId":{"bad":1},"reaction":{"bad":1}},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"reaction":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"ep":"chat/messages/read"}
+{"in":{"messageId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"messageId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"messageId":null},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":123},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":true},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":[]},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":""},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"x-y"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ABC"},"ok":true}
+{"in":{"messageId":"0"},"ok":true}
+{"in":{"messageId":"a_b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a-b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":" abc"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\n"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"日本"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ａｂｃ"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\u0000"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":{"bad":1}},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"ep":"chat/messages/update"}
+{"in":{"messageId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"messageId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"messageId":null},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":123},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":true},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":[]},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"messageId":""},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"x-y"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ABC"},"ok":true}
+{"in":{"messageId":"0"},"ok":true}
+{"in":{"messageId":"a_b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a-b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"a b"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":" abc"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\n"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"日本"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"ａｂｃ"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc\u0000"},"ok":false,"path":"#/properties/messageId/format","msg":"must match format \"misskey:id\""}
+{"in":{"messageId":"abc123","text":null},"ok":true}
+{"in":{"messageId":"abc123","text":123},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"messageId":"abc123","text":true},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"messageId":"abc123","text":[]},"ok":false,"path":"#/properties/text/type","msg":"must be string"}
+{"in":{"messageId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"messageId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"messageId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"messageId":"abc123","text":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/text/maxLength","msg":"must NOT have more than 2000 characters"}
+{"in":{"messageId":"abc123","text":""},"ok":true}
+{"in":{"messageId":"abc123","text":"x-y"},"ok":true}
+{"in":{"messageId":"abc123","text":"hello"},"ok":true}
+{"in":{"messageId":{"bad":1},"text":{"bad":1}},"ok":false,"path":"#/properties/messageId/type","msg":"must be string"}
+{"in":{"text":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'messageId'"}
+{"ep":"chat/rooms/invitations/accept"}
+{"in":{"roomId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"roomId":null},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[]},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":""},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC"},"ok":true}
+{"in":{"roomId":"0"},"ok":true}
+{"in":{"roomId":"a_b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"ep":"chat/rooms/invitations/delete"}
+{"in":{"invitationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'invitationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"invitationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"invitationId":null},"ok":false,"path":"#/properties/invitationId/type","msg":"must be string"}
+{"in":{"invitationId":123},"ok":false,"path":"#/properties/invitationId/type","msg":"must be string"}
+{"in":{"invitationId":true},"ok":false,"path":"#/properties/invitationId/type","msg":"must be string"}
+{"in":{"invitationId":[]},"ok":false,"path":"#/properties/invitationId/type","msg":"must be string"}
+{"in":{"invitationId":""},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"x-y"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"ABC"},"ok":true}
+{"in":{"invitationId":"0"},"ok":true}
+{"in":{"invitationId":"a_b"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"a-b"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"a b"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":" abc"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"abc\n"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"日本"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"ａｂｃ"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":"abc\u0000"},"ok":false,"path":"#/properties/invitationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"invitationId":{"bad":1}},"ok":false,"path":"#/properties/invitationId/type","msg":"must be string"}
+{"ep":"chat/rooms/invitations/reject"}
+{"in":{"roomId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"roomId":null},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[]},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":""},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC"},"ok":true}
+{"in":{"roomId":"0"},"ok":true}
+{"in":{"roomId":"a_b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"ep":"chat/rooms/joined"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"in":{"limit":null},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":10.0},"ok":true}
+{"in":{"limit":1e1},"ok":true}
+{"in":{"limit":1e400},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":-0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":"1"},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":true},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1},"ok":true}
+{"in":{"limit":0},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"limit":0.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":1.0},"ok":true}
+{"in":{"limit":100},"ok":true}
+{"in":{"limit":101},"ok":false,"path":"#/properties/limit/maximum","msg":"must be <= 100"}
+{"in":{"limit":100.5},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"limit":100e0},"ok":true}
+{"in":{"limit":-1},"ok":false,"path":"#/properties/limit/minimum","msg":"must be >= 1"}
+{"in":{"sinceId":null},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":123},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":true},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":[]},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"sinceId":""},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"x-y"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc123"},"ok":true}
+{"in":{"sinceId":"ABC"},"ok":true}
+{"in":{"sinceId":"0"},"ok":true}
+{"in":{"sinceId":"a_b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a-b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"a b"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":" abc"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\n"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"日本"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"ａｂｃ"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceId":"abc\u0000"},"ok":false,"path":"#/properties/sinceId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":null},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":123},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":true},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":[]},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"untilId":""},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"x-y"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc123"},"ok":true}
+{"in":{"untilId":"ABC"},"ok":true}
+{"in":{"untilId":"0"},"ok":true}
+{"in":{"untilId":"a_b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a-b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"a b"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":" abc"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\n"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"日本"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"ａｂｃ"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"untilId":"abc\u0000"},"ok":false,"path":"#/properties/untilId/format","msg":"must match format \"misskey:id\""}
+{"in":{"sinceDate":null},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":1.5},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":10.0},"ok":true}
+{"in":{"sinceDate":1e1},"ok":true}
+{"in":{"sinceDate":1e400},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-0},"ok":true}
+{"in":{"sinceDate":"1"},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":true},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"sinceDate":-1},"ok":true}
+{"in":{"sinceDate":1},"ok":true}
+{"in":{"untilDate":null},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":1.5},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":10.0},"ok":true}
+{"in":{"untilDate":1e1},"ok":true}
+{"in":{"untilDate":1e400},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-0},"ok":true}
+{"in":{"untilDate":"1"},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":true},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"in":{"untilDate":-1},"ok":true}
+{"in":{"untilDate":1},"ok":true}
+{"in":{"limit":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"in":{"sinceId":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceId":{"bad":1}},"ok":false,"path":"#/properties/sinceId/type","msg":"must be string"}
+{"in":{"untilId":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/untilId/type","msg":"must be string"}
+{"in":{"sinceDate":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
+{"ep":"chat/rooms/members/ban"}
+{"in":{"roomId":"abc123","userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":{"roomId":null,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[],"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":"","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC","userId":"abc123"},"ok":true}
+{"in":{"roomId":"0","userId":"abc123"},"ok":true}
+{"in":{"roomId":"a_b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"roomId":"abc123","userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ABC"},"ok":true}
+{"in":{"roomId":"abc123","userId":"0"},"ok":true}
+{"in":{"roomId":"abc123","userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"userId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"ep":"chat/rooms/members/update-membership"}
+{"in":{"roomId":"abc123","userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":{"roomId":null,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[],"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":"","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC","userId":"abc123"},"ok":true}
+{"in":{"roomId":"0","userId":"abc123"},"ok":true}
+{"in":{"roomId":"a_b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"roomId":"abc123","userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ABC"},"ok":true}
+{"in":{"roomId":"abc123","userId":"0"},"ok":true}
+{"in":{"roomId":"abc123","userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc123","isMuted":null},"ok":false,"path":"#/properties/isMuted/type","msg":"must be boolean"}
+{"in":{"roomId":"abc123","userId":"abc123","isMuted":0},"ok":false,"path":"#/properties/isMuted/type","msg":"must be boolean"}
+{"in":{"roomId":"abc123","userId":"abc123","isMuted":"true"},"ok":false,"path":"#/properties/isMuted/type","msg":"must be boolean"}
+{"in":{"roomId":"abc123","userId":"abc123","isMuted":false},"ok":true}
+{"in":{"roomId":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":{"bad":1},"isMuted":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"isMuted":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"ep":"chat/rooms/transfer-ownership"}
+{"in":{"roomId":"abc123","userId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","userId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":{"roomId":null,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true,"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[],"userId":"abc123"},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":"","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC","userId":"abc123"},"ok":true}
+{"in":{"roomId":"0","userId":"abc123"},"ok":true}
+{"in":{"roomId":"a_b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000","userId":"abc123"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"roomId":"abc123","userId":null},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":123},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":true},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":[]},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"roomId":"abc123","userId":""},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"x-y"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ABC"},"ok":true}
+{"in":{"roomId":"abc123","userId":"0"},"ok":true}
+{"in":{"roomId":"abc123","userId":"a_b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a-b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"a b"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":" abc"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\n"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"日本"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc123","userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":{"bad":1},"userId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"userId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"ep":"chat/rooms/unmute"}
+{"in":{"roomId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roomId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"roomId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"roomId":null},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":123},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":true},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":[]},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"in":{"roomId":""},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"x-y"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ABC"},"ok":true}
+{"in":{"roomId":"0"},"ok":true}
+{"in":{"roomId":"a_b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a-b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"a b"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":" abc"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\n"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"日本"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"ａｂｃ"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":"abc\u0000"},"ok":false,"path":"#/properties/roomId/format","msg":"must match format \"misskey:id\""}
+{"in":{"roomId":{"bad":1}},"ok":false,"path":"#/properties/roomId/type","msg":"must be string"}
+{"ep":"chat/unread-count"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"drive/files/create-chunked/abort"}
+{"in":{"uploadId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"uploadId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"uploadId":null},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":123},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":true},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":[]},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":""},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"x-y"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"ABC"},"ok":true}
+{"in":{"uploadId":"0"},"ok":true}
+{"in":{"uploadId":"a_b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"a-b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"a b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":" abc"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"abc\n"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"日本"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"ａｂｃ"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"abc\u0000"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":{"bad":1}},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"ep":"drive/files/create-chunked/finish"}
+{"in":{"uploadId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"uploadId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"uploadId":null},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":123},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":true},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":[]},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":""},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"x-y"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"ABC"},"ok":true}
+{"in":{"uploadId":"0"},"ok":true}
+{"in":{"uploadId":"a_b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"a-b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"a b"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":" abc"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"abc\n"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"日本"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"ａｂｃ"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":"abc\u0000"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
+{"in":{"uploadId":{"bad":1}},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"ep":"drive/files/create-chunked/start"}
+{"in":{"size":1},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'size'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"size":1,"unknownProperty":1},"ok":true}
+{"in":{"size":1,"name":null},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"size":1,"name":123},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"size":1,"name":true},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"size":1,"name":[]},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"size":1,"name":""},"ok":true}
+{"in":{"size":1,"name":"x-y"},"ok":true}
+{"in":{"size":1,"name":"hello"},"ok":true}
+{"in":{"size":null},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":1.5},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":10.0},"ok":true}
+{"in":{"size":1e1},"ok":true}
+{"in":{"size":1e400},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":-0},"ok":true}
+{"in":{"size":"1"},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":true},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":-1},"ok":true}
+{"in":{"size":1,"comment":null},"ok":true}
+{"in":{"size":1,"comment":123},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"size":1,"comment":true},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"size":1,"comment":[]},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"size":1,"comment":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":true}
+{"in":{"size":1,"comment":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ok":false,"path":"#/properties/comment/maxLength","msg":"must NOT have more than 512 characters"}
+{"in":{"size":1,"comment":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":true}
+{"in":{"size":1,"comment":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"},"ok":false,"path":"#/properties/comment/maxLength","msg":"must NOT have more than 512 characters"}
+{"in":{"size":1,"comment":""},"ok":true}
+{"in":{"size":1,"comment":"x-y"},"ok":true}
+{"in":{"size":1,"comment":"hello"},"ok":true}
+{"in":{"size":1,"folderId":null},"ok":true}
+{"in":{"size":1,"folderId":123},"ok":false,"path":"#/properties/folderId/type","msg":"must be string"}
+{"in":{"size":1,"folderId":true},"ok":false,"path":"#/properties/folderId/type","msg":"must be string"}
+{"in":{"size":1,"folderId":[]},"ok":false,"path":"#/properties/folderId/type","msg":"must be string"}
+{"in":{"size":1,"folderId":""},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"x-y"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"abc123"},"ok":true}
+{"in":{"size":1,"folderId":"ABC"},"ok":true}
+{"in":{"size":1,"folderId":"0"},"ok":true}
+{"in":{"size":1,"folderId":"a_b"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"a-b"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"a b"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":" abc"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"abc\n"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"日本"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"ａｂｃ"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"folderId":"abc\u0000"},"ok":false,"path":"#/properties/folderId/format","msg":"must match format \"misskey:id\""}
+{"in":{"size":1,"isSensitive":null},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"size":1,"isSensitive":0},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"size":1,"isSensitive":"true"},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"size":1,"isSensitive":false},"ok":true}
+{"in":{"size":1,"force":null},"ok":false,"path":"#/properties/force/type","msg":"must be boolean"}
+{"in":{"size":1,"force":0},"ok":false,"path":"#/properties/force/type","msg":"must be boolean"}
+{"in":{"size":1,"force":"true"},"ok":false,"path":"#/properties/force/type","msg":"must be boolean"}
+{"in":{"size":1,"force":false},"ok":true}
+{"in":{"size":{"bad":1},"name":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"size":{"bad":1},"comment":{"bad":1}},"ok":false,"path":"#/properties/size/type","msg":"must be integer"}
+{"in":{"size":1,"comment":{"bad":1},"folderId":{"bad":1}},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"size":1,"folderId":{"bad":1},"comment":{"bad":1}},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"size":1,"folderId":{"bad":1},"isSensitive":{"bad":1}},"ok":false,"path":"#/properties/folderId/type","msg":"must be string"}
+{"in":{"size":1,"isSensitive":{"bad":1},"folderId":{"bad":1}},"ok":false,"path":"#/properties/folderId/type","msg":"must be string"}
+{"in":{"size":1,"isSensitive":{"bad":1},"force":{"bad":1}},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"size":1,"force":{"bad":1},"isSensitive":{"bad":1}},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"force":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'size'"}
 {"ep":"emoji-application/list-mine"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}

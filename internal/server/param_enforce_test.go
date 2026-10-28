@@ -124,6 +124,22 @@ type stricterCase struct {
 	id    string
 }
 
+// reactionWithoutEmoji matches the reactions of the corpus that have no emoji.
+// corpus の値は ASCII だけなので、ASCII だけで :name: の形でないものを絵文字の
+// 無い値とみなす。
+func reactionWithoutEmoji(in map[string]any) bool {
+	r, ok := in["reaction"].(string)
+	if !ok || (strings.HasPrefix(r, ":") && strings.HasSuffix(r, ":") && len(r) > 2) {
+		return false
+	}
+	for _, c := range r {
+		if c > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // ajvInvalidParamID is upstream's id of the INVALID_PARAM ajv answers.
 const ajvInvalidParamID = "3d81ceae-475f-4600-b2a8-2bc116157532"
 
@@ -154,20 +170,10 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 	}},
 	// 本家は絵文字を含まない reaction を normalizeEmojiString が素の Error で
 	// 投げて 500 にする (ChatService.react)。利用者の入力の誤りなので、Elythia は
-	// 400 INVALID_PARAM にしている (#3841)。corpus の値は ASCII だけなので、
-	// ASCII だけで :name: の形でないものを絵文字の無い値とみなす。
-	"chat/messages/react": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
-		r, ok := in["reaction"].(string)
-		if !ok || (strings.HasPrefix(r, ":") && strings.HasSuffix(r, ":") && len(r) > 2) {
-			return false
-		}
-		for _, c := range r {
-			if c > 0x7f {
-				return false
-			}
-		}
-		return true
-	}},
+	// 400 INVALID_PARAM にしている (#3841)。
+	"chat/messages/react": {id: ajvInvalidParamID, match: reactionWithoutEmoji},
+	// 同じ handler を使う Elythia 独自の名前 (#3872)。
+	"chat/messages/reactions/create": {id: ajvInvalidParamID, match: reactionWithoutEmoji},
 	// 本家は note_visibility_enum に無い visibility を PostgreSQL の型変換で 500 に
 	// する。Elythia は引く前に 400 にしている (#3518)。空文字は未指定と同じに扱う。
 	"notes/mentions": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
