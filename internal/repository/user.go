@@ -90,9 +90,9 @@ type UserRepository interface {
 	// system accounts and the accounts plugins manage (#3881).
 	CountLocalUsers() (int64, error)
 	// CountLocalUsersForSetup returns the number of non-deleted local users
-	// that are not managed by a plugin. The initial-setup window
-	// (admin/accounts/create and meta's requireSetup) opens only while this
-	// is 0 (#3468).
+	// that are neither managed by a plugin nor a system account. The
+	// initial-setup window (admin/accounts/create and meta's requireSetup)
+	// opens only while this is 0 (#3468).
 	CountLocalUsersForSetup() (int64, error)
 	// CountLocalUsersActiveSince returns the number of local users whose
 	// lastActiveDate falls on or after `since`. Used by nodeinfo
@@ -924,13 +924,24 @@ func (r *userRepository) CountLocalUsers() (int64, error) {
 // 作ると、新しいインスタンスでは最初の管理者を作る前にローカル利用者が 1 になり、
 // セットアップの窓が閉じて誰も管理者を作れなくなる (復旧する CLI も無い)。
 // 管理するアカウントには誰もログインできないので、窓を閉じる理由にならない。
-// nodeinfo の利用者数 (CountLocalUsers) は、さらにシステムアカウントも外す (#3881)。
+//
+// **システムアカウントも数えない。** システムアカウント (instance・relay・proxy) は
+// 使ったときに作られ、最初の管理者より先に作られることがある。数えると、その
+// 時点で窓が閉じる。システムアカウントにも誰もログインできない。
+//
+// **外してよいのは、誰もログインできないアカウントだけ。** nodeinfo の利用者数
+// (CountLocalUsers) は今は同じものを外すが、あちらは「人が使っている利用者」を
+// 数えるもので、bot や活動していない利用者を外す方向へ変わりうる。こちらは
+// rootUserId が無いまま利用者がいるとき、未認証の窓を閉じる唯一の判定なので、
+// あちらを呼ばずに独立して持つ。bot・活動していない・凍結された利用者も数える
+// ことを TestUserRepository_CountLocalUsersForSetup が確かめる。
 func (r *userRepository) CountLocalUsersForSetup() (int64, error) {
 	var count int64
 	err := r.db.Model(&model.User{}).
 		Where("host IS NULL").
 		Where(`"isDeleted" = false`).
 		Where(`"managedByPlugin" IS NULL`).
+		Where(`NOT EXISTS (SELECT 1 FROM "system_account" sa WHERE sa."userId" = "user".id)`).
 		Count(&count).Error
 	return count, err
 }

@@ -950,7 +950,7 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 		if h.userRepo == nil {
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
-		// プラグインが管理するアカウント (#3468) は数えない。起動時に bot を作る
+		// プラグインが管理するアカウント (#3468) とシステムアカウントは数えない。起動時に bot を作る
 		// プラグインがあると、最初の管理者を作る前に窓が閉じるため。
 		n, cerr := h.userRepo.CountLocalUsersForSetup()
 		if cerr != nil {

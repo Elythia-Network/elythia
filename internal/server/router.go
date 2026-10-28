@@ -1660,7 +1660,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// する。揃えないと、`rootUserId` が NULL で利用者ありの DB で
 	// **セットアップ画面が出続けて作成ボタンが必ず失敗する**。
 	// 初回セットアップの判定は admin/accounts/create と同じ数え方にする。
-	// プラグインが管理するアカウント (#3468) は数えない。
+	// プラグインが管理するアカウント (#3468) とシステムアカウントは数えない。
 	// /api/meta と、frontend の shell に埋める meta (通常・OAuth の同意画面・
 	// permalink の SSR・埋め込み) の全部へ同じ値を渡す (#3782)。
 	setupDetector := meta.NewSetupDetector(func() (int64, error) { return userRepo.CountLocalUsersForSetup() })
