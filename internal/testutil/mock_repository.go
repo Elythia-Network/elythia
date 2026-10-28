@@ -748,8 +748,8 @@ func (m *MockUserRepository) CountOnlineUsers() (int64, error) {
 }
 
 // CountLocalUsers counts non-deleted local users in the mock store that no
-// plugin manages, like the repository (#3881). The mock does not know the
-// system accounts.
+// plugin manages, like the repository (#3881). The repository also leaves
+// out the system accounts, which the mock does not know.
 func (m *MockUserRepository) CountLocalUsers() (int64, error) {
 	// **error を注入できるようにしてある。** 呼び出し側に fail-closed の枝が
 	// あるとき (admin/accounts/create の初回セットアップ判定)、それを踏めないと
@@ -767,7 +767,8 @@ func (m *MockUserRepository) CountLocalUsers() (int64, error) {
 }
 
 // CountLocalUsersForSetup counts non-deleted local users that no plugin
-// manages. CountLocalUsersErr も同じく効く。
+// manages. The repository also leaves out the system accounts, which the
+// mock does not know. CountLocalUsersErr も同じく効く。
 func (m *MockUserRepository) CountLocalUsersForSetup() (int64, error) {
 	if m.CountLocalUsersErr != nil {
 		return 0, m.CountLocalUsersErr
