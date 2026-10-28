@@ -248,6 +248,9 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":"影の検証"}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"isCat":"yes"}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
+		{http.MethodPost, "/api/i/update", `{"makeNotesHiddenBefore":10.0}`, true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
 		// 本家に揃えた endpoint は、検証を止めた server でも同じに拒否する。
 		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
@@ -300,12 +303,11 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	require.NoError(t, on.Shutdown(context.Background()))
 	out := logs.String()
 	for _, want := range []string{
-		`"endpoint":"notes/create","kind":"rejected_handler_ok","schemaPath":"#/properties/fileIds/minItems"`,
-		`"endpoint":"notes/create","kind":"rejected_handler_ok","schemaPath":"#/properties/visibility/enum"`,
-		`"endpoint":"notes/create","kind":"rejected_handler_other_error","schemaPath":"#/properties/replyId/format"`,
+		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/name/minLength"`,
+		`"endpoint":"i/update","kind":"rejected_handler_other_error","schemaPath":"#/properties/avatarId/format"`,
 		`"endpoint":"i/update","kind":"rejected_handler_ok","schemaPath":"#/properties/isCat/type"`,
-		`"endpoint":"notes/create","kind":"accepted_handler_invalid_param","schemaPath":""`,
-		`"endpoint":"notes/create","kind":"param_mismatch","schemaPath":"#/then/properties/text/minLength"`,
+		`"endpoint":"i/update","kind":"accepted_handler_invalid_param","schemaPath":""`,
+		`"endpoint":"i/update","kind":"param_mismatch","schemaPath":"#/properties/isCat/type"`,
 		`"msg":"paramshadow summary"`,
 		`"lone_surrogate":1`,
 	} {
