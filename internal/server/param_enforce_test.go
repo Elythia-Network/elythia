@@ -145,13 +145,9 @@ var enforcementPending = map[string]string{
 // left to a later stage, with the reason. Unlike enforcementPending, they
 // have no Elythia-only input that upstream's paramDef rejects.
 var enforcementDeferred = map[string]string{
-	// 独自の引数は無いが、本家と判定が分かれる入力 (U+0085 だけの text、NUL を含む
-	// text、poll.choices の __proto__ の重複など) の扱いを、admin/update-meta・
-	// i/update と一緒に最後の段で決める (#3667、#3847)。
-	"notes/create": "decided with admin/update-meta and i/update in the last stage of #3667",
-	// 親 issue の方針どおり、admin/update-meta・notes/create と一緒に最後の段で
-	// 決める (#3667、#3851)。
-	"i/update": "decided with admin/update-meta and notes/create in the last stage of #3667",
+	// 親 issue の方針どおり、admin/update-meta と一緒に最後の段で決める (#3667、
+	// #3851)。
+	"i/update": "decided with admin/update-meta in the last stage of #3667",
 }
 
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
@@ -211,6 +207,25 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 	"chat/messages/react": {id: ajvInvalidParamID, match: reactionWithoutEmoji},
 	// 同じ handler を使う Elythia 独自の名前 (#3872)。
 	"chat/messages/reactions/create": {id: ajvInvalidParamID, match: reactionWithoutEmoji},
+	// notes/create (#3884) は 2 つの入力を、本家と違って 400 INVALID_PARAM にする。
+	// NUL を含む text は、本家では保存で PostgreSQL が落として 500 になる (#3025 と
+	// 同じ型)。poll.choices の "__proto__" の重複は、ajv の uniqueItems が見逃して
+	// 本家は受理するが、同じ選択肢が 2 つある投票になるので真似しない。
+	"notes/create": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		if text, ok := in["text"].(string); ok && strings.ContainsRune(text, 0) {
+			return true
+		}
+		poll, _ := in["poll"].(map[string]any)
+		choices, _ := poll["choices"].([]any)
+		seen := map[any]bool{}
+		for _, c := range choices {
+			if seen[c] {
+				return true
+			}
+			seen[c] = true
+		}
+		return false
+	}},
 	// 本家は note_visibility_enum に無い visibility を PostgreSQL の型変換で 500 に
 	// する。Elythia は引く前に 400 にしている (#3518)。空文字は未指定と同じに扱う。
 	"notes/mentions": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
@@ -486,6 +501,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// delete (see the check after the loop).
 	const guardFileID = "penforce-guard-file"
 	var keepAds, keepAnnouncements, keepDecorations, keepEmojis, keepFiles []string
+	// notes/create (#3884) は本文のタグで hashtag の行を作る。hashtag には持ち主の列が
+	// 無いので、テストの前にあった id を覚えておき、それ以外を消す。
+	var keepHashtags []string
+	require.NoError(t, db.Raw(`SELECT id FROM hashtag`).Scan(&keepHashtags).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM ad WHERE id <> ?`, seedID).Scan(&keepAds).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM announcement WHERE id <> ?`, seedID).Scan(&keepAnnouncements).Error)
 	require.NoError(t, db.Raw(`SELECT id FROM avatar_decoration WHERE id <> ?`, seedID).Scan(&keepDecorations).Error)
@@ -588,9 +607,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// notes/* の受理の入力は、入力ごとに置き直すノート・投票・下書き・リストと、
 		// そこへのお気に入り・リアクション・投票・スレッドのミュートを書き込む
 		// (#3847)。どれも利用者の削除で消える (ON DELETE CASCADE) が、何を作るかが
-		// 読めるように明示して消す。hashtag の行を作る notes/create は載せていない
-		// (enforcementDeferred) ので、hashtag は書き込まない。
+		// 読めるように明示して消す。notes/create (#3884) の受理の入力は投稿を作り、
+		// 本文のタグで hashtag の行を作る。投稿は利用者のものとして消え、hashtag は
+		// テストの前に無かった行を消す。
 		resetNotes()
+		require.NoError(t, db.Exec(`DELETE FROM hashtag WHERE NOT (id = ANY(?::varchar[]))`,
+			append(model.StringArray{}, keepHashtags...)).Error)
 		// i/* の受理の入力は、入力ごとに置き直すプロフィール・Webhook・レジストリの値と、
 		// webhooks/create・registry/set・pin が足す行を書き込む (#3851)。パスワードを
 		// 要る操作 (削除・トークンの再発行・パスワードやメールの変更・2 段階認証) は、
@@ -995,10 +1017,16 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	jobReached := map[string]int{}
 	diagAccepted := map[string]int{}
 	backupReached := map[string]int{}
+	notesCreated, textNotesCreated := 0, 0
 	adminSeeded := false
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
 			seedNotes()
+		}
+		if tc.ok && tc.ep == "notes/create" {
+			// i/* の置き直しが作る Webhook (On: note) が残っていると、投稿の作成が
+			// Webhook のジョブを積もうとする。notes/create の前に消す (#3884)。
+			require.NoError(t, db.Exec(`DELETE FROM webhook WHERE "userId" = ?`, userID).Error)
 		}
 		isAdmin := strings.HasPrefix(tc.ep, "admin/")
 		switch {
@@ -1072,6 +1100,13 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 				pausedQueues++
 				adminPost("admin/queue/resume", `{"queue":`+strconv.Quote(in.Queue)+`}`, http.StatusNoContent)
 				assert.False(t, queuePaused(in.Queue), "resume did not restart %s", in.Queue)
+			}
+		}
+		if tc.ok && tc.ep == "notes/create" && rec.Code == http.StatusOK {
+			notesCreated++
+			var in struct{ Text *string }
+			if json.Unmarshal(tc.in, &in) == nil && in.Text != nil {
+				textNotesCreated++
 			}
 		}
 
@@ -1237,6 +1272,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	for ep := range backupAcceptedStop {
 		assert.Positive(t, backupReached[ep], "no accepted corpus input of %s", ep)
 	}
+	// notes/create の受理の入力が、投稿の作成まで届いていること (#3884)。届かずに
+	// 別の 4xx で止まっていても、上の「INVALID_PARAM でない」は通ってしまう。
+	assert.Positive(t, notesCreated, "no accepted corpus input of notes/create created a note")
+	// 本文のある投稿の作成まで届いていること。本文の無い入力 (renoteId だけなど) が
+	// 1 件届くだけで上の確かめは通ってしまう。
+	assert.Positive(t, textNotesCreated, "no accepted corpus input of notes/create with a text created a note")
 	// admin/drive/cleanup が、置いたもの以外のファイル (テストの前からあったものと、
 	// 利用者のファイル) を消していないこと (#3857)。
 	var keptFiles int64
