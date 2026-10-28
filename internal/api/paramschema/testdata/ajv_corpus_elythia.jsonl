@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"e3a2e275cab3b6ca74f50a142f60285b4cdffba0b5205b1bc5e5481a83d6a762","cases":1965}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"a4001a0d1681a0fba120c82e868cca2c7abc1965243e0fa885d636a4de2c63aa","cases":2706}
 {"ep":"admin/database-health"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -21,6 +21,33 @@
 {"in":{"forceRecalc":0},"ok":false,"path":"#/properties/forceRecalc/type","msg":"must be boolean"}
 {"in":{"forceRecalc":"true"},"ok":false,"path":"#/properties/forceRecalc/type","msg":"must be boolean"}
 {"in":{"forceRecalc":false},"ok":true}
+{"ep":"admin/emoji-application/approve"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
 {"ep":"admin/emoji-application/list"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -163,6 +190,41 @@
 {"in":{"userId":"abc123","limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
 {"in":{"userId":"abc123","untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
 {"in":{"untilId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"ep":"admin/emoji-application/reject"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc123","reason":null},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","reason":123},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","reason":true},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","reason":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"applicationId":"abc123","reason":""},"ok":true}
+{"in":{"applicationId":"abc123","reason":"x-y"},"ok":true}
+{"in":{"applicationId":"abc123","reason":"hello"},"ok":true}
+{"in":{"applicationId":{"bad":1},"reason":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"reason":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
 {"ep":"admin/emoji-application/related"}
 {"in":{"applicationId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
@@ -227,6 +289,44 @@
 {"in":{"applicationId":"abc123","limit":{"bad":1},"untilId":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
 {"in":{"applicationId":"abc123","untilId":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
 {"in":{"untilId":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"ep":"admin/emoji-application/reset-user-quota"}
+{"in":{"userId":"abc123","reason":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","reason":"hello","unknownProperty":1},"ok":true}
+{"in":{"reason":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"userId":null,"reason":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123,"reason":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true,"reason":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[],"reason":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":"","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC","reason":"hello"},"ok":true}
+{"in":{"userId":"0","reason":"hello"},"ok":true}
+{"in":{"userId":"a_b","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000","reason":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'reason'"}
+{"in":{"userId":"abc123","reason":null},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"userId":"abc123","reason":123},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"userId":"abc123","reason":true},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"userId":"abc123","reason":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"userId":"abc123","reason":""},"ok":false,"path":"#/properties/reason/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"userId":"abc123","reason":"a"},"ok":true}
+{"in":{"userId":"abc123","reason":"😀"},"ok":true}
+{"in":{"userId":"abc123","reason":"x-y"},"ok":true}
+{"in":{"userId":{"bad":1},"reason":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"reason":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
 {"ep":"admin/emoji-application/user-summary"}
 {"in":{"userId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
@@ -254,6 +354,44 @@
 {"in":{"userId":"ａｂｃ"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"userId":"abc\u0000"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
 {"in":{"userId":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"ep":"admin/federation/clean-gone-instance"}
+{"in":{"host":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'host'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"host":"hello","unknownProperty":1},"ok":true}
+{"in":{"host":null},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":123},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":true},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":[]},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":""},"ok":false,"path":"#/properties/host/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"host":"a"},"ok":true}
+{"in":{"host":"😀"},"ok":true}
+{"in":{"host":"x-y"},"ok":true}
+{"in":{"host":{"bad":1}},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"ep":"admin/federation/close-delivery-breaker"}
+{"in":{"host":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'host'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"host":"hello","unknownProperty":1},"ok":true}
+{"in":{"host":null},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":123},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":true},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":[]},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
+{"in":{"host":""},"ok":false,"path":"#/properties/host/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"host":"a"},"ok":true}
+{"in":{"host":"😀"},"ok":true}
+{"in":{"host":"x-y"},"ok":true}
+{"in":{"host":{"bad":1}},"ok":false,"path":"#/properties/host/type","msg":"must be string"}
 {"ep":"admin/federation/delivery-health"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -631,6 +769,33 @@
 {"in":true,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/signup-application/approve"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
 {"ep":"admin/signup-application/list"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -683,6 +848,114 @@
 {"in":{"limit":{"bad":1},"filter":{"bad":1}},"ok":false,"path":"#/properties/filter/type","msg":"must be string"}
 {"in":{"limit":{"bad":1},"offset":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
 {"in":{"offset":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/limit/type","msg":"must be integer"}
+{"ep":"admin/signup-application/reject"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/accept"}
+{"in":{"matchId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"matchId":null},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":""},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC"},"ok":true}
+{"in":{"matchId":"0"},"ok":true}
+{"in":{"matchId":"a_b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/cancel"}
+{"in":{"matchId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"matchId":null},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":""},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC"},"ok":true}
+{"in":{"matchId":"0"},"ok":true}
+{"in":{"matchId":"a_b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/decline"}
+{"in":{"matchId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"matchId":null},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":""},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC"},"ok":true}
+{"in":{"matchId":"0"},"ok":true}
+{"in":{"matchId":"a_b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
 {"ep":"bubble-game/versus/history"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -768,6 +1041,44 @@
 {"in":true,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":{"unknownProperty":1},"ok":true}
+{"ep":"bubble-game/versus/invite"}
+{"in":{"userId":"abc123","gameMode":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"userId":"abc123","gameMode":"hello","unknownProperty":1},"ok":true}
+{"in":{"gameMode":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
+{"in":{"userId":null,"gameMode":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":123,"gameMode":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":true,"gameMode":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":[],"gameMode":"hello"},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"userId":"","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"x-y","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ABC","gameMode":"hello"},"ok":true}
+{"in":{"userId":"0","gameMode":"hello"},"ok":true}
+{"in":{"userId":"a_b","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a-b","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"a b","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":" abc","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\n","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"日本","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"ａｂｃ","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc\u0000","gameMode":"hello"},"ok":false,"path":"#/properties/userId/format","msg":"must match format \"misskey:id\""}
+{"in":{"userId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'gameMode'"}
+{"in":{"userId":"abc123","gameMode":null},"ok":false,"path":"#/properties/gameMode/type","msg":"must be string"}
+{"in":{"userId":"abc123","gameMode":123},"ok":false,"path":"#/properties/gameMode/type","msg":"must be string"}
+{"in":{"userId":"abc123","gameMode":true},"ok":false,"path":"#/properties/gameMode/type","msg":"must be string"}
+{"in":{"userId":"abc123","gameMode":[]},"ok":false,"path":"#/properties/gameMode/type","msg":"must be string"}
+{"in":{"userId":"abc123","gameMode":""},"ok":false,"path":"#/properties/gameMode/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"userId":"abc123","gameMode":"a"},"ok":true}
+{"in":{"userId":"abc123","gameMode":"😀"},"ok":true}
+{"in":{"userId":"abc123","gameMode":"x-y"},"ok":true}
+{"in":{"userId":{"bad":1},"gameMode":{"bad":1}},"ok":false,"path":"#/properties/userId/type","msg":"must be string"}
+{"in":{"gameMode":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'userId'"}
 {"ep":"bubble-game/versus/record"}
 {"in":{"matchId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
@@ -795,6 +1106,133 @@
 {"in":{"matchId":"ａｂｃ"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
 {"in":{"matchId":"abc\u0000"},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
 {"in":{"matchId":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"ep":"bubble-game/versus/report"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"unknownProperty":1},"ok":true}
+{"in":{"score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":{"matchId":null,"score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123,"score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true,"score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[],"score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":"","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC","score":1,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"0","score":1,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"a_b","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000","score":1,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc123","frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/required","msg":"must have required property 'score'"}
+{"in":{"matchId":"abc123","score":null,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1.5,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":10.0,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1e1,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1e400,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":-0,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":"1","frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":true,"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":-1,"frame":1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"reason":"hello","logs":[]},"ok":false,"path":"#/required","msg":"must have required property 'frame'"}
+{"in":{"matchId":"abc123","score":1,"frame":null,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1.5,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":10.0,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1e1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1e400,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":-0,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":"1","reason":"hello","logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":true,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":-1,"reason":"hello","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"logs":[]},"ok":false,"path":"#/required","msg":"must have required property 'reason'"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":null,"logs":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":123,"logs":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":true,"logs":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":[],"logs":[]},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"x-y","logs":[]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'logs'"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":null},"ok":false,"path":"#/properties/logs/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":{}},"ok":false,"path":"#/properties/logs/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":"x"},"ok":false,"path":"#/properties/logs/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[],[],[]]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":["x-y"]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[{"bad":1}]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[null]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":["__proto__","__proto__"]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[null,[]]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[{},[]]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":["x",[]]},"ok":false,"path":"#/properties/logs/items/type","msg":"must be array"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[1,1,2],[]]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[1,2,1],[]]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[["x-y"],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[{"bad":1}],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[null],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[["__proto__","__proto__"],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[null,2],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[1.5,2],[]]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[1e400,2],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[["1",2],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[true,2],[]]},"ok":false,"path":"#/properties/logs/items/items/type","msg":"must be number"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[[-1,2],[]]},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":null},"ok":false,"path":"#/properties/gameVersion/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":1.5},"ok":false,"path":"#/properties/gameVersion/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":10.0},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":1e1},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":1e400},"ok":false,"path":"#/properties/gameVersion/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":-0},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":"1"},"ok":false,"path":"#/properties/gameVersion/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":true},"ok":false,"path":"#/properties/gameVersion/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":-1},"ok":true}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":[],"gameVersion":1},"ok":true}
+{"in":{"matchId":{"bad":1},"score":{"bad":1},"frame":1,"reason":"hello","logs":[]},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":{"bad":1},"frame":{"bad":1},"reason":"hello","logs":[]},"ok":false,"path":"#/properties/score/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":{"bad":1},"reason":{"bad":1},"logs":[]},"ok":false,"path":"#/properties/frame/type","msg":"must be integer"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":{"bad":1},"logs":{"bad":1}},"ok":false,"path":"#/properties/reason/type","msg":"must be string"}
+{"in":{"matchId":"abc123","score":1,"frame":1,"reason":"hello","logs":{"bad":1},"gameVersion":{"bad":1}},"ok":false,"path":"#/properties/logs/type","msg":"must be array"}
+{"in":{"gameVersion":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"ep":"bubble-game/versus/set-public"}
+{"in":{"matchId":"abc123","isPublic":false},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"matchId":"abc123","isPublic":false,"unknownProperty":1},"ok":true}
+{"in":{"isPublic":false},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
+{"in":{"matchId":null,"isPublic":false},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":123,"isPublic":false},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":true,"isPublic":false},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":[],"isPublic":false},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"matchId":"","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"x-y","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ABC","isPublic":false},"ok":true}
+{"in":{"matchId":"0","isPublic":false},"ok":true}
+{"in":{"matchId":"a_b","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a-b","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"a b","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":" abc","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\n","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"日本","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"ａｂｃ","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc\u0000","isPublic":false},"ok":false,"path":"#/properties/matchId/format","msg":"must match format \"misskey:id\""}
+{"in":{"matchId":"abc123"},"ok":false,"path":"#/required","msg":"must have required property 'isPublic'"}
+{"in":{"matchId":"abc123","isPublic":null},"ok":false,"path":"#/properties/isPublic/type","msg":"must be boolean"}
+{"in":{"matchId":"abc123","isPublic":0},"ok":false,"path":"#/properties/isPublic/type","msg":"must be boolean"}
+{"in":{"matchId":"abc123","isPublic":"true"},"ok":false,"path":"#/properties/isPublic/type","msg":"must be boolean"}
+{"in":{"matchId":{"bad":1},"isPublic":{"bad":1}},"ok":false,"path":"#/properties/matchId/type","msg":"must be string"}
+{"in":{"isPublic":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
 {"ep":"bubble-game/versus/show"}
 {"in":{"matchId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'matchId'"}
@@ -1640,6 +2078,191 @@
 {"in":{"size":1,"isSensitive":{"bad":1},"force":{"bad":1}},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
 {"in":{"size":1,"force":{"bad":1},"isSensitive":{"bad":1}},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
 {"in":{"force":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'size'"}
+{"ep":"emoji-application/cancel"}
+{"in":{"applicationId":"abc123"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'applicationId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"applicationId":"abc123","unknownProperty":1},"ok":true}
+{"in":{"applicationId":null},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":123},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":true},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":[]},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"in":{"applicationId":""},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"x-y"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ABC"},"ok":true}
+{"in":{"applicationId":"0"},"ok":true}
+{"in":{"applicationId":"a_b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a-b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"a b"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":" abc"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\n"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"日本"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"ａｂｃ"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":"abc\u0000"},"ok":false,"path":"#/properties/applicationId/format","msg":"must match format \"misskey:id\""}
+{"in":{"applicationId":{"bad":1}},"ok":false,"path":"#/properties/applicationId/type","msg":"must be string"}
+{"ep":"emoji-application/create"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'name'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","unknownProperty":1},"ok":true}
+{"in":{"remoteHost":"hello","remoteName":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'name'"}
+{"in":{"name":null,"remoteHost":"hello","remoteName":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":123,"remoteHost":"hello","remoteName":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":true,"remoteHost":"hello","remoteName":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":[],"remoteHost":"hello","remoteName":"hello"},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":"","remoteHost":"hello","remoteName":"hello"},"ok":true}
+{"in":{"name":"x-y","remoteHost":"hello","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":null},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":123},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":true},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":[]},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":"own"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":""},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":"x-y"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":null},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":123},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":true},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":[]},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":""},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":"x-y"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":null},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":123},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":true},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":[]},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":""},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":"x-y"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":null},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":123},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":true},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":[]},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":""},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"x-y"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"abc123"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"ABC"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"0"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"a_b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"a-b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"a b"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":" abc"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"abc\n"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"日本"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"ａｂｃ"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":"abc\u0000"},"ok":false,"path":"#/properties/fileId/format","msg":"must match format \"misskey:id\""}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":null},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":123},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":true},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":[]},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":""},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":"x-y"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":null},"ok":false,"path":"#/properties/aliases/type","msg":"must be array"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":{}},"ok":false,"path":"#/properties/aliases/type","msg":"must be array"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":"x"},"ok":false,"path":"#/properties/aliases/type","msg":"must be array"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["hello","hello","hello1"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["hello","hello1","hello"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["x-y"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[{"bad":1}]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[null]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["__proto__","__proto__"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[null,"hello1"]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[123,"hello1"]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[true,"hello1"]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[[],"hello1"]},"ok":false,"path":"#/properties/aliases/items/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["","hello1"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":["x-y","hello1"]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":[]},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","isSensitive":null},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","isSensitive":0},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","isSensitive":"true"},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","isSensitive":false},"ok":true}
+{"in":{"name":"hello","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":null,"remoteName":"hello"},"ok":false,"path":"#/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":123,"remoteName":"hello"},"ok":false,"path":"#/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":true,"remoteName":"hello"},"ok":false,"path":"#/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":[],"remoteName":"hello"},"ok":false,"path":"#/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"x-y","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":null},"ok":false,"path":"#/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":123},"ok":false,"path":"#/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":true},"ok":false,"path":"#/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":[]},"ok":false,"path":"#/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":""},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"x-y"},"ok":true}
+{"in":{"name":{"bad":1},"remoteHost":"hello","remoteName":"hello","kind":{"bad":1}},"ok":false,"path":"#/properties/name/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":{"bad":1},"license":{"bad":1}},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":{"bad":1},"kind":{"bad":1}},"ok":false,"path":"#/properties/kind/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","license":{"bad":1},"comment":{"bad":1}},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":{"bad":1},"license":{"bad":1}},"ok":false,"path":"#/properties/license/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","comment":{"bad":1},"fileId":{"bad":1}},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":{"bad":1},"comment":{"bad":1}},"ok":false,"path":"#/properties/comment/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","fileId":{"bad":1},"category":{"bad":1}},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":{"bad":1},"fileId":{"bad":1}},"ok":false,"path":"#/properties/fileId/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","category":{"bad":1},"aliases":{"bad":1}},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":{"bad":1},"category":{"bad":1}},"ok":false,"path":"#/properties/category/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","aliases":{"bad":1},"isSensitive":{"bad":1}},"ok":false,"path":"#/properties/aliases/type","msg":"must be array"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","isSensitive":{"bad":1},"aliases":{"bad":1}},"ok":false,"path":"#/properties/aliases/type","msg":"must be array"}
+{"in":{"name":"hello","remoteHost":{"bad":1},"remoteName":"hello","isSensitive":{"bad":1}},"ok":false,"path":"#/properties/isSensitive/type","msg":"must be boolean"}
+{"in":{"name":"hello","remoteHost":{"bad":1},"remoteName":{"bad":1}},"ok":false,"path":"#/properties/remoteHost/type","msg":"must be string"}
+{"in":{"remoteName":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'name'"}
+{"in":123,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.5,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":10.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"","ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x-y","ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"name":"hello","remoteHost":"a","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"😀","remoteName":"hello"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"a"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"😀"},"ok":true}
+{"in":{"name":"hello"},"ok":true}
+{"in":{"name":"hello","remoteName":{"bad":1}},"ok":false,"path":"#/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"hello","kind":"remote","unknownProperty":1},"ok":true}
+{"in":{"name":"hello","remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/required","msg":"must have required property 'remoteHost'"}
+{"in":{"name":"hello","remoteHost":null,"remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":123,"remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":true,"remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":[],"remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"","remoteName":"hello","kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"name":"hello","remoteHost":"a","remoteName":"hello","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"😀","remoteName":"hello","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"x-y","remoteName":"hello","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","kind":"remote"},"ok":false,"path":"#/then/required","msg":"must have required property 'remoteName'"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":null,"kind":"remote"},"ok":false,"path":"#/then/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":123,"kind":"remote"},"ok":false,"path":"#/then/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":true,"kind":"remote"},"ok":false,"path":"#/then/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":[],"kind":"remote"},"ok":false,"path":"#/then/properties/remoteName/type","msg":"must be string"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"","kind":"remote"},"ok":false,"path":"#/then/properties/remoteName/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"a","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"😀","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"x-y","kind":"remote"},"ok":true}
+{"in":{"name":"hello","remoteHost":{"bad":1},"remoteName":{"bad":1},"kind":"remote"},"ok":false,"path":"#/then/properties/remoteHost/type","msg":"must be string"}
+{"in":{"name":"hello","kind":"remote"},"ok":false,"path":"#/then/required","msg":"must have required property 'remoteHost'"}
+{"in":{"name":"hello","kind":"remote","remoteName":{"bad":1}},"ok":false,"path":"#/then/required","msg":"must have required property 'remoteHost'"}
+{"in":{"name":"hello","remoteHost":null,"remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":123,"remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":true,"remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":[],"remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"","remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"x-y","remoteName":"hello","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":null,"kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":123,"kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":true,"kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":[],"kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"name":"hello","remoteHost":"hello","remoteName":"x-y","kind":"hello"},"ok":false,"path":"#/properties/kind/enum","msg":"must be equal to one of the allowed values"}
 {"ep":"emoji-application/list-mine"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -1991,6 +2614,142 @@
 {"in":{"roleId":"ａｂｃ"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
 {"in":{"roleId":"abc\u0000"},"ok":false,"path":"#/properties/roleId/format","msg":"must match format \"misskey:id\""}
 {"in":{"roleId":{"bad":1}},"ok":false,"path":"#/properties/roleId/type","msg":"must be string"}
+{"ep":"signup-application/apply"}
+{"in":{"answers":[]},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'answers'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"answers":[],"unknownProperty":1},"ok":true}
+{"in":{"answers":null},"ok":false,"path":"#/properties/answers/type","msg":"must be array"}
+{"in":{"answers":{}},"ok":false,"path":"#/properties/answers/type","msg":"must be array"}
+{"in":{"answers":"x"},"ok":false,"path":"#/properties/answers/type","msg":"must be array"}
+{"in":{"answers":["hello","hello","hello1"]},"ok":true}
+{"in":{"answers":["hello","hello1","hello"]},"ok":true}
+{"in":{"answers":["x-y"]},"ok":true}
+{"in":{"answers":[{"bad":1}]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":[null]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":["__proto__","__proto__"]},"ok":true}
+{"in":{"answers":[null,"hello1"]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":[123,"hello1"]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":[true,"hello1"]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":[[],"hello1"]},"ok":false,"path":"#/properties/answers/items/type","msg":"must be string"}
+{"in":{"answers":["","hello1"]},"ok":true}
+{"in":{"answers":["x-y","hello1"]},"ok":true}
+{"in":{"answers":[],"formToken":null},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"formToken":123},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"formToken":true},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"formToken":[]},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"formToken":""},"ok":true}
+{"in":{"answers":[],"formToken":"x-y"},"ok":true}
+{"in":{"answers":[],"formToken":"hello"},"ok":true}
+{"in":{"answers":[],"hcaptcha-response":null},"ok":true}
+{"in":{"answers":[],"hcaptcha-response":123},"ok":false,"path":"#/properties/hcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"hcaptcha-response":true},"ok":false,"path":"#/properties/hcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"hcaptcha-response":[]},"ok":false,"path":"#/properties/hcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"hcaptcha-response":""},"ok":true}
+{"in":{"answers":[],"hcaptcha-response":"x-y"},"ok":true}
+{"in":{"answers":[],"hcaptcha-response":"hello"},"ok":true}
+{"in":{"answers":[],"g-recaptcha-response":null},"ok":true}
+{"in":{"answers":[],"g-recaptcha-response":123},"ok":false,"path":"#/properties/g-recaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"g-recaptcha-response":true},"ok":false,"path":"#/properties/g-recaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"g-recaptcha-response":[]},"ok":false,"path":"#/properties/g-recaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"g-recaptcha-response":""},"ok":true}
+{"in":{"answers":[],"g-recaptcha-response":"x-y"},"ok":true}
+{"in":{"answers":[],"g-recaptcha-response":"hello"},"ok":true}
+{"in":{"answers":[],"turnstile-response":null},"ok":true}
+{"in":{"answers":[],"turnstile-response":123},"ok":false,"path":"#/properties/turnstile-response/type","msg":"must be string"}
+{"in":{"answers":[],"turnstile-response":true},"ok":false,"path":"#/properties/turnstile-response/type","msg":"must be string"}
+{"in":{"answers":[],"turnstile-response":[]},"ok":false,"path":"#/properties/turnstile-response/type","msg":"must be string"}
+{"in":{"answers":[],"turnstile-response":""},"ok":true}
+{"in":{"answers":[],"turnstile-response":"x-y"},"ok":true}
+{"in":{"answers":[],"turnstile-response":"hello"},"ok":true}
+{"in":{"answers":[],"m-captcha-response":null},"ok":true}
+{"in":{"answers":[],"m-captcha-response":123},"ok":false,"path":"#/properties/m-captcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"m-captcha-response":true},"ok":false,"path":"#/properties/m-captcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"m-captcha-response":[]},"ok":false,"path":"#/properties/m-captcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"m-captcha-response":""},"ok":true}
+{"in":{"answers":[],"m-captcha-response":"x-y"},"ok":true}
+{"in":{"answers":[],"m-captcha-response":"hello"},"ok":true}
+{"in":{"answers":[],"testcaptcha-response":null},"ok":true}
+{"in":{"answers":[],"testcaptcha-response":123},"ok":false,"path":"#/properties/testcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"testcaptcha-response":true},"ok":false,"path":"#/properties/testcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"testcaptcha-response":[]},"ok":false,"path":"#/properties/testcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"testcaptcha-response":""},"ok":true}
+{"in":{"answers":[],"testcaptcha-response":"x-y"},"ok":true}
+{"in":{"answers":[],"testcaptcha-response":"hello"},"ok":true}
+{"in":{"answers":{"bad":1},"formToken":{"bad":1}},"ok":false,"path":"#/properties/answers/type","msg":"must be array"}
+{"in":{"answers":[],"formToken":{"bad":1},"hcaptcha-response":{"bad":1}},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"hcaptcha-response":{"bad":1},"formToken":{"bad":1}},"ok":false,"path":"#/properties/formToken/type","msg":"must be string"}
+{"in":{"answers":[],"hcaptcha-response":{"bad":1},"g-recaptcha-response":{"bad":1}},"ok":false,"path":"#/properties/hcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"g-recaptcha-response":{"bad":1},"hcaptcha-response":{"bad":1}},"ok":false,"path":"#/properties/hcaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"g-recaptcha-response":{"bad":1},"turnstile-response":{"bad":1}},"ok":false,"path":"#/properties/g-recaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"turnstile-response":{"bad":1},"g-recaptcha-response":{"bad":1}},"ok":false,"path":"#/properties/g-recaptcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"turnstile-response":{"bad":1},"m-captcha-response":{"bad":1}},"ok":false,"path":"#/properties/turnstile-response/type","msg":"must be string"}
+{"in":{"answers":[],"m-captcha-response":{"bad":1},"turnstile-response":{"bad":1}},"ok":false,"path":"#/properties/turnstile-response/type","msg":"must be string"}
+{"in":{"answers":[],"m-captcha-response":{"bad":1},"testcaptcha-response":{"bad":1}},"ok":false,"path":"#/properties/m-captcha-response/type","msg":"must be string"}
+{"in":{"answers":[],"testcaptcha-response":{"bad":1},"m-captcha-response":{"bad":1}},"ok":false,"path":"#/properties/m-captcha-response/type","msg":"must be string"}
+{"in":{"testcaptcha-response":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'answers'"}
+{"ep":"signup-application/form-token"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"signup-application/register"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","unknownProperty":1},"ok":true}
+{"in":{"username":"hello","password":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
+{"in":{"claimCode":null,"username":"hello","password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":123,"username":"hello","password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":true,"username":"hello","password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":[],"username":"hello","password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":"","username":"hello","password":"hello"},"ok":false,"path":"#/properties/claimCode/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"claimCode":"a","username":"hello","password":"hello"},"ok":true}
+{"in":{"claimCode":"😀","username":"hello","password":"hello"},"ok":true}
+{"in":{"claimCode":"x-y","username":"hello","password":"hello"},"ok":true}
+{"in":{"claimCode":"hello","password":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'username'"}
+{"in":{"claimCode":"hello","username":null,"password":"hello"},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":123,"password":"hello"},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":true,"password":"hello"},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":[],"password":"hello"},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"","password":"hello"},"ok":false,"path":"#/properties/username/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"claimCode":"hello","username":"a","password":"hello"},"ok":true}
+{"in":{"claimCode":"hello","username":"😀","password":"hello"},"ok":true}
+{"in":{"claimCode":"hello","username":"x-y","password":"hello"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"claimCode":"hello","username":"hello","password":null},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":123},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":true},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":[]},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":""},"ok":false,"path":"#/properties/password/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"claimCode":"hello","username":"hello","password":"a"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"😀"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"x-y"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":null},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":123},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":true},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":[]},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":""},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":"x-y"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":"hello"},"ok":true}
+{"in":{"claimCode":{"bad":1},"username":{"bad":1},"password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":{"bad":1},"password":{"bad":1}},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":{"bad":1},"emailAddress":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"emailAddress":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
 {"ep":"signup-application/status"}
 {"in":{"claimCode":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
