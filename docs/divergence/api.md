@@ -208,6 +208,19 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 
 `admin/ip/accounts`の`ip`がIPアドレス (か`ip:port`) として読めるかと、`admin/ip/related-accounts`の`userId`がリモートの利用者でないかは、`paramDef`では書けないので、宣言は文字列とidの形までにし、以前どおりhandlerが400 `INVALID_PARAM`にする。
 
+2段目 (#3872) は、chatの15件 (`chat/messages`・`chat/messages/create`・`chat/messages/reactions/create`・`delete`・`chat/messages/read`・`update`・`chat/rooms/invitations/accept`・`delete`・`reject`・`chat/rooms/joined`・`chat/rooms/members/ban`・`update-membership`・`chat/rooms/transfer-ownership`・`chat/rooms/unmute`・`chat/unread-count`) と、分割アップロードの`drive/files/create-chunked/start`・`finish`・`abort`の3件。`chat/messages/create`は`toUserId`か`toRoomId`のどちらかを要求し (`anyOf`)、`chat/messages/reactions/create`・`delete`は同じhandlerを使う本家の`chat/messages/react`・`unreact`の宣言を写した。次の差が変わった。
+- `chat/messages`・`chat/rooms/joined`の`limit`の`0`以下と101以上は400になる。以前は既定値 (20と30) か100に丸めて200だった。elythia-jsの注釈も直した
+- `misskey:id`の形でないid (空文字を含む) は400になる。以前は、空の必須のidは400 (`info`無し)、それ以外は見つからない応答 (`NO_SUCH_ROOM`・`NO_SUCH_MESSAGE`・`NO_SUCH_USER`・`NO_SUCH_INVITATION`・`NO_SUCH_UPLOAD_SESSION`など) か、`chat/rooms/unmute`の`roomId`と、部屋のownerが送る`chat/rooms/members/ban`の`userId`の204、`chat/messages`の`userId`と`chat/rooms/joined`の`sinceId`・`untilId`の200だった
+- `null`は400になる。以前は省略と同じだった (`chat/rooms/members/update-membership`の`isMuted: null`はミュートを変えず、`toRoomId`と一緒に送る`chat/messages/create`の`toUserId: null`は無視した)。例外は、elythia-jsの型が`null`を許す`chat/messages/create`の`text`・`fileId`、`chat/messages/update`の`text`、`drive/files/create-chunked/start`の`comment`・`folderId`で、以前どおり省略と同じに扱う
+- 引数の誤りの400に`info`が付く。宛先の無い`chat/messages/create`、2001文字以上の`text`、513文字以上の`comment`などは、以前も400だったが`info`が無かった
+- 整数を小数の形で書いた値 (`10.0`) は、`chat/messages`の`limit`と`drive/files/create-chunked/start`の`size`でも整数として受ける。以前は400だった
+- `chat/rooms/invitations/accept`は`invitationId`を読まない。以前は読むだけで使わず、文字列でない値を400にしていた
+- 引数の検証がhandlerより先に走るので、オブジェクトストレージの無い構成の分割アップロードは、宣言から外れる値に、以前の400 `CHUNKED_UPLOAD_UNAVAILABLE`より先に引数の誤りの400を返す
+
+宣言を通っても、handlerが以前どおり400 `INVALID_PARAM` (`info`無し) にする入力が残る。`drive/files/create-chunked/start`のNULを含む`comment` (列に書けない。本家の`drive/files/update`などと同じ差で、[approximations.md](approximations.md)にある)、int64に収まらない整数 (`start`の`size`、`chat/rooms/joined`の`sinceDate`・`untilDate`)、絵文字を含まない`reaction` (`chat/messages/reactions/create`。本家の`chat/messages/react`と同じく、本家は500にする) が当たる。
+
+同梱のfrontendは、chatの15件をどれも呼ばない (本家の名前の`chat/messages/create-to-user`などを使う)。分割アップロードの`start`には`comment`・`folderId`に`null`を送るので、宣言は`null`を許す。`drive/files/create-chunked/append`はmultipartで、照合のテストがJSONしか送れないので、後の段に回した。
+
 ### 1-1b. レスポンスの additive field
 
 | endpoint | field | 内容 |
