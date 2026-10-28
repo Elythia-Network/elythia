@@ -29,7 +29,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // users/* in #3837; drive and drive/* in #3839; chat/* in #3841; reversi/* except reversi/match in #3843; export-custom-emojis,
 // fetch-external-resources, request-reset-password, reset-password,
 // verify-email and v2/admin/emoji/list in #3845; notes and notes/* except
-// notes/create in #3847; i and i/* except i/update, i/notifications and
+// notes/create in #3847, and notes/create in #3884; i and i/* except i/update, i/notifications and
 // i/notifications-grouped in #3851; admin/ad/*, admin/announcements/*,
 // admin/avatar-decorations/*, admin/invite/*, admin/promo/create, admin/meta,
 // admin/server-info, admin/get-index-stats, admin/get-table-stats and
@@ -302,6 +302,7 @@ var paramEnforcedEndpoints = []string{
 	"v2/admin/emoji/list",
 	"notes",
 	"notes/children",
+	"notes/create",
 	"notes/clips",
 	"notes/conversation",
 	"notes/delete",

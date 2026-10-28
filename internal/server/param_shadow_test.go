@@ -240,20 +240,23 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/notes/create", `{"text":"a","visibility":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, false, true},
-		// 数えるだけの例は、本家に揃えていない notes/create・i/update に置く
-		// (i/notifications・reversi/match は #3865 で揃えた)。
-		{http.MethodPost, "/api/notes/create", `{"text":"a","poll":{"choices":["a","b"],"expiredAfter":1e4}}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","replyId":"abc-def"}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","cw":1e400}`, true, true},
+		// 数えるだけの例は、本家に揃えていない i/update に置く (i/notifications・
+		// reversi/match は #3865、notes/create は #3884 で揃えた)。
 		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":"影の検証"}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"isCat":"yes"}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
 		{http.MethodPost, "/api/i/update", `{"makeNotesHiddenBefore":10.0}`, true, true},
+		{http.MethodPost, "/api/i/update", "{\"location\":\"\\ud800\"}", true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
-		// 本家に揃えた endpoint は、検証を止めた server でも同じに拒否する。
+		// 本家に揃えた endpoint は、検証を止めた server でも同じ応答になる (宣言から
+		// 外れる値は同じに拒否し、宣言を満たす値は同じに通す)。先頭の notes/create の
+		// 例も、#3884 から本家に揃えた endpoint の例になった。
 		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
+		{http.MethodPost, "/api/notes/create", `{"text":"a","poll":{"choices":["a","b"],"expiredAfter":1e4}}`, true, true},
+		{http.MethodPost, "/api/notes/create", `{"text":"a","replyId":"abc-def"}`, true, true},
+		{http.MethodPost, "/api/notes/create", `{"text":"a","cw":1e400}`, true, true},
 		{http.MethodPost, "/api/notes/create", `null`, true, true},
 		{http.MethodPost, "/api/notes/create", "{\"text\":\"\\ud800\"}", true, true},
 		{http.MethodGet, "/api/charts/notes?span=day&limit=x", "", false, false},

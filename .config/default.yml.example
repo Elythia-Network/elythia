@@ -101,7 +101,7 @@ port: 3000
 # users and users/*, drive and drive/*, chat/*, reversi/*,
 # export-custom-emojis,
 # fetch-external-resources, request-reset-password, reset-password,
-# verify-email, v2/admin/emoji/list, notes and notes/* except notes/create,
+# verify-email, v2/admin/emoji/list, notes and notes/*,
 # i and i/* except i/update,
 # admin/ad/*, admin/announcements/*, admin/avatar-decorations/*,
 # admin/invite/*, admin/promo/create, admin/meta, admin/server-info,
