@@ -22,6 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/misc/keyword"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -483,9 +484,11 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 
 	// #2106 L33: upstream NoteCreateService は text を trim し、trim 後が空なら null に正規化
 	// してから content-less 判定・保存を行う。先頭/末尾空白を upstream と同じく除去して
-	// 保存値・AP 配送値を揃える。
+	// 保存値・AP 配送値を揃える。削る空白は JavaScript の trim と同じにする。
+	// strings.TrimSpace は U+0085 を削り U+FEFF を削らないので、本家と保存値や
+	// content-less の判定が分かれた (#3884)。
 	if in.Text != nil {
-		trimmed := strings.TrimSpace(*in.Text)
+		trimmed := jsstr.Trim(*in.Text)
 		if trimmed == "" {
 			in.Text = nil
 		} else {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/api/jsnum"
 	corechannel "github.com/elythia-network/elythia/internal/core/channel"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
@@ -1115,7 +1116,7 @@ func TestValidateCreateInput_PollUniqueAndExpiredAfter(t *testing.T) {
 	ok := &CreateRequest{Poll: &PollRequest{Choices: []string{"a", "b"}}}
 	assert.NoError(t, validateCreateInput(ok, nil), "ユニークな choice は通る")
 
-	bad := int64(0)
+	bad := jsnum.Int(0)
 	badExpire := &CreateRequest{Poll: &PollRequest{Choices: []string{"a", "b"}, ExpiredAfter: &bad}}
 	assert.Error(t, validateCreateInput(badExpire, nil), "expiredAfter<1 は弾く")
 }
@@ -1149,6 +1150,77 @@ func TestCreate_PollExpiredAfterTakesPriority(t *testing.T) {
 		// expiredAfter (now+1h) を採用 → 30 日後の expiresAt よりずっと前になる。
 		assert.True(t, poll.ExpiresAt.Before(time.Now().Add(2*time.Hour)), "expiredAfter を優先すべき、got %v", poll.ExpiresAt)
 	}
+}
+
+// #3884: poll の expiresAt / expiredAfter は、本家の ajv と同じく小数の形の整数
+// (10.0) も受ける。
+func TestCreate_PollAcceptsIntegerForms(t *testing.T) {
+	for _, field := range []string{"expiredAfter", "expiresAt"} {
+		t.Run(field, func(t *testing.T) {
+			noteRepo := testutil.NewMockNoteRepository()
+			pollRepo := testutil.NewMockPollRepository()
+			idGen, _ := id.NewGenerator("aidx")
+			createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
+			h := newHandlerNilDeps(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
+			user := &model.User{ID: "user1", Username: "testuser", AvatarDecorations: datatypes.JSON([]byte("[]"))}
+
+			value := "3600000.0"
+			want := time.Now().Add(time.Hour)
+			if field == "expiresAt" {
+				want = time.Now().Add(2 * time.Hour).Truncate(time.Second)
+				value = fmt.Sprintf("%d.0", want.UnixMilli())
+			}
+			body := fmt.Sprintf(`{"text": "Vote!", "poll": {"choices": ["A", "B"], %q: %s}}`, field, value)
+			req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+			setAuthUser(c, user)
+			require.NoError(t, h.Create(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, pollRepo.Polls, 1)
+			for _, poll := range pollRepo.Polls {
+				require.NotNil(t, poll.ExpiresAt)
+				assert.WithinDuration(t, want, *poll.ExpiresAt, time.Minute)
+			}
+		})
+	}
+}
+
+// #3884: poll.expiresAt の 0 (と -0) は、本家と同じく期限なしとして扱う。
+func TestCreate_PollExpiresAtZeroMeansNoExpiry(t *testing.T) {
+	for _, value := range []string{"0", "-0", "0.0"} {
+		t.Run(value, func(t *testing.T) {
+			noteRepo := testutil.NewMockNoteRepository()
+			pollRepo := testutil.NewMockPollRepository()
+			idGen, _ := id.NewGenerator("aidx")
+			createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
+			h := newHandlerNilDeps(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
+			user := &model.User{ID: "user1", Username: "testuser", AvatarDecorations: datatypes.JSON([]byte("[]"))}
+			body := `{"text": "Vote!", "poll": {"choices": ["A", "B"], "expiresAt": ` + value + `}}`
+			req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+			setAuthUser(c, user)
+			require.NoError(t, h.Create(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, pollRepo.Polls, 1)
+			for _, poll := range pollRepo.Polls {
+				assert.Nil(t, poll.ExpiresAt)
+			}
+		})
+	}
+}
+
+// #3884: 空白だけの text の判定は、本家の pattern ('[^\\s]+') と同じく JavaScript の
+// \s で数える。U+0085 は \s に入らないので受け、U+FEFF は入るので弾く。
+func TestValidateCreateInput_TextWhitespaceIsJavaScripts(t *testing.T) {
+	text := func(s string) *CreateRequest { return &CreateRequest{Text: &s} }
+	assert.NoError(t, validateCreateInput(text("\u0085"), nil), "U+0085 is not JavaScript whitespace")
+	assert.Error(t, validateCreateInput(text("\ufeff"), nil), "U+FEFF is JavaScript whitespace")
+	assert.Error(t, validateCreateInput(text(" \u3000\u2009\t"), nil))
+	assert.NoError(t, validateCreateInput(text(" a "), nil))
 }
 
 // #3443: expiredAfter が time.Duration の範囲 (約 9.22e12 ms) を超えても期限が

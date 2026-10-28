@@ -2334,6 +2334,27 @@ func TestCreate_WhitespaceOnlyTextRejected(t *testing.T) {
 	require.ErrorIs(t, err, note.ErrNoteContentRequired)
 }
 
+// #3884: 削る空白は JavaScript の trim と同じ。U+0085 は削らず (それだけの本文も
+// 投稿になる)、U+FEFF は削る。
+func TestCreate_TrimsTextLikeJavaScript(t *testing.T) {
+	svc, _, _ := newCreateService(t)
+	text := "\ufeff hello\u0085\ufeff"
+	n, err := svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &text, Visibility: model.NoteVisibilityPublic})
+	require.NoError(t, err)
+	require.NotNil(t, n.Text)
+	assert.Equal(t, "hello\u0085", *n.Text)
+
+	nel := "\u0085"
+	n, err = svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &nel, Visibility: model.NoteVisibilityPublic})
+	require.NoError(t, err)
+	require.NotNil(t, n.Text)
+	assert.Equal(t, "\u0085", *n.Text)
+
+	bom := "\ufeff\u3000"
+	_, err = svc.Create(note.CreateInput{User: &model.User{ID: "u1"}, Text: &bom, Visibility: model.NoteVisibilityPublic})
+	require.ErrorIs(t, err, note.ErrNoteContentRequired)
+}
+
 // stubRolePolicies is a RolePolicyProvider returning fixed policies per user.
 type stubRolePolicies struct {
 	byUser map[string]map[string]any

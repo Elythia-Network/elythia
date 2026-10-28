@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/queue/driver"
@@ -474,11 +474,14 @@ type CreateRequest struct {
 }
 
 // PollRequest is the poll part of a create note request.
+//
+// expiresAt と expiredAfter は宣言で integer なので、本家の ajv と同じく 10.0 も
+// 受ける (#3884。下書きの handler_drafts.go と同じ)。
 type PollRequest struct {
-	Choices      []string `json:"choices"`
-	Multiple     bool     `json:"multiple"`
-	ExpiresAt    *int64   `json:"expiresAt"`
-	ExpiredAfter *int64   `json:"expiredAfter"`
+	Choices      []string   `json:"choices"`
+	Multiple     bool       `json:"multiple"`
+	ExpiresAt    *jsnum.Int `json:"expiresAt"`
+	ExpiredAfter *jsnum.Int `json:"expiredAfter"`
 }
 
 // Create handles POST /api/notes/create.
@@ -541,10 +544,12 @@ func (h *Handler) Create(c echo.Context) error {
 		)
 		switch {
 		case req.Poll.ExpiredAfter != nil:
-			t, expErr = note.PollExpiresAtAfter(time.Now(), *req.Poll.ExpiredAfter)
+			t, expErr = note.PollExpiresAtAfter(time.Now(), int64(*req.Poll.ExpiredAfter))
 			hasExp = true
-		case req.Poll.ExpiresAt != nil:
-			t, expErr = note.PollExpiresAtFromUnixMilli(*req.Poll.ExpiresAt)
+		// 本家は `ps.poll.expiresAt ? new Date(...) : null` なので、0 (と -0) は偽として
+		// 期限なしになる。0 を時刻として読むと過去なので、期限切れで断っていた (#3884)。
+		case req.Poll.ExpiresAt != nil && *req.Poll.ExpiresAt != 0:
+			t, expErr = note.PollExpiresAtFromUnixMilli(int64(*req.Poll.ExpiresAt))
 			hasExp = true
 		}
 		if expErr != nil {
@@ -646,9 +651,11 @@ func validateCreateInput(req *CreateRequest, fileIDs []string) error {
 	}
 	// text のみで成立する note (renote/file/poll 無し) は空白だけの text を弾く
 	// (upstream の pattern '[^\\s]+')。text=nil の content-less は service 側の
-	// ErrNoteContentRequired に委ねる。
+	// ErrNoteContentRequired に委ねる。空白は JavaScript の \s で数える。Go の
+	// strings.TrimSpace は U+0085 を削り U+FEFF を削らないので、本家と判定が分かれた
+	// (#3884)。
 	if req.RenoteID == nil && len(fileIDs) == 0 && req.Poll == nil && req.Text != nil {
-		if strings.TrimSpace(*req.Text) == "" {
+		if !jsstr.HasNonSpace(*req.Text) {
 			return errors.New("text must contain at least one non-whitespace character")
 		}
 	}
