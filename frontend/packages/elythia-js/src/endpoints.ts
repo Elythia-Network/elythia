@@ -104,8 +104,9 @@ export type ElythiaEndpoints = {
 		 * Restores the generation into a new database while the server keeps running (only a generation that passed verification),
 		 * or, with `kind: 'rollback'`, prepares swapping a kept database back in.
 		 * The re-authentication of a rollback is checked against the current database.
+		 * `database` is ignored when restoring a generation, and `id` when rolling back.
 		 */
-		req: BackupReauth & ({ kind?: 'restore'; id: string } | { kind: 'rollback'; database: string });
+		req: BackupReauth & ({ kind?: 'restore'; id: string; database?: string } | { kind: 'rollback'; database: string; id?: string });
 		res: BackupRestoreTicket & { status: BackupRestoreStatus };
 	};
 	'admin/backup/restore/status': {

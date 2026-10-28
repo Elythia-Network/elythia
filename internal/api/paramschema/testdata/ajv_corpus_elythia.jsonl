@@ -1,4 +1,507 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"169425e5cf363abe0202d76f6fdce6d4dbe30afc62e0b3ec2a400bc12e94a480","cases":3221}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"52a2bde695d9e6a55337c9bec6d5f847e4c173013c2af86a48d4add358336ac1","cases":3713}
+{"ep":"admin/backup/delete"}
+{"in":{"password":"hello","id":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","unknownProperty":1},"ok":true}
+{"in":{"id":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","id":"hello"},"ok":true}
+{"in":{"password":"x-y","id":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":""},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","id":null},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":123},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":true},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":[]},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":""},"ok":false,"path":"#/properties/id/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","id":"a"},"ok":true}
+{"in":{"password":"hello","id":"😀"},"ok":true}
+{"in":{"password":"hello","id":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"id":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"id":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/download"}
+{"in":{"password":"hello","id":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","unknownProperty":1},"ok":true}
+{"in":{"id":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","id":"hello"},"ok":true}
+{"in":{"password":"x-y","id":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":""},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","id":null},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":123},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":true},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":[]},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":""},"ok":false,"path":"#/properties/id/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","id":"a"},"ok":true}
+{"in":{"password":"hello","id":"😀"},"ok":true}
+{"in":{"password":"hello","id":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"id":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"id":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/list"}
+{"in":{"password":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","unknownProperty":1},"ok":true}
+{"in":{"password":null},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[]},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":""},"ok":true}
+{"in":{"password":"x-y"},"ok":true}
+{"in":{"password":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":""},"ok":true}
+{"in":{"password":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","credential":{}},"ok":true}
+{"in":{"password":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"credential":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/reauth-challenge"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/backup/restore/abort"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","unknownProperty":1},"ok":true}
+{"in":{"opId":"hello","ticket":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{"password":"x-y","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":""},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello","ticket":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'opId'"}
+{"in":{"password":"hello","opId":null,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":123,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":true,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":[],"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"","ticket":"hello"},"ok":false,"path":"#/properties/opId/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","opId":"a","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"😀","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"x-y","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'ticket'"}
+{"in":{"password":"hello","opId":"hello","ticket":null},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":123},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":true},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":[]},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":""},"ok":false,"path":"#/properties/ticket/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","opId":"hello","ticket":"a"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"😀"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"opId":"hello","ticket":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":{"bad":1},"ticket":"hello","credential":{"bad":1}},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":{"bad":1},"ticket":{"bad":1}},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"ticket":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/restore/candidates"}
+{"in":{"password":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","unknownProperty":1},"ok":true}
+{"in":{"password":null},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[]},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":""},"ok":true}
+{"in":{"password":"x-y"},"ok":true}
+{"in":{"password":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":""},"ok":true}
+{"in":{"password":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","credential":{}},"ok":true}
+{"in":{"password":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"credential":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/restore/confirm"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","unknownProperty":1},"ok":true}
+{"in":{"opId":"hello","ticket":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"opId":"hello","ticket":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{"password":"x-y","opId":"hello","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":""},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello","ticket":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'opId'"}
+{"in":{"password":"hello","opId":null,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":123,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":true,"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":[],"ticket":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"","ticket":"hello"},"ok":false,"path":"#/properties/opId/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","opId":"a","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"😀","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"x-y","ticket":"hello"},"ok":true}
+{"in":{"password":"hello","opId":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'ticket'"}
+{"in":{"password":"hello","opId":"hello","ticket":null},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":123},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":true},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":[]},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":""},"ok":false,"path":"#/properties/ticket/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","opId":"hello","ticket":"a"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"😀"},"ok":true}
+{"in":{"password":"hello","opId":"hello","ticket":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"opId":"hello","ticket":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":"hello","ticket":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","opId":{"bad":1},"ticket":"hello","credential":{"bad":1}},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"password":"hello","opId":{"bad":1},"ticket":{"bad":1}},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"ticket":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/restore/prepare"}
+{"in":{"password":"hello","id":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","unknownProperty":1},"ok":true}
+{"in":{"id":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","id":"hello"},"ok":true}
+{"in":{"password":"x-y","id":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":""},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello","id":"hello","kind":null},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":true},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":123},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":1.5},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":10.0},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":""},"ok":false,"path":"#/anyOf/0/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"password":"hello","id":"hello","kind":"x-y"},"ok":false,"path":"#/anyOf/0/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"password":"hello","id":"hello","kind":[]},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":{}},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":"x"},"ok":false,"path":"#/anyOf/0/properties/kind/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"password":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","id":null},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":123},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":true},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":[]},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":""},"ok":false,"path":"#/properties/id/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","id":"a"},"ok":true}
+{"in":{"password":"hello","id":"😀"},"ok":true}
+{"in":{"password":"hello","id":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","database":null},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","database":123},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","database":true},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","database":[]},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","database":""},"ok":false,"path":"#/properties/database/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","id":"hello","database":"a"},"ok":true}
+{"in":{"password":"hello","id":"hello","database":"😀"},"ok":true}
+{"in":{"password":"hello","id":"hello","database":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","database":"hello"},"ok":true}
+{"in":{"password":{"bad":1},"id":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","credential":{"bad":1},"kind":{"bad":1}},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","kind":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":{"bad":1},"kind":{"bad":1}},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","id":{"bad":1},"database":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"id":"hello","database":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":"hello","id":"hello","kind":"restore"},"ok":true}
+{"in":{"password":"hello","kind":{"bad":1}},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":"rollback","database":"hello"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","unknownProperty":1},"ok":true}
+{"in":{"kind":"rollback","database":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"kind":"rollback","database":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"kind":"rollback","database":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"kind":"rollback","database":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"kind":"rollback","database":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","kind":"rollback","database":"hello"},"ok":true}
+{"in":{"password":"x-y","kind":"rollback","database":"hello"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":""},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello","database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":null,"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":true,"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":123,"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":1.5,"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":10.0,"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":"","database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":"x-y","database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":[],"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":{},"database":"hello"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":null},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":123},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":true},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":[]},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":""},"ok":false,"path":"#/properties/id/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":"a"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":"😀"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":"x-y"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"hello","id":"hello"},"ok":true}
+{"in":{"password":"hello","kind":"rollback"},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":"rollback","database":null},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":123},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":true},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":[]},"ok":false,"path":"#/properties/database/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":""},"ok":false,"path":"#/properties/database/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","kind":"rollback","database":"a"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"😀"},"ok":true}
+{"in":{"password":"hello","kind":"rollback","database":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"kind":"rollback","database":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","kind":{"bad":1},"database":"hello","credential":{"bad":1}},"ok":false,"path":"#/anyOf/0/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","kind":{"bad":1},"database":"hello","id":{"bad":1}},"ok":false,"path":"#/anyOf/0/properties/kind/type","msg":"must be string"}
+{"in":{"password":"hello","kind":"rollback","database":{"bad":1},"id":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"kind":"rollback","database":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/restore/status"}
+{"in":{"opId":"hello","ticket":"hello","session":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'opId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"opId":"hello","ticket":"hello","session":"hello","unknownProperty":1},"ok":true}
+{"in":{"ticket":"hello","session":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'opId'"}
+{"in":{"opId":null,"ticket":"hello","session":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"opId":123,"ticket":"hello","session":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"opId":true,"ticket":"hello","session":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"opId":[],"ticket":"hello","session":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"opId":"","ticket":"hello","session":"hello"},"ok":false,"path":"#/properties/opId/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"opId":"a","ticket":"hello","session":"hello"},"ok":true}
+{"in":{"opId":"😀","ticket":"hello","session":"hello"},"ok":true}
+{"in":{"opId":"x-y","ticket":"hello","session":"hello"},"ok":true}
+{"in":{"opId":"hello","session":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'ticket'"}
+{"in":{"opId":"hello","ticket":null,"session":"hello"},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":123,"session":"hello"},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":true,"session":"hello"},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":[],"session":"hello"},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":"","session":"hello"},"ok":false,"path":"#/properties/ticket/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"opId":"hello","ticket":"a","session":"hello"},"ok":true}
+{"in":{"opId":"hello","ticket":"😀","session":"hello"},"ok":true}
+{"in":{"opId":"hello","ticket":"x-y","session":"hello"},"ok":true}
+{"in":{"opId":"hello","ticket":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'session'"}
+{"in":{"opId":"hello","ticket":"hello","session":null},"ok":false,"path":"#/properties/session/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":"hello","session":123},"ok":false,"path":"#/properties/session/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":"hello","session":true},"ok":false,"path":"#/properties/session/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":"hello","session":[]},"ok":false,"path":"#/properties/session/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":"hello","session":""},"ok":false,"path":"#/properties/session/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"opId":"hello","ticket":"hello","session":"a"},"ok":true}
+{"in":{"opId":"hello","ticket":"hello","session":"😀"},"ok":true}
+{"in":{"opId":"hello","ticket":"hello","session":"x-y"},"ok":true}
+{"in":{"opId":{"bad":1},"ticket":{"bad":1},"session":"hello"},"ok":false,"path":"#/properties/opId/type","msg":"must be string"}
+{"in":{"opId":"hello","ticket":{"bad":1},"session":{"bad":1}},"ok":false,"path":"#/properties/ticket/type","msg":"must be string"}
+{"in":{"session":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'opId'"}
+{"ep":"admin/backup/take"}
+{"in":{"password":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","unknownProperty":1},"ok":true}
+{"in":{"password":null},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[]},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":""},"ok":true}
+{"in":{"password":"x-y"},"ok":true}
+{"in":{"password":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","token":""},"ok":true}
+{"in":{"password":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","credential":{}},"ok":true}
+{"in":{"password":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"credential":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"ep":"admin/backup/verify"}
+{"in":{"password":"hello","id":"hello"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","unknownProperty":1},"ok":true}
+{"in":{"id":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
+{"in":{"password":null,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":123,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":true,"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":[],"id":"hello"},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"","id":"hello"},"ok":true}
+{"in":{"password":"x-y","id":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":null},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":123},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":true},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":[]},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":""},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"x-y"},"ok":true}
+{"in":{"password":"hello","id":"hello","token":"hello"},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":null},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":[]},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":"x"},"ok":false,"path":"#/properties/credential/type","msg":"must be object"}
+{"in":{"password":"hello","id":"hello","credential":{"unknownProperty":1}},"ok":true}
+{"in":{"password":"hello","id":"hello","credential":{}},"ok":true}
+{"in":{"password":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'id'"}
+{"in":{"password":"hello","id":null},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":123},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":true},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":[]},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"password":"hello","id":""},"ok":false,"path":"#/properties/id/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"password":"hello","id":"a"},"ok":true}
+{"in":{"password":"hello","id":"😀"},"ok":true}
+{"in":{"password":"hello","id":"x-y"},"ok":true}
+{"in":{"password":{"bad":1},"id":"hello","token":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","token":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":"hello","credential":{"bad":1},"token":{"bad":1}},"ok":false,"path":"#/properties/token/type","msg":"must be string"}
+{"in":{"password":"hello","id":{"bad":1},"credential":{"bad":1}},"ok":false,"path":"#/properties/id/type","msg":"must be string"}
+{"in":{"id":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
 {"ep":"admin/database-health"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}

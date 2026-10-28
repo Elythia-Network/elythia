@@ -90,8 +90,17 @@ func TestSetupRoutes_RestoreIsForwardedWithoutTheGuard(t *testing.T) {
 	t.Cleanup(cleanup)
 	require.NoError(t, repository.NewUserRepository(serverIntegrationDB).Create(&model.User{
 		ID: rootID, Username: "restore_fwd_root", UsernameLower: "restore_fwd_root", Token: &rootToken, IsRoot: true}))
+	// 本文は操作ごとの宣言を満たす形にする (#3878)。宣言から外れる本文は、転送の前に
+	// 引数の検証が 400 にする。
+	bodies := map[string]string{
+		"prepare":    `{"id":"20261010T040000Z","password":"pw","token":"123456"}`,
+		"confirm":    `{"opId":"x","ticket":"t","password":"pw","token":"123456"}`,
+		"abort":      `{"opId":"x","ticket":"t","password":"pw","token":"123456"}`,
+		"status":     `{"opId":"x","ticket":"t","session":"restorefwd000001"}`,
+		"candidates": `{"password":"pw","token":"123456"}`,
+	}
 	post := func(op, token string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/"+op, bytes.NewReader([]byte(`{"opId":"x","ticket":"t","password":"pw","token":"123456"}`)))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/restore/"+op, bytes.NewReader([]byte(bodies[op])))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		if token != "" {
 			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)

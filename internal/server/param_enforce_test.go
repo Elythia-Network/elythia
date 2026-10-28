@@ -36,6 +36,23 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
+// backupAcceptedStop is where an accepted corpus input of admin/backup/*
+// stops in TestEnforcedEndpointsMatchTheCorpus: the re-authentication cannot
+// load the test administrator's profile, and there is no backup service to
+// forward restore/* to.
+var backupAcceptedStop = map[string]string{
+	"admin/backup/list":               "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/take":               "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/verify":             "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/delete":             "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/download":           "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/restore/candidates": "AUTHENTICATION_UNAVAILABLE",
+	"admin/backup/restore/prepare":    "BACKUP_SERVICE_NOT_CONFIGURED",
+	"admin/backup/restore/confirm":    "BACKUP_SERVICE_NOT_CONFIGURED",
+	"admin/backup/restore/abort":      "BACKUP_SERVICE_NOT_CONFIGURED",
+	"admin/backup/restore/status":     "RESTORE_UNAVAILABLE",
+}
+
 // countingDiagnostics stands in for the self-check and the remote host check,
 // which make outgoing requests, and counts the runs.
 type countingDiagnostics struct {
@@ -977,6 +994,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	seedReached := map[string]int{}
 	jobReached := map[string]int{}
 	diagAccepted := map[string]int{}
+	backupReached := map[string]int{}
 	adminSeeded := false
 	for _, tc := range cases {
 		if tc.ok && (tc.ep == "notes" || strings.HasPrefix(tc.ep, "notes/")) {
@@ -1157,6 +1175,16 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			if (tc.ep == "admin/self-check" || tc.ep == "admin/federation/check-host") && rec.Code == http.StatusOK {
 				diagAccepted[tc.ep]++
 			}
+			// admin/backup/* の受理の入力は、引数の検証を通った後の段まで届く (#3878)。
+			// 再認証 (adminbackup の handler の中の guarded) を課す 6 件は、管理者と native token の確認を通り、
+			// テストの管理者が user_profile を持たないので、profile を読む段で
+			// AUTHENTICATION_UNAVAILABLE になる。restore/* の 4 件は、daemon が無いので
+			// 転送の手前で止まる (status は理由を分けない 503)。拒否の入力が 400 になる
+			// ことと合わせて、検証が再認証より先に走ることを確かめる。
+			if want, ok := backupAcceptedStop[tc.ep]; ok {
+				assert.Equal(t, want, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				backupReached[tc.ep]++
+			}
 		}
 		if tc.ok {
 			var in map[string]any
@@ -1205,6 +1233,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	for _, ep := range jobEnqueuingEndpoints {
 		assert.Positive(t, jobReached[ep], "no accepted corpus input of %s", ep)
+	}
+	for ep := range backupAcceptedStop {
+		assert.Positive(t, backupReached[ep], "no accepted corpus input of %s", ep)
 	}
 	// admin/drive/cleanup が、置いたもの以外のファイル (テストの前からあったものと、
 	// 利用者のファイル) を消していないこと (#3857)。
