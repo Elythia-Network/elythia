@@ -92,31 +92,8 @@ port: 3000
 # without acting on it, and log how often its verdict and the handler's
 # answer disagree (default: enabled). The log holds endpoint names, schema
 # paths and counts, never a value. The endpoints aligned with upstream
-# (clips/*, charts/*, hashtags/*, antennas/*, flash/*, gallery/*, following/*,
-# channels/*, blocking/*, mute/*, renote-mute/*, roles/*, invite/*,
-# notifications/*, app/*, auth/*, miauth/gen-token, my/apps, sw/*,
-# announcements, promo/read, email-address/available, username/available,
-# ap/*, bubble-game/ranking, bubble-game/register, federation/*, pages/*,
-# page-push, the read-only top-level endpoints such as meta and emojis,
-# users and users/*, drive and drive/*, chat/*, reversi/*,
-# export-custom-emojis,
-# fetch-external-resources, request-reset-password, reset-password,
-# verify-email, v2/admin/emoji/list, notes and notes/*,
-# i and i/*,
-# admin/ad/*, admin/announcements/*, admin/avatar-decorations/*,
-# admin/invite/*, admin/promo/create, admin/meta, admin/server-info,
-# admin/get-index-stats, admin/get-table-stats, admin/show-moderation-logs,
-# admin/drive/*, admin/emoji/*, admin/roles/*, admin/abuse-report/*,
-# admin/abuse-user-reports, admin/forward-abuse-user-report,
-# admin/resolve-abuse-user-report, admin/update-abuse-user-report,
-# admin/system-webhook/*, admin/captcha/*, admin/accounts/*,
-# admin/federation/*, admin/relays/*, admin/delete-account,
-# admin/delete-all-files-of-a-user, admin/get-user-ips, admin/reset-password,
-# admin/send-email, admin/show-user, admin/show-users, admin/suspend-user,
-# admin/unset-mfa, admin/unset-user-avatar, admin/unset-user-banner,
-# admin/unsuspend-user, admin/update-proxy-account, admin/update-user-note,
-# admin/queue/*, admin/update-meta) are validated and rejected regardless of
-# this setting.
+# (every endpoint with a paramDef, upstream's or Elythia's own, but the
+# test-only reset-db) are validated and rejected regardless of this setting.
 # See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).

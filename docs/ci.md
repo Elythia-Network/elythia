@@ -453,6 +453,12 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   - `internal/server`: 0%（router.goのwire層中心、e2e/drop-in test経由で実挙動検証する設計のため。個別handlerは`_test.go`で個別カバー）
   - それ以外のパッケージ: 90%以上
   - shard内のいずれかのパッケージが閾値未達なら、そのshardが失敗する。
+- **`MK_SERVER_TESTS_REQUIRE_DB` を渡す (#3890)。** `internal/server` の `TestMain` は、手元で
+  PostgreSQL を用意していない開発者のために接続できないと DB を使うテストを skip するが、
+  skip は成功として扱われる。組み立てたサーバーのルートに `paramDef` の宣言があるかを見る
+  ゲート (`TestAPIRoutesHaveParamDefs`、[param-shadow.md](param-shadow.md)) も DB で組み立てる
+  ので、CI でそのままだと接続に失敗しても緑になる。この変数があると `TestMain` が落ちる
+  (`plugin-tests` の `MK_PLUGIN_TESTS_REQUIRE_DB` と同じ形)。
 - カバレッジレポートは`coverage-shard-N`アーティファクトとして各shardからアップロード。
 - `test` job は `needs: test-shards / if: always()` で全shardを束ね、ブランチ保護が
   要求する `test` という名前の単一checkを公開する。いずれかのshardが失敗したら

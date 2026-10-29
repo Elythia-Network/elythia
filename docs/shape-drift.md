@@ -313,19 +313,19 @@ gateは2方向:
 
 `TestLimitSpecDrift`は、list endpointの`limit`の**default / maximum**をMisskeyの`paramDef`と整合させるgate。
 
-Misskeyは`limit: { type:'integer', minimum, maximum, default }`を宣言し、ajvが**default補完 + 範囲外reject**する。Elythiaはhandlerでimperativeにclampしていたため、default/max値がupstreamとずれると「limit省略時の件数」や「上限」が変わる(`limit`省略時に10件返すべきが30件返る等)。
+Misskeyは`limit: { type:'integer', minimum, maximum, default }`を宣言し、ajvが**default補完 + 範囲外reject**する。Elythiaはhandlerで同じ値を持つので、default/max値がupstreamとずれると「limit省略時の件数」や「上限」が変わる(`limit`省略時に10件返すべきが30件返る等)。
 
 ### 仕組み
 
-handlerは`pagination.ClampLimit(limit, def, max)`でlimitを正規化する。gateは各call siteの`def`/`max`**リテラル**を読み、`internal/server`のrouteの登録で囲むmethodをendpointに解決し、Misskey paramDefから生成したgolden(`golden_limit_specs.json`、`tools/limitspec`が生成)と突合する。L3と同様**段階的**で、`ClampLimit`へ移行済みのcall siteだけがgate対象(未移行は素通し)。
+handlerは`pagination.ResolveLimit(limit, def, max)`でlimitを決める。省略ならdefを返し、1..maxの範囲の外なら`INVALID_PARAM`(400)にする。gateは各call siteの`def`/`max`**リテラル**を読み、`internal/server`のrouteの登録で囲むmethodをendpointに解決し、本家の`paramDef`のgolden(`internal/api/paramschema/upstream_paramdefs.json`の`limit`。最上位の`allOf`などの分岐の中もたどる)と突合する。#3890より前は、`tools/limitspec`が本家の`.ts`を正規表現で読んで作った別のgolden(`golden_limit_specs.json`)と突合していた。limitを持つ113件のdefaultとmaximumが`upstream_paramdefs.json`とすべて一致したので、goldenを1つにした。gateが読むのは`ResolveLimit`のcall siteで、本家の`paramDef`に`limit`があるendpointに解決できたものだけを突合する。
 
-clampロジック自体(mk=clamp / Misskey=範囲外reject)は揃えない — mk側のclampの方が寛容で、揃えると既存クライアントを壊しうる。**default/max値のみ**が契約として gate される。
+範囲外の扱いは本家と同じく400で、以前は黙って丸めていた(`ClampLimit`、`internal/api/pagination/pagination.go`のコメント)。また、本家の`paramDef`で拒否するendpointでは、範囲外の`limit`は検証器が先に400にする。このgateが守るのは、検証器が見ない**default**と、handlerの持つmaxの値の一致。
 
 ### 運用
 
 ```bash
-make limitspec-check  # gate をローカル実行
-make shapecheck-gen   # golden_limit_specs.json も再生成
+go test ./internal/entitycompat/ -run TestLimitSpecDrift  # gate をローカル実行 (CI では test で走る)
+make paramdef-gen     # upstream_paramdefs.json を再生成
 ```
 
 ## Permission drift gate（アクセス制御）

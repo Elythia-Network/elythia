@@ -139,7 +139,7 @@
 | 種類 | 参照元 | 移行先 |
 |---|---|---|
 | **自分たちの frontend** | `internal/frontendutil` の既定値 (`frontendBase = "third_party/misskey"`、`MISSKEY_FRONTEND_*` で上書き可)、`Dockerfile.bundled` (`built/`・`packages/frontend/assets`・`assets/`)、`compose.uds.yaml.example` の bind mount (`./third_party/misskey/built:/frontend`)、`tools/pluginbuild` / `plugindev` (`packages/frontend/src/server-plugins.generated.ts` などを書く)、`make frontend-check` / `frontend-test`、Playwright のビルド | `frontend/` |
-| **比較対象の本家** | tools 7 つ (`apicompat` / `erroriddiff` / `limitspec` / `permspec` / `securespec` (以上 `packages/backend/src/server/api/endpoints`)、`schemadrift` (`packages/backend/migration`・`src/models`)、`shapediff` (`packages/misskey-js/src/autogen/types.ts`))、テスト 9 ファイル、本家 backend e2e (`tests/upstream-e2e`)、promo の確認 | `.cache/misskey/<版>/` (git 管理外) |
+| **比較対象の本家** | tools 7 つ (`apicompat` / `erroriddiff` / `limitspec` (#3890 で消した) / `permspec` / `securespec` (以上 `packages/backend/src/server/api/endpoints`)、`schemadrift` (`packages/backend/migration`・`src/models`)、`shapediff` (`packages/misskey-js/src/autogen/types.ts`))、テスト 9 ファイル、本家 backend e2e (`tests/upstream-e2e`)、promo の確認 | `.cache/misskey/<版>/` (git 管理外) |
 | **本家の backend パッケージから借りているもの** | `Dockerfile` / `Dockerfile.bundled` が `packages/backend/assets` (favicon・アイコン = `static-assets`) と `packages/backend/node_modules/@misskey-dev/emoji-assets` (twemoji / fluent-emoji) を焼き込む | 下の D3 で決める |
 
 ### submodule を checkout している workflow (10 本)
