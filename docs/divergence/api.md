@@ -323,7 +323,7 @@ upstream にもある endpoint に、Elythia が任意パラメータを足し�
 upstream 由来のクライアントはそのまま通る (省略時は upstream と同じ挙動)。
 `i/update`・`admin/update-meta`・`/avatar/@acct` (`paramDef` を持たない画像の経路) を除くこの表の
 引数と、`i/regenerate-token` の `token` ([security.md](security.md)) は、#3867 で本家の `paramDef` に重ねて
-宣言した (`i/update` の分は #3886 で宣言した) (`internal/api/paramschema/elythia_overlays.json` の `x-elythia-properties`、
+宣言した (`i/update` の分は #3886、`admin/update-meta` の分は #3888 で宣言した) (`internal/api/paramschema/elythia_overlays.json` の `x-elythia-properties`、
 [param-shadow.md](../param-shadow.md#elythia独自の値を重ねる3865))。宣言から外れる値 (型の違う値など) は、
 本家が知らない項目として通していたが、本家と同じ形の400 (`info`付き) になる。
 `admin/relays/remove` の独自の `id` (`inbox` の代わりにidで指す) は、#3861 で `id` だけの入力が
@@ -333,7 +333,8 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 |---|---|---|
 | signup | federationStatus | 作成するアカウントの状態 (pending / off / on)。省略時は on。公式クライアントはウィザードで選べるよう pending を明示する。pending のbotはネイティブセッショントークンで i/update-federation を呼んでからアプリトークンを発行する (i/update-federation はアプリトークン不可) |
 | admin/accounts/create | federationStatus | 作成するアカウントの状態 (pending / off / on)。省略時は on。一度でも外部参照された on アカウントは off に戻せない |
-| `admin/update-meta` | `inboxSuspendedSoftware` | 受信を拒否するソフトウェアの一覧 (#3362)。`deliverSuspendedSoftware` と同じく、**各要素の `software` / `versionRange` が文字列でなければ `INVALID_PARAM` (400)** にする (`deliverSuspendedSoftware` の検査は upstream の paramDef に揃えたもの。#3362 より前の Elythia は検査せずに保存していた) |
+| `admin/update-meta` | `inboxSuspendedSoftware` | 受信を拒否するソフトウェアの一覧 (#3362)。`deliverSuspendedSoftware` と同じく、**各要素の `software` / `versionRange` が文字列でなければ `INVALID_PARAM` (400)** にする (`deliverSuspendedSoftware` の検査は upstream の paramDef に揃えたもの。#3362 より前の Elythia は検査せずに保存していた)。#3888 から本家と同じ形の 400 (`info`付き)。`null` は空の一覧と同じ。要素のほかのキーはそのまま保存する |
+| `admin/update-meta` | 登録・分割アップロード・リレーの設定 | `approvalRequiredForSignup`・`registrationClosed` (真偽値。`null` は省略と同じ)、`signupApplicationForm` (申請フォーム。最大 10 項目で、各項目は `label` (1〜100 文字)・`type` (`text` / `textarea`)・`required` (真偽値)・`maxLength` (0〜2000 の整数) を持つ。`required`・`maxLength` は省略でき、`null` も受ける。`null` は空の一覧と同じ)、`minimumUsernameLength` (1〜20 の整数)、`chunkedUploadEnabled` (真偽値)・`chunkedUploadChunkSizeMb` (5〜32)・`chunkedUploadSessionTtlMinutes` (5〜1440)・`chunkedUploadMaxSessionsPerUser`・`chunkedUploadMaxPendingMbPerUser` (1〜2147483647 の整数)、`enableRelayOrphanUserCleanup`・`enableEphemeralRelayNotes` (真偽値)・`relayOrphanUserGraceDays` (7〜3650 の整数)・`ephemeralRelayNoteTtlMinutes` (1〜525600 の整数)。#3888 で宣言し、外れる値は本家と同じ形の 400 (`info`付き) になる |
 | `admin/abuse-user-reports` | `resolved` | 解決済みかどうかで絞り込む、`state`より前からの真偽値の引数。旧来のクライアントのために受ける。**`state`が`all`・空文字・null (省略を含む) のときだけ効き**、`unresolved` / `resolved`と知らない値 (本家と同じく全件、#3859) では無視する。同梱のfrontendは送らない |
 | `admin/abuse-user-reports` | `reportId` | 通報の通知から該当の 1 件を開くための additive パラメータ (#2868)。**指定時は `state` / `reporterOrigin` / `targetUserOrigin` / cursor の絞りを無視する** — 一覧の既定は `state=unresolved` なので、他のモデレーターが先に解決した通報に通知から飛べなくなる。1 件を名指しで引く以上、絞り込みは意味を持たない。存在しない ID は 404 ではなく空配列 (一覧 endpoint なので) |
 | `admin/queue/jobs` | `limit` / `page` | 1 ページの件数 (1〜100) とページ番号 (1 以上)。**#3867で整数として本家の`paramDef`に重ねて宣言し、範囲の外 (以前は、`limit: 0`だけ・`page: 0`だけの入力は省略と同じ扱い、それ以外は 30・1 に丸めた) と`null`は本家と同じ形の400、整数を小数の形で書いた値 (`5.0`) は受けるようにした**。**指定したときだけ効く** (handlerは`limit: 0`を省略と区別できないので省略として扱うが、検証が先に400で拒否する) — 省略時は upstream と同じく state ごとに新しい順で最大 101 件 (`getJobs(types, 0, 100)` は終端を含む) を state の指定順に連結して返す (#3167)。指定時は**全 state 合計**で `limit` 件に切る (state を順に詰めるので、後ろの state は前が埋めると出ない)。同梱フロントは指定しない。以前は省略時にも既定の 30 件が合計に効き、しかも古い順だったので、「すべて」タブが古い完了済みだけで埋まって失敗が 1 件も見えなかった |
