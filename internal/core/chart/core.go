@@ -583,8 +583,9 @@ func (c *Chart) requeueFailed(group string, gb *groupBuffer, outcome saveOutcome
 	if outcome == saveHourApplied {
 		// int の delta は hour に適用済みなので戻せない。**戻すものが他に
 		// あるかどうかに関わらず、捨てたことを記録する。** instance chart は
-		// unique 列を持たず requests.received が smallint で、day 行は 1 日ぶんを
-		// 積むぶん hour より 24 倍あふれやすい。perUserPv のように unique 列を
+		// unique 列を持たず、day 行は 1 日ぶんを積むぶん hour より 24 倍あふれ
+		// やすい (この記述を書いた当時は requests.received が smallint だった。
+		// #3873 で integer に広げた)。perUserPv のように unique 列を
 		// 持つ chart でも、pv.user / pv.visitor のような素のカウンタは同じように
 		// day 側で消える。ここを黙って通すと、その日一杯 day が更新されない
 		// ことに誰も気付けない。
