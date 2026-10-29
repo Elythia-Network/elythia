@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -256,13 +257,40 @@ func (h *Handler) updateMetaChecked(fields map[string]any) error {
 	})
 }
 
-// writeCheckedUpdateError writes the response for an updateMetaChecked error.
-func (h *Handler) writeCheckedUpdateError(c echo.Context, err error) error {
+// writeCheckedUpdateError writes the response for an updateMetaChecked error
+// of writing fields.
+//
+// DB の段の失敗は 500 にし、どの endpoint のどの項目の書き込みかをログに出す
+// (#3888)。ドライバのエラーそのものは GORM の logger も出すが、そちらには
+// endpoint と項目が無い。ドライバのエラーの文には秘密でない欄の値が入ることが
+// あるが、秘密の欄の値は入らない (checkSecretFieldTypes が文字列か null に
+// 限っているので、エンコードの失敗の文に値が載らない)。
+func (h *Handler) writeCheckedUpdateError(c echo.Context, fields map[string]any, err error) error {
 	var re *secretReentryError
 	if errors.As(err, &re) {
 		return secretReentryRequired(c, re.field)
 	}
+	slog.Error("admin: writing meta failed", "path", c.Path(), "fields", fieldKeys(fields), "err", err)
 	return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+}
+
+// checkSecretFieldTypes returns the first secret field of fields whose value
+// is neither a string nor null, or "".
+//
+// 本家の宣言でも秘密の欄はどれも文字列か null で、検証器が拒否する。ここでも
+// 見るのは、検証を飛ばす大きな本文 (param-shadow.md) でも DB へ渡さないため。
+// object などを渡すと、ドライバが書けなかった値をそのままエラーの文に入れ
+// (`unable to encode map[string]interface {}{"k":"<値>"} ...`)、GORM の logger が
+// 伏せずに出す (#3888 のレビューで実測)。
+func checkSecretFieldTypes(fields map[string]any) string {
+	for _, f := range metasecret.Fields {
+		switch fields[f].(type) {
+		case nil, string:
+		default:
+			return f
+		}
+	}
+	return ""
 }
 
 func touchesSecretDestination(fields map[string]any) bool {

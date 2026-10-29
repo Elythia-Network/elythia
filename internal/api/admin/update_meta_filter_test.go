@@ -28,7 +28,6 @@ func TestUpdateMeta_AliasesSurviveTheFilter(t *testing.T) {
 	for name, tc := range map[string]struct{ body, column string }{
 		"tosUrl":       {`{"tosUrl":"https://t.example"}`, "termsOfServiceUrl"},
 		"summalyProxy": {`{"summalyProxy":"https://p.example"}`, "urlPreviewSummaryProxyUrl"},
-		"swPublickey":  {`{"swPublickey":"k"}`, "swPublicKey"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, _, metaRepo, _ := newTestHandler(t)

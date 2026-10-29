@@ -15,7 +15,11 @@ import (
 // `id` は singleton の PK を壊す。`proxyAccountId` は
 // `admin/update-proxy-account` の管轄。upstream の paramDef もこれらを
 // 受け付けない (#2106 S1)。
-var updateMetaProtectedColumns = []string{"id", "rootUserId", "proxyAccountId"}
+//
+// `policies` (既定のポリシー) は `admin/roles/update-default-policies` の管轄。
+// 本家の paramDef に無く、本家は知らない項目として無視する。同梱の frontend も
+// 送らないので、本家と同じく無視する (#3888)。
+var updateMetaProtectedColumns = []string{"id", "rootUserId", "proxyAccountId", "policies"}
 
 // metaColumnNames returns every column declared by model.Meta.
 //
