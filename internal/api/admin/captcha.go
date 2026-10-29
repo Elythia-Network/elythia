@@ -192,7 +192,7 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 		setIfProvided(fields, "turnstileSecretKey", req.Secret)
 	}
 	if err := h.updateMetaChecked(fields); err != nil {
-		return h.writeCheckedUpdateError(c, err)
+		return h.writeCheckedUpdateError(c, fields, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -1257,9 +1257,17 @@ func TestUpdateMeta_TosUrlAliasIsTranslated(t *testing.T) {
 	assert.Equal(t, "https://example.test/tos", *metaRepo.Meta.TermsOfServiceURL)
 }
 
-func TestUpdateMeta_SwPublickeyAliasIsTranslated(t *testing.T) {
+// swPublickey (admin/meta が返す名前) は、本家の update-meta と同じく知らない
+// 項目として無視する。書くのは swPublicKey だけ (#3888)。
+func TestUpdateMeta_IgnoresSwPublickey(t *testing.T) {
 	h, _, metaRepo, _ := newTestHandler(t)
-	rec := doPost(h.UpdateMeta, `{"swPublickey":"KEY"}`, nil)
+	rec := doPost(h.UpdateMeta, `{"swPublickey":"KEY","name":"x"}`, nil)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Nil(t, metaRepo.Meta.SwPublicKey)
+	assert.NotContains(t, metaRepo.LastUpdateFields, "swPublicKey")
+	assert.NotContains(t, metaRepo.LastUpdateFields, "swPublickey")
+
+	rec = doPost(h.UpdateMeta, `{"swPublicKey":"KEY"}`, nil)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.NotNil(t, metaRepo.Meta.SwPublicKey)
 	assert.Equal(t, "KEY", *metaRepo.Meta.SwPublicKey)

@@ -41,6 +41,7 @@ import (
 	"github.com/elythia-network/elythia/internal/effectivepolicy"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -1835,6 +1836,9 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	delete(fields, "i")
 	// 伏せ字のまま送り返された秘密の欄は「変えない」(admin/meta は秘密の値を返さない)。
 	dropUnchangedSecretFields(fields)
+	if f := checkSecretFieldTypes(fields); f != "" {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", f+" must be a string or null", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
 	// #2106 S1: identity / 専用 endpoint 管轄の column を generic map 経路から除外する。
 	// update-meta は admin が任意 meta column を書ける generic passthrough 設計 (model
 	// コメント参照) だが、rootUserId を書けると root 権限を別 user に付け替えられ
@@ -1863,6 +1867,9 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	if err := validateUpdateMetaNumericRanges(fields); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	if err := validateUpdateMetaIntegers(fields); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
 	// 登録ゲートの型を揃える (#2803)。**normalizeSignupConditions より前に置く** —
 	// 正規化は bool しか見ないのに、後段の UPDATE は bool 以外でも列を書き換える
 	// ので、順番が逆だと「ゲートは外れたのに補正は走らない」組み合わせが残る。
@@ -1888,31 +1895,6 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	// packages/backend/src/models/Meta.ts と同じ正規名で保持している。
 	// alias が frontend から来たら DB カラム名に translate して渡す。
 	renameUpdateMetaFields(fields)
-
-	// **既定 policy の型をここでも見る (#3037 レビュー 2 周目)。**
-	// `policies` は `roles/update-default-policies` と **同じ `meta.policies`
-	// 列**を書く 4 本目の経路で (`metaJSONBColumns` のコメント参照)、
-	// generic passthrough なので保護列でもなく `dropUnknownMetaFields` も
-	// 通す。ここを素通しにすると、数値の policy に文字列を入れるだけで
-	// **全利用者でその上限が消える** — consumer は
-	// `if limit, ok := role.PolicyNumber(v); ok { ...gate... }` の形で読むので、
-	// 上限違反で弾かれるのではなく上限そのものが無くなる (#2611 / #3037)。
-	// rename の後に置くのは、alias で来た場合も正規名で見るため。
-	if raw, ok := fields["policies"]; ok && raw != nil {
-		// **`null` は従来どおり受ける (#3037 レビュー 3 周目)。**
-		// `coerceMetaJSONBFields` が nil を `{}` に倒して列をリセットする。
-		// 他の jsonb 列 (`clientOptions` / `deliverSuspendedSoftware`) も
-		// null を受けるので、ここだけ 400 にすると非対称になる。
-		policies, isMap := raw.(map[string]any)
-		if !isMap {
-			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
-				"policies must be an object.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
-		}
-		if key := invalidDefaultPolicyKey(policies); key != "" {
-			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
-				"policy "+key+" has a value of the wrong type.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
-		}
-	}
 
 	// **ソフトウェアの一覧の形を見る (#3362)。** upstream の paramDef は
 	// deliverSuspendedSoftware の各要素の software / versionRange を string 必須に
@@ -1996,7 +1978,7 @@ func (h *Handler) UpdateMeta(c echo.Context) error {
 	// 秘密を残したまま送り先だけを変えることはさせない。判定は書き込みと同じ
 	// transaction の中で行う (updateMetaChecked)。
 	if err := h.updateMetaChecked(fields); err != nil {
-		return h.writeCheckedUpdateError(c, err)
+		return h.writeCheckedUpdateError(c, fields, err)
 	}
 	if afterMeta, err := h.metaRepo.Fetch(); err == nil {
 		h.logModeration(c, moderationlog.LogUpdateServerSettings, map[string]any{
@@ -2131,14 +2113,25 @@ func strDeref(p *string) string {
 // field で alias を使っており、mk-go の AdminMeta も同じ alias で公開
 // しているため、save path にも逆向きの translate を入れる必要がある。
 var updateMetaFieldAliases = map[string]string{
-	"tosUrl":      "termsOfServiceUrl", // 本家: update-meta.ts の termsOfServiceUrl が admin/meta では tosUrl で出る
-	"swPublickey": "swPublicKey",
+	"tosUrl": "termsOfServiceUrl", // 本家: update-meta.ts の termsOfServiceUrl が admin/meta では tosUrl で出る
+	// admin/meta が返す swPublickey は別名にしない。本家の update-meta は
+	// swPublicKey だけを読み、swPublickey は知らない項目として無視する (#3888)。
 	// API param は mcaptchaSiteKey (capital K) だが DB 列は mcaptchaSitekey
 	// (lower k)。alias しないと存在しない列への UPDATE で保存できない (#1174)。
 	"mcaptchaSiteKey": "mcaptchaSitekey",
 }
 
+// renameUpdateMetaFields replaces the aliases of fields with the column
+// names. The column names themselves are dropped first.
+//
+// 列名 (termsOfServiceUrl・mcaptchaSitekey) は本家の paramDef に無く、本家は
+// 知らない項目として無視する。そのまま受けると、検証されずに UPDATE へ渡る
+// (`{"termsOfServiceUrl":{}}` が 500 になった。#3888 のレビュー)。別名で
+// 送った値だけを列に書く。
 func renameUpdateMetaFields(fields map[string]any) {
+	for _, canonical := range updateMetaFieldAliases {
+		delete(fields, canonical)
+	}
 	for alias, canonical := range updateMetaFieldAliases {
 		if v, ok := fields[alias]; ok {
 			fields[canonical] = v
@@ -2175,9 +2168,29 @@ var updateMetaNumericMinimums = map[string]float64{
 	// upstream 2026.7.0 sensitiveMediaDetection 外部サービス設定 (minimum: 1)。
 	"sensitiveMediaDetectionTimeout":             1,
 	"sensitiveMediaDetectionMaxImagesPerRequest": 1,
-	// 分割アップロード (#2313)。mk-go 独自。
-	"chunkedUploadMaxSessionsPerUser":  1,
-	"chunkedUploadMaxPendingMbPerUser": 1,
+}
+
+// updateMetaIntegerFields は、本家の paramDef が number で宣言しているが、列は
+// 本家でも integer の項目。本家は整数でない値 (1.5) を ajv で通し、列への
+// 書き込みで 500 にする。Elythia は書き込む前に 400 にする (#3888)。
+var updateMetaIntegerFields = []string{
+	"remoteNotesCleaningExpiryDaysForEachNotes",
+	"remoteNotesCleaningMaxProcessingDurationInMinutes",
+}
+
+// validateUpdateMetaIntegers rejects the values of updateMetaIntegerFields
+// that are not numbers with an integer value.
+func validateUpdateMetaIntegers(fields map[string]any) error {
+	for _, key := range updateMetaIntegerFields {
+		v, ok := fields[key]
+		if !ok {
+			continue
+		}
+		if n, ok := v.(float64); !ok || n != math.Trunc(n) {
+			return errors.New(key + " must be an integer")
+		}
+	}
+	return nil
 }
 
 // updateMetaNumericRanges は上下限を両方持つ integer カラム。分割アップロード
@@ -2195,6 +2208,18 @@ var updateMetaNumericRanges = map[string]struct{ min, max float64 }{
 	// service 側にも clamp があるが、**壊れた値を DB に書かせない**のが
 	// ここの役割 (silent fallback で admin の意図と乖離するのを防ぐ、#1108)。
 	"minimumUsernameLength": {float64(signup.MinUsernameLength), float64(signup.MaxUsernameLength)},
+	// 分割アップロードの上限 (#2313)。列は integer (int4) なので、超える値は列への
+	// 書き込みで 500 になる。上は列の範囲で切る (#3888)。
+	"chunkedUploadMaxSessionsPerUser":  {1, math.MaxInt32},
+	"chunkedUploadMaxPendingMbPerUser": {1, math.MaxInt32},
+	// リレーの設定 (#2332、#2340)。以前は 0 や -1 も保存し、リレーだけが持ち込んだ
+	// 利用者の掃除は使う側で 7 日を下限にしていた。下限は同梱の frontend の入力欄
+	// (relays.vue) と揃える。上限は使う側で溢れない値にする (#3888):
+	// 掃除は `now() - make_interval(days => n)` で、大きいと timestamp の範囲を
+	// 外れて毎回失敗する。揮発の期間は time.Duration(n)*time.Minute で、約 1.5 億分を
+	// 超えると溢れて負になる。どちらも運用で意味のある長さ (10 年、1 年) で切る。
+	"relayOrphanUserGraceDays":     {7, 3650},
+	"ephemeralRelayNoteTtlMinutes": {1, 525600},
 }
 
 // validateUpdateMetaNumericRanges rejects integer columns outside their
@@ -2343,8 +2368,8 @@ func coerceMetaArrayFields(fields map[string]any) {
 // metaJSONBColumns lists meta jsonb columns whose update-meta payload arrives as
 // a decoded []any / map[string]any and must be json.Marshal された []byte に
 // 変換しないと jsonb 列の UPDATE が型不一致で失敗する (#1732 deliverSuspendedSoftware)。
-// policies は object 形 jsonb で update-default-policies / update-meta の両経路から
-// 来る (#1823)。clientOptions も object 形 jsonb で update-meta が whitelist 無しで
+// policies は object 形 jsonb で update-default-policies から来る (#1823。update-meta
+// は #3888 から受けない)。clientOptions も object 形 jsonb で update-meta が whitelist 無しで
 // 受理するため、未登録だと同じ型不一致 500 になる (#1846)。
 //
 // model.Meta に datatypes.JSON 列を追加したらここにも登録すること。漏れは
@@ -2436,9 +2461,10 @@ func normalizeUpdateMetaFields(fields map[string]any) {
 	}
 	// urlPreviewUserAgent: trim して空なら null、非空なら原文 (untrimmed) を保存
 	// (upstream は trim 結果で null 判定しつつ ps.urlPreviewUserAgent を格納)。
+	// 削る空白は JavaScript の trim と同じ (jsstr、#3888)。
 	if v, ok := fields["urlPreviewUserAgent"]; ok {
 		if s, ok := v.(string); ok {
-			if strings.TrimSpace(s) == "" {
+			if jsstr.Trim(s) == "" {
 				fields["urlPreviewUserAgent"] = nil
 			}
 		}
@@ -2460,10 +2486,11 @@ func normalizeUpdateMetaFields(fields map[string]any) {
 	}
 	// upstream 2026.7.0 update-meta.ts は sensitive-detector の URL / key を
 	// `ps.X === '' ? null : ps.X` で null 化する (コントロールパネルで欄を空に
-	// したら未設定に戻る)。
+	// したら未設定に戻る)。本家と同じく空文字のときだけ null にし、空白は削らない
+	// (以前は削っていた。#3888)。
 	for _, key := range []string{"sensitiveMediaDetectionApiUrl", "sensitiveMediaDetectionApiKey"} {
-		if v, ok := fields[key]; ok {
-			fields[key] = trimToNil(v)
+		if s, ok := fields[key].(string); ok && s == "" {
+			fields[key] = nil
 		}
 	}
 }
@@ -2548,14 +2575,15 @@ func isParsableURL(s string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-// trimToNil trims a string value and returns nil when the result is empty,
-// otherwise the trimmed string. Non-string values pass through unchanged.
+// trimToNil trims a string value like JavaScript's trim and returns nil when
+// the result is empty, otherwise the trimmed string. Non-string values pass
+// through unchanged.
 func trimToNil(v any) any {
 	s, ok := v.(string)
 	if !ok {
 		return v
 	}
-	t := strings.TrimSpace(s)
+	t := jsstr.Trim(s)
 	if t == "" {
 		return nil
 	}
