@@ -11,7 +11,8 @@ package pagination
 //
 // def / max は upstream の paramDef (`default` / `maximum`) と一致させる。
 // 各呼び出し箇所のリテラルは limit-spec drift gate
-// (entitycompat.TestLimitSpecDrift) が golden と突き合わせて検証する。
+// (entitycompat.TestLimitSpecDrift) が upstream の paramDef の golden
+// (internal/api/paramschema/upstream_paramdefs.json) と突き合わせて検証する。
 //
 // 以前は範囲外を黙って丸めていた (ClampLimit) が、upstream は ajv で 400 に
 // するため、`limit: 0` や `limit: 101` を送ったクライアントが「丸められた件数」

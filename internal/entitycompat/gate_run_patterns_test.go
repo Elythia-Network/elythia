@@ -14,9 +14,10 @@ import (
 
 // runFlagRe extracts a `-run` value in any of the three shells write it in.
 //
-// **引用符を要求しない。** `limitspec-check` は `-run TestLimitSpecDrift` と
-// 裸で書いており、`'…'` 前提の抽出では**その target だけ静かに検査対象から
-// 落ちていた** (#2857 の初版が実際にそうだった)。
+// **引用符を要求しない。** `limitspec-check` (#3890 で消した) は
+// `-run TestLimitSpecDrift` と裸で書いており、`'…'` 前提の抽出では**その target
+// だけ静かに検査対象から落ちていた** (#2857 の初版が実際にそうだった)。今も
+// `openapi-upstream-check` が `-run TestSpecMatchesUpstreamAPIJSON` と裸で書いている。
 var runFlagRe = regexp.MustCompile(`-run[=\s]+('[^']*'|"[^"]*"|\S+)`)
 
 // goTestPkgRe matches the package operands of a `go test` command.
