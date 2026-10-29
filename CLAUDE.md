@@ -248,7 +248,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
 | `dropin-e2e` | PR(paths限定) | | TS→mkの切替(往路)、TSへ戻す復路の測定、実Misskey / Mastodonとの連合など5シナリオ |
 | `playwright` | PR(paths限定) | | ブラウザのe2e(4 shard) |
-| `upstream-backend-e2e` | PR(paths限定) | | 本家のbackend e2eを無改変で実行(4 shard) |
+| `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard) |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分 |
 | `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
 | `build-with-plugins-selftest` | PR(paths限定) | | 運営者向けreusable workflowのビルド |

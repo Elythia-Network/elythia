@@ -240,7 +240,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `make elythia-paramdef-gen` | Elythia独自のendpointの`paramDef`(`elythia_paramdefs.json`)から、ajvの照合corpusと、elythia-jsの型と突き合わせる型の検査を作り直す(#3869)。nodeと`frontend/node_modules`が要る。`make paramdef-gen`からも呼ばれる。型の検査だけなら`make elythia-js-paramdefs` | [引数の検証](param-shadow.md#elythia独自のendpointの宣言3869) |
 | `make upstream-sync TO=<版>` | 本家の新しい版の差分のうち、`frontend/` が取り込むパスだけを 3-way で当てる (設計 D4、#3379)。区分に当たらないパスがあれば何も当てずに止まる。`DRY=1` で分類だけを表示 | [本家への追従](upstream-catch-up.md) |
 | `make upstream-sync-lock` | `frontend/pnpm-lock.yaml` を、直前の lock を基点に package.json から作り直す (`pnpm install --lockfile-only`、node の container で実行) | [本家への追従](upstream-catch-up.md) |
-| `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e をテスト本体無改変で Elythia に向けて実行 | [本家 backend e2e](upstream-backend-e2e.md) |
+| `make upstream-e2e-deps` `upstream-e2e-up` `upstream-e2e-migrate` `upstream-e2e-test` `upstream-e2e-down` | Misskey 本家の backend e2e を本家ソースを正本として Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態のみ追加) | [本家 backend e2e](upstream-backend-e2e.md) |
 
 ### ベンチマーク
 
@@ -447,8 +447,9 @@ make dropin-swap-test       # TS-then-mk 切替シナリオ (bash orchestrator)
 # 双方向 Ed25519 verify を検証する e2e。
 make dropin-fedibird-test    # mock ↔ mk-A の Ed25519 inbound/outbound 検証
 
-# 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** をそのまま Elythia に
-# 向けて実行する。テスト本体は無改変。詳細は docs/upstream-backend-e2e.md。
+# 本家 backend e2e (#2347) — Misskey 本家の test/e2e/** を本家ソースを正本として
+# Elythia に向けて実行する。UserLite の期待DTOにローカル連合状態のみ追加する。
+# 詳細は docs/upstream-backend-e2e.md。
 make upstream-e2e-deps       # 本家を取得し、本家側の依存を用意 (初回 / UPSTREAM_MISSKEY_VERSION を上げた後)
 make upstream-e2e-up         # e2e 用 PostgreSQL / Redis を起動
 make upstream-e2e-migrate    # e2e 用 DB にマイグレーションを適用

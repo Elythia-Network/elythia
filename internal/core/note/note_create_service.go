@@ -16,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
 	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/bgwork"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/hashtag"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -31,6 +33,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/role"
 
 	"github.com/elythia-network/mfm"
+	"gorm.io/gorm"
 )
 
 // featured ランキング更新の sampling rate / note 年齢上限 (upstream
@@ -86,6 +89,7 @@ var (
 	// ErrContainsTooManyMentions is returned when the note exceeds the role
 	// policy's mentionLimit.
 	ErrContainsTooManyMentions = errors.New("note contains too many mentions")
+	ErrFederationDisabled      = corelocalfederation.ErrFederationDisabled
 )
 
 // CreateInput is the input parameter for CreateService.Create.
@@ -228,8 +232,12 @@ type SilencingProvider interface {
 type CreateService struct {
 	// background は作成後のベストエフォートフックを起動する箱 (#3661)。
 	// 世代の停止で待つ。nil なら素の goroutine で起動する (テスト)。
-	background *bgwork.Group
-	noteRepo   repository.NoteRepository
+	background              *bgwork.Group
+	noteRepo                repository.NoteRepository
+	localFederationObserver activitypub.LocalFederationObserver
+	localFederationLocker   interface {
+		WithLockedUser(userID string, fn func(tx *gorm.DB, user *model.User) error) error
+	}
 	// rolePolicyProvider は mentionLimit の gate に使う (#2321)。nil なら
 	// DefaultMentionLimit にフォールバックする。
 	rolePolicyProvider role.PolicyProvider
@@ -274,6 +282,19 @@ type CreateService struct {
 	// NewCreateServiceが既定の枠で作り、組み立てのときにSetHookConcurrencyで
 	// 設定の数に作り直す。
 	hookSlots *hookSlots
+}
+
+func (s *CreateService) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	s.localFederationObserver = observer
+}
+
+// SetLocalFederationLocker serializes note insertion with federation status
+// changes so a stale ON snapshot cannot create a remotely visible note while
+// the account is being turned OFF.
+func (s *CreateService) SetLocalFederationLocker(locker interface {
+	WithLockedUser(userID string, fn func(tx *gorm.DB, user *model.User) error) error
+}) {
+	s.localFederationLocker = locker
 }
 
 // RemoteUserResolver resolves a remote `username@host` that is not in the DB
@@ -544,6 +565,21 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 			}()
 		}
 		wg.Wait()
+	}
+	hasRemoteActionTarget := false
+	if in.User != nil && in.User.IsLocal() {
+		for _, target := range []*model.Note{replyTarget, renoteTarget} {
+			if target == nil || target.UserHost == nil || *target.UserHost == "" {
+				continue
+			}
+			hasRemoteActionTarget = true
+			break
+		}
+		// Production note insertion is checked again against the locked row
+		// below. Keep the cached check only for legacy callers without the locker.
+		if hasRemoteActionTarget && s.localFederationLocker == nil && s.localFederationObserver != nil && !s.localFederationObserver.IsExternallyAvailable(in.User) {
+			return nil, ErrFederationDisabled
+		}
 	}
 
 	// effective channel を決める (#1859):
@@ -974,7 +1010,22 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		}
 	}
 
-	if err := s.noteRepo.Create(note); err != nil {
+	federationHookAllowed := true
+	if s.localFederationLocker != nil && in.User.IsLocal() {
+		err := s.localFederationLocker.WithLockedUser(in.User.ID, func(tx *gorm.DB, lockedUser *model.User) error {
+			if hasRemoteActionTarget && s.localFederationObserver != nil && !s.localFederationObserver.IsExternallyAvailable(lockedUser) {
+				return ErrFederationDisabled
+			}
+			federationHookAllowed = lockedUser.FederationStatus != model.FederationStatusPending && lockedUser.FederationStatus != model.FederationStatusOff
+			if lockedUser.FederationStatus == model.FederationStatusOff {
+				note.LocalOnly = true
+			}
+			return s.noteRepo.CreateWithTx(note, tx)
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else if err := s.noteRepo.Create(note); err != nil {
 		return nil, err
 	}
 
@@ -1029,7 +1080,7 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 	if s.notificationHook != nil {
 		safeGo(s.background, s.hookSlots, func() { s.notificationHook.OnNoteCreated(finalNote, in.User, replyTarget, renoteTarget) })
 	}
-	if s.federationHook != nil {
+	if s.federationHook != nil && federationHookAllowed {
 		safeGo(s.background, s.hookSlots, func() { s.federationHook.OnNoteCreated(finalNote, in.User) })
 	}
 	// OnNotePosted は note が実際に属する effective channel (re-scope 後、#1859) で

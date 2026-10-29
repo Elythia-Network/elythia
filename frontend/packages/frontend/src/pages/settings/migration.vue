@@ -11,15 +11,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<template #caption>{{ i18n.ts._accountMigration.moveFromSub }}</template>
 
 		<div class="_gaps_m">
+			<FormInfo v-if="!migrationAllowed" warn>{{ i18n.ts._localOnlyAccount.migrationBlocked }}</FormInfo>
 			<FormInfo>
 				{{ i18n.ts._accountMigration.moveFromDescription }}
 			</FormInfo>
 			<div>
-				<MkButton :disabled="accountAliases.length >= 10" inline style="margin-right: 8px;" @click="add"><i class="ti ti-plus"></i> {{ i18n.ts.add }}</MkButton>
-				<MkButton inline primary @click="save"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
+				<MkButton :disabled="!migrationAllowed || accountAliases.length >= 10" inline style="margin-right: 8px;" @click="add"><i class="ti ti-plus"></i> {{ i18n.ts.add }}</MkButton>
+				<MkButton :disabled="!migrationAllowed" inline primary @click="save"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
 			</div>
 			<div class="_gaps">
-				<MkInput v-for="(_, i) in accountAliases" v-model="accountAliases[i]">
+				<MkInput v-for="(_, i) in accountAliases" v-model="accountAliases[i]" :disabled="!migrationAllowed">
 					<template #prefix><i class="ti ti-plane-arrival"></i></template>
 					<template #label>{{ i18n.tsx._accountMigration.moveFromLabel({ n: i + 1 }) }}</template>
 				</MkInput>
@@ -38,11 +39,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<FormInfo>{{ i18n.ts._accountMigration.moveAccountHowTo }}</FormInfo>
 				<FormInfo warn>{{ i18n.ts._accountMigration.moveCannotBeUndone }}</FormInfo>
 
-				<MkInput v-model="moveToAccount">
+				<MkInput v-model="moveToAccount" :disabled="!migrationAllowed">
 					<template #prefix><i class="ti ti-plane-departure"></i></template>
 					<template #label>{{ i18n.ts._accountMigration.moveToLabel }}</template>
 				</MkInput>
-				<MkButton inline danger :disabled="!moveToAccount" @click="move">
+				<MkButton inline danger :disabled="!migrationAllowed || !moveToAccount" @click="move">
 					<i class="ti ti-check"></i> {{ i18n.ts._accountMigration.startMigration }}
 				</MkButton>
 			</template>
@@ -58,7 +59,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import * as Misskey from 'misskey-js';
 import FormInfo from '@/components/MkInfo.vue';
 import MkInput from '@/components/MkInput.vue';
@@ -70,12 +71,14 @@ import { misskeyApi } from '@/utility/misskey-api.js';
 import { i18n } from '@/i18n.js';
 import { ensureSignin } from '@/i.js';
 import { unisonReload } from '@/utility/unison-reload.js';
+import { canUseAccountMigration } from '@/utility/account-federation.js';
 
 const $i = ensureSignin();
 
 const moveToAccount = ref('');
 const movedTo = ref<Misskey.entities.UserDetailed>();
 const accountAliases = ref(['']);
+const migrationAllowed = computed(() => canUseAccountMigration($i.federationStatus));
 
 async function init() {
 	if ($i.movedTo) {
@@ -93,6 +96,7 @@ async function init() {
 }
 
 async function move(): Promise<void> {
+	if (!migrationAllowed.value) return;
 	const account = moveToAccount.value;
 	const confirm = await os.confirm({
 		type: 'warning',
@@ -110,6 +114,7 @@ function add(): void {
 }
 
 async function save(): Promise<void> {
+	if (!migrationAllowed.value) return;
 	const alsoKnownAs = accountAliases.value.map(alias => alias.trim()).filter(alias => alias !== '');
 	const i = await os.apiWithDialog('i/update', {
 		alsoKnownAs,

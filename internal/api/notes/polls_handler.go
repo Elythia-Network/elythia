@@ -24,6 +24,9 @@ func (h *Handler) PollsVote(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.Choice == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	if !h.gateRemoteNoteAction(c, user, req.NoteID) {
+		return nil
+	}
 
 	if err := h.pollService.Vote(user, req.NoteID, int(*req.Choice)); err != nil {
 		switch {

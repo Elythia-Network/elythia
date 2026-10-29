@@ -219,11 +219,12 @@ func TestPluginQueueNamePatternMatchesTheQueuePackage(t *testing.T) {
 	}
 }
 
-// TestAddedPropertiesMatchElythiaJS keeps the properties Elythia adds to
-// upstream endpoints (x-elythia-properties of elythia_overlays.json) and the
-// request fields elythia-js declares for them (ElythiaRequestExtensions of
-// extensions.ts) to the same names (#3867). admin/update-meta is declared in
-// the last stage of #3667; it is only in extensions.ts.
+// TestAddedPropertiesMatchElythiaJS keeps properties Elythia adds to
+// upstream paramDefs (x-elythia-properties of elythia_overlays.json) and
+// direct-route properties in the generated golden aligned with the request
+// fields elythia-js declares (ElythiaRequestExtensions of extensions.ts).
+// admin/update-meta is declared in the last stage of #3667;
+// it is only in extensions.ts.
 func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 	src, err := os.ReadFile("../../frontend/packages/elythia-js/src/extensions.ts")
 	require.NoError(t, err)
@@ -255,13 +256,34 @@ func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, added)
+	var upstream struct {
+		DirectRoutes []string `json:"directRoutes"`
+	}
+	raw, err := os.ReadFile("../../internal/api/paramschema/upstream_paramdefs.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &upstream))
+	directRoutes := make(map[string]bool, len(upstream.DirectRoutes))
+	for _, name := range upstream.DirectRoutes {
+		directRoutes[name] = true
+	}
+	directProperties := map[string][]string{"signup": {"federationStatus"}}
 	lastStage := map[string]bool{"admin/update-meta": true}
 	for name, fields := range ts {
+		if directFields, ok := directProperties[name]; ok {
+			assert.True(t, directRoutes[name], "%s must be an upstream direct route", name)
+			assert.NotContains(t, added, name, "%s is schema-less in the upstream golden and must not be overlaid", name)
+			assert.Equal(t, sorted(directFields), sorted(fields), "%s: direct-route fields and extensions.ts differ", name)
+			continue
+		}
 		if lastStage[name] {
 			assert.NotContains(t, added, name, "%s is declared in the last stage of #3667", name)
 			continue
 		}
 		assert.Equal(t, sorted(fields), sorted(added[name]), "%s: extensions.ts and x-elythia-properties differ", name)
+	}
+	for name := range directProperties {
+		assert.Contains(t, ts, name, "%s direct-route fields are missing from extensions.ts", name)
+		assert.True(t, directRoutes[name], "%s must be an upstream direct route", name)
 	}
 	for name := range added {
 		assert.Contains(t, ts, name, "%s adds properties that extensions.ts does not declare", name)

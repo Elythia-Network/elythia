@@ -48,8 +48,10 @@ type resolveChain struct {
 	// 使う。**枝に伝播させるのが要点** — 相乗りする瞬間だけ待たない形にしても、
 	// 自分が先頭になれば内側 (著者 actor の解決) で待ってしまう
 	// (#2685 review round 4)。
-	bestEffort bool
-	ids        map[string]string
+	bestEffort             bool
+	inboundLocalReferences bool
+	inboundSourceHost      string
+	ids                    map[string]string
 }
 
 // treeBudget is the wait allowance shared by every chain in one resolve tree.
@@ -92,6 +94,7 @@ func (c *resolveChain) with(key, docID string) *resolveChain {
 	next := &resolveChain{ids: ids}
 	if c != nil {
 		next.id, next.budget, next.bestEffort = c.id, c.budget, c.bestEffort
+		next.inboundLocalReferences, next.inboundSourceHost = c.inboundLocalReferences, c.inboundSourceHost
 	}
 	next.rootStamp()
 	return next
@@ -105,6 +108,7 @@ func (c *resolveChain) asBestEffort() *resolveChain {
 	next := &resolveChain{bestEffort: true}
 	if c != nil {
 		next.id, next.budget, next.ids = c.id, c.budget, c.ids
+		next.inboundLocalReferences, next.inboundSourceHost = c.inboundLocalReferences, c.inboundSourceHost
 	}
 	next.rootStamp()
 	return next
@@ -195,6 +199,7 @@ func (c *resolveChain) ensureTree() *resolveChain {
 	if c != nil {
 		// ids は不変に扱っているので共有してよい。
 		next.ids, next.bestEffort = c.ids, c.bestEffort
+		next.inboundLocalReferences, next.inboundSourceHost = c.inboundLocalReferences, c.inboundSourceHost
 	}
 	next.rootStamp()
 	return next

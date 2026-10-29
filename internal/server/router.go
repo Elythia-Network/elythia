@@ -1031,8 +1031,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ActivityPub。apURLs と apRenderer は buildFederation で作る (#3688)。
 	// actor の `published` (アカウントの作成日時) を ID から出す (#3465)。
 	apRenderer.SetIDGenerator(idGen)
-	// Mention tag を AP Note に埋め込むための resolver。
-	apRenderer.SetMentionResolver(corefederation.NewUserMentionResolver(userRepo, apURLs))
+	// Mention tag を AP Note に埋め込むための resolver。連合OFF/PENDING利用者は
+	// tagとして外部へ列挙しない。
+	mentionResolver := corefederation.NewUserMentionResolver(userRepo, apURLs)
+	mentionResolver.SetLocalFederationObserver(coreSvcs.localFederation)
+	apRenderer.SetMentionResolver(mentionResolver)
 	apRenderer.SetFileResolver(driveFileRepo)
 	apRenderer.SetEmojiResolver(emojiRepo)
 	apRenderer.SetNoteResolver(noteRepo)
@@ -1918,6 +1921,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen,
 		noteHider, entityPacker, roleService, func() string { return metaUGCVisibility(metaRepo) },
 		driveFileRepo, metaRepo, blockingRepo, mutingRepo, renoteMutingRepo, channelMutingRepo, followingRepo)
+	notesHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	notesHandler.SetPiningRepo(piningRepo)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
@@ -2166,6 +2170,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 残す。引き継ぎの repository は構築子の必須の引数で渡す (#3823)。
 	accountMover := coremove.NewService(userRepo, followingRepo, apURLs, apRenderer, federationResolver, deliverService,
 		blockingRepo, mutingRepo, userListRepo, idGen)
+	accountMover.SetLocalFederationObserver(coreSvcs.localFederation)
 	// #2418: 移行時に旧アカウントのローカルフォロワーを移行先へ follow させる。
 	// relationship queue (#2403) に載るので AP 配送を詰まらせない。
 	accountMover.SetFollowQueue(s.queueClient)
@@ -2286,6 +2291,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		idGen, s.config.UserAgent, s.config.MaxFileSize,
 		entityPacker, // #3796: urlUploadFinished のファイルを包む
 	)
+	notesHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	driveHandler.SetURLUploader(driveURLUploader)
 	driveHandler.SetRepos(driveFileRepo, driveFolderRepo, noteRepo)
 	driveHandler.SetUserRepo(userRepo)
@@ -2572,6 +2578,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ブロック済み・連合しない host の actor を 403 にする (第 5 引数)。
 	inboxHandler := inbox.NewHandler(federationResolver, federationProcessor,
 		s.config.Host, s.queueClient, instanceService)
+	inboxHandler.SetLocalFederationObserver(coreSvcs.localFederation)
+	inboxHandler.SetUserRepo(userRepo)
+	inboxHandler.SetNoteRepo(noteRepo)
 	inboxHandler.SetInstanceTracker(instanceService)
 	inboxHandler.SetSignatureCapabilityRecorder(sigCapBuffer)
 	inboxHandler.SetChartHook(chartHooks)
@@ -3668,7 +3677,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	registerEmojisRoutes(api, emojisHandler, emojiApplicationHandler, avatarDecorationsHandler, roleService)
 	registerNotesRoutes(api, notesHandler, promoHandler)
 	registerUsersRoutes(api, usersHandler, userListHandler, roleService)
-	registerIRoutes(api, iHandler, webhookHandler, notificationsHandler, pagesHandler, flashHandler, announcementHandler, roleService)
+	registerIRoutes(api, iHandler, webhookHandler, notificationsHandler, pagesHandler, flashHandler, announcementHandler, roleService, rateLimiter)
 	registerNotificationsRoutes(api, notificationsHandler, swHandler)
 	registerHashtagsRoutes(api, hashtagsHandler)
 	registerGalleryRoutes(api, galleryHandler)

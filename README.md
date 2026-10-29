@@ -171,7 +171,7 @@ go test -race -count=1 -shuffle=3 -timeout 10m \
 | [Drop-in frontend e2e (cypress)](docs/dropin-frontend-e2e.md) | 3 TS instance + cypress で frontend 視点の互換 |
 | [差分比較ハーネス](docs/diff-e2e.md) | Elythia と TS の実APIレスポンスを値レベルでdiff |
 | [シェイプドリフト検出](docs/shape-drift.md) | レスポンス形状・エラーID・権限のドリフトを検出する静的ゲート |
-| [本家 backend e2e](docs/upstream-backend-e2e.md) | Misskey 本家の `test/e2e/**` を無改変で Elythia に向けて実行する |
+| [本家 backend e2e](docs/upstream-backend-e2e.md) | Misskey 本家の `test/e2e/**` を本家ソースを正本として Elythia に向けて実行する (UserLite の期待DTOにローカル連合状態のみ追加) |
 | [プラグイン](docs/plugins/) | ビルド時組み込みプラグインの書き方・運用 |
 | [プラグイン peer プロトコル](docs/plugin-peer-protocol.md) | Elythia 同士でだけ通じる署名付き HTTP チャネルの wire 仕様 |
 | [UDSデプロイ](docs/docker-uds.md) | UNIXドメインソケット構成 |

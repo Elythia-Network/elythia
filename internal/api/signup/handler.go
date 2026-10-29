@@ -171,8 +171,9 @@ func (h *Handler) SetEmailValidationClient(c *http.Client) {
 }
 
 type signupRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username         string                 `json:"username"`
+	Password         string                 `json:"password"`
+	FederationStatus model.FederationStatus `json:"federationStatus"`
 	// Host は TestMode でのみ読む。upstream SignupApiService も
 	// NODE_ENV === 'test' のときだけ body.host を受け付け、リモートユーザーを
 	// 直接作れるようにしている (e2e が「リモートユーザーのノートが LTL に
@@ -218,6 +219,10 @@ func (h *Handler) Signup(c echo.Context) error {
 	var req signupRequest
 	if err := c.Bind(&req); err != nil || req.Username == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	status := requestedFederationStatus(req.FederationStatus)
+	if status != model.FederationStatusOn && status != model.FederationStatusOff && status != model.FederationStatusPending {
+		return apierr.JSONInvalidParam(c)
 	}
 
 	meta, err := h.metaRepo.Fetch()
@@ -303,7 +308,7 @@ func (h *Handler) Signup(c echo.Context) error {
 				return resp()
 			}
 		}
-		pending, perr := h.signupService.CreatePending(req.Username, req.EmailAddress, req.Password, ticketID)
+		pending, perr := h.signupService.CreatePendingWithFederationStatus(req.Username, req.EmailAddress, req.Password, ticketID, nil, status)
 		if perr != nil {
 			h.releaseInvitation(ticket)
 			// upstream は username 系 error を Fastify-style reply error
@@ -381,7 +386,7 @@ func (h *Handler) Signup(c echo.Context) error {
 			return resp()
 		}
 	}
-	result, err := h.signupService.SignupWithHost(req.Username, req.Password, isInitialSetup, remoteHost, coresignup.UsernamePolicyPublic)
+	result, err := h.signupService.SignupWithHostAndFederationStatus(req.Username, req.Password, isInitialSetup, remoteHost, coresignup.UsernamePolicyPublic, requestedFederationStatus(req.FederationStatus))
 	if err != nil {
 		h.releaseInvitation(ticket)
 		// upstream の `/api/signup` は username 系 error を Fastify-style
@@ -658,3 +663,10 @@ func packSignupResponse(pk *entity.Packer, u *model.User, profile *model.UserPro
 
 // defaultPolicies returns the Misskey default policies for a new user.
 var errInvalidCode = errors.New("invalid invitation code")
+
+func requestedFederationStatus(status model.FederationStatus) model.FederationStatus {
+	if status == "" {
+		return model.FederationStatusOn
+	}
+	return status
+}

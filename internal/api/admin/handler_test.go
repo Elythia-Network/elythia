@@ -414,6 +414,13 @@ func TestAccountsCreate_InvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestAccountsCreate_RejectsUnknownFederationStatus(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	rec := doPost(h.AccountsCreate, `{"username":"admin","password":"pass123","federationStatus":"unknown"}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, userRepo.Users)
+}
+
 func TestAccountsCreate_DuplicateUsername(t *testing.T) {
 	// **認証済み admin で叩く。** 以前はここを未認証で叩いて 409 を期待していたが、
 	// それは「利用者が既に居るのに初回セットアップ扱いで到達できる」という

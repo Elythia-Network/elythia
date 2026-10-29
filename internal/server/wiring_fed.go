@@ -71,6 +71,7 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	instanceRepo := w.repos.instance
 	sysAcctSvc := coreSvcs.sysAcct
 	instanceService := coreSvcs.instance
+	localFederationService := coreSvcs.localFederation
 
 	// 受信を拒否するソフトウェア (#3362) の判定。連合の resolver、WebFinger で
 	// 利用者を引く remoteUserResolver、inbox の processor、ap/show が共有する。
@@ -84,6 +85,8 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	// 同じ instanceService を渡す。構築子の必須の引数 (#3833)。
 	deliverService := corefederation.NewDeliverService(s.queueClient, userRepo, followingRepo, keypairRepo, apURLs,
 		instanceService)
+	deliverService.SetLocalFederationObserver(localFederationService)
+	deliverService.SetNoteRepo(noteRepo)
 	// Relay 連携 (#161)。relay.Service は AP delivery を必要とするので
 	// deliverService の直後で作る。setter (SetLdSigning) は setupRoutes の元の位置。
 	relaySvc := corerelay.NewService(repository.NewRelayRepository(s.db), sysAcctSvc, apRenderer, deliverService, idGen)
@@ -102,6 +105,7 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	// admin の両方が使う。状態を持たないので 1 つで足りる (#3688)。
 	userModerationDeliveryHook := corefederation.NewUserModerationDeliveryHook(deliverService, apRenderer, userRepo)
 	profileUpdateHook := corefederation.NewProfileUpdateDeliveryHook(deliverService, apRenderer, userRepo, keypairRepo)
+	profileUpdateHook.SetLocalFederationObserver(localFederationService)
 	pinDeliveryHook := corefederation.NewPinDeliveryHook(deliverService, apRenderer, userRepo, noteRepo)
 
 	return fed{

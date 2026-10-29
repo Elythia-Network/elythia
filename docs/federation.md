@@ -280,6 +280,8 @@ upstream Misskey TS の `users/show` は **自インスタンスで観測した�
 | `POST /inbox` | Shared Inbox |
 | `POST /users/:id/inbox` | ユーザー Inbox |
 
+ローカルアカウントの連合状態は `pending` / `off` / `on`。`pending` はElythia公式クライアントが登録時に明示する状態で、引数を省略する既存Misskey互換クライアント/API利用者は `on` となる。`pending` 中は外部参照と連合操作を拒否するが、投稿は通常保存して配送だけを抑止する。`off` 確定時に既存投稿を一括で `localOnly` にし、OFF中の新規投稿も `localOnly` とする。再度 `on` にしても維持する。外部参照を観測した `on` は `off` に戻せない。公開プロフィールとOGPのHTMLは閲覧できる。本人向け状態取得・変更APIは `i/federation` と `i/update-federation`。WebFinger / ActivityPub応答を配信するCDN・リバースプロキシはキャッシュを無効にし、`no-store` を尊重する。詳細は[連合挙動の差分](divergence/federation.md)と[設計書](design/local-only-accounts.md)を参照。
+
 **ピン留めは `/users/:id/featured` ではない。** upstream と同じく
 `/users/:id/collections/featured` に登録されており、前者は AP ハンドラに
 到達しない。

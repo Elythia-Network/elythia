@@ -8,13 +8,13 @@
 - mk-go implemented (TS の subset): **444**
 - mk-go coverage of TS: **100.0%**
 - TS only (mk-go 未実装): **0**
-- mk-go only (TS spec 外): **108**
+- mk-go only (TS spec 外): **110**
 
 ## TS 側に存在するが mk-go で未実装 (0)
 
 (なし)
 
-## mk-go 側にしかない endpoint (108)
+## mk-go 側にしかない endpoint (110)
 
 ### GET variant 追加 (25)
 
@@ -70,7 +70,7 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/chat/rooms/unmute` |
 | POST | `/api/chat/unread-count` |
 
-### その他 mk-go 独自 / alias (68)
+### その他 mk-go 独自 / alias (70)
 
 上記カテゴリに当てはまらない mk-go 独自 endpoint。backward-compat shim や alias を含む。
 
@@ -136,8 +136,10 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/emoji-application/create` |
 | POST | `/api/emoji-application/list-mine` |
 | POST | `/api/following/silent/list` |
+| POST | `/api/i/federation` |
 | POST | `/api/i/flashs` |
 | POST | `/api/i/flashs/likes` |
+| POST | `/api/i/update-federation` |
 | POST | `/api/roles/assignment-show` |
 | POST | `/api/signin` |
 | POST | `/api/signup-application/apply` |

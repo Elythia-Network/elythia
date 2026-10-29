@@ -128,6 +128,57 @@ func TestNotePrimaryReader_UsesCurrentNoteAndAuthorValues(t *testing.T) {
 
 }
 
+func TestFindManyLocalReferenceMetadataByIDs_UsesPrimaryAndPreservesInputOrder(t *testing.T) {
+	replicaSchema := "repo_note_ref_metadata_replica"
+	require.NoError(t, testDB.Exec("CREATE SCHEMA IF NOT EXISTS "+replicaSchema).Error)
+	t.Cleanup(func() { testDB.Exec("DROP SCHEMA IF EXISTS " + replicaSchema + " CASCADE") })
+	var primarySchema string
+	require.NoError(t, testDB.Raw("SELECT current_schema()").Scan(&primarySchema).Error)
+	require.NoError(t, testDB.Exec(fmt.Sprintf(
+		`CREATE TABLE IF NOT EXISTS %s."note" (LIKE "%s"."note" INCLUDING ALL)`,
+		replicaSchema, primarySchema)).Error)
+
+	user := insertTestUser(t, "urefmeta1", "refmetadata")
+	t.Cleanup(func() { cleanupUser(t, user.ID) })
+	note := insertTestNote(t, "nrefmeta1", user.ID)
+	t.Cleanup(func() { cleanupNote(t, note.ID) })
+	require.NoError(t, testDB.Model(&model.Note{}).Where("id = ?", note.ID).Update("localOnly", true).Error)
+	remoteHost := "remote.example"
+	remoteNote := &model.Note{ID: "nrefmeta2", UserID: user.ID, UserHost: &remoteHost, Visibility: model.NoteVisibilityPublic}
+	require.NoError(t, testDB.Create(remoteNote).Error)
+	t.Cleanup(func() { cleanupNote(t, remoteNote.ID) })
+	// レプリカには制限の緩い古い行を置く。
+	require.NoError(t, testDB.Exec(fmt.Sprintf(
+		`INSERT INTO %s."note" SELECT * FROM "%s"."note" WHERE id = ?`,
+		replicaSchema, primarySchema), note.ID).Error)
+	require.NoError(t, testDB.Exec(fmt.Sprintf(
+		`UPDATE %s."note" SET "localOnly" = false WHERE id = ?`, replicaSchema), note.ID).Error)
+	require.NoError(t, testDB.Exec(fmt.Sprintf(
+		`INSERT INTO %s."note" SELECT * FROM "%s"."note" WHERE id = ?`,
+		replicaSchema, primarySchema), remoteNote.ID).Error)
+
+	gdb := openWithReplicaSchema(t, primarySchema, replicaSchema)
+	repo := &noteRepository{db: gdb}
+	missingID := "nrefmetagone"
+	var stale model.Note
+	require.NoError(t, gdb.Where("id = ?", note.ID).First(&stale).Error)
+	assert.False(t, stale.LocalOnly, "通常SELECTでは古いレプリカ行が見える")
+	got, err := repo.FindManyLocalReferenceMetadataByIDs([]string{remoteNote.ID, missingID, note.ID})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{remoteNote.ID, note.ID}, []string{got[0].ID, got[1].ID}, "missing IDs are omitted while result order follows input")
+	assert.Equal(t, user.ID, got[0].UserID)
+	assert.Equal(t, &remoteHost, got[0].UserHost)
+	assert.False(t, got[0].LocalOnly)
+	assert.Equal(t, user.ID, got[1].UserID)
+	assert.Nil(t, got[1].UserHost)
+	assert.True(t, got[1].LocalOnly, "privacy metadata must come from the primary")
+
+	got, err = repo.FindManyLocalReferenceMetadataByIDs(nil)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
 // TestExistingNoteIDsOnPrimary_Subset は返す集合を固定する。
 func TestExistingNoteIDsOnPrimary_Subset(t *testing.T) {
 	repo := NewNoteRepository(testDB)

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 func newTestHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
@@ -905,7 +906,8 @@ func TestDelete_InvalidJSON(t *testing.T) {
 // failingNoteRepo always returns errors on Create.
 type failingNoteRepo struct{}
 
-func (f *failingNoteRepo) Create(_ *model.Note) error { return testutil.ErrNotFound }
+func (f *failingNoteRepo) Create(_ *model.Note) error                   { return testutil.ErrNotFound }
+func (f *failingNoteRepo) CreateWithTx(_ *model.Note, _ *gorm.DB) error { return testutil.ErrNotFound }
 func (f *failingNoteRepo) ListRenoteOrReplyRemoteUserIDs(_ string) ([]string, error) {
 	return nil, testutil.ErrNotFound
 }
@@ -944,6 +946,9 @@ func (f *failingNoteRepo) ListLocalByChannelID(_, _, _, _ string, _ int) ([]*mod
 	return nil, nil
 }
 func (f *failingNoteRepo) FindManyByIDsWithUser(_ []string) ([]*model.Note, error) {
+	return nil, nil
+}
+func (f *failingNoteRepo) FindManyLocalReferenceMetadataByIDs(_ []string) ([]*model.Note, error) {
 	return nil, nil
 }
 func (f *failingNoteRepo) ListRenotesOf(_, _, _, _ string, _ int) ([]*model.Note, error) {

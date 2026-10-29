@@ -21,6 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
 	"github.com/elythia-network/elythia/internal/core/following"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -91,22 +92,24 @@ type Handler struct {
 	favoriteRepo     repository.NoteFavoriteRepository
 	transferEnqueuer TransferEnqueuer
 	// #2230: i/delete-account の cascade 削除と連合 Delete 配信 (admin/delete-account と同経路)。
-	deleteAccountEnqueuer DeleteAccountEnqueuer
-	accountDeletionFed    AccountDeletionFederationHook
-	webauthnSvc           *twofactor.WebAuthnService
-	securityKeyRepo       repository.UserSecurityKeyRepository
-	metaRepo              repository.MetaRepository
-	emailSender           EmailSender
-	serverURL             string
-	signinRepo            repository.SigninRepository
-	accessTokenRepo       repository.AccessTokenRepository
-	galleryRepo           GalleryRepository
-	pageLikeRepo          repository.PageLikeRepository
-	mover                 AccountMover
-	notificationSvc       UnreadNotificationSource
-	moveInValidator       MoveInValidator
-	achievementNotifier   AchievementNotifier
-	followRequestRepo     repository.FollowRequestRepository
+	deleteAccountEnqueuer   DeleteAccountEnqueuer
+	accountDeletionFed      AccountDeletionFederationHook
+	webauthnSvc             *twofactor.WebAuthnService
+	securityKeyRepo         repository.UserSecurityKeyRepository
+	metaRepo                repository.MetaRepository
+	emailSender             EmailSender
+	serverURL               string
+	signinRepo              repository.SigninRepository
+	accessTokenRepo         repository.AccessTokenRepository
+	galleryRepo             GalleryRepository
+	pageLikeRepo            repository.PageLikeRepository
+	mover                   AccountMover
+	localFederationObserver activitypub.LocalFederationObserver
+	localFederationService  *corelocalfederation.Service
+	notificationSvc         UnreadNotificationSource
+	moveInValidator         MoveInValidator
+	achievementNotifier     AchievementNotifier
+	followRequestRepo       repository.FollowRequestRepository
 	// followRequestAccepter は鍵を外したときに溜まったリクエストを承認する (#3466)。
 	followRequestAccepter FollowRequestBulkAccepter
 	announcementRepo      AnnouncementUnreadSource
@@ -191,6 +194,14 @@ type Handler struct {
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
+}
+
+func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
+}
+
+func (h *Handler) SetLocalFederationService(service *corelocalfederation.Service) {
+	h.localFederationService = service
 }
 
 // TokenInvalidator は i/regenerate-token / i/change-password 等の sensitive
@@ -335,6 +346,9 @@ func (h *Handler) resolveAlsoKnownAs(meID string, lines []string) ([]string, *av
 		}
 		u := h.lookupAlsoKnownAsTarget(line)
 		if u == nil {
+			return nil, noSuchUser
+		}
+		if u.IsLocal() && h.localFederationObserver != nil && !h.localFederationObserver.IsExternallyAvailable(u) {
 			return nil, noSuchUser
 		}
 		if u.ID == meID {

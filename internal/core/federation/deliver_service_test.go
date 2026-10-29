@@ -17,6 +17,187 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type failingFindNoteRepo struct {
+	*testutil.MockNoteRepository
+	err error
+}
+
+type failingNthUserFindRepo struct {
+	*testutil.MockUserRepository
+	calls  int
+	failAt int
+}
+
+func (r *failingNthUserFindRepo) FindByID(id string) (*model.User, error) {
+	r.calls++
+	if r.calls == r.failAt {
+		return nil, errors.New("database unavailable")
+	}
+	return r.MockUserRepository.FindByID(id)
+}
+
+func (r *failingNthUserFindRepo) FindManyByIDs(ids []string) ([]*model.User, error) {
+	r.calls++
+	if r.calls == r.failAt {
+		return nil, errors.New("database unavailable")
+	}
+	return r.MockUserRepository.FindManyByIDs(ids)
+}
+
+func (r *failingFindNoteRepo) FindByID(string) (*model.Note, error) { return nil, r.err }
+func (r *failingFindNoteRepo) FindManyLocalReferenceMetadataByIDs([]string) ([]*model.Note, error) {
+	return nil, r.err
+}
+
+func TestDeliverActivity_FailsClosedWhenReferencedNoteLookupFails(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	firstSeen := time.Now()
+	userRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(&failingFindNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: errors.New("database unavailable")})
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Create","object":"https://example.com/notes/hidden"}`), []string{"https://remote.example/inbox"})
+	require.ErrorContains(t, err, "lookup local note reference hidden")
+	assert.Empty(t, enq.calls, "a note lookup failure must stop queueing")
+	assert.Empty(t, observer.recorded)
+}
+
+func TestDeliverActivity_FailsClosedWhenReferencedUserLookupFails(t *testing.T) {
+	enq := &stubEnqueuer{}
+	baseUserRepo := testutil.NewMockUserRepository()
+	userRepo := &failingNthUserFindRepo{MockUserRepository: baseUserRepo, failAt: 2}
+	followingRepo := testutil.NewMockFollowingRepository()
+	keypairRepo := testutil.NewMockUserKeypairRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	svc := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
+	installLocalSigner(t, baseUserRepo, keypairRepo)
+	baseUserRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	firstSeen := time.Now()
+	baseUserRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	baseUserRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Follow","object":"https://example.com/users/bob"}`), []string{"https://remote.example/inbox"})
+	require.ErrorContains(t, err, "lookup local user reference bob")
+	assert.Empty(t, enq.calls, "a user lookup failure must stop queueing")
+	assert.Empty(t, observer.recorded)
+}
+
+func TestDeliverActivity_UserLookupFailureDoesNotObserveEarlierCandidates(t *testing.T) {
+	enq := &stubEnqueuer{}
+	baseUserRepo := testutil.NewMockUserRepository()
+	userRepo := &failingNthUserFindRepo{MockUserRepository: baseUserRepo, failAt: 2}
+	followingRepo := testutil.NewMockFollowingRepository()
+	keypairRepo := testutil.NewMockUserKeypairRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	svc := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
+	installLocalSigner(t, baseUserRepo, keypairRepo)
+	baseUserRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	baseUserRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	baseUserRepo.Users["carol"] = &model.User{ID: "carol", Username: "carol", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	body := []byte(`{"type":"Create","to":["https://example.com/users/bob","https://example.com/users/carol"]}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	require.ErrorContains(t, err, "lookup local user reference bob,carol")
+	require.ErrorContains(t, err, "database unavailable")
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded, "all actor lookups must finish before any body reference is observed")
+}
+
+func TestDeliverActivity_AllBlockedInboxesDoNotObserveReferences(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverServiceWithBlocker(t, &stubBlocker{blocked: map[string]bool{"blocked.example": true}})
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Create","actor":"https://example.com/users/bob"}`), []string{"https://blocked.example/inbox"})
+	require.NoError(t, err)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded, "with no usable destination no local user becomes externally referenced")
+}
+
+func TestDeliverActivity_IgnoresHumanContentLinksToPublicNotes(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	firstSeen := time.Now()
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["post"] = &model.Note{ID: "post", UserID: "bob", Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(noteRepo)
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/alice","object":{"content":"<a href=\"https://example.com/notes/post\">post</a>"}}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	require.NoError(t, err)
+	assert.Len(t, enq.calls, 1)
+	assert.Empty(t, observer.recorded, "human content links do not create references")
+}
+
+func TestDeliverActivity_IgnoresHumanContentLinksToLocalOnlyNotes(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	firstSeen := time.Now()
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOff}
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["private"] = &model.Note{ID: "private", UserID: "bob", LocalOnly: true, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(noteRepo)
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/alice","object":{"content":"See https://example.com/notes/private"}}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	require.NoError(t, err)
+	assert.Len(t, enq.calls, 1)
+	assert.Empty(t, observer.recorded, "a local-only note linked only from ordinary content must not be looked up or observed")
+}
+func TestDeliverActivity_IgnoresHumanContentLinksToMissingNotes(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	firstSeen := time.Now()
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(&failingFindNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: errors.New("database unavailable")})
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/alice","object":{"content":"See https://example.com/notes/missing"}}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	require.NoError(t, err)
+	assert.Len(t, enq.calls, 1)
+	assert.Empty(t, observer.recorded, "a note link in ordinary content must not trigger note or owner lookups")
+}
+func TestDeliverActivity_StillExtractsStandaloneLocalNoteURL(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	firstSeen := time.Now()
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["alice"].FirstExternalReferenceAt = &firstSeen
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["post"] = &model.Note{ID: "post", UserID: "bob", Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(noteRepo)
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Create","object":"https://example.com/notes/post"}`), []string{"https://remote.example/inbox"})
+	require.NoError(t, err)
+	assert.Len(t, enq.calls, 1)
+	assert.Equal(t, []string{"bob:delivery:remote.example"}, observer.recorded)
+}
+
 // stubEnqueuer captures EnqueueDeliver calls.
 type stubEnqueuer struct {
 	calls []queue.DeliverPayload
@@ -82,6 +263,126 @@ func installLocalSigner(t *testing.T, userRepo *testutil.MockUserRepository, key
 		PublicKey:  "PUB",
 		PrivateKey: "PEM-DATA",
 	}
+}
+
+type localFederationObserverStub struct {
+	recorded []string
+}
+
+func (s *localFederationObserverStub) IsExternallyAvailable(u *model.User) bool {
+	return u.FederationStatus == model.FederationStatusOn
+}
+
+func (s *localFederationObserverStub) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	s.recorded = append(s.recorded, userID+":"+reason+":"+host)
+	return true, nil
+}
+
+func TestDeliverActivity_LocalOnlySignerIsRejected(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOff
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Follow"}`), []string{"https://remote.example/inbox"})
+	assert.ErrorIs(t, err, federation.ErrFederationDisabled)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestDeliverActivity_OffSignerDoesNotObserveBodyActors(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOff
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/bob"}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	assert.ErrorIs(t, err, federation.ErrFederationDisabled)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded, "an OFF signer must be rejected before observing any body actor")
+	assert.Nil(t, userRepo.Users["bob"].FirstExternalReferenceAt)
+}
+
+func TestDeliverActivity_PrivateBodyDoesNotObserveUnseenSignerOrActors(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOff}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/bob"}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	assert.ErrorIs(t, err, federation.ErrFederationDisabled)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded, "a rejected body must not make the valid signer permanently referenced")
+	assert.Nil(t, userRepo.Users["alice"].FirstExternalReferenceAt)
+	assert.Nil(t, userRepo.Users["bob"].FirstExternalReferenceAt)
+}
+
+func TestDeliverActivity_BodyLookupFailureDoesNotObserveUnseenSigner(t *testing.T) {
+	enq := &stubEnqueuer{}
+	baseUserRepo := testutil.NewMockUserRepository()
+	userRepo := &failingNthUserFindRepo{MockUserRepository: baseUserRepo, failAt: 2}
+	followingRepo := testutil.NewMockFollowingRepository()
+	keypairRepo := testutil.NewMockUserKeypairRepository()
+	urls := activitypub.NewURLBuilder("https://example.com")
+	svc := federation.NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
+	installLocalSigner(t, baseUserRepo, keypairRepo)
+	baseUserRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	baseUserRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	baseUserRepo.Users["carol"] = &model.User{ID: "carol", Username: "carol", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	svc.SetNoteRepo(&failingFindNoteRepo{MockNoteRepository: testutil.NewMockNoteRepository(), err: errors.New("database unavailable")})
+	body := []byte(`{"type":"Create","actor":"https://example.com/users/bob","object":"https://example.com/notes/private"}`)
+
+	err := svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"})
+	require.ErrorContains(t, err, "lookup local note reference private")
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, observer.recorded, "body lookup failure must happen before recording signer or body actors")
+}
+
+func TestDeliverActivity_ValidSignerAndBodyActorsAreObservedAfterPreflight(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+	body := []byte(`{"type":"Follow","actor":"https://example.com/users/bob"}`)
+
+	require.NoError(t, svc.DeliverActivity("alice", body, []string{"https://remote.example/inbox"}))
+	assert.Len(t, enq.calls, 1)
+	assert.Equal(t, []string{"alice:delivery:remote.example", "bob:delivery:remote.example"}, observer.recorded)
+}
+
+func TestDeliverActivity_RecordsSignerReferenceBeforeEnqueue(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	observer := &localFederationObserverStub{}
+	svc.SetLocalFederationObserver(observer)
+
+	require.NoError(t, svc.DeliverActivity("alice", []byte(`{"type":"Follow"}`), []string{"https://remote.example/inbox"}))
+	assert.Equal(t, []string{"alice:delivery:remote.example"}, observer.recorded)
+	assert.Len(t, enq.calls, 1)
+}
+
+func TestDeliverActivity_RejectsUnavailableLocalActorReference(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	userRepo.Users["alice"].FederationStatus = model.FederationStatusOn
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOff}
+	svc.SetLocalFederationObserver(&localFederationObserverStub{})
+
+	err := svc.DeliverActivity("alice", []byte(`{"type":"Create","to":["https://example.com/users/bob"]}`), []string{"https://remote.example/inbox"})
+	assert.ErrorIs(t, err, federation.ErrFederationDisabled)
+	assert.Empty(t, enq.calls)
 }
 
 // stubBlocker is a HostBlockChecker that returns true for the listed hosts.

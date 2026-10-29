@@ -36,6 +36,8 @@ import { pleaseLogin } from '@/utility/please-login.js';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { i18n } from '@/i18n.js';
+import { $i } from '@/i.js';
+import { shouldBlockRemoteFederationAction } from '@/utility/account-federation.js';
 import { useLowresTime } from '@@/js/use-lowres-time.js';
 
 const props = defineProps<{
@@ -92,6 +94,10 @@ const vote = async (id: number) => {
 
 	const isLoggedIn = await pleaseLogin({ openOnRemote: pleaseLoginContext.value });
 	if (!isLoggedIn) return;
+	if (shouldBlockRemoteFederationAction($i?.federationStatus, props.author?.host != null)) {
+		await os.alert({ type: 'warning', text: i18n.ts._localOnlyAccount.remoteActionBlocked });
+		return;
+	}
 
 	const { canceled } = await os.confirm({
 		type: 'question',

@@ -127,6 +127,22 @@ func TestPostScheduledNote_HappyPath(t *testing.T) {
 	assert.Contains(t, draftRepo.deleted, "d1")
 }
 
+func TestPostScheduledNote_OffPeriodDraftRemainsLocalOnlyAfterReenable(t *testing.T) {
+	scheduledAt := timeFromMs(1234)
+	drafts := map[string]*model.NoteDraft{
+		"d1": {
+			ID: "d1", UserID: "u1", Visibility: "public", LocalOnly: true,
+			IsActuallyScheduled: true, ScheduledAt: &scheduledAt,
+		},
+	}
+	users := map[string]*model.User{"u1": {ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn}}
+	p, _, pub := newProcessor(drafts, users)
+
+	require.NoError(t, p.Handle(context.Background(), taskFor("d1")))
+	require.Len(t, pub.calls, 1)
+	assert.True(t, pub.calls[0].LocalOnly, "re-enabling the account must not make an OFF-period scheduled draft public")
+}
+
 // Draft が削除済み (= user 手動 cancel など) でも error 化せず silent success。
 func TestPostScheduledNote_DraftMissing(t *testing.T) {
 	p, _, pub := newProcessor(map[string]*model.NoteDraft{}, map[string]*model.User{})

@@ -1661,6 +1661,14 @@
 			},
 			"meta": {}
 		},
+		"i/federation": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
 		"i/flashs": {
 			"paramDef": {
 				"type": "object",
@@ -1720,6 +1728,24 @@
 					}
 				},
 				"required": []
+			},
+			"meta": {}
+		},
+		"i/update-federation": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"federationStatus": {
+						"type": "string",
+						"enum": [
+							"on",
+							"off"
+						]
+					}
+				},
+				"required": [
+					"federationStatus"
+				]
 			},
 			"meta": {}
 		},
@@ -1801,6 +1827,17 @@
 					"password": {
 						"type": "string",
 						"minLength": 1
+					},
+					"federationStatus": {
+						"type": "string",
+						"enum": [
+							"on",
+							"off",
+							"pending",
+							"",
+							null
+						],
+						"nullable": true
 					},
 					"emailAddress": {
 						"type": "string"

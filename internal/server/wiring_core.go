@@ -17,6 +17,7 @@ import (
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	corehashtag "github.com/elythia-network/elythia/internal/core/hashtag"
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	coremediaproxy "github.com/elythia-network/elythia/internal/core/mediaproxy"
 	coremodlog "github.com/elythia-network/elythia/internal/core/moderationlog"
 	coremuting "github.com/elythia-network/elythia/internal/core/muting"
@@ -72,6 +73,7 @@ type core struct {
 	totpReplayGuard      *coretwofactor.RedisReplayGuard
 	webPush              *corewebpush.Service
 	instance             *coreinstance.Service
+	localFederation      *corelocalfederation.Service
 	role                 *corerole.Service
 	signup               *coresignup.Service
 	noteCreate           *corenote.CreateService
@@ -204,6 +206,7 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// Instance management (Phase 3 Step H)。インスタンスの停止・サイレンスの判定を、
 	// 連合・following・reaction・配送が共有する。
 	instanceService := coreinstance.NewService(instanceRepo, metaRepo, idGen)
+	localFederationService := corelocalfederation.NewService(w.repos.localFederation, w.repos.keypairExtra != nil)
 	// PromotePending を transaction 化して partial failure rollback と invitation
 	// ticket の SELECT FOR UPDATE ロックを有効化する (#600 item 2 + #604)。
 	// 承認制の登録を確認メールに乗せた経路 (#2571) で、申請の確定もアカウント作成と
@@ -215,6 +218,8 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// fileIds の所有者の検査。
 	noteCreateService := corenote.NewCreateService(noteRepo, pollRepo, idGen, followingRepo,
 		s.background, entityPacker, blockingRepo, metaRepo, roleService, driveFileRepo)
+	noteCreateService.SetLocalFederationLocker(localFederationService)
+	noteCreateService.SetLocalFederationObserver(localFederationService)
 	// 投稿後のフックの同時実行の枠を設定の数で作り直す(#3780)。
 	noteCreateService.SetHookConcurrency(s.config.NoteHookConcurrency)
 	noteDeleteService := corenote.NewDeleteService(noteRepo)
@@ -337,6 +342,7 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 		totpReplayGuard:      totpReplayGuard,
 		webPush:              webPushService,
 		instance:             instanceService,
+		localFederation:      localFederationService,
 		role:                 roleService,
 		signup:               signupService,
 		noteCreate:           noteCreateService,

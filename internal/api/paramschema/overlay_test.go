@@ -288,6 +288,7 @@ func TestEffectiveDeclaresTheAddedProperties(t *testing.T) {
 	}{
 		{"admin/abuse-user-reports", "resolved", []any{true, false, nil}, []bad{{"yes", "type", "must be boolean"}}},
 		{"admin/abuse-user-reports", "reportId", []any{"abc123"}, []bad{{"", "format", `must match format "misskey:id"`}, {nil, "type", "must be string"}}},
+		{"admin/accounts/create", "federationStatus", []any{"on", "off", "pending", "", nil}, []bad{{true, "type", "must be string"}, {"unknown", "enum", "must be equal to one of the allowed values"}}},
 		{"admin/emoji/copy", "name", []any{"a_b", nil, strings.Repeat("a", 128)}, []bad{{"a b", "pattern", `must match pattern "^[a-zA-Z0-9_]+$"`}, {long, "maxLength", "must NOT have more than 128 characters"}}},
 		{"admin/emoji/copy", "category", []any{"", "face", nil}, []bad{{1.0, "type", "must be string"}}},
 		{"admin/emoji/copy", "aliases", []any{[]any{}, []any{"a"}, nil}, []bad{{"a", "type", "must be array"}}},

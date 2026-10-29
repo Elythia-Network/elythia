@@ -32,10 +32,10 @@ Elythia は Misskey TS からの drop-in 移行 (Misskey TS の DB / Redis を�
 
 | 軸 | Elythia 独自 | cherrypick 由来 | 未実装 |
 |---|---|---|---|
-| API endpoint | GET variant 25 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 10 + フォローの止め方 1 + DB のバックアップ 11 | chat 15 | **0** |
-| API レスポンスの additive field | 10 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength` / `managedByPlugin` / `has<秘密の欄>` (`admin/meta` の 11 欄と `admin/captcha/current` の `hasSecretKey` を 1 つと数える。[security.md §7](divergence/security.md#7-意図的な安全側-divergence))) | reversi packed game の `crc32` 等 | — |
+| API endpoint | GET variant 25 + alias 4 + 分割アップロード 4 + 承認制 7 + 絵文字の申請 10 + exact assignment lookup 2 + admin 観測 8 + 配送のブレーカー 1 + 消えたインスタンスの片付け 2 + 連合のルール 5 + IP 検索 3 + バブルゲームの対戦 10 + フォローの止め方 1 + DB のバックアップ 11 + アカウント単位の連合制御 2 | chat 15 | **0** |
+| API レスポンスの additive field | 11 (`runtime` / `mkGoVersion` / `chunkedUpload` / `approvalRequiredForSignup` / `registrationClosed` / `signupApplicationForm` / `canRequestCustomEmojis` / `minimumUsernameLength` / `managedByPlugin` / `federationStatus` / `has<秘密の欄>` (`admin/meta` の 11 欄と `admin/captcha/current` の `hasSecretKey` を 1 つと数える。[security.md §7](divergence/security.md#7-意図的な安全側-divergence))) | reversi packed game の `crc32` 等 | — |
 | DB テーブル | 21 (+ bookkeeping 2) | 0 | 0 |
-| DB カラム | 27 (+ 未使用の残存列 3) | 3 | 0 |
+| DB カラム | 33 (+ 未使用の残存列 3) | 3 | 0 |
 | ActivityPub | Ed25519 / RemoteStatsFetcher ほか | reversi 連合 / chat 連合 | — |
 | config キー | 20 前後 | 0 | — |
 | fork frontend の独自変更 | 143 tag (`2026.7.0-mk.0` ～ `2026.10.0-mk.5`) | — | — |
@@ -72,7 +72,7 @@ Elythia は Misskey TS からの drop-in 移行 (Misskey TS の DB / Redis を�
   - §2-1 / §2-2 は**実 schema (migration + `golden_upstream_columns.json`) との突き合わせ**。件数だけでなく行の有無も見るので、テーブル・カラムを足して表を更新し忘れると落ちる (#2634)
   - §4-2 の fork frontend tag は冒頭サマリの件数・範囲・連番と突き合わせる。§4-2 は #3379 で凍結した記録なので、表とサマリはもう動かない
 - **値レベルの差分**: `make diff-test` (Elythia ↔ TS の応答を値単位で diff)
-- **本家 e2e に対する適合**: `make upstream-e2e` (Misskey 本家の `test/e2e/**` を無改変で Elythia に向けて実行)。**意図的な差分は `tests/upstream-e2e/known-divergences.json` に根拠付きで登録し、expected-failure として扱う。** skip ではないので、乖離が解消して通るようになったら逆に落ちて気付ける。本ドキュメントに載せた divergence のうち API 挙動に現れるものは、原則この一覧にも entry がある ([upstream-backend-e2e.md](upstream-backend-e2e.md))
+- **本家 e2e に対する適合**: `make upstream-e2e` (Misskey 本家の `test/e2e/**` を本家ソースを正本として Elythia に向けて実行し、UserLite の期待DTOにローカル連合状態のみ追加)。**意図的な差分は `tests/upstream-e2e/known-divergences.json` に根拠付きで登録し、expected-failure として扱う。** skip ではないので、乖離が解消して通るようになったら逆に落ちて気付ける。本ドキュメントに載せた divergence のうち API 挙動に現れるものは、原則この一覧にも entry がある ([upstream-backend-e2e.md](upstream-backend-e2e.md))
 - **コード内の divergence 注記**: `grep -rn "#2106 L" internal/` で全件を辿れる
 - **upstream 追従時**: `docs/update/` に release ごとの diff doc を追加し、そこで確定した divergence を本ドキュメントへ反映する。golden の再生成 (`make shapecheck-gen`) と TypeORM seed の追加も必要 ([upstream-catch-up.md](upstream-catch-up.md))
 - **frontend の変更**: #3379 以降は本体の `frontend/` を直接直し ([contributing.md](contributing.md))、純正と違える挙動なら [§4-2b](divergence/frontend.md#4-2b-frontend-の独自変更-3379-で取り込んだ後) に PR 番号で 1 行足す。§4-2 の tag は取り込む前に fork で積んだ記録 (凍結)

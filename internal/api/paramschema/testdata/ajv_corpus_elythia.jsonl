@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"52a2bde695d9e6a55337c9bec6d5f847e4c173013c2af86a48d4add358336ac1","cases":3713}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"43501ca65ab8a7af82bbb1fa20b1225046e72222718fb6cc8b2e2626e2a696f2","elythiaParamdefsSha256":"c8bbf939ab78c039855a09acc10ace0921f3596b1cad61c7c8093dee0362c945","cases":3749}
 {"ep":"admin/backup/delete"}
 {"in":{"password":"hello","id":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
@@ -3420,6 +3420,15 @@
 {"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
 {"in":{"untilDate":{"bad":1},"limit":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
 {"in":{"limit":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"ep":"i/federation"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
 {"ep":"i/flashs"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
@@ -3611,6 +3620,24 @@
 {"in":{"untilDate":{"bad":1},"sinceDate":{"bad":1}},"ok":false,"path":"#/properties/sinceDate/type","msg":"must be integer"}
 {"in":{"untilDate":{"bad":1},"search":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
 {"in":{"search":{"bad":1},"untilDate":{"bad":1}},"ok":false,"path":"#/properties/untilDate/type","msg":"must be integer"}
+{"ep":"i/update-federation"}
+{"in":{"federationStatus":"on"},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'federationStatus'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"federationStatus":"on","unknownProperty":1},"ok":true}
+{"in":{"federationStatus":null},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"federationStatus":123},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"federationStatus":true},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"federationStatus":[]},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"federationStatus":"off"},"ok":true}
+{"in":{"federationStatus":""},"ok":false,"path":"#/properties/federationStatus/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"federationStatus":"x-y"},"ok":false,"path":"#/properties/federationStatus/enum","msg":"must be equal to one of the allowed values"}
+{"in":{"federationStatus":{"bad":1}},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
 {"ep":"roles/assignment-show"}
 {"in":{"roleId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'roleId'"}
@@ -3763,6 +3790,15 @@
 {"in":{"claimCode":"hello","username":"hello","password":"a"},"ok":true}
 {"in":{"claimCode":"hello","username":"hello","password":"😀"},"ok":true}
 {"in":{"claimCode":"hello","username":"hello","password":"x-y"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":null},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":123},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":true},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":[]},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":"on"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":"off"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":"pending"},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":""},"ok":true}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":"x-y"},"ok":false,"path":"#/properties/federationStatus/enum","msg":"must be equal to one of the allowed values"}
 {"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":null},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
 {"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":123},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
 {"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":true},"ok":false,"path":"#/properties/emailAddress/type","msg":"must be string"}
@@ -3772,7 +3808,9 @@
 {"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":"hello"},"ok":true}
 {"in":{"claimCode":{"bad":1},"username":{"bad":1},"password":"hello"},"ok":false,"path":"#/properties/claimCode/type","msg":"must be string"}
 {"in":{"claimCode":"hello","username":{"bad":1},"password":{"bad":1}},"ok":false,"path":"#/properties/username/type","msg":"must be string"}
-{"in":{"claimCode":"hello","username":"hello","password":{"bad":1},"emailAddress":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":{"bad":1},"federationStatus":{"bad":1}},"ok":false,"path":"#/properties/password/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","federationStatus":{"bad":1},"emailAddress":{"bad":1}},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
+{"in":{"claimCode":"hello","username":"hello","password":"hello","emailAddress":{"bad":1},"federationStatus":{"bad":1}},"ok":false,"path":"#/properties/federationStatus/type","msg":"must be string"}
 {"in":{"emailAddress":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'claimCode'"}
 {"ep":"signup-application/status"}
 {"in":{"claimCode":"hello"},"ok":true}

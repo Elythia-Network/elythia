@@ -69,7 +69,15 @@ func (s *Service) Fetch(kind string) (*model.User, error) {
 	}
 	sa, err := s.saRepo.FindByType(kind)
 	if err == nil {
-		return s.userRepo.FindByID(sa.UserID)
+		user, err := s.userRepo.FindByID(sa.UserID)
+		if err != nil {
+			return nil, err
+		}
+		user, err = s.ensureFederationState(user)
+		if err != nil {
+			return nil, err
+		}
+		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -92,13 +100,17 @@ func (s *Service) create(kind string) (*model.User, error) {
 	now := s.clock()
 	username := kind + ".actor"
 	user := &model.User{
-		ID:            s.idGen.Generate(now),
-		Username:      username,
-		UsernameLower: username,
-		Host:          nil,
-		IsExplorable:  false,
-		IsBot:         true,
-		IsLocked:      true,
+		ID:                           s.idGen.Generate(now),
+		Username:                     username,
+		UsernameLower:                username,
+		Host:                         nil,
+		IsExplorable:                 false,
+		IsBot:                        true,
+		IsLocked:                     true,
+		FederationStatus:             model.FederationStatusOn,
+		FederationEnabledAt:          &now,
+		FirstExternalReferenceAt:     &now,
+		FirstExternalReferenceReason: stringPtr("system-account"),
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, fmt.Errorf("systemaccount: create user: %w", err)
@@ -113,6 +125,11 @@ func (s *Service) create(kind string) (*model.User, error) {
 // second Fetch after a keypair-insert-succeeded-but-system_account-failed
 // crash completes on the second try.
 func (s *Service) completeFromOrphan(kind string, user *model.User) (*model.User, error) {
+	var err error
+	user, err = s.ensureFederationState(user)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := s.userRepo.FindProfileByUserID(user.ID); err != nil {
 		profile := &model.UserProfile{UserID: user.ID}
 		if perr := s.userRepo.CreateProfile(profile); perr != nil {
@@ -158,3 +175,41 @@ func (s *Service) completeFromOrphan(kind string, user *model.User) (*model.User
 	}
 	return user, nil
 }
+
+func (s *Service) ensureFederationState(user *model.User) (*model.User, error) {
+	if user == nil || !user.IsLocal() {
+		return user, nil
+	}
+	// CachedUserRepository returns shared pointers that callers must treat as
+	// read-only. Repair a copy so a failed write cannot poison the cache and
+	// concurrent readers never observe partially repaired fields.
+	repaired := *user
+	updates := make(map[string]any)
+	if repaired.FederationStatus != model.FederationStatusOn {
+		repaired.FederationStatus = model.FederationStatusOn
+		updates["federationStatus"] = model.FederationStatusOn
+	}
+	if repaired.FederationEnabledAt == nil {
+		at := s.clock()
+		repaired.FederationEnabledAt = &at
+		updates["federationEnabledAt"] = at
+	}
+	if repaired.FirstExternalReferenceAt == nil {
+		at := s.clock()
+		repaired.FirstExternalReferenceAt = &at
+		updates["firstExternalReferenceAt"] = at
+	}
+	if repaired.FirstExternalReferenceReason == nil {
+		reason := "system-account"
+		repaired.FirstExternalReferenceReason = &reason
+		updates["firstExternalReferenceReason"] = reason
+	}
+	if len(updates) != 0 {
+		if err := s.userRepo.UpdateUser(repaired.ID, updates); err != nil {
+			return nil, fmt.Errorf("systemaccount: set federation state: %w", err)
+		}
+	}
+	return &repaired, nil
+}
+
+func stringPtr(value string) *string { return &value }

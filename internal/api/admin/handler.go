@@ -911,12 +911,16 @@ func (h *Handler) SetModLogService(s *moderationlog.Service) {
 // それ以外はadmin権限が必要。
 func (h *Handler) AccountsCreate(c echo.Context) error {
 	var req struct {
-		Username      string  `json:"username"`
-		Password      string  `json:"password"`
-		SetupPassword *string `json:"setupPassword"`
+		Username         string                 `json:"username"`
+		Password         string                 `json:"password"`
+		SetupPassword    *string                `json:"setupPassword"`
+		FederationStatus model.FederationStatus `json:"federationStatus"`
 	}
 	if err := c.Bind(&req); err != nil || req.Username == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.FederationStatus != "" && req.FederationStatus != model.FederationStatusOn && req.FederationStatus != model.FederationStatusOff && req.FederationStatus != model.FederationStatusPending {
+		return apierr.JSONInvalidParam(c)
 	}
 
 	meta, err := h.metaRepo.Fetch()
@@ -1004,7 +1008,12 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 	// **admin は最小文字数の制限を受けない (#3015)。** 運営が公式アカウントに
 	// 短い ID を配れるようにするため。`preservedUsernames` は引き続き効くので、
 	// 「予約は効くが最小長は効かない」という非対称になる。
-	result, err := h.signupService.Signup(req.Username, req.Password, isInitialSetup, signup.UsernamePolicyOperator)
+	result, err := h.signupService.SignupWithFederationStatus(req.Username, req.Password, isInitialSetup, signup.UsernamePolicyOperator, func() model.FederationStatus {
+		if req.FederationStatus == "" {
+			return model.FederationStatusOn
+		}
+		return req.FederationStatus
+	}())
 	if err != nil {
 		if err == signup.ErrUsernameAlreadyExists {
 			return c.JSON(http.StatusConflict, apierr.Error("USERNAME_ALREADY_EXISTS", "Username already exists.", "0a504947-b888-4a99-9f62-8c4a0f3a3dab"))
@@ -1044,6 +1053,7 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 		"isCat":             detailed.IsCat,
 		"emojis":            detailed.Emojis,
 		"onlineStatus":      detailed.OnlineStatus,
+		"federationStatus":  detailed.FederationStatus,
 		"badgeRoles":        badgeRolesForMap(detailed.BadgeRoles),
 		// UserDetailed
 		"bannerUrl":      detailed.BannerURL,

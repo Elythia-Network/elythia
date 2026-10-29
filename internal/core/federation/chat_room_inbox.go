@@ -10,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/activitypub"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // ChatRoomReceiver wires the chat service's room-federation operations into the
@@ -177,8 +178,14 @@ func (p *Processor) handleChatRoomInvite(act genericActivity) error {
 		slog.Warn("chat room invite: missing target", "actor", act.Actor)
 		return ErrUnsupportedActivity
 	}
-	invitee, err := p.resolveTargetUser(env.Target)
-	if err != nil || invitee == nil || !invitee.IsLocal() {
+	invitee, err := p.resolveTargetUser(env.Target, inboundActorHost(act.Actor))
+	if errors.Is(err, ErrInboundLocalReferenceUnavailable) {
+		return err
+	}
+	if err != nil && !repository.IsNotFound(err) {
+		return err
+	}
+	if invitee == nil || !invitee.IsLocal() {
 		slog.Warn("chat room invite: invitee is not a local user", "target", env.Target)
 		return ErrUnsupportedActivity
 	}

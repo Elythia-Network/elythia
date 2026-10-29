@@ -17,7 +17,7 @@
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、298 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
 | fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
-| 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体無改変で Elythia に向けて実行 | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
+| 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体正本のまま Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態を追加) | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
 
 ## 手元の準備
 

@@ -225,15 +225,20 @@ func (h *Handler) ApplicationRegister(c echo.Context) error {
 		return err
 	}
 	var req struct {
-		ClaimCode string `json:"claimCode"`
-		Username  string `json:"username"`
-		Password  string `json:"password"`
+		ClaimCode        string                 `json:"claimCode"`
+		Username         string                 `json:"username"`
+		Password         string                 `json:"password"`
+		FederationStatus model.FederationStatus `json:"federationStatus"`
 		// EmailAddress は emailRequiredForSignup が有効なときだけ要る (#2571)。
 		EmailAddress string `json:"emailAddress"`
 	}
 	if err := c.Bind(&req); err != nil || req.Username == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest,
 			apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	status := requestedFederationStatus(req.FederationStatus)
+	if status != model.FederationStatusOn && status != model.FederationStatusOff && status != model.FederationStatusPending {
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// testMode は通常の signup と同じくメール確認を丸ごと迂回する。フロントの
@@ -295,7 +300,7 @@ func (h *Handler) ApplicationRegister(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError,
 				apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
-		return h.registerViaEmailConfirmation(c, meta, app, ticket, req.Username, req.EmailAddress, req.Password)
+		return h.registerViaEmailConfirmation(c, meta, app, ticket, req.Username, req.EmailAddress, req.Password, status)
 	}
 
 	// **即時作成では ticket を発行しない (#2813)。** 発行しても誰も参照しない —
@@ -312,7 +317,7 @@ func (h *Handler) ApplicationRegister(c echo.Context) error {
 	// **申請の確定とアカウント作成を同じ tx に入れる (#2580)。** 分けると、承認済みの
 	// 申請者が別々の username で同時に登録したときに両方が「承認済み」を読んで
 	// 両方アカウントを作れる。負けた側はユーザー作成ごと巻き戻る。
-	result, err := h.signupService.SignupForApplication(req.Username, req.Password, app.ID, "")
+	result, err := h.signupService.SignupForApplicationWithFederationStatus(req.Username, req.Password, app.ID, "", requestedFederationStatus(req.FederationStatus))
 	if err != nil {
 		if errors.Is(err, coresignup.ErrApplicationNotApproved) {
 			return c.JSON(http.StatusBadRequest,
@@ -358,7 +363,7 @@ func (h *Handler) registerViaEmailConfirmation(
 	meta *model.Meta,
 	app *model.SignupApplication,
 	ticket *model.RegistrationTicket,
-	username, email, password string,
+	username, email, password string, status model.FederationStatus,
 ) error {
 	var ticketID *string
 	if ticket != nil {
@@ -387,7 +392,7 @@ func (h *Handler) registerViaEmailConfirmation(
 		}
 	}
 	appID := app.ID
-	pending, err := h.signupService.CreatePendingForApplication(username, email, password, ticketID, &appID)
+	pending, err := h.signupService.CreatePendingWithFederationStatus(username, email, password, ticketID, &appID, status)
 	if err != nil {
 		// 使われないまま残った ticket は消す。**残すと、次の試行で「使用済み」に
 		// 見えないまま浮いた招待が積み上がる。**

@@ -139,7 +139,7 @@ func parseResp(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // --- Success ---
 
 func TestSignup_Success(t *testing.T) {
-	h, _, _ := newTestHandler(t)
+	h, userRepo, _ := newTestHandler(t)
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234"}`)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
@@ -153,6 +153,28 @@ func TestSignup_Success(t *testing.T) {
 	assert.NotNil(t, resp["policies"])
 	assert.Equal(t, false, resp["twoFactorEnabled"])
 	assert.Equal(t, true, resp["preventAiLearning"])
+	assert.Equal(t, "on", resp["federationStatus"])
+	for _, u := range userRepo.Users {
+		assert.Equal(t, model.FederationStatusOn, u.FederationStatus, "omitted status preserves legacy default-on")
+	}
+}
+
+func TestSignup_RejectsUnknownFederationStatus(t *testing.T) {
+	h, userRepo, _ := newTestHandler(t)
+	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","federationStatus":"unknown"}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, userRepo.Users)
+}
+
+func TestSignup_ExplicitPendingFederationStatus(t *testing.T) {
+	h, userRepo, _ := newTestHandler(t)
+	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","federationStatus":"pending"}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := parseResp(t, rec)
+	assert.Equal(t, "pending", resp["federationStatus"])
+	for _, u := range userRepo.Users {
+		assert.Equal(t, model.FederationStatusPending, u.FederationStatus)
+	}
 }
 
 // --- root 化 (初回セットアップ) ---
@@ -332,6 +354,9 @@ func TestSignup_EmailRequired_CreatesPendingAndSendsEmail(t *testing.T) {
 	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","emailAddress":"alice@example.com"}`)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	require.Len(t, pendingRepo.Rows, 1)
+	for _, row := range pendingRepo.Rows {
+		assert.Equal(t, model.FederationStatusOn, row.FederationStatus, "omitted status must stay default-on during email confirmation")
+	}
 
 	select {
 	case <-done:
@@ -346,6 +371,23 @@ func TestSignup_EmailRequired_CreatesPendingAndSendsEmail(t *testing.T) {
 	// confirmation link に pending.code が埋まっている
 	for _, row := range pendingRepo.Rows {
 		assert.Contains(t, sent.Text, row.Code)
+	}
+}
+
+func TestSignup_EmailRequired_PreservesExplicitPendingFederationStatus(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
+	pendingRepo := testutil.NewMockUserPendingRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
+	svc.SetUserPendingRepo(pendingRepo)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
+	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","emailAddress":"alice@example.com","federationStatus":"pending"}`)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Len(t, pendingRepo.Rows, 1)
+	for _, row := range pendingRepo.Rows {
+		assert.Equal(t, model.FederationStatusPending, row.FederationStatus)
 	}
 }
 

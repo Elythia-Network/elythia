@@ -21,6 +21,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/activitypub/mfm"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
@@ -95,6 +96,9 @@ var (
 	// createRoomInvitation's 'room is full' (upstream counts memberships only).
 	// Permanent: callers must not retry.
 	ErrRoomFull = errors.New("chat room is full")
+	// ErrFederationDisabled is returned before persisting an outbound chat
+	// interaction when its remote peer would require federation.
+	ErrFederationDisabled = corelocalfederation.ErrFederationDisabled
 )
 
 // maxReactionsPerMessage caps the reactions on a single chat message
@@ -545,14 +549,30 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 	}
 	// recipient は observer (#3469) にも渡す。引けていなければ nil。
 	var recipient, sender *model.User
-	if !otherApprovedMe && s.userRepo != nil {
-		if r, err := s.userRepo.FindByID(toUserID); err == nil {
-			recipient = r
-			if u, err := s.userRepo.FindByID(fromUserID); err == nil {
-				sender = u
-				if err := s.canChat(sender, recipient); err != nil {
-					return nil, err
-				}
+	if s.userRepo != nil {
+		users, lookupErr := s.userRepo.FindManyByIDs([]string{fromUserID, toUserID})
+		if lookupErr != nil {
+			return nil, fmt.Errorf("chat participants lookup: %w", lookupErr)
+		}
+		for _, user := range users {
+			switch user.ID {
+			case fromUserID:
+				sender = user
+			case toUserID:
+				recipient = user
+			}
+		}
+		if recipient != nil && !recipient.IsLocal() {
+			if err := ensureFederationAvailable(sender); err != nil {
+				return nil, err
+			}
+		}
+		if s.deliverer != nil && s.renderer != nil && s.urls != nil && (sender == nil || recipient == nil) {
+			return nil, errors.New("chat federation: participants are unavailable")
+		}
+		if !otherApprovedMe && sender != nil && recipient != nil {
+			if err := s.canChat(sender, recipient); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -597,12 +617,7 @@ func (s *Service) CreateMessageToUser(ctx context.Context, fromUserID, toUserID,
 	// 送らない: TS と同じ fan-out 方針)。
 	if s.mainStreamPublisher != nil {
 		// 本家は newChatMessage を packMessageDetailed で組む (fromUser / toUser が
-		// UserLite)。scope 検査で引いた利用者があれば使い回す (#3438)。
-		// recipient はこの後の notifyMessageObserver (プラグインの通知) にも渡る。
-		// 承認済みの会話では scope の検査で引いていないので、以前は nil を渡して
-		// いた。main stream が配線されているときは、ここで引いた値が渡る。
-		// observer の契約は「引いてあれば渡す、無ければ nil」なので、どちらも正しい。
-		sender, recipient = s.resolveUserPair(sender, recipient, fromUserID, toUserID)
+		// UserLite)。前段の参加者照合で取得した値を使い、再検索しない (#3438)。
 		packed := s.packMessageDetailedStream(msg, sender, recipient, nil)
 		s.mainStreamPublisher.PublishMainEvent(toUserID, "newChatMessage", packed)
 		s.pushNewChatMessage(toUserID, packed, sender, nil)
@@ -1274,6 +1289,10 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 	if !isMember {
 		return nil, ErrForbidden
 	}
+	sender, err := s.ensureRoomFederationAvailable(fromUserID, room)
+	if err != nil {
+		return nil, err
+	}
 	msg := &model.ChatMessage{
 		ID:         s.idGen.Generate(time.Now()),
 		FromUserID: fromUserID,
@@ -1293,9 +1312,7 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 	// 本家の room の message (ChatMessageLiteForRoom) は fromUser が必須。行は素で
 	// 組んだので、送信者を 1 回だけ引いて載せる。newChatMessage にも同じものを
 	// 使う (#3438)。
-	var sender *model.User
 	if s.publisher != nil || s.mainStreamPublisher != nil {
-		sender = s.resolveUser(nil, fromUserID)
 		msg.FromUser = sender
 	}
 	if s.publisher != nil {
@@ -1308,6 +1325,62 @@ func (s *Service) CreateMessageToRoom(ctx context.Context, fromUserID, roomID, t
 	// remote member が居れば group Create を AP 配送する (best-effort)。
 	s.tryDeliverRoomMessage(msg, room, fromUserID, members, membersLoaded)
 	return msg, nil
+}
+
+func ensureFederationAvailable(actor *model.User) error {
+	if actor == nil {
+		return errors.New("chat federation: actor is unavailable")
+	}
+	if !corelocalfederation.IsExternallyAvailable(actor) {
+		return ErrFederationDisabled
+	}
+	return nil
+}
+
+// ensureRoomFederationAvailable checks the actor before a room message is
+// persisted if the room itself or any room participant is remote.
+func (s *Service) ensureRoomFederationAvailable(actorID string, room *model.ChatRoom) (*model.User, error) {
+	if room == nil || s.userRepo == nil {
+		return nil, nil
+	}
+	actor, err := s.userRepo.FindByID(actorID)
+	if err != nil {
+		return nil, fmt.Errorf("chat federation actor lookup: %w", err)
+	}
+	if actor == nil {
+		return nil, errors.New("chat federation actor is unavailable")
+	}
+	if corelocalfederation.IsExternallyAvailable(actor) {
+		return actor, nil
+	}
+	remote := room.Host != nil && *room.Host != ""
+	if !remote && s.deliverer != nil && s.renderer != nil && s.urls != nil {
+		members, err := s.repo.ListMembersByRoom(room.ID)
+		if err != nil {
+			return nil, fmt.Errorf("chat room federation participants: %w", err)
+		}
+		participantIDs := map[string]struct{}{room.OwnerID: {}}
+		for _, member := range members {
+			participantIDs[member.UserID] = struct{}{}
+		}
+		for participantID := range participantIDs {
+			if participantID == actorID {
+				continue
+			}
+			participant, err := s.userRepo.FindByID(participantID)
+			if err != nil {
+				return nil, fmt.Errorf("chat room federation participant lookup: %w", err)
+			}
+			if participant != nil && !participant.IsLocal() {
+				remote = true
+				break
+			}
+		}
+	}
+	if !remote {
+		return actor, nil
+	}
+	return nil, ErrFederationDisabled
 }
 
 // tryDeliverRoomMessage federates a room message as a CherryPick group chat
@@ -2113,31 +2186,6 @@ func (s *Service) packMessageDetailedStream(msg *model.ChatMessage, sender, toUs
 		out["toRoom"] = r
 	}
 	return out
-}
-
-// resolveUserPair is resolveUser for the sender and the recipient of a direct
-// message. When neither is known, both are loaded with one FindManyByIDs.
-//
-// 承認済みの会話では scope の検査を飛ばすので、どちらも引いていない。1 人ずつ
-// 引くと 1 メッセージあたり 2 回になる (#3438 のレビュー)。
-func (s *Service) resolveUserPair(from, to *model.User, fromID, toID string) (*model.User, *model.User) {
-	if from == nil && to == nil && s.userRepo != nil && fromID != "" && toID != "" {
-		users, err := s.userRepo.FindManyByIDs([]string{fromID, toID})
-		if err != nil {
-			slog.Warn("chat: user lookup for stream payload failed", "fromUserId", fromID, "toUserId", toID, "err", err)
-			return nil, nil
-		}
-		for _, u := range users {
-			switch u.ID {
-			case fromID:
-				from = u
-			case toID:
-				to = u
-			}
-		}
-		return from, to
-	}
-	return s.resolveUser(from, fromID), s.resolveUser(to, toID)
 }
 
 // resolveUser returns known when it is non-nil, and otherwise loads the user

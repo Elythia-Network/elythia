@@ -34,6 +34,9 @@ func (h *Handler) ReactionsCreate(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.Reaction == nil {
 		return apierr.JSONInvalidParam(c)
 	}
+	if !h.gateRemoteNoteAction(c, user, req.NoteID) {
+		return nil
+	}
 
 	_, err := h.reactionService.Create(user, req.NoteID, *req.Reaction)
 	if err != nil {
@@ -73,6 +76,9 @@ func (h *Handler) ReactionsDelete(c echo.Context) error {
 	var req ReactionDeleteRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
+	}
+	if !h.gateRemoteNoteAction(c, user, req.NoteID) {
+		return nil
 	}
 
 	if err := h.reactionService.Delete(user, req.NoteID); err != nil {

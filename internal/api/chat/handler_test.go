@@ -86,8 +86,8 @@ func seedMember(t *testing.T, repo *testutil.MockChatRepository, userID, roomID 
 	}))
 }
 
-var u1 = &model.User{ID: "u1", Username: "alice"}
-var u2 = &model.User{ID: "u2", Username: "bob"}
+var u1 = &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn}
+var u2 = &model.User{ID: "u2", Username: "bob", FederationStatus: model.FederationStatusOn}
 
 // assertErrorCode unmarshals an error response and asserts the Misskey error
 // code + id (body shape is {"error": {code, id, message}}).

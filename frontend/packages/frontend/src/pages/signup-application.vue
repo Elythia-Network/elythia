@@ -432,6 +432,7 @@ async function register() {
 				claimCode: claimCode.value,
 				username: username.value,
 				password: password.value,
+				federationStatus: 'pending',
 				...(emailRequired.value ? { emailAddress: emailAddress.value } : {}),
 			});
 		// メール必須のときサーバーは 204 を返す (本体なし)。確認リンクを踏むまで

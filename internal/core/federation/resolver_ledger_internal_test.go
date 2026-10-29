@@ -191,10 +191,13 @@ func TestResolveQuoteURI_UsesExistingRowWhenTheKeyIsInFlight(t *testing.T) {
 
 	// 台帳に無ければ通常経路。取得 URI では引けないので fetch に行き、
 	// fetcher が失敗するので nil。
-	require.Nil(t, r.resolveQuoteURI(listed, 0, false, nil), "前提: 取得 URI だけでは引けない")
+	got, err := r.resolveQuoteURI(listed, 0, false, nil)
+	require.NoError(t, err, "通常 quote の fetch failure は best-effort")
+	require.Nil(t, got, "前提: 取得 URI だけでは引けない")
 
 	chain := (&resolveChain{}).with(noteGroupKey(listed, false, false), storedAs)
-	got := r.resolveQuoteURI(listed, 0, false, chain)
+	got, err = r.resolveQuoteURI(listed, 0, false, chain)
+	require.NoError(t, err)
 	require.NotNil(t, got, "in-flight でも既存行があれば引用を繋ぐこと")
 	assert.Equal(t, "9patnote000000000000", got.ID)
 }
@@ -214,10 +217,13 @@ func TestResolveQuoteURI_UsesEphemeralRowWhenTheKeyIsInFlight(t *testing.T) {
 		storedAs: {ID: "9quinnnote0000000000", UserID: "9quinnuser0000000000"},
 	}})
 
-	require.Nil(t, r.resolveQuoteURI(listed, 0, true, nil), "前提: 取得 URI だけでは引けない")
+	got, err := r.resolveQuoteURI(listed, 0, true, nil)
+	require.NoError(t, err, "通常 quote の fetch failure は best-effort")
+	require.Nil(t, got, "前提: 取得 URI だけでは引けない")
 
 	chain := (&resolveChain{}).with(noteGroupKey(listed, false, true), storedAs)
-	got := r.resolveQuoteURI(listed, 0, true, chain)
+	got, err = r.resolveQuoteURI(listed, 0, true, chain)
+	require.NoError(t, err)
 	require.NotNil(t, got, "in-flight でも ephemeral に在れば引用を繋ぐこと")
 	assert.Equal(t, "9quinnnote0000000000", got.ID)
 }

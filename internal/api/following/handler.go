@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -31,7 +32,23 @@ type Handler struct {
 	packer userpack.ListPacker
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3792)。組み立てで渡す。
-	entityPacker *entity.Packer
+	entityPacker            *entity.Packer
+	localFederationObserver activitypub.LocalFederationObserver
+}
+
+func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
+}
+
+func (h *Handler) gateExternalAction(c echo.Context, me *model.User, _ string) bool {
+	if h.localFederationObserver == nil || me == nil || !me.IsLocal() {
+		return true
+	}
+	if !h.localFederationObserver.IsExternallyAvailable(me) {
+		_ = c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account cannot perform remote actions.", "abdc2832-1f6d-4a33-8a10-b5731ca33884"))
+		return false
+	}
+	return true
 }
 
 // NewHandler creates a new following Handler.
@@ -67,6 +84,9 @@ func (h *Handler) Create(c echo.Context) error {
 	bundle, err := h.userService.ShowByID(req.UserID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "fcd2eef9-a9b2-4c4f-8624-038099e90aa5"))
+	}
+	if bundle.User.Host != nil && *bundle.User.Host != "" && !h.gateExternalAction(c, me, *bundle.User.Host) {
+		return nil
 	}
 
 	// withReplies 引数を Service に伝搬する (#1056)。upstream Misskey TS の
@@ -116,6 +136,9 @@ func (h *Handler) Delete(c echo.Context) error {
 	bundle, err := h.userService.ShowByID(req.UserID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "5b12c78d-2b28-4dca-99d2-f56139b42ff8"))
+	}
+	if bundle.User.Host != nil && *bundle.User.Host != "" && !h.gateExternalAction(c, me, *bundle.User.Host) {
+		return nil
 	}
 
 	if err := h.followingService.Unfollow(me.ID, req.UserID); err != nil {

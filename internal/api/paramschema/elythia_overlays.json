@@ -1,4 +1,20 @@
 {
+	"admin/accounts/create": {
+		"x-elythia-properties": {
+			"federationStatus": {
+				"description": "Federation state of the new account. Omitted, null, or the empty string defaults to on.",
+				"type": "string",
+				"enum": [
+					"on",
+					"off",
+					"pending",
+					"",
+					null
+				],
+				"nullable": true
+			}
+		}
+	},
 	"admin/queue/clear": {
 		"properties": {
 			"queue": {

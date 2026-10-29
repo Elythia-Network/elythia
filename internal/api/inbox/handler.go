@@ -13,9 +13,11 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/core/federation"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
 )
 
@@ -98,7 +100,31 @@ type Handler struct {
 	// VerifyInboxAdmission の host 検査が丸ごと skip され、host ヘッダが署名対象に
 	// 含まれているかの確認と、自ホストとの一致確認の 2 つが飛ぶ。** 構築子の必須の
 	// 引数 (#3833。以前は setter と起動時の検査、#2682)。
-	expectedHost string
+	expectedHost            string
+	localFederationObserver activitypub.LocalFederationObserver
+	userRepo                repository.UserRepository
+	noteRepo                repository.NoteRepository
+}
+
+func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
+	if h.resolver != nil {
+		h.resolver.SetLocalFederationObserver(observer)
+	}
+}
+
+func (h *Handler) SetUserRepo(repo repository.UserRepository) {
+	h.userRepo = repo
+	if h.resolver != nil {
+		h.resolver.SetUserRepo(repo)
+	}
+}
+
+func (h *Handler) SetNoteRepo(repo repository.NoteRepository) {
+	h.noteRepo = repo
+	if h.resolver != nil {
+		h.resolver.SetNoteRepo(repo)
+	}
 }
 
 // NewHandler constructs a Handler.
@@ -245,6 +271,7 @@ func captureSignatureHeaders(req *http.Request) (headers map[string]string, comp
 // 単体テスト / 旧来配線を維持するためのもので、production 配線では
 // 構築子で渡す enqueuer 経由の async path を踏む。
 func (h *Handler) Inbox(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
 	// upstream ActivityPubServerService.inbox と同じく、federation mode が "none" なら
 	// body を読む前に 403 を即返す (#1959)。per-actor の IsAllowed gate は actor が
 	// local 扱い (host nil) や async enqueue 後にしか効かない経路があるため、最前段で弾く。
@@ -263,6 +290,14 @@ func (h *Handler) Inbox(c echo.Context) error {
 			return he
 		}
 		return c.NoContent(http.StatusBadRequest)
+	}
+	parsedForObservation, _ := activitypub.ParseSignatureHeader(c.Request().Header.Get("Signature"))
+	if err := h.observeLocalInboxPathTarget(c, signerHostOf(parsedForObservation)); err != nil {
+		if errors.Is(err, corelocalfederation.ErrFederationDisabled) || errors.Is(err, errLocalInboxTargetUnavailable) {
+			return c.NoContent(http.StatusNotFound)
+		}
+		slog.Error("inbox local path target observation failed", "err", err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	// Echo の Request からはホストヘッダが空のことがあるため、明示的に補完する。
@@ -299,6 +334,17 @@ func (h *Handler) Inbox(c echo.Context) error {
 		slog.Warn("inbox rejected: activity has no actor",
 			"host", signerHostOf(parsed), "keyId", signerKeyIDOf(parsed))
 		return c.NoContent(http.StatusBadRequest)
+	}
+
+	if err := h.observeLocalInboxBodyTargets(body, signerHostOf(parsed)); err != nil {
+		if errors.Is(err, errLocalInboxTooManyReferences) {
+			return c.NoContent(http.StatusBadRequest)
+		}
+		if errors.Is(err, corelocalfederation.ErrFederationDisabled) || errors.Is(err, errLocalInboxTargetUnavailable) {
+			return c.NoContent(http.StatusNotFound)
+		}
+		slog.Error("inbox local body target observation failed", "err", err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if h.enqueuer != nil {
@@ -354,6 +400,43 @@ func (h *Handler) Inbox(c echo.Context) error {
 	h.commitChart(actor)
 
 	return h.processSynchronously(c, body)
+}
+
+var errLocalInboxTargetUnavailable = errors.New("local inbox target is not externally available")
+var errLocalInboxTooManyReferences = errors.New("too many local inbox references")
+
+const maxInboxBodyReferences = 64
+
+// observeLocalInboxPathTarget preserves the path-only target policy before
+// admission. It does not parse or inspect the request body.
+func (h *Handler) observeLocalInboxPathTarget(c echo.Context, host string) error {
+	id := c.Param("id")
+	if id == "" || h.userRepo == nil || h.localFederationObserver == nil {
+		return nil
+	}
+	if err := h.resolver.ObserveLocalInboxPathTarget(id, host); errors.Is(err, federation.ErrInboundLocalReferenceUnavailable) {
+		return errLocalInboxTargetUnavailable
+	} else {
+		return err
+	}
+}
+
+// observeLocalInboxBodyTargets validates all semantic body references first,
+// then records availability. Body-derived identities are not inspected until
+// inbox admission and the required actor check have both succeeded.
+func (h *Handler) observeLocalInboxBodyTargets(body []byte, host string) error {
+	if h.userRepo == nil || h.localFederationObserver == nil || h.resolver == nil {
+		return nil
+	}
+	userIDs, noteIDs := h.resolver.ExtractLocalAPReferences(string(body))
+	if len(userIDs)+len(noteIDs) > maxInboxBodyReferences {
+		return errLocalInboxTooManyReferences
+	}
+	if err := h.resolver.ObserveLocalInboxBodyReferences(userIDs, noteIDs, host); errors.Is(err, federation.ErrInboundLocalReferenceUnavailable) {
+		return errLocalInboxTargetUnavailable
+	} else {
+		return err
+	}
 }
 
 // processSynchronously runs federation.Processor.Process inline and maps

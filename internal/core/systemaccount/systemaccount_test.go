@@ -80,6 +80,11 @@ func TestFetch_CreatesRowsOnFirstCall(t *testing.T) {
 	assert.True(t, user.IsBot)
 	assert.False(t, user.IsExplorable)
 	assert.Nil(t, user.Host) // 必ずローカル
+	assert.Equal(t, model.FederationStatusOn, user.FederationStatus)
+	assert.NotNil(t, user.FederationEnabledAt)
+	assert.NotNil(t, user.FirstExternalReferenceAt)
+	require.NotNil(t, user.FirstExternalReferenceReason)
+	assert.Equal(t, "system-account", *user.FirstExternalReferenceReason)
 
 	// 各 repo に行が作られていることを確認
 	require.Len(t, userRepo.Users, 1)
@@ -209,6 +214,24 @@ func TestFetch_RecoversFromOrphanUser(t *testing.T) {
 	// 新しい user は作られず既存を再利用
 	assert.Len(t, userRepo.Users, 1)
 	assert.Len(t, originalRepo.Accounts, 1)
+}
+
+func TestFetch_RepairsFederationStateOnLegacyOrphan(t *testing.T) {
+	svc, userRepo, _, _ := newService(t)
+	user := &model.User{
+		ID: "legacy-system-user", Username: "legacy.actor", UsernameLower: "legacy.actor",
+		FederationStatus: model.FederationStatusPending,
+	}
+	require.NoError(t, userRepo.Create(user))
+
+	fetched, err := svc.Fetch("legacy")
+	require.NoError(t, err)
+	assert.Equal(t, user.ID, fetched.ID)
+	assert.Equal(t, model.FederationStatusOn, fetched.FederationStatus)
+	assert.NotNil(t, fetched.FederationEnabledAt)
+	assert.NotNil(t, fetched.FirstExternalReferenceAt)
+	require.NotNil(t, fetched.FirstExternalReferenceReason)
+	assert.Equal(t, "system-account", *fetched.FirstExternalReferenceReason)
 }
 
 // idGenFor は tests で idGen が必要な場合の小さなヘルパ。

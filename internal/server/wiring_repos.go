@@ -22,6 +22,7 @@ import "github.com/elythia-network/elythia/internal/repository"
 // are wired to these exact values.
 type repos struct {
 	user                 repository.UserRepository
+	localFederation      repository.LocalFederationRepository
 	note                 repository.NoteRepository
 	cachedMeta           *repository.CachedMetaRepository
 	poll                 repository.PollRepository
@@ -115,6 +116,7 @@ func (s *Server) buildRepos() repos {
 	// auth middleware と service 層が同じ cache を共有することで mutation
 	// 時の invalidate が両方に反映される (#300 3-3)。
 	userRepo := s.userRepo
+	localFederationRepo := repository.NewCachedLocalFederationRepository(repository.NewLocalFederationRepository(s.db), s.userCache)
 	noteRepo := repository.NewNoteRepository(s.db)
 	if _, ok := noteRepo.(repository.NotePrimaryReader); !ok {
 		panic("repository.NewNoteRepository must implement NotePrimaryReader")
@@ -224,6 +226,7 @@ func (s *Server) buildRepos() repos {
 
 	return repos{
 		user:                 userRepo,
+		localFederation:      localFederationRepo,
 		note:                 noteRepo,
 		cachedMeta:           cachedMeta,
 		poll:                 pollRepo,

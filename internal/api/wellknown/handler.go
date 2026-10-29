@@ -4,10 +4,12 @@ package wellknown
 import (
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/misc/permissions"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -16,11 +18,17 @@ import (
 
 // Handler handles webfinger / host-meta / nodeinfo discovery.
 type Handler struct {
-	urls        *activitypub.URLBuilder
-	userService *user.Service
-	host        string
-	origin      string // scheme + host (e.g. "https://example.com")
-	metaRepo    repository.MetaRepository
+	urls                    *activitypub.URLBuilder
+	userService             *user.Service
+	host                    string
+	origin                  string // scheme + host (e.g. "https://example.com")
+	metaRepo                repository.MetaRepository
+	localFederationObserver activitypub.LocalFederationObserver
+}
+
+// SetLocalFederationObserver wires local-only account discovery policy.
+func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
 }
 
 // NewHandler constructs a Handler.
@@ -83,6 +91,7 @@ func (h *Handler) Preflight(c echo.Context) error {
 // 形式不正は 400 を返す。Accept ヘッダで application/xrd+xml が優先された
 // ときは XRD(XML)、それ以外は JRD(JSON) を返す。
 func (h *Handler) Webfinger(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
@@ -116,6 +125,19 @@ func (h *Handler) Webfinger(c echo.Context) error {
 	if bundle.User.IsSuspended || bundle.User.IsDeleted {
 		return c.NoContent(http.StatusNotFound)
 	}
+	if h.localFederationObserver != nil {
+		if !h.localFederationObserver.IsExternallyAvailable(bundle.User) {
+			return c.NoContent(http.StatusNotFound)
+		}
+		if bundle.User.FirstExternalReferenceAt == nil {
+			if _, err := h.localFederationObserver.ObserveExternalReference(bundle.User.ID, "webfinger", ""); err != nil {
+				if errors.Is(err, corelocalfederation.ErrFederationDisabled) {
+					return c.NoContent(http.StatusNotFound)
+				}
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
+	}
 
 	subject := "acct:" + bundle.User.Username + "@" + h.host
 	selfHref := h.urls.UserURI(bundle.User.ID)
@@ -124,8 +146,6 @@ func (h *Handler) Webfinger(c echo.Context) error {
 
 	setDiscoveryCORS(c)
 	c.Response().Header().Set("Vary", "Accept")
-	// upstream WellKnownServerService.ts:182: `Cache-Control: public, max-age=180`。
-	c.Response().Header().Set("Cache-Control", "public, max-age=180")
 
 	// content negotiation: Accept が xrd を jrd より優先するときだけ XRD(XML)。
 	if wantsXRD(c.Request().Header.Get("Accept")) {

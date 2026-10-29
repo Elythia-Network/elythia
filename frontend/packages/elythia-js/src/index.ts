@@ -11,6 +11,7 @@ import type { ElythiaRequestExtensions, ResponseOverrides } from './extensions.j
 export type { ElythiaEndpoints } from './endpoints.js';
 export type { ElythiaRequestExtensions, ResponseOverrides } from './extensions.js';
 export type {
+	AccountFederationState,
 	AdminEmojiApplication,
 	AdminSignupApplication,
 	BackupDownload,
@@ -60,6 +61,7 @@ export type {
 	EmojiApplicationQuotaWindow,
 	EmojiApplicationStatus,
 	EmojiApplicationStatusCounts,
+	FederationStatus,
 	FederationHealthReport,
 	FederationHostHealth,
 	FederationInstance,
@@ -101,6 +103,7 @@ export type {
 	SignupApplicationFormField,
 	SignupApplicationStatus,
 	SignupApplicationView,
+	UserWithFederationStatus,
 	SilentFollow,
 	SuspendedSoftware,
 	UserDetailed,

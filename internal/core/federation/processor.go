@@ -246,7 +246,9 @@ func (p *Processor) handleQuoteRequest(act genericActivity) error {
 // 使うのは本家に対応の無い reversi の招待と chat room の招待の宛先だけ。
 // Follow / Block とその Undo は本家が getUserFromApId で引くので
 // userFromAPID を使う (#3330)。
-func (p *Processor) resolveTargetUser(uri string) (*model.User, error) {
+func (p *Processor) resolveTargetUser(uri string, sourceHost ...string) (*model.User, error) {
+	var user *model.User
+	var err error
 	if p.localBaseURL != "" {
 		prefix := p.localBaseURL + "/users/"
 		if id, ok := strings.CutPrefix(uri, prefix); ok {
@@ -255,11 +257,24 @@ func (p *Processor) resolveTargetUser(uri string) (*model.User, error) {
 				id = id[:slash]
 			}
 			if id != "" {
-				return p.userRepo.FindByID(id)
+				user, err = p.userRepo.FindByID(id)
+				goto checked
 			}
 		}
 	}
-	return p.userRepo.FindByURI(uri)
+	user, err = p.userRepo.FindByURI(uri)
+checked:
+	if err != nil {
+		return nil, err
+	}
+	host := ""
+	if len(sourceHost) > 0 {
+		host = sourceHost[0]
+	}
+	if err := p.resolver.RequireInboundLocalUser(user, host); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // userFromAPID looks up the user an AP id names the way upstream
@@ -274,7 +289,7 @@ func (p *Processor) resolveTargetUser(uri string) (*model.User, error) {
 // としてフォローの承認・解除を進めていた (#3330)。
 // ローカルの host で `/users/` 以外を指すものは、本家と同じく誰にも当てない
 // (本家は `parsed.type !== 'users'` で null)。
-func (p *Processor) userFromAPID(uri string) (*model.User, error) {
+func (p *Processor) userFromAPID(uri string, sourceHost ...string) (*model.User, error) {
 	var (
 		u   *model.User
 		err error
@@ -292,6 +307,13 @@ func (p *Processor) userFromAPID(uri string) (*model.User, error) {
 	}
 	if u == nil || u.IsDeleted {
 		return nil, repository.ErrNotFound
+	}
+	host := ""
+	if len(sourceHost) > 0 {
+		host = sourceHost[0]
+	}
+	if err := p.resolver.RequireInboundLocalUser(u, host); err != nil {
+		return nil, err
 	}
 	return u, nil
 }
@@ -1130,7 +1152,7 @@ func (p *Processor) handleFollow(act genericActivity) error {
 	// 見つからなければ本家は 'skip: followee not found' で ack する。以前は
 	// error を返して inbox の retry を使い切っていた (#3330)。DB 障害は retry
 	// させるために伝播する (#3115 と同じ扱い)。
-	followee, err := p.userFromAPID(followeeURI)
+	followee, err := p.userFromAPID(followeeURI, inboundActorHost(act.Actor))
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil
@@ -1299,7 +1321,7 @@ func (p *Processor) handleUndoAccept(act genericActivity, inner genericActivity)
 	if err != nil || followerURI == "" {
 		return nil
 	}
-	follower, err := p.userFromAPID(followerURI)
+	follower, err := p.userFromAPID(followerURI, inboundActorHost(act.Actor))
 	if err != nil {
 		// **#3115 が Accept / Reject で確立した原則の裏返し** (#3116)。ack すると
 		// job が retry されず、**accept を撤回された相手をフォローし続ける**。
@@ -1332,7 +1354,7 @@ func (p *Processor) handleUndoFollow(act genericActivity, inner genericActivity)
 		return err
 	}
 	// 本家 undoFollow() も getUserFromApId で引き、見つからなければ skip (#3330)。
-	followee, err := p.userFromAPID(followeeURI)
+	followee, err := p.userFromAPID(followeeURI, inboundActorHost(act.Actor))
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil
@@ -1392,7 +1414,7 @@ func (p *Processor) handleUndoLike(act genericActivity, inner genericActivity) e
 	if p.reactionService == nil {
 		return ErrUnsupportedActivity
 	}
-	target, err := p.resolver.ResolveNote(targetURI)
+	target, err := p.resolver.ResolveNoteForInbox(targetURI, inboundActorHost(act.Actor))
 	if err != nil {
 		// permanent な target resolve 失敗は ack。Undo の対象 reaction record
 		// が存在しないだけでも idempotent (= 削除済みは ErrReactionNotFound で
@@ -1434,7 +1456,7 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 	if err != nil {
 		return err
 	}
-	target, err := p.resolver.ResolveNote(targetURI)
+	target, err := p.resolver.ResolveNoteForInbox(targetURI, inboundActorHost(act.Actor))
 	if err != nil {
 		// permanent な target resolve 失敗は ack。target が解決できなければ
 		// renote record も無いはずなので、削除対象が無いまま activity を ack
@@ -1585,7 +1607,7 @@ func (p *Processor) handleAccept(act genericActivity) error {
 	if err != nil {
 		return nil
 	}
-	follower, err := p.userFromAPID(followerURI)
+	follower, err := p.userFromAPID(followerURI, inboundActorHost(act.Actor))
 	if err != nil {
 		// **not-found だけ ack する** (#3115)。その利用者が居ないことは retry
 		// しても変わらないので、7 回 retry (試行は計 8 回、
@@ -1845,7 +1867,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 			if roomURI, isRoom := chatRoomURIFromContext(probe.Context); isRoom {
 				return p.handleChatRoomMessageCreate(actor, probe.ID, probe.Content, mfmSource, roomURI)
 			}
-			return p.handleChatCreate(actor, probe.ID, probe.Content, mfmSource, probe.To)
+			return p.handleChatCreate(actor, probe.ID, probe.Content, mfmSource, probe.To, inboundActorHost(act.Actor))
 		}
 	}
 	// 本家 ApInboxService.create は resolve 前に activity.to/cc を Note object の
@@ -1857,7 +1879,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 	object := mergeCreateAudience(act)
 	// act.Actor を配送 actor として渡し、note の著者 (attributedTo) が配送者本人で
 	// あることを検証させる (なりすまし forge 防止、#1839)。
-	note, created, err := p.ingestCreateNote(object, act.Actor, viaRelay)
+	note, created, err := p.ingestCreateNote(object, act.Actor, viaRelay, inboundActorHost(act.Actor))
 	if errors.Is(err, corenote.ErrContainsTooManyMentions) {
 		// upstream Misskey #17167 (= 2026.5.0 fix / triage #1004): role policy
 		// 由来の "note contains too many mentions" は永続的に解決しない error な
@@ -2061,7 +2083,7 @@ func (p *Processor) handleLike(act genericActivity) error {
 	if p.reactionService == nil {
 		return ErrUnsupportedActivity
 	}
-	target, err := p.resolver.ResolveNote(like.Object)
+	target, err := p.resolver.ResolveNoteForInbox(like.Object, inboundActorHost(act.Actor))
 	if err != nil {
 		// permanent な target resolve 失敗 (followers-only / 削除済 等) は
 		// reaction record を作らず ack。retry しても永久に解消しない (#1183)。
@@ -2135,13 +2157,13 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	if viaRelay {
 		// リレー経由でしか観測しない投稿は Redis に置く。ephemeral store が
 		// 未配線 / 機能無効なら ResolveNoteEphemeral が通常経路に倒れる。
-		target, err = p.resolver.ResolveNoteEphemeral(targetURI)
+		target, err = p.resolver.ResolveNoteEphemeralForInbox(targetURI, inboundActorHost(act.Actor))
 	} else {
 		// **新規取り込みかどうかは resolver から受け取る** (#2751)。取得 URI で
 		// 既存行を引く方式では、Announce の object が document id と別名の URL
 		// (`https://h/@user/1` に対し id は `https://h/notes/1`) のときに何度
 		// 取り込んでも「新規」に見え、既知の note を繰り返し antenna へ押し込める。
-		target, targetCreated, err = p.resolver.ResolveNoteWithCreated(targetURI)
+		target, targetCreated, err = p.resolver.ResolveNoteWithCreatedForInbox(targetURI, inboundActorHost(act.Actor))
 	}
 	if err != nil {
 		// permanent な target resolve 失敗 (削除済 note / followers-only) は
@@ -2440,11 +2462,12 @@ func (p *Processor) resolveCreateActor(uri string, viaRelay bool) (*model.User, 
 
 // ingestCreateNote persists an inbound Create's note, diverting relay-forwarded
 // ones to the ephemeral store (#2338).
-func (p *Processor) ingestCreateNote(object []byte, deliveringActorURI string, viaRelay bool) (*model.Note, bool, error) {
+
+func (p *Processor) ingestCreateNote(object []byte, deliveringActorURI string, viaRelay bool, sourceHost string) (*model.Note, bool, error) {
 	if viaRelay {
-		return p.resolver.IngestNoteEphemeral(object, deliveringActorURI)
+		return p.resolver.IngestNoteEphemeralForInbox(object, deliveringActorURI, sourceHost)
 	}
-	return p.resolver.IngestNoteWithCreated(object, deliveringActorURI)
+	return p.resolver.IngestNoteWithCreatedForInbox(object, deliveringActorURI, sourceHost)
 }
 
 // handleDelete removes a remote note (or actor) referenced by a Delete activity.
@@ -2588,7 +2611,7 @@ func (p *Processor) handleUpdate(act genericActivity) error {
 	}
 	if strings.EqualFold(objectType, "note") {
 		// act.Actor を渡して note 著者との一致を検証させる (#1819、Question 経路と対称)。
-		_, err := p.resolver.UpdateRemoteNote(act.Object, act.Actor)
+		_, err := p.resolver.UpdateRemoteNote(act.Object, act.Actor, inboundActorHost(act.Actor))
 		// ErrInvalidNote は受信側の不備として skip 扱い (200 を返す)。
 		if errors.Is(err, ErrInvalidNote) {
 			return nil
@@ -2743,7 +2766,7 @@ func (p *Processor) handleReject(act genericActivity) error {
 	// (userFromAPID)。これをやらないと FindByURI が fail して reject が silent
 	// drop されてしまい、ローカル側の FollowRequest が消えずに永遠に pending の
 	// ままになる。
-	follower, err := p.userFromAPID(followerURI)
+	follower, err := p.userFromAPID(followerURI, inboundActorHost(act.Actor))
 	if err != nil {
 		// **Accept と同じ扱い** (#3115)。not-found は retry しても変わらないので
 		// ack するが、**DB 障害を ack すると job が成功扱いになって retry されず**、
@@ -2784,7 +2807,7 @@ func (p *Processor) handleBlock(act genericActivity) error {
 	}
 	// 本家 block() は getUserFromApId で引き、見つからなければ skip (#3330)。
 	// ローカルユーザーは user.uri が NULL なので、URI から ID を読んで引く。
-	blockee, err := p.userFromAPID(blockeeURI)
+	blockee, err := p.userFromAPID(blockeeURI, inboundActorHost(act.Actor))
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil
@@ -2818,7 +2841,7 @@ func (p *Processor) handleUndoBlock(act genericActivity, inner genericActivity) 
 		return err
 	}
 	// 本家 undoBlock() も getUserFromApId で引き、見つからなければ skip (#3330)。
-	blockee, err := p.userFromAPID(blockeeURI)
+	blockee, err := p.userFromAPID(blockeeURI, inboundActorHost(act.Actor))
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil
@@ -2873,7 +2896,7 @@ func (p *Processor) handleFlag(act genericActivity) error {
 	// 段を ID として引く (`/users/{id}/followers` は誰にも当たらない、#3330)。旧実装は
 	// 任意 host の user/note URI を受け、note 作者 (リモート可) まで fallback
 	// して別 instance のユーザーを誤って報告し得た。
-	target, err := p.flagTargetUser(uris)
+	target, err := p.flagTargetUser(uris, inboundActorHost(act.Actor))
 	if err != nil {
 		return err
 	}
@@ -2940,7 +2963,7 @@ func (p *Processor) handleFlag(act genericActivity) error {
 //
 // 引けなかったことを「誰も居ない」に潰さない (#3121)。潰すと job が ack されて
 // retry されず、通報が届かない。
-func (p *Processor) flagTargetUser(uris []string) (*model.User, error) {
+func (p *Processor) flagTargetUser(uris []string, sourceHost string) (*model.User, error) {
 	var ids []string
 	seen := make(map[string]struct{}, len(uris))
 	for _, uri := range uris {
@@ -2965,6 +2988,11 @@ func (p *Processor) flagTargetUser(uris []string) (*model.User, error) {
 	for _, u := range users {
 		if u != nil && (target == nil || u.ID < target.ID) {
 			target = u
+		}
+	}
+	if target != nil {
+		if err := p.resolver.RequireInboundLocalUser(target, sourceHost); err != nil {
+			return nil, err
 		}
 	}
 	return target, nil
@@ -3019,10 +3047,13 @@ func (p *Processor) handleAdd(act genericActivity) error {
 	// ローカルノートならDBから検索、リモートならResolveNoteでフェッチ+取り込み
 	note, err := p.noteRepo.FindByURI(noteURI)
 	if err != nil {
-		note, err = p.resolver.ResolveNote(noteURI)
+		note, err = p.resolver.ResolveNoteForInbox(noteURI, inboundActorHost(act.Actor))
 		if err != nil {
 			return err
 		}
+	}
+	if err := p.resolver.RequireInboundLocalNote(note, inboundActorHost(act.Actor)); err != nil {
+		return err
 	}
 	// **ピン留めできるのは自分の投稿だけ。** これを見ないと、署名付きの
 	// リモート actor が**他人のノートを自分のプロフィールに並べられる**。
@@ -3306,7 +3337,7 @@ func readActorString(act genericActivity) (string, error) {
 // Create の入口 (`chatRoomURIFromContext`) が先に振り分け、
 // `handleChatRoomMessageCreate` → `CreateRoomMessageViaAP` が room のメンバー
 // 全員に配る。ここに複数 recipient が来ることはない。
-func (p *Processor) handleChatCreate(sender *model.User, noteURI, content, mfmSource string, toRaw json.RawMessage) error {
+func (p *Processor) handleChatCreate(sender *model.User, noteURI, content, mfmSource string, toRaw json.RawMessage, sourceHost string) error {
 	if p.chatService == nil {
 		return ErrUnsupportedActivity
 	}
@@ -3334,6 +3365,9 @@ func (p *Processor) handleChatCreate(sender *model.User, noteURI, content, mfmSo
 	}
 	if !recipient.IsLocal() {
 		return fmt.Errorf("chat create: recipient %s is not local", to)
+	}
+	if err := p.resolver.RequireInboundLocalUser(recipient, sourceHost); err != nil {
+		return err
 	}
 	_, err = p.chatService.CreateMessageViaAP(context.Background(), noteURI, sender, recipient.ID, content, mfmSource)
 	// 列に収まらない uri は retry しても解決しないので drop する (#2726)。
@@ -3418,6 +3452,9 @@ func (p *Processor) handleChatMessage(act genericActivity) error {
 	}
 	if !recipient.IsLocal() {
 		return fmt.Errorf("chat message: recipient %s is not local", raw.To)
+	}
+	if err := p.resolver.RequireInboundLocalUser(recipient, inboundActorHost(act.Actor)); err != nil {
+		return err
 	}
 	// **id を配送元ホストに縛る。** `Create` + `_misskey_talk` 側と同じ理由で、
 	// ここも `act.ID` をそのままメッセージの uri として保存する

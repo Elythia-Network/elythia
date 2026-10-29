@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -34,6 +35,7 @@ var (
 	// ErrRemoteSourceForbidden is returned when the caller is not a local user.
 	// AP 配送のため秘密鍵が必要で、リモートユーザーを move 元にはできない。
 	ErrRemoteSourceForbidden = errors.New("source must be a local user")
+	ErrFederationDisabled    = corelocalfederation.ErrFederationDisabled
 )
 
 // Resolver fetches a remote actor by URI and returns the persisted local
@@ -84,12 +86,13 @@ type ProxyAccountIDResolver func() (string, bool)
 
 // Service owns the account-move workflow.
 type Service struct {
-	userRepo      repository.UserRepository
-	followingRepo repository.FollowingRepository
-	urls          *activitypub.URLBuilder
-	renderer      *activitypub.Renderer
-	resolver      Resolver
-	deliverer     Deliverer
+	userRepo                repository.UserRepository
+	followingRepo           repository.FollowingRepository
+	urls                    *activitypub.URLBuilder
+	renderer                *activitypub.Renderer
+	resolver                Resolver
+	deliverer               Deliverer
+	localFederationObserver activitypub.LocalFederationObserver
 
 	// followQueue / proxyAccount は post-move 処理 (#2418) 用。既存の
 	// NewService 呼び出しを壊さないよう setter で後付けする。未設定なら
@@ -110,6 +113,10 @@ type Service struct {
 	instanceCounter      InstanceFollowersCounter
 	instanceStatsEnabled func() bool
 	chartHook            ChartHook
+}
+
+func (s *Service) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	s.localFederationObserver = observer
 }
 
 // InstanceFollowersCounter adjusts instance(host).followersCount. Implemented
@@ -209,6 +216,16 @@ func (s *Service) Move(src *model.User, dstURI string) error {
 	dst, viaLocalURI, err := s.resolveDestination(dstURI)
 	if err != nil || dst == nil {
 		return ErrNoSuchUser
+	}
+	if s.localFederationObserver != nil {
+		if !s.localFederationObserver.IsExternallyAvailable(src) {
+			return ErrFederationDisabled
+		}
+		if dst.IsLocal() {
+			if !s.localFederationObserver.IsExternallyAvailable(dst) {
+				return ErrFederationDisabled
+			}
+		}
 	}
 	// 解決後の dst URI は resolver が正規化した形 (actor.id) を使う。
 	// これが空なら遷移先が AP 的に不正。

@@ -1,10 +1,10 @@
 /*
  * 本家の backend e2e を mk-go に向けて実行するための vitest 設定。
  *
- * include は本家の `test/e2e/**` をそのまま指す。差し替えるのは
- * globalSetup (サーバー起動) と setupFiles (DB リセット) の 2 点だけで、
- * テスト本体には一切手を入れない。上流追従でテストが増えれば自動的に
- * こちらの検証対象も増える。
+ * include は本家の `test/e2e/**` を指し、テスト本体の正本は本家に置く。
+ * globalSetup (サーバー起動) と setupFiles (DB リセット) を差し替え、
+ * Elythia 固有のローカル連合状態は UserLite の期待DTOだけに加える。
+ * ほかの比較は本家のまま保ち、上流追従でテストが増えれば検証対象も増える。
  */
 
 import { defineConfig, mergeConfig } from 'vitest/config';

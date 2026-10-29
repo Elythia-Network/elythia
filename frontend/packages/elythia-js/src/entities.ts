@@ -6,6 +6,24 @@
 
 import type * as Misskey from 'misskey-js';
 
+/** Whether this account may participate in ActivityPub federation. */
+export type FederationStatus = 'pending' | 'off' | 'on';
+
+/** Current federation state and the first externally observed reference. */
+export type AccountFederationState = {
+	federationStatus: FederationStatus;
+	federationEnabledAt: string | null;
+	firstExternalReferenceAt: string | null;
+	firstExternalReferenceReason: string | null;
+	firstExternalReferenceHost: string | null;
+	isSystemAccount: boolean;
+};
+
+/** A user DTO with Elythia's federation status. */
+export type UserWithFederationStatus = Misskey.entities.UserDetailed & {
+	federationStatus?: FederationStatus;
+};
+
 /** A field of the signup application form (approval-based signup). */
 export type SignupApplicationFormField = {
 	label: string;
