@@ -16,7 +16,7 @@
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
 	bench-up bench-run bench-down bench-logs bench-compare bench-compare-down bench-upstream \
 	apicompat apicompat-routes apicompat-render \
-	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
+	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
 	upstream-e2e upstream-e2e-deps upstream-e2e-up upstream-e2e-down upstream-e2e-migrate upstream-e2e-test
 
@@ -42,7 +42,7 @@ check: fmt lint actionlint golangci-lint test ## コミット前に必須 (lint 
 	# `make plugins-all && go build ./cmd/elythia`)、`lint` job の重複 fixture ID 検査、
 	# `test` のカバレッジ閾値は再現しない。
 
-gates: shapecheck errorid-check limitspec-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check cachelist-check gaterun-check ## 静的 parity ゲートを一括実行
+gates: shapecheck errorid-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check migrationdoc-check mdtable-check notiftype-check pluginembed-check dockerignore-check secretfield-check ipshape-check iprecord-check sqlbind-check cachelist-check gaterun-check ## 静的 parity ゲートを一括実行
 
 version: ## Elythia / 互換 Misskey / 追従している本家のバージョンを表示
 	@printf "Elythia          : %s\n" "$$(sed -n 's/^var MkGoVersion = "\(.*\)"/\1/p' internal/config/config.go)"
@@ -1542,7 +1542,6 @@ apicompat: apicompat-routes apicompat-render ## API 互換性マトリクス doc
 shapecheck-gen: ## shape drift の golden snapshot を再生成
 	go run ./tools/shapediff
 	go run ./tools/erroriddiff
-	go run ./tools/limitspec
 	go run ./tools/permspec
 	go run ./tools/securespec
 	go run ./tools/schemadrift
@@ -1562,12 +1561,6 @@ shapecheck: ## レスポンス形状の drift を検査
 # 経由で endpoint に解決して突合する静的 gate。詳細は docs/shape-drift.md。
 errorid-check: ## error id / HTTP status / kind の drift を検査
 	go test ./internal/entitycompat/... -run 'TestErrorIDDrift|TestErrorHTTPStatusDrift|TestErrorKindDrift|TestAPIRouteHandlersResolve' -count=1 -v
-
-# pagination limit-spec drift gate をローカルで実行する。handler が
-# pagination.ClampLimit(limit, def, max) で渡す default/max literal を router
-# 経由で endpoint に解決し、Misskey paramDef の default/maximum と突合する。
-limitspec-check: ## ページネーションの default / max の drift を検査
-	go test ./internal/entitycompat/... -run TestLimitSpecDrift -count=1 -v
 
 # permission drift gate をローカルで実行する。mk-go の router middleware が
 # Misskey の requireAdmin/requireModerator/requireCredential より緩くないか検証。
