@@ -86,6 +86,9 @@ window.document.documentElement.style.maxWidth = '500px';
 
 // iframeIdの設定
 function setIframeIdHandler(event: MessageEvent) {
+	// 埋め込み元の親ウィンドウ以外が先に送ると、その値で確定してしまう。
+	// setIframeIdは最初の1回しか効かないので、親以外からのメッセージは読まない。
+	if (event.source !== window.parent) return;
 	if (event.data?.type === 'misskey:embedParent:registerIframeId' && event.data.payload?.iframeId != null) {
 		setIframeId(event.data.payload.iframeId);
 		window.removeEventListener('message', setIframeIdHandler);
