@@ -24,7 +24,8 @@ import (
 //     valid UTF-8 but cannot be embedded (whitespace between tokens, nesting
 //     too deep, not JSON) and the string is not larger than base64
 //   - "body": "<base64>" — anything else, every job written before #3614,
-//     and every job written while driver.CompactJobPayloads is disabled
+//     and every job written while driver.CompactJobPayloads was disabled
+//     (2.1.0)
 //
 // base64 の形だけでは、外側の framing (mkqdriver.framedPayload) でもう一度
 // base64 になるため、Redis に本文の約 1.86 倍で載る (#3614)。
@@ -39,8 +40,9 @@ import (
 // すると、引用符を 1 つずつエスケープするぶん大きくなり、書くのも読むのも埋め込み
 // より遅い。
 //
-// **書く側はまだ有効にしていない** (driver.CompactJobPayloads。#3614 は読む側を
-// 先に出す 2 段)。MarshalJSON は有効になるまで以前の形を書く。
+// **書く側は 2.1.0 の次の版から有効にした** (driver.CompactJobPayloads。#3614 は
+// 読む側を先に出す 2 段で、2.1.0 は読む側だけ)。MarshalJSON は定数が false なら
+// 以前の形を書く。
 //
 // 読む側は 4 つの形をすべて受け付ける。再送を待つ job は Redis に約 32 時間
 // (落ちた配送先へのブレーカーで待たされる job はもっと長く) 残るので、更新の前に
@@ -266,8 +268,8 @@ func (p DeliverPayload) MarshalJSON() ([]byte, error) {
 
 // MarshalCompactJSON writes the payload with the activity in its most
 // compact wire shape (#3614), regardless of driver.CompactJobPayloads.
-// MarshalJSON uses it once the writers are enabled; tests use it to pin the
-// shape before that.
+// MarshalJSON uses it while the writers are enabled; tests use it to pin the
+// shape regardless of the constant.
 func (p DeliverPayload) MarshalCompactJSON() ([]byte, error) {
 	// body を除いた field を書き (wire の body 系は nil なので出ない)、本文を
 	// 継ぎ足す。
@@ -306,8 +308,8 @@ func (p InboxPayload) MarshalJSON() ([]byte, error) {
 
 // MarshalCompactJSON writes the payload with the activity in its most
 // compact wire shape (#3614), regardless of driver.CompactJobPayloads.
-// MarshalJSON uses it once the writers are enabled; tests use it to pin the
-// shape before that.
+// MarshalJSON uses it while the writers are enabled; tests use it to pin the
+// shape regardless of the constant.
 func (p InboxPayload) MarshalCompactJSON() ([]byte, error) {
 	// body を除いた field を書き (wire の body 系は nil なので出ない)、本文を
 	// 継ぎ足す。

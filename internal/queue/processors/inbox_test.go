@@ -1398,9 +1398,9 @@ func TestInboxProcessor_SoftwareSuspendedHostStoppedBeforeVerification(t *testin
 }
 
 // **job の本文の形 (#3614) を経ても、worker で署名の検証が通り、受け付けた本文が
-// 1 バイトも変わらずに処理へ渡ること。** 書く側を有効にすると、本文は base64 に
-// せず埋め込む。Misskey の本文は < をエスケープしない (`bodyEscaped` で載り、
-// 読むときに戻す)。詰まっていない JSON は文字列の形で載る。Digest と本文の照合は
+// 1 バイトも変わらずに処理へ渡ること。** 本文は base64 にせず埋め込む。
+// Misskey の本文は < をエスケープしない (`bodyEscaped` で載り、読むときに
+// 戻す)。詰まっていない JSON は文字列の形で載る。Digest と本文の照合は
 // 受付 (`VerifyInboxAdmission`) で済んでいるので、worker が扱う本文はそのバイト列
 // でなければならない。以前の形 (base64) の job も同じく通ること。
 func TestInboxProcessor_VerifiesSignatureForEveryBodyShape(t *testing.T) {
@@ -1429,7 +1429,8 @@ func TestInboxProcessor_VerifiesSignatureForEveryBodyShape(t *testing.T) {
 			legacy, err := json.Marshal(map[string]any{"body": body, "method": payload.Method, "path": payload.Path, "headers": payload.Headers})
 			require.NoError(t, err)
 
-			// current はこの版が積む形 (書く側を有効にするまでは legacy と同じ)。
+			// current はこの版が積む形 (driver.CompactJobPayloads が false なら
+			// legacy と同じ)。
 			for enc, raw := range map[string][]byte{"current": mustEncode(t, payload), "compact": compact, "legacy": legacy} {
 				verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 				stub := &stubFedProcessor{}

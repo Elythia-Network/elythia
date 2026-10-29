@@ -12,13 +12,14 @@ import (
 	"github.com/elythia-network/elythia/internal/queue/driver"
 )
 
-// **配送・受信の Enqueue の入口で積む payload は、書く側を有効にするまでは
-// #3614 より前の版と同じバイト列であること** (#3614 の 1 段目。レビュー 2 周目
-// の M-1)。読み戻して比べるテストは、読む側が新しい形も読むので形が変わっても
-// 通ってしまう。バイト列で比べる。有効にした後は MarshalCompactJSON と同じ。
+// **配送・受信の Enqueue の入口で積む payload は、driver.CompactJobPayloads に
+// 従ったバイト列であること** (#3614。2.1.0 のレビュー 2 周目の M-1)。有効なら
+// MarshalCompactJSON と同じ、false なら #3614 より前の版と同じ。読み戻して比べる
+// テストは、読む側がどちらの形も読むので形が変わっても通ってしまう。バイト列で
+// 比べる。
 // Inbox / Path / Headers に & < > を入れてあるのは、HTML のエスケープの有無も
-// バイト列に出るようにするため (本文は base64 になるので出ない。レビュー 3 周目
-// の L-2)。
+// バイト列に出るようにするため (定数が false のときは本文が base64 になるので
+// 出ない。2.1.0 のレビュー 3 周目の L-2)。
 func TestClient_EnqueueWritesTheShapeSelectedByCompactJobPayloads(t *testing.T) {
 	for name, body := range map[string]string{
 		// mk-go の json.Marshal が描く配送の本文 (< はエスケープ済み)。

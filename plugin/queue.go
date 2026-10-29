@@ -16,8 +16,9 @@ import (
  * ジョブは `plugin:<プラグイン名>` という専用のキューに入る。admin/queue から
  * 見えるので、詰まっていることに運営者が気付ける。
  *
- * **mkq を直接は渡さない。** 本体の worker はペイロードを {type, body} で
- * 包んで type で dispatch するので、素の mkq ハンドルから積んだジョブは
+ * **mkq を直接は渡さない。** 本体の worker はペイロードを {type, bodyJson}
+ * (JSON として埋め込めないものは {type, body}。#3614) で包んで type で
+ * dispatch するので、素の mkq ハンドルから積んだジョブは
  * 処理者が見つからない。包み方は本体の enqueue と worker の間の契約であって、
  * プラグインに晒す面ではない。
  */

@@ -2,7 +2,8 @@
 // (github.com/elythia-network/mkq), a BullMQ-compatible Go-native job queue.
 //
 // Wire format note: every job mkqdriver enqueues carries a small
-// framing wrapper {type, body} as its mkq payload. The wrapper is
+// framing wrapper {type, bodyJson} ({type, body} when the payload cannot be
+// embedded as JSON, #3614) as its mkq payload. The wrapper is
 // what the worker dispatches on; the BullMQ Job.name field is set to
 // the same task type for ad-hoc Add calls (so bull-board / Misskey
 // admin UI sees the task type natively), but mkq schedule API does
@@ -32,7 +33,7 @@ import (
 // Use newFramedPayload to build one and payload to read it back. The reader
 // accepts both shapes, so jobs enqueued by an older process (retries stay in
 // Redis for about 32 hours, longer when held by the delivery breaker) keep
-// working after an upgrade. Writers use the BodyJSON shape only once
+// working after an upgrade. Writers use the BodyJSON shape while
 // driver.CompactJobPayloads is enabled.
 //
 // Body (base64) だけでは、配送と受信の payload はそれ自体が JSON で、中の本文も
@@ -57,7 +58,7 @@ type framedPayload struct {
 // driver.CompactJobPayloads is enabled, the pre-#3614 base64 shape otherwise.
 //
 // 書く側の切り替えはこの関数と queue の activity_body.go の 2 か所で、どちらも
-// driver.CompactJobPayloads だけを見る (#3614 は 2 段に分けて出す)。
+// driver.CompactJobPayloads だけを見る (#3614 は 2 段に分けて出した)。
 func newFramedPayload(taskType string, payload []byte) framedPayload {
 	return framePayload(taskType, payload, false)
 }

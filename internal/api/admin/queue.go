@@ -1086,10 +1086,10 @@ func packTaskSummary(t *QueueTaskSummary) map[string]any {
 // packJobData renders the job payload for the admin Data tab.
 //
 // **upstream と 1 点だけ意図的に違う。** upstream は Bull の `job.data` を
-// そのまま返すが、mk-go は payload を `{"type": …, "body": <base64>}` (#3614 の
-// 書く側を有効にした後は `{"type": …, "bodyJson": <JSON>}`) で包んで保存して
-// いるので、そのまま返すと Data タブが包みの形で見える (base64 なら読めない塊に
-// なる)。包みの形は `{"type": …, "body": <payload>}` に揃えて返す
+// そのまま返すが、mk-go は payload を `{"type": …, "bodyJson": <JSON>}`
+// (#3614。2.1.0 までと、JSON として埋め込めない payload は
+// `{"type": …, "body": <base64>}`) で包んで保存しているので、そのまま返すと
+// Data タブが包みの形で見える (base64 なら読めない塊になる)。包みの形は `{"type": …, "body": <payload>}` に揃えて返す
 // (docs/divergence.md)。
 //
 // 以前は body だけを返していたため **type が落ちていた** (#2689)。

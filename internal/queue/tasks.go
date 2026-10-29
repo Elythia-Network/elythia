@@ -162,8 +162,8 @@ const TaskTypeInbox = "ap:inbox"
 // 信頼してチャート / instance 更新する)。新 payload では Headers から
 // 抽出するため通常空。
 //
-// Body の JSON での形 (#3614 の書く側を有効にすると base64 にせず埋め込む) は
-// activity_body.go を参照。
+// Body の JSON での形 (#3614。base64 にせず埋め込む) は activity_body.go を
+// 参照。
 type InboxPayload struct {
 	Body    []byte            `json:"body"`
 	Host    string            `json:"host,omitempty"`
@@ -195,8 +195,8 @@ type DeliverPayload struct {
 	// Inbox is the absolute URL of the recipient inbox to POST to.
 	Inbox string `json:"inbox"`
 	// Body is the JSON-serialized AP activity to deliver. Its wire shape is
-	// base64, or embedded JSON once driver.CompactJobPayloads is enabled
-	// (see activity_body.go, #3614).
+	// embedded JSON while driver.CompactJobPayloads is enabled, base64
+	// otherwise (see activity_body.go, #3614).
 	Body []byte `json:"body"`
 	// KeyID is the HTTP Signature keyId
 	// (e.g. https://example.com/users/u1#main-key).

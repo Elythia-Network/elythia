@@ -139,10 +139,9 @@ func TestActivityBody_RoundTripsByteForByte(t *testing.T) {
 	}
 }
 
-// **この版が積む payload は以前の形 (本文が base64) のまま (#3614 の 1 段目)。**
-// 書く側を有効にする (driver.CompactJobPayloads) までは、#3614 より前の版と同じ
-// バイト列を書く。そうしておけば、この版から前の版へ戻しても積まれた job を読める。
-// 有効にした後は MarshalCompactJSON と同じ形を書く (切り替えが効いているかも見る)。
+// **積む payload の形は driver.CompactJobPayloads に従うこと (#3614)。** 有効なら
+// MarshalCompactJSON と同じ形を書く。false に戻したら、#3614 より前の版と同じ
+// バイト列 (本文が base64) を書き、前の版へ戻しても積まれた job を読める。
 func TestActivityBody_WritesTheShapeSelectedByCompactJobPayloads(t *testing.T) {
 	for _, tc := range activityBodyCases(t) {
 		dp := DeliverPayload{Inbox: "https://remote.example/inbox?a=1&b=<x>", Body: tc.body, KeyID: "k", Ed25519KeyID: "e", IsSharedInbox: true, SignerUserID: "u1", NotAfter: 123}

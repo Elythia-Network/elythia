@@ -87,10 +87,9 @@ func TestFramedPayload_OldReaderSeesNoBody(t *testing.T) {
 	assert.Empty(t, old.Body)
 }
 
-// **この版が積む job は以前の形 (payload が base64) のまま (#3614 の 1 段目)。**
-// 書く側を有効にする (driver.CompactJobPayloads) までは、#3614 より前の版と
-// 同じ data を書く。有効にした後は compactFramedPayload と同じ形を書く
-// (切り替えが効いているかも見る)。
+// **積む job の形は driver.CompactJobPayloads に従うこと (#3614)。** 有効なら
+// compactFramedPayload と同じ形を書く。false に戻したら、#3614 より前の版と同じ
+// data (payload が base64) を書く。
 func TestFramedPayload_WritesTheShapeSelectedByCompactJobPayloads(t *testing.T) {
 	type pre3614 struct {
 		Type string `json:"type"`
