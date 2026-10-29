@@ -12,7 +12,6 @@
 |---|---|
 | `shapecheck` | レスポンス形状の drift を検査 |
 | `errorid-check` | error id / HTTP status / kind の drift を検査 |
-| `limitspec-check` | ページネーションの default / max の drift を検査 |
 | `perm-check` | router middleware の権限が upstream より緩くないか検査 |
 | `wiring-check` | router で配線が必要なものが外れていないか検査 |
 | `catalog-check` | システムカタログのクエリが schema で絞られ、indexdef を WHERE に書いていないか検査 |
@@ -34,7 +33,7 @@
 
 ## `internal/server` のソースを読むゲート (#3672)
 
-`perm-check` / `errorid-check` / `limitspec-check` / `wiring-check` と、`internal/server` の
+`perm-check` / `errorid-check` / `wiring-check` と、`internal/server` の
 ソースを読むテストは、**`git ls-files` で列挙した `internal/server` 直下の非テストの `.go` を
 全部読む**。`router.go` のような 1 つのファイルを名指ししない。組み立てのコード
 (`setupRoutes`) を別のファイルへ移すたびに、ゲートが「抽出が 0 件」で落ちて直すことに
