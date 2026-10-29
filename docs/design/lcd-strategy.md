@@ -1,6 +1,6 @@
 # Playwright LCD → strict 化による drift detection strategy
 
-**Status**: Active。spec は現在 298 ファイル (`tests/playwright/`)。以下 §5 の数値は
+**Status**: Active。spec は現在 299 ファイル (`tests/playwright/`)。以下 §5 の数値は
 **Phase 1-4 完了時点のスナップショット**で、現状は [testing.md](../testing.md) を参照
 
 ---

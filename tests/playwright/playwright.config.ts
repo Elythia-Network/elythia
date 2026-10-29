@@ -6,7 +6,7 @@
 import { defineConfig } from '@playwright/test';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
-// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 8 ファイル。CI では `--shard=i/4` を 4 job に
+// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 9 ファイル。CI では `--shard=i/4` を 4 job に
 // 分けて回す (docs/playwright.md)。
 export default defineConfig({
   testDir: './specs',
@@ -62,7 +62,7 @@ export default defineConfig({
     // i18n key 解決に使うので、これで全 spec の text 前提が安定する。
     locale: 'en-US',
   },
-  // **1 スタックに対しては直列で回すしかない。** 298 spec のうち 179 が共有の
+  // **1 スタックに対しては直列で回すしかない。** 299 spec のうち 179 が共有の
   // root (alice) でブラウザからサインインし (数え方は
   // `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
   // さらに 32 がサインインせず root の token で API を叩く

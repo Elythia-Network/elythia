@@ -264,7 +264,7 @@ jobs:
 
       - name: Run Playwright
         # spec は 1 スタックあたり直列でしか回せない。共有の root アカウント
-        # を 298 ファイル中 179 がブラウザからサインインして使い (数え方は
+        # を 299 ファイル中 179 がブラウザからサインインして使い (数え方は
         # `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
         # さらに 32 がサインインせず root の token で API を叩く
         # (`root.json` を読むのが 211 で、その差分)。このアカウントと instance meta を全 spec が
