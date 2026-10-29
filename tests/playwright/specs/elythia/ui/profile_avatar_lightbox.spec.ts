@@ -6,7 +6,7 @@
 // プロフィールページ (`pages/user/home.vue`) のアイコンを押すと、既存の
 // `MkLightbox` で拡大表示されるかを見る spec (#3124)。
 //
-// **`specs/mkgo/` に置く。** upstream のプロフィールのアイコンは押せない素の
+// **`specs/elythia/` に置く。** upstream のプロフィールのアイコンは押せない素の
 // 画像なので、`specs/upstream` だけを回す `make playwright-ts-test`
 // (backend = ts) の対象に入れてはいけない。
 //

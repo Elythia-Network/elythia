@@ -10,7 +10,7 @@
 // たびに競合させる意味が無い。
 //
 // 見るのは配線だけで、実際に拡大された絵が出るかは Playwright 側
-// (`specs/mkgo/ui/profile_avatar_lightbox.spec.ts`) が実ブラウザで見る。
+// (`specs/elythia/ui/profile_avatar_lightbox.spec.ts`) が実ブラウザで見る。
 
 import { afterAll, afterEach, assert, beforeAll, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, type RenderResult } from '@testing-library/vue';

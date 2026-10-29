@@ -77,7 +77,7 @@ handler が hash では通らない (`'unsafe-hashes'` が要る、#2786) のよ
 ブラウザに実行させないと分からない挙動がある。
 
 **`report-only` では駄目。** あちらは違反を報告するだけで script は動くので、
-壊れた状態でも spec は緑になる。`specs/mkgo/ui/csp_enforce.spec.ts` は
+壊れた状態でも spec は緑になる。`specs/elythia/ui/csp_enforce.spec.ts` は
 header が `Content-Security-Policy` (report-only でない) であることを先に確認する
 — この確認が無いと `instance.yml` から設定が消えても violation ゼロで緑になり、
 「CSP を検査していないのに通る」状態に落ちる。
@@ -132,7 +132,7 @@ $L 2>&1 | grep msg=csp-report | grep -oE 'documentUri=\S+' | sort | uniq -c
 の枚数と一致する (contributor 6 + sponsors 6 + patron 50)。`loading="lazy"` も
 `v-if` も折りたたみも無いので、ページを開いた時点で全部読まれる。上の 124 件は
 spec が `/about-misskey` を 2 回開いた時点の実測で、**#2700 の
-`specs/mkgo/ui/about_elythia.spec.ts` が 2 回開くようになったので現在は 4 回**
+`specs/elythia/ui/about_elythia.spec.ts` が 2 回開くようになったので現在は 4 回**
 (件数は 248 前後になる)。**開く回数を変えたらこの数も動く** — 内訳の妥当性は
 「62 × 開いた回数」で確かめること。
 

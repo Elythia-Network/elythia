@@ -6,7 +6,7 @@
 import { defineConfig } from '@playwright/test';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
-// `specs/upstream/` に 290 ファイル、`specs/mkgo/` に 8 ファイル。CI では `--shard=i/4` を 4 job に
+// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 8 ファイル。CI では `--shard=i/4` を 4 job に
 // 分けて回す (docs/playwright.md)。
 export default defineConfig({
   testDir: './specs',

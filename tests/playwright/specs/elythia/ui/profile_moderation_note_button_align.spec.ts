@@ -14,7 +14,7 @@
 // 親に `text-align: center` を足しても動かない (ブロック要素なので)
 // 型なので、CSS の存在ではなく**実際の位置**を測る。
 //
-// **`specs/mkgo/` に置く。** upstream Misskey は今もこれを直しておらず、
+// **`specs/elythia/` に置く。** upstream Misskey は今もこれを直しておらず、
 // `make playwright-ts-test` (backend = ts) は `specs/upstream` だけを
 // 対象にするので、そちらでは実行されない。
 //

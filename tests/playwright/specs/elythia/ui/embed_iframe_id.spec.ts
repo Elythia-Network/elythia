@@ -7,7 +7,7 @@
 // 実ブラウザで見る。iframeIdは最初の1回で確定するので、親以外の値を受けると
 // 親への通知に別の値が付く。
 //
-// **`mkgo/`に置く。** 本家のfrontend-embedは送り元を確かめないので、公式imageを
+// **`elythia/`に置く。** 本家のfrontend-embedは送り元を確かめないので、公式imageを
 // 使う`playwright-ts-test`では通らない。
 
 import { expect, test } from '@playwright/test';

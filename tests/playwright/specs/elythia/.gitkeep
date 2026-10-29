@@ -1,7 +1,7 @@
-mk-go 独自機能を検証する spec を置く。
+Elythia 独自機能を検証する spec を置く。
 
 upstream/ との違い:
   - upstream/ は Misskey TS backend に対しても通る (make playwright-ts-test で担保)
-  - mkgo/ は mk-go にしか無い機能なので TS backend では通らない
+  - elythia/ は Elythia にしか無い機能なので TS backend では通らない
 
 混ぜると playwright-ts-test が壊れるので分けている。
