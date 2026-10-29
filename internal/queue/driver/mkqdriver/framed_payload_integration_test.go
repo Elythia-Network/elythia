@@ -73,9 +73,9 @@ func jobData(t *testing.T, queueName string) string {
 // Misskey の本文は < をエスケープせず、日本語を含む。空白を含む本文 (詰まって
 // いない JSON) も届く。
 //
-// 2 つの書き方を通す。"current" はこの版の Enqueue (書く側を有効にするまでは
-// 以前の形)。"compact" は書く側を有効にしたときの形を mkq で直接積んだもの
-// (読む側を先に出す 2 段の、2 段目の job)。compact では、本文が二重の base64 に
+// 2 つの書き方を通す。"current" はこの版の Enqueue (driver.CompactJobPayloads
+// が false なら以前の形)。"compact" は書く側を有効にしたときの形を mkq で直接
+// 積んだもの。compact では、本文が二重の base64 に
 // ならず、data がほぼ本文の大きさに収まることも見る。
 func TestFramedPayload_InboxBodySurvivesRedisByteForByte(t *testing.T) {
 	type compactFramed struct {
@@ -209,8 +209,8 @@ func scheduleData(t *testing.T, taskType string) []string {
 	return out
 }
 
-// **定期実行の登録も、書く側を有効にするまでは以前の形で積むこと** (#3614 の
-// 1 段目。レビュー 2 周目の L-1)。payload を持つ定期実行はプラグインの cron で、
+// **定期実行の登録も、driver.CompactJobPayloads に従った形で積むこと** (#3614。
+// 2.1.0 のレビュー 2 周目の L-1)。payload を持つ定期実行はプラグインの cron で、
 // 登録した template から作られる次の 1 回が、戻した後の古い版にも渡る。
 func TestScheduler_RegisterWritesTheShapeSelectedByCompactJobPayloads(t *testing.T) {
 	d := newDriver(t)

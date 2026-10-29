@@ -2020,8 +2020,8 @@ func legacyActivityPayload(t *testing.T, fields map[string]any, body []byte) []b
 }
 
 // activityPayloadEncodings returns the two stored shapes of an inbox payload
-// carrying body: the pre-#3614 base64 one ("legacy", also what this release
-// writes) and the #3614 one written once driver.CompactJobPayloads is
+// carrying body: the pre-#3614 base64 one ("legacy", also what 2.1.0
+// writes) and the #3614 one written while driver.CompactJobPayloads is
 // enabled ("compact").
 func activityPayloadEncodings(t *testing.T, body []byte) map[string][]byte {
 	t.Helper()
@@ -2079,8 +2079,7 @@ func TestQueueShowJob_DataExpandsActivityBody(t *testing.T) {
 			checkFn: func(t *testing.T, body map[string]any) { assert.NotContains(t, body, "bodyEscaped") }})
 	}
 	// JSON として読めない本文と、JSON の文字列 (オブジェクトでも配列でもない) は
-	// 埋め込まない。以前の形は base64 のまま、#3614 の形 (書く側を有効にした
-	// 後) は文字列のまま返す。
+	// 埋め込まない。以前の形は base64 のまま、#3614 の形は文字列のまま返す。
 	for _, raw := range []string{"not json", `"abc"`} {
 		encs := activityPayloadEncodings(t, []byte(raw))
 		cases = append(cases,
