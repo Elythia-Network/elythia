@@ -24,7 +24,9 @@ package driver
 //     (internal/queue)、
 //     `TestFramedPayload_WritesTheShapeSelectedByCompactJobPayloads`、
 //     `TestScheduler_RegisterWritesTheShapeSelectedByCompactJobPayloads`、
-//     `TestFramedPayload_InboxBodySurvivesRedisByteForByte` の current
+//     `TestFramedPayload_InboxBodySurvivesRedisByteForByte` の current、
+//     `TestFramePayload_UsesTheVerbatimMarkOnlyWhenWritingCompactShapes`
+//     (driver.WithVerbatimJSONPayload の印が効くのは true にしてから)
 //     (internal/queue/driver/mkqdriver)
 //   - docs を更新する: docs/divergence/config.md §4-3 (「読む側」「書く側」の
 //     箇条と「書く側を有効にするリリースの注意」)、docs/divergence/api.md の

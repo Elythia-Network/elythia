@@ -50,3 +50,16 @@ func TestClient_EnqueueWritesTheShapeSelectedByCompactJobPayloads(t *testing.T) 
 		})
 	}
 }
+
+// **配送・受信の payload には、driver の検査を省かせる印を付ける** (#3614)。
+// 1 つの投稿を inbox の数だけ積む配送で、同じ検査を宛先ごとに繰り返さないため。
+// 付けてよいのは、MarshalJSON がどちらの形でも encoding/json と同じ書き方の
+// object を返すからで、それは FuzzActivityBodyRoundTrip (mkqdriver) が確かめる。
+func TestClient_DeliverAndInboxMarkTheirPayloadsVerbatim(t *testing.T) {
+	c, rc := newRecordingClient(nil)
+	require.NoError(t, c.EnqueueDeliver(queue.DeliverPayload{Inbox: "https://remote.example/inbox", Body: []byte(`{"type":"Create"}`), KeyID: "k", SignerUserID: "u1"}))
+	require.NoError(t, c.EnqueueInbox(context.Background(), queue.InboxPayload{Body: []byte(`{"type":"Create"}`)}))
+	require.Len(t, rc.enqueued, 2)
+	assert.True(t, rc.enqueued[0].opts.VerbatimJSONPayload, "deliver")
+	assert.True(t, rc.enqueued[1].opts.VerbatimJSONPayload, "inbox")
+}

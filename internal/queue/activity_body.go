@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
@@ -83,6 +85,46 @@ func encodeActivityBody(b []byte) activityBodyField {
 		}
 	}
 	return compactOrLegacyActivityBody(b)
+}
+
+// deliverBodyMemo remembers the shape picked for the last deliver activity.
+//
+// **1 つの投稿は inbox の数だけ同じ本文で積まれる** (DeliverService の宛先の
+// ループ)。形の判定は本文の全体を 2 回走査するので、宛先ごとに繰り返すと 73KB の
+// 本文で 1 件あたり約 250µs かかる (#3614)。直前の 1 件だけを覚え、中身が同じなら
+// 判定を使い回す。
+//
+// **中身で照合し、本文は複製して持つ。** 同じ配列が後から書き換えられても、
+// 覚えた値は複製から作ったものなので、別の本文と取り違えない。照合は memcmp で、
+// 判定より桁で速い。並行して別の投稿を配ると交互に外れるが、そのときは判定し直す
+// だけで、結果は変わらない。
+var deliverBodyMemo struct {
+	mu    sync.Mutex
+	body  []byte
+	field activityBodyField
+}
+
+// encodeDeliverActivityBody is encodeActivityBody for deliver payloads,
+// reusing the result for the same activity (deliverBodyMemo).
+func encodeDeliverActivityBody(b []byte) activityBodyField {
+	// nil (null) と空 (文字列の "") は書く形が違うので、空は覚えない。
+	if len(b) == 0 {
+		return encodeActivityBody(b)
+	}
+	deliverBodyMemo.mu.Lock()
+	if bytes.Equal(deliverBodyMemo.body, b) {
+		f := deliverBodyMemo.field
+		deliverBodyMemo.mu.Unlock()
+		return f
+	}
+	deliverBodyMemo.mu.Unlock()
+
+	own := bytes.Clone(b)
+	f := encodeActivityBody(own)
+	deliverBodyMemo.mu.Lock()
+	deliverBodyMemo.body, deliverBodyMemo.field = own, f
+	deliverBodyMemo.mu.Unlock()
+	return f
 }
 
 // compactOrLegacyActivityBody returns the string shape when it is valid and
@@ -233,7 +275,7 @@ func (p DeliverPayload) MarshalCompactJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return appendActivityBody(head, encodeActivityBody(p.Body)), nil
+	return appendActivityBody(head, encodeDeliverActivityBody(p.Body)), nil
 }
 
 // UnmarshalJSON reads every wire shape of the activity, including the
