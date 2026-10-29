@@ -73,3 +73,45 @@ func FuzzActivityBodyRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+// FuzzFramedPayloadRoundTrip frames an arbitrary task payload (plugins may
+// enqueue any bytes) in every unmarked writer shape, stores it the way mkq
+// stores job data, and checks that the worker reads the same bytes back.
+//
+// 包みの側は、本文と違ってプラグインが任意のバイト列を積める。埋め込めないものは
+// 以前の形に戻すので、どんな入力でも読み戻したバイト列が一致すること。種
+// (testdata/fuzz/FuzzFramedPayloadRoundTrip) は FuzzActivityBodyRoundTrip と同じ
+// 壊れ方に、包みの深さの境目 (driver.MaxFramedJSONDepth) と、オブジェクトでない
+// JSON を足したもの。広く回すときは
+// `go test -run '^$' -fuzz FuzzFramedPayloadRoundTrip ./internal/queue/driver/mkqdriver/`。
+func FuzzFramedPayloadRoundTrip(f *testing.F) {
+	f.Fuzz(func(t *testing.T, payload []byte) {
+		for name, frame := range map[string]func(string, []byte) framedPayload{
+			"current": newFramedPayload,
+			"compact": compactFramedPayload,
+		} {
+			var data []byte
+			err := addFramed(frame("plugin:x", payload), "plugin:x", payload, func(fp framedPayload) error {
+				b, err := json.Marshal(fp)
+				if err != nil {
+					return fmt.Errorf("mkq: marshal payload: %w", err)
+				}
+				data = b
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("%s: add: %v", name, err)
+			}
+			var back framedPayload
+			if err := json.Unmarshal(data, &back); err != nil {
+				t.Fatalf("%s: unmarshal data: %v", name, err)
+			}
+			if back.Type != "plugin:x" {
+				t.Fatalf("%s: type changed: %q", name, back.Type)
+			}
+			if !bytes.Equal(back.payload(), payload) {
+				t.Fatalf("%s: payload changed:\n got %q\nwant %q", name, back.payload(), payload)
+			}
+		}
+	})
+}

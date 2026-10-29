@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"pluginName\":\"x\",\"data\":{\"k\":\"<v>&\",\"n\":1}}")
