@@ -28,6 +28,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/config"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/remotecheck"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
@@ -145,7 +146,7 @@ var enforcementPending = map[string]string{
 // left to a later stage, with the reason. Unlike enforcementPending, they
 // have no Elythia-only input that upstream's paramDef rejects.
 var enforcementDeferred = map[string]string{
-	// i/update は #3886 で載せた。
+	// i/update は #3886 で、admin/update-meta は #3888 で載せた。
 }
 
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
@@ -261,6 +262,26 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 		name, ok := in["name"].(string)
 		return ok && utf8.RuneCountInString(name) > 128
 	}},
+	// admin/update-meta (#3888) は 2 つの入力を、本家と違って 400 INVALID_PARAM にする。
+	// remoteNotesCleaning* の整数でない数は、本家の宣言が number で列が integer なので、
+	// 本家では列への書き込みで 500 になる。deliverSuspendedSoftware の `/.../` の形で
+	// コンパイルできない versionRange は、本家は保存し、何にも当たらない規則が残る
+	// (#3362)。
+	"admin/update-meta": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
+		for _, k := range []string{"remoteNotesCleaningExpiryDaysForEachNotes", "remoteNotesCleaningMaxProcessingDurationInMinutes"} {
+			if v, ok := in[k].(float64); ok && v != math.Trunc(v) {
+				return true
+			}
+		}
+		items, _ := in["deliverSuspendedSoftware"].([]any)
+		for _, item := range items {
+			m, _ := item.(map[string]any)
+			if r, ok := m["versionRange"].(string); ok && corefederation.InvalidVersionRegexp(r) {
+				return true
+			}
+		}
+		return false
+	}},
 	// 本家は日付として読めない updatedAtFrom / updatedAtTo を PostgreSQL の型変換で
 	// 500 にする。Elythia は引く前に 400 にしている (#3518)。
 	"v2/admin/emoji/list": {id: ajvInvalidParamID, match: func(in map[string]any) bool {
@@ -275,6 +296,15 @@ var handlerStricterThanUpstream = map[string]stricterCase{
 		}
 		return false
 	}},
+}
+
+// extraAcceptedInputs are inputs ajv accepts that the corpus does not have,
+// sent like the corpus inputs (as lines -1, -2, ...) so that every branch of
+// handlerStricterThanUpstream is run (#3888).
+var extraAcceptedInputs = []struct{ ep, in string }{
+	// コンパイルできない `/.../` の versionRange。corpus の versionRange には `/` で
+	// 始まる値が無い。
+	{"admin/update-meta", `{"deliverSuspendedSoftware":[{"software":"x","versionRange":"/(/"}]}`},
 }
 
 // nonIntegerDisplayOrder matches an input whose displayOrder is a number
@@ -310,8 +340,8 @@ var jobEnqueuingEndpoints = []string{"admin/drive/clean-remote-files", "admin/em
 
 // metaWritingEndpoints are the enforced admin/* endpoints whose accepted
 // corpus inputs write meta. TestEnforcedEndpointsMatchTheCorpus puts the row
-// back after each of them.
-var metaWritingEndpoints = []string{"admin/roles/update-default-policies", "admin/captcha/save"}
+// back after each of them, and drops the caches built from it.
+var metaWritingEndpoints = []string{"admin/roles/update-default-policies", "admin/captcha/save", "admin/update-meta"}
 
 // moderationEndpoint reports whether TestEnforcedEndpointsMatchTheCorpus seeds
 // the remote user, role, system webhook, notification recipient and abuse
@@ -417,9 +447,20 @@ func TestEnforcedEndpointsAreDeclared(t *testing.T) {
 	// 要求する (#3854、#3857、#3859、#3861、#3865)。
 	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
 		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha",
-		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account", "admin/queue"} {
+		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account", "admin/queue",
+		"admin/update-meta"} {
 		require.True(t, packages[pkg], "package %s is not counted", pkg)
 	}
+	// #3888 で admin/update-meta を載せ、本家の endpoint で載っていないのは reset-db
+	// だけになった。reset-db はテストのモードでだけ登録し、宣言 (properties: {}) は
+	// どの object も通すので、拒否に載せても変わらない。
+	var counted []string
+	for name := range eps {
+		if !slices.Contains(paramEnforcedEndpoints, name) {
+			counted = append(counted, name)
+		}
+	}
+	assert.Equal(t, []string{"reset-db"}, counted, "the upstream endpoints that are only counted")
 	for name := range eps {
 		pkg := enforcementPackage(name)
 		if packages[pkg] && enforcementPending[name] == "" && enforcementDeferred[name] == "" {
@@ -706,6 +747,20 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		cfg.AllowedPrivateNetworks = []string{"192.0.2.0/24"}
 	})
 	dropUserCache = on.userCache.DropLocal
+	// dropMetaCaches drops the caches of the meta line of the server, in drop
+	// order.
+	var metaCaches []cachePart
+	for _, p := range on.caches.parts {
+		if slices.Contains(metaCachesInOrder, p.name) {
+			metaCaches = append(metaCaches, p)
+		}
+	}
+	require.Len(t, metaCaches, len(metaCachesInOrder), "the caches of the meta line are not all listed")
+	dropMetaCaches := func() {
+		for _, p := range metaCaches {
+			p.cache.DropLocal()
+		}
+	}
 	// proxy が外向きの通信を実際に拾えることを先に確かめる。拾えないと、下の 0 件は
 	// 何も見ていないのと同じになる。
 	if res, err := on.outboundClient(5 * time.Second).Get("http://192.0.2.1/probe"); err == nil {
@@ -960,8 +1015,12 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	restoreMetaSQL := `UPDATE meta SET (` + strings.Join(quoted, ", ") + `) = (SELECT ` + strings.Join(quoted, ", ") +
 		` FROM json_populate_record(NULL::meta, ?::json))`
+	// 行を戻しただけでは、meta の系統のキャッシュ (#3721) に書き換えた後の値が
+	// 残り、後の入力 (meta・admin/meta など) がそれを読む (#3888 で実測)。行を
+	// 戻した後に、捨てる順で捨てる (dropMetaCaches)。
 	restoreMeta := func() {
 		require.NoError(t, db.Exec(restoreMetaSQL, metaBefore[0]).Error)
+		dropMetaCaches()
 	}
 	// i/update の受理の入力は、利用者の user の列 (isLocked・isBot・name・
 	// avatarDecorations・makeNotes*Before など) を書き換える。seedI が置き直すのは
@@ -986,10 +1045,22 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// userRewritten counts the i/update inputs that changed the user row, so
 	// that restoring it is not vacuous.
 	userRewritten := 0
+	// metaRewritten counts the admin/update-meta inputs that changed the meta
+	// row, likewise.
+	metaRewritten := 0
 
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
 	cases := readAJVCorpus(t, paramEnforcedEndpoints)
+	for i, extra := range extraAcceptedInputs {
+		var data any
+		require.NoError(t, json.Unmarshal([]byte(extra.in), &data))
+		require.Nil(t, eps[extra.ep].Schema.Validate(data), "ajv's paramDef rejects the extra input %s", extra.in)
+		cases = append(cases, ajvCase{ep: extra.ep, line: -1 - i, in: json.RawMessage(extra.in), ok: true})
+	}
+	// extraStricter counts the extra inputs that went through
+	// handlerStricterThanUpstream.
+	extraStricter := 0
 	seen := map[string][2]int{}
 	for _, tc := range cases {
 		n := seen[tc.ep]
@@ -1045,6 +1116,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		require.NoError(t, json.Unmarshal(adminPost("admin/queue/queue-stats", `{"queue":`+strconv.Quote(name)+`}`, http.StatusOK), &stats))
 		return stats.IsPaused
 	}
+	// 流す前の admin/meta。meta を書き換えた入力の後に、行とキャッシュを戻した
+	// ことをこれと比べて確かめる。
+	adminMetaBefore := adminPost("admin/meta", `{}`, http.StatusOK)
 	seedReached := map[string]int{}
 	jobReached := map[string]int{}
 	diagAccepted := map[string]int{}
@@ -1119,7 +1193,17 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
 		if metaWriting {
+			changed := !slices.Equal(metaBefore, readMeta())
+			if changed && tc.ep == "admin/update-meta" {
+				metaRewritten++
+			}
 			restoreMeta()
+			if changed {
+				// 戻した後の admin/meta が、流す前と同じ値を返すこと (キャッシュを
+				// 捨て損ねていないこと)。
+				require.JSONEq(t, string(adminMetaBefore), string(adminPost("admin/meta", `{}`, http.StatusOK)),
+					"admin/meta after %s (corpus line %d) restored the row", tc.ep, tc.line)
+			}
 		}
 		if isI {
 			if readUser() != userBefore {
@@ -1270,11 +1354,19 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			var in map[string]any
 			if stricter, ok := handlerStricterThanUpstream[tc.ep]; ok && json.Unmarshal(tc.in, &in) == nil && stricter.match(in) {
 				stricterSeen[tc.ep]++
+				if tc.line < 0 {
+					extraStricter++
+				}
 				assert.Equal(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				assert.Equal(t, stricter.id, env.Error.ID, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				continue
 			}
 			assert.NotEqual(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): ajv accepts it; body %s", name, tc.line, rec.Body.String())
+			// update-meta の受理の入力は保存まで届く (#3888)。以前は型の違う値で 500 に
+			// なるものがあり、上の「INVALID_PARAM でない」はそれを通していた。
+			if tc.ep == "admin/update-meta" {
+				assert.Equal(t, http.StatusNoContent, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			}
 			continue
 		}
 		// 本家が拒否する値を Elythia が重ねる宣言 (elythia_overlays.json) で許して
@@ -1317,6 +1409,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		"the rejected corpus inputs the overlays accept, by upstream's first error")
 	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
 	assert.Positive(t, userRewritten, "no accepted corpus input of i/update changed the user row")
+	assert.Equal(t, len(extraAcceptedInputs), extraStricter, "an extra input did not go through handlerStricterThanUpstream")
+	assert.Positive(t, metaRewritten, "no accepted corpus input of admin/update-meta changed the meta row")
 	// 診断の偽物が呼ばれた回数は、200 を返した受理の入力の数と一致する。偽物が
 	// 組み立てで使われていないと、本物が外へ取りに行き、回数は 0 になる。
 	assert.Positive(t, diagAccepted["admin/self-check"], "no accepted corpus input of admin/self-check ran the self-check")

@@ -477,5 +477,131 @@
 				]
 			}
 		}
+	},
+	"admin/update-meta": {
+		"x-elythia-properties": {
+			"approvalRequiredForSignup": {
+				"description": "Accepts signups only through applications that a moderator approves (#2554); null leaves it as it is.",
+				"type": "boolean",
+				"nullable": true
+			},
+			"registrationClosed": {
+				"description": "Accepts no registrations at all, not even with an invitation code (#3186); null leaves it as it is.",
+				"type": "boolean",
+				"nullable": true
+			},
+			"signupApplicationForm": {
+				"description": "The questions of the signup application (#2570); null is the same as an empty array.",
+				"type": "array",
+				"nullable": true,
+				"maxItems": 10,
+				"items": {
+					"type": "object",
+					"properties": {
+						"label": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 100
+						},
+						"type": {
+							"type": "string",
+							"enum": [
+								"text",
+								"textarea"
+							]
+						},
+						"required": {
+							"type": "boolean",
+							"nullable": true
+						},
+						"maxLength": {
+							"description": "The longest answer; 0 and null are the default of 500.",
+							"type": "integer",
+							"nullable": true,
+							"minimum": 0,
+							"maximum": 2000
+						}
+					},
+					"required": [
+						"label",
+						"type"
+					]
+				}
+			},
+			"minimumUsernameLength": {
+				"description": "The minimum length of a local username (#3015).",
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 20
+			},
+			"chunkedUploadEnabled": {
+				"description": "Enables the chunked upload of drive files (#2313).",
+				"type": "boolean"
+			},
+			"chunkedUploadChunkSizeMb": {
+				"description": "The size of one chunk in MiB.",
+				"type": "integer",
+				"minimum": 5,
+				"maximum": 32
+			},
+			"chunkedUploadSessionTtlMinutes": {
+				"description": "How long an unfinished chunked upload is kept.",
+				"type": "integer",
+				"minimum": 5,
+				"maximum": 1440
+			},
+			"chunkedUploadMaxSessionsPerUser": {
+				"description": "The unfinished chunked uploads a user may have at once; up to the range of the int4 column.",
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 2147483647
+			},
+			"chunkedUploadMaxPendingMbPerUser": {
+				"description": "The MiB of unfinished chunked uploads a user may have at once; up to the range of the int4 column.",
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 2147483647
+			},
+			"enableRelayOrphanUserCleanup": {
+				"description": "Periodically deletes remote users that only relays brought in (#2340).",
+				"type": "boolean"
+			},
+			"relayOrphanUserGraceDays": {
+				"description": "Such a user is deleted this many days after it was last seen (queue/processors.MinOrphanUserGraceDays); up to 10 years, so that now() - make_interval(days => n) stays a timestamp.",
+				"type": "integer",
+				"minimum": 7,
+				"maximum": 3650
+			},
+			"enableEphemeralRelayNotes": {
+				"description": "Keeps notes seen only through relays in Redis instead of the database (#2332).",
+				"type": "boolean"
+			},
+			"ephemeralRelayNoteTtlMinutes": {
+				"description": "How long such a note is kept; up to a year, so that time.Duration(n) * time.Minute does not overflow.",
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 525600
+			},
+			"inboxSuspendedSoftware": {
+				"description": "Software whose activities the inbox refuses, matched like deliverSuspendedSoftware (#3362); null is the same as an empty array.",
+				"type": "array",
+				"nullable": true,
+				"items": {
+					"type": "object",
+					"properties": {
+						"software": {
+							"type": "string"
+						},
+						"versionRange": {
+							"type": "string"
+						}
+					},
+					"required": [
+						"software",
+						"versionRange"
+					]
+				}
+			}
+		}
 	}
 }

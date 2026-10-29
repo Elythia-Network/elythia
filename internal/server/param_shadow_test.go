@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,13 +56,33 @@ func captureDefaultLog(t *testing.T) *syncBuffer {
 	return buf
 }
 
+// countedExample is the upstream endpoint the tests below count only, by
+// taking it out of the enforced endpoints of the server (enforcedExcept).
+//
+// #3888 で admin/update-meta も本家に揃えたので、数えるだけの本家の endpoint は
+// reset-db だけになった。reset-db の宣言は properties: {} で、判定が分かれる入力を
+// 作れず、テストのサーバー (TestMode) では実際に DB を消す。テストの中だけで
+// 対象の一覧から外した admin/update-meta を、数えるだけの例に使う。
+const countedExample = "admin/update-meta"
+
+// enforcedExcept returns paramEnforcedEndpoints without name, for
+// Server.paramEnforced. name must be enforced, or the test would count an
+// endpoint that is counted anyway.
+func enforcedExcept(t *testing.T, name string) []string {
+	t.Helper()
+	require.Contains(t, paramEnforcedEndpoints, name)
+	out := slices.DeleteFunc(slices.Clone(paramEnforcedEndpoints), func(n string) bool { return n == name })
+	require.Len(t, out, len(paramEnforcedEndpoints)-1)
+	return out
+}
+
 // TestParamShadowMiddlewareDisabled checks that disableParamShadow stops
 // only the counting: the enforced endpoints still reject with upstream's 400
 // (#3742), and the other upstream endpoints are neither validated nor
 // counted.
 func TestParamShadowMiddlewareDisabled(t *testing.T) {
 	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{DisableParamShadow: true, ParamShadowLogSeconds: 3600}}
+	s := &Server{config: &config.Config{DisableParamShadow: true, ParamShadowLogSeconds: 3600}, paramEnforced: enforcedExcept(t, countedExample)}
 	mw := s.paramShadowMiddleware()
 	require.NotNil(t, mw)
 
@@ -95,7 +116,7 @@ func TestParamShadowMiddlewareDisabled(t *testing.T) {
 // writes the counts.
 func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 3600}}
+	s := &Server{config: &config.Config{ParamShadowLogSeconds: 3600}, paramEnforced: enforcedExcept(t, countedExample)}
 	mw := s.paramShadowMiddleware()
 	require.NotNil(t, mw)
 	require.Equal(t, []string{"paramShadowRecorder"}, s.lifecycle.names())
@@ -252,7 +273,9 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	}).Error)
 	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
 
-	off, on, logs := newParamShadowServers(t)
+	off, on, logs := newParamShadowServersSetup(t, []func(*Server){func(s *Server) {
+		s.paramEnforced = enforcedExcept(t, countedExample)
+	}})
 
 	type request struct {
 		method, path, body string
@@ -268,13 +291,13 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		{http.MethodPost, "/api/notes/create", `{"text":"a","visibility":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":""}`, true, true},
 		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, false, true},
-		// 数えるだけの例は、本家に揃えていない admin/update-meta に置く
-		// (i/notifications・reversi/match は #3865、notes/create は #3884、i/update は
-		// #3886 で揃えた)。pinnedUsers の要素の型の誤りは、handler が 500 を返す
-		// (#3667 の admin/update-meta の段で揃える)。
+		// 数えるだけの例は、このテストの中だけで対象の一覧から外した
+		// admin/update-meta に置く (countedExample。#3888 で本家に揃えた)。
+		// pinnedUsers の要素の型の誤りは、検証を通らないと handler が 500 を返す。
+		// remoteNotesCleaning* の 1.5 は、本家の宣言は通し、handler は 400 にする。
 		{http.MethodPost, "/api/admin/update-meta", `{"themeColor":"影の検証"}`, true, true},
 		{http.MethodPost, "/api/admin/update-meta", `{"pinnedUsers":[1]}`, true, true},
-		{http.MethodPost, "/api/admin/update-meta", `{"minimumUsernameLength":0}`, true, true},
+		{http.MethodPost, "/api/admin/update-meta", `{"remoteNotesCleaningExpiryDaysForEachNotes":1.5}`, true, true},
 		{http.MethodPost, "/api/admin/update-meta", `{"disableRegistration":"yes"}`, true, true},
 		{http.MethodPost, "/api/admin/update-meta", "{\"name\":\"\\ud800\"}", true, true},
 		{http.MethodPost, "/api/i", `{}`, true, false},
@@ -473,7 +496,7 @@ func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
 	slog.SetDefault(slog.New(h))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New()}
+	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New(), paramEnforced: enforcedExcept(t, countedExample)}
 	mw := s.paramShadowMiddleware()
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
@@ -508,7 +531,7 @@ func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
 // itself without the group counting it as dropped work (#3677 review 2 L-1).
 func TestParamShadowSummaryAfterTheGenerationStopped(t *testing.T) {
 	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New()}
+	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New(), paramEnforced: enforcedExcept(t, countedExample)}
 	mw := s.paramShadowMiddleware()
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}

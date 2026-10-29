@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"slices"
@@ -14,9 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/core/notification"
+	coresignup "github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/processors"
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
@@ -175,6 +180,122 @@ func TestIUpdateOverlay(t *testing.T) {
 	}
 }
 
+// TestUpdateMetaOverlay pins the settings elythia_overlays.json adds to
+// admin/update-meta (#3888) to the bounds the handler and the services use:
+// the chunked upload (core/drive), the minimum username length (core/signup),
+// the signup application form (core/signupapplication) and the relay
+// settings (queue/processors for the grace days; the bundled frontend's
+// relays.vue for both). Each bound is checked from both sides.
+func TestUpdateMetaOverlay(t *testing.T) {
+	eff, err := paramschema.Effective()
+	require.NoError(t, err)
+	up, err := paramschema.Upstream()
+	require.NoError(t, err)
+	validate := func(eps map[string]paramschema.Endpoint, body string) *paramschema.Error {
+		t.Helper()
+		var data any
+		require.NoError(t, json.Unmarshal([]byte(body), &data), body)
+		return eps["admin/update-meta"].Schema.Validate(data)
+	}
+	ints := map[string][2]int{
+		"minimumUsernameLength":          {coresignup.MinUsernameLength, coresignup.MaxUsernameLength},
+		"chunkedUploadChunkSizeMb":       {coredrive.MinChunkSizeMb, coredrive.MaxChunkSizeMb},
+		"chunkedUploadSessionTtlMinutes": {coredrive.MinSessionTTLMinutes, coredrive.MaxSessionTTLMinutes},
+		// 上限は列 (int4) の範囲と、使う側で溢れない長さ (handler の
+		// updateMetaNumericRanges と同じ値)。
+		"chunkedUploadMaxSessionsPerUser":  {1, math.MaxInt32},
+		"chunkedUploadMaxPendingMbPerUser": {1, math.MaxInt32},
+		"relayOrphanUserGraceDays":         {processors.MinOrphanUserGraceDays, 3650},
+		"ephemeralRelayNoteTtlMinutes":     {1, 525600},
+	}
+	for key, r := range ints {
+		ok := func(v string) {
+			body := fmt.Sprintf(`{%q:%s}`, key, v)
+			assert.Nil(t, validate(eff, body), body)
+			// 本家は知らない項目として通す。宣言を足したことで初めて検証される。
+			assert.Nil(t, validate(up, body), body)
+		}
+		ng := func(v string) {
+			body := fmt.Sprintf(`{%q:%s}`, key, v)
+			assert.NotNil(t, validate(eff, body), body)
+		}
+		ok(fmt.Sprint(r[0]))
+		ok(fmt.Sprintf("%d.0", r[0]))
+		ng(fmt.Sprint(r[0] - 1))
+		ok(fmt.Sprint(r[1]))
+		ng(fmt.Sprint(r[1] + 1))
+		ng(fmt.Sprintf("%d.5", r[0]))
+		ng(`null`)
+		ng(fmt.Sprintf("%q", fmt.Sprint(r[0])))
+	}
+	for _, key := range []string{"chunkedUploadEnabled", "enableRelayOrphanUserCleanup", "enableEphemeralRelayNotes"} {
+		assert.Nil(t, validate(eff, `{"`+key+`":true}`), key)
+		for _, v := range []string{`null`, `0`, `"true"`} {
+			assert.NotNil(t, validate(eff, `{"`+key+`":`+v+`}`), key+" "+v)
+		}
+	}
+	// 登録のゲートの null は、handler が省略として扱う (normalizeSignupGateBools)。
+	for _, key := range []string{"approvalRequiredForSignup", "registrationClosed"} {
+		for _, v := range []string{`true`, `false`, `null`} {
+			assert.Nil(t, validate(eff, `{"`+key+`":`+v+`}`), key+" "+v)
+		}
+		assert.NotNil(t, validate(eff, `{"`+key+`":"false"}`), key)
+	}
+
+	field := func(label string, extra string) string {
+		return fmt.Sprintf(`{"label":%q,"type":"text"%s}`, label, extra)
+	}
+	form := func(fields ...string) string {
+		return `{"signupApplicationForm":[` + strings.Join(fields, ",") + `]}`
+	}
+	maxFields := make([]string, signupapplication.MaxFormFields)
+	for i := range maxFields {
+		maxFields[i] = field("q", "")
+	}
+	for body, ok := range map[string]bool{
+		`{"signupApplicationForm":null}`:                   true,
+		`{"signupApplicationForm":[]}`:                     true,
+		form(maxFields...):                                 true,
+		form(append(maxFields, field("q", ""))...):         false,
+		form(field("q", `,"required":true,"maxLength":0`)): true,
+		form(field("q", fmt.Sprintf(`,"maxLength":%d`, signupapplication.MaxAnswerLength))):   true,
+		form(field("q", fmt.Sprintf(`,"maxLength":%d`, signupapplication.MaxAnswerLength+1))): false,
+		form(field("q", `,"maxLength":-1`)):                                                   false,
+		form(field("q", `,"maxLength":1.5`)):                                                  false,
+		form(field("q", `,"required":null,"maxLength":null`)):                                 true,
+		form(field("q", `,"required":"yes"`)):                                                 false,
+		form(field(strings.Repeat("あ", signupapplication.MaxFormLabelLength), "")):            true,
+		form(field(strings.Repeat("あ", signupapplication.MaxFormLabelLength+1), "")):          false,
+		form(field("", "")): false,
+		// 宣言は送られたままの長さで数え、handler は前後の空白を削ってから数える
+		// (signupapplication.ValidateForm)。前後に空白を付けた 100 文字は宣言が
+		// 拒否し、空白だけの label は宣言を通って handler が 400 にする。
+		form(field(" "+strings.Repeat("あ", signupapplication.MaxFormLabelLength)+" ", "")): false,
+		form(field(" ", "")): true,
+		form(`{"label":"q","type":"` + signupapplication.FieldTypeTextarea + `"}`): true,
+		form(`{"label":"q","type":"select"}`):                                      false,
+		form(`{"label":"q"}`):                                                      false,
+		form(`{"type":"text"}`):                                                    false,
+		form(`"q"`):                                                                false,
+		`{"signupApplicationForm":{}}`:                                             false,
+	} {
+		assert.Equal(t, ok, validate(eff, body) == nil, body)
+	}
+
+	for body, ok := range map[string]bool{
+		`{"inboxSuspendedSoftware":null}`:                                           true,
+		`{"inboxSuspendedSoftware":[]}`:                                             true,
+		`{"inboxSuspendedSoftware":[{"software":"x","versionRange":"*"}]}`:          true,
+		`{"inboxSuspendedSoftware":[{"software":"x","versionRange":"*","note":1}]}`: true,
+		`{"inboxSuspendedSoftware":[{"software":"x"}]}`:                             false,
+		`{"inboxSuspendedSoftware":[{"software":1,"versionRange":"*"}]}`:            false,
+		`{"inboxSuspendedSoftware":["x"]}`:                                          false,
+		`{"inboxSuspendedSoftware":{}}`:                                             false,
+	} {
+		assert.Equal(t, ok, validate(eff, body) == nil, body)
+	}
+}
+
 // The job queue page of the bundled frontend opens a queue by the name
 // admin/queue/queues lists, the queues of plugins included, and calls the
 // endpoints below with it (job-queue.vue, job-queue.job.vue). The effective
@@ -219,12 +340,11 @@ func TestPluginQueueNamePatternMatchesTheQueuePackage(t *testing.T) {
 	}
 }
 
-// TestAddedPropertiesMatchElythiaJS keeps properties Elythia adds to
-// upstream paramDefs (x-elythia-properties of elythia_overlays.json) and
-// direct-route properties in the generated golden aligned with the request
-// fields elythia-js declares (ElythiaRequestExtensions of extensions.ts).
-// admin/update-meta is declared in the last stage of #3667;
-// it is only in extensions.ts.
+// TestAddedPropertiesMatchElythiaJS keeps the properties Elythia adds to
+// upstream endpoints (x-elythia-properties of elythia_overlays.json, #3867)
+// and the direct-route properties in the generated golden (#3852) to the same
+// names as the request fields elythia-js declares for them
+// (ElythiaRequestExtensions of extensions.ts).
 func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 	src, err := os.ReadFile("../../frontend/packages/elythia-js/src/extensions.ts")
 	require.NoError(t, err)
@@ -267,16 +387,11 @@ func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 		directRoutes[name] = true
 	}
 	directProperties := map[string][]string{"signup": {"federationStatus"}}
-	lastStage := map[string]bool{"admin/update-meta": true}
 	for name, fields := range ts {
 		if directFields, ok := directProperties[name]; ok {
 			assert.True(t, directRoutes[name], "%s must be an upstream direct route", name)
 			assert.NotContains(t, added, name, "%s is schema-less in the upstream golden and must not be overlaid", name)
 			assert.Equal(t, sorted(directFields), sorted(fields), "%s: direct-route fields and extensions.ts differ", name)
-			continue
-		}
-		if lastStage[name] {
-			assert.NotContains(t, added, name, "%s is declared in the last stage of #3667", name)
 			continue
 		}
 		assert.Equal(t, sorted(fields), sorted(added[name]), "%s: extensions.ts and x-elythia-properties differ", name)
