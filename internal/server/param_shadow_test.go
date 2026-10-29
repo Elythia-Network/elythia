@@ -65,14 +65,15 @@ func captureDefaultLog(t *testing.T) *syncBuffer {
 // 対象の一覧から外した admin/update-meta を、数えるだけの例に使う。
 const countedExample = "admin/update-meta"
 
-// enforcedExcept returns paramEnforcedEndpoints without name, for
-// Server.paramEnforced. name must be enforced, or the test would count an
-// endpoint that is counted anyway.
+// enforcedExcept returns the enforced endpoints (enforcedEndpoints) without
+// name, for Server.paramEnforced. name must be enforced, or the test would
+// count an endpoint that is counted anyway.
 func enforcedExcept(t *testing.T, name string) []string {
 	t.Helper()
-	require.Contains(t, paramEnforcedEndpoints, name)
-	out := slices.DeleteFunc(slices.Clone(paramEnforcedEndpoints), func(n string) bool { return n == name })
-	require.Len(t, out, len(paramEnforcedEndpoints)-1)
+	enforced := enforcedEndpoints(t)
+	require.Contains(t, enforced, name)
+	out := slices.DeleteFunc(slices.Clone(enforced), func(n string) bool { return n == name })
+	require.Len(t, out, len(enforced)-1)
 	return out
 }
 

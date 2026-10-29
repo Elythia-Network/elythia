@@ -132,23 +132,6 @@ func readAJVCorpusFile(t *testing.T, file string, eps []string) []ajvCase {
 	return cases
 }
 
-// enforcementPending lists the endpoints of an enforced package that are not
-// enforced yet, with a JSON body Elythia accepts but upstream's paramDef
-// rejects.
-var enforcementPending = map[string]string{
-	// 保留していた federation/instances・reversi/match・i/notifications・
-	// i/notifications-grouped・admin/drive/files は、Elythia 独自の値を本家の
-	// paramDef に重ねて(paramschema.Effective、elythia_overlays.json)載せた。
-	// admin/emoji/add の url だけの経路は消した(#3865)。
-}
-
-// enforcementDeferred lists the endpoints of an enforced package that are
-// left to a later stage, with the reason. Unlike enforcementPending, they
-// have no Elythia-only input that upstream's paramDef rejects.
-var enforcementDeferred = map[string]string{
-	// i/update は #3886 で、admin/update-meta は #3888 で載せた。
-}
-
 // stricterCase is an entry of handlerStricterThanUpstream: the accepted corpus
 // inputs it matches, and the id of the INVALID_PARAM the handler answers.
 type stricterCase struct {
@@ -371,123 +354,59 @@ var userTargetEndpoints = []string{
 // testNet1 is TEST-NET-1 (RFC 5737), where the seeded urls point.
 var testNet1 = &net.IPNet{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)}
 
-// enforcementPackage returns the package TestEnforcedEndpointsAreDeclared
-// counts the endpoint in: the first segment of the path (notes for notes and
-// notes/*), and for admin the first two (admin/ad for admin/ad/*). A top-level
-// endpoint (meta, admin/meta) is a package of its own.
-//
-// admin/* は 102 件あり、性質ごとに段を分けて載せる (#3854)。1 段目で数えると、
-// 一部を載せた時点で残り (#3854 の 20 件なら 82 件) を enforcementDeferred に並べる
-// ことになるので、admin だけは 2 段目までを 1 つのパッケージとして数える。
-func enforcementPackage(name string) string {
-	first, rest, ok := strings.Cut(name, "/")
-	if !ok || first != "admin" {
-		return first
-	}
-	second, _, ok := strings.Cut(rest, "/")
-	if !ok {
-		return name
-	}
-	return first + "/" + second
+// enforcedEndpoints returns paramEnforcedEndpoints of paramschema.Effective,
+// the endpoints the production server rejects with upstream's 400.
+func enforcedEndpoints(t *testing.T) []string {
+	t.Helper()
+	eps, err := paramschema.Effective()
+	require.NoError(t, err)
+	return paramEnforcedEndpoints(eps)
 }
 
-func TestEnforcementPackage(t *testing.T) {
-	for name, want := range map[string]string{
-		"meta":                          "meta",
-		"notes":                         "notes",
-		"notes/create":                  "notes",
-		"notes/polls/vote":              "notes",
-		"v2/admin/emoji/list":           "v2",
-		"admin/meta":                    "admin/meta",
-		"admin/ad/create":               "admin/ad",
-		"admin/emoji/set-category-bulk": "admin/emoji",
-		"admin/abuse-report/notification-recipient/create": "admin/abuse-report",
-	} {
-		assert.Equal(t, want, enforcementPackage(name), name)
-	}
-}
-
-// TestEnforcedEndpointsAreDeclared keeps paramEnforcedEndpoints to names
-// with a paramDef: upstream's, or Elythia's own (elythia_paramdefs.json,
-// #3869). The upstream ones go by whole packages (see enforcementPackage): an
-// endpoint of a package left out would keep the handwritten checks only,
-// unless enforcementPending or enforcementDeferred names it. Every Elythia
-// endpoint with a paramDef is enforced: the declaration is written to be
-// enforced, in steps of #3667.
+// TestEnforcedEndpointsAreDeclared checks paramEnforcedEndpoints: every
+// endpoint with a paramDef, upstream's or Elythia's own
+// (elythia_paramdefs.json, #3869), compiles and is enforced, but
+// paramCountedOnlyEndpoints, which must name upstream endpoints. Whether every
+// route has a paramDef is TestAPIRoutesHaveParamDefs.
 func TestEnforcedEndpointsAreDeclared(t *testing.T) {
-	eps, err := paramschema.Upstream()
+	up, err := paramschema.Upstream()
 	require.NoError(t, err)
 	eff, err := paramschema.Effective()
 	require.NoError(t, err)
-	packages := map[string]bool{}
-	elythia := 0
-	for _, name := range paramEnforcedEndpoints {
-		if ep, ok := eff[name]; ok && ep.Elythia {
-			require.NoError(t, ep.CompileErr, name)
-			elythia++
+	enforced := paramEnforcedEndpoints(eff)
+	require.True(t, slices.IsSorted(enforced))
+	upstreamN, elythiaN := 0, 0
+	for _, name := range enforced {
+		ep := eff[name]
+		require.NoError(t, ep.CompileErr, name)
+		if ep.Elythia {
+			elythiaN++
 			continue
 		}
-		ep, ok := eps[name]
-		require.True(t, ok, "%s has no paramDef: neither upstream nor elythia_paramdefs.json declares it", name)
-		require.NoError(t, ep.CompileErr, name)
-		packages[enforcementPackage(name)] = true
+		_, ok := up[name]
+		require.True(t, ok, "%s is enforced, but neither upstream nor elythia_paramdefs.json declares it", name)
+		upstreamN++
 	}
-	// 独自のendpointを1件も数えなくなる(Elythiaの印が付かなくなる)と、下の
-	// 検査が空振りする。
-	require.Positive(t, elythia, "no Elythia endpoint is enforced")
-	for name, ep := range eff {
-		if ep.Elythia {
-			assert.Contains(t, paramEnforcedEndpoints, name, "%s is declared in elythia_paramdefs.json, but not enforced", name)
-		}
+	// Elythiaの印が付かなくなる、本家の宣言を読めなくなる、のどちらでも下の
+	// 検査が空振りするので、両方を数え、実在するものを名指しで要求する。
+	require.Positive(t, upstreamN, "no upstream endpoint is enforced")
+	require.Positive(t, elythiaN, "no Elythia endpoint is enforced")
+	for _, name := range []string{"notes/create", "charts/notes", "admin/update-meta", "admin/queue/jobs", "admin/backup/list", "i/federation"} {
+		require.Contains(t, enforced, name)
 	}
-	require.NotEmpty(t, packages)
-	// admin は 2 段目までで数える。1 段目で数える形に戻ると、admin/* の残りが
-	// 載っていないことで落ちるが、数え方が別の形で崩れて admin のパッケージを
-	// 1 つも数えなくなると、下の検査が空振りする。載せたパッケージを名指しで
-	// 要求する (#3854、#3857、#3859、#3861、#3865)。
-	for _, pkg := range []string{"admin/ad", "admin/announcements", "admin/avatar-decorations", "admin/invite", "admin/promo", "admin/meta",
-		"admin/drive", "admin/emoji", "admin/roles", "admin/abuse-report", "admin/abuse-user-reports", "admin/system-webhook", "admin/captcha",
-		"admin/accounts", "admin/federation", "admin/relays", "admin/show-users", "admin/update-proxy-account", "admin/queue",
-		"admin/update-meta"} {
-		require.True(t, packages[pkg], "package %s is not counted", pkg)
-	}
-	// #3888 で admin/update-meta を載せ、本家の endpoint で載っていないのは reset-db
-	// だけになった。reset-db はテストのモードでだけ登録し、宣言 (properties: {}) は
-	// どの object も通すので、拒否に載せても変わらない。
+	// 数えるだけの一覧には、本家の宣言のある名前だけを、拒否の対象から外して置く。
+	// 使われなくなった名前を残さない。
 	var counted []string
-	for name := range eps {
-		if !slices.Contains(paramEnforcedEndpoints, name) {
+	for name := range eff {
+		if !slices.Contains(enforced, name) {
 			counted = append(counted, name)
 		}
 	}
-	assert.Equal(t, []string{"reset-db"}, counted, "the upstream endpoints that are only counted")
-	for name := range eps {
-		pkg := enforcementPackage(name)
-		if packages[pkg] && enforcementPending[name] == "" && enforcementDeferred[name] == "" {
-			assert.Contains(t, paramEnforcedEndpoints, name, "package %s is enforced, but not %s", pkg, name)
-		}
-	}
-	// 使われなくなった項目を残さない: 載せたか、パッケージごと外したら消す。
-	for name, body := range enforcementPending {
-		pkg := enforcementPackage(name)
-		ep, ok := eps[name]
-		if assert.True(t, ok, "pending %s is not an upstream endpoint", name) {
-			// 本家がその入力を通すようになったら、除外の理由は無くなる。
-			var in any
-			require.NoError(t, json.Unmarshal([]byte(body), &in), name)
-			assert.NotNil(t, ep.Schema.Validate(in), "pending %s: upstream now accepts %s; enforce it", name, body)
-		}
-		assert.NotContains(t, paramEnforcedEndpoints, name, "pending %s is enforced; drop it from enforcementPending", name)
-		assert.True(t, packages[pkg], "pending %s: package %s is not enforced; drop it from enforcementPending", name, pkg)
-	}
-	for name, reason := range enforcementDeferred {
-		pkg := enforcementPackage(name)
-		assert.NotEmpty(t, reason, name)
-		_, ok := eps[name]
-		assert.True(t, ok, "deferred %s is not an upstream endpoint", name)
-		assert.NotContains(t, paramEnforcedEndpoints, name, "deferred %s is enforced; drop it from enforcementDeferred", name)
-		assert.Empty(t, enforcementPending[name], "%s is both pending and deferred", name)
-		assert.True(t, packages[pkg], "deferred %s: package %s is not enforced; drop it from enforcementDeferred", name, pkg)
+	slices.Sort(counted)
+	assert.Equal(t, slices.Sorted(slices.Values(paramCountedOnlyEndpoints)), counted, "the endpoints that are only counted")
+	for _, name := range paramCountedOnlyEndpoints {
+		_, ok := up[name]
+		assert.True(t, ok, "paramCountedOnlyEndpoints has %s, which is not an upstream endpoint", name)
 	}
 }
 
@@ -1051,7 +970,8 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 
 	eps, err := paramschema.Upstream()
 	require.NoError(t, err)
-	cases := readAJVCorpus(t, paramEnforcedEndpoints)
+	enforced := enforcedEndpoints(t)
+	cases := readAJVCorpus(t, enforced)
 	for i, extra := range extraAcceptedInputs {
 		var data any
 		require.NoError(t, json.Unmarshal([]byte(extra.in), &data))
@@ -1071,7 +991,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		seen[tc.ep] = n
 	}
-	for _, name := range paramEnforcedEndpoints {
+	for _, name := range enforced {
 		// 何も流さずに緑にならないよう、各endpointに受理と拒否の両方を要求する。
 		// paramDef が {} で何でも通す endpoint (reversi/invitations) には拒否の
 		// 入力が無いので、受理だけを要求する (#3843)。
