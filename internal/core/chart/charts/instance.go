@@ -13,9 +13,9 @@ func SchemaInstance() chart.Schema {
 		Name:    "instance",
 		Grouped: true,
 		Columns: []chart.ColumnDef{
-			{Name: "requests.failed", Range: chart.RangeSmall},
-			{Name: "requests.succeeded", Range: chart.RangeSmall},
-			{Name: "requests.received", Range: chart.RangeSmall},
+			{Name: "requests.failed"},
+			{Name: "requests.succeeded"},
+			{Name: "requests.received"},
 			{Name: "notes.total", Accumulate: true},
 			{Name: "notes.inc"},
 			{Name: "notes.dec"},
