@@ -75,6 +75,18 @@ type EnqueueOptions struct {
 	// (deliver / inbox) は必ず設定して hammering を防ぐ (#1405)。
 	BackoffType  string
 	BackoffDelay time.Duration
+
+	// VerbatimJSONPayload is the caller's promise that the payload is a JSON
+	// object written the way encoding/json writes it (no whitespace between
+	// tokens, <, > and & escaped, valid UTF-8, nested no deeper than
+	// MaxFramedJSONDepth). A driver that embeds payloads as JSON
+	// (CompactJobPayloads) may then skip its own check. Set it with
+	// WithVerbatimJSONPayload.
+	//
+	// 検査を飛ばすだけで、埋め込みに失敗したときの以前の形への切り替えは残る。
+	// 約束が破れていても job は落ちないが、本文が json.Marshal に書き直されて
+	// バイト列が変わりうるので、約束できる payload にだけ付ける。
+	VerbatimJSONPayload bool
 }
 
 // EnqueueOption mutates EnqueueOptions; pass via Client.Enqueue.
@@ -106,6 +118,16 @@ func WithUnique(ttl time.Duration) EnqueueOption {
 // WithProcessIn delays processing of the task by the given duration.
 func WithProcessIn(d time.Duration) EnqueueOption {
 	return func(o *EnqueueOptions) { o.ProcessIn = d }
+}
+
+// WithVerbatimJSONPayload marks the payload as a JSON object written the
+// way encoding/json writes it (EnqueueOptions.VerbatimJSONPayload).
+//
+// 1 つの投稿を inbox の数だけ積む配送では、同じ検査を宛先ごとに繰り返す
+// (73KB の本文で 1 件あたり約 140µs、#3614)。payload を自分で組み立てる側は
+// 形を知っているので、検査を省けるよう伝える。
+func WithVerbatimJSONPayload() EnqueueOption {
+	return func(o *EnqueueOptions) { o.VerbatimJSONPayload = true }
 }
 
 // Backoff type constants. "fixed" / "exponential" are BullMQ built-ins

@@ -15,6 +15,7 @@ import (
 type recordedTask struct {
 	taskType string
 	payload  []byte
+	opts     driver.EnqueueOptions
 }
 
 // recordingQueueClient is a driver.Client fake that records Enqueue calls
@@ -26,13 +27,13 @@ type recordingQueueClient struct {
 	failWhen func(taskType string, payload []byte) error
 }
 
-func (c *recordingQueueClient) Enqueue(_ context.Context, taskType string, payload []byte, _ ...driver.EnqueueOption) error {
+func (c *recordingQueueClient) Enqueue(_ context.Context, taskType string, payload []byte, opts ...driver.EnqueueOption) error {
 	if c.failWhen != nil {
 		if err := c.failWhen(taskType, payload); err != nil {
 			return err
 		}
 	}
-	c.enqueued = append(c.enqueued, recordedTask{taskType: taskType, payload: payload})
+	c.enqueued = append(c.enqueued, recordedTask{taskType: taskType, payload: payload, opts: driver.ApplyEnqueueOptions(opts)})
 	return nil
 }
 

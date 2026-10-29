@@ -59,10 +59,31 @@ type framedPayload struct {
 // 書く側の切り替えはこの関数と queue の activity_body.go の 2 か所で、どちらも
 // driver.CompactJobPayloads だけを見る (#3614 は 2 段に分けて出す)。
 func newFramedPayload(taskType string, payload []byte) framedPayload {
-	if driver.CompactJobPayloads {
-		return compactFramedPayload(taskType, payload)
+	return framePayload(taskType, payload, false)
+}
+
+// framePayload is newFramedPayload for a payload the caller may have marked
+// with driver.WithVerbatimJSONPayload.
+func framePayload(taskType string, payload []byte, verbatim bool) framedPayload {
+	if !driver.CompactJobPayloads {
+		return legacyFramedPayload(taskType, payload)
 	}
-	return legacyFramedPayload(taskType, payload)
+	if verbatim {
+		return trustedFramedPayload(taskType, payload)
+	}
+	return compactFramedPayload(taskType, payload)
+}
+
+// trustedFramedPayload is compactFramedPayload without the byte-for-byte
+// check, for a payload the caller marked with driver.WithVerbatimJSONPayload.
+//
+// 検査は飛ばすが、オブジェクトの形かどうかだけは見る (1 バイト目で足りる)。
+// 約束が破れていて mkq の Marshal が失敗したときは、addFramed が以前の形に戻す。
+func trustedFramedPayload(taskType string, payload []byte) framedPayload {
+	if len(payload) > 0 && payload[0] == '{' {
+		return framedPayload{Type: taskType, BodyJSON: json.RawMessage(payload)}
+	}
+	return compactFramedPayload(taskType, payload)
 }
 
 // compactFramedPayload frames payload in the #3614 shape, embedding it

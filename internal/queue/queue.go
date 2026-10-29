@@ -236,7 +236,9 @@ func (c *Client) EnqueueDeliver(payload DeliverPayload, opts ...driver.EnqueueOp
 	// 1 回の policyFor で MaxAttempts と retention の両方を済ませる
 	// (RLock 1 回 / map lookup 1 回に集約)。
 	p := c.policyFor(QueueName)
-	base := []driver.EnqueueOption{driver.WithQueue(QueueName)}
+	// MarshalJSON はどちらの形でも encoding/json と同じ書き方の object を返す
+	// ので、driver の検査を省かせる (宛先の数だけ積むので、#3614)。
+	base := []driver.EnqueueOption{driver.WithQueue(QueueName), driver.WithVerbatimJSONPayload()}
 	if p.MaxAttempts > 0 {
 		base = append(base, driver.WithMaxRetry(p.MaxAttempts-1))
 	}
@@ -428,7 +430,7 @@ func (c *Client) EnqueueInbox(ctx context.Context, payload InboxPayload) error {
 	}
 	// EnqueueDeliver と同じ理由で 1-shot lookup (#1184 / #1193)。
 	p := c.policyFor(InboxQueueName)
-	base := []driver.EnqueueOption{driver.WithQueue(InboxQueueName)}
+	base := []driver.EnqueueOption{driver.WithQueue(InboxQueueName), driver.WithVerbatimJSONPayload()}
 	if p.MaxAttempts > 0 {
 		base = append(base, driver.WithMaxRetry(p.MaxAttempts-1))
 	}

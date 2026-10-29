@@ -35,7 +35,7 @@ func (c *Client) Enqueue(ctx context.Context, taskType string, payload []byte, o
 	}
 
 	addOpts := toMkqAddOptions(o, taskType, payload)
-	err := addFramed(newFramedPayload(taskType, payload), taskType, payload, func(f framedPayload) error {
+	err := addFramed(framePayload(taskType, payload, o.VerbatimJSONPayload), taskType, payload, func(f framedPayload) error {
 		_, err := q.Add(ctx, f, addOpts...)
 		return err
 	})

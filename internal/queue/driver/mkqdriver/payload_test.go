@@ -153,3 +153,48 @@ func TestCompactFramedPayload_EmbedsPayloadsOfMaxDepthBodies(t *testing.T) {
 	_, back := roundTrip(t, f)
 	assert.Equal(t, string(payload), string(back.payload()))
 }
+
+// driver.WithVerbatimJSONPayload の印は、書く側を有効にしたときだけ効き、
+// 印の無い payload は今までどおり newFramedPayload の形になる (#3614)。
+func TestFramePayload_UsesTheVerbatimMarkOnlyWhenWritingCompactShapes(t *testing.T) {
+	for _, payload := range [][]byte{[]byte(`{"a":1}`), []byte(`{ "a": 1 }`), []byte("hello"), nil} {
+		assert.Equal(t, newFramedPayload("t", payload), framePayload("t", payload, false))
+		want := legacyFramedPayload("t", payload)
+		if driver.CompactJobPayloads {
+			want = trustedFramedPayload("t", payload)
+		}
+		assert.Equal(t, want, framePayload("t", payload, true))
+	}
+}
+
+// 印の付いた payload は、バイト列の検査をせずに埋め込む。オブジェクトでない
+// ものは印があっても埋め込まず、印の無いときと同じ判定に回す (#3614)。
+func TestTrustedFramedPayload_SkipsTheByteCheckForObjects(t *testing.T) {
+	// 空白を含むので、検査をすれば埋め込まない形。
+	spaced := []byte(`{ "a": 1 }`)
+	require.False(t, compactFramedPayload("t", spaced).embedded())
+	got := trustedFramedPayload("t", spaced)
+	assert.True(t, got.embedded(), "a marked object is embedded without the byte check")
+	assert.Equal(t, string(spaced), string(got.BodyJSON))
+
+	for _, payload := range [][]byte{[]byte("hello"), []byte(`[1]`), []byte(`"s"`), {}, nil} {
+		assert.Equal(t, compactFramedPayload("t", payload), trustedFramedPayload("t", payload))
+	}
+}
+
+// 印が誤っていて JSON として読めない payload でも、mkq の Marshal の失敗で
+// 以前の形に積み直し、job を落とさない (#3614)。
+func TestAddFramed_FallsBackForAMarkedPayloadThatIsNotJSON(t *testing.T) {
+	var added []string
+	add := func(f framedPayload) error {
+		data, err := json.Marshal(f)
+		if err != nil {
+			return fmt.Errorf("mkq: marshal payload: %w", err)
+		}
+		added = append(added, string(data))
+		return nil
+	}
+	bad := []byte(`{"a":}`)
+	require.NoError(t, addFramed(trustedFramedPayload("t", bad), "t", bad, add))
+	assert.Equal(t, []string{`{"type":"t","body":"eyJhIjp9"}`}, added)
+}

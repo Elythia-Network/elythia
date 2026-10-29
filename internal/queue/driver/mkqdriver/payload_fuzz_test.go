@@ -14,6 +14,11 @@ import (
 // frames it the way mkq stores job data, and checks that the worker reads the
 // same bytes back.
 //
+// **queue が付ける driver.WithVerbatimJSONPayload の印の裏付けもここで取る。**
+// 印の付いた payload は検査せずに埋め込むので、配送・受信の payload がどの形でも
+// encoding/json と同じ書き方であることが要る。書き方が違えば、埋め込んだ本文が
+// mkq の json.Marshal で書き直され、読み戻したバイト列が変わって落ちる。
+//
 // **encoding/json の json.RawMessage の書き方に依存している** (空白を詰める・
 // HTML の文字をエスケープする以外は書き直さない)。Go の版を上げてそれが変わった
 // ときに落ちるよう、種 (testdata/fuzz/FuzzActivityBodyRoundTrip) には #3614 の
@@ -37,8 +42,17 @@ func FuzzActivityBodyRoundTrip(f *testing.F) {
 		if err != nil {
 			t.Fatalf("MarshalCompactJSON: %v", err)
 		}
+		dp := queue.DeliverPayload{Inbox: "https://remote.example/inbox?a=1&b=<x>", Body: body, KeyID: "k&<>", SignerUserID: "u1"}
+		deliverCompact, err := dp.MarshalCompactJSON()
+		if err != nil {
+			t.Fatalf("deliver MarshalCompactJSON: %v", err)
+		}
+		deliverCurrent, err := dp.MarshalJSON()
+		if err != nil {
+			t.Fatalf("deliver MarshalJSON: %v", err)
+		}
 		for name, payload := range map[string][]byte{"current": current, "compact": compact} {
-			for _, frame := range []func(string, []byte) framedPayload{newFramedPayload, compactFramedPayload} {
+			for _, frame := range []func(string, []byte) framedPayload{newFramedPayload, compactFramedPayload, trustedFramedPayload} {
 				// mkq と同じく data を json.Marshal し、失敗は包んで返す。
 				var data []byte
 				err := addFramed(frame(queue.TaskTypeInbox, payload), queue.TaskTypeInbox, payload, func(fp framedPayload) error {
@@ -69,6 +83,28 @@ func FuzzActivityBodyRoundTrip(f *testing.F) {
 				if got.Path != ip.Path || got.Method != ip.Method || got.Headers["Signature"] != ip.Headers["Signature"] {
 					t.Fatalf("%s: fields changed: %+v", name, got)
 				}
+			}
+		}
+
+		// 配送の payload も、印を付けて埋め込んだまま元のバイト列に戻ること。
+		for name, payload := range map[string][]byte{"deliver current": deliverCurrent, "deliver compact": deliverCompact} {
+			data, err := json.Marshal(trustedFramedPayload(queue.TaskTypeDeliver, payload))
+			if err != nil {
+				t.Fatalf("%s: a marked payload is not valid JSON: %v", name, err)
+			}
+			var back framedPayload
+			if err := json.Unmarshal(data, &back); err != nil {
+				t.Fatalf("%s: unmarshal data: %v", name, err)
+			}
+			if !bytes.Equal(back.payload(), payload) {
+				t.Fatalf("%s: a marked payload changed:\n got %q\nwant %q", name, back.payload(), payload)
+			}
+			got, err := queue.DecodeDeliverPayload(back.payload())
+			if err != nil {
+				t.Fatalf("%s: decode: %v", name, err)
+			}
+			if !bytes.Equal(got.Body, body) || (got.Body == nil) != (body == nil) {
+				t.Fatalf("%s: body changed:\n got %q\nwant %q", name, got.Body, body)
 			}
 		}
 	})

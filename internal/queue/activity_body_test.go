@@ -248,3 +248,59 @@ func TestActivityBody_DecodePrefersBodyEscapedThenBodyText(t *testing.T) {
 		assert.Equal(t, tc.want, string(gotDeliver.Body), name)
 	}
 }
+
+// resetDeliverBodyMemo empties deliverBodyMemo for the duration of a test.
+//
+// deliverBodyMemo はプロセス全体で 1 つなので、これを使うテストは t.Parallel に
+// しない。並列の別のテストが配送を積むと、覚えた値が入れ替わって落ちる。
+func resetDeliverBodyMemo(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		deliverBodyMemo.mu.Lock()
+		deliverBodyMemo.body, deliverBodyMemo.field = nil, activityBodyField{}
+		deliverBodyMemo.mu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// **同じ本文の形の判定は使い回し、中身が変われば判定し直す** (#3614)。1 つの投稿は
+// inbox の数だけ同じ本文で積まれるので、宛先ごとに判定しない。本文の配列が後から
+// 書き換えられても、前の本文の判定を返さない。
+func TestEncodeDeliverActivityBody_ReusesTheShapeOnlyForTheSameBytes(t *testing.T) {
+	resetDeliverBodyMemo(t)
+	// < を生で含むので bodyEscaped の形になり、値は本文とは別の配列に作られる。
+	body := []byte(`{"type":"Create","object":{"content":"<p>` + strings.Repeat("今日は晴れ", 20) + `</p>"}}`)
+
+	first := encodeDeliverActivityBody(body)
+	require.Equal(t, encodeActivityBody(body), first)
+	require.Equal(t, "bodyEscaped", first.key)
+
+	again := encodeDeliverActivityBody(bytes.Clone(body))
+	assert.Equal(t, first, again)
+	assert.True(t, &first.value[0] == &again.value[0], "the same bytes must reuse the memoized shape")
+
+	// 同じ長さのまま、呼び出し元の配列を書き換える。
+	copy(body, `{"type":"Delete"`)
+	changed := encodeDeliverActivityBody(body)
+	assert.Equal(t, encodeActivityBody(body), changed)
+	assert.Contains(t, string(changed.value), `"Delete"`)
+}
+
+// nil (null) と空 (文字列の "") は書く形が違うので、覚えた値と取り違えない。
+func TestEncodeDeliverActivityBody_KeepsNilAndEmptyApart(t *testing.T) {
+	resetDeliverBodyMemo(t)
+	assert.Equal(t, encodeActivityBody(nil), encodeDeliverActivityBody(nil))
+	assert.Equal(t, encodeActivityBody([]byte{}), encodeDeliverActivityBody([]byte{}))
+	assert.Equal(t, encodeActivityBody(nil), encodeDeliverActivityBody(nil))
+	assert.NotEqual(t, encodeActivityBody(nil), encodeActivityBody([]byte{}))
+}
+
+// 配送の payload の書き出しは、覚えた判定を通る (受信は 1 件ずつなので通さない)。
+func TestDeliverPayload_MarshalCompactJSONGoesThroughTheMemo(t *testing.T) {
+	resetDeliverBodyMemo(t)
+	body := []byte(`{"type":"Create","object":{"content":"hello"}}`)
+	_, err := DeliverPayload{Inbox: "https://remote.example/inbox", Body: body}.MarshalCompactJSON()
+	require.NoError(t, err)
+	assert.Equal(t, string(body), string(deliverBodyMemo.body))
+}

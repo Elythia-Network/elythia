@@ -211,6 +211,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"Mutex", "m"}, nil},
 	"internal/queue.Client": {kindNotCache, "policiesは構築のときに設定から作るqueueごとのretryの方針",
 		[]string{"inner", "inspector", "mu", "policies"}, nil},
+	"internal/queue.deliverBodyMemo": {kindContentKeyed, "直前に積んだ配送の本文の複製を鍵に、その本文をjobに書く形を覚える。中身が一致したときだけ使うので、別の本文には別の判定をする",
+		[]string{"body", "field", "mu"}, nil},
 	"internal/queue/driver/mkqdriver.Driver": {kindNotCache, "ジョブキューの接続。値の写しではなく、Redisの待ち行列そのものを相手にする",
 		[]string{"cfg", "client", "closed", "dClient", "dIns", "dSched", "dServer", "keyPrefix", "mu", "queueNames", "queues", "rdb"}, nil},
 	"internal/queue/driver/mkqdriver.Scheduler": {kindNotCache, "遅延ジョブの移し替えの数え。Redisの待ち行列そのものを相手にする",
