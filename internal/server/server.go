@@ -205,7 +205,7 @@ type Server struct {
 	selfCheckRunner apiadmin.SelfCheckRunner
 	remoteChecker   apiadmin.RemoteChecker
 	// paramEnforcedは、本家と同じ400で拒否するendpointの一覧。nilなら
-	// paramEnforcedEndpoints。本家の残りのendpoint(reset-db)では数えるだけの
+	// paramEnforcedEndpoints(宣言の全部)。本家の残りのendpoint(reset-db)では数えるだけの
 	// 検証を試せないので、影の検証のテストがbeforeSetupで差し替える(#3888)。
 	paramEnforced []string
 	// reactionCountWriter は世代のリアクションの書き込み先 (#3663)。テストが

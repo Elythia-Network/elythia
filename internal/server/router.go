@@ -1647,10 +1647,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 数えたいので、その後ろに置く。kindを持つendpointではRequireScopeなどの
 	// gateが利用者を戻す。
 	api.Use(middleware.HideAppUserWithoutRead())
-	// 本家のparamDefで引数を検証する。本家に揃えたendpoint(clips/*、charts/*、hashtags/*、antennas/*、flash/*、gallery/*、following/*、channels/*、blocking/*、mute/*、renote-mute/*、roles/*、invite/*、notifications/*、app/*、auth/*、miauth/gen-token、my/apps、sw/*、announcements、promo/read、email-address/available、username/available、ap/*、bubble-game/ranking、bubble-game/register、federation/*、pages/*、page-push、参照だけのトップレベルのendpoint、users、users/*、drive、drive/*、chat/*、reversi/*、export-custom-emojis、fetch-external-resources、request-reset-password、reset-password、verify-email、v2/admin/emoji/list、notes、notes/*、i、i/*、admin/ad/*、admin/announcements/*、admin/avatar-decorations/*、admin/invite/*、admin/promo/create、admin/meta、admin/server-info、admin/get-index-stats、admin/get-table-stats、admin/show-moderation-logs、admin/drive/*、admin/emoji/*、admin/roles/*、admin/abuse-report/*、admin/abuse-user-reports、admin/forward-abuse-user-report、admin/resolve-abuse-user-report、admin/update-abuse-user-report、admin/system-webhook/*、admin/captcha/*、admin/accounts/*、admin/federation/*、admin/relays/*、利用者の管理・メールの送信・プロキシのアカウントのadmin/*、admin/queue/*、admin/update-meta)では本家と
-	// 同じ400で拒否し(#3742)、それ以外では応答を変えずに、handlerと判定が
-	// 分かれた件数を数える(#3677)。検証そのものはrouteのmiddlewareの末尾
-	// (withParamShadow)で走る。
+	// 本家のparamDefで引数を検証する。本家かElythiaの宣言のあるendpointは、
+	// テストのモードでだけ登録するreset-dbを除いてすべて本家と同じ400で拒否し
+	// (#3742、#3890で宣言から決める形にした。paramEnforcedEndpoints)、reset-dbでは
+	// 応答を変えずに、handlerと判定が分かれた件数を数える(#3677)。検証そのものは
+	// routeのmiddlewareの末尾(withParamShadow)で走る。
 	if mw := s.paramShadowMiddleware(); mw != nil {
 		api.Use(mw)
 	}
