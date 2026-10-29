@@ -148,6 +148,11 @@ jobs:
       TEST_DB_SSLMODE: disable
       TEST_REDIS_HOST: localhost
       TEST_REDIS_PORT: 6379
+      # internal/server の TestMain は、PostgreSQL に繋がらないと DB を使うテストを
+      # skip する。skip は成功扱いなので、サーバーを組み立てるテスト (ルートを見る
+      # ゲートなど、#3890) ごと無検証で緑になる。この変数があると skip せずに
+      # 落ちる (plugin-tests の MK_PLUGIN_TESTS_REQUIRE_DB と同じ形)。
+      MK_SERVER_TESTS_REQUIRE_DB: "1"
       SHARD_INDEX: ${{ matrix.shard }}
       SHARD_TOTAL: 4
 
