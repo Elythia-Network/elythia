@@ -221,7 +221,10 @@ func TestAPIRoutesHaveParamDefs(t *testing.T) {
 		}
 	}
 
-	// 逆向き: 宣言があるのにPOSTのrouteが無いもの。
+	// 逆向き: 宣言があるのにPOSTのrouteが無いもの。Elythiaの宣言の名前は、以前は
+	// entitycompatのTestElythiaParamDefsNameElythiaOnlyEndpointsが生成物の
+	// docs/api-compat.mdと突き合わせていた。実際のルートと突き合わせるここへ
+	// 移した(#3890)。本家と同じ名前の宣言はparamschema.Effectiveが拒否する。
 	for name := range eps {
 		if posted[name] {
 			continue
