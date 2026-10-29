@@ -115,7 +115,8 @@ port: 3000
 # admin/send-email, admin/show-user, admin/show-users, admin/suspend-user,
 # admin/unset-mfa, admin/unset-user-avatar, admin/unset-user-banner,
 # admin/unsuspend-user, admin/update-proxy-account, admin/update-user-note,
-# admin/queue/*) are validated and rejected regardless of this setting.
+# admin/queue/*, admin/update-meta) are validated and rejected regardless of
+# this setting.
 # See docs/param-shadow.md.
 #disableParamShadow: false
 # Interval of the summary written to the log, in seconds (default: 600).

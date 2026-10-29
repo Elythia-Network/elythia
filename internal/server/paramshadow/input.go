@@ -125,6 +125,9 @@ const DefaultEnforcedMaxBody = 16 << 10
 // admin/roles/create・updateも、本家がpoliciesの中身を決めず、同梱のロールの
 // エディタは全部のポリシーを埋めて送るので、普段の保存で超える(updateは
 // ポリシー24件から、roleIdの無いcreateは25件から。#3859)。
+// admin/update-metaも、本家がblockedHostsなどの一覧の数に上限を持たず、同梱の
+// モデレーションの画面が一覧を1つずつ`i`と一緒に送るbodyでは、250行から超える
+// (#3888)。
 const DefaultEnforcedMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is

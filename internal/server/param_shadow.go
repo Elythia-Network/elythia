@@ -43,14 +43,17 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // in #3861; admin/queue/*, admin/drive/files, admin/emoji/add,
 // federation/instances, i/notifications, i/notifications-grouped and
 // reversi/match in #3865, with the values Elythia accepts on top of upstream's
-// paramDef overlaid (paramschema.Effective)), and the endpoints Elythia has
+// paramDef overlaid (paramschema.Effective)), admin/update-meta in #3888 (the
+// last of upstream's endpoints but the test-only reset-db, with Elythia's
+// own settings overlaid the same way), and the endpoints Elythia has
 // and upstream does not, with their paramDef from elythia_paramdefs.json: the
 // read-only ones without outgoing requests in #3869, and Elythia's own chat/*
 // endpoints and drive/files/create-chunked/* except append in #3872, the
 // writes that stay within the database and Redis in #3875, the federation
 // rules and the diagnostics with outgoing requests in #3877, and
 // admin/backup/* in #3878; i/federation and i/update-federation in #3852.
-// The other upstream endpoints are only validated and counted (#3677).
+// The other upstream endpoint, reset-db (registered in test mode only), is
+// only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
 // で本家と判定が分かれる入力を、手書きの検査が拒否していないか(本家が通す
@@ -476,6 +479,7 @@ var paramEnforcedEndpoints = []string{
 	"admin/unsuspend-user",
 	"admin/update-proxy-account",
 	"admin/update-user-note",
+	"admin/update-meta",
 	"admin/queue/clear",
 	"admin/queue/deliver-delayed",
 	"admin/queue/inbox-delayed",
@@ -599,13 +603,17 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 		slog.Warn("param validation disabled: the embedded upstream paramDefs or Elythia's overlays do not load", "err", err)
 		return nil
 	}
-	opts := []paramshadow.Option{paramshadow.WithEnforced(paramEnforcedEndpoints...)}
+	enforced := paramEnforcedEndpoints
+	if s.paramEnforced != nil {
+		enforced = s.paramEnforced
+	}
+	opts := []paramshadow.Option{paramshadow.WithEnforced(enforced...)}
 	if s.config.DisableParamShadow {
 		// 止めるのは数えるだけの検証。本家に揃えた分の拒否は止めない。記録は
 		// 検証器のpanicとcompileの失敗だけになる。
 		opts = append(opts, paramshadow.WithoutShadow())
 		slog.Info("param shadow validation disabled (disableParamShadow); the enforced endpoints are still validated",
-			"enforced", len(paramEnforcedEndpoints))
+			"enforced", len(enforced))
 	}
 	for name, ep := range eps {
 		if ep.CompileErr != nil {
@@ -633,7 +641,7 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 	s.addCloser("paramShadowRecorder", rec)
 	shadow := paramshadow.Middleware(eps, rec, opts...)
 	if !s.config.DisableParamShadow {
-		slog.Info("param shadow validation enabled", "endpoints", len(eps), "enforced", len(paramEnforcedEndpoints), "logInterval", interval.String())
+		slog.Info("param shadow validation enabled", "endpoints", len(eps), "enforced", len(enforced), "logInterval", interval.String())
 	}
 	return paramValidationGroupMiddleware(shadow)
 }

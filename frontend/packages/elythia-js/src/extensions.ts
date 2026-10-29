@@ -100,15 +100,17 @@ export type ElythiaRequestExtensions = {
 		chunkedUploadChunkSizeMb?: number;
 		/** From 5 to 1440. */
 		chunkedUploadSessionTtlMinutes?: number;
-		/** At least 1. */
+		/** From 1 to 2147483647. */
 		chunkedUploadMaxSessionsPerUser?: number;
-		/** At least 1. */
+		/** From 1 to 2147483647. */
 		chunkedUploadMaxPendingMbPerUser?: number;
 		/** Periodically deletes remote users that only relays brought in. */
 		enableRelayOrphanUserCleanup?: boolean;
+		/** Days after a relay-only user was last seen, from 7 to 3650. */
 		relayOrphanUserGraceDays?: number;
 		/** Keeps notes seen only through relays in Redis instead of the database. */
 		enableEphemeralRelayNotes?: boolean;
+		/** Minutes such a note is kept, from 1 to 525600. */
 		ephemeralRelayNoteTtlMinutes?: number;
 		/**
 		 * Software whose activities the inbox refuses (#3362). Matched by the same
