@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test';
 
 // SPA shell が CSP enforce 下で動くことを実ブラウザで確かめる (#2788)。
 //
-// **`mkgo/` に置く。** `frontendContentSecurityPolicy` は mk-go 独自キーで、
+// **`elythia/` に置く。** `frontendContentSecurityPolicy` は mk-go 独自キーで、
 // 公式 image は無視する。`upstream/` に置くと `playwright-ts-test` で必ず落ちる。
 //
 // Go 側の `TestFrontendCSP_HashesCoverRenderedInlineScripts` は HTML と CSP

@@ -6,7 +6,7 @@
 // /about-elythia が AGPL-3.0 section 13 の案内として成立していることを実ブラウザで
 // 見る (#2700)。
 //
-// **`mkgo/` に置く。** `/about-elythia` は mk-go の frontend にしか無いので、公式 image
+// **`elythia/` に置く。** `/about-elythia` は mk-go の frontend にしか無いので、公式 image
 // を使う `playwright-ts-test` では必ず 404 になる。
 //
 // Go 側のテストは `EnsureInitial` が repositoryUrl を入れることと meta が

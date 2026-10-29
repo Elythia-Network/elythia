@@ -1229,9 +1229,9 @@ playwright-ts-up: ## Playwright スタック (Misskey TS backend) を起動
 playwright-ts-test: ## Playwright spec を実行 (TS backend、upstream 追従時のみ)
 	# `playwright-test` と同じく `--build` で runner image を最新化する。
 	#
-	# **`specs/upstream` に絞る。** `specs/mkgo` は mk-go 独自機能の spec で、
+	# **`specs/upstream` に絞る。** `specs/elythia` は Elythia 独自機能の spec で、
 	# 公式 image に対しては通らない (README の「境界」を参照)。絞らないと
-	# TS backend 実行が mkgo 側の spec で落ちる。
+	# TS backend 実行が elythia 側の spec で落ちる。
 	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) --profile test run --rm --build playwright-runner test specs/upstream $(PLAYWRIGHT_ARGS)
 
 playwright-ts-down: ## Playwright TS スタックを撤去

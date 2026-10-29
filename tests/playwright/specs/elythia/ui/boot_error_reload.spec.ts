@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test';
 
 // boot エラー画面の Reload ボタンが押せること (#2786)。
 //
-// **`mkgo/` に置く。** `#mkBootReload` は fork の `2026.7.0-mk.22c` で足した id で、
+// **`elythia/` に置く。** `#mkBootReload` は fork の `2026.7.0-mk.22c` で足した id で、
 // upstream 2026.7.0 の boot.js には無い (`onclick` 属性のまま)。`upstream/` に
 // 置くと `playwright-ts-test` が公式 image に対して回したときに必ず落ちる。
 //
