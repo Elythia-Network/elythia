@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,8 +24,21 @@ import (
 
 var serverIntegrationDB *gorm.DB
 
+// requireDBEnv makes TestMain fail when PostgreSQL is unavailable, instead of
+// letting the tests that need it skip. CI's test-shards set it.
+const requireDBEnv = "MK_SERVER_TESTS_REQUIRE_DB"
+
 func TestMain(m *testing.M) {
-	if db, err := testutil.OpenTestDB(); err == nil {
+	db, err := testutil.OpenTestDB()
+	if err != nil {
+		// 手元ではPostgreSQLが無くてもDBの要らないテストを回せるよう、DBを使う
+		// テストはskipする。CIでskipすると、サーバーを組み立てるテスト(ルートを
+		// 見るゲートなど)ごと検査せずに緑になるので、前提が欠けたら落とす(#3890)。
+		if os.Getenv(requireDBEnv) != "" {
+			fmt.Fprintf(os.Stderr, "PostgreSQL unavailable (%s is set, so the tests do not skip): %v\n", requireDBEnv, err)
+			os.Exit(1)
+		}
+	} else {
 		testutil.ApplyMigrations(db)
 		serverIntegrationDB = db
 	}
