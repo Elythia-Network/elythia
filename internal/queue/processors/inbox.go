@@ -501,6 +501,11 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 		}
 	}
 	if err := p.dispatch(body, normalized, signer); err != nil {
+		if errors.Is(err, federation.ErrInboundLocalReferenceUnavailable) {
+			slog.Debug("inbox: unavailable local reference, dropped", "host", host)
+			p.recordInboxTelemetry(host, deliveryhealth.ClassUnsupported, started, "")
+			return nil
+		}
 		if errors.Is(err, federation.ErrUnsupportedActivity) {
 			slog.Debug("inbox: unsupported activity, dropped", "host", host)
 			// 異常ではない (相手は正しく送っており、こちらが対応していない

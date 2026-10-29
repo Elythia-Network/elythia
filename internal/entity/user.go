@@ -47,13 +47,14 @@ type UserLite struct {
 	// AvatarURL は upstream Misskey TS 互換で常に non-null。
 	// avatarId が無い / DB の avatarUrl が空のときは IdenticonURL() が
 	// /identicon/<username>(@<host>) にフォールバックする (#710)。
-	AvatarURL         string                 `json:"avatarUrl"`
-	AvatarBlurhash    *string                `json:"avatarBlurhash"`
-	AvatarDecorations []AvatarDecorationItem `json:"avatarDecorations"`
-	IsBot             bool                   `json:"isBot"`
-	IsCat             bool                   `json:"isCat"`
-	Emojis            map[string]string      `json:"emojis"`
-	OnlineStatus      string                 `json:"onlineStatus"`
+	AvatarURL         string                  `json:"avatarUrl"`
+	AvatarBlurhash    *string                 `json:"avatarBlurhash"`
+	AvatarDecorations []AvatarDecorationItem  `json:"avatarDecorations"`
+	IsBot             bool                    `json:"isBot"`
+	IsCat             bool                    `json:"isCat"`
+	Emojis            map[string]string       `json:"emojis"`
+	OnlineStatus      string                  `json:"onlineStatus"`
+	FederationStatus  *model.FederationStatus `json:"federationStatus,omitempty"`
 	// BadgeRoles は local user では常に present (空でも `[]`)、remote user では
 	// meta.showRoleBadgesOfRemoteUsers が off なら省略する (upstream: undefined)。
 	// 「空配列 present」と「absent」を区別するため *[]any + omitempty を使う
@@ -570,6 +571,13 @@ func (pkr *Packer) PackUserLite(u *model.User) UserLite {
 		Emojis:            make(map[string]string),
 		OnlineStatus:      computeOnlineStatus(u),
 		BadgeRoles:        pkr.packBadgeRoles(u),
+	}
+	if u.IsLocal() {
+		status := u.FederationStatus
+		if status == "" {
+			status = model.FederationStatusOn
+		}
+		out.FederationStatus = &status
 	}
 	// requireSigninToViewContents: true のときだけ出す (TS は false→undefined)
 	if u.RequireSigninToViewContents {

@@ -37,6 +37,45 @@ func addUser(repo *testutil.MockUserRepository, id, username string) {
 	repo.Users[id] = &model.User{ID: id, Username: username, UsernameLower: username}
 }
 
+type localFederationObserverStub struct {
+	available bool
+	recorded  []string
+}
+
+func (s *localFederationObserverStub) IsExternallyAvailable(*model.User) bool {
+	return s.available
+}
+
+func (s *localFederationObserverStub) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	s.recorded = append(s.recorded, userID+":"+reason+":"+host)
+	return true, nil
+}
+
+func TestWebfinger_LocalOnlyAccountIsNotDiscovered(t *testing.T) {
+	h, repo := newHandler(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice", FederationStatus: model.FederationStatusOff}
+	observer := &localFederationObserverStub{available: false}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "/.well-known/webfinger?resource=acct:alice@example.com")
+	require.NoError(t, h.Webfinger(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestWebfinger_RecordsFirstExternalReferenceWithoutCache(t *testing.T) {
+	h, repo := newHandler(t)
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice", UsernameLower: "alice", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "/.well-known/webfinger?resource=acct:alice@example.com")
+	require.NoError(t, h.Webfinger(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"u1:webfinger:"}, observer.recorded)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}
+
 func TestWebfinger_AcctWithHost(t *testing.T) {
 	h, repo := newHandler(t)
 	addUser(repo, "u1", "alice")
@@ -331,7 +370,7 @@ func TestWebfinger_JRDDefault(t *testing.T) {
 	require.NoError(t, h.Webfinger(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get("Content-Type"), "application/jrd+json")
-	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
 }
 

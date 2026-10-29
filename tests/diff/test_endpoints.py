@@ -108,6 +108,11 @@ def test_note_packing_parity(mkgo, ts):
 USER_IGNORE = DEFAULT_IGNORE_KEYS | {
     "avatarDecorations", "roles", "badgeRoles", "emojis", "instance",
     "avatarColor", "bannerColor", "followersCount", "followingCount",
+    # ローカル専用アカウントの連合状態 (#3852)。ローカル user にだけ
+    # 公開し、Misskey TS 側には無い Elythia 独自 field。
+    # 公開・非公開の契約は internal/entity/user_test.go の
+    # TestPackUserLite_ExposesFederationStatusOnlyForLocalUsers で検証する。
+    "federationStatus",
     # notesCount は eventual-consistency (mk-go は note 作成で即時、TS は chart/job
     # で遅延更新) のため瞬間値が割れる timing-state。安定比較対象外。
     "notesCount",
@@ -225,6 +230,9 @@ I_IGNORE = META_IGNORE | {
     "twoFactorEnabled", "usePasswordLessLogin", "securityKeys",
     "notesCount", "twoFactorBackupCodesStock", "lastActiveDate", "onlineStatus",
     "isAdmin", "isModerator",  # role 依存 (root fallback) は users/show 側で gate 済
+    # ローカル専用アカウントの連合状態 (#3852)。ローカル user にだけ公開し、
+    # Misskey TS 側には無い。公開・非公開の契約はパッカーテストで検証する。
+    "federationStatus",
     # room / clientData は mk-go の **意図的な** pass-through extra (upstream は削除済
     # だが mk-go は client 固有 JSON 保存機能として read/write/test 付きで保持、#2094 で
     # intentional と判断)。upstream に無い field なので harness では永続無視する。

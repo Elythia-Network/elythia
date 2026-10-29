@@ -189,6 +189,8 @@ func (s *Server) buildHandlers(
 	// ときの一括承認 (#3466)、s.background は世代の停止で待つ箱 (#3661)。
 	iHandler := i.NewHandler(userService, idGen, noteHider, entityPacker, roleService, totpReplayGuard,
 		twoFAPendingGuard, s.auth, accessTokenRepo, streamRevokePublisher, followingService, s.background)
+	iHandler.SetLocalFederationObserver(coreSvcs.localFederation)
+	iHandler.SetLocalFederationService(coreSvcs.localFederation)
 	webhookHandler := apiwebhooks.NewHandler(webhookRepo, idGen, roleService) // #1029: webhookLimit
 	notificationsHandler := notifications.NewHandler(notificationService, idGen, entityPacker, noteHider,
 		roleService, abuseNotifStates, abuseUnresolvedCount, signupApplicationNotifLookup)
@@ -209,7 +211,10 @@ func (s *Server) buildHandlers(
 	// usersHandler は ap/show の利用者のピン留め・移行先を埋める (#3330)。
 	apHandler := ap.NewHandler(apRenderer, userService, noteQueryService, keypairRepo, idGen, noteHider, entityPacker,
 		instanceService, s.config.Hostname, inboxSoftwareChecker, usersHandler)
+	apHandler.SetLocalFederationObserver(coreSvcs.localFederation)
+	apHandler.SetNoteRepo(noteRepo)
 	wellknownHandler := wellknown.NewHandler(apURLs, userService, s.config.Host, s.config.URL)
+	wellknownHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	nodeinfoHandler := nodeinfo.NewHandler(s.config)
 	// #1957-a / #3330: followers/following/users の embed user を本家 packMany と同じ形に。
 	federationHandler := apifederation.NewHandler(instanceService, entityPacker, sharedUserPacker)
@@ -230,6 +235,7 @@ func (s *Server) buildHandlers(
 	flashHandler := apiflash.NewHandler(flashService, userRepo, idGen, entityPacker)
 	// #1912 / #3330: following/list・requests/* の embed user を本家 packMany と同じ形に。
 	followingHandler := following.NewHandler(followingService, userService, entityPacker, sharedUserPacker)
+	followingHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	// roles/notes の blocked-host filter と、#1973 / #3330: roles/users の embed user を
 	// 本家 packMany と同じ形に。
 	rolesHandler := apiroles.NewHandler(roleService, idGen, noteHider, entityPacker, metaRepo, sharedUserPacker)

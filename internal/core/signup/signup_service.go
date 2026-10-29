@@ -162,7 +162,8 @@ var (
 	ErrApplicationNotApproved = errors.New("signup application is not approved")
 	// ErrRegistrationClosed is returned while the server accepts no
 	// registrations at all (meta.registrationClosed, #3186).
-	ErrRegistrationClosed = errors.New("registration is closed")
+	ErrRegistrationClosed      = errors.New("registration is closed")
+	ErrInvalidFederationStatus = errors.New("invalid federation status")
 	// ErrInvitationAlreadyUsed is returned when the invitation ticket linked to
 	// a pending signup has already been consumed by another user. transaction
 	// 経路で SELECT FOR UPDATE 後に usedById を確認することで concurrent burst
@@ -392,7 +393,11 @@ type SignupResult struct {
 // isInitialSetup=true の場合、作成したユーザーを rootUser に設定する。
 // policy は meta 由来の username 制限のどれを適用するかを選ぶ (#3015)。
 func (s *Service) Signup(username, password string, isInitialSetup bool, policy UsernamePolicy) (*SignupResult, error) {
-	return s.SignupWithHost(username, password, isInitialSetup, nil, policy)
+	return s.SignupWithFederationStatus(username, password, isInitialSetup, policy, model.FederationStatusOn)
+}
+
+func (s *Service) SignupWithFederationStatus(username, password string, isInitialSetup bool, policy UsernamePolicy, status model.FederationStatus) (*SignupResult, error) {
+	return s.SignupWithHostAndFederationStatus(username, password, isInitialSetup, nil, policy, status)
 }
 
 // SignupWithHost creates a user attributed to the given remote host.
@@ -403,6 +408,16 @@ func (s *Service) Signup(username, password string, isInitialSetup bool, policy 
 // host=nil なら従来どおりローカルユーザー。呼び出し側で TestMode を確認する
 // こと。
 func (s *Service) SignupWithHost(username, password string, isInitialSetup bool, host *string, policy UsernamePolicy) (*SignupResult, error) {
+	return s.SignupWithHostAndFederationStatus(username, password, isInitialSetup, host, policy, model.FederationStatusOn)
+}
+
+func (s *Service) SignupWithHostAndFederationStatus(username, password string, isInitialSetup bool, host *string, policy UsernamePolicy, status model.FederationStatus) (*SignupResult, error) {
+	if status != model.FederationStatusPending && status != model.FederationStatusOff && status != model.FederationStatusOn {
+		return nil, ErrInvalidFederationStatus
+	}
+	if host != nil {
+		status = model.FederationStatusOn
+	}
 	username, err := normalizeAndValidateUsername(username)
 	if err != nil {
 		return nil, err
@@ -473,8 +488,12 @@ func (s *Service) SignupWithHost(username, password string, isInitialSetup bool,
 		// isRoot=true でマークしておく。mk-go pure 経路では meta.rootUserId
 		// で root を判定するので冗長だが、TS から引き継いだ DB の root と同じ
 		// 形に揃えておく。
-		IsRoot: isInitialSetup,
-		Host:   host,
+		IsRoot:           isInitialSetup,
+		Host:             host,
+		FederationStatus: status,
+	}
+	if host == nil && status == model.FederationStatusOn {
+		user.FederationEnabledAt = &now
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
@@ -501,24 +520,27 @@ func (s *Service) SignupWithHost(username, password string, isInitialSetup bool,
 	// 削除後も同名 username の再取得を恒久的に防ぐ (SignupService.ts:151-154)。
 	s.recordUsedUsername(lower)
 
-	// RSA keypair (federation 用)。keypairRepo が未設定の場合はスキップする
-	// (従来の単体テストのため)。
-	if s.keypairRepo != nil {
-		privPEM, pubPEM, err := activitypub.GenerateRSAKeypair()
-		if err != nil {
+	// Federation keys are created only for accounts enabled at signup.
+	if status == model.FederationStatusOn {
+		// RSA keypair (federation 用)。keypairRepo が未設定の場合はスキップする
+		// (従来の単体テストのため)。
+		if s.keypairRepo != nil {
+			privPEM, pubPEM, err := activitypub.GenerateRSAKeypair()
+			if err != nil {
+				return nil, err
+			}
+			if err := s.keypairRepo.Create(&model.UserKeypair{
+				UserID:     userID,
+				PublicKey:  pubPEM,
+				PrivateKey: privPEM,
+			}); err != nil {
+				return nil, err
+			}
+		}
+		// Ed25519 keypair (FEP-521a Multikey 用)。keypairExtraRepo wire 時のみ。
+		if err := s.maybeCreateEd25519Keypair(nil, userID); err != nil {
 			return nil, err
 		}
-		if err := s.keypairRepo.Create(&model.UserKeypair{
-			UserID:     userID,
-			PublicKey:  pubPEM,
-			PrivateKey: privPEM,
-		}); err != nil {
-			return nil, err
-		}
-	}
-	// Ed25519 keypair (FEP-521a Multikey 用)。keypairExtraRepo wire 時のみ。
-	if err := s.maybeCreateEd25519Keypair(nil, userID); err != nil {
-		return nil, err
 	}
 
 	// 初回セットアップの場合は rootUserId を設定
@@ -628,7 +650,11 @@ func generatePendingCode() string {
 // 成功時に SignupResult.InvitationTicketID 経由で handler に伝える
 // (招待制 + email 確認制併用時の MarkUsed 用)。
 func (s *Service) CreatePending(username, email, password string, invitationTicketID *string) (*model.UserPending, error) {
-	return s.CreatePendingForApplication(username, email, password, invitationTicketID, nil)
+	return s.CreatePendingWithFederationStatus(username, email, password, invitationTicketID, nil, model.FederationStatusOn)
+}
+
+func (s *Service) CreatePendingWithFederationStatus(username, email, password string, invitationTicketID, signupApplicationID *string, status model.FederationStatus) (*model.UserPending, error) {
+	return s.createPending(username, email, password, invitationTicketID, signupApplicationID, status)
 }
 
 // CreatePendingForApplication is CreatePending carrying the approval
@@ -637,6 +663,13 @@ func (s *Service) CreatePending(username, email, password string, invitationTick
 // 承認制 + メール必須のとき、確認完了まではアカウントが無いので申請を completed
 // にできない。pending row に申請 ID を持たせ、PromotePending の戻り値で返す。
 func (s *Service) CreatePendingForApplication(username, email, password string, invitationTicketID, signupApplicationID *string) (*model.UserPending, error) {
+	return s.createPending(username, email, password, invitationTicketID, signupApplicationID, model.FederationStatusOn)
+}
+
+func (s *Service) createPending(username, email, password string, invitationTicketID, signupApplicationID *string, status model.FederationStatus) (*model.UserPending, error) {
+	if status != model.FederationStatusPending && status != model.FederationStatusOff && status != model.FederationStatusOn {
+		return nil, ErrInvalidFederationStatus
+	}
 	username, err := normalizeAndValidateUsername(username)
 	if err != nil {
 		return nil, err
@@ -683,6 +716,7 @@ func (s *Service) CreatePendingForApplication(username, email, password string, 
 		Password:            hash,
 		InvitationTicketID:  invitationTicketID,
 		SignupApplicationID: signupApplicationID,
+		FederationStatus:    status,
 	}
 	if err := s.pendingRepo.Create(row); err != nil {
 		return nil, err
@@ -866,13 +900,14 @@ func (s *Service) promotePendingTx(pending *model.UserPending) (*SignupResult, e
 
 		verified := true
 		user, profile, err := s.createUserTx(tx, createUserInput{
-			userID:        userID,
-			username:      pending.Username,
-			lower:         lower,
-			token:         token,
-			passwordHash:  pending.Password,
-			email:         &pending.Email,
-			emailVerified: verified,
+			userID:           userID,
+			username:         pending.Username,
+			lower:            lower,
+			token:            token,
+			passwordHash:     pending.Password,
+			email:            &pending.Email,
+			emailVerified:    verified,
+			federationStatus: pending.FederationStatus,
 		})
 		if err != nil {
 			return err
@@ -933,6 +968,10 @@ func (s *Service) promotePendingNoTx(pending *model.UserPending) (*SignupResult,
 	token := generateToken()
 	now := time.Now()
 	userID := s.idGen.Generate(now)
+	status := pending.FederationStatus
+	if status == "" {
+		status = model.FederationStatusOn
+	}
 	user := &model.User{
 		ID:                userID,
 		Username:          pending.Username,
@@ -940,6 +979,7 @@ func (s *Service) promotePendingNoTx(pending *model.UserPending) (*SignupResult,
 		Token:             &token,
 		IsExplorable:      true,
 		AvatarDecorations: []byte("[]"),
+		FederationStatus:  status,
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
@@ -963,7 +1003,7 @@ func (s *Service) promotePendingNoTx(pending *model.UserPending) (*SignupResult,
 	}
 	// #2106 N23: used_username に記録 (non-tx 経路。Signup と mirror)。
 	s.recordUsedUsername(lower)
-	if s.keypairRepo != nil {
+	if status == model.FederationStatusOn && s.keypairRepo != nil {
 		privPEM, pubPEM, err := activitypub.GenerateRSAKeypair()
 		if err != nil {
 			return nil, err
@@ -976,8 +1016,10 @@ func (s *Service) promotePendingNoTx(pending *model.UserPending) (*SignupResult,
 			return nil, err
 		}
 	}
-	if err := s.maybeCreateEd25519Keypair(nil, userID); err != nil {
-		return nil, err
+	if status == model.FederationStatusOn {
+		if err := s.maybeCreateEd25519Keypair(nil, userID); err != nil {
+			return nil, err
+		}
 	}
 	_ = s.pendingRepo.Delete(pending.ID)
 
@@ -1003,9 +1045,13 @@ func (s *Service) promotePendingNoTx(pending *model.UserPending) (*SignupResult,
 // db / 申請 repo が未配線なら通常の Signup にフォールバックし、
 // SignupApplicationCompleted=false を返す (呼び出し側が従来どおり完了記録する)。
 func (s *Service) SignupForApplication(username, password, applicationID, ticketID string) (*SignupResult, error) {
+	return s.SignupForApplicationWithFederationStatus(username, password, applicationID, ticketID, model.FederationStatusOn)
+}
+
+func (s *Service) SignupForApplicationWithFederationStatus(username, password, applicationID, ticketID string, status model.FederationStatus) (*SignupResult, error) {
 	if s.db == nil || s.appRepo == nil {
 		// 申請経由なので公開登録と同じ制限を適用する (#3015)。
-		return s.Signup(username, password, false, UsernamePolicyPublic)
+		return s.SignupWithFederationStatus(username, password, false, UsernamePolicyPublic, status)
 	}
 
 	username, err := normalizeAndValidateUsername(username)
@@ -1055,11 +1101,12 @@ func (s *Service) SignupForApplication(username, password, applicationID, ticket
 			return err
 		}
 		user, profile, err := s.createUserTx(tx, createUserInput{
-			userID:       userID,
-			username:     username,
-			lower:        lower,
-			token:        token,
-			passwordHash: hash,
+			userID:           userID,
+			username:         username,
+			lower:            lower,
+			token:            token,
+			passwordHash:     hash,
+			federationStatus: status,
 			// メール確認を通っていないので、プロフィールにメールは持たせない
 			// (Signup と同じ)。
 		})
@@ -1097,7 +1144,8 @@ type createUserInput struct {
 	emailVerified bool
 	// managedByPlugin が non-nil なら、プラグインが管理するアカウント (#3468)
 	// として作る。passwordHash は使わず (パスワードを持たせない)、isBot を立てる。
-	managedByPlugin *string
+	managedByPlugin  *string
+	federationStatus model.FederationStatus
 }
 
 // createUserTx creates the user, profile, used_username entry and keypairs
@@ -1119,6 +1167,10 @@ func (s *Service) createUserTx(tx *gorm.DB, in createUserInput) (*model.User, *m
 		return nil, nil, err
 	}
 
+	status := in.federationStatus
+	if status == "" {
+		status = model.FederationStatusOn
+	}
 	user := &model.User{
 		ID:                in.userID,
 		Username:          in.username,
@@ -1127,9 +1179,14 @@ func (s *Service) createUserTx(tx *gorm.DB, in createUserInput) (*model.User, *m
 		IsExplorable:      true,
 		AvatarDecorations: []byte("[]"),
 		ManagedByPlugin:   in.managedByPlugin,
+		FederationStatus:  status,
 		// 管理するアカウントは必ず bot として作る (#3468)。人が中に入らない
 		// アカウントなので、相手に bot であることを示す。
 		IsBot: in.managedByPlugin != nil,
+	}
+	if status == model.FederationStatusOn {
+		enabledAt := time.Now()
+		user.FederationEnabledAt = &enabledAt
 	}
 	if err := tx.Create(user).Error; err != nil {
 		return nil, nil, err
@@ -1168,23 +1225,28 @@ func (s *Service) createUserTx(tx *gorm.DB, in createUserInput) (*model.User, *m
 		return nil, nil, err
 	}
 
-	// keypair (federation 用) — keypairRepo が wire されているときのみ
-	if s.keypairRepo != nil {
-		privPEM, pubPEM, err := activitypub.GenerateRSAKeypair()
-		if err != nil {
-			return nil, nil, err
+	// Keys exist only when federation is enabled.
+	if status == model.FederationStatusOn {
+		// keypair (federation 用) — keypairRepo が wire されているときのみ
+		if s.keypairRepo != nil {
+			privPEM, pubPEM, err := activitypub.GenerateRSAKeypair()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := tx.Create(&model.UserKeypair{
+				UserID:     in.userID,
+				PublicKey:  pubPEM,
+				PrivateKey: privPEM,
+			}).Error; err != nil {
+				return nil, nil, err
+			}
 		}
-		if err := tx.Create(&model.UserKeypair{
-			UserID:     in.userID,
-			PublicKey:  pubPEM,
-			PrivateKey: privPEM,
-		}).Error; err != nil {
-			return nil, nil, err
+		// Ed25519 keypair も同 tx 内で発行 (#1067 / #1068)
+		if status == model.FederationStatusOn {
+			if err := s.maybeCreateEd25519Keypair(tx, in.userID); err != nil {
+				return nil, nil, err
+			}
 		}
-	}
-	// Ed25519 keypair も同 tx 内で発行 (#1067 / #1068)
-	if err := s.maybeCreateEd25519Keypair(tx, in.userID); err != nil {
-		return nil, nil, err
 	}
 	return user, profile, nil
 }

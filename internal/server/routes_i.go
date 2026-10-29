@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	apiannouncements "github.com/elythia-network/elythia/internal/api/announcements"
 	apiflash "github.com/elythia-network/elythia/internal/api/flash"
 	"github.com/elythia-network/elythia/internal/api/i"
@@ -13,9 +15,11 @@ import (
 
 // registerIRoutes registers the routes of the signed-in account (i/* and
 // verify-email) on the /api group.
-func registerIRoutes(api apiRoutes, iHandler *i.Handler, webhookHandler *apiwebhooks.Handler, notificationsHandler *notifications.Handler, pagesHandler *pages.Handler, flashHandler *apiflash.Handler, announcementHandler *apiannouncements.Handler, roleService *corerole.Service) {
+func registerIRoutes(api apiRoutes, iHandler *i.Handler, webhookHandler *apiwebhooks.Handler, notificationsHandler *notifications.Handler, pagesHandler *pages.Handler, flashHandler *apiflash.Handler, announcementHandler *apiannouncements.Handler, roleService *corerole.Service, rateLimiter *middleware.RateLimiter) {
 	api.POST("/i", iHandler.Me, middleware.RequireAuth(), middleware.RequireScope("read:account"))
 	api.POST("/i/update", iHandler.Update, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/i/federation", iHandler.Federation, middleware.RequireAuth(), middleware.RequireScope("read:account"))
+	api.POST("/i/update-federation", iHandler.UpdateFederation, middleware.RequireAuth(), middleware.RequireScope("write:account"), middleware.RequireSecure(), rateLimiter.ForEndpoint("i/update-federation", &middleware.EndpointLimit{Duration: time.Hour, Max: 20}))
 	api.POST("/i/pin", iHandler.Pin, middleware.RequireAuth(), middleware.RequireNotMoved(), middleware.RequireScope("write:account"))
 	api.POST("/i/unpin", iHandler.Unpin, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/i/registry/get", iHandler.RegistryGet, middleware.RequireAuth(), middleware.RequireScope("read:account"))

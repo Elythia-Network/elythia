@@ -6,6 +6,15 @@ import (
 	"gorm.io/datatypes"
 )
 
+// FederationStatus controls whether a local account may participate in ActivityPub.
+type FederationStatus string
+
+const (
+	FederationStatusPending FederationStatus = "pending"
+	FederationStatusOff     FederationStatus = "off"
+	FederationStatusOn      FederationStatus = "on"
+)
+
 // User represents the `user` table.
 // Misskey互換のカラム名・型を維持する
 type User struct {
@@ -74,7 +83,12 @@ type User struct {
 	// 埋まっているアカウントには、どの経路からもログインできない。ネイティブ
 	// トークンはプラグインのプロセス内の呼び出し (AsUser) でだけ受け付ける。
 	// Elythia 独自の列 (migration 000118)。
-	ManagedByPlugin *string `gorm:"column:managedByPlugin;type:varchar(32)" json:"managedByPlugin,omitempty"`
+	ManagedByPlugin              *string          `gorm:"column:managedByPlugin;type:varchar(32)" json:"managedByPlugin,omitempty"`
+	FederationStatus             FederationStatus `gorm:"column:federationStatus;type:varchar(16);not null;default:'on'" json:"-"`
+	FederationEnabledAt          *time.Time       `gorm:"column:federationEnabledAt;type:timestamp with time zone" json:"-"`
+	FirstExternalReferenceAt     *time.Time       `gorm:"column:firstExternalReferenceAt;type:timestamp with time zone" json:"-"`
+	FirstExternalReferenceReason *string          `gorm:"column:firstExternalReferenceReason;type:varchar(32)" json:"-"`
+	FirstExternalReferenceHost   *string          `gorm:"column:firstExternalReferenceHost;type:varchar(255)" json:"-"`
 
 	// Relations
 	Avatar *DriveFile `gorm:"foreignKey:AvatarID" json:"avatar,omitempty"`

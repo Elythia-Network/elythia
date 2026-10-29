@@ -36,6 +36,12 @@ import (
 // src を指している必要があり、その時点で local に解決済のため local lookup で足りる。
 func (h *Handler) Move(c echo.Context) error {
 	me := middleware.GetUser(c)
+	if me != nil && h.localFederationObserver != nil && !h.localFederationObserver.IsExternallyAvailable(me) {
+		return c.JSON(http.StatusBadRequest, apierr.Error(
+			"FEDERATION_DISABLED", "Account migration is unavailable while federation is disabled for this account.",
+			"abdc2832-1f6d-4a33-8a10-b5731ca33884",
+		))
+	}
 	var req struct {
 		MoveToAccount *string `json:"moveToAccount"`
 		Password      string  `json:"password"`
@@ -153,6 +159,11 @@ func (h *Handler) Move(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error(
 			"INVALID_PARAM", "Remote users cannot initiate account move.",
 			"3d81ceae-475f-4600-b2a8-2bc116157532",
+		))
+	case errors.Is(err, move.ErrFederationDisabled):
+		return c.JSON(http.StatusBadRequest, apierr.Error(
+			"FEDERATION_DISABLED", "Account migration is unavailable while federation is disabled for an account.",
+			"abdc2832-1f6d-4a33-8a10-b5731ca33884",
 		))
 	default:
 		return apierr.JSONInternalError(c)

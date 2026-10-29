@@ -965,6 +965,17 @@ func ptrOrNilInt(v any) *int {
 	return nil
 }
 
+func ptrOrNilTime(v any) *time.Time {
+	switch value := v.(type) {
+	case time.Time:
+		return &value
+	case *time.Time:
+		return value
+	default:
+		return nil
+	}
+}
+
 func applyUserFields(u *model.User, fields map[string]any) {
 	for k, v := range fields {
 		switch k {
@@ -998,6 +1009,16 @@ func applyUserFields(u *model.User, fields map[string]any) {
 			if t, ok := v.(*time.Time); ok {
 				u.LastFetchedAt = t
 			}
+		case "federationStatus":
+			if status, ok := v.(model.FederationStatus); ok {
+				u.FederationStatus = status
+			}
+		case "federationEnabledAt":
+			u.FederationEnabledAt = ptrOrNilTime(v)
+		case "firstExternalReferenceAt":
+			u.FirstExternalReferenceAt = ptrOrNilTime(v)
+		case "firstExternalReferenceReason":
+			u.FirstExternalReferenceReason = ptrOrNilString(v)
 		case "accountCreatedAt":
 			if t, ok := v.(*time.Time); ok {
 				u.AccountCreatedAt = t
@@ -1429,6 +1450,12 @@ func (m *MockNoteRepository) Create(note *model.Note) error {
 	return nil
 }
 
+// CreateWithTx mirrors Create for callers whose production insert shares a
+// transaction with a user-row lock.
+func (m *MockNoteRepository) CreateWithTx(note *model.Note, _ *gorm.DB) error {
+	return m.Create(note)
+}
+
 func (m *MockNoteRepository) FindByID(id string) (*model.Note, error) {
 	if m.FindErr != nil {
 		return nil, m.FindErr
@@ -1846,6 +1873,13 @@ func (m *MockNoteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note,
 		}
 	}
 	return out, nil
+}
+
+func (m *MockNoteRepository) FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error) {
+	if m.FindErr != nil {
+		return nil, m.FindErr
+	}
+	return m.FindManyByIDsWithUser(ids)
 }
 
 func (m *MockNoteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {

@@ -354,7 +354,7 @@ func TestCreateMessageToRoom_DeliversToRemoteMembers(t *testing.T) {
 	svc, chatRepo, userRepo, deliverer := newInvitationService(t)
 	remoteHost := "remote.example"
 	bobURI := "https://remote.example/users/bob"
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", Host: &remoteHost, URI: &bobURI}
 	// alice (local owner) の room に remote member bob。**ローカル room なので
 	// host / uri は NULL** (#2994)。
@@ -373,7 +373,7 @@ func TestCreateMessageToRoom_DeliversToRemoteMembers(t *testing.T) {
 
 func TestCreateMessageToRoom_LocalOnlyRoomNoFederation(t *testing.T) {
 	svc, chatRepo, userRepo, deliverer := newInvitationService(t)
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["carol"] = &model.User{ID: "carol", Username: "carol"}
 	require.NoError(t, chatRepo.CreateRoom(remoteRoomRow("room1", "General", "alice")))
 	require.NoError(t, chatRepo.CreateMembership(&model.ChatRoomMembership{ID: "mem1", UserID: "carol", RoomID: "room1"}))
@@ -389,7 +389,7 @@ func TestCreateMessageToRoom_RemoteRoomUsesStoredURI(t *testing.T) {
 	remoteHost := "remote.example"
 	ownerURI := "https://remote.example/users/owner"
 	userRepo.Users["owner"] = &model.User{ID: "owner", Username: "owner", Host: &remoteHost, URI: &ownerURI}
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	// remote owner の room copy に local member alice が投稿する。
 	require.NoError(t, chatRepo.CreateRoom(remoteRoomRow("room1", "General", "owner")))
 	require.NoError(t, chatRepo.CreateMembership(&model.ChatRoomMembership{ID: "mem1", UserID: "alice", RoomID: "room1"}))
@@ -406,7 +406,7 @@ func TestCreateMessageToRoom_DeliveryFailureSwallowed(t *testing.T) {
 	deliverer.returnErr = assert.AnError
 	remoteHost := "remote.example"
 	bobURI := "https://remote.example/users/bob"
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", Host: &remoteHost, URI: &bobURI}
 	require.NoError(t, chatRepo.CreateRoom(remoteRoomRow("room1", "General", "alice")))
 	require.NoError(t, chatRepo.CreateMembership(&model.ChatRoomMembership{ID: "mem1", UserID: "bob", RoomID: "room1"}))
@@ -499,7 +499,7 @@ func TestLeaveRoom_NonMemberDoesNotFederate(t *testing.T) {
 	svc, chatRepo, userRepo, deliverer := newInvitationService(t)
 	remoteHost := "remote.example"
 	bobURI := "https://remote.example/users/bob"
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", Host: &remoteHost, URI: &bobURI}
 	userRepo.Users["mallory"] = &model.User{ID: "mallory", Username: "mallory"}
 	// ローカル room (alice が owner) なので host / uri は NULL。
@@ -518,7 +518,7 @@ func TestLeaveRoom_NonMemberDoesNotFederate(t *testing.T) {
 // 見える。
 func TestLeaveRoom_MembershipLookupFailureIsError(t *testing.T) {
 	svc, chatRepo, userRepo, deliverer := newInvitationService(t)
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
 	// ローカル room (alice が owner) なので host / uri は NULL。
 	require.NoError(t, chatRepo.CreateRoom(&model.ChatRoom{ID: "room1", Name: "G", OwnerID: "alice"}))
@@ -808,8 +808,8 @@ func TestCreateMessageToRoom_NoDeliveryWhenRoomURIUnknown(t *testing.T) {
 	remoteHost := "remote.example"
 	bobURI := "https://remote.example/users/bob"
 	badOwnerURI := "not-a-url"
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["remoteOwner"] = &model.User{ID: "remoteOwner", Username: "owner", Host: &remoteHost, URI: &badOwnerURI}
-	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice"}
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", Host: &remoteHost, URI: &bobURI}
 	// `uri` を持たないのに owner がリモート、という身元の分からない行。
 	require.NoError(t, chatRepo.CreateRoom(&model.ChatRoom{ID: "room1", Name: "G", OwnerID: "remoteOwner"}))

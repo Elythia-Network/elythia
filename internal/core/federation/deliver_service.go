@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/queue/driver"
@@ -23,6 +26,9 @@ var (
 	// ErrNoLocalSigner is returned when DeliverService is asked to sign with a
 	// remote user. リモートユーザーの代理署名は不可能。
 	ErrNoLocalSigner = errors.New("cannot sign on behalf of a remote user")
+	// ErrFederationDisabled is returned when a local-only or pending account
+	// would otherwise be used as an external delivery signer.
+	ErrFederationDisabled = corelocalfederation.ErrFederationDisabled
 )
 
 // HostBlockChecker reports whether a host is on the blocked list and whether
@@ -72,7 +78,10 @@ type DeliverService struct {
 	// エンキューしない。**nil だと `isBlockedInbox` が常に false になり、ブロック済み
 	// host へも配送する (outbound の defederation が効かない)。** 構築子の必須の
 	// 引数 (#3833。以前は setter と起動時の検査、#2683)。テストは nil を渡せる。
-	hostBlocker HostBlockChecker
+	hostBlocker             HostBlockChecker
+	localFederationObserver activitypub.LocalFederationObserver
+	noteRepo                repository.NoteRepository
+	localReferenceCache     localReferenceCache
 	// syncDeliverHook, when non-nil, replaces the queue enqueue with an
 	// inline call to the hook. test 専用で federation deliver の queue 経路
 	// を bypass し、sign + HTTP POST を同期実行する e2e_federation 用。
@@ -97,6 +106,12 @@ type DeliverService struct {
 	cacheMu  sync.Mutex
 	cacheGen uint64
 }
+
+func (s *DeliverService) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	s.localFederationObserver = observer
+}
+
+func (s *DeliverService) SetNoteRepo(repo repository.NoteRepository) { s.noteRepo = repo }
 
 // NewDeliverService constructs a DeliverService.
 func NewDeliverService(
@@ -203,6 +218,66 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 	if len(inboxes) == 0 {
 		return nil
 	}
+	usableInboxes := make([]string, 0, len(inboxes))
+	usableSeen := make(map[string]struct{}, len(inboxes))
+	for _, inbox := range inboxes {
+		if inbox == "" || s.isBlockedInbox(inbox) {
+			continue
+		}
+		if _, dup := usableSeen[inbox]; dup {
+			continue
+		}
+		usableSeen[inbox] = struct{}{}
+		usableInboxes = append(usableInboxes, inbox)
+	}
+	if len(usableInboxes) == 0 {
+		return nil
+	}
+	inboxes = usableInboxes
+	var signer *model.User
+	signerNeedsObservation := false
+	var bodyReferences []referenceCandidate
+	if s.localFederationObserver != nil {
+		var err error
+		signer, signerNeedsObservation, err = s.preflightSigner(signerUserID)
+		if err != nil {
+			return err
+		}
+		knownUsers := make(map[string]*model.User, 1)
+		if signer != nil {
+			knownUsers[signer.ID] = signer
+		}
+		bodyReferences, err = s.preflightBodyReferences(body, knownUsers)
+		if err != nil {
+			return err
+		}
+		// Both signer and every local actor/note reference have passed lookup and
+		// availability checks. Only now can an outbound attempt record a first
+		// external reference.
+		host := firstDeliveryHost(inboxes, s)
+		if signerNeedsObservation {
+			if err := s.observeExternalReference(signer.ID, host); err != nil {
+				return err
+			}
+		}
+		for _, candidate := range bodyReferences {
+			if candidate.observe {
+				if err := s.observeExternalReference(candidate.id, host); err != nil {
+					return err
+				}
+			}
+			s.localReferenceCache.rememberUser(candidate.id, s.clock())
+		}
+		needsNoteRecheck := signerNeedsObservation
+		for _, candidate := range bodyReferences {
+			needsNoteRecheck = needsNoteRecheck || candidate.observe
+		}
+		if needsNoteRecheck {
+			if err := s.confirmOutboundLocalNotes(body); err != nil {
+				return err
+			}
+		}
+	}
 	keyID, keyPEM, err := s.signerCredentials(signerUserID)
 	if err != nil {
 		return err
@@ -263,6 +338,201 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			return fmt.Errorf("enqueue deliver to %s: %w", inbox, err)
 		}
 	}
+	return nil
+}
+
+func (s *DeliverService) confirmOutboundLocalNotes(body []byte) error {
+	if s.urls == nil || s.noteRepo == nil {
+		return nil
+	}
+	_, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), string(body))
+	if len(noteIDs) == 0 {
+		return nil
+	}
+	notes, err := s.noteRepo.FindManyLocalReferenceMetadataByIDs(noteIDs)
+	if err != nil {
+		return fmt.Errorf("confirm local note references before delivery: %w", err)
+	}
+	for _, note := range notes {
+		if note != nil && note.UserHost == nil && note.LocalOnly {
+			return ErrFederationDisabled
+		}
+		if note != nil && note.UserHost == nil && s.localReferenceCache.hasUser(note.UserID, s.clock()) {
+			s.localReferenceCache.rememberNote(note.ID, note.UserID, s.clock())
+		}
+	}
+	return nil
+}
+
+func firstDeliveryHost(inboxes []string, s *DeliverService) string {
+	for _, inbox := range inboxes {
+		if inbox == "" || s.isBlockedInbox(inbox) {
+			continue
+		}
+		if u, err := url.Parse(inbox); err == nil {
+			return u.Host
+		}
+	}
+	return ""
+}
+
+type referenceCandidate struct {
+	id      string
+	observe bool
+}
+
+// preflightSigner checks policy without recording a reference. The returned
+// user is memoized for body validation so the signer is looked up only once.
+func (s *DeliverService) preflightSigner(userID string) (*model.User, bool, error) {
+	if s.localReferenceCache.hasUser(userID, s.clock()) {
+		return nil, false, nil
+	}
+	signer, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("load delivery signer: %w", err)
+	}
+	if !signer.IsLocal() {
+		return signer, false, nil
+	}
+	if !s.localFederationObserver.IsExternallyAvailable(signer) {
+		return nil, false, ErrFederationDisabled
+	}
+	if signer.FirstExternalReferenceAt != nil {
+		s.localReferenceCache.rememberUser(signer.ID, s.clock())
+		return signer, false, nil
+	}
+	return signer, true, nil
+}
+
+// preflightBodyReferences validates all account and note policy centrally so
+// every activity kind is covered before any account is recorded as referenced.
+func (s *DeliverService) preflightBodyReferences(body []byte, knownUsers map[string]*model.User) ([]referenceCandidate, error) {
+	if s.urls == nil || s.userRepo == nil {
+		return nil, nil
+	}
+	userIDs := map[string]struct{}{}
+	ids, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), string(body))
+	for _, id := range ids {
+		userIDs[id] = struct{}{}
+	}
+	notesToConfirm := make(map[string]string, len(noteIDs))
+	var coldNoteIDs []string
+	for _, id := range noteIDs {
+		if authorID, ok := s.localReferenceCache.noteAuthor(id, s.clock()); ok && s.externallyReferencedHas(authorID) {
+			continue
+		}
+		coldNoteIDs = append(coldNoteIDs, id)
+	}
+	if len(coldNoteIDs) > 0 && s.noteRepo != nil {
+		notes, err := s.noteRepo.FindManyLocalReferenceMetadataByIDs(coldNoteIDs)
+		if err != nil {
+			return nil, fmt.Errorf("lookup local note reference %s: %w", strings.Join(coldNoteIDs, ","), err)
+		}
+		for _, note := range notes {
+			if note == nil || note.UserHost != nil {
+				continue
+			}
+			if note.LocalOnly {
+				return nil, ErrFederationDisabled
+			}
+			notesToConfirm[note.ID] = note.UserID
+			userIDs[note.UserID] = struct{}{}
+		}
+	} else if len(coldNoteIDs) > 0 {
+		return nil, fmt.Errorf("lookup local note references: note repository is unavailable")
+	}
+	userIDList := make([]string, 0, len(userIDs))
+	for id := range userIDs {
+		userIDList = append(userIDList, id)
+	}
+	sort.Strings(userIDList)
+	toLookup := make([]string, 0, len(userIDList))
+	for _, id := range userIDList {
+		if s.localReferenceCache.hasUser(id, s.clock()) {
+			continue
+		}
+		if _, ok := knownUsers[id]; ok {
+			continue
+		}
+		toLookup = append(toLookup, id)
+	}
+	resolved := make(map[string]*model.User, len(toLookup))
+	if len(toLookup) > 0 {
+		users, err := s.userRepo.FindManyByIDs(toLookup)
+		if err != nil {
+			return nil, fmt.Errorf("lookup local user reference %s: %w", strings.Join(toLookup, ","), err)
+		}
+		for _, user := range users {
+			if user != nil {
+				resolved[user.ID] = user
+			}
+		}
+	}
+	candidates := make([]referenceCandidate, 0, len(userIDList))
+	confirmedAuthors := make(map[string]struct{}, len(userIDList))
+	for _, id := range userIDList {
+		if s.localReferenceCache.hasUser(id, s.clock()) {
+			confirmedAuthors[id] = struct{}{}
+			continue
+		}
+		u, ok := knownUsers[id]
+		if !ok {
+			u = resolved[id]
+		}
+		if u == nil {
+			continue
+		}
+		if !u.IsLocal() {
+			continue
+		}
+		if u.FirstExternalReferenceAt != nil {
+			confirmedAuthors[id] = struct{}{}
+		}
+		if !s.localFederationObserver.IsExternallyAvailable(u) {
+			return nil, ErrFederationDisabled
+		}
+		candidates = append(candidates, referenceCandidate{id: u.ID, observe: u.FirstExternalReferenceAt == nil})
+	}
+	if len(notesToConfirm) > 0 {
+		confirmIDs := make([]string, 0, len(notesToConfirm))
+		for id := range notesToConfirm {
+			confirmIDs = append(confirmIDs, id)
+		}
+		confirmed, err := s.noteRepo.FindManyLocalReferenceMetadataByIDs(confirmIDs)
+		if err != nil {
+			return nil, fmt.Errorf("confirm local note references: %w", err)
+		}
+		confirmedByID := make(map[string]*model.Note, len(confirmed))
+		for _, note := range confirmed {
+			if note != nil {
+				confirmedByID[note.ID] = note
+			}
+		}
+		for _, id := range confirmIDs {
+			note := confirmedByID[id]
+			if note == nil || note.LocalOnly || note.UserHost != nil || note.UserID != notesToConfirm[id] {
+				return nil, ErrFederationDisabled
+			}
+			if _, ok := confirmedAuthors[note.UserID]; ok {
+				s.localReferenceCache.rememberNote(id, note.UserID, s.clock())
+			}
+		}
+	}
+	return candidates, nil
+}
+
+func (s *DeliverService) externallyReferencedHas(userID string) bool {
+	return s.localReferenceCache.hasUser(userID, s.clock())
+}
+
+func (s *DeliverService) observeExternalReference(userID, host string) error {
+	if s.localReferenceCache.hasUser(userID, s.clock()) {
+		return nil
+	}
+	if _, err := s.localFederationObserver.ObserveExternalReference(userID, "delivery", host); err != nil {
+		return err
+	}
+	s.localReferenceCache.rememberUser(userID, s.clock())
 	return nil
 }
 

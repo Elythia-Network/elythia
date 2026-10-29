@@ -78,6 +78,7 @@ func aidxCutoffID(t time.Time) string {
 // NoteRepository provides data access for notes.
 type NoteRepository interface {
 	Create(note *model.Note) error
+	CreateWithTx(note *model.Note, tx *gorm.DB) error
 	FindByID(id string) (*model.Note, error)
 	// FindByIDWithUser fetches a note with only its author (`User`) preloaded.
 	// Renote / Reply の embed までは要らない caller (visibility チェック等) 向け
@@ -131,6 +132,9 @@ type NoteRepository interface {
 	// generateUgcVisibilityQueryForVisitor).
 	ListLocalByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error)
 	FindManyByIDsWithUser(ids []string) ([]*model.Note, error)
+	// FindManyLocalReferenceMetadataByIDs loads only the fields needed to validate
+	// inbound local references, without hydrating note relations.
+	FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error)
 	// ExistingNoteIDsOnPrimary returns the subset of ids that exist, reading
 	// from the primary DB even when read replicas are configured.
 	//
@@ -281,6 +285,13 @@ func NewNoteRepository(db *gorm.DB) NoteRepository {
 
 func (r *noteRepository) Create(note *model.Note) error {
 	return r.db.Create(note).Error
+}
+
+func (r *noteRepository) CreateWithTx(note *model.Note, tx *gorm.DB) error {
+	if tx == nil {
+		return gorm.ErrInvalidTransaction
+	}
+	return tx.Create(note).Error
 }
 
 func (r *noteRepository) FindByID(id string) (*model.Note, error) {
@@ -818,6 +829,28 @@ func (r *noteRepository) ExistingNoteIDsOnPrimary(ids []string) ([]string, error
 func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
 	ids = storableIDs(ids)
 	return r.findManyByIDsWithUser(ids, false)
+}
+
+func (r *noteRepository) FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error) {
+	ids = storableIDs(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var notes []*model.Note
+	if err := r.reader(true)().Select("id", "userId", "userHost", "localOnly").Where("id IN ?", ids).Find(&notes).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*model.Note, len(notes))
+	for _, note := range notes {
+		byID[note.ID] = note
+	}
+	ordered := make([]*model.Note, 0, len(notes))
+	for _, id := range ids {
+		if note := byID[id]; note != nil {
+			ordered = append(ordered, note)
+		}
+	}
+	return ordered, nil
 }
 
 func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*model.Note, error) {

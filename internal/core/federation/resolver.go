@@ -398,12 +398,14 @@ type Resolver struct {
 	// (#3833。以前は setter と起動時の検査)。
 	background *bgwork.Group
 	// rules は連合のルール (#3090)。nil なら評価しない。
-	rules    RuleEvaluator
-	userRepo repository.UserRepository
-	noteRepo repository.NoteRepository
-	urls     *activitypub.URLBuilder
-	fetcher  HTTPFetcher
-	idGen    id.Generator
+	rules                   RuleEvaluator
+	userRepo                repository.UserRepository
+	noteRepo                repository.NoteRepository
+	localFederationObserver activitypub.LocalFederationObserver
+	localReferenceCache     localReferenceCache
+	urls                    *activitypub.URLBuilder
+	fetcher                 HTTPFetcher
+	idGen                   id.Generator
 	// keysMu は keys map (userID → publicKey + fetchedAt) の concurrent
 	// access を保護する。queue worker や inbox handler は別 actor を並行
 	// 処理するため、ロック無しの map read/write は runtime panic を起こす
@@ -643,6 +645,16 @@ func (r *Resolver) SetPublickeyExtraRepo(repo PublickeyExtraStore) {
 // SetPollRepo attaches a PollRepository for ingesting Question (poll) objects.
 func (r *Resolver) SetPollRepo(repo repository.PollRepository) {
 	r.pollRepo = repo
+}
+
+// SetUserRepo replaces the user repository used by resolver lookups.
+func (r *Resolver) SetUserRepo(repo repository.UserRepository) {
+	r.userRepo = repo
+}
+
+// SetNoteRepo replaces the note repository used by resolver lookups.
+func (r *Resolver) SetNoteRepo(repo repository.NoteRepository) {
+	r.noteRepo = repo
 }
 
 // resolveSuspensionChange decides whether to follow the actor's `suspended`.
@@ -2849,6 +2861,23 @@ func (r *Resolver) ResolveNoteWithCreated(uri string) (*model.Note, bool, error)
 	return r.resolveNoteDepthOptCreated(uri, 0, false, false, true, nil)
 }
 
+// ResolveNoteForInbox marks this resolution tree as an inbound worker operation
+// so local shortcut references are checked without affecting native API reads.
+func (r *Resolver) ResolveNoteForInbox(uri, sourceHost string) (*model.Note, error) {
+	note, _, err := r.resolveNoteDepthOptCreated(uri, 0, false, false, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
+	return note, err
+}
+
+func (r *Resolver) ResolveNoteWithCreatedForInbox(uri, sourceHost string) (*model.Note, bool, error) {
+	return r.resolveNoteDepthOptCreated(uri, 0, false, false, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
+}
+
+func (r *Resolver) ResolveNoteEphemeralForInbox(uri, sourceHost string) (*model.Note, error) {
+	ephemeral := r.ephemeralSink != nil && r.ephemeralSink.Enabled()
+	note, _, err := r.resolveNoteDepthOptCreated(uri, 0, false, ephemeral, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
+	return note, err
+}
+
 // ResolveNoteEphemeral is ResolveNote for relay-delivered notes: the note and
 // its author are written to the ephemeral store instead of the database
 // (#2332)。既に DB に在る URI はそのまま DB 行を返す (直接配送で来ていた等)。
@@ -2904,6 +2933,11 @@ func (r *Resolver) IngestNoteEphemeral(body []byte, deliveringActorURI string) (
 		return r.IngestNoteWithCreated(body, deliveringActorURI)
 	}
 	return r.ingestNoteWithCreated(body, deliveringActorURI, 0, true, nil)
+}
+
+func (r *Resolver) IngestNoteEphemeralForInbox(body []byte, deliveringActorURI, sourceHost string) (*model.Note, bool, error) {
+	ephemeral := r.ephemeralSink != nil && r.ephemeralSink.Enabled()
+	return r.ingestNoteWithCreated(body, deliveringActorURI, 0, ephemeral, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
 }
 
 // ResolveNoteAllowCrossHost is ResolveNote for user-initiated lookups
@@ -2966,7 +3000,7 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 	// **入った鍵をチェーンへ足す。** 入れ子の解決が「待つと自分を待つことに
 	// なる」を判定できるようにする (#2684)。チェーンに閉じているので、
 	// 無関係な goroutine が同じ鍵を握っていても巻き込まない (#2685)。
-	key := noteGroupKey(uri, allowCrossHost, ephemeral)
+	key := noteGroupKeyForChain(uri, allowCrossHost, ephemeral, chain)
 	inner := chain.with(key, "")
 	// **待つと循環する場合は諦める。** チェーンローカルの判定は自分の祖先しか
 	// 見ないので、cross-goroutine の待ちの循環 (相互に引用し合う 2 投稿を
@@ -2989,6 +3023,11 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 	if !ok || rn == nil || rn.note == nil {
 		return nil, false, ErrInvalidNote
 	}
+	if chain != nil && chain.inboundLocalReferences {
+		if err := r.RequireInboundLocalNote(rn.note, chain.inboundSourceHost); err != nil {
+			return nil, false, err
+		}
+	}
 	return rn.note, rn.created, nil
 }
 
@@ -3000,7 +3039,7 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 // note 行は document id で保存されるので、別名 URL では取得 URI で引くと必ず
 // 空振りする (#2684 review MED-1)。
 func chainAfterProbe(chain *resolveChain, uri string, allowCrossHost, ephemeral bool, docID string) *resolveChain {
-	return chain.with(noteGroupKey(uri, allowCrossHost, ephemeral), docID).with(docID, docID)
+	return chain.with(noteGroupKeyForChain(uri, allowCrossHost, ephemeral, chain), docID).with(docID, docID)
 }
 
 // noteInFlightInChain reports whether the current resolve chain is already
@@ -3023,7 +3062,7 @@ func chainAfterProbe(chain *resolveChain, uri string, allowCrossHost, ephemeral 
 // 別名 URL では取得 URI と document id が食い違うので、片方だけでは取りこぼす
 // (#2684 review HIGH-1)。戻り値の docID は既存行を引き当てるのに使う。
 func (r *Resolver) noteInFlightInChain(chain *resolveChain, uri string, allowCrossHost, ephemeral bool) (string, bool) {
-	if docID, ok := chain.lookup(noteGroupKey(uri, allowCrossHost, ephemeral)); ok {
+	if docID, ok := chain.lookup(noteGroupKeyForChain(uri, allowCrossHost, ephemeral, chain)); ok {
 		if docID == "" {
 			// fetch 前なので id が未確定。取得 URI で引くしかない。
 			docID = uri
@@ -3077,8 +3116,17 @@ func (r *Resolver) resolveNoteOnce(uri string, depth int, allowCrossHost, epheme
 		return nil, ErrRecursionLimit
 	}
 	if id := r.extractLocalNoteID(uri); id != "" {
-		if existing, err := r.noteRepo.FindByID(id); err == nil {
+		existing, lookupErr := r.noteRepo.FindByID(id)
+		if lookupErr == nil {
+			if chain != nil && chain.inboundLocalReferences {
+				if err := r.RequireInboundLocalNote(existing, chain.inboundSourceHost); err != nil {
+					return nil, err
+				}
+			}
 			return &resolvedNote{note: existing}, nil
+		}
+		if chain != nil && chain.inboundLocalReferences && !repository.IsNotFound(lookupErr) {
+			return nil, fmt.Errorf("%w: lookup local note: %w", ErrInboundLocalReferenceFailure, lookupErr)
 		}
 		// ローカル URI なのにDBに無ければ、これ以上 fetch しても意味がない
 		return nil, ErrInvalidNote
@@ -3204,53 +3252,60 @@ func (r *Resolver) resolveNoteOnce(uri string, depth int, allowCrossHost, epheme
 // 既知 note (local ID / 取り込み済み URI) を fetch 無しで優先的に引く。未知 URI は
 // ResolveNote で fetch するが、その URI が現在 ingest 中 (quote cycle) の場合は
 // fetch を skip して無限再帰を防ぐ (#1527)。
-func (r *Resolver) resolveQuoteTarget(misskeyQuote, quoteURL string, depth int, ephemeral bool, chain *resolveChain) *model.Note {
+func (r *Resolver) resolveQuoteTarget(misskeyQuote, quoteURL string, depth int, ephemeral bool, chain *resolveChain) (*model.Note, error) {
 	if r.noteRepo == nil {
-		return nil
+		return nil, nil
 	}
 	// upstream ApNoteService は `[_misskey_quote, quoteUrl]` を順に解決し、最初に
 	// 成功した note を採用する (`.at(0)`)。通常は両者同値だが、片方しか解決できない
 	// ケースで取りこぼさないよう順に試す。
-	if n := r.resolveQuoteURI(misskeyQuote, depth, ephemeral, chain); n != nil {
-		return n
+	if n, err := r.resolveQuoteURI(misskeyQuote, depth, ephemeral, chain); err != nil || n != nil {
+		return n, err
 	}
 	if quoteURL != misskeyQuote {
-		if n := r.resolveQuoteURI(quoteURL, depth, ephemeral, chain); n != nil {
-			return n
+		if n, err := r.resolveQuoteURI(quoteURL, depth, ephemeral, chain); err != nil || n != nil {
+			return n, err
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // resolveQuoteURI resolves a single quote URI to a local note row. 既知 note
 // (local ID / 取り込み済み URI) は fetch 無しで引き、未知 URI は cycle でなければ
 // ResolveNote で fetch する。空 URI / 解決不能は nil。
-func (r *Resolver) resolveQuoteURI(uri string, depth int, ephemeral bool, chain *resolveChain) *model.Note {
+func (r *Resolver) resolveQuoteURI(uri string, depth int, ephemeral bool, chain *resolveChain) (*model.Note, error) {
 	if uri == "" {
-		return nil
+		return nil, nil
 	}
 	// 1. ローカル note URI なら ID 抽出して DB から (fetch 不要)。
 	//
-	// **ここは障害でも ack する** (#3116)。この関数は `*model.Note` しか返さず、
-	// 呼び出し側 (ingest) は引用が解けなくてもノート自体は取り込む。retry させる
-	// 手段が無いので、DB 障害のあいだに届いた引用は**解決されないまま確定する**。
-	// 直すには signature を変えて ingest ごと retry させる必要があり、それは
-	// 「引用が解けないノートを一切取り込まない」という別の判断になる。
+	// 通常の quote 解決失敗は従来どおり best-effort で無視する。inbound worker の
+	// local reference policy reject とavailability確認の障害だけはerrorとして返し、
+	// 外側のnoteを保存してからretry不能になる状態を防ぐ。
 	if id := r.extractLocalNoteID(uri); id != "" {
-		if n, err := r.noteRepo.FindByID(id); err == nil {
-			return n
+		n, lookupErr := r.noteRepo.FindByID(id)
+		if lookupErr == nil {
+			if chain != nil && chain.inboundLocalReferences {
+				if err := r.RequireInboundLocalNote(n, chain.inboundSourceHost); err != nil {
+					return nil, err
+				}
+			}
+			return n, nil
 		}
-		return nil
+		if chain != nil && chain.inboundLocalReferences && !repository.IsNotFound(lookupErr) {
+			return nil, fmt.Errorf("%w: lookup local quote target: %w", ErrInboundLocalReferenceFailure, lookupErr)
+		}
+		return nil, nil
 	}
 	// 2. 取り込み済みのリモート note なら DB から (fetch 不要)。
 	if n, err := r.noteRepo.FindByURI(uri); err == nil {
-		return n
+		return n, nil
 	}
 	// 2.5. ephemeral 側に既にあれば再 fetch しない (#2397)。これが無いと引用先を
 	// 取り込み直して別 ID で保存し、renoteId が指す先が投稿ごとにずれる。
 	if ephemeral {
 		if n := r.ephemeralNoteByURI(uri); n != nil {
-			return n
+			return n, nil
 		}
 	}
 	// 3. 未知 URI: cycle でなければ fetch して取り込む (本家同様)。**自分の
@@ -3262,22 +3317,25 @@ func (r *Resolver) resolveQuoteURI(uri string, depth int, ephemeral bool, chain 
 	if docID, inflight := r.noteInFlightInChain(chain, uri, false, ephemeral); inflight {
 		// 別名 URL で既に取り込み済みなら、その行で引用を繋げる。
 		if n := r.noteByAnyURI(uri, docID); n != nil {
-			return n
+			return n, nil
 		}
 		// ephemeral 側も同じ理由で document id で引き直す (2.5 は取得 URI だけ)。
 		if ephemeral && docID != "" && docID != uri {
 			if n := r.ephemeralNoteByURI(docID); n != nil {
-				return n
+				return n, nil
 			}
 		}
-		return nil
+		return nil, nil
 	}
 	// quote 解決は federation-loop 扱いで Strict (request host binding 有効)。
 	// ephemeral は親から引き継ぐ (引用先だけ DB に落ちるのを防ぐ)。
 	if n, err := r.resolveNoteDepth(uri, depth+1, false, ephemeral, chain); err == nil {
-		return n
+		return n, nil
+	} else if chain != nil && chain.inboundLocalReferences &&
+		(errors.Is(err, ErrInboundLocalReferenceUnavailable) || errors.Is(err, ErrInboundLocalReferenceFailure)) {
+		return nil, err
 	}
-	return nil
+	return nil, nil
 }
 
 // IngestNote parses an ActivityStreams Note JSON and persists it as a local
@@ -3318,6 +3376,10 @@ func (r *Resolver) IngestNote(body []byte) (*model.Note, error) {
 func (r *Resolver) IngestNoteWithCreated(body []byte, deliveringActorURI string) (*model.Note, bool, error) {
 	// inbound delivery 起点は quote chain depth 0。
 	return r.ingestNoteWithCreated(body, deliveringActorURI, 0, false, nil)
+}
+
+func (r *Resolver) IngestNoteWithCreatedForInbox(body []byte, deliveringActorURI, sourceHost string) (*model.Note, bool, error) {
+	return r.ingestNoteWithCreated(body, deliveringActorURI, 0, false, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
 }
 
 // ingestNoteWithCreated is the body of IngestNoteWithCreated carrying the
@@ -3557,8 +3619,9 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		// ヒットする** = スレッド接続が恒久的に失われる。not-found (こちらが
 		// 取り込んでいない返信先) は従来どおり nil のまま進む。
 		var replyErr error
-		if id := r.extractLocalNoteID(apNote.InReplyTo.String()); id != "" {
-			reply, err := r.noteRepo.FindByID(id)
+		localReplyID := r.extractLocalNoteID(apNote.InReplyTo.String())
+		if localReplyID != "" {
+			reply, err := r.noteRepo.FindByID(localReplyID)
 			replyTarget, replyErr = reply, err
 		} else {
 			reply, err := r.noteRepo.FindByURI(apNote.InReplyTo.String())
@@ -3566,11 +3629,19 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		}
 		if replyErr != nil {
 			if !repository.IsNotFound(replyErr) {
+				if localReplyID != "" && chain != nil && chain.inboundLocalReferences {
+					return nil, false, fmt.Errorf("%w: ingest note: lookup local reply target: %w", ErrInboundLocalReferenceFailure, replyErr)
+				}
 				return nil, false, fmt.Errorf("ingest note: lookup reply target: %w", replyErr)
 			}
 			replyTarget = nil
 		}
 		if replyTarget != nil {
+			if chain != nil && chain.inboundLocalReferences {
+				if err := r.RequireInboundLocalNote(replyTarget, chain.inboundSourceHost); err != nil {
+					return nil, false, fmt.Errorf("ingest note: validate reply target: %w", err)
+				}
+			}
 			note.ReplyID = &replyTarget.ID
 			note.ReplyUserID = &replyTarget.UserID
 			note.ReplyUserHost = replyTarget.UserHost
@@ -3649,7 +3720,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	if !ephemeral && depth == 0 {
 		r.fetchUnknownMentionActors(authorMentionLimit, tagHrefs, audience, chain)
 	}
-	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs)
+	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs, chain)
 	if merr != nil {
 		return nil, false, fmt.Errorf("ingest note: %w", merr)
 	}
@@ -3662,7 +3733,7 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 投稿者の followers を除いた残りを宛先にする。以前は `to` だけを見ていたので、
 	// `cc` に置かれた宛先が DM を読めなかった (#3330)。
 	if note.Visibility == model.NoteVisibilitySpecified {
-		visible, verr := r.resolveMentionedUserIDs(audience)
+		visible, verr := r.resolveMentionedUserIDs(audience, chain)
 		if verr != nil {
 			return nil, false, fmt.Errorf("ingest note: %w", verr)
 		}
@@ -3707,6 +3778,21 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// (#3330)。そのため宛先の解決を判定より前に行う。
 	if exceedsRemoteMentionLimit(note, note.Mentions, tagHrefs, authorMentionLimit) {
 		return nil, false, corenote.ErrContainsTooManyMentions
+	}
+	// 引用先のpolicy確認を、絵文字や添付の行を書き込む前に済ませる。
+	quoted, quoteErr := r.resolveQuoteTarget(apNote.MisskeyQuote.String(), apNote.QuoteURL.String(), depth, ephemeral, chain)
+	if quoteErr != nil {
+		return nil, false, fmt.Errorf("ingest note: validate quote target: %w", quoteErr)
+	}
+	if quoted != nil &&
+		(quoted.Visibility == model.NoteVisibilityFollowers ||
+			quoted.Visibility == model.NoteVisibilitySpecified) {
+		quoted = nil
+	}
+	if quoted != nil && quoted.ID != note.ID {
+		note.RenoteID = &quoted.ID
+		note.RenoteUserID = &quoted.UserID
+		note.RenoteUserHost = quoted.UserHost
 	}
 	// AP Note Tag配列からカスタム絵文字を抽出してDBにupsert
 	if actor.Host != nil {
@@ -3755,30 +3841,6 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// Question（投票）の場合はhasPollフラグをCreate前に設定
 	if len(apNote.OneOf) > 0 || len(apNote.AnyOf) > 0 {
 		note.HasPoll = true
-	}
-	// 引用 renote: upstream ApNoteService と同じく `_misskey_quote` / `quoteUrl` が
-	// 指す note を解決して renoteId に紐付ける (#1527)。これが無いと remote quote が
-	// 「本文だけ」で引用元が表示されない。解決失敗は best-effort で quote 無し扱い。
-	// AP vote の早期 return より後 (= 実際に note を作る経路) で解決し、vote object に
-	// quote field が乗っていても無駄な fetch をしない。renoteCount の増分は Create 後。
-	quoted := r.resolveQuoteTarget(apNote.MisskeyQuote.String(), apNote.QuoteURL.String(), depth, ephemeral, chain)
-	// 引用先が followers / specified(DM) の場合は紐付けない。本家
-	// NoteCreateService.ts:346-352 は他人の followers note と全 specified note を
-	// renote 対象から reject するため、連合の正規 quote がこれらを指すことはない。
-	// inbound quote 解決はローカル note を可視性無視で引くため、これらを紐付けると
-	// 非可視のローカル note が renote embed 経由で本来見られない viewer へ broadcast
-	// される IDOR になる (#1534 / #1532 regression)。entity packing 層に hideNote
-	// 相当が無い現状 (#1536) では、ここで弾くのが embed leak への最小防御。quoted=nil に
-	// することで下の RenoteID 紐付けと renoteCount 増分の両方が skip される。
-	if quoted != nil &&
-		(quoted.Visibility == model.NoteVisibilityFollowers ||
-			quoted.Visibility == model.NoteVisibilitySpecified) {
-		quoted = nil
-	}
-	if quoted != nil && quoted.ID != note.ID {
-		note.RenoteID = &quoted.ID
-		note.RenoteUserID = &quoted.UserID
-		note.RenoteUserHost = quoted.UserHost
 	}
 	if ephemeral {
 		// リレー由来の投稿は DB に入れず Redis へ置く (#2332)。ここまでの
@@ -4040,7 +4102,7 @@ func (r *Resolver) UpdateRemoteQuestion(object json.RawMessage, actorURI string)
 //     `uri` / `license` を上書きし、`hashtagHook.OnNoteCreated` は
 //     `mentionedUserIds` への append と count++ を撃つ。`drive_file` だけは
 //     URI で dedup するので新規作成のみ
-func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, error) {
+func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceHost ...string) (*model.Note, error) {
 	if r.noteRepo == nil {
 		return nil, ErrInvalidNote
 	}
@@ -4158,7 +4220,11 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	// IngestNote と同じく tag の Mention だけを user ID 配列にする (本家
 	// ApNoteService.createNote の apMentions と同じ。本文からは取らない、#3330)。
 	tagHrefs := extractMentionTags(apNote.Tag)
-	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs)
+	var inboundChain *resolveChain
+	if len(inboundSourceHost) > 0 {
+		inboundChain = &resolveChain{inboundLocalReferences: true, inboundSourceHost: inboundSourceHost[0]}
+	}
+	tagMentions, merr := r.resolveMentionedUserIDs(tagHrefs, inboundChain)
 	if merr != nil {
 		return nil, fmt.Errorf("update remote note: %w", merr)
 	}
@@ -4324,6 +4390,15 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string) (*model.Note, 
 	return existing, nil
 }
 
+// ExtractLocalAPReferences delegates to the shared semantic ActivityPub reference
+// extractor using this resolver's canonical local origin.
+func (r *Resolver) ExtractLocalAPReferences(serialized string) (userIDs []string, noteIDs []string) {
+	if r == nil || r.urls == nil {
+		return nil, nil
+	}
+	return activitypub.ExtractLocalAPReferences(r.urls.BaseURL(), serialized)
+}
+
 // ExtractLocalUserID returns the user ID a local URI names the way upstream
 // ApPersonService.fetchPerson reads it: a URI under `{url}/` (a plain string
 // prefix, not a host comparison) names the user whose ID is its last path
@@ -4355,6 +4430,15 @@ func (r *Resolver) ExtractLocalUserID(uri string) string {
 	// UserURI("") = `{url}/users/`。URLBuilder は baseURL を公開しないので、
 	// 既存の組み立てから `{url}/` を取り出す。
 	return lastSegmentUnder(uri, strings.TrimSuffix(r.urls.UserURI(""), "users/"))
+}
+
+// ExtractLocalNoteID returns a note ID from a canonical local note URI,
+// including activity and fragment variants.
+func (r *Resolver) ExtractLocalNoteID(uri string) string {
+	if r.urls == nil {
+		return ""
+	}
+	return r.urls.LocalNoteIDFromURI(uri)
 }
 
 // flagTargetUserID returns the user ID an inbound Flag object URI names the
@@ -4649,12 +4733,15 @@ func (r *Resolver) fetchUnknownMentionActors(mentionLimit func() int, tagHrefs, 
 // specified note の `visibleUserIds` が空のまま note が確定し、**URI は DB に
 // 入るので retry は dedup にヒットして二度と直らない**。DM なら受信者本人が
 // 本文を読めなくなる (`core/note/visibility.go` の `CanView` は空配列を見る)。
-func (r *Resolver) resolveMentionedUserIDs(hrefs []string) ([]string, error) {
+func (r *Resolver) resolveMentionedUserIDs(hrefs []string, chains ...*resolveChain) ([]string, error) {
 	if len(hrefs) == 0 {
 		return nil, nil
 	}
 	existingLocal, err := r.existingLocalUserIDs(hrefs)
 	if err != nil {
+		if len(chains) > 0 && chains[0] != nil && chains[0].inboundLocalReferences {
+			return nil, fmt.Errorf("%w: resolve existing local mentioned users: %w", ErrInboundLocalReferenceFailure, err)
+		}
 		return nil, err
 	}
 	seen := make(map[string]struct{}, len(hrefs))
@@ -4682,6 +4769,11 @@ func (r *Resolver) resolveMentionedUserIDs(hrefs []string) ([]string, error) {
 		}
 		seen[id] = struct{}{}
 		out = append(out, id)
+	}
+	if len(chains) > 0 && chains[0] != nil && chains[0].inboundLocalReferences {
+		if err := r.ObserveLocalInboxBodyReferences(out, nil, chains[0].inboundSourceHost); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -5217,6 +5309,14 @@ func noteGroupKey(uri string, allowCrossHost, ephemeral bool) string {
 		return "eph\x00" + crossHostKey(uri, allowCrossHost)
 	}
 	return crossHostKey(uri, allowCrossHost)
+}
+
+func noteGroupKeyForChain(uri string, allowCrossHost, ephemeral bool, chain *resolveChain) string {
+	key := noteGroupKey(uri, allowCrossHost, ephemeral)
+	if chain != nil && chain.inboundLocalReferences {
+		return "inbox\x00" + key
+	}
+	return key
 }
 
 // normalizeMatchHost canonicalizes a URL host for object-host comparison,

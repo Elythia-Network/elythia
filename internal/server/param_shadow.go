@@ -49,7 +49,7 @@ const paramShadowContextKey = "mk.server.paramShadow"
 // endpoints and drive/files/create-chunked/* except append in #3872, the
 // writes that stay within the database and Redis in #3875, the federation
 // rules and the diagnostics with outgoing requests in #3877, and
-// admin/backup/* in #3878.
+// admin/backup/* in #3878; i/federation and i/update-federation in #3852.
 // The other upstream endpoints are only validated and counted (#3677).
 //
 // 本家に揃える対象はパッケージ単位で広げる(#3667)。足したら、そのendpoint
@@ -493,8 +493,10 @@ var paramEnforcedEndpoints = []string{
 	"admin/drive/files",
 	"admin/emoji/add",
 	"federation/instances",
+	"i/federation",
 	"i/notifications",
 	"i/notifications-grouped",
+	"i/update-federation",
 	"reversi/match",
 	"admin/database-health",
 	"admin/drive/usage",

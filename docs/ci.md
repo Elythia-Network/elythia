@@ -614,7 +614,9 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - `.github/workflows/upstream-backend-e2e.yml` で Misskey 本家の backend e2e
   (本家の `packages/backend/test/e2e/**`) を Elythia に向けて実行する。本家は
   `UPSTREAM_MISSKEY_VERSION` の版を `.cache/misskey/<版>` に checkout する (#3378)。
-  テスト本体は無改変で、vitest の `globalSetup` / `setupFiles` (`tests/upstream-e2e/harness/`) だけを差し替える。
+  テスト本体の正本は本家に置き、vitest の `globalSetup` / `setupFiles`
+  (`tests/upstream-e2e/harness/`) を差し替える。Elythia 固有のローカル連合状態は
+  UserLite の期待DTOだけに加え、ほかの比較は維持する。
 - `pull_request` で paths (`internal/**` / `cmd/**` / `migration/**` /
   `tests/upstream-e2e/**` / `UPSTREAM_MISSKEY_VERSION` / `Makefile` / `go.mod` /
   `go.sum` / 当 workflow) に該当する変更のみ発火。`workflow_dispatch` で任意の

@@ -174,7 +174,6 @@ const dialog = useTemplateRef('dialog');
 
 // eslint-disable-next-line vue/no-setup-props-reactivity-loss
 const page = ref(props.initialPage ?? 0);
-
 watch(page, (to) => {
 	// チュートリアルの枚数を増やしたら必ず変更すること！！
 	if (to === 6) {

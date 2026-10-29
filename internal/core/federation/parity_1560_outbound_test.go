@@ -94,6 +94,69 @@ func TestProfileUpdateHook_DeliversToFollowers(t *testing.T) {
 	assert.Contains(t, inner["id"], "alice")
 }
 
+type profileActorReferenceObserver struct {
+	recorded []string
+}
+
+func (o *profileActorReferenceObserver) IsExternallyAvailable(user *model.User) bool {
+	return user.FederationStatus == model.FederationStatusOn && !user.IsSuspended && !user.IsDeleted
+}
+
+func (o *profileActorReferenceObserver) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	o.recorded = append(o.recorded, userID+":"+reason+":"+host)
+	return true, nil
+}
+
+func TestProfileUpdateHook_FiltersUnavailableLocalActorReferences(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo := newProfileUpdateHook(t)
+	urls := activitypub.NewURLBuilder("https://example.com")
+	owner := &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
+	available := &model.User{ID: "available-alias", Username: "old-alice", FederationStatus: model.FederationStatusOn}
+	disabled := &model.User{ID: "disabled-alias", Username: "off-alice", FederationStatus: model.FederationStatusOff}
+	pending := &model.User{ID: "pending-alias", Username: "pending-alice", FederationStatus: model.FederationStatusPending}
+	suspended := &model.User{ID: "suspended-alias", Username: "suspended-alice", FederationStatus: model.FederationStatusOn, IsSuspended: true}
+	deleted := &model.User{ID: "deleted-alias", Username: "deleted-alice", FederationStatus: model.FederationStatusOn, IsDeleted: true}
+	for _, user := range []*model.User{owner, available, disabled, pending, suspended, deleted} {
+		userRepo.Users[user.ID] = user
+	}
+	aliases := urls.UserURI(available.ID) + "," + urls.UserURI(disabled.ID) + "," + urls.UserURI(pending.ID) + "," + urls.UserURI(suspended.ID) + "," + urls.UserURI(deleted.ID) + "," + urls.UserURI("missing-alias") + ",https://remote.example/users/old-alice"
+	owner.AlsoKnownAs = &aliases
+	keypairRepo.Keypairs[owner.ID] = &model.UserKeypair{UserID: owner.ID, PrivateKey: "PEM"}
+	followingRepo.RemoteInboxes[owner.ID] = []string{"https://remote.example/users/bob/inbox"}
+	observer := &profileActorReferenceObserver{}
+	hook.SetLocalFederationObserver(observer)
+
+	hook.OnLocalProfileUpdated(owner.ID)
+
+	require.Len(t, enq.calls, 1)
+	var update map[string]any
+	require.NoError(t, json.Unmarshal(enq.calls[0].Body, &update))
+	person, ok := update["object"].(map[string]any)
+	require.True(t, ok)
+	aliasesOut, ok := person["alsoKnownAs"].([]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{urls.UserURI(available.ID), "https://remote.example/users/old-alice"}, aliasesOut)
+	assert.Contains(t, observer.recorded, "available-alias:delivery:remote.example")
+}
+
+func TestProfileUpdateHook_DoesNotObserveAliasesWithoutRecipients(t *testing.T) {
+	hook, _, userRepo, _, keypairRepo := newProfileUpdateHook(t)
+	urls := activitypub.NewURLBuilder("https://example.com")
+	owner := &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
+	alias := &model.User{ID: "available-alias", Username: "old-alice", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[owner.ID] = owner
+	userRepo.Users[alias.ID] = alias
+	aliasURI := urls.UserURI(alias.ID)
+	owner.AlsoKnownAs = &aliasURI
+	keypairRepo.Keypairs[owner.ID] = &model.UserKeypair{UserID: owner.ID, PrivateKey: "PEM"}
+	observer := &profileActorReferenceObserver{}
+	hook.SetLocalFederationObserver(observer)
+
+	hook.OnLocalProfileUpdated(owner.ID)
+
+	assert.Empty(t, observer.recorded)
+}
+
 // resolve の早期 return 分岐: blocker 不在 / blocker が非ローカルなら配信しない。
 func TestBlockingHook_NoDeliveryForMissingOrRemoteBlocker(t *testing.T) {
 	hook, enq, userRepo, _ := newBlockingHook(t)

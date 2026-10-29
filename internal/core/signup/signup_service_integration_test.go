@@ -68,6 +68,35 @@ func newTxService(t *testing.T, db *gorm.DB) *signup.Service {
 	return svc
 }
 
+// Explicit pending survives email confirmation and does not create federation keys.
+func TestPromotePending_PreservesExplicitFederationStatusWithoutKeys(t *testing.T) {
+	db := integrationDB(t)
+	const prefix = "itfed_"
+	defer cleanupSignupRows(t, db, prefix)
+	svc := newTxService(t, db)
+	row, err := svc.CreatePendingWithFederationStatus(prefix+"alice", "alice@it.example", "pw123", nil, nil, model.FederationStatusPending)
+	require.NoError(t, err)
+	assert.Equal(t, model.FederationStatusPending, row.FederationStatus)
+	result, err := svc.PromotePending(row.Code)
+	require.NoError(t, err)
+	assert.Equal(t, model.FederationStatusPending, result.User.FederationStatus)
+	var rsaCount, edCount int64
+	require.NoError(t, db.Model(&model.UserKeypair{}).Where(`"userId" = ?`, result.User.ID).Count(&rsaCount).Error)
+	require.NoError(t, db.Model(&model.UserKeypairExtra{}).Where(`"userId" = ?`, result.User.ID).Count(&edCount).Error)
+	assert.Zero(t, rsaCount)
+	assert.Zero(t, edCount)
+}
+
+// Omitting the status preserves the historic default-on behavior.
+func TestCreatePending_DefaultFederationStatusIsOn(t *testing.T) {
+	db := integrationDB(t)
+	const prefix = "itfeddefault_"
+	defer cleanupSignupRows(t, db, prefix)
+	row, err := newTxService(t, db).CreatePending(prefix+"alice", "alice@it.example", "pw123", nil)
+	require.NoError(t, err)
+	assert.Equal(t, model.FederationStatusOn, row.FederationStatus)
+}
+
 // invitation 経由で pending を作成し、PromotePending が ticket を消費する
 // 一連の流れを real DB 上で検証する (#600 item 2 + #604 happy path)。
 func TestPromotePending_TxConsumesInvitationTicket(t *testing.T) {

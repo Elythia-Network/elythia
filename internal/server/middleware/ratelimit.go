@@ -250,6 +250,22 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 	}
 }
 
+// ForEndpoint returns the same limiter behavior for one route, using an
+// endpoint-specific limit instead of the shared definition map. It is useful
+// when a route must pass an authentication gate before its bucket is charged.
+// The limiter configuration is copied so this route cannot change group-wide
+// limits or charge the same request twice.
+// A nil shared limit table preserves the global disableEndpointRateLimits setting.
+func (rl *RateLimiter) ForEndpoint(endpoint string, limit *EndpointLimit) echo.MiddlewareFunc {
+	if rl == nil || limit == nil || rl.limits == nil {
+		return func(next echo.HandlerFunc) echo.HandlerFunc { return next }
+	}
+	scoped := *rl
+	endpointLimit := *limit
+	scoped.limits = map[string]*EndpointLimit{endpoint: &endpointLimit}
+	return scoped.Middleware()
+}
+
 // limitFor returns the limit of endpoint: its table entry, or the default
 // limit of plugin routes.
 //

@@ -15,6 +15,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div class="profile _gaps">
 					<MkAccountMoved v-if="user.movedTo" :movedTo="user.movedTo"/>
 					<MkRemoteCaution v-if="user.host != null" :href="user.url ?? user.uri!"/>
+					<MkRemoteCaution v-else-if="shouldShowLocalOnlyProfileNotice(user.host, user.federationStatus)" :text="i18n.ts._localOnlyAccount.publicProfile"/>
 					<MkInfo v-if="user.host == null && user.username.includes('.')">{{ i18n.ts.isSystemAccount }}</MkInfo>
 
 					<div :key="user.id" class="main _panel">
@@ -201,6 +202,7 @@ import { i18n } from '@/i18n.js';
 import { $i, iAmModerator } from '@/i.js';
 import { dateString } from '@/filters/date.js';
 import { accountCreatedDateString } from '@/utility/account-created-date.js';
+import { shouldShowLocalOnlyProfileNotice } from '@/utility/account-federation.js';
 import { confetti } from '@/utility/confetti.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { isFollowingVisibleForMe, isFollowersVisibleForMe } from '@/utility/isFfVisibleForMe.js';
@@ -232,7 +234,7 @@ const XActivity = defineAsyncComponent(() => import('./index.activity.vue'));
 const XTimeline = defineAsyncComponent(() => import('./index.timeline.vue'));
 
 const props = withDefaults(defineProps<{
-	user: Misskey.entities.UserDetailed;
+	user: Elythia.UserWithFederationStatus;
 	/** Refetches the user in place. Supplied by the parent page. */
 	refreshUser?: () => Promise<void>;
 	/** Test only; MkNotesTimeline currently causes problems in vitest */

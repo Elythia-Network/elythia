@@ -45,6 +45,14 @@ type fakeDeliverer struct {
 	returnErr error
 }
 
+type moveFederationObserver struct{ recorded []string }
+
+func (*moveFederationObserver) IsExternallyAvailable(*model.User) bool { return true }
+func (o *moveFederationObserver) ObserveExternalReference(userID, _, _ string) (bool, error) {
+	o.recorded = append(o.recorded, userID)
+	return true, nil
+}
+
 func (f *fakeDeliverer) DeliverToFollowers(signerUserID string, body []byte) error {
 	f.called++
 	f.signer = signerUserID
@@ -165,6 +173,25 @@ func TestMove_AlsoKnownAsMissing(t *testing.T) {
 	svc, _, _ := newService(resolver, &fakeDeliverer{})
 	me := &model.User{ID: "me", URI: strPtr("https://local.example/users/me")}
 	assert.ErrorIs(t, svc.Move(me, dstURI), move.ErrDestinationForbids)
+}
+
+func TestMove_InvalidAlsoKnownAsDoesNotRecordExternalReferences(t *testing.T) {
+	srcURI := "https://local.example/users/src"
+	dstURI := "https://local.example/users/dst"
+	resolver := &fakeResolver{localIDs: map[string]string{dstURI: "dst"}}
+	svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+	src := &model.User{ID: "src", URI: strPtr(srcURI), FederationStatus: model.FederationStatusOn}
+	dst := &model.User{ID: "dst", AlsoKnownAs: nil, FederationStatus: model.FederationStatusOn}
+	userRepo.Users[src.ID] = src
+	userRepo.Users[dst.ID] = dst
+	observer := &moveFederationObserver{}
+	svc.SetLocalFederationObserver(observer)
+
+	err := svc.Move(src, dstURI)
+	require.ErrorIs(t, err, move.ErrDestinationForbids)
+	assert.Empty(t, observer.recorded, "invalid move must not make either local account externally referenced")
+	assert.Nil(t, src.FirstExternalReferenceAt)
+	assert.Nil(t, dst.FirstExternalReferenceAt)
 }
 
 func TestMove_DestinationAlreadyMoved(t *testing.T) {

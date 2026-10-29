@@ -5,7 +5,11 @@
  */
 
 import type * as Misskey from 'misskey-js';
-import type { FederationInstance, FollowApprovalAction, Page, PageVisibility, SignupApplicationFormField, SuspendedSoftware } from './entities.js';
+import type { FederationInstance, FederationStatus, FollowApprovalAction, Page, PageVisibility, SignupApplicationFormField, SuspendedSoftware } from './entities.js';
+
+type WithFederationStatus<T> = T extends unknown[]
+	? WithFederationStatus<T[number]>[]
+	: T extends object ? T & { federationStatus?: FederationStatus } : T;
 
 /**
  * Request fields that Elythia adds to upstream endpoints, keyed by the endpoint.
@@ -17,6 +21,22 @@ import type { FederationInstance, FollowApprovalAction, Page, PageVisibility, Si
  * (internal/entitycompat) の対象ではない。
  */
 export type ElythiaRequestExtensions = {
+	'signup': {
+		/**
+		 * Sets the initial federation state. Omitted values default to `on`;
+		 * official signup sends `pending` for the first-run tutorial. An account
+		 * that has been referenced externally cannot be switched back to `off`.
+		 */
+		federationStatus?: FederationStatus;
+	};
+	'admin/accounts/create': {
+		/**
+		 * Federation state for the newly created account. Defaults to `on`.
+		 * An account that has been referenced externally cannot be switched back
+		 * to `off`.
+		 */
+		federationStatus?: FederationStatus;
+	};
 	'admin/abuse-user-reports': {
 		/**
 		 * Filters by whether the report is resolved. Read only when `state` is
@@ -169,6 +189,8 @@ export type ElythiaRequestExtensions = {
  * 出なかった (#3439)。
  */
 export type ResponseOverrides = {
+	/** The signed-in account's public DTO includes its federation state. */
+	'i': WithFederationStatus<Misskey.Endpoints['i']['res']>;
 	/** Elythia adds the software whose activities the inbox refuses (#3362). */
 	'admin/meta': Misskey.entities.AdminMetaResponse & {
 		/**

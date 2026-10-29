@@ -1257,9 +1257,10 @@ diff-logs: ## 差分比較ハーネスのログを表示
 	docker compose -f $(DIFF_COMPOSE) logs -f
 
 # Misskey 本家の backend e2e (test/e2e/**) を mk-go に向けて実行する。
-# テスト本体には手を入れず、本家の取得先 (.cache/misskey) の vitest 設定 2 ファイル
-# (globalSetup / setupFiles) だけを差し替えている。上流でテストが増えれば
-# 自動的にこちらの検証対象も増える。詳細は docs/upstream-backend-e2e.md。
+# 本家の取得先 (.cache/misskey) へ vitest 設定 (globalSetup / setupFiles) をコピーし、
+# Elythia 独自の additive API field がある UserLite の期待 DTO だけは、実行時に
+# drift-checked patch で拡張する。テスト本体の正本は本家のまま保つ。詳細は
+# docs/upstream-backend-e2e.md。
 #
 # 『通らないことが正しい』テストは tests/upstream-e2e/known-divergences.json に
 # 根拠付きで登録し、vitest の expected-failure として扱う。乖離が解消して通る
@@ -1269,7 +1270,7 @@ diff-logs: ## 差分比較ハーネスのログを表示
 UPSTREAM_E2E_COMPOSE=tests/upstream-e2e/compose.yml
 UPSTREAM_E2E_CONFIG=tests/upstream-e2e/mkgo.yml
 # 本家そのもの (`make upstream-fetch` の取得先) で走らせる (#3378)。mk-go へ向ける
-# ための 3 ファイルは tests/upstream-e2e/harness/ に置き、upstream-e2e-test が
+# ためのファイルは tests/upstream-e2e/harness/ に置き、upstream-e2e-test が
 # 実行のたびに本家の packages/backend/ へコピーする (編集がすぐ効くように deps
 # ではなく test の側で写す)。vitest の設定を本家の外に置いたまま本家のテストを
 # 走らせる形は採らない — 設定ファイルの import (`vitest/config`、本家の
@@ -1474,6 +1475,7 @@ UPSTREAM_E2E_ASSETS_ENV = \
 
 upstream-e2e-test: build ## 本家 backend e2e を Elythia に対して実行 (VITEST_ARGS で引数追加)
 	cp -R $(UPSTREAM_E2E_HARNESS)/. $(UPSTREAM_E2E_BACKEND)/
+	node $(UPSTREAM_E2E_HARNESS)/extend-user-lite-dto.mjs $(UPSTREAM_E2E_BACKEND)/test/e2e/users.ts
 	cd $(UPSTREAM_E2E_BACKEND) && \
 		$(UPSTREAM_E2E_ASSETS_ENV) \
 		MKGO_BIN=$(CURDIR)/built/$(BINARY) \

@@ -23,7 +23,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 	v-else
 	class="_button"
 	:class="[$style.root, { [$style.wait]: wait, [$style.active]: isFollowing || hasPendingFollowRequestFromYou, [$style.full]: full, [$style.large]: large }]"
-	:disabled="wait"
+	:disabled="wait || isRemoteActionBlocked"
+	:title="isRemoteActionBlocked ? i18n.ts._localOnlyAccount.remoteActionBlocked : undefined"
 	@click="onClick"
 >
 	<template v-if="!wait">
@@ -63,6 +64,7 @@ import { pleaseLogin } from '@/utility/please-login.js';
 import { $i } from '@/i.js';
 import { prefer } from '@/preferences.js';
 import { haptic } from '@/utility/haptic.js';
+import { shouldBlockRemoteFederationAction } from '@/utility/account-federation.js';
 
 const props = withDefaults(defineProps<{
 	user: Misskey.entities.UserDetailed,
@@ -97,6 +99,7 @@ const fetchedIsLocked = ref<boolean | null>(null);
 const isLocked = computed(() => fetchedIsLocked.value ?? props.user.isLocked);
 const hasPendingFollowRequestFromYou = ref(props.user.hasPendingFollowRequestFromYou);
 const wait = ref(false);
+const isRemoteActionBlocked = computed(() => shouldBlockRemoteFederationAction($i?.federationStatus, props.user.host != null));
 const connection = useStream().useChannel('main');
 
 if (props.user.isFollowing == null && $i) {
@@ -126,6 +129,10 @@ async function onClick() {
 		},
 	});
 	if (!isLoggedIn) return;
+	if (isRemoteActionBlocked.value) {
+		await os.alert({ type: 'warning', text: i18n.ts._localOnlyAccount.remoteActionBlocked });
+		return;
+	}
 
 	wait.value = true;
 

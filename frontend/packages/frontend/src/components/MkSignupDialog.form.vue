@@ -317,7 +317,7 @@ async function onSubmit(): Promise<void> {
 	if (submitting.value) return;
 	submitting.value = true;
 
-	const signupPayload: Misskey.entities.SignupRequest = {
+	const signupPayload: Misskey.entities.SignupRequest & { federationStatus: 'pending' } = {
 		username: username.value,
 		password: password.value,
 		emailAddress: email.value,
@@ -327,6 +327,7 @@ async function onSubmit(): Promise<void> {
 		'g-recaptcha-response': reCaptchaResponse.value,
 		'turnstile-response': turnstileResponse.value,
 		'testcaptcha-response': testcaptchaResponse.value,
+		federationStatus: 'pending',
 	};
 
 	const res = await window.fetch(`${config.apiUrl}/signup`, {

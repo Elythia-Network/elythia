@@ -27,6 +27,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <script lang="ts" setup>
 import { defineAsyncComponent, computed, watch, ref } from 'vue';
 import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { acct as getAcct } from '@@/js/user.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { definePage } from '@/page.js';
@@ -59,7 +60,7 @@ const props = withDefaults(defineProps<{
 
 const tab = ref(props.page);
 
-const user = ref<null | Misskey.entities.UserDetailed>(CTX_USER);
+const user = ref<null | Elythia.UserWithFederationStatus>(CTX_USER);
 const error = ref<any>(null);
 
 // 初回読込時専用（使える場合はサーバーコンテキストから取得する）

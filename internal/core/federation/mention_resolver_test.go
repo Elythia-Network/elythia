@@ -22,6 +22,30 @@ func TestUserMentionResolver_Local(t *testing.T) {
 	assert.Equal(t, "https://example.com/users/uA", uri)
 }
 
+type localFederationAvailabilityStub struct{}
+
+func (localFederationAvailabilityStub) IsExternallyAvailable(u *model.User) bool {
+	return u.FederationStatus == model.FederationStatusOn
+}
+
+func (localFederationAvailabilityStub) ObserveExternalReference(string, string, string) (bool, error) {
+	return true, nil
+}
+
+func TestUserMentionResolver_LocalFederationUnavailable(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+		t.Run(string(status), func(t *testing.T) {
+			userRepo := testutil.NewMockUserRepository()
+			userRepo.Users["uA"] = &model.User{ID: "uA", Username: "alice", FederationStatus: status}
+			r := federation.NewUserMentionResolver(userRepo, activitypub.NewURLBuilder("https://example.com"))
+			r.SetLocalFederationObserver(localFederationAvailabilityStub{})
+
+			_, _, err := r.ResolveMention("uA")
+			assert.ErrorIs(t, err, activitypub.ErrMentionUserNotFound)
+		})
+	}
+}
+
 func TestUserMentionResolver_Remote(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	host := "remote.example"

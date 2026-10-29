@@ -46,6 +46,9 @@ type HostColumn struct {
 // 順序は依存関係ではなく、影響の大きい順 (acct 解決 → 連合ゲート → 表示)。
 var HostColumns = []HostColumn{
 	{Table: "user", KeysetColumn: "id", Column: "host"},
+	// 初回の外部参照元を記録する nullable な監査メタデータ。アカウントの host では
+	// なく、関連付けや削除には使わないが、remote host の表記を揃える対象に含める。
+	{Table: "user", KeysetColumn: "id", Column: "firstExternalReferenceHost"},
 	{Table: "instance", KeysetColumn: "id", Column: "host"},
 	{Table: "instance_signature_capability", KeysetColumn: "host", Column: "host"},
 	{Table: "instance_gone_suspension", KeysetColumn: "host", Column: "host"},

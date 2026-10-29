@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
@@ -104,11 +105,12 @@ type Handler struct {
 	// renoteMutingRepo・blockingRepo と、この metaRepo の 7 つは、以前は setter で
 	// 入れて起動時に検査していた (#2708、#2709 review) が、#3831 で構築子の必須の
 	// 引数にした。
-	metaRepo        repository.MetaRepository
-	emojiRepo       repository.EmojiRepository
-	driveFolderRepo repository.DriveFolderRepository
-	userRepo        repository.UserRepository
-	userListRepo    repository.UserListRepository
+	metaRepo                repository.MetaRepository
+	emojiRepo               repository.EmojiRepository
+	driveFolderRepo         repository.DriveFolderRepository
+	userRepo                repository.UserRepository
+	localFederationObserver activitypub.LocalFederationObserver
+	userListRepo            repository.UserListRepository
 	// clipRepo / clipNoteRepo / clipFavoriteRepo は notes/clips で「この note を
 	// 含む public clip」を Clip entity として返すのに使う (#1554)。未配線時は
 	// 空配列 fallback (旧 stub 互換)。
@@ -170,6 +172,32 @@ type Handler struct {
 	// Packer の mediaURL は #3834 から entity.NewPacker の必須の引数で、組み立てた
 	// Packer が持つことは server の TestBuiltHandlersHaveNoNilDependencies が見る。
 	entityPacker *entity.Packer
+}
+
+func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
+}
+
+func (h *Handler) gateRemoteNoteAction(c echo.Context, user *model.User, noteID string) bool {
+	if h.localFederationObserver == nil || user == nil || !user.IsLocal() || h.noteRepo == nil {
+		return true
+	}
+	n, err := h.noteRepo.FindByID(noteID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return true
+		}
+		_ = apierr.JSONInternalError(c)
+		return false
+	}
+	if n == nil || n.UserHost == nil || *n.UserHost == "" {
+		return true
+	}
+	if !h.localFederationObserver.IsExternallyAvailable(user) {
+		_ = c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account cannot perform remote actions.", "abdc2832-1f6d-4a33-8a10-b5731ca33884"))
+		return false
+	}
+	return true
 }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
@@ -565,6 +593,8 @@ func (h *Handler) Create(c echo.Context) error {
 		switch {
 		case errors.Is(err, note.ErrNoteContentRequired):
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Text, fileIds, or renoteId is required.", apierr.UUIDInvalidParam))
+		case errors.Is(err, note.ErrFederationDisabled):
+			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account cannot perform remote actions.", "abdc2832-1f6d-4a33-8a10-b5731ca33884"))
 		case errors.Is(err, note.ErrReplyTargetNotFound):
 			return apierr.JSONNoSuchReplyTarget(c)
 		case errors.Is(err, note.ErrRenoteTargetNotFound):

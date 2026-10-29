@@ -99,7 +99,7 @@ func newSvc(t *testing.T) (*corechat.Service, *testutil.MockChatRepository, *cap
 	users := testutil.NewMockUserRepository()
 	for _, u := range []string{"alice", "bob", "carol"} {
 		name := u
-		users.Users[u] = &model.User{ID: u, Username: u, Name: &name}
+		users.Users[u] = &model.User{ID: u, Username: u, Name: &name, FederationStatus: model.FederationStatusOn}
 	}
 	svc.SetUserRepo(users)
 	return svc, repo, pub
@@ -1278,6 +1278,21 @@ func TestCreateMessageToUser_UnresolvedSenderSkipsPush(t *testing.T) {
 			assert.Equal(t, []string{"alice"}, main.mainRecipients())
 		})
 	}
+}
+
+func TestCreateMessageToUser_RejectsRemoteRecipientWhenSenderIsMissing(t *testing.T) {
+	svc, repo, _ := newSvc(t)
+	users := testutil.NewMockUserRepository()
+	remoteHost := "remote.example"
+	users.Users["remote"] = &model.User{
+		ID: "remote", Username: "remote", Host: &remoteHost,
+		FederationStatus: model.FederationStatusOn,
+	}
+	svc.SetUserRepo(users)
+
+	_, err := svc.CreateMessageToUser(context.Background(), "missing", "remote", "hi", "")
+	require.Error(t, err)
+	assert.Empty(t, repo.Messages, "a remote interaction cannot be persisted when the sender is unresolved")
 }
 
 // 添付のみのメッセージでも text キーを落とさない (#2840)。

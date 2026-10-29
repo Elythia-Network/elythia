@@ -1153,3 +1153,13 @@ func TestPackUserDetailed_LocalUserPublicReactionsPreserved(t *testing.T) {
 	detailed := currentPacker().PackUserDetailed(u, profile)
 	assert.True(t, detailed.PublicReactions, "local user with publicReactions=true must stay true")
 }
+
+func TestPackUserLite_ExposesFederationStatusOnlyForLocalUsers(t *testing.T) {
+	local, err := json.Marshal(currentPacker().PackUserLite(&model.User{ID: "local", Username: "local", FederationStatus: model.FederationStatusPending}))
+	require.NoError(t, err)
+	assert.Contains(t, string(local), `"federationStatus":"pending"`)
+	remoteHost := "example.org"
+	remote, err := json.Marshal(currentPacker().PackUserLite(&model.User{ID: "remote", Username: "remote", Host: &remoteHost, FederationStatus: model.FederationStatusOn}))
+	require.NoError(t, err)
+	assert.NotContains(t, string(remote), `"federationStatus"`)
+}

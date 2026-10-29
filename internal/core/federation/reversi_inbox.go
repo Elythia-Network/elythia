@@ -10,6 +10,7 @@ import (
 
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"gorm.io/datatypes"
 )
 
@@ -56,9 +57,15 @@ func (p *Processor) handleReversiInvite(act genericActivity) error {
 	// ローカルユーザーの user.uri は DB 上 NULL なので FindByURI では解決
 	// できない。localBaseURL の接頭辞から ID を読む resolveTargetUser を使って
 	// `{localBaseURL}/users/{id}` 形式もローカル ID として解決する。
-	invitee, err := p.resolveTargetUser(toURI)
+	invitee, err := p.resolveTargetUser(toURI, inboundActorHost(act.Actor))
 	if err != nil {
-		return fmt.Errorf("reversi invite: recipient %s not found", toURI)
+		if errors.Is(err, ErrInboundLocalReferenceUnavailable) {
+			return err
+		}
+		if repository.IsNotFound(err) {
+			return ErrUnsupportedActivity
+		}
+		return fmt.Errorf("reversi invite: resolve recipient: %w", err)
 	}
 	// **招待先がローカル利用者であることを確かめる。**
 	//

@@ -33,6 +33,20 @@ func (qaGate) IsBlocked(string) bool      { return false }
 func (qaGate) IsAllowed(string) bool      { return true }
 func (g qaGate) FederationDisabled() bool { return g.disabled }
 
+type quoteFederationObserver struct {
+	unavailable map[string]bool
+	recorded    []string
+}
+
+func (o *quoteFederationObserver) IsExternallyAvailable(user *model.User) bool {
+	return !o.unavailable[user.ID]
+}
+
+func (o *quoteFederationObserver) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	o.recorded = append(o.recorded, userID+":"+reason+":"+host)
+	return true, nil
+}
+
 func qaReq(t *testing.T, noteID, authID string) (echo.Context, func() (int, string, http.Header)) {
 	t.Helper()
 	c, rec := newReq(t, "id", noteID)
@@ -88,7 +102,7 @@ func TestQuoteAuthorization(t *testing.T) {
 		assert.Equal(t, "https://example.com/notes/"+tc.target, m["interactionTarget"])
 		assert.Equal(t, store[tc.auth].QuotingURI, m["interactingObject"])
 		assert.Contains(t, hdr.Get("Content-Type"), "application/activity+json")
-		assert.Equal(t, "public, max-age=180", hdr.Get("Cache-Control"))
+		assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
 	}
 
 	for name, tc := range map[string]struct {
@@ -131,4 +145,126 @@ func TestQuoteAuthorization(t *testing.T) {
 	require.NoError(t, h.QuoteAuthorization(c))
 	code, _, _ = res()
 	assert.Equal(t, http.StatusForbidden, code)
+}
+
+func TestQuoteAuthorization_LocalFederationGateAndObservation(t *testing.T) {
+	t.Run("pending or off author returns empty 404", func(t *testing.T) {
+		for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+			t.Run(string(status), func(t *testing.T) {
+				h, users, notes, _ := newHandler(t)
+				users.Users["author"] = &model.User{ID: "author", Username: "alice", FederationStatus: status}
+				notes.Notes["target"] = &model.Note{ID: "target", UserID: "author", Visibility: model.NoteVisibilityPublic}
+				h.SetNoteRepo(notes)
+				h.SetQuoteAuthorizationStore(qaStore{"approval": {ID: "approval", NoteID: "target", QuotingURI: "https://remote.example/notes/q"}})
+				observer := &quoteFederationObserver{unavailable: map[string]bool{"author": true}}
+				h.SetLocalFederationObserver(observer)
+
+				c, res := qaReq(t, "target", "approval")
+				require.NoError(t, h.QuoteAuthorization(c))
+				code, body, hdr := res()
+				assert.Equal(t, http.StatusNotFound, code)
+				assert.Empty(t, body)
+				assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
+				assert.Empty(t, observer.recorded)
+			})
+		}
+	})
+
+	t.Run("observes both local authors before returning stamp", func(t *testing.T) {
+		h, users, notes, _ := newHandler(t)
+		users.Users["author"] = &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+		users.Users["quoter"] = &model.User{ID: "quoter", Username: "bob", FederationStatus: model.FederationStatusOn}
+		quoteURI := "https://example.com/notes/quote"
+		notes.Notes["target"] = &model.Note{ID: "target", UserID: "author", Visibility: model.NoteVisibilityPublic}
+		// Local notes use the canonical /notes/:id URL, while their database URI is NULL.
+		notes.Notes["quote"] = &model.Note{ID: "quote", UserID: "quoter", Visibility: model.NoteVisibilityPublic}
+		h.SetNoteRepo(notes)
+		h.SetQuoteAuthorizationStore(qaStore{"approval": {ID: "approval", NoteID: "target", QuotingURI: quoteURI}})
+		observer := &quoteFederationObserver{}
+		h.SetLocalFederationObserver(observer)
+
+		c, res := qaReq(t, "target", "approval")
+		require.NoError(t, h.QuoteAuthorization(c))
+		code, body, hdr := res()
+		assert.Equal(t, http.StatusOK, code)
+		assert.NotEmpty(t, body)
+		assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
+		assert.Equal(t, []string{"author:quote-authorization:", "quoter:quote-authorization:"}, observer.recorded)
+	})
+
+	t.Run("quoter moderation does not revoke an issued stamp", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			suspended bool
+			deleted   bool
+		}{
+			{name: "suspended", suspended: true},
+			{name: "deleted", deleted: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h, users, notes, _ := newHandler(t)
+				users.Users["author"] = &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+				users.Users["quoter"] = &model.User{ID: "quoter", Username: "bob", FederationStatus: model.FederationStatusOn, IsSuspended: tc.suspended, IsDeleted: tc.deleted}
+				quoteURI := "https://example.com/notes/quote"
+				notes.Notes["target"] = &model.Note{ID: "target", UserID: "author", Visibility: model.NoteVisibilityPublic}
+				notes.Notes["quote"] = &model.Note{ID: "quote", UserID: "quoter", Visibility: model.NoteVisibilityPublic}
+				h.SetNoteRepo(notes)
+				h.SetQuoteAuthorizationStore(qaStore{"approval": {ID: "approval", NoteID: "target", QuotingURI: quoteURI}})
+				observer := &quoteFederationObserver{}
+				h.SetLocalFederationObserver(observer)
+
+				c, res := qaReq(t, "target", "approval")
+				require.NoError(t, h.QuoteAuthorization(c))
+				code, body, _ := res()
+				assert.Equal(t, http.StatusOK, code)
+				assert.NotEmpty(t, body)
+				assert.Equal(t, []string{"author:quote-authorization:", "quoter:quote-authorization:"}, observer.recorded)
+			})
+		}
+	})
+
+	t.Run("unavailable local interacting note author returns empty 404", func(t *testing.T) {
+		for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+			t.Run(string(status), func(t *testing.T) {
+				h, users, notes, _ := newHandler(t)
+				users.Users["author"] = &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+				users.Users["quoter"] = &model.User{ID: "quoter", Username: "bob", FederationStatus: status}
+				quoteURI := "https://example.com/notes/quote"
+				notes.Notes["target"] = &model.Note{ID: "target", UserID: "author", Visibility: model.NoteVisibilityPublic}
+				notes.Notes["quote"] = &model.Note{ID: "quote", UserID: "quoter", Visibility: model.NoteVisibilityPublic}
+				h.SetNoteRepo(notes)
+				h.SetQuoteAuthorizationStore(qaStore{"approval": {ID: "approval", NoteID: "target", QuotingURI: quoteURI}})
+				observer := &quoteFederationObserver{unavailable: map[string]bool{"quoter": true}}
+				h.SetLocalFederationObserver(observer)
+
+				c, res := qaReq(t, "target", "approval")
+				require.NoError(t, h.QuoteAuthorization(c))
+				code, body, hdr := res()
+				assert.Equal(t, http.StatusNotFound, code)
+				assert.Empty(t, body)
+				assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
+				assert.Equal(t, []string{"author:quote-authorization:"}, observer.recorded)
+			})
+		}
+	})
+
+	t.Run("localOnly interacting note returns empty 404", func(t *testing.T) {
+		h, users, notes, _ := newHandler(t)
+		users.Users["author"] = &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+		users.Users["quoter"] = &model.User{ID: "quoter", Username: "bob", FederationStatus: model.FederationStatusOn}
+		quoteURI := "https://example.com/notes/quote"
+		notes.Notes["target"] = &model.Note{ID: "target", UserID: "author", Visibility: model.NoteVisibilityPublic}
+		notes.Notes["quote"] = &model.Note{ID: "quote", UserID: "quoter", Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+		h.SetNoteRepo(notes)
+		h.SetQuoteAuthorizationStore(qaStore{"approval": {ID: "approval", NoteID: "target", QuotingURI: quoteURI}})
+		observer := &quoteFederationObserver{}
+		h.SetLocalFederationObserver(observer)
+
+		c, res := qaReq(t, "target", "approval")
+		require.NoError(t, h.QuoteAuthorization(c))
+		code, body, hdr := res()
+		assert.Equal(t, http.StatusNotFound, code)
+		assert.Empty(t, body)
+		assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
+	})
 }

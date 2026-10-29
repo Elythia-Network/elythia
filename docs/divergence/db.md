@@ -38,9 +38,9 @@
 
 `__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
 
-### 2-2. 独自カラム (33 = 実使用 30 + 未使用の残存 3)
+### 2-2. 独自カラム (39 = 実使用 36 + 未使用の残存 3)
 
-うち **Elythia が実際に読み書きするのは 30 件** (cherrypick 由来 3 + Elythia 独自 27)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。`user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (#3466 で本家 PR 17998 から先に取り込んだ列) と `announcement` の `autoArchiveAt` (#3809) は、本家 2026.10.1 に同じ列が入ったので独自ではなくなった。
+うち **Elythia が実際に読み書きするのは 36 件** (cherrypick 由来 3 + Elythia 独自 33)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。`user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (#3466 で本家 PR 17998 から先に取り込んだ列) と `announcement` の `autoArchiveAt` (#3809) は、本家 2026.10.1 に同じ列が入ったので独自ではなくなった。
 
 | テーブル | カラム | 由来 | 理由 |
 |---|---|---|---|
@@ -51,6 +51,7 @@
 | `meta` | `registrationClosed` | Elythia 独自 | 新規登録をどの経路からも受け付けない (#3186)。途中まで進んでいる登録 (承認済みの申請 / メール確認待ち) も止めるが、記録は消さないので解除すれば有効期限内のものはそのまま使える (承認済みの申請は承認制で再開した場合だけ)。**有効にする更新では `disableRegistration` も立てる** (`normalizeRegistrationClosed`) — TS へ戻すとこの列は無視されるが、招待制に落ちるので登録が開く方向には倒れない。承認制の値は残す (照会を開けておくのと、解除後に戻れるように)。解除する更新で承認制が残っていれば登録を開け直す (#2565 の整合) |
 | `meta` | `inboxSuspendedSoftware` | Elythia 独自 | 受信を拒否するソフトウェアの設定 (#3362)。形は本家の `deliverSuspendedSoftware` と同じ `[{software, versionRange}]`。`NOT NULL DEFAULT '[]'`。**TS はこの列を認識しない**ので、TS へ戻すと受信の拒否が黙って効かなくなる ([TS版からの移行](../migration-from-ts.md#misskey-tsへのロールバック)) |
 | `user` | `accountCreatedAt` | Elythia 独自 | リモートの人がアカウントを作った日時 (#3465)。`createdAt` は id から出るので、リモートの人では「このサーバーが初めて知った日時」にしかならない。actor の `published` か、Misskey 系なら相手の `/api/users/show` の `createdAt` から埋める ([連合の差分](federation.md#3-7-リモートのアカウントの作成日時-elythia-独自))。ローカルの人と、どちらからも取れなかった人は NULL。**TS はこの列を認識しない**ので、TS へ戻すと読まれないだけで害は無い |
+| `user` | `federationStatus` / `federationEnabledAt` / `firstExternalReferenceAt` / `firstExternalReferenceReason` / `firstExternalReferenceHost` | Elythia 独自 | アカウント単位の連合状態 (`pending` / `off` / `on`) と、ON にした時刻・最初の外部参照の時刻・理由・相手 host を記録する。外部参照の記録は最初の一度だけで、OFF への切り替え可否にも使う。既存のローカルアカウントは migration で `on`・外部参照済みにする。`firstExternalReferenceHost` は nullable な観測メタデータで、アカウントの `host` や行の関連付けには使わない |
 | `user` | `managedByPlugin` | Elythia 独自 | プラグインが管理するアカウント (#3468) のプラグイン名。NULL は普通のアカウント。埋まっているアカウントには本体がどの経路からもログインさせず、ネイティブトークンをプロセス内の呼び出しでだけ受け付ける ([security.md](security.md) §6)。**TS はこの列を認識しない**ため、TS へ戻すと普通のアカウントとして扱われ、トークンも外から使えるようになる (パスワードは持たないので、パスワードではログインできないまま) |
 | `user_profile` | `followApprovalAction` | Elythia 独自 | 作られてから `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (本家と同じ列) に満たないアカウントからのフォローの止め方 (#3466)。`request` (既定、本家と同じ) / `silentRequest` / `silentFollow`。`NOT NULL DEFAULT 'request'` なので、TS から移ってきた行も本家と同じ動きになる。TS はこの列を読まない |
 | `user` | `isRoot` | Elythia 独自 | upstream は system_account 移行で DROP 済み。`role.Service.isRootUser` の fallback に必要 |
@@ -59,6 +60,7 @@
 | `app` / `auth_session` | `createdAt` | 列のみ残存 | upstream は `deleteCreatedAt` で DROP 済み。Elythia も **読み書きしない** (#2243 で model から除去)。fresh な Elythia DB には列が残るが未使用 |
 | `clip` | `notesCount` | 列のみ残存 | 旧・非正規化カウンタ。#2243 で撤去し、件数は upstream 同様 `clip_note` の実カウントで算出する |
 | `poll` | `notifiedAt` | Elythia 独自 | pollEnded 通知の二重送信防止 |
+| `user_pending` | `federationStatus` | Elythia 独自 | メール確認待ちの登録で選択した連合状態を本登録まで保持する。既存行と省略時は既定値 `on` で、既存の登録動作を保つ |
 | `user_pending` | `invitationTicketId` | Elythia 独自 | 1 招待で複数アカウントを作れる gap を塞ぐ |
 | `user_pending` | `signupApplicationId` | Elythia 独自 | 承認制 (#2571) でメール確認を挟むときの申請 ID。確認完了まではアカウントが無いので申請を `completed` にできず、**紐付けが無いと申請が `approved` のまま残って 1 つの承認から複数アカウントを作れる**。`/api/signup-pending` が `PromotePending` の戻り値からこれを読んで申請を完了させる。**承認制が有効な間は、この列の有無がそのままゲートの判定になる** (#2804) — 空にすると承認を経ていない pending として弾かれる側に倒れるので、移行バッチ等で NULL 化しないこと。TS は未知の列を無視するので drop-in の復路は壊れない |
 | `meta` | `signupApplicationForm` | Elythia 独自 | 承認制の申請フォームの定義 (#2570)。管理者が項目を決める jsonb 配列。上限は 10 項目 / ラベル 100 文字 / 回答 2000 文字で、**上限を置かないと管理者が自分で壊せる** (項目無制限で申請ページが使えなくなる、最大長無制限で 1 件の申請が DB を膨らませる)。壊れた JSON は空フォーム扱いにして申請ページを 500 で潰さない |

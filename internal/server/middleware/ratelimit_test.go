@@ -84,6 +84,60 @@ func TestMiddleware_NoLimitDefined(t *testing.T) {
 	assert.Empty(t, store.calls)
 }
 
+func TestRateLimiterForEndpoint_AfterRequireSecure(t *testing.T) {
+	store := &mockLimitStore{results: []mockResult{
+		{Info: LimitInfo{Remaining: 1}},
+		{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(time.Minute).UnixMilli()}},
+		{Info: LimitInfo{Remaining: 1}},
+	}}
+	rl := NewRateLimiter(store, false, map[string]*EndpointLimit{})
+	limit := rl.ForEndpoint("i/update-federation", &EndpointLimit{Duration: time.Hour, Max: 1})
+	e := echo.New()
+	handler := func(c echo.Context) error { return c.NoContent(http.StatusOK) }
+
+	request := func(userID, token string, isApp bool) *httptest.ResponseRecorder {
+		nativeToken := "native-" + userID
+		user := &model.User{ID: userID, Token: &nativeToken}
+		req := httptest.NewRequest(http.MethodPost, "/api/i/update-federation", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetPath("/api/i/update-federation")
+		c.Set(string(UserContextKey), user)
+		c.Set(string(TokenContextKey), token)
+		if isApp {
+			c.Set(string(AuthScopeContextKey), &AuthScope{IsApp: true, Scopes: []string{"write:account"}})
+		}
+		wrapped := RequireSecure()(limit(handler))
+		_ = wrapped(c)
+		return rec
+	}
+
+	appResponse := request("u1", "app-token", true)
+	assert.Equal(t, http.StatusForbidden, appResponse.Code)
+	assert.Empty(t, store.calls, "an app token rejected by RequireSecure must not consume the user's bucket")
+
+	firstNative := request("u1", "native-u1", false)
+	assert.Equal(t, http.StatusOK, firstNative.Code)
+	secondNative := request("u1", "native-u1", false)
+	assert.Equal(t, http.StatusTooManyRequests, secondNative.Code, "the configured native-user burst limit must be enforced")
+	otherNative := request("u2", "native-u2", false)
+	assert.Equal(t, http.StatusOK, otherNative.Code, "one user's exhausted bucket must not block another user")
+	require.Len(t, store.calls, 3)
+	assert.Equal(t, []string{"u1:i/update-federation", "u1:i/update-federation", "u2:i/update-federation"},
+		[]string{store.calls[0].Key, store.calls[1].Key, store.calls[2].Key})
+}
+
+func TestRateLimiterForEndpoint_DisabledEndpointTable(t *testing.T) {
+	store := &mockLimitStore{}
+	rl := NewRateLimiter(store, false, nil)
+	limit := rl.ForEndpoint("i/update-federation", &EndpointLimit{Duration: time.Hour, Max: 20})
+	e, handler := setupEcho(rl)
+	rec := doRequest(e, limit, handler, "/api/i/update-federation", &model.User{ID: "u1"})
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, store.calls, "a nil endpoint table disables route-local limits too")
+}
+
 // Disable() を呼んだら、リミット定義があっても store を一切引かずに素通しする。
 // 本家 RateLimiterService が NODE_ENV !== 'production' でやっているのと同じ。
 func TestMiddleware_Disabled(t *testing.T) {

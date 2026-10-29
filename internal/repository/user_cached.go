@@ -19,9 +19,9 @@ import (
 //   - role / emoji / meta cache (#300 3-5 / 3-6 / 3-1) と同じ既存パターンに
 //     揃えるため。Redis 越しの user cache はインスタンス間共有という別の
 //     利点があるが、out-of-band write が無い前提では in-memory で十分。
-//   - 全 user 系 mutation が `userRepo` 経由 (admin, federation processor,
-//     following service, signin, resetpassword 等) なので wrapper 層で
-//     invalidate を保証できる。DB 直接 UPDATE の経路は無い。
+//   - ほとんどの user 系 mutation は `userRepo` 経由で invalidate する。
+//     行ロックを含む local federation transaction のような専用 repository
+//     は NewCachedLocalFederationRepository でこの cache に接続する。
 //
 // 注意: cached value はポインタ参照を直接返す。caller が User / UserProfile
 // を mutate すると他の caller の view を破壊するので **read-only として扱う**。

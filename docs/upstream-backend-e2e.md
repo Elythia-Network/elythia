@@ -3,8 +3,10 @@
 Misskey 本家 (`make upstream-fetch` が取得する `.cache/misskey/<版>/`、#3378) の backend e2e (`packages/backend/test/e2e/**`) を、
 そのまま Elythia に対して実行するハーネス。API 互換性の regression を検出する。
 
-**テスト本体には一切手を入れない。** 差し替えるのは vitest 設定の 2 点だけで、
-上流でテストが増えれば自動的に検証対象も増える。
+本家のテストを正本として使い、Elythia 側でテストを保守しない。設定に加え、
+Elythia 独自の additive API field がある UserLite については、期待 DTO を実行時に
+狭く拡張する drift-checked patch を適用する。これにより、それ以外のキーと値の
+比較は本家のまま保たれ、上流でテストが増えれば自動的に検証対象も増える。
 
 ## 構成
 
@@ -13,6 +15,7 @@ Misskey 本家 (`make upstream-fetch` が取得する `.cache/misskey/<版>/`、
 | `tests/upstream-e2e/harness/vitest.config.e2e.mkgo.ts` | `globalSetup` と `setupFiles` を差し替えた vitest 設定 |
 | `tests/upstream-e2e/harness/test-server-mkgo/entry.ts` | NestJS アプリの代わりに Elythia バイナリを子プロセスとして起動する。`MKGO_BIN` / `MKGO_CONFIG` / `MKGO_CWD` が無ければ落ちる |
 | `tests/upstream-e2e/harness/test/setup.e2e.mkgo.ts` | 各ファイルの前に `/api/reset-db` を叩く。既知乖離の expected-failure もここで立てる (一覧は `MKGO_CWD` から読む) |
+| `tests/upstream-e2e/harness/extend-user-lite-dto.mjs` | コピー済みの本家 `test/e2e/users.ts` を形確認付きで更新し、ローカル UserLite の期待 DTO に Elythia 固有の `federationStatus: 'on'` を加える |
 | `tests/upstream-e2e/compose.yml` | ローカル実行用の PostgreSQL / Redis |
 | `tests/upstream-e2e/mkgo.yml` | 本家 `.github/misskey/test.yml` の Elythia 版 |
 | `tests/upstream-e2e/known-divergences.json` | 『通らないことが正しい』テストの一覧 |
@@ -64,7 +67,9 @@ make upstream-e2e-down
   js-yaml を含めないため)。生成しておかないと globalSetup が
   「Compiled configuration file not found」で落ちる
 
-`make upstream-e2e-test` は `built/elythia` を先にビルドする。テスト側の
+`make upstream-e2e-test` は `built/elythia` を先にビルドし、vitest 設定をコピーした後に
+期待 DTO patch を実行する。patch は local user に `'on'` を固定期待値として追加し、
+response から値を転記しないため、値・キーの回帰も比較で検出できる。テスト側の
 ハーネスがそのバイナリを子プロセスとして起動するので、Elythia を手で立ち上げて
 おく必要はない。**むしろ手動で 61812 を掴んでいると、ハーネスの再起動
 (`/env` 経由) が `address already in use` で失敗し、環境変数を変えたはずの

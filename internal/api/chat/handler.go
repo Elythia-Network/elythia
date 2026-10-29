@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	corechat "github.com/elythia-network/elythia/internal/core/chat"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -216,6 +217,8 @@ func (h *Handler) mapChatErr(c echo.Context, err error) error {
 	case errors.Is(err, corechat.ErrChatBlocked):
 		// recipient が sender を block している (upstream YOU_HAVE_BEEN_BLOCKED)。
 		return c.JSON(http.StatusBadRequest, apierr.Error("YOU_HAVE_BEEN_BLOCKED", "You cannot send a message because you have been blocked by this user.", "c15a5199-7422-4968-941a-2a462c478f7d"))
+	case errors.Is(err, corechat.ErrFederationDisabled):
+		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 	case errors.Is(err, corechat.ErrChatScopeViolation):
 		// CherryPick の `recipient is cannot chat (...)` 相当 (#692)。
 		// upstream は ApiError を持たず単なる Error を投げるので mk-go 固有
@@ -1517,6 +1520,9 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 		}
 		inviteeUser = u
 	}
+	if inviteeUser != nil && !inviteeUser.IsLocal() && !corelocalfederation.IsExternallyAvailable(user) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+	}
 	inv := &model.ChatRoomInvitation{
 		ID: h.idGen.Generate(time.Now()), UserID: req.UserID, RoomID: req.RoomID,
 	}
@@ -1608,6 +1614,9 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 	if rerr != nil && !repository.IsNotFound(rerr) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
+	}
+	if rerr == nil && room.Host != nil && *room.Host != "" && !corelocalfederation.IsExternallyAvailable(user) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 	}
 	if rerr == nil && room.OwnerID == user.ID {
 		_ = h.repo.DeleteInvitation(inv.ID)
@@ -1959,6 +1968,9 @@ func (h *Handler) RoomsJoin(c echo.Context) error {
 	if rerr != nil && !repository.IsNotFound(rerr) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
+	}
+	if rerr == nil && joinRoom.Host != nil && *joinRoom.Host != "" && !corelocalfederation.IsExternallyAvailable(user) {
+		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 	}
 	if rerr == nil && joinRoom.OwnerID == user.ID {
 		_ = h.repo.DeleteInvitation(inv.ID)

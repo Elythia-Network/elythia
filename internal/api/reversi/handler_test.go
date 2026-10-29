@@ -207,7 +207,7 @@ func post(handler func(echo.Context) error, body string, user *model.User) *http
 	return rec
 }
 
-var u1 = &model.User{ID: "u1", Username: "alice"}
+var u1 = &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn}
 
 func sampleGame() *model.ReversiGame {
 	return &model.ReversiGame{

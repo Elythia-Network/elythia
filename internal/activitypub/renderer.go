@@ -39,6 +39,9 @@ func NewURLBuilder(baseURL string) *URLBuilder {
 	return &URLBuilder{baseURL: baseURL}
 }
 
+// BaseURL returns the canonical origin used by this builder.
+func (b *URLBuilder) BaseURL() string { return b.baseURL }
+
 // UserURI returns the canonical actor URI for a local user.
 func (b *URLBuilder) UserURI(userID string) string {
 	return b.baseURL + "/users/" + userID
@@ -71,6 +74,20 @@ func (b *URLBuilder) LocalUserIDFromURI(uri string) string {
 	// `/users/<id>` ちょうどの形だけを受ける (配下のサブパスは actor ではない)。
 	if rest == "" || strings.Contains(rest, "/") {
 		return ""
+	}
+	return rest
+}
+
+// LocalNoteIDFromURI returns the ID named by a canonical local note URI,
+// including activity and fragment variants that identify the same note.
+func (b *URLBuilder) LocalNoteIDFromURI(uri string) string {
+	prefix := b.baseURL + "/notes/"
+	if b.baseURL == "" || !strings.HasPrefix(uri, prefix) {
+		return ""
+	}
+	rest := uri[len(prefix):]
+	if i := strings.IndexAny(rest, "/#?"); i >= 0 {
+		rest = rest[:i]
 	}
 	return rest
 }

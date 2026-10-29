@@ -86,6 +86,25 @@ func TestInboxProcessor_UnsupportedActivityIsSwallowed(t *testing.T) {
 	assert.NoError(t, err, "unsupported type should not fail the worker")
 }
 
+func TestInboxProcessor_InboundLocalReferencePolicyDropsButLookupFailuresRetry(t *testing.T) {
+	newTask := func(t *testing.T) driver.RawTask {
+		t.Helper()
+		return driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, queue.InboxPayload{Body: []byte(`{}`)})}
+	}
+
+	policyStub := &stubFedProcessor{returnFn: func(_ []byte) error {
+		return federation.ErrInboundLocalReferenceUnavailable
+	}}
+	err := processors.NewInboxProcessor(policyStub, nil, nil, nil, nil, nil).Handle(context.Background(), newTask(t))
+	require.NoError(t, err, "permanent local-reference policy refusals should be acknowledged")
+
+	lookupErr := fmt.Errorf("%w: database unavailable", federation.ErrInboundLocalReferenceFailure)
+	transientStub := &stubFedProcessor{returnFn: func(_ []byte) error { return lookupErr }}
+	err = processors.NewInboxProcessor(transientStub, nil, nil, nil, nil, nil).Handle(context.Background(), newTask(t))
+	require.ErrorIs(t, err, federation.ErrInboundLocalReferenceFailure)
+	assert.False(t, errors.Is(err, driver.ErrSkipRetry), "lookup failures must remain retryable")
+}
+
 // stubVerifier returns the supplied actor + pubkey deterministically so
 // worker-side signature verification can be exercised without the full
 // federation.Resolver dep chain.

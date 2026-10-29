@@ -9,9 +9,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/api/userrelation"
+	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -67,6 +70,82 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *testutil
 	return NewHandler(renderer, userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil), userRepo, noteRepo, keypairRepo
 }
 
+type localFederationObserverStub struct {
+	available   bool
+	unavailable map[string]bool
+	recorded    []string
+	err         error
+	observeErr  error
+}
+
+func (s *localFederationObserverStub) IsExternallyAvailable(user *model.User) bool {
+	return s.available && (s.unavailable == nil || !s.unavailable[user.ID])
+}
+
+func (s *localFederationObserverStub) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	s.recorded = append(s.recorded, userID+":"+reason+":"+host)
+	if s.observeErr != nil {
+		return false, s.observeErr
+	}
+	return true, s.err
+}
+
+func TestUser_LocalFederationUnavailableReturnsNotFound(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+		t.Run(string(status), func(t *testing.T) {
+			h, userRepo, _, keypairRepo := newHandler(t)
+			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", FederationStatus: status}
+			keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUBKEY"}
+			observer := &localFederationObserverStub{available: false}
+			h.SetLocalFederationObserver(observer)
+
+			c, rec := newReq(t, "id", "u1")
+			require.NoError(t, h.User(c))
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Empty(t, rec.Body.String(), "unavailable actor responses must not append a Person body")
+			assert.Empty(t, observer.recorded)
+		})
+	}
+}
+
+func TestUser_RecordsFirstExternalReferenceWithoutCache(t *testing.T) {
+	h, userRepo, _, keypairRepo := newHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn}
+	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUBKEY"}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"u1:actor:"}, observer.recorded)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}
+
+type countingAPUserRepository struct {
+	*testutil.MockUserRepository
+	findByIDCalls map[string]int
+}
+
+func (r *countingAPUserRepository) FindByID(userID string) (*model.User, error) {
+	r.findByIDCalls[userID]++
+	return r.MockUserRepository.FindByID(userID)
+}
+
+func TestUser_ResponseValidationReusesLoadedActor(t *testing.T) {
+	h, userRepo, noteRepo, keypairRepo := newHandler(t)
+	counted := &countingAPUserRepository{MockUserRepository: userRepo, findByIDCalls: map[string]int{}}
+	h.userService = coreuser.NewService(counted, noteRepo, testutil.NewMockUserNotePiningRepository(), h.idGen, nil)
+	counted.Users["u1"] = &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn}
+	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUBKEY"}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.User(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, counted.findByIDCalls["u1"], "the response guard should reuse the User already loaded by the handler")
+}
+
 func newReq(t *testing.T, paramName, paramValue string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
@@ -91,8 +170,7 @@ func TestUser_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Person")
 	assert.Contains(t, rec.Body.String(), "alice")
-	// upstream userInfo と同じキャッシュ指示 (#2506)。
-	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 }
 
 func TestUser_NotFound(t *testing.T) {
@@ -1502,7 +1580,7 @@ func TestFollowers_PrivateVisibility_Forbidden(t *testing.T) {
 		c, rec := newReq(t, "id", "u1")
 		require.NoError(t, h.Followers(c))
 		assert.Equal(t, http.StatusForbidden, rec.Code, "visibility=%s must 403", vis)
-		assert.Equal(t, "public, max-age=30", rec.Header().Get("Cache-Control"))
+		assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 	}
 }
 
@@ -1553,7 +1631,7 @@ func TestFollowers_NilProfile_Forbidden(t *testing.T) {
 	c, rec := newReq(t, "id", "u1")
 	require.NoError(t, h.Followers(c))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Equal(t, "public, max-age=30", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 }
 
 func TestFollowers_Page_NextCursorWhenMore(t *testing.T) {
@@ -1660,6 +1738,373 @@ func newHandlerWithOutbox(t *testing.T) (*Handler, *testutil.MockUserRepository,
 	return h, userRepo, noteRepo
 }
 
+func TestFeatured_LocalFederationUnavailableReturnsEmptyNotFound(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+		t.Run(string(status), func(t *testing.T) {
+			h, userRepo, _, _ := newHandlerWithPining(t)
+			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", FederationStatus: status}
+			h.SetLocalFederationObserver(&localFederationObserverStub{available: false})
+			c, rec := newReq(t, "id", "u1")
+			require.NoError(t, h.Featured(c))
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Empty(t, rec.Body.String(), "collection body must not follow the 404")
+		})
+	}
+}
+
+func TestOutbox_LocalFederationUnavailableReturnsEmptyNotFound(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusPending, model.FederationStatusOff} {
+		t.Run(string(status), func(t *testing.T) {
+			h, userRepo, noteRepo := newHandlerWithOutbox(t)
+			author := &model.User{ID: "u1", Username: "alice", FederationStatus: status}
+			userRepo.Users[author.ID] = author
+			text := "still local"
+			noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+			h.SetLocalFederationObserver(&localFederationObserverStub{available: false})
+			c, rec := newReqQuery(t, "id", author.ID, "page=true")
+			require.NoError(t, h.Outbox(c))
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Empty(t, rec.Body.String(), "outbox page must not follow the 404")
+		})
+	}
+}
+
+func TestNote_LocalFederationUnavailableReturnsEmptyNotFound(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	text := "local only by account"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: false})
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Body.String(), "localOnly=false note must not be rendered after author rejection")
+}
+
+func TestNoteActivity_LocalFederationUnavailableReturnsEmptyNotFound(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	text := "local only by account"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Visibility: model.NoteVisibilityPublic, Text: &text}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: false})
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.NoteActivity(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Body.String(), "Create activity must not be rendered after author rejection")
+}
+
+func TestNote_ObservesNestedLocalMention(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	mentioned := &model.User{ID: "mentioned", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[mentioned.ID] = mentioned
+	h.SetNoteRepo(noteRepo)
+	text := "hello"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Mentions: []string{mentioned.ID}, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	h.renderer.SetMentionResolver(corefederation.NewUserMentionResolver(userRepo, h.renderer.URLs()))
+
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.Note(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), h.renderer.URLs().UserURI(mentioned.ID))
+	assert.Contains(t, observer.recorded, "mentioned:actor:", "GET alone externally exposes the mention and must record it")
+}
+
+func TestNote_RejectsNestedUnavailableLocalReply(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	mentioned := &model.User{ID: "referenced", Username: "bob", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[mentioned.ID] = mentioned
+	h.SetNoteRepo(noteRepo)
+	text := "reply"
+	replyID := "old-note"
+	oldText := "local now"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: mentioned.ID, User: mentioned, Text: &oldText, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	noteRepo.Notes["reply"] = &model.Note{ID: "reply", UserID: author.ID, User: author, ReplyID: &replyID, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true, unavailable: map[string]bool{mentioned.ID: true}}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "id", "reply")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Body.String(), "a visible local reply must not disclose a disabled local target URI")
+}
+
+func TestNote_RejectsNestedReferenceWhenDisableWinsObservationRace(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	observedAt := time.Now()
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn, FirstExternalReferenceAt: &observedAt}
+	referenced := &model.User{ID: "referenced", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[referenced.ID] = referenced
+	h.SetNoteRepo(noteRepo)
+	replyID := "target"
+	text := "reply"
+	targetText := "target"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: referenced.ID, User: referenced, Text: &targetText, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["reply"] = &model.Note{ID: "reply", UserID: author.ID, User: author, ReplyID: &replyID, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true, err: corelocalfederation.ErrFederationDisabled}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "id", "reply")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code, "a stale ON snapshot must not survive an OFF-first locked observation")
+	assert.Empty(t, rec.Body.String())
+}
+
+func TestNoteActivity_RejectsNestedUnavailableLocalReply(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	referenced := &model.User{ID: "referenced", Username: "bob", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[referenced.ID] = referenced
+	h.SetNoteRepo(noteRepo)
+	replyID := "old-note"
+	oldText := "local now"
+	text := "reply"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: referenced.ID, User: referenced, Text: &oldText, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	noteRepo.Notes["reply"] = &model.Note{ID: "reply", UserID: author.ID, User: author, ReplyID: &replyID, Text: &text, Visibility: model.NoteVisibilityPublic}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true, unavailable: map[string]bool{referenced.ID: true}})
+
+	c, rec := newReq(t, "id", "reply")
+	require.NoError(t, h.NoteActivity(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Body.String())
+}
+
+func TestNote_NestedReferenceObservationErrorFailsClosed(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	observedAt := time.Now()
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn, FirstExternalReferenceAt: &observedAt}
+	mentioned := &model.User{ID: "mentioned", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[mentioned.ID] = mentioned
+	h.SetNoteRepo(noteRepo)
+	text := "hello"
+	quoteID := "quoted"
+	quoteText := "quote"
+	noteRepo.Notes[quoteID] = &model.Note{ID: quoteID, UserID: mentioned.ID, User: mentioned, Text: &quoteText, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, RenoteID: &quoteID, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true, observeErr: errors.New("database unavailable")}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, rec.Body.String())
+}
+
+type failingAPReferenceNoteRepo struct {
+	*testutil.MockNoteRepository
+	failingID string
+}
+
+func (r failingAPReferenceNoteRepo) FindByID(id string) (*model.Note, error) {
+	if id == r.failingID {
+		return nil, errors.New("reference lookup unavailable")
+	}
+	return r.MockNoteRepository.FindByID(id)
+}
+
+func TestNote_NestedReferenceLookupErrorFailsClosed(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	observedAt := time.Now()
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn, FirstExternalReferenceAt: &observedAt}
+	referenced := &model.User{ID: "referenced", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[referenced.ID] = referenced
+	replyID := "target"
+	text := "reply"
+	targetText := "target"
+	noteRepo.Notes[replyID] = &model.Note{ID: replyID, UserID: referenced.ID, User: referenced, Text: &targetText, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["reply"] = &model.Note{ID: "reply", UserID: author.ID, User: author, ReplyID: &replyID, Text: &text, Visibility: model.NoteVisibilityPublic}
+	h.SetNoteRepo(failingAPReferenceNoteRepo{MockNoteRepository: noteRepo, failingID: replyID})
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+
+	c, rec := newReq(t, "id", "reply")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, rec.Body.String())
+}
+
+func TestNoteDoesNotObserveAvailableMentionWhenAnotherReferenceIsUnavailable(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn, FirstExternalReferenceAt: ptrTimeForAPTest()}
+	mentioned := &model.User{ID: "mentioned", Username: "bob", FederationStatus: model.FederationStatusOn}
+	localOnlyAuthor := &model.User{ID: "local-only-author", Username: "carol", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[mentioned.ID] = mentioned
+	userRepo.Users[localOnlyAuthor.ID] = localOnlyAuthor
+	h.SetNoteRepo(noteRepo)
+	targetID := "local-only-target"
+	text := "reply with mention"
+	targetText := "not public anymore"
+	noteRepo.Notes[targetID] = &model.Note{ID: targetID, UserID: localOnlyAuthor.ID, User: localOnlyAuthor, Text: &targetText, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	noteRepo.Notes["note"] = &model.Note{ID: "note", UserID: author.ID, User: author, ReplyID: &targetID, Mentions: []string{mentioned.ID}, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	h.renderer.SetMentionResolver(corefederation.NewUserMentionResolver(userRepo, h.renderer.URLs()))
+
+	c, rec := newReq(t, "id", "note")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Body.String())
+	assert.NotContains(t, observer.recorded, "mentioned:actor:", "the item is rejected before it externally references this third-party user")
+}
+
+func ptrTimeForAPTest() *time.Time {
+	now := time.Now()
+	return &now
+}
+
+func TestOutbox_FiltersItemsWithUnavailableNestedLocalNote(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	targetAuthor := &model.User{ID: "target-author", Username: "bob", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[targetAuthor.ID] = targetAuthor
+	h.SetNoteRepo(noteRepo)
+	targetID := "old-target"
+	targetText := "private now"
+	noteRepo.Notes[targetID] = &model.Note{ID: targetID, UserID: targetAuthor.ID, User: targetAuthor, Text: &targetText, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	noteRepo.Notes["renote"] = &model.Note{ID: "renote", UserID: author.ID, User: author, RenoteID: &targetID, Visibility: model.NoteVisibilityPublic}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true, unavailable: map[string]bool{targetAuthor.ID: true}})
+
+	c, rec := newReqQuery(t, "id", author.ID, "page=true")
+	require.NoError(t, h.Outbox(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), h.renderer.URLs().NoteURI(targetID))
+}
+
+type countingAPNoteRepository struct {
+	*testutil.MockNoteRepository
+	findByIDCalls map[string]int
+}
+
+func (r *countingAPNoteRepository) FindByID(noteID string) (*model.Note, error) {
+	r.findByIDCalls[noteID]++
+	return r.MockNoteRepository.FindByID(noteID)
+}
+
+func TestOutbox_CollectionValidationReusesItemReferences(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	targetAuthor := &model.User{ID: "target-author", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[targetAuthor.ID] = targetAuthor
+	targetID := "target-note"
+	targetText := "target"
+	noteRepo.Notes[targetID] = &model.Note{ID: targetID, UserID: targetAuthor.ID, User: targetAuthor, Text: &targetText, Visibility: model.NoteVisibilityPublic}
+	renoteID := targetID
+	noteRepo.Notes["renote"] = &model.Note{ID: "renote", UserID: author.ID, User: author, RenoteID: &renoteID, Visibility: model.NoteVisibilityPublic}
+	counted := &countingAPNoteRepository{MockNoteRepository: noteRepo, findByIDCalls: map[string]int{}}
+	h.SetNoteRepo(counted)
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+
+	c, rec := newReqQuery(t, "id", author.ID, "page=true")
+	require.NoError(t, h.Outbox(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, counted.findByIDCalls[targetID], "renote URI rendering should load the target once; item and collection validation reuse it")
+}
+
+func TestOutbox_ObservesNestedLocalMention(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	mentioned := &model.User{ID: "mentioned", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[mentioned.ID] = mentioned
+	text := "hello"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Mentions: []string{mentioned.ID}, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	h.renderer.SetMentionResolver(corefederation.NewUserMentionResolver(userRepo, h.renderer.URLs()))
+
+	c, rec := newReqQuery(t, "id", author.ID, "page=true")
+	require.NoError(t, h.Outbox(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), h.renderer.URLs().UserURI(mentioned.ID))
+	assert.Contains(t, observer.recorded, "mentioned:actor:")
+}
+
+func TestOutbox_HumanContentLinksDoNotBlockOrObserveUsers(t *testing.T) {
+	h, userRepo, noteRepo := newHandlerWithOutbox(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	observedAt := time.Now()
+	author.FirstExternalReferenceAt = &observedAt
+	thirdParty := &model.User{ID: "third-party", Username: "bob", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[thirdParty.ID] = thirdParty
+	lockedText := "channel"
+	noteRepo.Notes["channel-note"] = &model.Note{ID: "channel-note", UserID: "third-party", Text: &lockedText, LocalOnly: true, Visibility: model.NoteVisibilityPublic}
+	text := `<a href="https://example.com/notes/channel-note">channel</a> https://example.com/notes/deleted https://example.com/users/third-party`
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: author.ID, User: author, Text: &text, Visibility: model.NoteVisibilityPublic}
+	observer := &localFederationObserverStub{available: true, unavailable: map[string]bool{thirdParty.ID: true}}
+	h.SetLocalFederationObserver(observer)
+
+	c, rec := newReqQuery(t, "id", author.ID, "page=true")
+	require.NoError(t, h.Outbox(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, observer.recorded, "third-party:actor:")
+	assert.Empty(t, observer.recorded, "only ordinary content links are present")
+}
+func TestValidateAPReferences_AllowsMissingDeleteTombstone(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	h.SetNoteRepo(noteRepo)
+	actor := &model.User{ID: "actor", Username: "alice", FederationStatus: model.FederationStatusOn}
+	userRepo.Users[actor.ID] = actor
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	activity := map[string]any{
+		"type":   "Delete",
+		"actor":  h.renderer.URLs().UserURI(actor.ID),
+		"object": map[string]any{"type": "Tombstone", "id": h.renderer.URLs().NoteURI("already-deleted")},
+	}
+	c, _ := newReq(t, "id", actor.ID)
+	available, err := h.validateAPReferences(c, activity)
+	require.NoError(t, err)
+	assert.True(t, available)
+	assert.Equal(t, []string{"actor:actor:"}, observer.recorded)
+}
+func TestExtractLocalAPReferences(t *testing.T) {
+	data, err := json.Marshal(map[string]any{
+		"id":      "https://example.com/notes/own-note",
+		"content": `<a href="https://example.com/notes/quoted#fragment">quoted</a>`,
+		"tag":     []any{map[string]any{"href": "https://example.com/users/mentioned"}},
+		"outside": "https://example.com.evil.test/users/not-local",
+	})
+	require.NoError(t, err)
+	users, notes := activitypub.ExtractLocalAPReferences("https://example.com", string(data))
+	assert.Equal(t, []string{"mentioned"}, users)
+	assert.Equal(t, []string{"own-note"}, notes)
+}
+
+func TestFeatured_FiltersItemsWithUnavailableNestedLocalNote(t *testing.T) {
+	h, userRepo, noteRepo, pinRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "author", Username: "alice", FederationStatus: model.FederationStatusOn}
+	targetAuthor := &model.User{ID: "target-author", Username: "bob", FederationStatus: model.FederationStatusOff}
+	userRepo.Users[author.ID] = author
+	userRepo.Users[targetAuthor.ID] = targetAuthor
+	h.SetNoteRepo(noteRepo)
+	targetID := "old-target"
+	targetText := "private now"
+	noteRepo.Notes[targetID] = &model.Note{ID: targetID, UserID: targetAuthor.ID, User: targetAuthor, Text: &targetText, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	replyID := targetID
+	noteRepo.Notes["featured"] = &model.Note{ID: "featured", UserID: author.ID, User: author, ReplyID: &replyID, Visibility: model.NoteVisibilityPublic}
+	require.NoError(t, pinRepo.Create(&model.UserNotePining{ID: "pin1", UserID: author.ID, NoteID: "featured"}))
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true, unavailable: map[string]bool{targetAuthor.ID: true}})
+
+	c, rec := newReq(t, "id", author.ID)
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), h.renderer.URLs().NoteURI(targetID))
+}
+
 func TestOutbox_IndexCollection(t *testing.T) {
 	h, userRepo, _ := newHandlerWithOutbox(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", NotesCount: 10}
@@ -1667,7 +2112,7 @@ func TestOutbox_IndexCollection(t *testing.T) {
 	c, rec := newReq(t, "id", "u1")
 	require.NoError(t, h.Outbox(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 
 	var col map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
@@ -1913,6 +2358,26 @@ func TestUser_FederationDisabled_BrowserStillRedirects(t *testing.T) {
 	assert.Equal(t, http.StatusFound, rec.Code, "browser path must redirect even when federation disabled")
 }
 
+func TestNote_AuthorLookupDatabaseErrorReturnsInternalServerError(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	userRepo.FindErr = errors.New("database unavailable")
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.Note(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestNoteActivity_AuthorLookupDatabaseErrorReturnsInternalServerError(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	userRepo.FindErr = errors.New("database unavailable")
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+	c, rec := newReq(t, "id", "n1")
+	require.NoError(t, h.NoteActivity(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 // --- NoteActivity (#2507) ---
 
 // renderer が広告する <note URI>/activity の dereference 先。通常ノートは
@@ -1929,7 +2394,7 @@ func TestNoteActivity_LocalNoteIsCreate(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"Create"`)
 	assert.Contains(t, rec.Body.String(), "/notes/n1/activity")
 	assert.Contains(t, rec.Body.String(), "@context")
-	assert.Equal(t, "public, max-age=180", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 	assert.Equal(t, "Accept", rec.Header().Get("Vary"))
 }
 

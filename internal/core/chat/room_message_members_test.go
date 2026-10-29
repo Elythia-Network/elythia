@@ -44,7 +44,7 @@ func newRoomMessageMembersFixture(t *testing.T, failListMembersCall int) (*corec
 	remoteHost := "remote.example"
 	remoteURI := "https://remote.example/users/remote"
 	userRepo.Users["owner"] = &model.User{ID: "owner", Username: "owner"}
-	userRepo.Users["sender"] = &model.User{ID: "sender", Username: "sender"}
+	userRepo.Users["sender"] = &model.User{ID: "sender", Username: "sender", FederationStatus: model.FederationStatusOn}
 	userRepo.Users["remote"] = &model.User{ID: "remote", Username: "remote", Host: &remoteHost, URI: &remoteURI}
 	urls := activitypub.NewURLBuilder("https://local.example")
 	deliverer := &fakeAPDeliverer{}

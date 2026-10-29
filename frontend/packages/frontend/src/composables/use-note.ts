@@ -24,6 +24,7 @@ import { deepClone } from '@/utility/clone.js';
 import { useTooltip } from '@/composables/use-tooltip.js';
 import { claimAchievement } from '@/utility/achievements.js';
 import { showMovedDialog } from '@/utility/show-moved-dialog.js';
+import { shouldBlockRemoteFederationAction } from '@/utility/account-federation.js';
 import { getAppearNote } from '@/utility/get-appear-note.js';
 import { prefer } from '@/preferences.js';
 import { getPluginHandlers } from '@/plugin.js';
@@ -219,10 +220,17 @@ export function useNote(
 	}
 
 	// 共通アクション関数群
+	function blockRemoteAction(): boolean {
+		if (!shouldBlockRemoteFederationAction($i?.federationStatus, appearNote.user.host != null)) return false;
+		void os.alert({ type: 'warning', text: i18n.ts._localOnlyAccount.remoteActionBlocked });
+		return true;
+	}
+
 	async function renote() {
 		if (props.mock) return;
 		const isLoggedIn = await pleaseLogin({ openOnRemote: pleaseLoginContext });
 		if (!isLoggedIn) return;
+		if (blockRemoteAction()) return;
 		showMovedDialog();
 		if (els.renoteButton == null) return;
 		const { menu } = getRenoteMenu({
@@ -238,6 +246,7 @@ export function useNote(
 		if (props.mock) return;
 		const isLoggedIn = await pleaseLogin({ openOnRemote: pleaseLoginContext });
 		if (!isLoggedIn) return;
+		if (blockRemoteAction()) return;
 		os.post({
 			reply: appearNote,
 			channel: appearNote.channel,
@@ -249,6 +258,7 @@ export function useNote(
 	async function react(createReactionMock?: (reaction: string) => void) {
 		const isLoggedIn = await pleaseLogin({ openOnRemote: pleaseLoginContext });
 		if (!isLoggedIn) return;
+		if (blockRemoteAction()) return;
 		showMovedDialog();
 
 		if (appearNote.reactionAcceptance === 'likeOnly') {
@@ -301,6 +311,7 @@ export function useNote(
 		if (props.mock) return;
 		const isLoggedIn = await pleaseLogin({ openOnRemote: pleaseLoginContext });
 		if (!isLoggedIn) return;
+		if (blockRemoteAction()) return;
 		showMovedDialog();
 		sound.playMisskeySfx('reaction');
 		misskeyApi('notes/reactions/create', {
@@ -315,6 +326,7 @@ export function useNote(
 	}
 
 	function undoReact(): void {
+		if (blockRemoteAction()) return;
 		const oldReaction = $appearNote.myReaction;
 		if (!oldReaction) return;
 		if (props.mock) return;

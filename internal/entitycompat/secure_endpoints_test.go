@@ -104,9 +104,13 @@ var secureStricterThanUpstream = map[string]string{
 	"admin/backup/restore/prepare": backupSecureReason,
 	// 退避した DB の一覧 (#3463 (6d))。一覧 (admin/backup/list) と同じ扱い。
 	"admin/backup/restore/candidates": backupSecureReason,
+	// 外部公開や既存投稿のlocalOnly化を伴うアカウント自身の連合状態変更。
+	"i/update-federation": federationStateSecureReason,
 }
 
 const backupSecureReason = "Elythia-only backup admin (#3462): backups hold private keys, tokens and password hashes, so app tokens must not reach them"
+
+const federationStateSecureReason = "Elythia-only federation state change (#3852): publishing an account or making its existing posts local-only is consequential and can be irreversible, so only the owner's native session may change it (docs/divergence/api.md)"
 
 // parseRouteRegistrations returns endpoint path -> the full router registration
 // text (balanced parens), so middleware on a multi-line inline handler's closing

@@ -207,6 +207,45 @@ func TestUpdate_AlsoKnownAs_NoUserRepoFailsClosed(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_USER")
 }
 
+// Local alias targets must be externally available before they can be saved.
+func TestUpdate_AlsoKnownAs_LocalFederationAvailability(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusOff, model.FederationStatusPending} {
+		t.Run(string(status), func(t *testing.T) {
+			h, me := akaHandler(t)
+			nativeToken := "native-login-token"
+			me.Token = &nativeToken
+			me.FederationStatus = model.FederationStatusOn
+			me.AlsoKnownAs = strPtr("https://mk.example/users/old")
+			target := repoOf(h).addLocal("alias1", "aliasuser")
+			target.FederationStatus = status
+			h.SetLocalFederationObserver(&moveAvailabilityObserver{})
+
+			rec := updateWithToken(h, "{\"alsoKnownAs\":[\"@aliasuser\"]}", me, nativeToken)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "NO_SUCH_USER")
+			got := repoOf(h).get("me")
+			require.NotNil(t, got.AlsoKnownAs)
+			assert.Equal(t, "https://mk.example/users/old", *got.AlsoKnownAs)
+		})
+	}
+}
+
+func TestUpdate_AlsoKnownAs_LocalFederationEnabled(t *testing.T) {
+	h, me := akaHandler(t)
+	nativeToken := "native-login-token"
+	me.Token = &nativeToken
+	me.FederationStatus = model.FederationStatusOn
+	target := repoOf(h).addLocal("alias1", "aliasuser")
+	target.FederationStatus = model.FederationStatusOn
+	h.SetLocalFederationObserver(&moveAvailabilityObserver{})
+
+	rec := updateWithToken(h, "{\"alsoKnownAs\":[\"@aliasuser\"]}", me, nativeToken)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := repoOf(h).get("me")
+	require.NotNil(t, got.AlsoKnownAs)
+	assert.Equal(t, "https://mk.example/users/alias1", *got.AlsoKnownAs)
+}
+
 // #2106 L3: 不正な regex リテラルの mutedWords は INVALID_REGEXP(400) で拒否する。
 func TestUpdate_InvalidMutedWordsRegex(t *testing.T) {
 	h, me := akaHandler(t)

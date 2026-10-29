@@ -16,12 +16,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<template v-else-if="page === 2" #header><i class="ti ti-lock"></i> {{ i18n.ts._initialAccountSetting.privacySetting }}</template>
 	<template v-else-if="page === 3" #header><i class="ti ti-user-plus"></i> {{ i18n.ts.follow }}</template>
 	<template v-else-if="page === 4" #header><i class="ti ti-bell-plus"></i> {{ i18n.ts.pushNotification }}</template>
-	<template v-else-if="page === 5" #header>{{ i18n.ts.done }}</template>
+	<template v-else-if="page === 5" #header><i class="ti ti-world"></i> {{ i18n.ts._localOnlyAccount.setupTitle }}</template>
+	<template v-else-if="page === 6" #header>{{ i18n.ts.done }}</template>
 	<template v-else #header>{{ i18n.ts.initialAccountSetting }}</template>
 
 	<div style="overflow-x: clip;">
 		<div :class="$style.progressBar">
-			<div :class="$style.progressBarValue" :style="{ width: `${(page / 5) * 100}%` }"></div>
+			<div :class="$style.progressBarValue" :style="{ width: `${(page / 6) * 100}%` }"></div>
 		</div>
 		<Transition
 			mode="out-in"
@@ -106,6 +107,27 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</div>
 			</template>
 			<template v-else-if="page === 5">
+				<div style="height: 100cqh; overflow: auto;">
+					<div :class="$style.pageRoot">
+						<div class="_spacer" style="--MI_SPACER-min: 20px; --MI_SPACER-max: 28px;" :class="$style.pageMain">
+							<div class="_gaps">
+								<div class="_gaps" style="font-size: 120%;">{{ i18n.ts._localOnlyAccount.setupDescription }}</div>
+								<MkSwitch v-if="$i?.federationStatus === 'pending'" v-model="enableFederation">{{ i18n.ts._localOnlyAccount.enableFederation }}</MkSwitch>
+								<MkInfo v-if="$i?.federationStatus === 'pending' && enableFederation" warn>{{ i18n.ts._localOnlyAccount.setupOnWarning }}</MkInfo>
+								<MkInfo v-else-if="$i?.federationStatus === 'pending'">{{ i18n.ts._localOnlyAccount.setupOffDescription }}</MkInfo>
+								<MkInfo v-else>{{ i18n.ts._localOnlyAccount.alreadyConfigured }}</MkInfo>
+							</div>
+						</div>
+						<div :class="$style.pageFooter">
+							<div class="_buttonsCenter">
+								<MkButton rounded data-testid="user-setup-back" @click="page--"><i class="ti ti-arrow-left"></i> {{ i18n.ts.goBack }}</MkButton>
+								<MkButton primary rounded gradate data-testid="user-setup-finish" @click="setupComplete()">{{ i18n.ts.continue }} <i class="ti ti-arrow-right"></i></MkButton>
+							</div>
+						</div>
+					</div>
+				</div>
+			</template>
+			<template v-else-if="page === 6">
 				<div :class="$style.centerPage">
 					<MkAnimBg style="position: absolute; top: 0;" :scale="1.5"/>
 					<div class="_spacer" style="--MI_SPACER-min: 20px; --MI_SPACER-max: 28px;">
@@ -114,11 +136,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 							<div style="font-size: 120%;">{{ i18n.ts._initialAccountSetting.initialAccountSettingCompleted }}</div>
 							<div>{{ i18n.tsx._initialAccountSetting.youCanContinueTutorial({ name: instance.name ?? host }) }}</div>
 							<div class="_buttonsCenter" style="margin-top: 16px;">
-								<MkButton rounded primary gradate data-testid="user-setup-continue" @click="launchTutorial()">{{ i18n.ts._initialAccountSetting.startTutorial }} <i class="ti ti-arrow-right"></i></MkButton>
+								<MkButton rounded primary gradate data-testid="user-setup-tutorial" @click="launchTutorial()">{{ i18n.ts._initialAccountSetting.startTutorial }} <i class="ti ti-arrow-right"></i></MkButton>
 							</div>
 							<div class="_buttonsCenter">
 								<MkButton rounded data-testid="user-setup-back" @click="page--"><i class="ti ti-arrow-left"></i> {{ i18n.ts.goBack }}</MkButton>
-								<MkButton rounded primary data-testid="user-setup-continue" @click="setupComplete()">{{ i18n.ts.close }}</MkButton>
+								<MkButton rounded primary data-testid="user-setup-close" @click="completeWizard()">{{ i18n.ts.close }}</MkButton>
 							</div>
 						</div>
 					</div>
@@ -141,8 +163,12 @@ import MkAnimBg from '@/components/MkAnimBg.vue';
 import { i18n } from '@/i18n.js';
 import { instance } from '@/instance.js';
 import MkPushNotificationAllowButton from '@/components/MkPushNotificationAllowButton.vue';
+import MkInfo from '@/components/MkInfo.vue';
+import MkSwitch from '@/components/MkSwitch.vue';
 import { store } from '@/store.js';
+import { $i } from '@/i.js';
 import * as os from '@/os.js';
+import { finalizeFederationSetup } from '@/utility/account-federation.js';
 
 const emit = defineEmits<{
 	(ev: 'closed'): void;
@@ -151,6 +177,7 @@ const emit = defineEmits<{
 const dialog = useTemplateRef('dialog');
 
 const page = ref(store.s.accountSetupWizard);
+const enableFederation = ref(true);
 
 watch(page, () => {
 	store.set('accountSetupWizard', page.value);
@@ -165,17 +192,42 @@ async function close(skip: boolean) {
 		if (canceled) return;
 	}
 
-	dialog.value?.close();
-	store.set('accountSetupWizard', -1);
+	await resolveFederationChoice(skip, completeWizard);
 }
 
-function setupComplete() {
+async function resolveFederationChoice(skipped: boolean, onComplete: () => void): Promise<boolean> {
+	try {
+		return await finalizeFederationSetup({
+		current: $i?.federationStatus,
+		choice: skipped && $i?.federationStatus === 'pending' ? 'on' : enableFederation.value ? 'on' : 'off',
+		confirmFederation: async () => {
+			const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts._localOnlyAccount.setupOnWarning });
+			return !canceled;
+		},
+		update: async (federationStatus) => {
+			const result = await os.apiWithDialog('i/update-federation', { federationStatus });
+			if ($i) $i.federationStatus = result.federationStatus;
+			return result.federationStatus;
+		},
+		complete: onComplete,
+		});
+	} catch {
+		// The API dialog reports the failure. Keep the wizard open so the user can retry.
+		return false;
+	}
+}
+
+async function setupComplete() {
+	await resolveFederationChoice(false, () => { page.value = 6; });
+}
+
+function completeWizard() {
 	store.set('accountSetupWizard', -1);
 	dialog.value?.close();
 }
 
 function launchTutorial() {
-	setupComplete();
+	completeWizard();
 	nextTick(async () => {
 		const { dispose } = await os.popupAsyncWithDialog(import('@/components/MkTutorialDialog.vue').then(x => x.default), {
 			initialPage: 1,

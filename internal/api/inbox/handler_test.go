@@ -83,6 +83,129 @@ func newPost(t *testing.T, body []byte) (echo.Context, *httptest.ResponseRecorde
 	return e.NewContext(req, rec), rec
 }
 
+type localFederationObserverStub struct {
+	available bool
+	err       error
+	recorded  []string
+}
+
+func (s *localFederationObserverStub) IsExternallyAvailable(user *model.User) bool {
+	return s.available
+}
+
+func (s *localFederationObserverStub) ObserveExternalReference(userID, reason, host string) (bool, error) {
+	s.recorded = append(s.recorded, userID+":"+reason+":"+host)
+	return s.err == nil, s.err
+}
+
+func TestInbox_LocalOnlySharedInboxTargetIsNotInspectedBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOff}
+	observer := &localFederationObserverStub{available: false}
+	h.SetLocalFederationObserver(observer)
+	h.SetUserRepo(repo)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob","to":"https://example.com/users/bob"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}
+
+func TestInbox_DoesNotRecordBodyTargetBeforeSignatureAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	h.SetUserRepo(repo)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob","to":"https://example.com/users/bob"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}
+func TestInbox_LocalOnlyNoteTargetIsNotInspectedBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["locked-note"] = &model.Note{ID: "locked-note", UserID: "bob", LocalOnly: true}
+	h.SetNoteRepo(noteRepo)
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+
+	body := []byte(`{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/locked-note"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestInbox_BodyNoteOwnerIsNotObservedBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["public-note"] = &model.Note{ID: "public-note", UserID: "bob"}
+	h.SetNoteRepo(noteRepo)
+	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+
+	body := []byte(`{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/public-note"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestInbox_BodyObservationDoesNotRunBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn}
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true, err: errors.New("observation failed")}
+	h.SetLocalFederationObserver(observer)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestInbox_KnownExternalReferenceIsNotRecordedAgain(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	observedAt := time.Now()
+	repo.Users["bob"] = &model.User{
+		ID: "bob", Username: "bob", FederationStatus: model.FederationStatusOn,
+		FirstExternalReferenceAt: &observedAt,
+	}
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+
+	body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, observer.recorded)
+}
+
+func TestInbox_NoteLookupDoesNotRunBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.FindErr = errors.New("note lookup failed")
+	h.SetNoteRepo(noteRepo)
+	h.SetUserRepo(repo)
+	h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+
+	body := []byte(`{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/missing"}`)
+	c, rec := newPost(t, body)
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
 func TestInbox_HappyPathFollow(t *testing.T) {
 	priv, pub, err := activitypub.GenerateRSAKeypair()
 	require.NoError(t, err)
@@ -637,6 +760,187 @@ func TestInbox_HostMismatchRejected(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestInbox_RejectedAdmissionDoesNotObserveBodyTargets(t *testing.T) {
+	for _, mode := range []string{"unsigned", "bad digest", "bad host"} {
+		t.Run(mode, func(t *testing.T) {
+			priv, pub, err := activitypub.GenerateRSAKeypair()
+			require.NoError(t, err)
+			key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+			require.NoError(t, err)
+			h, repo, _ := newHandler(t, pub)
+			h.expectedHost = "example.com"
+			repo.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+			h.SetUserRepo(repo)
+			observer := &localFederationObserverStub{available: true}
+			h.SetLocalFederationObserver(observer)
+			body := []byte(`{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`)
+			c, rec := newPost(t, body)
+			req := c.Request()
+			if mode != "unsigned" {
+				digestBody := body
+				if mode == "bad digest" {
+					digestBody = []byte("different body")
+				}
+				require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest(digestBody), []string{"(request-target)", "date", "host", "digest"}))
+			}
+			req.Host = "example.com"
+			if mode == "bad host" {
+				req.Host = "evil.example"
+			}
+			require.NoError(t, h.Inbox(c))
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Empty(t, observer.recorded)
+		})
+	}
+}
+
+func TestInbox_PathTargetIsObservedBeforeAdmission(t *testing.T) {
+	h, repo, _ := newHandler(t, "")
+	repo.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	c, rec := newPost(t, []byte(`{"type":"Follow"}`))
+	c.SetParamNames("id")
+	c.SetParamValues("bob")
+	require.NoError(t, h.Inbox(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Equal(t, []string{"bob:inbox:"}, observer.recorded)
+}
+func TestInbox_AdmittedBodyTargetsAreCheckedAndObserved(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		setup      func(*Handler, *testutil.MockUserRepository, *testutil.MockNoteRepository)
+		wantStatus int
+		wantSeen   []string
+	}{
+		{
+			name: "public note observes owner",
+			body: `{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/public-note"}`,
+			setup: func(h *Handler, users *testutil.MockUserRepository, notes *testutil.MockNoteRepository) {
+				notes.Notes["public-note"] = &model.Note{ID: "public-note", UserID: "bob"}
+				users.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+			},
+			wantStatus: http.StatusAccepted,
+			wantSeen:   []string{"bob:inbox:remote.example"},
+		},
+		{
+			name: "local-only note rejected",
+			body: `{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/private-note"}`,
+			setup: func(_ *Handler, _ *testutil.MockUserRepository, notes *testutil.MockNoteRepository) {
+				notes.Notes["private-note"] = &model.Note{ID: "private-note", UserID: "bob", LocalOnly: true}
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "note lookup failure is server error",
+			body: `{"type":"Like","actor":"https://remote.example/users/alice","object":"https://example.com/notes/failing-note"}`,
+			setup: func(_ *Handler, _ *testutil.MockUserRepository, notes *testutil.MockNoteRepository) {
+				notes.FindErr = errors.New("database unavailable")
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "off user rejected",
+			body: `{"type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`,
+			setup: func(_ *Handler, users *testutil.MockUserRepository, _ *testutil.MockNoteRepository) {
+				users.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOff}
+			},
+			wantStatus: http.StatusNotFound,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			priv, pub, err := activitypub.GenerateRSAKeypair()
+			require.NoError(t, err)
+			key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+			require.NoError(t, err)
+			h, users, _ := newHandler(t, pub)
+			h.expectedHost = "example.com"
+			enq := &recordingEnqueuer{}
+			h.enqueuer = enq
+			notes := testutil.NewMockNoteRepository()
+			h.SetNoteRepo(notes)
+			h.SetUserRepo(users)
+			observer := &localFederationObserverStub{available: tc.name != "off user rejected"}
+			h.SetLocalFederationObserver(observer)
+			tc.setup(h, users, notes)
+			c, rec := newPost(t, []byte(tc.body))
+			req := c.Request()
+			require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest([]byte(tc.body)), []string{"(request-target)", "date", "host", "digest"}))
+			req.Host = "example.com"
+			require.NoError(t, h.Inbox(c))
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			assert.Equal(t, tc.wantSeen, observer.recorded)
+			if tc.wantStatus == http.StatusAccepted {
+				assert.Len(t, enq.calls, 1)
+			} else {
+				assert.Empty(t, enq.calls)
+			}
+		})
+	}
+}
+
+type failingNthInboxUserRepo struct {
+	*testutil.MockUserRepository
+	calls  int
+	failAt int
+}
+
+func (r *failingNthInboxUserRepo) FindByID(id string) (*model.User, error) {
+	r.calls++
+	if r.calls == r.failAt {
+		return nil, errors.New("user lookup failed")
+	}
+	return r.MockUserRepository.FindByID(id)
+}
+
+func (r *failingNthInboxUserRepo) FindManyByIDs(ids []string) ([]*model.User, error) {
+	r.calls++
+	if r.calls == r.failAt {
+		return nil, errors.New("user lookup failed")
+	}
+	return r.MockUserRepository.FindManyByIDs(ids)
+}
+
+func TestInbox_BodyReferencePreflightFinishesBeforeObservation(t *testing.T) {
+	h, baseRepo, _ := newHandler(t, "")
+	baseRepo.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+	baseRepo.Users["carol"] = &model.User{ID: "carol", FederationStatus: model.FederationStatusOn}
+	repo := &failingNthInboxUserRepo{MockUserRepository: baseRepo, failAt: 1}
+	h.SetUserRepo(repo)
+	observer := &localFederationObserverStub{available: true}
+	h.SetLocalFederationObserver(observer)
+	body := []byte(`{"actor":"https://example.com/users/bob","object":"https://example.com/users/carol"}`)
+	assert.Error(t, h.observeLocalInboxBodyTargets(body, "remote.example"))
+	assert.Empty(t, observer.recorded, "all body lookups must finish before the first observation")
+}
+func TestInbox_BodyTargetsAreBoundedAndSemantic(t *testing.T) {
+	t.Run("over limit before lookup", func(t *testing.T) {
+		h, repo, _ := newHandler(t, "")
+		repo.FindErr = errors.New("body targets must not be looked up")
+		h.SetUserRepo(repo)
+		h.SetLocalFederationObserver(&localFederationObserverStub{available: true})
+		refs := make([]string, maxInboxBodyReferences+1)
+		for i := range refs {
+			refs[i] = fmt.Sprintf(`"https://example.com/users/user-%d"`, i)
+		}
+		body := []byte(fmt.Sprintf(`{"actor":"https://remote.example/users/alice","object":[%s]}`, strings.Join(refs, ",")))
+		assert.ErrorIs(t, h.observeLocalInboxBodyTargets(body, "remote.example"), errLocalInboxTooManyReferences)
+	})
+
+	t.Run("deduplicate canonical refs and ignore ordinary links", func(t *testing.T) {
+		h, repo, _ := newHandler(t, "")
+		repo.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+		repo.Users["channel"] = &model.User{ID: "channel", FederationStatus: model.FederationStatusOff}
+		observer := &localFederationObserverStub{available: true}
+		h.SetUserRepo(repo)
+		h.SetLocalFederationObserver(observer)
+		body := []byte(`{"actor":"https://example.com/users/bob","object":["https://example.com/users/bob","https://example.com/users/bob/followers"],"content":"https://example.com/users/channel https://example.com/notes/missing"}`)
+		assert.NoError(t, h.observeLocalInboxBodyTargets(body, "remote.example"))
+		assert.Equal(t, []string{"bob:inbox:remote.example"}, observer.recorded)
+	})
+}
 func TestInbox_HostSignedAndMatchAccepted(t *testing.T) {
 	priv, pub, err := activitypub.GenerateRSAKeypair()
 	require.NoError(t, err)

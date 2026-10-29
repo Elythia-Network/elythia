@@ -32,7 +32,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<span :class="$style.headerRightButtonText">{{ targetChannel.name }}</span>
 				</button>
 			</template>
-			<button v-if="visibility !== 'specified'" v-tooltip="i18n.ts._visibility.disableFederation" class="_button" :class="[$style.headerRightItem, { [$style.danger]: localOnly }]" :disabled="targetChannel != null" @click="toggleLocalOnly">
+			<button v-if="visibility !== 'specified'" v-tooltip="i18n.ts._visibility.disableFederation" class="_button" :class="[$style.headerRightItem, { [$style.danger]: localOnly }]" :disabled="targetChannel != null || isFederationOff" @click="toggleLocalOnly">
 				<span v-if="!localOnly"><i class="ti ti-rocket"></i></span>
 				<span v-else><i class="ti ti-rocket-off"></i></span>
 			</button>
@@ -49,6 +49,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 	</header>
 	<MkNoteSimple v-if="replyTargetNote" :class="$style.targetNote" :note="replyTargetNote"/>
 	<MkNoteSimple v-if="renoteTargetNote" :class="$style.targetNote" :note="renoteTargetNote"/>
+	<MkInfo v-if="isFederationOff">{{ i18n.ts._localOnlyAccount.offPostForced }}</MkInfo>
+	<MkInfo v-if="isFederationOff && hasRemoteMention" warn>{{ i18n.ts._localOnlyAccount.remoteMentionWarning }}</MkInfo>
 	<div v-if="quoteId" :class="$style.withQuote"><i class="ti ti-quote"></i> {{ i18n.ts.quoteAttached }}<button @click="quoteId = null; renoteTargetNote = null;"><i class="ti ti-x"></i></button></div>
 	<div v-if="visibility === 'specified'" :class="$style.toSpecified">
 		<span style="margin-right: 8px;">{{ i18n.ts.recipient }}</span>
@@ -158,6 +160,7 @@ import { checkDragDataType, getDragData } from '@/drag-and-drop.js';
 import { useUploader } from '@/composables/use-uploader.js';
 import { startTour } from '@/utility/tour.js';
 import { closeTip } from '@/tips.js';
+import { resolveLocalOnlyPreference } from '@/utility/account-federation.js';
 
 const $i = ensureSignin();
 
@@ -204,7 +207,8 @@ watch(showPreview, () => store.set('showPreview', showPreview.value));
 const showAddMfmFunction = ref(prefer.s.enableQuickAddMfmFunction);
 watch(showAddMfmFunction, () => prefer.commit('enableQuickAddMfmFunction', showAddMfmFunction.value));
 const cw = ref<string | null>(props.initialCw ?? null);
-const localOnly = ref(props.initialLocalOnly ?? (prefer.s.rememberNoteVisibility ? store.s.localOnly : prefer.s.defaultNoteLocalOnly));
+const isFederationOff = computed(() => $i.federationStatus === 'off');
+const localOnly = ref(isFederationOff.value ? true : props.initialLocalOnly ?? (prefer.s.rememberNoteVisibility ? store.s.localOnly : prefer.s.defaultNoteLocalOnly));
 const visibility = ref(props.initialVisibility ?? (prefer.s.rememberNoteVisibility ? store.s.visibility : prefer.s.defaultNoteVisibility));
 const visibleUsers = ref<Misskey.entities.UserDetailed[]>([]);
 if (props.initialVisibleUsers) {
@@ -215,6 +219,7 @@ const scheduledAt = ref<number | null>(null);
 const draghover = ref(false);
 const quoteId = ref<string | null>(null);
 const hasNotSpecifiedMentions = ref(false);
+const hasRemoteMention = computed(() => extractMentions(mfm.parse(text.value)).some(mention => mention.host != null && mention.host !== host));
 const recentHashtags = ref(JSON.parse(miLocalStorage.getItem('hashtags') ?? '[]'));
 const imeText = ref('');
 const showingOptions = ref(false);
@@ -349,6 +354,10 @@ watch(visibleUsers, () => {
 }, {
 	deep: true,
 });
+
+watch(isFederationOff, (off) => {
+	if (off) localOnly.value = true;
+}, { immediate: true });
 
 if (props.mention) {
 	text.value = props.mention.host ? `@${props.mention.username}@${toASCII(props.mention.host)}` : `@${props.mention.username}`;
@@ -547,6 +556,7 @@ function setVisibility() {
 }
 
 async function toggleLocalOnly() {
+	if (isFederationOff.value) return;
 	if (targetChannel.value) {
 		visibility.value = 'public';
 		localOnly.value = true; // TODO: チャンネルが連合するようになった折には消す
@@ -1263,7 +1273,7 @@ async function openAccountMenu(ev: PointerEvent) {
 				useCw.value = draft.cw != null;
 				cw.value = draft.cw ?? null;
 				visibility.value = draft.visibility;
-				localOnly.value = draft.localOnly ?? false;
+				localOnly.value = resolveLocalOnlyPreference($i.federationStatus, draft.localOnly);
 				files.value = draft.files ?? [];
 				hashtags.value = draft.hashtag ?? '';
 				if (draft.hashtag) withHashtags.value = true;
@@ -1426,7 +1436,7 @@ onMounted(() => {
 				useCw.value = draft.data.useCw;
 				cw.value = draft.data.cw;
 				visibility.value = draft.data.visibility;
-				localOnly.value = draft.data.localOnly;
+				localOnly.value = resolveLocalOnlyPreference($i.federationStatus, draft.data.localOnly);
 				files.value = (draft.data.files || []).filter(draftFile => draftFile);
 				if (draft.data.poll) {
 					poll.value = draft.data.poll;
@@ -1449,7 +1459,7 @@ onMounted(() => {
 			useCw.value = init.cw != null;
 			cw.value = init.cw ?? null;
 			visibility.value = init.visibility;
-			localOnly.value = init.localOnly ?? false;
+			localOnly.value = resolveLocalOnlyPreference($i.federationStatus, init.localOnly);
 			files.value = init.files ?? [];
 			if (init.poll) {
 				poll.value = {

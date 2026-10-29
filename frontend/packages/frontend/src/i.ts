@@ -5,11 +5,12 @@
 
 import { reactive } from 'vue';
 import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { miLocalStorage } from '@/local-storage.js';
 
 // TODO: 他のタブと永続化されたstateを同期
 
-type AccountWithToken = Misskey.entities.MeDetailed & { token: string };
+type AccountWithToken = Misskey.entities.MeDetailed & { federationStatus?: Elythia.FederationStatus; token: string };
 
 const accountData = miLocalStorage.getItem('account');
 

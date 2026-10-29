@@ -12,8 +12,13 @@ import (
 // users via UserRepository and building the AS Mention tag data (name + href).
 // ローカルユーザーは urls.UserURI を返し、リモートユーザーは user.URI を返す。
 type UserMentionResolver struct {
-	userRepo repository.UserRepository
-	urls     *activitypub.URLBuilder
+	userRepo                repository.UserRepository
+	urls                    *activitypub.URLBuilder
+	localFederationObserver activitypub.LocalFederationObserver
+}
+
+func (r *UserMentionResolver) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	r.localFederationObserver = observer
 }
 
 // NewUserMentionResolver constructs a UserMentionResolver.
@@ -42,6 +47,9 @@ func (r *UserMentionResolver) ResolveMention(userID string) (name, uri string, e
 		return "", "", activitypub.ErrMentionUserNotFound
 	}
 	if u.IsLocal() {
+		if r.localFederationObserver != nil && !r.localFederationObserver.IsExternallyAvailable(u) {
+			return "", "", activitypub.ErrMentionUserNotFound
+		}
 		return "@" + u.Username, r.urls.UserURI(u.ID), nil
 	}
 	if u.URI == nil || *u.URI == "" {

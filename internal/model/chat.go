@@ -94,10 +94,11 @@ func (ChatApproval) TableName() string { return "chat_approval" }
 type UserPending struct {
 	ID string `gorm:"column:id;type:varchar(32);primaryKey" json:"id"`
 	// サインアップ確認コード。これを持っていればアカウントを有効化できる。
-	Code     string `gorm:"column:code;type:varchar(128);not null;uniqueIndex" json:"-"`
-	Username string `gorm:"column:username;type:varchar(128);not null" json:"username"`
-	Email    string `gorm:"column:email;type:varchar(128);not null" json:"email"`
-	Password string `gorm:"column:password;type:varchar(128);not null" json:"-"`
+	Code             string           `gorm:"column:code;type:varchar(128);not null;uniqueIndex" json:"-"`
+	Username         string           `gorm:"column:username;type:varchar(128);not null" json:"username"`
+	Email            string           `gorm:"column:email;type:varchar(128);not null" json:"email"`
+	Password         string           `gorm:"column:password;type:varchar(128);not null" json:"-"`
+	FederationStatus FederationStatus `gorm:"column:federationStatus;type:varchar(16);not null;default:'on'" json:"-"`
 	// InvitationTicketID は招待制 + email 確認制の併用時に消費した
 	// registration_ticket の ID。PromotePending 完了時に MarkUsed する。
 	// 通常 (招待制無効) signup では nil。

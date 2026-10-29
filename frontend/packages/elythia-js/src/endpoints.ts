@@ -8,6 +8,8 @@ import type * as Misskey from 'misskey-js';
 import type {
 	AdminEmojiApplication,
 	AdminSignupApplication,
+	AccountFederationState,
+	FederationStatus,
 	BackupDownload,
 	BackupJob,
 	BackupKeptDatabases,
@@ -67,6 +69,19 @@ type FederationRuleRequest = Partial<FederationRuleBody> & Pick<FederationRuleBo
  * キーは `'<path>': {` の形で 1 行に書く。
  */
 export type ElythiaEndpoints = {
+	'i/federation': {
+		req: Misskey.entities.EmptyRequest;
+		res: AccountFederationState;
+	};
+	'i/update-federation': {
+		/**
+		 * Changes the signed-in account's federation state. Requires a native
+		 * session token; app tokens are not accepted. Once externally referenced,
+		 * an `on` account cannot be switched back to `off`.
+		 */
+		req: { federationStatus: 'on' | 'off' };
+		res: AccountFederationState;
+	};
 	'admin/backup/delete': {
 		req: BackupReauth & { id: string };
 		res: { freedBytes: number };
@@ -733,6 +748,7 @@ export type ElythiaEndpoints = {
 			claimCode: string;
 			username: string;
 			password: string;
+			federationStatus?: FederationStatus;
 			/** Required when `meta.emailRequiredForSignup` is set. */
 			emailAddress?: string;
 		};

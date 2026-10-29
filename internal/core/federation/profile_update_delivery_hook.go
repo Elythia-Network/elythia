@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
@@ -27,7 +28,8 @@ type ProfileUpdateDeliveryHook struct {
 	// assertionMethod に含めるための optional 依存。配信する Update(Person) を
 	// actor endpoint と同じ shape にし、follower 側 cache merge で ed25519
 	// verify capability が一時的に落ちないようにする (#1560 review)。
-	keypairExtraRepo repository.UserKeypairExtraRepository
+	keypairExtraRepo        repository.UserKeypairExtraRepository
+	localFederationObserver activitypub.LocalFederationObserver
 	// relay は profile 更新を relay subscriber にも fan-out する optional 依存
 	// (upstream AccountUpdateService.publishToFollowers + deliverToRelays、
 	// #1560 review)。nil なら relay 配送 skip。
@@ -43,6 +45,15 @@ func NewProfileUpdateDeliveryHook(deliver *DeliverService, renderer *activitypub
 // Update(Person) carries assertionMethod like the actor endpoint (#1560)。
 func (h *ProfileUpdateDeliveryHook) SetKeypairExtraRepo(r repository.UserKeypairExtraRepository) {
 	h.keypairExtraRepo = r
+}
+
+// SetLocalFederationObserver wires local actor-reference filtering for profile
+// updates.
+func (h *ProfileUpdateDeliveryHook) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
+	h.localFederationObserver = observer
+	if h.deliver != nil {
+		h.deliver.SetLocalFederationObserver(observer)
+	}
 }
 
 // SetRelayBroadcaster wires the relay fan-out target (#1560)。
@@ -87,7 +98,22 @@ func (h *ProfileUpdateDeliveryHook) OnLocalProfileUpdated(userID string) {
 		slog.Warn("profile update delivery: keypair lookup failed", "userID", userID, "err", err)
 		return
 	}
-	person := h.renderer.RenderPerson(user, profile, keypair.PublicKey, h.lookupEd25519(userID))
+	filteredUser, err := FilterLocalActorReferences(user, h.renderer.URLs(), func(id string) (*model.User, error) {
+		target, err := h.userRepo.FindByID(id)
+		if repository.IsNotFound(err) {
+			return nil, nil
+		}
+		return target, err
+	}, h.localFederationObserver, "delivery", func(*model.User, string) (bool, error) {
+		// 外部参照の記録は実際の配送前検査に任せる。宛先のないプロフィール更新で
+		// 別名の利用者が外部参照済みにならないよう、ここでは記録しない。
+		return true, nil
+	})
+	if err != nil {
+		slog.Warn("profile update delivery: filter actor references failed", "userID", userID, "err", err)
+		return
+	}
+	person := h.renderer.RenderPerson(filteredUser, profile, keypair.PublicKey, h.lookupEd25519(userID))
 	update := h.renderer.RenderUpdate(person)
 	body, err := json.Marshal(update)
 	if err != nil {

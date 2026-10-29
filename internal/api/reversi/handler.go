@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -366,7 +367,9 @@ func (h *Handler) ShowGame(c echo.Context) error {
 	// する (#417 P1 UDS 検証で発覚)。deliver は idempotent。
 	viewer := middleware.GetUser(c)
 	if viewer != nil && !game.IsStarted && !game.IsEnded && game.User2ID == viewer.ID {
-		h.sendJoinForAcceptedInvite(c, viewer, game)
+		if err := h.sendJoinForAcceptedInvite(c, viewer, game); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
+			return federationDisabledResponse(c)
+		}
 	}
 	return c.JSON(http.StatusOK, packGame(h.entityPacker, game, h.idGen))
 }
@@ -444,7 +447,9 @@ func (h *Handler) Match(c echo.Context) error {
 	// 新しいゲーム + 新しい session_id を作って二重招待になり、state 伝播が
 	// 噛み合わなくなる。
 	if existing := h.findPendingInvitationFrom(user.ID, req.UserID); existing != nil {
-		h.sendJoinForAcceptedInvite(c, user, existing)
+		if err := h.sendJoinForAcceptedInvite(c, user, existing); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
+			return federationDisabledResponse(c)
+		}
 		return c.JSON(http.StatusOK, packGame(h.entityPacker, existing, h.idGen))
 	}
 
@@ -474,6 +479,9 @@ func (h *Handler) Match(c echo.Context) error {
 				"The target user's server does not support reversi federation.",
 				"3c9d76c8-8d40-4f6e-9bea-e4e57ae02fed"))
 		}
+	}
+	if targetUser != nil && !targetUser.IsLocal() && !corelocalfederation.IsExternallyAvailable(user) {
+		return federationDisabledResponse(c)
 	}
 
 	now := time.Now()
@@ -548,36 +556,44 @@ func (h *Handler) withinMatchDedupWindow(g *model.ReversiGame) bool {
 // sendJoinForAcceptedInvite delivers a Join activity to the remote inviter so
 // both sides agree the match has started. local-only の招待の場合 (User1 が
 // ローカル) は federation 不要なので何もしない。
-func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User, game *model.ReversiGame) {
+func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User, game *model.ReversiGame) error {
 	if h.userRepo == nil || h.deliverer == nil || h.fedCache == nil {
-		return
+		return nil
 	}
 	inviter, err := h.userRepo.FindByID(game.User1ID)
 	if err != nil || inviter == nil || inviter.Host == nil || inviter.URI == nil {
-		return
+		return nil
+	}
+	if !corelocalfederation.IsExternallyAvailable(accepter) {
+		return corelocalfederation.ErrFederationDisabled
 	}
 	ctx := c.Request().Context()
 	sessionID, ok := h.fedCache.GetSessionByGame(ctx, game.ID)
 	if !ok {
-		return
+		return nil
 	}
 	// show-game 経由で User2 が pending game を表示するたびに呼ばれる
 	// 経路があるため、session ごとに 1 回だけ送るよう guard する
 	// (#417 Devin review)。相手側 (CherryPick) でも zset idempotent なので
 	// 重複しても実害は無いが、無駄な deliver job を抑える。
 	if h.fedCache.IsJoinSent(ctx, sessionID) {
-		return
+		return nil
 	}
 	join := corereversi.RenderJoin(h.baseURL, sessionID,
 		h.baseURL+"/users/"+accepter.ID, *inviter.URI, time.Now().UTC().Format(time.RFC3339))
 	body, err := json.Marshal(join)
 	if err != nil {
-		return
+		return nil
 	}
 	if err := h.deliverer.DeliverToUser(accepter.ID, inviter, body); err != nil {
-		return
+		return nil
 	}
 	h.fedCache.MarkJoinSent(ctx, sessionID)
+	return nil
+}
+
+func federationDisabledResponse(c echo.Context) error {
+	return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 }
 
 // CancelMatch handles POST /api/reversi/cancel-match.
@@ -782,7 +798,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	// 1. 直近の未開始対局の再利用。upstream は multiple=true でこれを飛ばして
 	//    毎回新しく探す (ReversiService.ts:146)。
 	if !multiple {
-		if g := h.findPendingGameFor(user.ID); g != nil {
+		if g := h.findPendingGameFor(user.ID); g != nil && !(g.User2ID == user.ID && g.User1ID != user.ID) {
 			return c.JSON(http.StatusOK, packGame(h.entityPacker, g, h.idGen))
 		}
 	}
@@ -791,7 +807,9 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	//    「自分が User2 の未開始 game」がそれにあたる。specific-match の
 	//    accept 経路と同じ扱いにして、相手に Join を返す。
 	if g := h.findPendingInvitationTo(user.ID); g != nil {
-		h.sendJoinForAcceptedInvite(c, user, g)
+		if err := h.sendJoinForAcceptedInvite(c, user, g); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
+			return federationDisabledResponse(c)
+		}
 		return c.JSON(http.StatusOK, packGame(h.entityPacker, g, h.idGen))
 	}
 
