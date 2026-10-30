@@ -976,7 +976,13 @@ func TestBodyHasActor(t *testing.T) {
 		{"null actor", `{"type":"Create","actor":null}`, false},
 		{"not an object (array)", `[{"actor":"x"}]`, false},
 		{"not json", `garbage`, false},
-		{"empty actor string is present", `{"actor":""}`, true},
+		// 空文字列・数値・真偽値は actor を名指せない。worker の authorizeActor が
+		// 落とすのと同じ入力を、enqueue する前に弾く (2026-10-31 の監査)。
+		{"empty actor string", `{"actor":""}`, false},
+		{"numeric actor", `{"actor":123}`, false},
+		{"boolean actor", `{"actor":true}`, false},
+		{"array actor is left to the worker", `{"actor":["https://r/u/a"]}`, true},
+		{"actor with surrounding space", `{"actor": "https://r/u/a" }`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

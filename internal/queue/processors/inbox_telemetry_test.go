@@ -26,7 +26,10 @@ func signedInboxFixture(t *testing.T, body []byte) (queue.InboxPayload, *stubVer
 	require.NoError(t, err)
 
 	host := "remote.example"
-	v := &stubVerifier{actor: &model.User{ID: "alice", Host: &host}, pubKey: pub}
+	// 署名者の URI は本文の actor と一致させる。actor の読めない本文は authorizeActor が
+	// 落とすようになった (2026-10-31 の監査) ので、通す fixture は actor を持つ。
+	aliceURI := "https://remote.example/users/alice"
+	v := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
 	return signedInboxPayload(t, key, body), v, host
 }
 
@@ -42,7 +45,7 @@ func runInbox(t *testing.T, p *processors.InboxProcessor, payload queue.InboxPay
 // 「届かない」の原因がまた見えなくなる (#2471)。
 func TestInboxTelemetry_AcceptedAndUnsupported(t *testing.T) {
 	t.Run("accepted", func(t *testing.T) {
-		payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+		payload, v, host := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 		p := processors.NewInboxProcessor(&stubFedProcessor{}, v, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
@@ -54,7 +57,7 @@ func TestInboxTelemetry_AcceptedAndUnsupported(t *testing.T) {
 	})
 
 	t.Run("unsupported", func(t *testing.T) {
-		payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+		payload, v, _ := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 		p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return federation.ErrUnsupportedActivity }}, v, nil, nil, nil, nil)
 		tel := &recordingTelemetry{}
 		p.SetDeliveryTelemetry(tel)
@@ -81,7 +84,7 @@ func TestInboxTelemetry_SignatureFailed(t *testing.T) {
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
-	require.NoError(t, runInbox(t, p, signedInboxPayload(t, key, []byte(`{"type":"Follow"}`))))
+	require.NoError(t, runInbox(t, p, signedInboxPayload(t, key, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))))
 	require.Len(t, tel.outcomes, 1)
 	assert.Equal(t, deliveryhealth.ClassSignatureFailed, tel.outcomes[0].Class)
 	assert.NotEmpty(t, tel.outcomes[0].Err, "原因が分からないと直せない")
@@ -89,7 +92,7 @@ func TestInboxTelemetry_SignatureFailed(t *testing.T) {
 
 // **ブロック済みホストは元々ログすら出ない。** ここが唯一の観測点になる。
 func TestInboxTelemetry_BlockedHostIsRecorded(t *testing.T) {
-	payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+	payload, v, host := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 	p := processors.NewInboxProcessor(&stubFedProcessor{}, v, &stubBlocker{blocked: func(h string) bool { return h == host }}, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
@@ -103,7 +106,7 @@ func TestInboxTelemetry_BlockedHostIsRecorded(t *testing.T) {
 }
 
 func TestInboxTelemetry_ProcessingError(t *testing.T) {
-	payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+	payload, v, _ := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 	p := processors.NewInboxProcessor(&stubFedProcessor{returnFn: func([]byte) error { return errors.New("db down") }}, v, nil, nil, nil, nil)
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
@@ -116,7 +119,7 @@ func TestInboxTelemetry_ProcessingError(t *testing.T) {
 
 // telemetry 未配線でも inbox 処理は動く。観測のために受信を落とさない。
 func TestInboxTelemetry_UnwiredDoesNotBreakProcessing(t *testing.T) {
-	payload, v, _ := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+	payload, v, _ := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 	stub := &stubFedProcessor{}
 	p := processors.NewInboxProcessor(stub, v, nil, nil, nil, nil)
 
@@ -144,7 +147,7 @@ func TestOutcomeClass_InboundSuccessDiffersFromOutbound(t *testing.T) {
 // header は「こちらのホスト名」なので送信元を表さないため。署名の keyId から
 // 導けないと、集計が全部「空ホスト」に落ちて何も見えなくなる (#2471)。
 func TestInboxTelemetry_DerivesHostFromSignatureWhenPayloadHostEmpty(t *testing.T) {
-	payload, v, host := signedInboxFixture(t, []byte(`{"type":"Follow"}`))
+	payload, v, host := signedInboxFixture(t, []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`))
 	require.Empty(t, payload.Host, "本番と同じく payload.Host は空")
 
 	p := processors.NewInboxProcessor(&stubFedProcessor{}, v, nil, nil, nil, nil)
@@ -163,6 +166,6 @@ func TestInboxTelemetry_NoHostWithoutSignature(t *testing.T) {
 	tel := &recordingTelemetry{}
 	p.SetDeliveryTelemetry(tel)
 
-	require.NoError(t, runInbox(t, p, queue.InboxPayload{Body: []byte(`{"type":"Follow"}`)}))
+	require.NoError(t, runInbox(t, p, queue.InboxPayload{Body: []byte(`{"id":"https://remote.example/follows/t","type":"Follow","actor":"https://remote.example/users/alice"}`)}))
 	assert.Empty(t, tel.outcomes, "host が特定できないものは数えない")
 }

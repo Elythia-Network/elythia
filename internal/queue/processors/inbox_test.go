@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
@@ -397,7 +398,8 @@ func TestInboxProcessor_LocalActorSkipsHostDependentHooks(t *testing.T) {
 	require.NoError(t, err)
 	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
 	require.NoError(t, err)
-	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: nil}, pubKey: pub}
+	localURI := "https://example.com/users/alice"
+	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: nil, URI: &localURI}, pubKey: pub}
 	tracker := &stubInstanceTracker{}
 	chart := &stubInboxChartHook{}
 	blocker := &stubBlocker{}
@@ -407,7 +409,7 @@ func TestInboxProcessor_LocalActorSkipsHostDependentHooks(t *testing.T) {
 	p.SetInstanceTracker(tracker)
 	p.SetChartHook(chart)
 
-	payload := signedInboxPayload(t, key, []byte(`{}`))
+	payload := signedInboxPayload(t, key, []byte(`{"id":"https://example.com/follows/1","type":"Follow","actor":"https://example.com/users/alice"}`))
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
 		Body:     mustEncode(t, payload),
@@ -1441,4 +1443,105 @@ func TestInboxProcessor_VerifiesSignatureForEveryBodyShape(t *testing.T) {
 			}
 		})
 	}
+}
+
+// **actor の読めない本文で、他ホストの id を再投函ガードに覚えさせない。**
+//
+// 以前は authorizeActor が actor 無しを素通しし、Process が「actor 無し」を成功
+// として捨てていたので、`"actor": ""` の本文に付けた**他ホストの** id が覚えられた。
+// 有効な鍵を持つ任意のリモートが、被害者の決定的な id (本家の Undo(Follow) など)
+// を先に登録して、本物を重複として捨てさせられた (2026-10-31 の監査)。
+func TestInboxProcessor_ActorlessBodyIsRejectedBeforeTheReplayGuard(t *testing.T) {
+	for name, actor := range map[string]string{
+		"empty string":      `""`,
+		"number":            `123`,
+		"object without id": `{"type":"Person"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"id":"https://victim.example/follows/1/2/undo","type":"Undo","actor":` + actor + `,"object":{"type":"Follow"}}`)
+			verifier, payload := signedReplayFixture(t, body)
+
+			stub := &stubFedProcessor{}
+			guard := newMemReplayGuard()
+			p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
+			task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
+			require.NoError(t, p.Handle(context.Background(), task), "actor 無しは retry しても変わらないので ack する")
+			assert.Empty(t, stub.calls, "actor の読めない本文を Process へ渡している")
+			assert.Empty(t, guard.seen, "actor の読めない本文の id を再投函ガードが覚えている")
+		})
+	}
+}
+
+// **同じ id で中身の違う活動は再投函ではない。** 本家 Misskey の Undo(Follow) は
+// `<Follow の id>/undo` の決定的な id を使い、違うのは `published` だけ。id を鍵に
+// すると 15 分以内の 2 回目のフォロー解除が捨てられ、フォロワーのまま残る
+// (2026-10-31 の監査)。鍵は署名が覆った本文のダイジェストにする。
+func TestInboxProcessor_SameIDWithDifferentBodyIsNotAReplay(t *testing.T) {
+	undo := func(published string) []byte {
+		return []byte(`{"id":"https://remote.example/follows/alice/bob/undo","type":"Undo","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/follows/alice/bob","type":"Follow","actor":"https://remote.example/users/alice","object":"https://local.example/users/bob"},"published":"` + published + `"}`)
+	}
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+	host := "remote.example"
+	aliceURI := "https://remote.example/users/alice"
+	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
+	first := signedInboxPayload(t, key, undo("2026-10-31T00:00:00.000Z"))
+	second := signedInboxPayload(t, key, undo("2026-10-31T00:05:00.000Z"))
+
+	stub := &stubFedProcessor{}
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, newMemReplayGuard())
+
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, first)}))
+	require.Len(t, stub.calls, 1)
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, second)}))
+	assert.Len(t, stub.calls, 2, "同じ id でも本文が違えば処理すること")
+
+	// 1 本目をそのまま投げ直すと、こちらは再投函として捨てる。
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, first)}))
+	assert.Len(t, stub.calls, 2, "同じ本文の再投函を処理している")
+}
+
+// **同じ本文でも Date が違えば再投函ではない。** Elythia 自身の Follow は決定的な
+// id で `published` を持たないので、解除してから 15 分以内の再フォローは本文が
+// 同じバイト列になる。鍵に署名された Date を含めるので、送り直しは通り、捕まえた
+// リクエストの再投函 (Date も同じ) は捨てる (2026-10-31 の監査のレビュー)。
+func TestInboxProcessor_SameBodyWithNewDateIsNotAReplay(t *testing.T) {
+	body := []byte(`{"id":"https://remote.example/follows/alice/bob","type":"Follow","actor":"https://remote.example/users/alice","object":"https://local.example/users/bob"}`)
+	priv, pub, err := activitypub.GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := activitypub.NewPrivateKey("https://remote.example/users/alice#main-key", priv)
+	require.NoError(t, err)
+	host := "remote.example"
+	aliceURI := "https://remote.example/users/alice"
+	verifier := &stubVerifier{actor: &model.User{ID: "alice", Host: &host, URI: &aliceURI}, pubKey: pub}
+	signedAt := func(when time.Time) queue.InboxPayload {
+		req := httptest.NewRequest(http.MethodPost, "https://example.com/inbox", nil)
+		req.Host = "example.com"
+		req.Header.Set("Date", when.UTC().Format(http.TimeFormat))
+		require.NoError(t, activitypub.SignRequest(req, key, activitypub.SHA256Digest(body), []string{"(request-target)", "date", "host", "digest"}))
+		headers := map[string]string{}
+		for _, h := range []string{"Signature", "Date", "Host", "Digest"} {
+			if v := req.Header.Get(h); v != "" {
+				headers[h] = v
+			}
+		}
+		if headers["Host"] == "" {
+			headers["Host"] = req.Host
+		}
+		return queue.InboxPayload{Body: body, Method: req.Method, Path: req.URL.RequestURI(), Headers: headers}
+	}
+	now := time.Now()
+	first, second := signedAt(now.Add(-10*time.Second)), signedAt(now)
+
+	stub := &stubFedProcessor{}
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, newMemReplayGuard())
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, first)}))
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, second)}))
+	assert.Len(t, stub.calls, 2, "同じ本文でも Date が違う送り直しは処理すること")
+
+	require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, second)}))
+	assert.Len(t, stub.calls, 2, "Date も本文も同じ再投函を処理している")
 }

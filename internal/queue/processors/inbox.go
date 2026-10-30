@@ -345,6 +345,9 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 	// 未署名の body から採った id は相手の申告でしかなく、覚えると他人の id を
 	// 先に登録して本物を落とせる。
 	activityID := ""
+	// replayKey は再投函ガードの鍵 (署名が覆った本文のダイジェスト)。activityID と
+	// 同じく、署名検証と actor の認可を通った経路でだけ埋まる。
+	replayKey := ""
 	// body は dispatch する本文。転送経路では authorizeActor が署名済みの内容へ
 	// 差し替える。
 	body := payload.Body
@@ -451,13 +454,22 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 			host = *actor.Host
 		}
 		// **ここまで来て初めて activity.id を信用できる。** 署名が本文を縛って
-		// いて、authorizeActor が id の host と actor の host の一致を見た後。
+		// いて、authorizeActor が actor を読め、id の host と actor の host の一致を
+		// 見た後。
 		//
 		// id は authorizeActor が読んだものをそのまま使う (#3610)。authorized は
 		// 処理に渡す本文 (転送経路では compact 済みの文書) から読んだ値なので、
 		// 以前の ExtractActivityID(body) と同じ値で、正規化をもう 1 回しない。
 		activityID = fields.ID
-		if p.isReplay(activityID) {
+		// **再投函の鍵は署名が覆った Date と本文。** id だけを鍵にすると、同じ id で
+		// 中身の違う活動を 2 つ目から捨てる。本家 Misskey の Undo(Follow) は
+		// `<Follow の id>/undo` の決定的な id で `published` だけが変わるので、
+		// 15 分以内の 2 回目のフォロー解除が届かず、フォロワーのまま残っていた
+		// (2026-10-31 の監査)。本文だけでも、Elythia 自身の Follow (決定的な id で
+		// `published` 無し) の再フォローを捨てる。再投函は捕まえた署名付きリクエストを
+		// そのまま投げ直す形なので、署名された Date を足せば過不足なく捕まえられる。
+		replayKey = activityReplayKey(payload.Headers["Date"], payload.Body)
+		if p.isReplay(replayKey) {
 			slog.Debug("inbox: activity already processed, dropping replay",
 				"host", host, "activityId", activityID)
 			p.recordInboxTelemetry(host, deliveryhealth.ClassDuplicate, started, "")
@@ -518,20 +530,20 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 	}
 	// **成功してから覚える。** 先に覚えると、処理が落ちてキューが再試行した
 	// ときに自分の再試行を再投函として捨ててしまう。
-	p.rememberActivity(activityID)
+	p.rememberActivity(replayKey, activityID)
 	p.recordInboxTelemetry(host, deliveryhealth.ClassAccepted, started, "")
 	return nil
 }
 
-// isReplay reports whether this activity was already processed.
+// isReplay reports whether a request with this replay key was already processed.
 //
 // guard の障害では**落とさない** (fail-open)。Redis が不調なだけで連合の受信が
 // 止まると、再投函を防ぐより害が大きい。
-func (p *InboxProcessor) isReplay(activityID string) bool {
-	if p.replayGuard == nil || activityID == "" {
+func (p *InboxProcessor) isReplay(replayKey string) bool {
+	if p.replayGuard == nil || replayKey == "" {
 		return false
 	}
-	seen, err := p.replayGuard.Seen(context.Background(), activityID)
+	seen, err := p.replayGuard.Seen(context.Background(), replayKey)
 	if err != nil {
 		slog.Warn("inbox: replay guard degraded, accepting without the check", "err", err)
 		return false
@@ -539,12 +551,13 @@ func (p *InboxProcessor) isReplay(activityID string) bool {
 	return seen
 }
 
-// rememberActivity records a successfully processed activity.
-func (p *InboxProcessor) rememberActivity(activityID string) {
-	if p.replayGuard == nil || activityID == "" {
+// rememberActivity records a successfully processed request by its replay key.
+// activityID is only for the log.
+func (p *InboxProcessor) rememberActivity(replayKey, activityID string) {
+	if p.replayGuard == nil || replayKey == "" {
 		return
 	}
-	if err := p.replayGuard.Remember(context.Background(), activityID); err != nil {
+	if err := p.replayGuard.Remember(context.Background(), replayKey); err != nil {
 		slog.Warn("inbox: failed to record processed activity", "activityId", activityID, "err", err)
 	}
 }
@@ -624,9 +637,14 @@ func (p *InboxProcessor) authorizeActor(body []byte, signer *model.User) (federa
 	fields := raw.Fields()
 	bodyActor := fields.Actor
 	if bodyActor == "" {
-		// actor 欠落は Process 側 ("activity missing actor") が弾く。ここでは
-		// 判定不能なので素通しし、なりすまし対象が無い状態にする。
-		return raw, nil
+		// **actor の読めない本文はここで落とす (upstream InboxProcessorService と
+		// 同じ)。** 以前は「Process 側が弾く」として素通ししていたが、素通しした
+		// 本文は下の id の host の検査も受けずに呼び出し元へ戻り、Process が actor
+		// 無しを成功として捨てるので、**他ホストの任意の id が再投函ガードに
+		// 覚えられた**。有効な鍵を持つ任意のリモートが `"actor": ""` の本文に
+		// 被害者の将来の id を付けて 1 本送るだけで、本物の活動が重複として
+		// 捨てられる (2026-10-31 の監査)。
+		return raw, fmt.Errorf("activity has no actor")
 	}
 	// activity.id host gate (upstream InboxProcessorService): activity.id は文字列
 	// 必須で、その host は actor の host と一致しなければならない。これが無いと、
