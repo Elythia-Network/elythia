@@ -1676,7 +1676,7 @@ func (r *Renderer) RenderUndoAnnounce(renoter *model.User, announce *Announce) *
 //
 // **Delete(Tombstone) では取り消せない。** Announce の id は
 // `<noteURI>/activity` で、受信側はその id を renote の uri として保存する
-// (mk-go 自身も processor.go が `renote.URI = act.ID` とする)。Tombstone の
+// (mk-go 自身も processor_like_announce.go が `renote.URI = act.ID` とする)。Tombstone の
 // id は `/activity` の付かない note URI なので一致せず、ブーストが相手側に
 // 残り続ける。
 //
