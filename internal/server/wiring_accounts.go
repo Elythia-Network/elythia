@@ -314,7 +314,7 @@ func (s *Server) wireAccounts(d accountsDeps) (*corefederation.RemoteStatsFetche
 	iHandler.SetReactionReader(reactionCountWriter)
 	iHandler.SetAvatarDecorationRepo(avatarDecorationRepo)
 	iHandler.SetNoteFieldResolver(noteFieldResolver)
-	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.NewPacker の直前で入れる。
+	// announcementRepo (/api/i の未読のお知らせ) は、setupRoutes の、この節より後の meself.NewPacker の直前で入れる。
 
 	// i/export-* and i/import-* (Phase 9.4)
 	iHandler.SetTransferEnqueuer(s.queueClient)

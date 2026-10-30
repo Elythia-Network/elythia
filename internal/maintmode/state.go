@@ -62,7 +62,7 @@ const (
 // Channel is the pubsub channel announcing a state change. Subscribers only
 // use it as a hint to re-read the state hash.
 //
-// 既存の internal: の購読 (router.go) と同じ命名にした。中身は読まず、
+// 既存の internal: の購読 (internal/server/wiring_cache_invalidation.go) と同じ命名にした。中身は読まず、
 // 受けたら hash を読み直すだけなので、接頭辞の無い名前が別のインスタンスと
 // 重なっても、余分に 1 回読むだけで済む。
 const Channel = "internal:maintenance"

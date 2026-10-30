@@ -106,8 +106,8 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 		s.echo.File("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
 		s.echo.File("/apple-touch-icon.png", filepath.Join(staticDir, "apple-touch-icon.png"))
 		// /robots.txt はここでは配らない。upstream は meta を見て動的生成する
-		// (ugcVisibilityForVisitor で Disallow が変わる) ので、上の
-		// webResourceHandler に一本化する。静的ファイルを後から登録すると
+		// (ugcVisibilityForVisitor で Disallow が変わる) ので、wireFederationRoutes の
+		// webResHandler.RobotsTxt に一本化する。静的ファイルを後から登録すると
 		// そちらが後勝ちして、実体が無い環境で 404 になっていた (#2345)。
 	}
 
