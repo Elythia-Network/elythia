@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -112,7 +113,7 @@ func (b *apiBinder) Bind(i any, c echo.Context) error {
 		if err := b.BindPathParams(c, i); err != nil {
 			return err
 		}
-		return b.BindQueryParams(c, i)
+		return b.bindExactQueryParams(c, i)
 	}
 	err := b.DefaultBinder.Bind(i, c)
 	if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) || !expectsObject(reflect.TypeOf(i)) {
@@ -129,6 +130,51 @@ func (b *apiBinder) Bind(i any, c echo.Context) error {
 	}
 	apierr.MarkBodyNotObject(c)
 	return errBodyNotObject
+}
+
+// bindExactQueryParams binds the `query` tagged fields of a struct i from the
+// query params whose key equals the tag exactly. echo's binder also takes a
+// key that matches ignoring case (`?Limit=` for `limit`), which upstream's
+// fast-querystring + ajv never do: an unknown key is ignored there. Binding it
+// let a caller hand the handler a value the validator never saw (the
+// validator reads the query with exact keys; 2026-10-31 の監査)。A non-struct
+// target (a map) keeps echo's behaviour.
+func (b *apiBinder) bindExactQueryParams(c echo.Context, i any) error {
+	t := derefType(reflect.TypeOf(i))
+	if t == nil || t.Kind() != reflect.Struct {
+		return b.BindQueryParams(c, i)
+	}
+	names := map[string]bool{}
+	collectQueryNames(t, names)
+	filtered := url.Values{}
+	for k, vs := range c.QueryParams() {
+		if names[k] {
+			filtered[k] = vs
+		}
+	}
+	// echo は c.QueryParams() を request の URL から読むので、完全一致の分だけを
+	// 持つ URL の使い捨ての context で bind する。
+	req := c.Request().Clone(c.Request().Context())
+	u := *req.URL
+	u.RawQuery = filtered.Encode()
+	req.URL = &u
+	return b.BindQueryParams(c.Echo().NewContext(req, c.Response()), i)
+}
+
+// collectQueryNames gathers the `query` tag names of t's fields, descending
+// into untagged struct fields like echo's binder and firstCastFailure do.
+func collectQueryNames(t reflect.Type, names map[string]bool) {
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name := f.Tag.Get("query")
+		if name == "" {
+			if ft := derefType(f.Type); ft != nil && ft.Kind() == reflect.Struct && !decodesItself(ft) {
+				collectQueryNames(ft, names)
+			}
+			continue
+		}
+		names[name] = true
+	}
 }
 
 // errQueryCast is returned by c.Bind when a GET query value cannot be cast
@@ -239,10 +285,15 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 		if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) {
 			return next(c)
 		}
+		ct := req.Header.Get(echo.HeaderContentType)
+		// 本家の paramDef が {} の endpoint も、parser の無い Content-Type は fastify が
+		// 415 にする (ajv より前)。それ以外の本文は何でも通す。
 		if anyBodyEndpoints()[strings.TrimPrefix(c.Path(), "/api/")] {
+			if isUnsupportedAPIContentType(ct) {
+				return unsupportedMediaType(c)
+			}
 			return next(c)
 		}
-		ct := req.Header.Get(echo.HeaderContentType)
 		notObject := false
 		switch {
 		case middleware.IsJSONContentType(ct):
@@ -269,6 +320,22 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 				break
 			}
 			notObject = req.ContentLength == 0
+		case isMultipartForm(ct):
+			// 本家は @fastify/multipart を全体に登録しているので 415 にはならず、
+			// requireFile でない endpoint では request.body が object にならずに
+			// ajv の #/type で落ちる。requireFile の endpoint (と Elythia の
+			// create-chunked/append) は handler が multipart を読むので通す。
+			if multipartBodyRoutes[c.Path()] {
+				return next(c)
+			}
+			notObject = true
+		default:
+			// 本家は application/json・text/plain・multipart 以外の parser を持たず、
+			// fastify が 415 を返す。以前は他の Content-Type を素通しして echo の
+			// binder が束縛していたので、XML や form-urlencoded で送ると宣言の
+			// 検証 (JSON の body だけを見る) を迂回して handler に届いた
+			// (2026-10-31 の監査)。
+			return unsupportedMediaType(c)
 		}
 		if !notObject {
 			return next(c)
@@ -276,6 +343,44 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 		apierr.MarkBodyNotObject(c)
 		return apierr.JSONInvalidParam(c)
 	}
+}
+
+// isUnsupportedAPIContentType reports whether upstream's /api has no body parser
+// for the content type: anything but application/json, text/plain, multipart
+// and no content type at all.
+func isUnsupportedAPIContentType(ct string) bool {
+	return !middleware.IsJSONContentType(ct) && !isTextPlain(ct) && !isMultipartForm(ct) && strings.TrimSpace(ct) != ""
+}
+
+// unsupportedMediaType answers like fastify's FST_ERR_CTP_INVALID_MEDIA_TYPE.
+func unsupportedMediaType(c echo.Context) error {
+	return c.JSON(http.StatusUnsupportedMediaType, map[string]any{
+		"statusCode": http.StatusUnsupportedMediaType,
+		"code":       "FST_ERR_CTP_INVALID_MEDIA_TYPE",
+		"error":      "Unsupported Media Type",
+		"message":    "Unsupported Media Type",
+	})
+}
+
+// multipartBodyRoutes are the /api routes whose handler reads a multipart body:
+// upstream's requireFile endpoints (multipartUploadRoutes) and Elythia's
+// drive/files/create-chunked/append (docs/param-shadow.md の宣言しない例外)。
+var multipartBodyRoutes = func() map[string]bool {
+	m := map[string]bool{"/api/drive/files/create-chunked/append": true}
+	for _, p := range multipartUploadRoutes {
+		m[p] = true
+	}
+	return m
+}()
+
+// isMultipartForm reports whether the content type is multipart/form-data.
+func isMultipartForm(ct string) bool {
+	essence, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		essence, _, _ = strings.Cut(ct, ";")
+		essence = strings.ToLower(strings.TrimSpace(essence))
+	}
+	return essence == echo.MIMEMultipartForm
 }
 
 // anyBodyEndpoints returns the upstream endpoints whose paramDef accepts a

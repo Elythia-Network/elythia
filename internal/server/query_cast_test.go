@@ -71,8 +71,10 @@ func TestAPIBinder_QueryCast(t *testing.T) {
 		{name: "repeated key is not cast", query: "limit=x&limit=1", wantErr: true},
 		// 配列の param は本家でも変換しない。echo は要素を int に読めずに失敗する。
 		{name: "array param is not cast", query: "ids=x", wantErr: true},
-		// 本家のキーは完全一致。echo は大文字小文字を無視して拾うので echo が失敗する。
-		{name: "case variant key is not cast", query: "LIMIT=abc", wantErr: true},
+		// 本家のキーは完全一致。binder も完全一致で読むので、知らないキーとして
+		// 無視され、変換も束縛もされない (2026-10-31 の監査。以前は echo が大文字
+		// 小文字を無視して拾い、int に読めずに失敗していた)。
+		{name: "case variant key is not cast", query: "LIMIT=abc"},
 		// POST は query を変換しない (body が無いので #/type で落ちる)。
 		{name: "POST does not read the query", method: http.MethodPost, query: "limit=abc", wantErr: true},
 		{name: "non-API route", path: "/oauth/token", query: "limit=abc", wantErr: true},
