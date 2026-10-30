@@ -121,7 +121,7 @@ func (h *NoteDeleteDeliveryHook) OnNoteDeleted(author *model.User, note *model.N
 //
 // 純粋リノートは Delete(Tombstone) では取り消せない。受信側は Announce を
 // `uri = <noteURI>/activity` で保存するのに対し Tombstone の id は `/activity`
-// の付かない note URI で、両者は一致しない (mk-go 自身も processor.go が
+// の付かない note URI で、両者は一致しない (mk-go 自身も processor_like_announce.go が
 // `renote.URI = act.ID` で保存する)。upstream NoteDeleteService も pure renote
 // のときだけ renderUndo(renderAnnounce(...)) に切り替える。
 func (h *NoteDeleteDeliveryHook) renderBody(author *model.User, note *model.Note) ([]byte, bool) {

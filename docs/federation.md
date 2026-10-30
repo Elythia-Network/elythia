@@ -25,7 +25,7 @@
 |---|---|
 | `resolver.go` / `resolver_*.go` | リモートアクター/ノートの取得・永続化。公開鍵の2層キャッシュ (メモリ+DB, TTL 24h)。`Resolver`の定義と設定は`resolver.go`、アクターは`resolver_actor*.go`、公開鍵は`resolver_publickey.go`、ノートは`resolver_note*.go` |
 | `deliver_service.go` | 配信ジョブのエンキュー。フォロワーのInbox収集、ホストブロック判定 |
-| `processor.go` | 受信Activityのディスパッチ (Follow, Create, Like, Announce, Delete, Update等) |
+| `processor.go` / `processor_*.go` | 受信Activityのディスパッチ (Follow, Create, Like, Announce, Delete, Update等)。振り分けは`processor.go`、種類ごとの処理は`processor_follow.go`・`processor_create.go`など |
 | `published_time.go` | AP `published` を parse + clock skew (5min) / 過去 10 年 floor で fallback (#940) |
 | `remote_stats.go` | リモート user の notesCount/followersCount/followingCount を origin の `/api/users/show` から取得 (Elythia 独自拡張、#943)。LRU cache size cap 10000 (#945)、SSRF guard 経由 |
 | `note_delivery_hook.go` | ノート公開時にCreate/Announceを配信 |
@@ -35,7 +35,7 @@
 | `mention_resolver.go` | メンション → AS Mentionタグ変換 |
 | `fetcher.go` | リモートオブジェクト取得。**既定は instance actor による署名付き GET**で、401/403 のときだけ unsigned にフォールバックする (authorized-fetch 対応、#419) |
 | `ld_signature_verifier.go` | inbound activity の LD-Signature 検証 |
-| `activity_unwrap.go` | **1 要素の JSON 配列**になっている body を剥がす (Foundkey 系、#1185)。ネストした activity の actor 正規化は `processor.go` の `normalizeActor` |
+| `activity_unwrap.go` | **1 要素の JSON 配列**になっている body を剥がす (Foundkey 系、#1185)。ネストした activity の actor 正規化は `processor_read.go` の `normalizeActor` |
 | `pin_delivery_hook.go` | ピン留め時に Add/Remove を配信 (#2024) |
 | `poll_delivery_hook.go` | 投票関連の配信 |
 | `blocking_delivery_hook.go` / `user_moderation_delivery_hook.go` | ブロック・モデレーション操作の配信 |

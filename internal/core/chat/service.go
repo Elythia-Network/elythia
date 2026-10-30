@@ -1154,7 +1154,7 @@ func (s *Service) roomAPURI(room *model.ChatRoom, owner *model.User) string {
 // NUL も落とす。
 //
 // **note 取り込みと同じ 3 段** (source → _misskey_content → content) で拾う。
-// 前 2 つは `internal/core/federation/processor.go` の probe が読み取って
+// 前 2 つは `internal/core/federation/processor_create.go` の probe が読み取って
 // `mfmSource` として渡してくるので、この層では「原文があるか」だけを見る。
 func remoteChatText(content, mfmSource string) string {
 	// **原文があれば HTML から戻さない。** `mfm.Parse` -> `ToHTML` -> `FromHTML`

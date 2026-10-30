@@ -835,7 +835,8 @@ func (s *Service) OnNoteCreated(n *model.Note, author *model.User) {
 		//
 		// **ただし #2743 以降、リレー由来の note はそもそもここに来ない。**
 		// federation 側の antenna hook はリレー配送を除外している
-		// (processor.go の handleCreate / handleAnnounce が viaRelay /
+		// (processor_create.go の handleCreate / processor_like_announce.go の
+		// handleAnnounce が viaRelay /
 		// isRelayDelivery で gate し、publishRelayDeliveredNote では発火しない)。
 		// この分岐が効くのは、将来リレー以外の経路で ephemeral note が
 		// antenna に載るようになった場合の保険。

@@ -243,7 +243,7 @@ upstream `core/activitypub/*` に対応。型/署名/レンダラは `activitypu
 | `activitypub/webfinger.go` | `WebfingerService` | WebFinger 解決 |
 | `activitypub/inbox_admission.go` | （ApInboxService の入口 gate） | forbidden directive 検査・freeze |
 | `activitypub/mfm/` | `ApMfmService` / `MfmService` | MFM ↔ HTML |
-| `core/federation/processor.go` | `ApInboxService` | inbox activity の処理 (Follow/Undo/Like/Announce/…) |
+| `core/federation/processor.go` / `processor_*.go` | `ApInboxService` | inbox activity の処理 (Follow/Undo/Like/Announce/…) |
 | `core/federation/resolver.go` / `resolver_*.go` | `ApResolver/ApDbResolver/RemoteUserResolve Service` | リモートオブジェクト解決・キャッシュ |
 | `core/federation` の deliver | `ApDeliverManagerService` + queue/deliver | 配信（fan-out, retry） |
 | `core/federation` の deriveVisibility | `ApAudienceService` | to/cc → visibility 判定 |
