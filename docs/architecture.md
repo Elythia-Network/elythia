@@ -2166,6 +2166,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `wireAdmin` | `wiring_admin.go` | 管理画面の API の handler と配線 (通報の webhook・メール、ロール、絵文字の申請、連合など) と、DB のバックアップの管理画面の handler・再認証・`/backup-download` | 69 | 4 (`adminHandler`・`emojiApplicationService`・`emojiApplicationHandler`・`backupHandler`) |
 | `wireStreaming` | `wiring_streaming.go` | ストリーミングの接続の管理 (lookup と、server role で始める購読)、server と queue の統計の publisher、既存の service への publisher の注入、reversi・バブルゲームの対戦・chat の service とチャンネルの登録、`/streaming` の登録 | 64 | 7 (`abuseCreatedNotifier`・`serverStatsPub`・`reversiService`・`bubbleVersusPublisher`・`bubbleVersusService`・`chatService`・`chatRoomFactory`) |
 | `wireFederationRoutes` | `wiring_federation_routes.go` | /api の外の、ActivityPub のリソースと同じ path の SSR・フィード (`/notes/:id`・`/@:acct`)、discovery (well-known・nodeinfo)、OAuth2 / IndieAuth、inbox の登録と、連合の API の handler の配線 | 43 | 5 (`ssrMeta`・`feedH`・`twemojiBadge`・`oauthHandler`・`inboxHandler`) |
+| `wireAccounts` | `wiring_accounts.go` | users の API の handler の配線 (検索・関係・リモートの統計・リスト) と、i (自分のアカウント) の API の handler の配線 (プロフィール・2FA・アカウントの移行・エクスポートとインポート・アカウントの削除・webhook) | 65 | 2 (`remoteStatsFetcher`・`accountMover`) |
 
 数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 

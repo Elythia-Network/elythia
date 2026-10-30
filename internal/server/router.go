@@ -54,7 +54,6 @@ import (
 	"github.com/elythia-network/elythia/internal/core/iplog"
 	coremediaproxy "github.com/elythia-network/elythia/internal/core/mediaproxy"
 	coremoderatoractivity "github.com/elythia-network/elythia/internal/core/moderatoractivity"
-	coremove "github.com/elythia-network/elythia/internal/core/move"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	corepluginaccount "github.com/elythia-network/elythia/internal/core/pluginaccount"
 	corepluginnotify "github.com/elythia-network/elythia/internal/core/pluginnotify"
@@ -2048,154 +2047,75 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	inviteHandler := hSvcs.invite
 	echoTestHandler := hSvcs.echoTest
 
-	// Users endpoints
-	// users/lists/update-membership の withReplies 変更を userUpdated として流し、接続中の
-	// userList channel snapshot を live 更新する (#2051)。
-	usersHandler.SetUserListEventPublisher(userListStreamPublisher)
-	usersHandler.SetLocalHost(localHost)
-	usersHandler.SetServerURL(s.config.URL)
-	usersHandler.SetChartHook(chartHooks)
-	usersHandler.SetFeaturedRanking(featuredService) // #1687: users/featured-notes ランキング
-	usersHandler.SetPiningRepo(piningRepo)
-	usersHandler.SetFollowingRepo(followingRepo)
-	usersHandler.SetProxyFollow(listProxyFollow) // #1704: create-from-public remote member proxy follow
-	usersHandler.SetRenoteMutingRepo(renoteMutingRepo)
-	usersHandler.SetFollowRequestRepo(followRequestRepo)
-	usersHandler.SetInstanceRepo(instanceRepo)
-	usersHandler.SetEmojiRepo(emojiRepo)
-	usersHandler.SetReactionReader(reactionCountWriter)
-	usersHandler.SetClipRepo(clipRepo)
-	usersHandler.SetClipFavoriteRepo(clipFavoriteRepo) // #1562: users/clips の favoritedCount / isFavorited
-	usersHandler.SetClipNoteRepo(clipNoteRepo)         // #2243: users/clips の notesCount 実カウント
-	usersHandler.SetFlashRepo(flashRepo)
-	usersHandler.SetGalleryRepo(galleryRepo)
-	usersHandler.SetPageRepo(pageRepo)
-	// users/pages の page も attachedFiles / eyeCatchingImage を解決する (#1662)。
-	usersHandler.SetDriveFileRepo(driveFileRepo)
-	usersHandler.SetNoteFieldResolver(noteFieldResolver)
-	usersHandler.SetUserRepo(userRepo)
-	usersHandler.SetNoteReactionRepo(reactionRepo)
-	sharedUserPacker.SetDetailExtras(usersHandler)
-	sharedUserPacker.SetDetailExtrasMany(usersHandler) // #3330: 一覧の DetailedMany のピン留め・移行先・instance・絵文字
-	// **連合を切った相手へ取りに行かない。** この経路は未認証の
-	// `/api/users/show` から呼ばれるので、放っておくと defederate した相手に
-	// 「誰をいつ見たか」が漏れる。判定は構築子の必須の引数で渡す (#3823)。
-	remoteStatsFetcher := corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, instanceService.CanFetchOptionalRemoteData, s.outboundOpts()...)
-	// フォローしてきたリモートの人のアカウントの作成日時を、Misskey 系の相手
-	// なら `/api/users/show` から埋める (#3465)。統計と同じ fetcher を使うので、
-	// 待ち時間の上限・キャッシュ・SSRF 対策・連合を切った相手の扱いが揃う。
-	federationProcessor.SetAccountCreatedAtFiller(corefederation.NewAccountCreatedAtFiller(remoteStatsFetcher, instanceRepo, userRepo).Fill)
-	usersHandler.SetRemoteStatsFetcher(&remoteStatsFetcherAdapter{
-		fetcher: remoteStatsFetcher,
+	// users と i (自分のアカウント) の API の配線 (#3901 で関数へ移した。呼ぶ位置と中の文の順は
+	// 元のまま。作った部品は同じ名前で受ける)。
+	remoteStatsFetcher, accountMover := s.wireAccounts(accountsDeps{
+		idGen:                      idGen,
+		streamPubSub:               streamPubSub,
+		relationReloadPublisher:    relationReloadPublisher,
+		mainStreamPublisher:        mainStreamPublisher,
+		userListStreamPublisher:    userListStreamPublisher,
+		userRepo:                   userRepo,
+		noteRepo:                   noteRepo,
+		metaRepo:                   metaRepo,
+		followingRepo:              followingRepo,
+		followRequestRepo:          followRequestRepo,
+		piningRepo:                 piningRepo,
+		reactionRepo:               reactionRepo,
+		emojiRepo:                  emojiRepo,
+		blockingRepo:               blockingRepo,
+		mutingRepo:                 mutingRepo,
+		renoteMutingRepo:           renoteMutingRepo,
+		driveFileRepo:              driveFileRepo,
+		instanceRepo:               instanceRepo,
+		antennaRepo:                antennaRepo,
+		clipRepo:                   clipRepo,
+		clipNoteRepo:               clipNoteRepo,
+		pageRepo:                   pageRepo,
+		pageLikeRepo:               pageLikeRepo,
+		flashRepo:                  flashRepo,
+		noteFavoriteRepo:           noteFavoriteRepo,
+		userListRepo:               userListRepo,
+		chatRepo:                   chatRepo,
+		clipFavoriteRepo:           clipFavoriteRepo,
+		userListFavoriteRepo:       userListFavoriteRepo,
+		channelNoteUnreadRepo:      channelNoteUnreadRepo,
+		antennaNoteUnreadRepo:      antennaNoteUnreadRepo,
+		signinRepo:                 signinRepo,
+		avatarDecorationRepo:       avatarDecorationRepo,
+		moveSystemAccountRepo:      moveSystemAccountRepo,
+		userSecurityKeyRepo:        userSecurityKeyRepo,
+		registryRepo:               registryRepo,
+		abuseReportRepo:            abuseReportRepo,
+		userMemoRepo:               userMemoRepo,
+		galleryRepo:                galleryRepo,
+		chartHooks:                 chartHooks,
+		roleService:                roleService,
+		sharedUserPacker:           sharedUserPacker,
+		coreSvcs:                   coreSvcs,
+		featuredService:            featuredService,
+		instanceService:            instanceService,
+		followingService:           followingService,
+		antennaService:             antennaService,
+		notificationService:        notificationService,
+		webhookService:             webhookService,
+		driveReader:                driveReader,
+		listProxyFollow:            listProxyFollow,
+		passwordFailureGuard:       passwordFailureGuard,
+		apURLs:                     apURLs,
+		apRenderer:                 apRenderer,
+		deliverService:             deliverService,
+		userModerationDeliveryHook: userModerationDeliveryHook,
+		reactionCountWriter:        reactionCountWriter,
+		localHost:                  localHost,
+		federationResolver:         federationResolver,
+		federationProcessor:        federationProcessor,
+		webauthnSvc:                webauthnSvc,
+		noteFieldResolver:          noteFieldResolver,
+		usersHandler:               usersHandler,
+		iHandler:                   iHandler,
+		webhookHandler:             webhookHandler,
 	})
-
-	usersHandler.SetAbuseRepo(abuseReportRepo)
-	usersHandler.SetMemoRepo(userMemoRepo)
-	usersHandler.SetUserListFavoriteRepo(userListFavoriteRepo)
-	usersHandler.SetUserListRepo(userListRepo)
-	// users/reactions で moderator/admin が remote / 非 public reactions を
-	// 閲覧できるようにする (upstream の iAmModerator bypass)。
-	usersHandler.SetModeratorChecker(roleService)
-
-	// Account endpoints
-	iHandler.SetHardMutePublisher(&hardMutePublisherAdapter{pubsub: streamPubSub})
-	iHandler.SetRelationReloadPublisher(relationReloadPublisher)
-	iHandler.SetMainStreamPublisher(mainStreamPublisher)
-	iHandler.SetUserRepo(userRepo)
-	// フォロー申請の作成・承認・取り消しで followee に meUpdated を流す (#3330)。
-	followingService.SetMeUpdatedPublisher(iHandler)
-	iHandler.SetPasswordFailureGuard(passwordFailureGuard)
-	iHandler.SetPasswordHasher(s.passwordHasher)
-	// upstream UserAuthService と同じテスト用バイパス。testMode 以外では無効。
-	iHandler.SetTestMode(s.config.TestMode)
-	iHandler.SetRegistryRepo(registryRepo)
-	iHandler.SetMetaRepo(metaRepo)
-	iHandler.SetServerURL(s.config.URL)
-	// i/update-email の verifymail / truemail SaaS 呼び出しも SSRF-safe
-	// transport + forward proxy 経由にする (#638)。
-	iHandler.SetEmailValidationClient(s.outboundClient(10 * time.Second))
-	iHandler.SetVerifyLinkClient(s.outboundClient(10 * time.Second)) // #1786: rel=me link 検証
-	// SMTP メール送信を i/update-email 用に注入する。meta の SMTP 設定に従い、
-	// SenderFromMeta が closure 内で per-call 再 Fetch するため admin UI の
-	// 設定変更は即座に反映される (#1112)。smtpSecure 反映は #1111。
-	iHandler.SetEmailSender(miscsmtp.SenderFromMeta(metaRepo, s.config.ProxySMTP))
-	if webauthnSvc != nil {
-		iHandler.SetWebAuthn(webauthnSvc, userSecurityKeyRepo)
-	}
-	iHandler.SetSigninRepo(signinRepo)
-	// i/import-* の fileId 所有権検証 (#1555)。未配線だと fail-closed
-	// (NO_SUCH_FILE) になるため production では必ず wire する。
-	iHandler.SetDriveFileRepo(driveFileRepo)
-	// i/import-antennas の TOO_MANY_ANTENNAS 同期 enforce 用 (#1667)。
-	iHandler.SetImportDriveReader(driveReader)
-	iHandler.SetAntennaCounter(antennaRepo)
-	// P4-6 (#166): i/gallery/*, i/page-likes。i/authorized-apps と i/revoke-token の
-	// accessTokenRepo は構築子の引数で渡す (#3827)。
-	iHandler.SetGalleryRepo(galleryRepo)
-	iHandler.SetPageLikeRepo(pageLikeRepo)
-	// P4-6 followup (#174): i/move は federation resolver + deliverService を使って
-	// 宛先 actor 解決 → alsoKnownAs 検証 → MovedTo 書き込み → Move activity 配送。
-	// #2419: フォロワー以外の関連データ (ブロック / ミュート / リスト) も移行先へ
-	// 引き継ぐ。いずれも「旧側を消さずに新側を足す」片方向で、旧アカウントの関係は
-	// 残す。引き継ぎの repository は構築子の必須の引数で渡す (#3823)。
-	accountMover := coremove.NewService(userRepo, followingRepo, apURLs, apRenderer, federationResolver, deliverService,
-		blockingRepo, mutingRepo, userListRepo, idGen)
-	accountMover.SetLocalFederationObserver(coreSvcs.localFederation)
-	// #2418: 移行時に旧アカウントのローカルフォロワーを移行先へ follow させる。
-	// relationship queue (#2403) に載るので AP 配送を詰まらせない。
-	accountMover.SetFollowQueue(s.queueClient)
-	// proxy account はリスト購読のため機械的に follow しているだけなので
-	// 引き継ぎ対象から外す。newProxyAccountResolver は username を返す別用途の
-	// resolver なので、ここでは user id を引く専用のもの (moveSystemAccountRepo) を渡す。
-	accountMover.SetProxyAccountResolver(func() (string, bool) {
-		sa, err := moveSystemAccountRepo.FindByType("proxy")
-		if err != nil || sa == nil {
-			return "", false
-		}
-		return sa.UserID, true
-	})
-	accountMover.SetBlockQueue(s.queueClient)
-	accountMover.SetRoleAssigner(roleService)
-	accountMover.SetAntennaMover(antennaService)
-	// 本家 adjustFollowingCounts と同じく、旧アカウントがリモートなら instance の
-	// followersCount をローカルのフォロワー数ぶん減らし、chart も動かす (#3330)。
-	accountMover.SetInstanceStats(instanceRepo, corefollowing.MetaInstanceStatsGate(metaRepo), chartHooks)
-	iHandler.SetAccountMover(accountMover)
-	// #2414: リモートアカウントの移行を検知したら、同じ引き継ぎ処理を走らせる。
-	// federation → core/move の一方向依存で循環しない。
-	federationResolver.SetMoveProcessor(accountMover)
-	// #2415: 移行直後 (相互確認済み + 2h 以内) だけ import の上限を緩和する。
-	iHandler.SetMoveInValidator(accountMover)
-	iHandler.SetFavoriteRepo(noteFavoriteRepo)
-	// Phase 7-2 (#244): /api/i の未読系フィールドを実クエリ化。
-	iHandler.SetNotificationService(notificationService)
-	iHandler.SetAchievementNotifier(notificationService)
-	iHandler.SetFollowRequestRepo(followRequestRepo)
-	iHandler.SetChatRepo(chatRepo)
-	// Phase 7-2 follow-up (#271)
-	iHandler.SetAntennaUnreadRepo(antennaNoteUnreadRepo)
-	iHandler.SetChannelUnreadRepo(channelNoteUnreadRepo)
-	iHandler.SetMeUnreadFlagsReader(repository.NewMeUnreadFlagsRepository(s.db)) // #3608: 未読の真偽値 (note_unread を含む) を 1 文で引く
-	// Phase 7-3 (#245): pinnedNoteIds / pinnedNotes / pinnedPageId / pinnedPage
-	iHandler.SetPiningRepo(piningRepo)
-	iHandler.SetNoteRepo(noteRepo)
-	iHandler.SetPageRepo(pageRepo)
-	iHandler.SetInstanceRepo(instanceRepo)
-	iHandler.SetEmojiRepo(emojiRepo)
-	iHandler.SetReactionReader(reactionCountWriter)
-	iHandler.SetAvatarDecorationRepo(avatarDecorationRepo)
-	iHandler.SetNoteFieldResolver(noteFieldResolver)
-	// announcementRepo (/api/i の未読のお知らせ) は、下の meself.NewPacker の直前で入れる。
-
-	// i/export-* and i/import-* (Phase 9.4)
-	iHandler.SetTransferEnqueuer(s.queueClient)
-	// #2230: i/delete-account の cascade 削除 (notes/drive/following purge) と AP Delete(actor)
-	// 配信を admin/delete-account と同経路で配線する。未配線だと論理削除フラグだけ立って実削除が走らない。
-	iHandler.SetDeleteAccountEnqueuer(s.queueClient)
-	iHandler.SetAccountDeletionFederationHook(userModerationDeliveryHook)
-
-	// i/webhooks/* — Webhook管理 (実データ)
-	webhookHandler.SetDispatcher(webhookService)
 
 	// Notifications endpoints
 	notificationsHandler.SetRepos(userRepo, noteRepo)
