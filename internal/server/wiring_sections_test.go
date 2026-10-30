@@ -20,6 +20,7 @@ import (
 var mustFindWiringSections = map[string]string{
 	"wireCacheInvalidation": "wiring_cache_invalidation.go",
 	"wireFrontendRoutes":    "wiring_frontend_routes.go",
+	"wireAdmin":             "wiring_admin.go",
 }
 
 // wiringSectionName matches the name of a *Server method that holds one part

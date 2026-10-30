@@ -2140,6 +2140,9 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   1 か所だけ
 - **`:=` の右辺で作り方を見るゲートは、受け直し `x := d.x` を数えない。** `internal/entitycompat` の
   `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
+- **範囲の中で `:=` で受け直すだけの `err` は渡さない。** `wireAdmin` の範囲は `setupRoutes()` の
+  `err` を `backupVerifier, err := …` で書き換えるが、読む前に必ず代入し、範囲より後も `:=` で
+  代入してから読む。渡すと「呼び出しより後で書き換える」に当たるので、節の中で新しく宣言させた
 - **範囲に `setupRoutes()` の `return`・`defer`・ラベルを含めない。** 節へ移すと、返る先や走る時刻が
   変わる。これはゲートでは見ておらず、切り出すときに確かめる
 
@@ -2147,6 +2150,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 |---|---|---|---|---|
 | `wireCacheInvalidation` | `wiring_cache_invalidation.go` | cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (`urlPreview` より前の分) | 31 | 0 |
 | `wireFrontendRoutes` | `wiring_frontend_routes.go` | /api の外のフロントエンドの配信 (アセット・twemoji・identicon・manifest・Service Worker・埋め込みページ) と SPA の catchall。プラグインの準備の `return` より後 | 13 | 0 |
+| `wireAdmin` | `wiring_admin.go` | 管理画面の API の handler と配線 (通報の webhook・メール、ロール、絵文字の申請、連合など) と、DB のバックアップの管理画面の handler・再認証・`/backup-download` | 69 | 4 (`adminHandler`・`emojiApplicationService`・`emojiApplicationHandler`・`backupHandler`) |
 
 数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 
