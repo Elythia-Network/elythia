@@ -48,6 +48,7 @@
 | `internal/entitycompat` | `parseServerFiles` / `inspectServerFiles` | 1 つの `FileSet` に載せた構文木と、その全ファイルの走査 |
 | `internal/entitycompat` | `assertWired(t, serverPkg, ...)` | 全ファイルの配線の集合に、その配線があるか |
 | `internal/entitycompat` | `assertRouteRegisteredBy(t, file, fn, route, ...)` | /api のルートの行が `routes_<領域>.go` の登録の関数 `fn` にあり、`setupRoutes()` がその関数に、引数と同じ名前の変数を渡して 1 回だけ呼んでいるか (#3697) |
+| `internal/entitycompat` | `sectionDepsAliases(files)` | `setupRoutes()` から切り出した節 (`wire…`) が、受け取った値を同じ名前で受け直す文 (`x := d.x`)。`:=` の右辺で作り方を見るゲートは、この文を数えない (#3901、docs/architecture.md 4.2) |
 | `internal/server` | `packageSources` / `packageSourceWithoutComments` | 列挙したファイルの本文 / コメントを落として改行でつないだ本文 |
 
 ルートを解析するヘルパー (`parseRoutes` / `parseRouteRegistrations` / `parseRouteLevels` /
@@ -134,6 +135,10 @@ route (GET / POST / PUT / DELETE。`api.Match` の chart は含まない) につ
   関数と呼び出しまで照合する (`assertRouteRegisteredBy`)。形は `internal/server` の
   `routes_registrars_test.go` が見る (呼び出しの位置と回数、引数の名前、書き換えていないこと、
   登録の関数の外で `api` に登録していないこと。docs/architecture.md 4.2)
+- **`setupRoutes()` の範囲を切り出した節 (`wire…`) は、範囲より前の名前を同じ名前で受け直す
+  (#3901)。** 移した文は変わらないので、文字列の照合はそのまま効く。渡す側が同じ名前の変数を
+  渡すことは、`internal/server` の `TestSetupRoutesSectionsReceiveSameNamedVariables` が見る
+  (docs/architecture.md 4.2)
 - **`git add` していない `.go` は読まれない。** 手元と CI で結果はずれないが、`go build` は
   通るので気付きにくい。列挙するテストが落ちたときは、`internal/server` の未追跡の `.go` の
   名前をログに出す

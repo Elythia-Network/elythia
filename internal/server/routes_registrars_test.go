@@ -185,51 +185,11 @@ func TestSetupRoutesCallsEveryRouteRegistrarOnce(t *testing.T) {
 	require.Len(t, pluginIdx, 1, "setupRoutes に setupPlugins の呼び出しが無い (rename した?)")
 	lastUse := useIdx[len(useIdx)-1]
 
-	// 本文の直下の:=で定義した名前の回数と、書き換えている名前。
-	defined := map[string]int{}
-	for _, st := range body.List {
-		as, ok := st.(*ast.AssignStmt)
-		if !ok || as.Tok != token.DEFINE {
-			continue
-		}
-		for _, l := range as.Lhs {
-			if id, ok := l.(*ast.Ident); ok && id.Name != "_" {
-				defined[id.Name]++
-			}
-		}
-	}
-	require.NotEmpty(t, defined, "setupRoutes の := を 1 つも拾えていない")
+	defined, rewrites := setupRoutesNames(t, body)
 	rewritten := map[string]string{}
-	ast.Inspect(body, func(n ast.Node) bool {
-		switch v := n.(type) {
-		case *ast.AssignStmt:
-			if v.Tok == token.DEFINE {
-				return true
-			}
-			for _, l := range v.Lhs {
-				if id, ok := l.(*ast.Ident); ok {
-					rewritten[id.Name] = v.Tok.String()
-				}
-			}
-		case *ast.IncDecStmt:
-			if id, ok := v.X.(*ast.Ident); ok {
-				rewritten[id.Name] = v.Tok.String()
-			}
-		case *ast.UnaryExpr:
-			if id, ok := v.X.(*ast.Ident); ok && v.Op == token.AND {
-				rewritten[id.Name] = "&"
-			}
-		case *ast.RangeStmt:
-			if v.Tok == token.ASSIGN {
-				for _, e := range []ast.Expr{v.Key, v.Value} {
-					if id, ok := e.(*ast.Ident); ok {
-						rewritten[id.Name] = "range ="
-					}
-				}
-			}
-		}
-		return true
-	})
+	for name, rs := range rewrites {
+		rewritten[name] = rs[0].tok
+	}
 
 	// 本文の直下の式文としての呼び出し。
 	top := map[string][]int{}
@@ -305,6 +265,75 @@ func TestSetupRoutesCallsEveryRouteRegistrarOnce(t *testing.T) {
 			}
 		}
 	}
+}
+
+// setupRoutesRewrite is one place in setupRoutes that changes a variable
+// after it was defined, or takes its address.
+type setupRoutesRewrite struct {
+	stmt  int    // index of the top-level statement of setupRoutes that holds it
+	inLit bool   // inside a function literal (may run at any later time)
+	tok   string // "=", "+=", "++", "&", "range =" ...
+}
+
+// setupRoutesNames returns how many times each name is defined with := by a
+// top-level statement of the setupRoutes body, and every place that rewrites
+// a name or takes its address (anywhere in the body, function literals
+// included).
+func setupRoutesNames(t *testing.T, body *ast.BlockStmt) (map[string]int, map[string][]setupRoutesRewrite) {
+	t.Helper()
+	defined := map[string]int{}
+	for _, st := range body.List {
+		as, ok := st.(*ast.AssignStmt)
+		if !ok || as.Tok != token.DEFINE {
+			continue
+		}
+		for _, l := range as.Lhs {
+			if id, ok := l.(*ast.Ident); ok && id.Name != "_" {
+				defined[id.Name]++
+			}
+		}
+	}
+	require.NotEmpty(t, defined, "setupRoutes の := を 1 つも拾えていない")
+	rewrites := map[string][]setupRoutesRewrite{}
+	for i, st := range body.List {
+		var walk func(n ast.Node, inLit bool)
+		walk = func(n ast.Node, inLit bool) {
+			ast.Inspect(n, func(n ast.Node) bool {
+				add := func(e ast.Expr, tok string) {
+					if id, ok := e.(*ast.Ident); ok {
+						rewrites[id.Name] = append(rewrites[id.Name], setupRoutesRewrite{stmt: i, inLit: inLit, tok: tok})
+					}
+				}
+				switch v := n.(type) {
+				case *ast.FuncLit:
+					if !inLit {
+						walk(v.Body, true)
+						return false
+					}
+				case *ast.AssignStmt:
+					if v.Tok != token.DEFINE {
+						for _, l := range v.Lhs {
+							add(l, v.Tok.String())
+						}
+					}
+				case *ast.IncDecStmt:
+					add(v.X, v.Tok.String())
+				case *ast.UnaryExpr:
+					if v.Op == token.AND {
+						add(v.X, "&")
+					}
+				case *ast.RangeStmt:
+					if v.Tok == token.ASSIGN {
+						add(v.Key, "range =")
+						add(v.Value, "range =")
+					}
+				}
+				return true
+			})
+		}
+		walk(st, false)
+	}
+	return defined, rewrites
 }
 
 // routeMethodsOnAPI are the apiRoutes methods a registrar may call.
