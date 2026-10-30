@@ -15,7 +15,7 @@ import (
 //     FileServerService は X-Frame-Options を付けておらず、PDF を iframe で
 //     開く利用を壊さないためにも合わせる
 //
-// /embed/ は `router.go` で配線済み (#2389)。**除外はここ 1 箇所で管理する** —
+// /embed/ は `internal/server/wiring_frontend_routes.go` で配線済み (#2389)。**除外はここ 1 箇所で管理する** —
 // frontend CSP に `frame-ancestors` を入れると同じ除外を 2 箇所で持つことになり、
 // 片方だけ更新して埋め込みが死ぬ (#2789 で embed に CSP を付けたときも
 // `frame-ancestors` は入れていない)。

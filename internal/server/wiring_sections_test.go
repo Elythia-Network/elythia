@@ -19,6 +19,7 @@ import (
 // 「同じ名前の変数を渡す」も「書き換えない」も、見る対象が無いまま緑になる。
 var mustFindWiringSections = map[string]string{
 	"wireCacheInvalidation": "wiring_cache_invalidation.go",
+	"wireFrontendRoutes":    "wiring_frontend_routes.go",
 }
 
 // wiringSectionName matches the name of a *Server method that holds one part
@@ -117,7 +118,7 @@ func wiringSections(t *testing.T, p parsedPackage) map[string]wiringSection {
 //   - 渡すDepsの値は、すべてのフィールドを`f: f`の形で1回ずつ書いた複合リテラル。
 //     書き忘れたフィールドはゼロ値(nil)で黙って渡り、別の名前の変数を渡すと、
 //     照合する文の名前と指す値がずれる
-//   - 渡す変数は、setupRoutesの引数か、本文の直下で:=で1回だけ定義した名前。
+//   - 渡す変数は、setupRoutesの引数か、本文の直下で:=か値付きのvarで1回だけ定義した名前。
 //     呼び出しより後と、関数リテラルの中で書き換えず、アドレスも取らない。
 //     節は呼び出しの時点の値を受け取るので、後で書き換えると、文がsetupRoutesに
 //     あったときと違う値を指す
@@ -248,7 +249,7 @@ func TestSetupRoutesSectionsReceiveSameNamedVariables(t *testing.T) {
 				continue
 			}
 			assert.Truef(t, params[v.Name] || defined[v.Name] == 1,
-				"%s に渡す %s は、setupRoutes の引数か、本文の直下で := で 1 回だけ定義した名前であること", sec.deps, v.Name)
+				"%s に渡す %s は、setupRoutes の引数か、本文の直下で := か値付きの var で 1 回だけ定義した名前であること", sec.deps, v.Name)
 			for _, rw := range rewrites[v.Name] {
 				if rw.inLit || rw.stmt >= tc.stmt {
 					t.Errorf("%s に渡す %s を、setupRoutes の中で呼び出しより後か関数リテラルの中で書き換えている (%s)。節が受け取る値が、文が setupRoutes にあったときと違いうる", sec.deps, v.Name, rw.tok)

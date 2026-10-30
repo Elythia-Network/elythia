@@ -2046,7 +2046,7 @@ setupRoutes()
   - `TestSetupRoutesCallsEveryRouteRegistrarOnce`: 登録の関数ごとに、`setupRoutes()` の本文の
     直下の式文としての呼び出しが 1 つだけで、ほかから呼ばない。呼び出しはすべての `api.Use`
     より後、どの `return` と `setupPlugins` よりも前。引数は関数の引数と同じ名前の識別子で、
-    `setupRoutes()` の本文の直下で `:=` で 1 回だけ定義し、関数リテラルの中を含めて書き換えず、
+    `setupRoutes()` の本文の直下で `:=` か値付きの `var` で 1 回だけ定義し、関数リテラルの中を含めて書き換えず、
     アドレスも取らない
   - `TestRouteRegistrarsOnlyRegisterRoutes`: 本文の直下は `api` の `POST` / `GET` / `Match` の
     式文と `:=` だけ (`if` の中の登録、`api.Use`、`api.Group` を落とす)。引数を書き換えない
@@ -2135,13 +2135,20 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 - **渡す側の形は、`internal/server` の `TestSetupRoutesSectionsReceiveSameNamedVariables` が見る。**
   フィールドをすべて `f: f` の形で 1 回ずつ書く (書き忘れたフィールドはゼロ値が黙って渡り、別の
   名前の変数を渡すと照合する文の名前と指す値がずれる)。渡す名前は `setupRoutes()` の引数か、本文の
-  直下で `:=` で 1 回だけ定義した名前で、呼び出しより後と関数リテラルの中で書き換えず、アドレスも
+  直下で `:=` か値付きの `var` で 1 回だけ定義した名前で、呼び出しより後と関数リテラルの中で書き換えず、アドレスも
   取らない (節は呼び出しの時点の値を受け取るため)。節を呼ぶのは `setupRoutes()` の本文の直下の
   1 か所だけ
 - **`:=` の右辺で作り方を見るゲートは、受け直し `x := d.x` を数えない。** `internal/entitycompat` の
   `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
 - **範囲に `setupRoutes()` の `return`・`defer`・ラベルを含めない。** 節へ移すと、返る先や走る時刻が
   変わる。これはゲートでは見ておらず、切り出すときに確かめる
+
+| 節 | ファイル | 移した範囲 | 受け取る名前 | 返す名前 |
+|---|---|---|---|---|
+| `wireCacheInvalidation` | `wiring_cache_invalidation.go` | cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (`urlPreview` より前の分) | 31 | 0 |
+| `wireFrontendRoutes` | `wiring_frontend_routes.go` | /api の外のフロントエンドの配信 (アセット・twemoji・identicon・manifest・Service Worker・埋め込みページ) と SPA の catchall。プラグインの準備の `return` より後 | 13 | 0 |
+
+数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 
 **同じ動きであることの確かめ方。** 節を足すたびに、`develop` とその段の binary で、`elythia dump-routes`
 の出力、その起動の間の Redis の命令の列 (`MONITOR`) と起動ログが一致することを確かめた。どれも
