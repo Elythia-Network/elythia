@@ -11,6 +11,12 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// MaxPreviewURLBytes is the longest `url` the preview endpoint accepts.
+//
+// ブラウザが扱う URL の上限 (概ね 2KiB〜8KiB) に収まり、抽出した URL を切る
+// 2048 バイト (parser) より少し広い。LRU の 1 件あたりの上限でもある。
+const MaxPreviewURLBytes = 4096
+
 // Handler handles the URL preview endpoint.
 type Handler struct {
 	fetcher *urlpreview.Fetcher
@@ -35,6 +41,14 @@ func (h *Handler) Preview(c echo.Context) error {
 	rawURL := c.QueryParam("url")
 	if rawURL == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "url is required.", apierr.UUIDInvalidParam))
+	}
+	// **長さは取りに行く前に見る (2026-10-31 の監査)。** 応答が HTML でないとき
+	// fetcher は渡された URL をそのまま結果に載せ、結果は 1 時間の LRU (1000 件)
+	// に載る。上限が無いと、header に収まる約 1MiB の URL を 1000 回送るだけで
+	// 約 1GiB の heap を積める (実測: 400KiB × 500 で RSS +168MiB)。title や
+	// 抽出した URL は切っているのに、入力の URL だけ切っていなかった。
+	if len(rawURL) > MaxPreviewURLBytes {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "url is too long.", apierr.UUIDInvalidParam))
 	}
 
 	result, err := h.fetcher.Fetch(c.Request().Context(), rawURL)

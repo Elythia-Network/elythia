@@ -212,3 +212,25 @@ func TestPreview_ProxySignatureExpires(t *testing.T) {
 			"%s の署名の期限が長すぎる", key)
 	}
 }
+
+// **長い url は取りに行く前に 400 にする (2026-10-31 の監査)。** 応答が HTML でない
+// とき fetcher は入力の URL をそのまま結果に載せ、結果は 1000 件の LRU に 1 時間
+// 残る。上限が無いと約 1MiB の URL を 1000 回送るだけで約 1GiB の heap を積めた。
+// fetcher は disabled にしてあるので、取りに行けば 403 になって区別できる。
+func TestPreview_TooLongURLIsRejectedBeforeFetching(t *testing.T) {
+	h := apiurl.NewHandler(urlpreview.NewFetcher(urlpreview.Config{Enabled: false}, nil), nil)
+	long := "https://example.com/" + strings.Repeat("a", apiurl.MaxPreviewURLBytes)
+	rec := doPreview(h, url.QueryEscape(long))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	errObj := body["error"].(map[string]any)
+	assert.Equal(t, "INVALID_PARAM", errObj["code"])
+
+	// 上限ちょうどは fetcher まで届く (disabled なので 403)。
+	exact := "https://example.com/" + strings.Repeat("a", apiurl.MaxPreviewURLBytes-len("https://example.com/"))
+	require.Len(t, exact, apiurl.MaxPreviewURLBytes)
+	rec = doPreview(h, url.QueryEscape(exact))
+	assert.Equal(t, http.StatusForbidden, rec.Code, "上限ちょうどの URL を拒否している")
+}
