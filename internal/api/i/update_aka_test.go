@@ -20,7 +20,7 @@ func akaHandler(t *testing.T) (*Handler, *model.User) {
 	h, repo, _, _ := newTestHandler(t)
 	h.SetUserRepo(repo)
 	h.SetServerURL("https://mk.example")
-	me := &model.User{ID: "me", Username: "me", UsernameLower: "me"}
+	me := &model.User{ID: "me", Username: "me", UsernameLower: "me", FederationStatus: model.FederationStatusOn}
 	repo.Users["me"] = me
 	return h, me
 }
@@ -185,7 +185,7 @@ func TestUpdate_AlsoKnownAs_LocalURINullWhenNoServerURL(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	h.SetUserRepo(repo)
 	// serverURL を敢えて設定しない。
-	me := &model.User{ID: "me", Username: "me", UsernameLower: "me"}
+	me := &model.User{ID: "me", Username: "me", UsernameLower: "me", FederationStatus: model.FederationStatusOn}
 	repo.Users["me"] = me
 	repo.Users["alias1"] = &model.User{ID: "alias1", Username: "aliasuser", UsernameLower: "aliasuser"}
 
@@ -199,7 +199,7 @@ func TestUpdate_AlsoKnownAs_NoUserRepoFailsClosed(t *testing.T) {
 	h, repo, _, _ := newTestHandler(t)
 	// SetUserRepo を呼ばない → h.userRepo == nil。
 	h.SetServerURL("https://mk.example")
-	me := &model.User{ID: "me", Username: "me", UsernameLower: "me"}
+	me := &model.User{ID: "me", Username: "me", UsernameLower: "me", FederationStatus: model.FederationStatusOn}
 	repo.Users["me"] = me
 
 	rec := post(h.Update, `{"alsoKnownAs":["@anyone"]}`, me)
@@ -325,4 +325,36 @@ func TestUpdate_WordMuteLimitCountsCharacters(t *testing.T) {
 			assert.Contains(t, rec.Body.String(), "TOO_MANY_MUTED_WORDS", body)
 		}
 	}
+}
+
+// **連合 OFF・未確定のアカウントは alsoKnownAs を設定できない** (ローカル専用
+// アカウントの設計 7.8「移行先としても禁止」)。UI だけが止めていて API では通って
+// いた (2026-10-31 の監査)。
+func TestUpdate_AlsoKnownAs_RefusedWhileFederationIsNotOn(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusOff, model.FederationStatusPending} {
+		t.Run(string(status), func(t *testing.T) {
+			h, me := akaHandler(t)
+			repoOf(h).addLocal("alias1", "aliasuser")
+			me.FederationStatus = status
+
+			rec := post(h.Update, `{"alsoKnownAs":["@aliasuser"]}`, me)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "FEDERATION_DISABLED")
+			got := repoOf(h).get("me")
+			assert.Nil(t, got.AlsoKnownAs, "拒否したのに保存している")
+		})
+	}
+}
+
+// 連合 OFF でも、空の配列 (解除) は通る。ON のときに設定してから OFF にした利用者が
+// 別名を消せなくなるため (レビュー L-7)。
+func TestUpdate_AlsoKnownAs_ClearingIsAllowedWhileFederationIsOff(t *testing.T) {
+	h, me := akaHandler(t)
+	me.AlsoKnownAs = strPtr("https://other.example/users/rem1")
+	me.FederationStatus = model.FederationStatusOff
+
+	rec := post(h.Update, `{"alsoKnownAs":[]}`, me)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := repoOf(h).get("me")
+	assert.Nil(t, got.AlsoKnownAs, "解除が保存されていない")
 }
