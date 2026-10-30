@@ -223,8 +223,8 @@ type TokenInvalidator interface {
 }
 
 // HardMutePublisher publishes a wordmute reload event for the given user.
-// Implementation lives in router.go (Redis pubsub adapter), the handler
-// only depends on this minimal interface.
+// Implementation lives in internal/server/router_adapters.go (Redis pubsub
+// adapter), the handler only depends on this minimal interface.
 type HardMutePublisher interface {
 	PublishHardMuteReload(userID string)
 }
