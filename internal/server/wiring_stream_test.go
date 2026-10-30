@@ -316,7 +316,7 @@ func TestBuiltinStreamChannelsRegisterTheCheckedChatRoomFactory(t *testing.T) {
 // 下のテスト (欄の値が := で 1 回だけ定義した変数か) も通ったまま、検査
 // (streamChannels.chatRoom.service の HasService) と登録が別の factory になる。
 func TestSetupRoutesPassesTheCheckedChatRoomFactory(t *testing.T) {
-	_, fd := setupRoutesDecl(t)
+	_, fd := assembledSetupRoutes(t)
 
 	// 起動時の検査の項目 {"streamChannels.chatRoom.service", X.HasService(), …} の X。
 	var checked []string
@@ -459,7 +459,9 @@ func TestBuiltinStreamChannelsUseEveryChannelConstructor(t *testing.T) {
 // Register / RegisterCredentialed を直接呼ぶ行が戻ると、チャンネル名と factory の
 // 対応が一覧の外にもできる。こちらは関数リテラルの中も数える。
 func TestSetupRoutesRegistersStreamChannelsOnce(t *testing.T) {
-	fset, fd := setupRoutesDecl(t)
+	// 節 (#3901) を展開した本文を読む。文がファイルをまたぐので、順序は行ではなく
+	// 本文の直下の文の添字で比べる。
+	_, fd := assembledSetupRoutes(t)
 	body := fd.Body
 
 	isRegister := func(call *ast.CallExpr) bool {
@@ -468,15 +470,15 @@ func TestSetupRoutesRegistersStreamChannelsOnce(t *testing.T) {
 	}
 
 	var topLevel []int
-	handlerLine := 0
-	for _, st := range body.List {
+	handlerAt := -1
+	for i, st := range body.List {
 		switch st := st.(type) {
 		case *ast.ExprStmt:
 			call, ok := st.X.(*ast.CallExpr)
 			if !ok || !isRegister(call) {
 				continue
 			}
-			topLevel = append(topLevel, fset.Position(call.Pos()).Line)
+			topLevel = append(topLevel, i)
 			require.Len(t, call.Args, 2)
 			reg, ok := call.Args[0].(*ast.Ident)
 			require.True(t, ok && reg.Name == "streamRegistry", "registerStreamChannels の第 1 引数が streamRegistry でない")
@@ -492,8 +494,8 @@ func TestSetupRoutesRegistersStreamChannelsOnce(t *testing.T) {
 				}
 				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewHandler" {
 					if x, ok := sel.X.(*ast.Ident); ok && x.Name == "streaming" {
-						require.Zero(t, handlerLine, "streaming.NewHandler が 2 回ある")
-						handlerLine = fset.Position(call.Pos()).Line
+						require.Equal(t, -1, handlerAt, "streaming.NewHandler が 2 回ある")
+						handlerAt = i
 					}
 				}
 			}
@@ -514,23 +516,25 @@ func TestSetupRoutesRegistersStreamChannelsOnce(t *testing.T) {
 		}
 		return true
 	})
-	var returnLines []int
-	ast.Inspect(body, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.FuncLit:
-			return false
-		case *ast.ReturnStmt:
-			returnLines = append(returnLines, fset.Position(n.Pos()).Line)
-		}
-		return true
-	})
+	var returnAt []int
+	for i, st := range body.List {
+		ast.Inspect(st, func(n ast.Node) bool {
+			switch n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.ReturnStmt:
+				returnAt = append(returnAt, i)
+			}
+			return true
+		})
+	}
 	require.Len(t, topLevel, 1, "setupRoutes の本文の直下で registerStreamChannels(streamRegistry, builtinStreamChannels(...)) を 1 回だけ呼ぶ")
 	require.Equal(t, 1, all, "registerStreamChannels を本文の直下以外 (関数リテラル・go 文・if の中など) でも呼んでいる")
-	require.NotZero(t, handlerLine, "setupRoutes の本文の直下に streaming.NewHandler(...) の代入が無い (rename した?)")
-	assert.Less(t, topLevel[0], handlerLine, "チャンネルの登録は /streaming の handler を作るより前に置く")
-	require.NotEmpty(t, returnLines, "setupRoutes の return を 1 つも拾えていない")
-	for _, l := range returnLines {
-		assert.Less(t, topLevel[0], l, "チャンネルの登録が %d 行目の return より後にある", l)
+	require.NotEqual(t, -1, handlerAt, "setupRoutes の本文の直下に streaming.NewHandler(...) の代入が無い (rename した?)")
+	assert.Less(t, topLevel[0], handlerAt, "チャンネルの登録は /streaming の handler を作るより前に置く")
+	require.NotEmpty(t, returnAt, "setupRoutes の return を 1 つも拾えていない")
+	for _, at := range returnAt {
+		assert.Less(t, topLevel[0], at, "チャンネルの登録が本文の %d 番目の文の return より後にある", at)
 	}
 	assert.Zero(t, direct, "setupRoutes で Register / RegisterCredentialed を直接呼んでいる。builtinStreamChannels の一覧に足すこと")
 }
@@ -548,7 +552,7 @@ func TestSetupRoutesRegistersStreamChannelsOnce(t *testing.T) {
 // 直下の `if s.queueInspector != nil {` の中で 1 回だけ代入する形に限って許す。欄の
 // 書き忘れ (nil の service) も落とす。
 func TestSetupRoutesPassesSetterConfiguredStreamDeps(t *testing.T) {
-	_, fd := setupRoutesDecl(t)
+	_, fd := assembledSetupRoutes(t)
 
 	defined := map[string]int{}     // 本文の直下の := と、値付きの var
 	declaredNil := map[string]int{} // 本文の直下の、値の無い var

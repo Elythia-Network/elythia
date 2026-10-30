@@ -50,6 +50,7 @@
 | `internal/entitycompat` | `assertRouteRegisteredBy(t, file, fn, route, ...)` | /api のルートの行が `routes_<領域>.go` の登録の関数 `fn` にあり、`setupRoutes()` がその関数に、引数と同じ名前の変数を渡して 1 回だけ呼んでいるか (#3697) |
 | `internal/entitycompat` | `sectionDepsAliases(files)` | `setupRoutes()` から切り出した節 (`wire…`) が、受け取った値を同じ名前で受け直す文 (`x := d.x`)。`:=` の右辺で作り方を見るゲートは、この文を数えない (#3901、docs/architecture.md 4.2) |
 | `internal/server` | `packageSources` / `packageSourceWithoutComments` | 列挙したファイルの本文 / コメントを落として改行でつないだ本文 |
+| `internal/server` | `assembledSetupRoutes` | `setupRoutes()` の節 (`wire…`) の呼び出しを、節の本文に置き換えた `setupRoutes()`。本文の直下の文を見るテストが使う。順序は本文の添字で比べる (#3901、docs/architecture.md 4.2) |
 
 ルートを解析するヘルパー (`parseRoutes` / `parseRouteRegistrations` / `parseRouteLevels` /
 `parseGetRoutes` / `scanInlineRoutes` / `countInlineHandlers` / `countCriticalWiringEntries`) は

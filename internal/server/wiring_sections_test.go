@@ -21,6 +21,7 @@ var mustFindWiringSections = map[string]string{
 	"wireCacheInvalidation": "wiring_cache_invalidation.go",
 	"wireFrontendRoutes":    "wiring_frontend_routes.go",
 	"wireAdmin":             "wiring_admin.go",
+	"wireStreaming":         "wiring_streaming.go",
 }
 
 // wiringSectionName matches the name of a *Server method that holds one part
@@ -284,4 +285,77 @@ func TestSetupRoutesSectionsReceiveSameNamedVariables(t *testing.T) {
 		}
 		assert.Equalf(t, results, lhs, "setupRoutes が %s の戻り値を受ける名前が、%s の return の名前と違う", fn, fn)
 	}
+}
+
+// assembledSetupRoutes returns setupRoutes with the call of each section
+// replaced by the statements of the section's body, without the statements
+// that bind the fields of d and without the final return (#3901).
+//
+// 節は setupRoutes の範囲をそのまま移したもので、受け渡しは同じ名前の変数で
+// 行う (TestSetupRoutesSectionsReceiveSameNamedVariables)。なので展開した本文は、
+// 移す前の 1 つの関数と同じ文を同じ順に持つ。setupRoutes の本文の直下の文を
+// 見るテストは、この本文を読めば、文が節へ移っても同じ検査になる。
+//
+// **文の位置は、ファイルをまたぐと行で比べられない。** 順序は本文の添字で比べる。
+func assembledSetupRoutes(t *testing.T) (*token.FileSet, *ast.FuncDecl) {
+	t.Helper()
+	p := parsePackage(t)
+	secs := wiringSections(t, p)
+	var fd *ast.FuncDecl
+	for _, name := range p.names {
+		for _, decl := range p.files[name].Decls {
+			if d, ok := decl.(*ast.FuncDecl); ok && d.Name.Name == "setupRoutes" && d.Recv != nil {
+				require.Nil(t, fd, "(*Server).setupRoutes が 2 つある")
+				fd = d
+			}
+		}
+	}
+	require.NotNil(t, fd, "internal/server に (*Server).setupRoutes が無い (rename した?)")
+	sectionOf := func(st ast.Stmt) (wiringSection, bool) {
+		var call *ast.CallExpr
+		switch v := st.(type) {
+		case *ast.ExprStmt:
+			call, _ = v.X.(*ast.CallExpr)
+		case *ast.AssignStmt:
+			if v.Tok == token.DEFINE && len(v.Rhs) == 1 {
+				call, _ = v.Rhs[0].(*ast.CallExpr)
+			}
+		}
+		if call == nil {
+			return wiringSection{}, false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return wiringSection{}, false
+		}
+		if recv, ok := sel.X.(*ast.Ident); !ok || recv.Name != "s" {
+			return wiringSection{}, false
+		}
+		sec, ok := secs[sel.Sel.Name]
+		return sec, ok
+	}
+	var list []ast.Stmt
+	inlined := 0
+	for _, st := range fd.Body.List {
+		sec, ok := sectionOf(st)
+		if !ok {
+			list = append(list, st)
+			continue
+		}
+		body := sec.decl.Body.List
+		require.GreaterOrEqualf(t, len(body), len(sec.fields), "%s の本文が短すぎる", sec.decl.Name.Name)
+		body = body[len(sec.fields):]
+		if sec.decl.Type.Results != nil && sec.decl.Type.Results.NumFields() > 0 {
+			require.NotEmptyf(t, body, "%s の本文が空", sec.decl.Name.Name)
+			_, isReturn := body[len(body)-1].(*ast.ReturnStmt)
+			require.Truef(t, isReturn, "%s は値を返すのに最後の文が return でない", sec.decl.Name.Name)
+			body = body[:len(body)-1]
+		}
+		list = append(list, body...)
+		inlined++
+	}
+	require.Equal(t, len(secs), inlined, "setupRoutes が本文の直下で呼んでいない節がある")
+	out := *fd
+	out.Body = &ast.BlockStmt{Lbrace: fd.Body.Lbrace, List: list, Rbrace: fd.Body.Rbrace}
+	return p.fset, &out
 }

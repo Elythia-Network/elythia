@@ -181,7 +181,7 @@ func (m *Manager) SetFollowingSnapshotLookup(l FollowingSnapshotLookup) {
 // SetNoteVisibilityChecker wires a NoteVisibilityChecker so per-connection
 // Dispatcher can refuse subNote subscriptions to non-visible notes
 // (#1460 IDOR fix)。未配線時は fail-closed で全 subNote が subscribe しない
-// (= production の router.go は必ず wire する、notifications #1444 と同 doctrine)。
+// (= production の internal/server/wiring_streaming.go は必ず wire する、notifications #1444 と同 doctrine)。
 func (m *Manager) SetNoteVisibilityChecker(c NoteVisibilityChecker) {
 	m.noteVisibility = c
 }
