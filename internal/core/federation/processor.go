@@ -1534,7 +1534,7 @@ func (p *Processor) handleUndoAnnounce(act genericActivity, inner genericActivit
 // この規則で数えれば対象は導ける (件数を別に持たない)。
 //
 // **#3121 時点で ack のまま残っているもの** (どれも規則 1-4 で説明が付く):
-//   - `resolver.go` の `fetchActor` / `fetchNote` の失敗 — リモートが取れないという
+//   - `resolver_actor_refresh.go` の `fetchActor` / `fetchNote` の失敗 — リモートが取れないという
 //     相手側の事情で、**こちらの retry で取り戻せるとは限らない**。分けるなら HTTP
 //     status から一時的か恒久的かを決める別の設計が要るので、ここでは触っていない。
 //   - 同 `userRepo.Create` / `noteRepo.Create` の失敗 — 読み側を先に分けたので、DB が
@@ -1839,7 +1839,7 @@ func (p *Processor) handleCreate(act genericActivity, signer *model.User) error 
 			// **メッセージの id を配送してきた actor のホストに縛る。**
 			//
 			// この分岐は `ingestCreateNote` の手前で短絡するので、通常の note に
-			// 掛かる `id host == attributedTo host` の検査 (`resolver.go` の
+			// 掛かる `id host == attributedTo host` の検査 (`resolver_note_ingest.go` の
 			// `validateNote` 相当) を一度も通らない。縛らないと、署名が通る
 			// リモート actor が**任意ホストの URI を名乗って chat メッセージを
 			// 1 通送れる**。以後その URI を使う正規の連合 chat メッセージは

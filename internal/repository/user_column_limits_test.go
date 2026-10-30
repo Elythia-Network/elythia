@@ -36,7 +36,7 @@ func TestUser_IdentityColumnLimits(t *testing.T) {
 			WHERE table_schema = current_schema() AND table_name = 'user' AND column_name = ?`,
 			tc.column).Scan(&n).Error)
 		assert.Equal(t, tc.max, n,
-			"user.%s の列長が変わっている (internal/core/federation/resolver.go の定数も直すこと)", tc.column)
+			"user.%s の列長が変わっている (internal/core/federation/resolver_values.go の定数も直すこと)", tc.column)
 	}
 }
 

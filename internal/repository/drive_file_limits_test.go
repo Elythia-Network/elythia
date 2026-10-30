@@ -36,7 +36,7 @@ func TestDriveFile_ColumnLimits(t *testing.T) {
 			WHERE table_schema = current_schema() AND table_name = 'drive_file' AND column_name = ?`,
 			tc.column).Scan(&n).Error)
 		assert.Equal(t, tc.max, n,
-			"drive_file.%s の列長が変わっている (internal/core/federation/resolver.go の定数も直すこと)", tc.column)
+			"drive_file.%s の列長が変わっている (internal/core/federation/resolver_values.go の定数も直すこと)", tc.column)
 	}
 }
 

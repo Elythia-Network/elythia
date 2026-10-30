@@ -33,7 +33,7 @@ type AvatarPublicURLBackfillResult struct {
 // drive に保存しないので `avatarId` を書かないが、**upstream は保存して書く**
 // (`ApPersonService` の `avatarId: avatar.id`)。TS から引き継いだ DB には
 // リモート利用者の古い `avatarId` が残っており、mk-go の `refreshActor` は
-// `avatarUrl` しか更新しない (`core/federation/resolver.go`) ので id はそのまま
+// `avatarUrl` しか更新しない (`core/federation/resolver_actor_refresh.go`) ので id はそのまま
 // 残り続ける。ここで host を見ないと、**mk-go が actor から取り直した現在の
 // リモート URL を、TS 時代のキャッシュへ巻き戻す**。しかも mk-go の
 // リモートキャッシュ掃除は accessKey を NULL にして実体を消すので、

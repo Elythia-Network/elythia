@@ -1143,7 +1143,7 @@ func (s *Service) roomAPURI(room *model.ChatRoom, owner *model.User) string {
 // text mk-go stores, then clips it to `chat_message.text`.
 //
 // **連合で届く chat の本文は HTML。** upstream の note 取り込み
-// (`ApNoteService`) も mk-go の `IngestNote` (`internal/core/federation/resolver.go`)
+// (`ApNoteService`) も mk-go の `IngestNote` (`internal/core/federation/resolver_note.go`)
 // も `content` を `mfm.FromHTML` で MFM に戻してから保存しており、chat だけが
 // 生のまま保存していた。frontend は本文を MFM として描画するので、HTML のまま
 // だと `<` や `&` が `&lt;` / `&amp;` とリテラル表示され、`<p>` などのタグは

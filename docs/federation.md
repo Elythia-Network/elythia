@@ -23,7 +23,7 @@
 
 | ファイル | 責務 |
 |---|---|
-| `resolver.go` | リモートアクター/ノートの取得・永続化。公開鍵の2層キャッシュ (メモリ+DB, TTL 24h) |
+| `resolver.go` / `resolver_*.go` | リモートアクター/ノートの取得・永続化。公開鍵の2層キャッシュ (メモリ+DB, TTL 24h)。`Resolver`の定義と設定は`resolver.go`、アクターは`resolver_actor*.go`、公開鍵は`resolver_publickey.go`、ノートは`resolver_note*.go` |
 | `deliver_service.go` | 配信ジョブのエンキュー。フォロワーのInbox収集、ホストブロック判定 |
 | `processor.go` | 受信Activityのディスパッチ (Follow, Create, Like, Announce, Delete, Update等) |
 | `published_time.go` | AP `published` を parse + clock skew (5min) / 過去 10 年 floor で fallback (#940) |
@@ -113,7 +113,7 @@ HTTP Signature からは言えない。これを埋めるのが LD-Signature。
 
 ## リモートオブジェクト解決
 
-`resolver.go`がリモートのアクターとノートを取得し、ローカルDBに永続化する。
+`resolver.go` / `resolver_*.go`がリモートのアクターとノートを取得し、ローカルDBに永続化する。
 
 **公開鍵キャッシュ:**
 1. インメモリ (`map[userID]publicKeyEntry`, TTL 24h)

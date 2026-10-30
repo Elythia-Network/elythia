@@ -440,7 +440,7 @@ func validApprovalURI(uri, actorURI string) bool {
 		return false
 	}
 	// 相手が申告した値なので、`www.` を同一視しない厳密な比較を使う
-	// (resolver.go の sameDeliveryHost の doc)。Mastodon もホストをそのまま比べる。
+	// (resolver_uri.go の sameDeliveryHost の doc)。Mastodon もホストをそのまま比べる。
 	return sameDeliveryHost(uri, actorURI)
 }
 
