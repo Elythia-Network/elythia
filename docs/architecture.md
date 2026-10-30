@@ -331,13 +331,17 @@ server.New() → setupRoutes()
   ├→ stream (bus・registry・manager と、ここから配る publisher は buildStream で作り
   │   (#3827 から buildHandlers の直前で呼ぶ)、ここで wiring.stream に入れて別名を置く。
   │   pubsub の購読をここで始める。WebSocket のチャンネルは
-  │   registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels) /
+  │   registerStreamChannels で 1 回だけ登録する。一覧は builtinStreamChannels。
+  │   #3901 から、別名より後の購読・チャンネルの登録・/streaming は節 wireStreaming) /
   │   WebSocket / middleware
   ├→ /api のルートの登録。handler をすべて作った後、プラグインの準備より前で、
   │   routes_<領域>.go の register…Routes を 1 回ずつ呼ぶ (24 個)。/api の外のルート
   │   (ActivityPub・SSR・well-known など) は s.echo へ元の位置で登録する
   └→ プラグインの準備 (失敗したらここで return) / /api の catchall / 静的ファイル /
-      SPA の catchall
+      SPA の catchall (静的ファイルと SPA の catchall は #3901 から節 wireFrontendRoutes)
+
+#3901 から、`setupRoutes()` の連続した範囲のいくつかは `wire…` の節にある (4.2 の
+「setupRoutes の節」)。節は元の範囲の位置で呼ぶので、上の順は変わらない。
 
 Server.StartBackground() (Supervisor が構築の後に呼ぶ。4.3)
   ├→ 一覧の部品のうち起動を持つものを、一覧の順に起動する (#3703)
@@ -2138,6 +2142,11 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   直下で `:=` か値付きの `var` で 1 回だけ定義した名前で、呼び出しより後と関数リテラルの中で書き換えず、アドレスも
   取らない (節は呼び出しの時点の値を受け取るため)。節を呼ぶのは `setupRoutes()` の本文の直下の
   1 か所だけ
+- **`setupRoutes()` の本文の直下の文を見るテストは、節を展開した本文を読む。** `internal/server` の
+  `assembledSetupRoutes` は、節の呼び出しを節の本文 (受け直しと最後の `return` を除く) に置き換えた
+  `setupRoutes()` を返す。受け渡しが同じ名前なので、移す前の 1 つの関数と同じ文を同じ順に持つ。
+  文がファイルをまたぐので、順序は行ではなく本文の添字で比べる (今使っているのは stream の
+  チャンネルの登録を見る 3 つ)
 - **`:=` の右辺で作り方を見るゲートは、受け直し `x := d.x` を数えない。** `internal/entitycompat` の
   `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
 - **範囲の中で `:=` で受け直すだけの `err` は渡さない。** `wireAdmin` の範囲は `setupRoutes()` の
@@ -2151,6 +2160,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `wireCacheInvalidation` | `wiring_cache_invalidation.go` | cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (`urlPreview` より前の分) | 31 | 0 |
 | `wireFrontendRoutes` | `wiring_frontend_routes.go` | /api の外のフロントエンドの配信 (アセット・twemoji・identicon・manifest・Service Worker・埋め込みページ) と SPA の catchall。プラグインの準備の `return` より後 | 13 | 0 |
 | `wireAdmin` | `wiring_admin.go` | 管理画面の API の handler と配線 (通報の webhook・メール、ロール、絵文字の申請、連合など) と、DB のバックアップの管理画面の handler・再認証・`/backup-download` | 69 | 4 (`adminHandler`・`emojiApplicationService`・`emojiApplicationHandler`・`backupHandler`) |
+| `wireStreaming` | `wiring_streaming.go` | ストリーミングの接続の管理 (lookup と、server role で始める購読)、server と queue の統計の publisher、既存の service への publisher の注入、reversi・バブルゲームの対戦・chat の service とチャンネルの登録、`/streaming` の登録 | 64 | 7 (`abuseCreatedNotifier`・`serverStatsPub`・`reversiService`・`bubbleVersusPublisher`・`bubbleVersusService`・`chatService`・`chatRoomFactory`) |
 
 数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 
@@ -2406,7 +2416,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   `serve`のログでは、`retentionAggregateAtStartup`が書くgormのログが、構築の途中のログ(param shadow
   の行の前)から、構築の最後のログ(frontendの警告)の後へ動いた。`pollExpiryWorker`の最初の走査も
   構築の後になったので、構築の途中で作ったpollEndedの通知が配線の途中のnotificationServiceを
-  通ることは無くなった(`router.go`の`notificationService.SetMainStreamPublisher`の行のコメント)
+  通ることは無くなった(`wiring_streaming.go`の`notificationService.SetMainStreamPublisher`の行のコメント。#3901より前は`router.go`)
 - 構築の失敗の後始末では、起動していない部品を止める(上の表)
 - 部品の起動のpanicは、前はプロセスごと落としていた。今は`StartBackground`のエラーになり、
   Supervisorが世代を止める。メンテナンスを抜けるときの作り直しでは、ほかの失敗と同じく

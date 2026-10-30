@@ -143,7 +143,7 @@ func (d *Dispatcher) SetNotificationReader(nr NotificationReader) {
 // SetNoteVisibilityChecker wires a NoteVisibilityChecker so handleSubNote
 // can refuse subscribing to non-visible notes (#1460 IDOR fix)。未配線時
 // は fail-closed で全 subNote が subscribe しない (= production の
-// router.go は必ず wire する、test の partial setup を漏れに繋げない、
+// internal/server/wiring_streaming.go は必ず wire する、test の partial setup を漏れに繋げない、
 // notifications #1444 と同 doctrine)。
 func (d *Dispatcher) SetNoteVisibilityChecker(c NoteVisibilityChecker) {
 	d.noteVisibility = c

@@ -851,7 +851,7 @@ func (s *Service) isLocalRoomURI(roomURI string) bool {
 //
 // **URL builder が未配線なら "" を返す = 「自ホストではない」と答える。**
 // これは fail-open 側で、唯一の利用者である `EnsureRoomViaAP` の拒否が効かなく
-// なる。本番では `router.go` が必ず配線するうえ、実際の防波堤は federation 側の
+// なる。本番では `internal/server/wiring_streaming.go` が必ず配線するうえ、実際の防波堤は federation 側の
 // `sameDeliveryHost` と local actor の除外なので、ここは多層防御の 1 枚目。
 func (s *Service) localRoomIDFromAPURI(roomURI string) string {
 	if s.urls == nil {
