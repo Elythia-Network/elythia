@@ -29,7 +29,7 @@ func (h *Handler) PromoCreate(c echo.Context) error {
 	}
 
 	// noteFinder 未配線時は visibility 検証ができないため fail-closed で
-	// promote を断る (#1466 / #1469 review)。production の router.go では
+	// promote を断る (#1466 / #1469 review)。production の wiring_admin.go では
 	// SetPromoNoteRepo の直後に SetNoteFinder が必ず呼ばれるため経路には
 	// 到達しないが、設定ミス時に visibility check を黙って bypass しないよう
 	// 兄弟 PR (#1467/#1468/#1460) と doctrine を揃える。

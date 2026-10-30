@@ -664,7 +664,7 @@ func TestPromoCreate_NonPublicNoteRejected(t *testing.T) {
 
 // #1469 review (指摘 2): promoNoteRepo は配線済み + noteFinder 未配線の状態で
 // visibility check ができないまま promote が通る fail-open を塞ぐ。production の
-// router.go では SetPromoNoteRepo の直後に SetNoteFinder が必ず呼ばれるため
+// wiring_admin.go では SetPromoNoteRepo の直後に SetNoteFinder が必ず呼ばれるため
 // 経路に達しないが、設定ミス検出 + 兄弟 PR (#1467/#1468/#1460) の fail-closed
 // doctrine と揃えるため明示 gate する。
 func TestPromoCreate_NoteFinderUnwired_FailClosed(t *testing.T) {
