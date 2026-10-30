@@ -90,8 +90,6 @@ func TestJSONInput(t *testing.T) {
 	}
 
 	for body, want := range map[string]string{
-		"{\"a\":\"\xff\"}":           SkipInvalidUTF8,
-		`{"a":"~ud800"}`:             SkipLoneSurrogate,
 		`{"a":`:                      SkipBody,
 		`[1,2]`:                      "",
 		`{"a":"~~ud800"}`:            "",
@@ -101,37 +99,22 @@ func TestJSONInput(t *testing.T) {
 			t.Errorf("jsonInput(%s).skip = %q, want %q", body, got, want)
 		}
 	}
-}
 
-func TestHasLoneSurrogate(t *testing.T) {
-	for body, want := range map[string]bool{
-		`{"a":"plain"}`:                   false,
-		`{"a":"~u00e9"}`:                  false,
-		`{"a":"~ud83d~ude00"}`:            false,
-		`{"a":"~uD83D~uDE00"}`:            false,
-		`{"a":"~uD800"}`:                  true,
-		`{"a":"~uDFFF"}`:                  true,
-		`{"a":"~uDBFF~uDC00"}`:            false,
-		`{"a":"~ud800"}`:                  true,
-		`{"a":"~udc00"}`:                  true,
-		`{"a":"~ud800~u0041"}`:            true,
-		`{"a":"~ud800~~u0041"}`:           true,
-		`{"a":"~ude00~ud83d"}`:            true,
-		`{"a":"x~ud83d"}`:                 true,
-		`{"a":"~~ud800"}`:                 false,
-		`{"a":"~~~ud800"}`:                true,
-		`{"a":"~"~ud83d~ude00~""}`:        false,
-		`{"~ud800":1}`:                    true,
-		`{"a":["~ud83d~ude00","~udfff"]}`: true,
-		// 正しいJSONでは来ない形でも、範囲の外を読まない。
-		`~u12`:       false,
-		`~uzzzz`:     false,
-		`~`:          false,
-		`~ud83d~u`:   true,
-		`~ud83d~uzz`: true,
+	// 不正なUTF-8と対になっていないサロゲートは飛ばさず、U+FFFDに置き換えた値で
+	// 判定する(2026-10-31の監査)。飛ばすと1バイト混ぜるだけで拒否の検証を迂回できた。
+	for body, want := range map[string]string{
+		"{\"a\":\"x\xffy\"}":     "x\uFFFDy",
+		"{\"a\":\"x\xff\xfey\"}": "x\uFFFDy", // 連続した不正なバイト列は1つに置き換える
+		`{"a":"~ud800"}`:         "\uFFFD",
+		`{"a":"~udc00x"}`:        "\uFFFDx",
 	} {
-		if got := hasLoneSurrogate(esc(body)); got != want {
-			t.Errorf("hasLoneSurrogate(%s) = %v, want %v", body, got, want)
+		in := jsonInput(esc(body))
+		if in.skip != "" {
+			t.Errorf("jsonInput(%s).skip = %q, want validated", body, in.skip)
+			continue
+		}
+		if got := in.data.(map[string]any)["a"]; got != want {
+			t.Errorf("jsonInput(%s).data[a] = %q, want %q", body, got, want)
 		}
 	}
 }
@@ -180,9 +163,9 @@ func TestQueryInput(t *testing.T) {
 	for q, want := range map[string]string{
 		"a=1;b=2":   SkipQuery,
 		"a=%zz":     SkipQuery,
-		"a=%ff":     SkipInvalidUTF8,
-		"%ff=1":     SkipInvalidUTF8,
-		"a=1&a=%ff": SkipInvalidUTF8,
+		"a=%ff":     "",
+		"%ff=1":     "",
+		"a=1&a=%ff": "",
 		"":          "",
 	} {
 		if got := queryInput(q, s).skip; got != want {
