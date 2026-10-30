@@ -1037,3 +1037,20 @@ func TestStartChunkedUpload_FractionalConcurrentSessions(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, drive.ErrTooManyUploadSessions)
 }
+
+// **SessionError は AppendChunk が返すはずのエラーを、チャンクを読む前に答える
+// (2026-10-31 の監査)。** handler は SessionChunkSize が ok=false のとき、これで断る。
+func TestSessionError_MirrorsAppendChunk(t *testing.T) {
+	f := newChunkedFixture(t)
+	sess := f.start(t, testChunkSize)
+
+	assert.ErrorIs(t, f.svc.SessionError(f.user, "no-such-session"), drive.ErrUploadSessionNotFound)
+	other := &model.User{ID: "someone-else"}
+	assert.ErrorIs(t, f.svc.SessionError(other, sess.ID), drive.ErrUploadSessionNotFound, "他人のセッションは無いのと同じ")
+
+	f.settings.Enabled = false
+	assert.ErrorIs(t, f.svc.SessionError(f.user, sess.ID), drive.ErrChunkedUploadUnavailable, "機能が無効なら読む前に unavailable")
+
+	svc, _, _ := newSvc(t)
+	assert.ErrorIs(t, svc.SessionError(f.user, sess.ID), drive.ErrChunkedUploadUnavailable, "未配線も unavailable")
+}
