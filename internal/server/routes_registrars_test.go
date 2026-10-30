@@ -136,7 +136,8 @@ func routeRegistrars(t *testing.T, p parsedPackage) map[string]routeRegistrar {
 func TestSetupRoutesCallsEveryRouteRegistrarOnce(t *testing.T) {
 	p := parsePackage(t)
 	regs := routeRegistrars(t, p)
-	_, fd := setupRoutesDecl(t)
+	// 節 (#3901) の中の書き換えも見るため、節を展開した本文を読む。
+	_, fd := assembledSetupRoutes(t)
 	body := fd.Body
 	fset := p.fset
 
@@ -321,7 +322,9 @@ func setupRoutesNames(t *testing.T, body *ast.BlockStmt) (map[string]int, map[st
 		walk = func(n ast.Node, inLit bool) {
 			ast.Inspect(n, func(n ast.Node) bool {
 				add := func(e ast.Expr, tok string) {
-					if id, ok := e.(*ast.Ident); ok {
+					// x.f = … や x[i] = … も x の書き換えに数える。値で持つ構造体
+					// (coreSvcs など) は、節へ渡した後に欄を書き換えると節と食い違う。
+					if id := rootIdent(e); id != nil {
 						rewrites[id.Name] = append(rewrites[id.Name], setupRoutesRewrite{stmt: i, inLit: inLit, tok: tok})
 					}
 				}

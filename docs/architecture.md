@@ -2137,20 +2137,25 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 
 - **範囲より前の名前は、`…Deps` の構造体で受けて、本文の先頭で同じ名前に受け直す。** 移した文は
   1 文字も変わらないので、`assertWired` などの照合はそのまま効く。引数で受けないのは、範囲が
-  使う名前が多いため (#3901 で測った。キャッシュの無効化の範囲で 31 個、ほかの候補の範囲で 19〜70 個)
-- **節は範囲ごとに 1 つで、型は `wireX` に対して `xDeps`。** 範囲で作って範囲より後で使う名前は、
+  使う名前が多いため (#3901 で節にした 7 つの範囲で 13〜69 個。下の表の「受け取る名前」)
+- **節は範囲ごとに 1 つの `*Server` のメソッドで、型は `wireX` に対して `xDeps`。** 節は `s` の
+  フィールドを書くので、値レシーバにしない (テストが落とす)。 範囲で作って範囲より後で使う名前は、
   最後の文の `return a, b` で返し、`setupRoutes()` が `a, b := s.wireX(…)` で同じ名前に受ける
 - **渡す側の形は、`internal/server` の `TestSetupRoutesSectionsReceiveSameNamedVariables` が見る。**
   フィールドをすべて `f: f` の形で 1 回ずつ書く (書き忘れたフィールドはゼロ値が黙って渡り、別の
   名前の変数を渡すと照合する文の名前と指す値がずれる)。渡す名前は `setupRoutes()` の引数か、本文の
   直下で `:=` か値付きの `var` で 1 回だけ定義した名前で、呼び出しより後と関数リテラルの中で書き換えず、アドレスも
-  取らない (節は呼び出しの時点の値を受け取るため)。節を呼ぶのは `setupRoutes()` の本文の直下の
-  1 か所だけ
+  取らない (節は呼び出しの時点の値を受け取るため。値で渡す構造体の欄への代入 `x.f = …` も数える)。
+  節を呼ぶのは `setupRoutes()` の本文の直下の 1 か所だけ。節の中でも、受け直した名前を書き換えない
+  (欄への代入は、ポインタの欄なら同じ先を書き換えるので数えない)
 - **`setupRoutes()` の本文の直下の文を見るテストは、節を展開した本文を読む。** `internal/server` の
   `assembledSetupRoutes` は、節の呼び出しを節の本文 (受け直しと最後の `return` を除く) に置き換えた
   `setupRoutes()` を返す。受け渡しが同じ名前なので、移す前の 1 つの関数と同じ文を同じ順に持つ。
-  文がファイルをまたぐので、順序は行ではなく本文の添字で比べる (今使っているのは stream の
-  チャンネルの登録を見る 3 つ)
+  文がファイルをまたぐので、順序は行ではなく本文の添字で比べる。使っているのは、stream の
+  チャンネルの登録を見る 3 つ、queue の handler の登録と processor を見る 2 つ
+  (`TestSetupRoutesRegistersBuiltinQueueHandlersOnce`・`TestSetupRoutesPassesSetterConfiguredProcessors`)、
+  `TestSetupRoutesAliasesEveryBuiltHandler`、`TestSetupRoutesCallsEveryRouteRegistrarOnce`。
+  `setupRoutes()` だけを読むと、節の中の書き換えが見えなくなる (#3901 のレビューで実測)
 - **変数の名前を同じファイルの中でだけ突き合わせるゲートは、節の受け直しを `setupRoutes()` の
   変数として数える。** `TestPushSubscriptionCacheIsShared` は、節の中で受け直した名前を
   そのまま渡す呼び出しを、`setupRoutes()` のファイルにあるものとして扱う (アカウントの削除の
@@ -2159,9 +2164,13 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
 - **範囲の中で `:=` で受け直すだけの `err` は渡さない。** `wireAdmin` の範囲は `setupRoutes()` の
   `err` を `backupVerifier, err := …` で書き換えるが、読む前に必ず代入し、範囲より後も `:=` で
-  代入してから読む。渡すと「呼び出しより後で書き換える」に当たるので、節の中で新しく宣言させた
-- **範囲に `setupRoutes()` の `return`・`defer`・ラベルを含めない。** 節へ移すと、返る先や走る時刻が
-  変わる。これはゲートでは見ておらず、切り出すときに確かめる
+  代入してから読む。渡すと「呼び出しより後で書き換える」に当たるので、節の中で新しく宣言させた。
+  `setupRoutes()` で定義済みの名前を節の中で `:=` で新しく宣言すると、`setupRoutes()` からは書き換えが
+  見えなくなるので、`TestSetupRoutesSectionsReceiveSameNamedVariables` は理由を書いた
+  `sectionRedeclaredNames` (今は `wireAdmin.err` だけ。使われていない項目も落とす) の外のものを落とす
+- **範囲に `setupRoutes()` の `return`・`defer`・ラベル・`goto` を含めない。** 節へ移すと、返る先や
+  走る時刻が変わる。`TestSetupRoutesSectionsReceiveSameNamedVariables` が、節の関数リテラルの外に
+  最後の文の他の `return` と、`defer`・ラベル・`goto` があれば落とす
 
 | 節 | ファイル | 移した範囲 | 受け取る名前 | 返す名前 |
 |---|---|---|---|---|
