@@ -44,7 +44,7 @@ func TestMetaArrayColumns_CoversAllStringArrayFields(t *testing.T) {
 	// 漏れ: model.Meta に varchar[] 列があるのに metaArrayColumns に登録なし。
 	missing := diffSorted(expected, metaArrayColumns)
 	assert.Empty(t, missing,
-		"metaArrayColumns に未登録の varchar[] 列がある。新しい列を追加した際は internal/api/admin/handler.go の metaArrayColumns も更新してください")
+		"metaArrayColumns に未登録の varchar[] 列がある。新しい列を追加した際は internal/api/admin/meta.go の metaArrayColumns も更新してください")
 
 	// 過剰: metaArrayColumns にあるが model.Meta に対応する model.StringArray が無い。
 	// typo / 列削除し忘れの検出用。
@@ -117,7 +117,7 @@ func TestMetaJSONBColumns_CoversAllJSONColumns(t *testing.T) {
 
 	missing := diffSorted(expected, metaJSONBColumns)
 	assert.Empty(t, missing,
-		"metaJSONBColumns に未登録の jsonb 列がある。新しい datatypes.JSON 列を追加した際は handler.go の metaJSONBColumns も更新してください (#1846)")
+		"metaJSONBColumns に未登録の jsonb 列がある。新しい datatypes.JSON 列を追加した際は meta.go の metaJSONBColumns も更新してください (#1846)")
 
 	extra := diffSorted(metaJSONBColumns, expected)
 	assert.Empty(t, extra,
