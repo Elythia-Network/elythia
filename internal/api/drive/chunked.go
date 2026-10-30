@@ -129,7 +129,18 @@ func (h *Handler) FilesCreateChunkedAppend(c echo.Context) error {
 	// `size > sess.ChunkSize` を拒否するが、そこへ届く時点でチャンクは全部
 	// メモリに載っている。body limit はこの経路で 33MiB なので、既定 10MiB の
 	// セッションでも 1 リクエストあたり 33MiB を確保させられていた。
-	maxChunk, _ := h.svc.SessionChunkSize(user, uploadID)
+	//
+	// **セッションが引けないときも読まない (2026-10-31 の監査)。** 以前は ok を
+	// 捨てて上限 0 (= 無制限) で読んでいたので、でたらめな uploadId を送るだけで
+	// #3037 で塞いだ「io.ReadAll による 2 つ目のコピー (最大 33MiB)」が戻っていた。
+	// 機能が無効でも同じだった (読み終えてから CHUNKED_UPLOAD_UNAVAILABLE を返して
+	// いた)。応答は AppendChunk が返すはずのものをサービスに聞いて揃える。
+	// 消えるのはその 2 つ目のコピーで、上の c.FormValue が呼ぶ ParseMultipartForm
+	// (32MiB) がパーサに載せる分は残る (SessionChunkSize のコメント)。
+	maxChunk, ok := h.svc.SessionChunkSize(user, uploadID)
+	if !ok {
+		return h.chunkedError(c, h.svc.SessionError(user, uploadID))
+	}
 	chunk, err := readMultipartChunk(c, maxChunk)
 	if err != nil {
 		if errors.Is(err, coredrive.ErrInvalidChunkSize) {

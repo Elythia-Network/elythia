@@ -383,11 +383,11 @@ type ChunkAppendResult struct {
 // (`drive/files/create` 側は 250MB のような大きい本体がパーサで**ディスクへ
 // spill** されるので、そちらの guard は最大 250MB のヒープ確保を実際に消す。)
 //
-// ok=false は「上限を決められない」(セッションが無い / 他人のもの / 期限切れ)。
-// **その場合は上限を掛けない** — 本物の判定は `AppendChunk` が行い、そちらが
-// 正しいエラーを返す。ここで独自に落とすと、応答の種類が経路で食い違う。
-// 存在しない `uploadId` を送ればこの枝に入れるが、body limit が 33MiB なので
-// 最悪値は変わらない (`AppendChunk` がその後 404 を返す)。
+// ok=false は「上限を決められない」(機能が無効 / セッションが無い / 他人のもの /
+// 期限切れ)。**その場合、handler はチャンクを読まずに SessionError の答えで断る**
+// (2026-10-31 の監査)。以前は上限を掛けずに読んで `AppendChunk` の判定に任せて
+// いたが、それだと存在しない `uploadId` を送るだけで 1 リクエストあたり 33MiB
+// (body limit いっぱい) をメモリに載せられた。
 func (s *Service) SessionChunkSize(user *model.User, sessionID string) (int64, bool) {
 	if s.chunkedRepo == nil {
 		return 0, false
@@ -397,6 +397,21 @@ func (s *Service) SessionChunkSize(user *model.User, sessionID string) (int64, b
 		return 0, false
 	}
 	return sess.ChunkSize, true
+}
+
+// SessionError reports why SessionChunkSize could not find a session, as the
+// error AppendChunk would answer for it: ErrChunkedUploadUnavailable when the
+// feature is off, ErrUploadSessionNotFound for a missing, foreign or expired
+// session. The handler answers with it before reading the chunk.
+func (s *Service) SessionError(user *model.User, sessionID string) error {
+	if _, _, err := s.chunkedMultipart(); err != nil {
+		return err
+	}
+	if _, err := s.loadOwnedSession(user, sessionID, time.Now()); err != nil {
+		return err
+	}
+	// 行はあるが chunkSize が壊れている。読んでも AppendChunk は受け付けない。
+	return ErrUploadSessionNotFound
 }
 
 // AppendChunk stores one chunk as a part of the session's multipart upload.

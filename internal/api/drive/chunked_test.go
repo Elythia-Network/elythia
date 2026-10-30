@@ -656,3 +656,29 @@ func TestFilesCreateChunkedStart_CommentWithNUL(t *testing.T) {
 	require.NoError(t, h.FilesCreateChunkedStart(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
+
+// **セッションが引けないときはチャンクを読まない (2026-10-31 の監査)。**
+//
+// 以前は `SessionChunkSize` の ok を捨てて上限 0 (= 無制限) で読んでいたので、
+// でたらめな uploadId を送るだけで #3037 で塞いだ 33MiB の確保が戻っていた。
+// 本体を開いたかどうかで見る — 応答だけだと `AppendChunk` が 404 を返した
+// 場合と区別が付かない。
+func TestFilesCreateChunkedAppend_UnknownSessionDoesNotReadTheChunk(t *testing.T) {
+	h, _, _ := newChunkedHandler(t)
+
+	opened := false
+	prev := openMultipartFile
+	t.Cleanup(func() { openMultipartFile = prev })
+	openMultipartFile = func(fh *multipart.FileHeader) (multipart.File, error) {
+		opened = true
+		return prev(fh)
+	}
+
+	c, rec := newChunkReq(t, "no-such-session", 0, chunkBytes(apiChunkSize), false)
+	setUser(c, "u1")
+	require.NoError(t, h.FilesCreateChunkedAppend(c))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_UPLOAD_SESSION")
+	assert.False(t, opened, "セッションが無いのにチャンクを開いている")
+}
