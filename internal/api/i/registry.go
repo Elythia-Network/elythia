@@ -1,12 +1,15 @@
 package i
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -209,4 +212,171 @@ func (h *Handler) RegistryScopesWithDomain(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// SetRegistryRepo attaches a RegistryRepository for i/registry/* endpoints.
+func (h *Handler) SetRegistryRepo(r repository.RegistryRepository) {
+	h.registryRepo = r
+}
+
+// RegistryGet handles POST /api/i/registry/get.
+func (h *Handler) RegistryGet(c echo.Context) error {
+	u := middleware.GetUser(c)
+	var req struct {
+		Key    *string  `json:"key"`
+		Scope  []string `json:"scope"`
+		Domain *string  `json:"domain"`
+	}
+	// 空のkeyは本家と同じく引きに行き、一致する値が無いのでNO_SUCH_KEYで返す。
+	// キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Key == nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "key is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Scope == nil {
+		req.Scope = []string{}
+	}
+	if !validRegistryScope(req.Scope) || !storableRegistryValue(*req.Key, req.Domain) {
+		return apierr.JSONInvalidParam(c)
+	}
+	item, err := h.registryRepo.Get(u.ID, *req.Key, req.Scope, registryEffectiveDomain(c, req.Domain))
+	if err != nil && !repository.IsNotFound(err) {
+		// **DB 障害を「そんなキーは無い」にしない** (#2792)。registry は
+		// クライアントの設定同期に使うので、障害を 400 で返すと「消えた」と
+		// 判断して既定値で上書きしうる。
+		return apierr.JSONInternalError(c)
+	}
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_KEY", "No such key.", "ac3ed68a-62f0-422b-a7bc-d5e09e8f6a6a"))
+	}
+	// value をそのまま返す (JSONBの中身)
+	return c.JSONBlob(http.StatusOK, item.Value)
+}
+
+// RegistrySet handles POST /api/i/registry/set.
+func (h *Handler) RegistrySet(c echo.Context) error {
+	u := middleware.GetUser(c)
+	var req struct {
+		Key    string          `json:"key"`
+		Value  json.RawMessage `json:"value"`
+		Scope  []string        `json:"scope"`
+		Domain *string         `json:"domain"`
+	}
+	if err := c.Bind(&req); err != nil || req.Key == "" {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "key is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Scope == nil {
+		req.Scope = []string{}
+	}
+	// **書き込みなので幅も見る。** 読み取り側は幅を見ない (列幅を超えた値は
+	// 比較の右辺では落ちず、`NO_SUCH_KEY` を返すのが事実)。
+	if !validRegistryScope(req.Scope) || !storableRegistryWrite(req.Key, req.Domain) {
+		return apierr.JSONInvalidParam(c)
+	}
+	// **value は jsonb 列へそのまま入る (#3037)。** PostgreSQL の jsonb は
+	// NUL エスケープを受け付けず SQLSTATE 22P05 でクエリごと落とすので、
+	// 引く前に弾かないと**任意の認証ユーザーが 500 を起こせる**。
+	if !colfit.JSONStorable(req.Value) {
+		return apierr.JSONInvalidParam(c)
+	}
+	// app token は自分の token id を domain に強制する (#1717)。
+	domain := registryEffectiveDomain(c, req.Domain)
+	item := &model.RegistryItem{
+		ID:        h.idGen.Generate(time.Now()),
+		UpdatedAt: time.Now(),
+		UserID:    u.ID,
+		Key:       req.Key,
+		Value:     []byte(req.Value),
+		Scope:     req.Scope,
+		Domain:    domain,
+	}
+	if err := h.registryRepo.Set(item); err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	// TS本家 RegistryApiService.set (lines 59-66): domain == null のとき
+	// のみmainにpublishする。domain指定はサードパーティアプリ固有の領域
+	// なので他クライアントには broadcast しない仕様。app token は domain が
+	// token id に強制されるため publish されない (#1717)。
+	if h.mainStreamPublisher != nil && domain == nil {
+		h.mainStreamPublisher.PublishMainEvent(u.ID, "registryUpdated", map[string]any{
+			"scope": req.Scope,
+			"key":   req.Key,
+			"value": json.RawMessage(req.Value),
+		})
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// RegistryGetAll handles POST /api/i/registry/get-all.
+func (h *Handler) RegistryGetAll(c echo.Context) error {
+	u := middleware.GetUser(c)
+	var req struct {
+		Scope  []string `json:"scope"`
+		Domain *string  `json:"domain"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Scope == nil {
+		req.Scope = []string{}
+	}
+	if !validRegistryScope(req.Scope) || !storableRegistryValue("", req.Domain) {
+		return apierr.JSONInvalidParam(c)
+	}
+	items, err := h.registryRepo.GetAll(u.ID, req.Scope, registryEffectiveDomain(c, req.Domain))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	result := make(map[string]json.RawMessage, len(items))
+	for _, item := range items {
+		result[item.Key] = json.RawMessage(item.Value)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// RegistryKeysWithType handles POST /api/i/registry/keys-with-type.
+func (h *Handler) RegistryKeysWithType(c echo.Context) error {
+	u := middleware.GetUser(c)
+	var req struct {
+		Scope  []string `json:"scope"`
+		Domain *string  `json:"domain"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Scope == nil {
+		req.Scope = []string{}
+	}
+	if !validRegistryScope(req.Scope) || !storableRegistryValue("", req.Domain) {
+		return apierr.JSONInvalidParam(c)
+	}
+	keys, err := h.registryRepo.KeysWithType(u.ID, req.Scope, registryEffectiveDomain(c, req.Domain))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	return c.JSON(http.StatusOK, keys)
+}
+
+// RegistryRemove handles POST /api/i/registry/remove.
+func (h *Handler) RegistryRemove(c echo.Context) error {
+	u := middleware.GetUser(c)
+	var req struct {
+		Key    *string  `json:"key"`
+		Scope  []string `json:"scope"`
+		Domain *string  `json:"domain"`
+	}
+	// 空のkeyは本家と同じく消しに行き、一致する値が無いので何も消さずに204を
+	// 返す。キーが無いものは本家も400(#3851)。
+	if err := c.Bind(&req); err != nil || req.Key == nil {
+		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "key is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	if req.Scope == nil {
+		req.Scope = []string{}
+	}
+	if !validRegistryScope(req.Scope) || !storableRegistryValue(*req.Key, req.Domain) {
+		return apierr.JSONInvalidParam(c)
+	}
+	if err := h.registryRepo.Remove(u.ID, *req.Key, req.Scope, registryEffectiveDomain(c, req.Domain)); err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+	return c.NoContent(http.StatusNoContent)
 }

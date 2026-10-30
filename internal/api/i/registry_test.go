@@ -150,7 +150,7 @@ func TestRegistryScopesWithDomain_GroupedByDomain(t *testing.T) {
 func TestRegistryScopePatternRejected(t *testing.T) {
 	h, _ := newExtraHandler(t)
 	h.SetRegistryRepo(testutil.NewMockRegistryRepository())
-	// RegistryGetDetail (registry.go) と RegistryGetAll (handler.go) の両系統を確認。
+	// RegistryGetDetail と RegistryGetAll (どちらも registry.go) の両系統を確認。
 	assert.Equal(t, http.StatusBadRequest, postExtra(h.RegistryGetDetail, `{"key":"k","scope":["bad scope"]}`, stubUser).Code)
 	assert.Equal(t, http.StatusBadRequest, postExtra(h.RegistryGetAll, `{"scope":["has.dot"]}`, stubUser).Code)
 	assert.Equal(t, http.StatusBadRequest, postExtra(h.RegistryKeys, `{"scope":["nope!"]}`, stubUser).Code)
