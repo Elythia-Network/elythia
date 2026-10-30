@@ -525,7 +525,7 @@ func TestTimeline_VisibilityFilter(t *testing.T) {
 	allowed := "allowed"
 	stranger := "stranger"
 	// author を follow しているのは follower のみ。Mock の Following は
-	// followerID -> []followeeIDs (testutil/mock_repository.go の
+	// followerID -> []followeeIDs (testutil/mock_note.go の
 	// noteVisibleToViewer 経路で使われる)。
 	noteRepo.Following[follower] = []string{author}
 	noteRepo.Notes["n_pub"] = &model.Note{
