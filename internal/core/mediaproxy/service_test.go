@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,13 @@ import (
 
 type mockAllowlist struct {
 	allowed map[string]bool
+	// lookups counts IsAllowedURL calls, so tests can show a value was refused
+	// without reaching the database.
+	lookups int
 }
 
 func (m *mockAllowlist) IsAllowedURL(_ context.Context, url string) (bool, error) {
+	m.lookups++
 	return m.allowed[url], nil
 }
 
@@ -1224,4 +1229,32 @@ func TestNormalizeForResize_LeavesOtherTypesAlone(t *testing.T) {
 	converted := normalizeForResize(nycbcra)
 	assert.NotSame(t, image.Image(nycbcra), converted)
 	assert.IsType(t, &image.NRGBA{}, converted)
+}
+
+// **列に入らない長さの URL は allowlist を引かずに拒否する (2026-10-31 の監査)。**
+// 署名の無い `?url` は 11 箇所に bind されるので、長さを見ないと未認証の
+// 1 リクエストで約 1MiB × 11 のパラメータを PostgreSQL へ渡せた。
+func TestAuthorize_NoSig_TooLongURLIsUnauthorizedWithoutLookup(t *testing.T) {
+	long := "https://remote.example/" + strings.Repeat("a", MaxAllowlistURLChars)
+	s := testService(map[string]bool{long: true})
+	m := s.allowlist.(*mockAllowlist)
+
+	err := s.Authorize(context.Background(), long, "")
+	assert.ErrorIs(t, err, ErrUnauthorized)
+	assert.Zero(t, m.lookups, "列に入らない長さの URL で allowlist を引いている")
+
+	// 上限ちょうどは引く。
+	exact := "https://remote.example/" + strings.Repeat("a", MaxAllowlistURLChars-len("https://remote.example/"))
+	require.Len(t, exact, MaxAllowlistURLChars)
+	s = testService(map[string]bool{exact: true})
+	require.NoError(t, s.Authorize(context.Background(), exact, ""))
+	assert.Equal(t, 1, s.allowlist.(*mockAllowlist).lookups)
+
+	// varchar(n) は文字数なので、多バイトの文字で上限ちょうどの URL (バイト数は
+	// 上限の約 3 倍) も引く (レビュー L-1)。
+	wide := "https://remote.example/" + strings.Repeat("あ", MaxAllowlistURLChars-len("https://remote.example/"))
+	require.Greater(t, len(wide), MaxAllowlistURLChars)
+	s = testService(map[string]bool{wide: true})
+	require.NoError(t, s.Authorize(context.Background(), wide, ""))
+	assert.Equal(t, 1, s.allowlist.(*mockAllowlist).lookups)
 }
