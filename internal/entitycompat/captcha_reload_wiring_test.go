@@ -169,6 +169,7 @@ func captchaServiceIsUnconditional(files []*ast.File) bool {
 	// 巻き戻し前の特定 diff 1 形だけだった。**
 	assigned := false
 	conditional := false
+	aliases := sectionDepsAliases(files)
 	inspectServerFiles(files, func(n ast.Node) bool {
 		switch t := n.(type) {
 		case *ast.DeclStmt:
@@ -189,6 +190,10 @@ func captchaServiceIsUnconditional(files []*ast.File) bool {
 				}
 			}
 		case *ast.AssignStmt:
+			// 節の受け直し (`captchaSvc := d.captchaSvc`、#3901) は作り方ではない。
+			if aliases[t] {
+				return true
+			}
 			for i, lhs := range t.Lhs {
 				id, ok := lhs.(*ast.Ident)
 				if !ok || id.Name != "captchaSvc" {

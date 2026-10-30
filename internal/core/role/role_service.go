@@ -335,7 +335,7 @@ type Service struct {
 	// invalidationHook は**ローカルの**変更でキャッシュを落とした後に呼ぶ。
 	// 複数ワーカー構成 (`MK_ONLY_SERVER` / `MK_ONLY_QUEUE`) では、これを繋がない
 	// と剥奪を受け付けなかった側のノードで最大 roleCacheTTL のあいだ古いロールが
-	// 通り続ける。配線は router.go (`internal:rolesUpdated`)。
+	// 通り続ける。配線は internal/server の wiring_cache_invalidation.go (`internal:rolesUpdated`)。
 	invalidationHook func()
 
 	userRoleCacheMu  sync.RWMutex

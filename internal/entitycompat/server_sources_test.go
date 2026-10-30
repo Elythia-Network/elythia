@@ -180,6 +180,49 @@ func inspectServerFiles(files []*ast.File, fn func(ast.Node) bool) {
 	}
 }
 
+// sectionDepsAliases returns the statements that bind a field of a wiring
+// section's parameter to the same name (`x := d.x` in a *Server method named
+// wire… whose only parameter is `d …Deps`, #3901).
+//
+// setupRoutes から切り出した節は、受け取った値を setupRoutes と同じ名前で受け直す
+// ので、`x := d.x` は「x を作り直した」のではなく「setupRoutes の x を受け取った」
+// ことを表す。`:=` の右辺で作り方を見るゲートは、この文を数えない。渡す側が
+// 同じ名前の変数をそのまま渡すことは、internal/server の
+// TestSetupRoutesSectionsReceiveSameNamedVariables が見る。
+func sectionDepsAliases(files []*ast.File) map[*ast.AssignStmt]bool {
+	out := map[*ast.AssignStmt]bool{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || fd.Body == nil || len(fd.Type.Params.List) != 1 ||
+				!strings.HasPrefix(fd.Name.Name, "wire") {
+				continue
+			}
+			param := fd.Type.Params.List[0]
+			typ, ok := param.Type.(*ast.Ident)
+			if !ok || !strings.HasSuffix(typ.Name, "Deps") || len(param.Names) != 1 {
+				continue
+			}
+			d := param.Names[0].Name
+			for _, st := range fd.Body.List {
+				as, ok := st.(*ast.AssignStmt)
+				if !ok || as.Tok != token.DEFINE || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+					continue
+				}
+				l, lok := as.Lhs[0].(*ast.Ident)
+				r, rok := as.Rhs[0].(*ast.SelectorExpr)
+				if !lok || !rok {
+					continue
+				}
+				if x, ok := r.X.(*ast.Ident); ok && x.Name == d && r.Sel.Name == l.Name {
+					out[as] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
 // relPath returns p relative to the repository root, for diagnostics. Paths
 // outside the repository (test fixtures) are returned as they are.
 func relPath(t *testing.T, p string) string {

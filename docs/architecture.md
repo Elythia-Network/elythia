@@ -2102,6 +2102,51 @@ stream の部品・handler と、/api の外のルートの登録は、依存す
 領域ほど、構築の途中で動く処理 (4.1) と shutdown hook を登録するものが多いので、それらを
 動かさずに残す範囲を PR ごとに決める。
 
+#### setupRoutes の節 (#3901)
+
+**`setupRoutes()` の中の連続した範囲を、名前が `wire…` の `*Server` のメソッド (節) へそのまま
+移す。** 呼ぶ位置は元の範囲の位置で、中の文とその順は変えない。段階 (2) で作るだけの部品は
+`build…` へ移り、`setupRoutes()` に残ったのは主に setter の呼び出しと、副作用があって動かせない
+文だった。setter を受け手の領域ごとに寄せ直すと、4.1 の「setter は元の位置で呼ぶ」を覆すことに
+なるので、範囲を切り出すだけにした。
+
+```
+setupRoutes()
+  …
+  s.wireCacheInvalidation(cacheInvalidationDeps{   // wiring_cache_invalidation.go
+      idGen:          idGen,
+      internalPubSub: internalPubSub,
+      …                                            // 範囲の中で使う、範囲より前の名前すべて
+  })
+  …
+
+func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
+  idGen := d.idGen                                 // setupRoutes と同じ名前で受け直す
+  …
+  …                                                // 元の範囲の文 (そのまま)
+}
+```
+
+- **範囲より前の名前は、`…Deps` の構造体で受けて、本文の先頭で同じ名前に受け直す。** 移した文は
+  1 文字も変わらないので、`assertWired` などの照合はそのまま効く。引数で受けないのは、範囲が
+  使う名前が多いため (#3901 で測った。キャッシュの無効化の範囲で 31 個、ほかの候補の範囲で 19〜70 個)
+- **節は範囲ごとに 1 つで、型は `wireX` に対して `xDeps`。** 範囲で作って範囲より後で使う名前は、
+  最後の文の `return a, b` で返し、`setupRoutes()` が `a, b := s.wireX(…)` で同じ名前に受ける
+- **渡す側の形は、`internal/server` の `TestSetupRoutesSectionsReceiveSameNamedVariables` が見る。**
+  フィールドをすべて `f: f` の形で 1 回ずつ書く (書き忘れたフィールドはゼロ値が黙って渡り、別の
+  名前の変数を渡すと照合する文の名前と指す値がずれる)。渡す名前は `setupRoutes()` の引数か、本文の
+  直下で `:=` で 1 回だけ定義した名前で、呼び出しより後と関数リテラルの中で書き換えず、アドレスも
+  取らない (節は呼び出しの時点の値を受け取るため)。節を呼ぶのは `setupRoutes()` の本文の直下の
+  1 か所だけ
+- **`:=` の右辺で作り方を見るゲートは、受け直し `x := d.x` を数えない。** `internal/entitycompat` の
+  `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
+- **範囲に `setupRoutes()` の `return`・`defer`・ラベルを含めない。** 節へ移すと、返る先や走る時刻が
+  変わる。これはゲートでは見ておらず、切り出すときに確かめる
+
+**同じ動きであることの確かめ方。** 節を足すたびに、`develop` とその段の binary で、`elythia dump-routes`
+の出力、その起動の間の Redis の命令の列 (`MONITOR`) と起動ログが一致することを確かめた。どれも
+使い捨ての PostgreSQL と Redis に向けて流した。
+
 ### 4.3 部品の起動と停止の一覧 (#3699、#3701、#3703)
 
 **停止が要る部品は、名前を付けて 1 つの一覧 `lifecycle` (`internal/server/lifecycle_parts.go`)
@@ -2813,28 +2858,29 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 
 ```
 setupRoutes()
-  s.addCache("cachedMeta", cacheFromDB, cachedMeta)
-  s.addCache("metaResponse", cacheFromDB, metaHandler)
-  s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
-  s.addCache("captcha", cacheFromDB, reloadOnDrop(reloadCaptcha))   // #3777。捨てずに読み直す
-  s.addCache("reactionBuffering", cacheFromDB, reloadOnDrop(reloadReactionBuffering))
-  …
-  s.addCache("userCache", cacheFromDB, s.userCache)       // 3 つは newServer で作る (#3723)
-  s.addCache("relationCache", cacheFromDB, s.relationCache)
-  s.addCache("authTokens", cacheFromDB, s.auth)
-  s.addCache("roles", cacheFromDB, roleService)           // #3725。userCache の後
-  …
-  s.addCache("emojis", cacheFromDB, emojiRepo)            // #3727
-  s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)  // emojis の後
-  s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
-  s.addCache("instances", cacheFromDB, instanceService)   // #3729
-  s.addCache("relays", cacheFromDB, relaySvc)
-  s.addCache("fedRules", cacheFromDB, fedRuleService)
-  s.addCache("deliverEd25519", cacheFromDB, deliverService)        // #3732
-  s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
-  s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
-  s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)   // userCache の後
-  …
+  s.wireCacheInvalidation(…)   // #3901 から、urlPreview より前の登録はこの節 (wiring_cache_invalidation.go)
+    s.addCache("cachedMeta", cacheFromDB, cachedMeta)
+    s.addCache("metaResponse", cacheFromDB, metaHandler)
+    s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
+    s.addCache("captcha", cacheFromDB, reloadOnDrop(reloadCaptcha))   // #3777。捨てずに読み直す
+    s.addCache("reactionBuffering", cacheFromDB, reloadOnDrop(reloadReactionBuffering))
+    …
+    s.addCache("userCache", cacheFromDB, s.userCache)       // 3 つは newServer で作る (#3723)
+    s.addCache("relationCache", cacheFromDB, s.relationCache)
+    s.addCache("authTokens", cacheFromDB, s.auth)
+    s.addCache("roles", cacheFromDB, roleService)           // #3725。userCache の後
+    …
+    s.addCache("emojis", cacheFromDB, emojiRepo)            // #3727
+    s.addCache("emojiDecorations", cacheFromDB, emojiDecorationResolver)  // emojis の後
+    s.addCache("avatarDecorations", cacheFromDB, avatarDecorationResolver)
+    s.addCache("instances", cacheFromDB, instanceService)   // #3729
+    s.addCache("relays", cacheFromDB, relaySvc)
+    s.addCache("fedRules", cacheFromDB, fedRuleService)
+    s.addCache("deliverEd25519", cacheFromDB, deliverService)        // #3732
+    s.addCache("federationPublicKeys", cacheFromDB, federationResolver)
+    s.addCache("deliverSigningKeys", cacheFromDB, deliverProcessor)
+    s.addCache("instanceActorSigner", cacheFromDB, instanceSigner)   // userCache の後
+    …
   s.addCache("urlPreview", cacheFromExternal, urlPreviewFetcher)   // #3776。peerDeps の直後
   …
   s.addCache("twemojiBadge", cacheFromFile, twemojiBadge)

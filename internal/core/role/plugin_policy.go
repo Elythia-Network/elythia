@@ -1016,7 +1016,7 @@ func (s *Service) DropLocal() {
 // SetInvalidationHook registers fn, invoked after a **local** mutation has
 // dropped this process's role / policy caches.
 //
-// 配線は `internal/server/router.go` で、`internal:rolesUpdated` へ publish
+// 配線は `internal/server/wiring_cache_invalidation.go` で、`internal:rolesUpdated` へ publish
 // する。meta (#1740) / antenna (#2752) と同じ形。
 //
 // **起動時専用。** リクエストを捌いている最中に差し替えると、読みとの間で
