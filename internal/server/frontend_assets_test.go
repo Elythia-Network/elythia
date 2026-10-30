@@ -60,7 +60,7 @@ func TestRegisterFrontendAssets(t *testing.T) {
 			hits.Store(0)
 			e := echo.New()
 			registerFrontendAssets(e, tt.cfg, tt.prefix, tt.dir, devServer.URL)
-			// 本番と同じく SPA の catchall を後から登録する (router.go の
+			// 本番と同じく SPA の catchall を後から登録する (wiring_frontend_routes.go の
 			// `s.echo.GET("/*", frontend)`)。これが無いと echo の既定の 404 が
 			// 返るので、ビルド成果物が無いときの 404 の明示登録を消しても
 			// 「404 が返る」ままテストが通ってしまう。

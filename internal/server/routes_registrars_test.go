@@ -129,8 +129,8 @@ func routeRegistrars(t *testing.T, p parsedPackage) map[string]routeRegistrar {
 //     setupPluginsより前にある。echoのgroupはUseより前に登録したルートに
 //     middlewareを付けない。returnの後に置くと、プラグインの準備に失敗した
 //     経路で/apiのルートが無いまま止まる(元の登録はすべてreturnより前だった)
-//   - 引数は、関数の引数と同じ名前の識別子。setupRoutesの本文の直下で:=で
-//     1回だけ定義し、どこでも(関数リテラルの中を含めて)=などで書き換えず、
+//   - 引数は、関数の引数と同じ名前の識別子。setupRoutesの本文の直下で:=か
+//     値付きのvarで1回だけ定義し、どこでも(関数リテラルの中を含めて)=などで書き換えず、
 //     アドレスも取らない。書き換えると、登録が呼び出しの時点の値を受け取る
 //     ので、元の位置で登録していたときと違う値を指しうる
 func TestSetupRoutesCallsEveryRouteRegistrarOnce(t *testing.T) {
@@ -259,7 +259,7 @@ func TestSetupRoutesCallsEveryRouteRegistrarOnce(t *testing.T) {
 				"%s の引数 %s に、別の名前の変数 %s を渡している。ルートの行を照合するゲートは引数の名前で書いた行を見るので、名前を揃えること",
 				fn, r.params[i], id.Name)
 			assert.Equalf(t, 1, defined[id.Name],
-				"%s に渡す %s は、setupRoutes の本文の直下で := で 1 回だけ定義した名前であること", fn, id.Name)
+				"%s に渡す %s は、setupRoutes の本文の直下で := か値付きの var で 1 回だけ定義した名前であること", fn, id.Name)
 			if tok, ok := rewritten[id.Name]; ok {
 				t.Errorf("%s に渡す %s を、setupRoutes の中で書き換えている (%s)。登録が受け取る値が、元の位置で登録していたときと違いうる", fn, id.Name, tok)
 			}
@@ -275,21 +275,42 @@ type setupRoutesRewrite struct {
 	tok   string // "=", "+=", "++", "&", "range =" ...
 }
 
-// setupRoutesNames returns how many times each name is defined with := by a
-// top-level statement of the setupRoutes body, and every place that rewrites
+// setupRoutesNames returns how many times each name is defined with := or a
+// var with a value by a top-level statement of the setupRoutes body, and every place that rewrites
 // a name or takes its address (anywhere in the body, function literals
 // included).
 func setupRoutesNames(t *testing.T, body *ast.BlockStmt) (map[string]int, map[string][]setupRoutesRewrite) {
 	t.Helper()
 	defined := map[string]int{}
 	for _, st := range body.List {
-		as, ok := st.(*ast.AssignStmt)
-		if !ok || as.Tok != token.DEFINE {
-			continue
-		}
-		for _, l := range as.Lhs {
-			if id, ok := l.(*ast.Ident); ok && id.Name != "_" {
-				defined[id.Name]++
+		switch v := st.(type) {
+		case *ast.AssignStmt:
+			if v.Tok != token.DEFINE {
+				continue
+			}
+			for _, l := range v.Lhs {
+				if id, ok := l.(*ast.Ident); ok && id.Name != "_" {
+					defined[id.Name]++
+				}
+			}
+		case *ast.DeclStmt:
+			// `var metaRepo repository.MetaRepository = cachedMeta` のように、
+			// interface の型で持つ名前は var で定義している。値の無い var はゼロ値
+			// (nil) の宣言なので、定義に数えない。
+			gd, ok := v.Decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				if len(vs.Values) == 0 {
+					continue
+				}
+				for _, id := range vs.Names {
+					if id.Name != "_" {
+						defined[id.Name]++
+					}
+				}
 			}
 		}
 	}
