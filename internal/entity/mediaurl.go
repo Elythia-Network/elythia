@@ -22,7 +22,7 @@ import (
 //
 // mk-go では remote attachment / remote avatar を local に cache せず link
 // 形式 (model.DriveFile.IsLink, StoredInternal=false) でそのまま remote origin
-// URL を保持する (federation/resolver.go upsertAttachments)。そのため upstream
+// URL を保持する (federation/resolver_attachments.go upsertAttachments)。そのため upstream
 // のように「remote file は /files/<accessKey> で local 配信される」前提が成り
 // 立たず、pack 時に remote origin を proxy 経由 URL へ書き換えないと閲覧者の
 // IP が remote server に漏れる。これが #1529 の根因。

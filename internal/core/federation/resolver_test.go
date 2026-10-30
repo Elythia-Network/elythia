@@ -6583,7 +6583,7 @@ func TestExtractAttachments_InheritsNoteSensitive(t *testing.T) {
 
 // 添付の `icon.type` も配列形を受ける (upstream `getApType` と同じ head 方式)。
 // **現状 `Document.Icon.Type` を読む下流は無く**、thumbnail は
-// `doc.Icon.URL` だけで決まる (resolver.go の upsertAttachments)。1 件目は
+// `doc.Icon.URL` だけで決まる (resolver_attachments.go の upsertAttachments)。1 件目は
 // その意味で予防的で、parse 結果を直接固定している (#2665)。
 //
 // **2 件目は消さないこと。** こちらが固定しているのは icon 固有の値ではなく

@@ -171,7 +171,7 @@ func TestAllowlistQueryUsesIndexes(t *testing.T) {
 //
 // **btree は 1 行 2704 bytes を超える値を入れられない** (#3383 のレビューで実測)。
 // user."avatarUrl" / drive_file.src は varchar(1024) で、リモートの actor は多バイトの
-// 文字を 1024 字まで送れる (resolver.go の remoteMediaURL は rune 数で切る)。btree に
+// 文字を 1024 字まで送れる (resolver_actor.go の remoteMediaURL は rune 数で切る)。btree に
 // すると INSERT / UPDATE ごと落ち、actor を作れない・更新できない (#2662 と同じ形で
 // 受信のたびに fetch し直す) ので、この 2 列は hash index にしている。
 func TestAllowlistIndexesAcceptLongMultibyteURLs(t *testing.T) {

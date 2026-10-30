@@ -268,7 +268,7 @@ func (s *Store) getNotesShallow(ctx context.Context, ids []string) ([]*model.Not
 // Redis 往復が段数ぶん増える。報告された症状 (引用先が削除ノート) は 1 段で解ける。
 //
 // **返信先 (ReplyID) は埋めない。** リレー由来の投稿は未知 URI の返信先を fetch
-// しない設計 (resolver.go の InReplyTo 解決) なので ReplyID がそもそも付かず、
+// しない設計 (resolver_note_ingest.go の InReplyTo 解決) なので ReplyID がそもそも付かず、
 // 宙ぶらりんの参照が生まれない。埋める対象が無い。
 func (s *Store) attachQuoteTargets(ctx context.Context, notes []*model.Note) {
 	want := make([]string, 0, len(notes))

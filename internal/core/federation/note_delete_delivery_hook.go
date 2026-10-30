@@ -180,7 +180,7 @@ func (h *NoteDeleteDeliveryHook) directInboxes(note *model.Note) []string {
 	}
 	ids = append(ids, note.Mentions...)
 	// **DM では renote / reply した相手を足さない。** inbound の reply は
-	// `replyId` を可視性を見ずに結ぶので (core/federation/resolver.go)、敵対的な
+	// `replyId` を可視性を見ずに結ぶので (core/federation/resolver_note_ingest.go)、敵対的な
 	// host が任意のローカル note id を `replyId` に書いた note を投げておくだけで
 	// 「その DM が存在し、いつ誰に消されたか」を Delete の配送で確かめられる。
 	// **正当な返信者は元から `visibleUserIDs` に居る** (宛先でなければ DM を

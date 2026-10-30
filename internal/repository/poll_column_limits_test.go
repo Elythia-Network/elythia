@@ -44,7 +44,7 @@ func TestRemoteArrayColumnLimits(t *testing.T) {
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, arrayElementMaxLength(t, tc.table, tc.column),
-			"%s.%s の要素長が変わっている (internal/core/federation/resolver.go の定数も直すこと)",
+			"%s.%s の要素長が変わっている (internal/core/federation/resolver_values.go と resolver_tags.go の定数も直すこと)",
 			tc.table, tc.column)
 	}
 }

@@ -21,7 +21,7 @@ func TestNote_URLColumnLimitIs512(t *testing.T) {
 		WHERE table_schema = current_schema() AND table_name = 'note' AND column_name = 'url'`).
 		Scan(&n).Error)
 	assert.Equal(t, 512, n,
-		"note.url の列長が変わっている (internal/core/federation/resolver.go の noteURLMaxRunes も直すこと)")
+		"note.url の列長が変わっている (internal/core/federation/resolver_values.go の noteURLMaxRunes も直すこと)")
 }
 
 // resolver が「収まる」と判断した長さで実際に書けること (#2729)。

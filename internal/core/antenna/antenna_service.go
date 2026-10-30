@@ -593,7 +593,7 @@ func (s *Service) confirmMissingOnPrimary(ctx context.Context, candidates []stri
 // zset から恒久的に消え、戻す経路が無い**。
 //
 // ID に埋め込まれた時刻での猶予判定は**使えない**。リモート note の ID は
-// AP の `published` から発番される (`federation/resolver.go` が ID を作り、
+// AP の `published` から発番される (`federation/resolver_note_ingest.go` が ID を作り、
 // 許容範囲は `federation/published_time.go` の publishedPastFloor) ので、
 // 「たった今 INSERT されたが ID の時刻は数時間前」が普通に起きる。しかも
 // リモート note が antenna に入るのは #2743 からで、守るべきクラスと一致する。

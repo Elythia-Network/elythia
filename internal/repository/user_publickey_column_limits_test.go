@@ -33,7 +33,7 @@ func TestUserPublickey_ColumnLimits(t *testing.T) {
 			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
 			tc.table, tc.column).Scan(&n).Error)
 		assert.Equal(t, tc.max, n,
-			"%s.%s の列長が変わっている (internal/core/federation/resolver.go の定数も直すこと)",
+			"%s.%s の列長が変わっている (internal/core/federation/resolver_values.go の定数も直すこと)",
 			tc.table, tc.column)
 	}
 }

@@ -289,7 +289,7 @@ func TestMockDriveFileRepository_RemainingDivergences(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 2, "重複した id でも行は 1 度だけ")
 		// **順序は assert しない。** production の `Find` に ORDER BY は無く
-		// 戻り順は不定 (federation/resolver.go も「戻り順は不定なので map で
+		// 戻り順は不定 (federation/resolver_attachments.go も「戻り順は不定なので map で
 		// 再整列する」と書いている)。ここで入力順を固定すると、mock でしか
 		// 成り立たない前提をテストが承認することになる。
 		assert.ElementsMatch(t, []string{"f1", "f2"}, []string{got[0].ID, got[1].ID})

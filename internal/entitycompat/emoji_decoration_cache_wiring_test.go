@@ -70,7 +70,7 @@ var emojiCacheNotifiers = map[string]bool{
 // admin だけ見る gate では素通りする (敵対的レビューで実測された)。
 //
 // **`internal/core/federation` は対象外。** あそこも `emoji` を書くが
-// (`resolver.go` の `Create` / `UpdateFields`)、作るのは必ず `Host: &host` の
+// (`resolver_tags.go` の `Create` / `UpdateFields`)、作るのは必ず `Host: &host` の
 // リモート行で、resolver の map は `ListLocal` (= `host IS NULL`) しか載せない。
 // **ローカル行に触るようになったらここへ足すこと** — そうなるまでこの gate は
 // あちらについて何も言わない。
