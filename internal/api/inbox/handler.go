@@ -2,6 +2,7 @@
 package inbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -583,15 +584,25 @@ func (h *Handler) commitChart(actor *model.User) {
 	h.chartHook.OnInboxReceived(*actor.Host)
 }
 
-// bodyHasActor reports whether the inbox activity body is a JSON object with a
-// non-null `actor` field. upstream #17558: actor 無し activity は authenticate
-// 不能なので enqueue 前に弾く。actor は string ID / embedded object どちらも許容
-// (presence + 非 null のみ判定)。
+// bodyHasActor reports whether the inbox activity body is a JSON object whose
+// `actor` can name an actor: a non-empty string, an object or an array.
+// upstream #17558: actor 無し activity は authenticate 不能なので enqueue 前に
+// 弾く。数値・真偽値・空文字列は actor を名指せないので、null と同じく弾く
+// (worker の authorizeActor も落とすが、無駄な enqueue を避ける。2026-10-31 の監査)。
 func bodyHasActor(body []byte) bool {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(body, &probe); err != nil {
 		return false // object でない (= 不正) → reject
 	}
-	actor, ok := probe["actor"]
-	return ok && len(actor) > 0 && string(actor) != "null"
+	actor := bytes.TrimSpace(probe["actor"])
+	if len(actor) == 0 {
+		return false
+	}
+	switch actor[0] {
+	case '"':
+		return len(actor) > 2 // `""` は名指していない
+	case '{', '[':
+		return true
+	}
+	return false
 }

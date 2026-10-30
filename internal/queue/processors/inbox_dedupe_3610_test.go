@@ -2,6 +2,8 @@ package processors_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -65,14 +67,26 @@ func TestInboxProcessor_DirectActivityIsDispatchedNormalized(t *testing.T) {
 		Type:  "Follow",
 	}, got.Fields())
 	assert.Same(t, verifier.actor, rec.signers[0], "the verified signer row must be handed over")
-	assert.True(t, guard.seen["https://remote.example/follows/7"], "the replay guard must remember the activity id")
+	// 再投函の鍵は署名が覆った本文のダイジェスト (id ではない。2026-10-31 の監査)。
+	assert.True(t, guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)], "the replay guard must remember the signed request")
+	assert.Len(t, guard.seen, 1)
 
 	require.NoError(t, p.Handle(context.Background(), task))
 	assert.Len(t, rec.normalized, 1, "the replay must be dropped")
 }
 
-// 転送の経路では、処理へ渡すのも再投函の判定に使う id も、LD-Signature が覆う
-// compact 済みの文書から取る。生の本文の正規化を渡してはいけない。
+// replayKeyOf mirrors the processor's replay key: the SHA-256 of the signed
+// Date header and the signed body.
+func replayKeyOf(date string, body []byte) string {
+	h := sha256.New()
+	h.Write([]byte(date))
+	h.Write([]byte{'\n'})
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// 転送の経路では、処理へ渡すのは LD-Signature が覆う compact 済みの文書から取る。
+// 生の本文の正規化を渡してはいけない。再投函の鍵は HTTP 署名が覆った生の本文。
 func TestInboxProcessor_ForwardedActivityIsDispatchedFromCompactedBody(t *testing.T) {
 	priv, pub, err := activitypub.GenerateRSAKeypair()
 	require.NoError(t, err)
@@ -94,16 +108,17 @@ func TestInboxProcessor_ForwardedActivityIsDispatchedFromCompactedBody(t *testin
 	p.SetLDSignatureVerifier(&stubLDVerifier{present: true, creator: "https://origin.example/users/alice#main-key", compactedBody: compacted})
 
 	body := []byte(`{"id":"https://origin.example/creates/1","type":"Create","actor":"https://origin.example/users/alice","_misskey_content":"unsigned","signature":{"type":"RsaSignature2017","creator":"https://origin.example/users/alice#main-key"}}`)
+	payload := signedInboxPayload(t, key, body)
 	require.NoError(t, p.Handle(context.Background(), driver.RawTask{
 		TypeName: queue.TaskTypeInbox,
-		Body:     mustEncode(t, signedInboxPayload(t, key, body)),
+		Body:     mustEncode(t, payload),
 	}))
 	require.Len(t, rec.normalized, 1)
 	got := rec.normalized[0]
 	assert.Equal(t, compacted, got.Source(), "a forwarded activity must be processed from the compacted document")
 	assert.Equal(t, "https://origin.example/creates/1#signed", got.Fields().ID)
-	assert.True(t, guard.seen["https://origin.example/creates/1#signed"], "the replay guard must see the compacted document's id")
-	assert.False(t, guard.seen["https://origin.example/creates/1"])
+	assert.True(t, guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)], "the replay guard must remember the signed request")
+	assert.Len(t, guard.seen, 1)
 	assert.Equal(t, "relay", rec.signers[0].ID, "the HTTP signer (not the LD creator) is handed over")
 }
 
