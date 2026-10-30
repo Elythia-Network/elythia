@@ -23,7 +23,7 @@ const aidxTime2000Ms int64 = 946684800000
 // FeaturedService.getPerUserNotesRanking の threshold (50) と揃える (#1487 / #1491)。
 // 選抜後は id DESC + untilID cursor + limit でページングする。
 //
-// テスト用 mock (internal/testutil/mock_repository.go の ListFeaturedByUser) も
+// テスト用 mock (internal/testutil/mock_note.go の ListFeaturedByUser) も
 // この定数を直接参照することで mock と real repo の pool cap が drift しない
 // ことを保証する (#1491 review B 指摘の二重定義解消)。
 const FeaturedNotesPerUserPoolSize = 50
@@ -36,7 +36,7 @@ const FeaturedNotesPerUserPoolSize = 50
 // (docs/divergence/api.md)。窓は時間ではなく件数で、並べる値は
 // `renoteCount + repliesCount` の累計 (ランキングのような最近の反応の数ではない)。
 // 窓より古いノートは、累計が多くても選ばれない。
-// mock (internal/testutil/mock_repository.go) も同じ値を使う。
+// mock (internal/testutil/mock_note.go) も同じ値を使う。
 const FeaturedNotesPerUserCandidateWindow = 1000
 
 // pureRenoteCondSQL は pure renote (= text/cw/files/poll/reply を伴わない renote)

@@ -9,12 +9,11 @@ import (
 )
 
 // TestMockVisibilityBranch_MatchesCanSeeNote は #1507 で追加した drift detector。
-// internal/testutil/mock_repository.go には visibility 判定経路が 2 つ存在する:
+// internal/testutil/mock_note.go には visibility 判定経路が 2 つ存在する:
 //
-//  1. MockNoteRepository.ListByUserList 内の inline switch
-//     (mock_repository.go:1338-1361 付近) — user-list timeline の visibility
-//     push-down を inline で再現している。
-//  2. noteVisibleToViewer 共通ヘルパー (mock_repository.go:1693 付近) —
+//  1. MockNoteRepository.ListByUserList 内の inline switch — user-list
+//     timeline の visibility push-down を inline で再現している。
+//  2. noteVisibleToViewer 共通ヘルパー —
 //     MockNoteRepository.canViewerSeeNote と MockNoteReactionRepository.canViewerSeeNote
 //     の両方が内部で叩く判定本体。ListFeatured 系 / ListByUserIDFiltered /
 //     ListMentions / NoteReaction.ListByNoteID 等の経路で間接的に使われる。
@@ -136,14 +135,14 @@ func TestMockVisibilityBranch_MatchesCanSeeNote(t *testing.T) {
 					// CanSeeNote の真偽とは比較せず、ListByUserList=false を固定で要求する。
 					if listVisible {
 						t.Fatalf("user-list timeline は specified visibility を必ず drop するはずだが "+
-							"viewer=%s で note が残った。mock_repository.go の ListByUserList 内 "+
+							"viewer=%s で note が残った。mock_note.go の ListByUserList 内 "+
 							"visibility switch (default 分岐) を確認せよ。", v.name)
 					}
 					// noteVisibleToViewer は CanSeeNote と equal で比較 (両者は宛先 visibleUserIDs を含む)。
 					if helperVisible != canSee {
 						t.Fatalf("noteVisibleToViewer drift on specified: viewer=%s\n"+
 							"  CanSeeNote (internal/core/note/visibility.go) = %v\n"+
-							"  noteVisibleToViewer (internal/testutil/mock_repository.go:1693) = %v\n"+
+							"  noteVisibleToViewer (internal/testutil/mock_note.go) = %v\n"+
 							"=> mock 共通ヘルパー側の visibility 分岐を CanSeeNote に再同期せよ。",
 							v.name, canSee, helperVisible)
 					}
@@ -154,14 +153,14 @@ func TestMockVisibilityBranch_MatchesCanSeeNote(t *testing.T) {
 				if listVisible != canSee {
 					t.Fatalf("ListByUserList visibility drift: visibility=%s viewer=%s\n"+
 						"  CanSeeNote (internal/core/note/visibility.go) = %v\n"+
-						"  ListByUserList mock branch (internal/testutil/mock_repository.go:1338-1361 付近) = %v\n"+
+						"  ListByUserList mock branch (internal/testutil/mock_note.go) = %v\n"+
 						"=> mock 側 inline switch を CanSeeNote に再同期せよ。",
 						vis, v.name, canSee, listVisible)
 				}
 				if helperVisible != canSee {
 					t.Fatalf("noteVisibleToViewer drift: visibility=%s viewer=%s\n"+
 						"  CanSeeNote (internal/core/note/visibility.go) = %v\n"+
-						"  noteVisibleToViewer (internal/testutil/mock_repository.go:1693) = %v\n"+
+						"  noteVisibleToViewer (internal/testutil/mock_note.go) = %v\n"+
 						"=> mock 共通ヘルパー側 visibility 分岐を CanSeeNote に再同期せよ。",
 						vis, v.name, canSee, helperVisible)
 				}

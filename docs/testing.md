@@ -231,7 +231,17 @@ func newSvc(t *testing.T) *Service {
 
 | ファイル | 内容 |
 |---|---|
-| `mock_repository.go` | User, Note, Following, Reaction, Meta, Role, Channel, Chat等 (~20種) |
+| `mock_repository.go` | UserRepository と、列の検査など複数のモックが使う補助 |
+| `mock_user.go` | UserKeypair, UserPublickey, UserPending, UserMemo など、User に付く小さなもの |
+| `mock_auth.go` | AccessToken, Signin, AuthSession, PasswordResetRequest, RegistrationTicket |
+| `mock_note.go` | Note, NoteFavorite, NoteReaction, Poll, PollVote, NoteUnread など |
+| `mock_following.go` | Following, FollowRequest, UserList, UserListFavorite |
+| `mock_antenna_channel.go` | Antenna, Channel と、その既読・お気に入り・ミュート |
+| `mock_clip.go` / `mock_page_flash.go` | Clip / Page, Flash, Gallery |
+| `mock_emoji.go` / `mock_instance.go` | Emoji, AvatarDecoration / Instance |
+| `mock_moderation.go` | AbuseReport, ModerationLog, Role, RoleAssignment など |
+| `mock_meta.go` | Meta, Announcement, Registry, Relay, SystemWebhook, Ad など |
+| `mock_chat.go` | Chat |
 | `mock_drive.go` | DriveFileRepository, DriveFolderRepository |
 | `mock_block_mute.go` | BlockingRepository, MutingRepository, RenoteMutingRepository |
 | `mock_allowlist.go` | AllowlistChecker (mediaproxy用) |
