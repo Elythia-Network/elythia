@@ -448,3 +448,32 @@ func TestCreateMessageToUser_NoApprovalRepoScopeEnforced(t *testing.T) {
 	_, err := svc.CreateMessageToUser(context.Background(), "alice", "bob", "x", "")
 	require.ErrorIs(t, err, corechat.ErrChatScopeViolation)
 }
+
+// **連合 OFF・未確定のメンバーは room message の `to` に載せない (2026-10-31 の監査)。**
+// 載せると deliver の preflight がメッセージ全体を止め、ルームのリモート配送が
+// 黙って全部止まっていた。
+func TestCreateMessageToRoom_LeavesUnavailableLocalMembersOutOfTheAudience(t *testing.T) {
+	repo := newFakeRepo()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := corechat.NewService(repo, idGen, nil, nil, nil)
+	userRepo := testutil.NewMockUserRepository()
+	urls := activitypub.NewURLBuilder("https://local.example")
+	deliverer := &fakeAPDeliverer{}
+	svc.SetAPDelivery(userRepo, activitypub.NewRenderer(urls), urls, deliverer)
+	remoteHost := "remote.example"
+	remoteURI := "https://remote.example/users/bob"
+	userRepo.Users["alice"] = &model.User{ID: "alice", Username: "alice", FederationStatus: model.FederationStatusOn}
+	userRepo.Users["off"] = &model.User{ID: "off", Username: "off", FederationStatus: model.FederationStatusOff}
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", Host: &remoteHost, URI: &remoteURI}
+	repo.Rooms["room"] = &model.ChatRoom{ID: "room", OwnerID: "alice", Name: "r"}
+	repo.Memberships["off:room"] = &model.ChatRoomMembership{ID: "m1", UserID: "off", RoomID: "room"}
+	repo.Memberships["bob:room"] = &model.ChatRoomMembership{ID: "m2", UserID: "bob", RoomID: "room"}
+
+	_, err := svc.CreateMessageToRoom(context.Background(), "alice", "room", "hello room", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, deliverer.called, "リモートのメンバーへは配送すること")
+	body := string(deliverer.lastBody)
+	assert.Contains(t, body, remoteURI)
+	assert.Contains(t, body, "https://local.example/users/alice")
+	assert.NotContains(t, body, "https://local.example/users/off", "連合 OFF のメンバーの URI が外へ出ている")
+}
