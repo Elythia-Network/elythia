@@ -1419,6 +1419,13 @@ func (s *Service) tryDeliverRoomMessage(msg *model.ChatMessage, room *model.Chat
 			owner = u
 		}
 		if u.IsLocal() {
+			// **連合 OFF・未確定のメンバーは `to` に載せない (2026-10-31 の監査)。**
+			// 載せると deliver の preflight が「利用不可の参照がある」としてメッセージ
+			// 全体の配送を止め、ルームのリモート配送が黙って全部止まっていた。
+			// 参加と招待の API でも組み合わせを断るが、既にある行の分はここで除く。
+			if !corelocalfederation.IsExternallyAvailable(u) {
+				continue
+			}
 			memberURIs = append(memberURIs, s.urls.UserURI(u.ID))
 		} else if u.URI != nil && *u.URI != "" {
 			memberURIs = append(memberURIs, *u.URI)

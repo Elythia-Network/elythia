@@ -1013,6 +1013,18 @@ func (h *Handler) RoomsTransferOwnership(c echo.Context) error {
 	if !target.IsLocal() {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_MEMBER", "Not a member.", "05af3d8f-a5d9-4282-8cf0-4fcc5f4e1734"))
 	}
+	// 連合 OFF・未確定の利用者を、リモートの参加者がいるルームの owner にしない
+	// (join / invitations と同じ判定。2026-10-31 の監査のレビュー)。owner はルームの
+	// `attributedTo` に載り、招待の Invite の actor になる。
+	if !corelocalfederation.IsExternallyAvailable(target) {
+		remote, ferr := h.roomHasRemoteParticipants(room.ID)
+		if ferr != nil {
+			return apierr.JSONInternalError(c)
+		}
+		if remote {
+			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+		}
+	}
 	// **owner の membership 行を入れ替える。** ownerId を書き換えるだけだと
 	// 新 owner は解除できない mute を抱え、旧 owner は room から締め出される
 	// (repository.TransferRoomOwnership のコメントに詳しい)。
@@ -1523,6 +1535,25 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 	if inviteeUser != nil && !inviteeUser.IsLocal() && !corelocalfederation.IsExternallyAvailable(user) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 	}
+	// **連合 OFF・未確定の利用者とリモートの利用者を同じルームに入れない (2026-10-31 の
+	// 監査)。** どちらの向きでも、揃った時点で全メンバーの投稿のリモート配送が
+	// deliver の preflight で止まる。招待の時点で断る (参加の API も同じ判定を持つ)。
+	if inviteeUser != nil {
+		var mixes bool
+		var ferr error
+		switch {
+		case inviteeUser.IsLocal() && !corelocalfederation.IsExternallyAvailable(inviteeUser):
+			mixes, ferr = h.roomHasRemoteParticipants(req.RoomID)
+		case !inviteeUser.IsLocal():
+			mixes, ferr = h.roomHasUnavailableLocalParticipants(room)
+		}
+		if ferr != nil {
+			return apierr.JSONInternalError(c)
+		}
+		if mixes {
+			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+		}
+	}
 	inv := &model.ChatRoomInvitation{
 		ID: h.idGen.Generate(time.Now()), UserID: req.UserID, RoomID: req.RoomID,
 	}
@@ -1617,6 +1648,18 @@ func (h *Handler) InvitationsAccept(c echo.Context) error {
 	}
 	if rerr == nil && room.Host != nil && *room.Host != "" && !corelocalfederation.IsExternallyAvailable(user) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+	}
+	// rooms/join と同じく、リモートの参加者がいるローカル所有のルームへ連合 OFF・
+	// 未確定の利用者を入れない (2026-10-31 の監査)。招待を受けてから OFF に
+	// 切り替えて承諾する経路がここに来る。
+	if rerr == nil && !corelocalfederation.IsExternallyAvailable(user) {
+		remote, ferr := h.roomHasRemoteParticipants(req.RoomID)
+		if ferr != nil {
+			return apierr.JSONInternalError(c)
+		}
+		if remote {
+			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+		}
 	}
 	if rerr == nil && room.OwnerID == user.ID {
 		_ = h.repo.DeleteInvitation(inv.ID)
@@ -1972,6 +2015,18 @@ func (h *Handler) RoomsJoin(c echo.Context) error {
 	if rerr == nil && joinRoom.Host != nil && *joinRoom.Host != "" && !corelocalfederation.IsExternallyAvailable(user) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 	}
+	// **ローカル所有のルームでも、リモートの参加者がいれば連合 OFF・未確定の利用者は
+	// 入れない (2026-10-31 の監査)。** 入れると、以後の全メンバーの投稿が deliver の
+	// preflight で止まり、ルームのリモート配送が黙って全部止まっていた。
+	if rerr == nil && !corelocalfederation.IsExternallyAvailable(user) {
+		remote, ferr := h.roomHasRemoteParticipants(req.RoomID)
+		if ferr != nil {
+			return apierr.JSONInternalError(c)
+		}
+		if remote {
+			return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
+		}
+	}
 	if rerr == nil && joinRoom.OwnerID == user.ID {
 		_ = h.repo.DeleteInvitation(inv.ID)
 		return c.NoContent(http.StatusNoContent)
@@ -2159,4 +2214,113 @@ func (h *Handler) UnreadCount(c echo.Context) error {
 	user := middleware.GetUser(c)
 	count, _ := h.repo.CountUnread(user.ID)
 	return c.JSON(http.StatusOK, map[string]any{"count": count})
+}
+
+// roomHasRemoteParticipants reports whether the room has a remote member or a
+// pending invitation to a remote user. Used to keep federation-disabled local
+// users out of federated rooms (2026-10-31 の監査)。userRepo が無い構成では
+// 判定できないので false を返す (InvitationsCreate の degraded path と同じ)。
+func (h *Handler) roomHasRemoteParticipants(roomID string) (bool, error) {
+	if h.userRepo == nil {
+		return false, nil
+	}
+	users, err := h.roomParticipantUsers(roomID)
+	if err != nil {
+		return false, err
+	}
+	for _, u := range users {
+		if !u.IsLocal() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// roomHasUnavailableLocalParticipants reports whether the room's owner, a member
+// or a pending invitee is a local user the federation cannot serve (連合 OFF /
+// 未確定)。Inviting a remote user into such a room would stall its delivery.
+func (h *Handler) roomHasUnavailableLocalParticipants(room *model.ChatRoom) (bool, error) {
+	if h.userRepo == nil || room == nil {
+		return false, nil
+	}
+	users, err := h.roomParticipantUsers(room.ID)
+	if err != nil {
+		return false, err
+	}
+	owner, err := h.participantUser(room.OwnerID, nil)
+	if err != nil {
+		return false, err
+	}
+	if owner != nil {
+		users = append(users, owner)
+	}
+	for _, u := range users {
+		if u.IsLocal() && !corelocalfederation.IsExternallyAvailable(u) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// participantUser returns a participant's user row: the preloaded row when the
+// listing carried one, else a read by id. A deleted user is nil; a database
+// error is returned (**DB 障害を「いない」に丸めない**、#2792)。
+func (h *Handler) participantUser(userID string, preloaded *model.User) (*model.User, error) {
+	if preloaded != nil {
+		return preloaded, nil
+	}
+	u, err := h.userRepo.FindByID(userID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
+// roomParticipantUsers lists the user rows of the room's members and pending
+// invitees (the owner is not a membership row). Both listings preload the user
+// row in the real repository, so this rarely queries per participant. Deleted
+// users are left out.
+func (h *Handler) roomParticipantUsers(roomID string) ([]*model.User, error) {
+	members, err := h.repo.ListMembersByRoom(roomID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.User, 0, len(members))
+	for _, m := range members {
+		u, err := h.participantUser(m.UserID, m.User)
+		if err != nil {
+			return nil, err
+		}
+		if u != nil {
+			out = append(out, u)
+		}
+	}
+	// 招待は定員に縛られずに溜まる (invitations/create は今のメンバー数しか数えない)
+	// ので、id の cursor で最後まで引く。一覧は id の降順で、untilId は「それより
+	// 小さい id」を返す。
+	const page = 100
+	untilID := ""
+	for range 1000 {
+		invitations, err := h.repo.ListInvitationsByRoom(roomID, "", untilID, page)
+		if err != nil {
+			return nil, err
+		}
+		for _, inv := range invitations {
+			u, err := h.participantUser(inv.UserID, inv.User)
+			if err != nil {
+				return nil, err
+			}
+			if u != nil {
+				out = append(out, u)
+			}
+		}
+		if len(invitations) < page {
+			break
+		}
+		untilID = invitations[len(invitations)-1].ID
+	}
+	return out, nil
 }
