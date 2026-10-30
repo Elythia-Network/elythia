@@ -88,15 +88,18 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 足したルートとパッケージが反映されていなかった。#3697 で数え直した (ルートは `internal/server` の
 非テストの `.go` の構文木で、`api` への `POST` / `GET` / `Match` / `Any` の呼び出しを数えた)。
 
-`/api` の外は `s.echo` へ直接登録していて、`setupRoutes()` の本文の登録の式文は 64
-(`GET` 50 / `POST` 5 / `OPTIONS` 2 / `Any` 1 / `File` 4 / `Static` 2。4.2 の「/api のルートの
-登録」の前後の数の表と同じ数え方で、`if` の中も数える)。`Any` は 1 呼び出しで全メソッドを登録するので、
+`/api` の外は `s.echo` へ直接登録していて、`setupRoutes()` とその節 (4.2 の「setupRoutes の節」、
+#3901) の本文の登録の式文は 65 (`GET` 51 / `POST` 5 / `OPTIONS` 2 / `Any` 1 / `File` 4 / `Static` 2。
+4.2 の「/api のルートの登録」の前後の数の表と同じ数え方で、`if` の中も数える)。内訳は
+`wireFederationRoutes` 41・`wireFrontendRoutes` 17・`setupRoutes()` 5・`wireAdmin` 1・
+`wireStreaming` 1。前に書いていた 64 (`GET` 50) は、#3901 で節へ移す前の `develop`
+(`e083dfe4b7`) を同じ数え方で数えると 65 (`GET` 51) で、1 つ足りなかった。`Any` は 1 呼び出しで全メソッドを登録するので、
 ルート単位に展開すると増える。ほかに `/debug/pprof` 配下が 8 (`pprofGroup` への登録)。
 `setupRoutes()` から呼ぶ関数の中の登録 (`registerFrontendAssets` の `/vite/*` と `/embed_vite/*`、
 `wireMetricsEndpoint` の `/metrics`、`serveStaticAssetDir` の `/twemoji/*` と `/fluent-emoji/*`) は、
 この数に入れていない。
 
-**`if` の中にあり、設定次第では登録されないもの**は、64 のうち 7 (`Static` 2・`File` 4・CSP report
+**`if` の中にあり、設定次第では登録されないもの**は、65 のうち 7 (`Static` 2・`File` 4・CSP report
 の `POST`) と、pprof の 8。上の関数の中の登録のうち、`serveStaticAssetDir` の 2 つも
 `os.Stat` の `if` の中で呼ぶので、置き場所が無ければ登録されない。
 
@@ -336,7 +339,8 @@ server.New() → setupRoutes()
   │   WebSocket / middleware
   ├→ /api のルートの登録。handler をすべて作った後、プラグインの準備より前で、
   │   routes_<領域>.go の register…Routes を 1 回ずつ呼ぶ (24 個)。/api の外のルート
-  │   (ActivityPub・SSR・well-known など) は s.echo へ元の位置で登録する
+  │   (ActivityPub・SSR・well-known など) は s.echo へ元の位置で登録する (#3901 から、
+  │   ActivityPub・SSR・discovery・OAuth・inbox は /api の登録より前の節 wireFederationRoutes)
   └→ プラグインの準備 (失敗したらここで return) / /api の catchall / 静的ファイル /
       SPA の catchall (静的ファイルと SPA の catchall は #3901 から節 wireFrontendRoutes)
 
@@ -2161,6 +2165,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `wireFrontendRoutes` | `wiring_frontend_routes.go` | /api の外のフロントエンドの配信 (アセット・twemoji・identicon・manifest・Service Worker・埋め込みページ) と SPA の catchall。プラグインの準備の `return` より後 | 13 | 0 |
 | `wireAdmin` | `wiring_admin.go` | 管理画面の API の handler と配線 (通報の webhook・メール、ロール、絵文字の申請、連合など) と、DB のバックアップの管理画面の handler・再認証・`/backup-download` | 69 | 4 (`adminHandler`・`emojiApplicationService`・`emojiApplicationHandler`・`backupHandler`) |
 | `wireStreaming` | `wiring_streaming.go` | ストリーミングの接続の管理 (lookup と、server role で始める購読)、server と queue の統計の publisher、既存の service への publisher の注入、reversi・バブルゲームの対戦・chat の service とチャンネルの登録、`/streaming` の登録 | 64 | 7 (`abuseCreatedNotifier`・`serverStatsPub`・`reversiService`・`bubbleVersusPublisher`・`bubbleVersusService`・`chatService`・`chatRoomFactory`) |
+| `wireFederationRoutes` | `wiring_federation_routes.go` | /api の外の、ActivityPub のリソースと同じ path の SSR・フィード (`/notes/:id`・`/@:acct`)、discovery (well-known・nodeinfo)、OAuth2 / IndieAuth、inbox の登録と、連合の API の handler の配線 | 43 | 5 (`ssrMeta`・`feedH`・`twemojiBadge`・`oauthHandler`・`inboxHandler`) |
 
 数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 
