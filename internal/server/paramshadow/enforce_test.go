@@ -91,6 +91,10 @@ func TestEnforcedRejectsWithUpstreamsAnswer(t *testing.T) {
 		{"null for a non-nullable property", `{"noteId":"abc","flag":null}`, "#/properties/flag/type", "must be boolean"},
 		{"maximum", `{"noteId":"abc","limit":101}`, "#/properties/limit/maximum", "must be <= 100"},
 		{"not an object", `[]`, "#/type", "must be object"},
+		// 対になっていないサロゲートと不正なUTF-8は、U+FFFDに置き換えた値で判定する
+		// (2026-10-31の監査)。飛ばすと1バイト混ぜるだけで拒否の検証を迂回できた。
+		{"lone surrogate", `{"noteId":"\ud800"}`, "#/properties/noteId/format", `must match format "misskey:id"`},
+		{"invalid utf-8", "{\"noteId\":\"abc\",\"limit\":101,\"x\":\"\xff\"}", "#/properties/limit/maximum", "must be <= 100"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			wantInvalidParam(t, serveEnforced(t, nil, http.MethodPost, "/api/t/post", echo.MIMEApplicationJSON, tt.body), tt.param, tt.reason)
@@ -124,7 +128,6 @@ func TestEnforcedLeavesWhatItCannotValidateToTheHandler(t *testing.T) {
 		{"too large", []Option{WithMaxBody(64)}, http.MethodPost, "/api/t/post", echo.MIMEApplicationJSON, large},
 		{"too many values", []Option{WithMaxValues(4)}, http.MethodPost, "/api/t/post", echo.MIMEApplicationJSON, `{"noteId":"a-b","x":[1,2,3]}`},
 		{"not json", nil, http.MethodPost, "/api/t/post", echo.MIMETextPlain, `{"noteId":"a-b"}`},
-		{"lone surrogate", nil, http.MethodPost, "/api/t/post", echo.MIMEApplicationJSON, `{"noteId":"\ud800"}`},
 		{"method", nil, http.MethodPut, "/api/t/post", echo.MIMEApplicationJSON, `{"noteId":"a-b"}`},
 		{"GET cast failure", nil, http.MethodGet, "/api/t/get?noteId=abc&limit=x", "", ""},
 	} {

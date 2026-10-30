@@ -72,7 +72,7 @@ func TestRecorderSummarizes(t *testing.T) {
 	r.Record(Event{Endpoint: "x", Kind: KindAgreed, HandlerStatus: 200})
 	r.Record(Event{Endpoint: "x", Kind: KindSkipped, Skip: SkipNotJSON})
 	r.Record(Event{Endpoint: "x", Kind: KindSkipped, Skip: SkipNotJSON})
-	r.Record(Event{Endpoint: "y", Kind: KindSkipped, Skip: SkipLoneSurrogate})
+	r.Record(Event{Endpoint: "y", Kind: KindSkipped, Skip: SkipQuery})
 	if got := buf.lines(t); len(got) != 0 {
 		t.Fatalf("wrote before the interval: %v", got)
 	}
@@ -86,7 +86,7 @@ func TestRecorderSummarizes(t *testing.T) {
 			"schemaPath": "#/properties/text/minLength", "handlerParam": "#/properties/text/type", "handlerStatus": 400.0,
 			"handlerCode": "INVALID_PARAM", "count": 2.0},
 		{"msg": "paramshadow summary", "since": "2026-10-18T12:00:00Z", "seconds": 90.0, "agreed": 1.0, "diverged": 3.0,
-			"skipped": 3.0, "skippedBy": map[string]any{SkipLoneSurrogate: 1.0, SkipNotJSON: 2.0}},
+			"skipped": 3.0, "skippedBy": map[string]any{SkipQuery: 1.0, SkipNotJSON: 2.0}},
 	}
 	if got := buf.lines(t); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("lines =\n%v\nwant\n%v", got, want)

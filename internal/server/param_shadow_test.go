@@ -372,10 +372,13 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 		`"endpoint":"admin/update-meta","kind":"accepted_handler_invalid_param","schemaPath":""`,
 		`"endpoint":"admin/update-meta","kind":"param_mismatch","schemaPath":"#/properties/disableRegistration/type"`,
 		`"msg":"paramshadow summary"`,
-		`"lone_surrogate":1`,
+		`"skipped":0`,
 	} {
 		assert.Contains(t, out, want)
 	}
+	// 対になっていないサロゲートの escape は飛ばさず、U+FFFD に置き換えて検証する
+	// (2026-10-31 の監査)。
+	assert.NotContains(t, out, "lone_surrogate")
 	assert.NotContains(t, out, token)
 	assert.NotContains(t, out, adminToken)
 	assert.NotContains(t, out, "影の検証")

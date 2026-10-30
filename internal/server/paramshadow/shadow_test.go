@@ -153,8 +153,6 @@ func TestMiddlewareClassifies(t *testing.T) {
 			Event{Kind: KindSkipped, Skip: SkipMultipart}},
 		{"compile error", http.MethodPost, "/api/t/broken", `{"noteId":"abc"}`, ok,
 			Event{Kind: KindCompileError}},
-		{"lone surrogate", http.MethodPost, "/api/t/post", string(esc(`{"noteId":"~ud800"}`)), ok,
-			Event{Kind: KindSkipped, Skip: SkipLoneSurrogate}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -575,7 +573,6 @@ func TestMiddlewareReleasesTheSlotOnEveryPath(t *testing.T) {
 		{"too large", `{"noteId":"abc","pad":"` + strings.Repeat("x", 100) + `"}`, SkipTooLarge},
 		{"too many values", `{"noteId":"abc","x":[0,0,0,0,0,0,0,0,0,0]}`, SkipTooManyValues},
 		{"empty body", "", SkipBody},
-		{"lone surrogate", string(esc(`{"noteId":"~ud800"}`)), SkipLoneSurrogate},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()

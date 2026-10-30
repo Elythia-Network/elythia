@@ -39,14 +39,6 @@ const (
 	// SkipMethod: a GET to an endpoint without meta.allowGet (upstream
 	// answers it before the params), or a method other than GET and POST.
 	SkipMethod = "method"
-	// SkipLoneSurrogate: the JSON body escapes a surrogate that is not half
-	// of a pair ("\ud800"). JSON.parse keeps it, encoding/json turns it into
-	// U+FFFD, so enum and uniqueItems could judge differently.
-	SkipLoneSurrogate = "lone_surrogate"
-	// SkipInvalidUTF8: the body or the query is not valid UTF-8. Node and Go
-	// replace the bad bytes with a different number of U+FFFD, which changes
-	// the length ajv counts.
-	SkipInvalidUTF8 = "invalid_utf8"
 	// SkipQuery: a query url.ParseQuery rejects (a ';' or a bad
 	// %-escape). fast-querystring parses it differently.
 	SkipQuery = "unparsable_query"
@@ -191,12 +183,20 @@ func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 // jsonInput decodes a JSON body (already checked by JSONBodyParse) the way
 // upstream's ajv sees it: numbers stay json.Number, so 1e400 is Infinity
 // rather than an error and 10.0 is still an integer.
+//
+// 不正なUTF-8は、本家がajvに渡すのと同じくU+FFFDに置き換えた写しで判定する(Nodeは
+// bodyを文字列にするときに置き換える)。対になっていないサロゲートのescape
+// (`"\ud800"`)は、JSON.parseはそのまま残すがGoのdecoderはU+FFFDにするので、その
+// ままdecodeした値で判定する。どちらも以前は検証を飛ばしていた(`invalid_utf8`・
+// `lone_surrogate`)が、飛ばすとbodyに1バイト混ぜるだけで拒否の検証を迂回できた
+// (2026-10-31の監査)。判定に使うのは写しで、handlerの読むbodyは変わらない。
+// 置き換えの数(Nodeは最大の部分列ごと、Goは連続した不正なバイト列ごとなので
+// Goの方が短くなり、maxLengthは受理側にずれうる)とlone surrogateの同一視(enum・
+// uniqueItemsは拒否側にずれうる)でajvと判定が分かれうるが、正当なクライアントは
+// 送らない入力なので受け入れる(docs/param-shadow.md)。
 func jsonInput(body []byte) input {
 	if !utf8.Valid(body) {
-		return input{skip: SkipInvalidUTF8}
-	}
-	if hasLoneSurrogate(body) {
-		return input{skip: SkipLoneSurrogate}
+		body = bytes.ToValidUTF8(body, []byte("�"))
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
@@ -259,65 +259,6 @@ func queryTooManyValues(rawQuery string, max int) bool {
 	return rawQuery != "" && strings.Count(rawQuery, "&")+1 > max
 }
 
-// hasLoneSurrogate reports whether body, valid JSON, has a \u escape of a
-// surrogate that is not half of a high-low pair.
-func hasLoneSurrogate(body []byte) bool {
-	// 正しいJSONでは、`\`は文字列の中にしか現れない。`\`の無いbodyは走査しない。
-	if bytes.IndexByte(body, '\\') < 0 {
-		return false
-	}
-	for i := 0; i < len(body); i++ {
-		if body[i] != '\\' {
-			continue
-		}
-		if i+1 >= len(body) || body[i+1] != 'u' {
-			// `\\`や`\"`は2文字で1つ。次の文字を飛ばす。
-			i++
-			continue
-		}
-		r, ok := hex4(body, i+2)
-		if !ok {
-			i++
-			continue
-		}
-		switch {
-		case r >= 0xD800 && r <= 0xDBFF:
-			if i+7 < len(body) && body[i+6] == '\\' && body[i+7] == 'u' {
-				if lo, ok := hex4(body, i+8); ok && lo >= 0xDC00 && lo <= 0xDFFF {
-					i += 11
-					continue
-				}
-			}
-			return true
-		case r >= 0xDC00 && r <= 0xDFFF:
-			return true
-		}
-		i += 5
-	}
-	return false
-}
-
-func hex4(b []byte, at int) (rune, bool) {
-	if at+4 > len(b) {
-		return 0, false
-	}
-	var r rune
-	for _, c := range b[at : at+4] {
-		r <<= 4
-		switch {
-		case c >= '0' && c <= '9':
-			r |= rune(c - '0')
-		case c >= 'a' && c <= 'f':
-			r |= rune(c-'a') + 10
-		case c >= 'A' && c <= 'F':
-			r |= rune(c-'A') + 10
-		default:
-			return 0, false
-		}
-	}
-	return r, true
-}
-
 // queryInput builds the params upstream validates for a GET: the query
 // (fastify's fast-querystring, where a repeated key becomes an array of its
 // values) after the cast step, which JSON.parses the string value of every
@@ -330,21 +271,15 @@ func queryInput(rawQuery string, s *paramschema.Schema) input {
 	}
 	data := make(map[string]any, len(q))
 	for k, vs := range q {
-		if !utf8.ValidString(k) {
-			return input{skip: SkipInvalidUTF8}
-		}
-		for _, v := range vs {
-			if !utf8.ValidString(v) {
-				return input{skip: SkipInvalidUTF8}
-			}
-		}
+		// 不正なUTF-8はU+FFFDに置き換えて判定する(jsonInputと同じ理由)。
+		k = strings.ToValidUTF8(k, "�")
 		if len(vs) == 1 {
-			data[k] = vs[0]
+			data[k] = strings.ToValidUTF8(vs[0], "�")
 			continue
 		}
 		arr := make([]any, len(vs))
 		for i, v := range vs {
-			arr[i] = v
+			arr[i] = strings.ToValidUTF8(v, "�")
 		}
 		data[k] = arr
 	}
