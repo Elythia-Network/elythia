@@ -22,6 +22,7 @@ var mustFindWiringSections = map[string]string{
 	"wireFrontendRoutes":    "wiring_frontend_routes.go",
 	"wireAdmin":             "wiring_admin.go",
 	"wireStreaming":         "wiring_streaming.go",
+	"wireFederationRoutes":  "wiring_federation_routes.go",
 }
 
 // wiringSectionName matches the name of a *Server method that holds one part
