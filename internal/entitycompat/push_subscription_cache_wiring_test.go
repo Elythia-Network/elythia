@@ -37,10 +37,51 @@ func TestPushSubscriptionCacheIsShared(t *testing.T) {
 // **変数の名前で突き合わせるので、4 つが同じファイルにあることまで見る。**
 // ローカル変数は別のファイルの同名の変数と別物で、ファイルをまたいで名前が
 // 一致しても同じ instance とは言えない。
+//
+// **例外は setupRoutes から切り出した節 (#3901)。** 節の中で、受け直した名前
+// (`webPushCache := d.webPushCache`) をそのまま渡しているものは、setupRoutes の
+// ファイルにあるものとして数える。節が setupRoutes の同じ名前の変数を受け取る
+// ことは、internal/server の TestSetupRoutesSectionsReceiveSameNamedVariables が見る。
 func pushSubscriptionCacheProblems(fset *token.FileSet, files []*ast.File) []string {
 	var cacheVars []string
 	var deliveryArgs, deleteAccountArgs, swArgs []string
 	sites := map[string]bool{}
+	setupRoutesFile := ""
+	type sectionScope struct {
+		decl    *ast.FuncDecl
+		aliases map[string]bool
+	}
+	var sections []sectionScope
+	aliases := sectionDepsAliases(files)
+	for _, f := range files {
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil || fd.Recv == nil {
+				continue
+			}
+			if fd.Name.Name == "setupRoutes" {
+				setupRoutesFile = fset.Position(fd.Pos()).Filename
+			}
+			names := map[string]bool{}
+			for _, st := range fd.Body.List {
+				if as, ok := st.(*ast.AssignStmt); ok && aliases[as] {
+					names[as.Lhs[0].(*ast.Ident).Name] = true
+				}
+			}
+			if len(names) > 0 {
+				sections = append(sections, sectionScope{decl: fd, aliases: names})
+			}
+		}
+	}
+	// arg は受け渡す式の文字列。節の中で受け直した名前なら setupRoutes のファイルを返す。
+	siteOf := func(n ast.Node, arg string) string {
+		for _, sec := range sections {
+			if n.Pos() >= sec.decl.Body.Pos() && n.End() <= sec.decl.Body.End() && sec.aliases[arg] && setupRoutesFile != "" {
+				return setupRoutesFile
+			}
+		}
+		return fset.Position(n.Pos()).Filename
+	}
 	fileOf := func(n ast.Node) string { return fset.Position(n.Pos()).Filename }
 	inspectServerFiles(files, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -61,15 +102,18 @@ func pushSubscriptionCacheProblems(fset *token.FileSet, files []*ast.File) []str
 			}
 			switch {
 			case exprString(sel) == "processors.NewWebPushProcessor":
-				deliveryArgs = append(deliveryArgs, exprString(node.Args[0]))
-				sites[fileOf(node)] = true
+				arg := exprString(node.Args[0])
+				deliveryArgs = append(deliveryArgs, arg)
+				sites[siteOf(node, arg)] = true
 			case exprString(sel) == "processors.NewDeleteAccountProcessor":
 				// 購読キャッシュは最後の引数 (#3829)。
-				deleteAccountArgs = append(deleteAccountArgs, exprString(node.Args[len(node.Args)-1]))
-				sites[fileOf(node)] = true
+				arg := exprString(node.Args[len(node.Args)-1])
+				deleteAccountArgs = append(deleteAccountArgs, arg)
+				sites[siteOf(node, arg)] = true
 			case exprString(sel) == "apisw.NewHandler":
-				swArgs = append(swArgs, exprString(node.Args[len(node.Args)-1]))
-				sites[fileOf(node)] = true
+				arg := exprString(node.Args[len(node.Args)-1])
+				swArgs = append(swArgs, arg)
+				sites[siteOf(node, arg)] = true
 			}
 		}
 		return true
@@ -145,4 +189,22 @@ func TestPushSubscriptionCacheProblemsRequireOneFile(t *testing.T) {
 	// 同じファイルでも、別の変数を渡したら落とす。
 	fset, files = parse(map[string]string{"a.go": create + strings.Replace(use, "NewDeleteAccountProcessor(n, d, f, p, c)", "NewDeleteAccountProcessor(n, d, f, p, other)", 1)})
 	assert.Len(t, pushSubscriptionCacheProblems(fset, files), 1)
+
+	// setupRoutes から切り出した節 (#3901) が、受け直した名前を渡すなら別のファイルでもよい。
+	const routes = "func (s *Server) setupRoutes() {\n\tc := corewebpush.NewSubscriptionCache(r, d)\n\tprocessors.NewWebPushProcessor(c)\n\tapisw.NewHandler(x, c)\n\ts.wireJobs(jobsDeps{c: c})\n}\n"
+	const section = "func (s *Server) wireJobs(d jobsDeps) {\n\tc := d.c\n\tprocessors.NewDeleteAccountProcessor(n, d, f, p, c)\n}\n"
+	fset, files = parse(map[string]string{"router.go": routes, "jobs.go": section})
+	assert.Empty(t, pushSubscriptionCacheProblems(fset, files), "節が受け直した名前を渡すなら問題は無い")
+
+	// 節の中でも、受け直していない同じ名前 (節の中で作り直したものなど) は数えない。
+	fset, files = parse(map[string]string{"router.go": routes, "jobs.go": strings.Replace(section, "c := d.c", "c := other(d)", 1)})
+	got = pushSubscriptionCacheProblems(fset, files)
+	require.Len(t, got, 1)
+	assert.Contains(t, got[0], "別々のファイル")
+
+	// 受け直しは、名前が wire… の *Server のメソッドで、引数が …Deps のときだけ。
+	fset, files = parse(map[string]string{"router.go": routes, "jobs.go": strings.Replace(section, "wireJobs", "buildJobs", 1)})
+	got = pushSubscriptionCacheProblems(fset, files)
+	require.Len(t, got, 1)
+	assert.Contains(t, got[0], "別々のファイル")
 }

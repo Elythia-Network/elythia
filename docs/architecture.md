@@ -2151,6 +2151,10 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   `setupRoutes()` を返す。受け渡しが同じ名前なので、移す前の 1 つの関数と同じ文を同じ順に持つ。
   文がファイルをまたぐので、順序は行ではなく本文の添字で比べる (今使っているのは stream の
   チャンネルの登録を見る 3 つ)
+- **変数の名前を同じファイルの中でだけ突き合わせるゲートは、節の受け直しを `setupRoutes()` の
+  変数として数える。** `TestPushSubscriptionCacheIsShared` は、節の中で受け直した名前を
+  そのまま渡す呼び出しを、`setupRoutes()` のファイルにあるものとして扱う (アカウントの削除の
+  processor が `wireBackgroundJobs` へ移ったため)
 - **`:=` の右辺で作り方を見るゲートは、受け直し `x := d.x` を数えない。** `internal/entitycompat` の
   `sectionDepsAliases` が受け直しの文を返す (今使っているのは `TestCaptchaReloadIsWired`)
 - **範囲の中で `:=` で受け直すだけの `err` は渡さない。** `wireAdmin` の範囲は `setupRoutes()` の
@@ -2167,6 +2171,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `wireStreaming` | `wiring_streaming.go` | ストリーミングの接続の管理 (lookup と、server role で始める購読)、server と queue の統計の publisher、既存の service への publisher の注入、reversi・バブルゲームの対戦・chat の service とチャンネルの登録、`/streaming` の登録 | 64 | 7 (`abuseCreatedNotifier`・`serverStatsPub`・`reversiService`・`bubbleVersusPublisher`・`bubbleVersusService`・`chatService`・`chatRoomFactory`) |
 | `wireFederationRoutes` | `wiring_federation_routes.go` | /api の外の、ActivityPub のリソースと同じ path の SSR・フィード (`/notes/:id`・`/@:acct`)、discovery (well-known・nodeinfo)、OAuth2 / IndieAuth、inbox の登録と、連合の API の handler の配線 | 43 | 5 (`ssrMeta`・`feedH`・`twemojiBadge`・`oauthHandler`・`inboxHandler`) |
 | `wireAccounts` | `wiring_accounts.go` | users の API の handler の配線 (検索・関係・リモートの統計・リスト) と、i (自分のアカウント) の API の handler の配線 (プロフィール・2FA・アカウントの移行・エクスポートとインポート・アカウントの削除・webhook) | 65 | 2 (`remoteStatsFetcher`・`accountMover`) |
+| `wireBackgroundJobs` | `wiring_background_jobs.go` | 定期と後続のジョブの processor (リモートのノートの掃除・期限切れのミュート・毎日の掃除・リアクションの flush・アカウントの削除)、chart の管理と cron の processor、配送と受信の健全性、インスタンスのメタデータの取り直し、起動時の retention の集計。部品を停止の一覧 (4.3) へ登録する順は元のまま | 25 | 6 (`flushProcessor`・`deleteAccountProcessor`・`deliveryHealth`・`inboxHealth`・`chartProcessor`・`instanceRefreshProc`) |
 
 数え方: 受け取る名前は `…Deps` のフィールドの数、返す名前は `return` の値の数。
 
