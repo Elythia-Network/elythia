@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/following"
+	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/core/wordmute"
@@ -692,6 +693,17 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusForbidden, apierr.Error(
 				"YOUR_ACCOUNT_MOVED", "You have moved your account.",
 				"56f20ec9-fd06-4fa5-841b-edd6d7d4fa31",
+			))
+		}
+		// **連合 OFF・未確定のアカウントは移行先にもならない** (ローカル専用アカウントの
+		// 設計 7.8)。alsoKnownAs は「このアカウントへ移ってよい」と移行元に告げる印で、
+		// 受け取る側の Move は移行先の状態を見ない。UI (migration.vue) だけが止めていて
+		// API では設定できた (2026-10-31 の監査)。i/move と同じ FEDERATION_DISABLED で断る。
+		// 空の配列 (= 解除) は通す。ON のときに設定してから OFF にした利用者が消せなくなる。
+		if len(*req.AlsoKnownAs) > 0 && !corelocalfederation.IsExternallyAvailable(me) {
+			return c.JSON(http.StatusBadRequest, apierr.Error(
+				"FEDERATION_DISABLED", "Account aliases are unavailable while federation is disabled for this account.",
+				"6f0e3d5c-2b1a-4c8e-9d7f-3a5b1c2d4e6f",
 			))
 		}
 		if len(*req.AlsoKnownAs) > 10 {
