@@ -109,7 +109,7 @@ upstream にも提案できるが、frontend 側 (TS) に対しても drop-in �
 2. `bundle.User.Host != nil && *bundle.User.Host != ""` なら `h.remoteStatsFetcher.Fetch(ctx, host, username)` 呼び出し
 3. 戻り値 `*RemoteUserStatsView` が non-nil なら `detailed.NotesCount` / `FollowersCount` / `FollowingCount` を上書き
 
-`internal/server/router.go` の wiring で `corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, s.outboundOpts()...)` を生成して adapter で `users.Handler` に注入。
+`internal/server/wiring_accounts.go` の wiring (#3901 より前は `router.go`) で `corefederation.NewRemoteStatsFetcher(s.config.AllowedPrivateNetworks, s.config.UserAgent, s.outboundOpts()...)` を生成して adapter で `users.Handler` に注入。
 
 ## 6. 関連
 

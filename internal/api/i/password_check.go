@@ -15,7 +15,7 @@ import (
 )
 
 // SetPasswordFailureGuard attaches the per-account budget for wrong current
-// passwords. nil disables it (tests only; router.go always wires it).
+// passwords. nil disables it (tests only; internal/server always wires it).
 func (h *Handler) SetPasswordFailureGuard(g passwordguard.Guard) {
 	h.passwordGuard = g
 }
