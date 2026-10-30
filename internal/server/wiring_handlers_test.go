@@ -64,7 +64,8 @@ func TestBuildHandlersFillsEveryField(t *testing.T) {
 // への代入 (`for _, hSvcs.<欄> = range …`)、別名を通した中身の上書き
 // (`*xHandler = …`)、apiHandlers のポインタレシーバのメソッドの呼び出し。
 func TestSetupRoutesAliasesEveryBuiltHandler(t *testing.T) {
-	_, fd := setupRoutesDecl(t)
+	// 節 (#3901) の中の書き換えも見るため、節を展開した本文を読む。
+	_, fd := assembledSetupRoutes(t)
 	body := fd.Body
 
 	fields := map[string]bool{}

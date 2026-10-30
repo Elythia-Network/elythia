@@ -237,7 +237,9 @@ func setupRoutesDecl(t *testing.T) (*token.FileSet, *ast.FuncDecl) {
 // 1 つも登録されなくなる。プラグインの登録 (setupPlugins) も return の後なので、
 // 組み込みが先という元の順もこれで保たれる。
 func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
-	fset, fd := setupRoutesDecl(t)
+	// 節 (#3901) を展開した本文を読む。文がファイルをまたぐので、順序は行ではなく
+	// 本文の直下の文の添字で比べる。
+	_, fd := assembledSetupRoutes(t)
 	body := fd.Body
 
 	isRegister := func(call *ast.CallExpr) bool {
@@ -247,7 +249,7 @@ func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
 
 	// 本文の直下の式文としての呼び出し。
 	var topLevel []int
-	for _, st := range body.List {
+	for i, st := range body.List {
 		es, ok := st.(*ast.ExprStmt)
 		if !ok {
 			continue
@@ -256,7 +258,7 @@ func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
 		if !ok || !isRegister(call) {
 			continue
 		}
-		topLevel = append(topLevel, fset.Position(call.Pos()).Line)
+		topLevel = append(topLevel, i)
 		require.Len(t, call.Args, 1)
 		inner, ok := call.Args[0].(*ast.CallExpr)
 		require.True(t, ok, "registerQueueHandlers の引数が builtinQueueHandlers(...) でない")
@@ -266,47 +268,51 @@ func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
 
 	// 関数リテラルの中も含めた、すべての呼び出し。
 	all, direct := 0, 0
-	var pluginLines []int
-	ast.Inspect(body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		if isRegister(call) {
-			all++
-		}
-		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-			switch sel.Sel.Name {
-			case "setupPlugins":
-				pluginLines = append(pluginLines, fset.Position(call.Pos()).Line)
-			case "Handle":
-				if x, ok := sel.X.(*ast.SelectorExpr); ok && x.Sel.Name == "queueServer" {
-					direct++
+	var pluginAt []int
+	for i, st := range body.List {
+		ast.Inspect(st, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if isRegister(call) {
+				all++
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				switch sel.Sel.Name {
+				case "setupPlugins":
+					pluginAt = append(pluginAt, i)
+				case "Handle":
+					if x, ok := sel.X.(*ast.SelectorExpr); ok && x.Sel.Name == "queueServer" {
+						direct++
+					}
 				}
 			}
-		}
-		return true
-	})
+			return true
+		})
+	}
 	// setupRoutes 自身の return だけを集める (関数リテラルの return は別の関数のもの)。
-	var returnLines []int
-	ast.Inspect(body, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.FuncLit:
-			return false
-		case *ast.ReturnStmt:
-			returnLines = append(returnLines, fset.Position(n.Pos()).Line)
-		}
-		return true
-	})
+	var returnAt []int
+	for i, st := range body.List {
+		ast.Inspect(st, func(n ast.Node) bool {
+			switch n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.ReturnStmt:
+				returnAt = append(returnAt, i)
+			}
+			return true
+		})
+	}
 	require.Len(t, topLevel, 1, "setupRoutes の本文の直下で s.registerQueueHandlers(builtinQueueHandlers(...)) を 1 回だけ呼ぶ")
 	require.Equal(t, 1, all, "registerQueueHandlers を本文の直下以外 (関数リテラル・go 文・if の中など) でも呼んでいる")
-	require.Len(t, pluginLines, 1, "setupRoutes に setupPlugins の呼び出しが無い (rename した?)")
+	require.Len(t, pluginAt, 1, "setupRoutes に setupPlugins の呼び出しが無い (rename した?)")
 	// 抽出が空振りしたら落とす。途中の return を本当に無くしたなら、この検査ごと見直す。
-	require.NotEmpty(t, returnLines, "setupRoutes の return を 1 つも拾えていない")
-	for _, l := range returnLines {
-		assert.Less(t, topLevel[0], l, "組み込みの handler の登録が %d 行目の return より後にある", l)
+	require.NotEmpty(t, returnAt, "setupRoutes の return を 1 つも拾えていない")
+	for _, at := range returnAt {
+		assert.Less(t, topLevel[0], at, "組み込みの handler の登録が本文の %d 番目の文の return より後にある", at)
 	}
-	assert.Less(t, topLevel[0], pluginLines[0], "組み込みの handler の登録は setupPlugins より前に置く")
+	assert.Less(t, topLevel[0], pluginAt[0], "組み込みの handler の登録は setupPlugins より前に置く")
 	assert.Zero(t, direct, "setupRoutes で s.queueServer.Handle を直接呼んでいる。builtinQueueHandlers の一覧に足すこと")
 }
 
@@ -320,7 +326,7 @@ func TestSetupRoutesRegistersBuiltinQueueHandlersOnce(t *testing.T) {
 // (入れ替えると、setter を呼んだ値と登録する値が分かれうる)。欄の書き忘れ
 // (nil の processor) も落とす。
 func TestSetupRoutesPassesSetterConfiguredProcessors(t *testing.T) {
-	_, fd := setupRoutesDecl(t)
+	_, fd := assembledSetupRoutes(t)
 
 	// setupRoutes の本文の直下の `:=` で定義した名前と、その回数。
 	defined := map[string]int{}
