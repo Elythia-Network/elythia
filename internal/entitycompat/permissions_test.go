@@ -166,12 +166,12 @@ func routeRegistrationsFrom(names, srcs []string) (map[string]string, error) {
 
 // 本家のendpointのディレクトリを走査して作るgoldenに、本家のVitestのunit test
 // (`notes/create.test.ts`など)から作った偽のendpointが混ざっていないこと (#3369)。
-// tools/permspec・securespec・erroriddiffが`.test.ts`を飛ばさないと、作り直した
-// ときに`notes/create.test`のような項目が入る。
+// tools/erroriddiffが`.test.ts`を飛ばさないと、作り直したときに
+// `notes/create.test`のような項目が入る。本家のmetaはupstream_paramdefs.jsonから
+// 読む (upstreamMetas)。こちらはendpoint-list.tsの一覧から作るので、unit testは入らない。
 func TestGoldensHaveNoUpstreamUnitTests(t *testing.T) {
 	names := map[string][]string{}
 	for _, file := range []string{
-		"golden_permissions.json", "golden_oauth_kinds.json", "golden_cache_sec.json",
 		"golden_error_ids.json", "golden_error_status.json", "golden_error_kinds.json",
 	} {
 		raw, err := os.ReadFile("testdata/" + file)
@@ -186,15 +186,6 @@ func TestGoldensHaveNoUpstreamUnitTests(t *testing.T) {
 			names[file] = append(names[file], ep)
 		}
 	}
-	raw, err := os.ReadFile("testdata/golden_secure_endpoints.json")
-	if err != nil {
-		t.Fatalf("read golden_secure_endpoints.json: %v", err)
-	}
-	var secure []string
-	if err := json.Unmarshal(raw, &secure); err != nil {
-		t.Fatalf("parse golden_secure_endpoints.json: %v", err)
-	}
-	names["golden_secure_endpoints.json"] = secure
 	for file, eps := range names {
 		// 何も読めなかったら落とす (書式が変わって抽出が空振りしたとき)。
 		if len(eps) == 0 {
