@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coretimeline "github.com/elythia-network/elythia/internal/core/timeline"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -55,7 +56,7 @@ func TestTimeline_Cache_DropDuringBuildIsNotStored(t *testing.T) {
 		return []*model.Note{noteRepo.Notes[note1]}, nil
 	}
 	c1, rec1 := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
-	require.NoError(t, h.serveTimeline(c1, "local", dropping, false))
+	require.NoError(t, h.serveTimeline(c1, "local", id.NormalizeCursor, dropping, false))
 	require.Equal(t, http.StatusOK, rec1.Code)
 
 	// 1 回目は捨てる前に組み立て始めたので積まれていない。2 回目は読み直す。
@@ -65,7 +66,7 @@ func TestTimeline_Cache_DropDuringBuildIsNotStored(t *testing.T) {
 		return []*model.Note{}, nil
 	}
 	c2, rec2 := newJSONRequest(t, "/api/notes/local-timeline", `{}`)
-	require.NoError(t, h.serveTimeline(c2, "local", counting, false))
+	require.NoError(t, h.serveTimeline(c2, "local", id.NormalizeCursor, counting, false))
 	assert.Equal(t, 1, calls, "the response built across the drop was not cached")
 	var resp []map[string]any
 	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp))

@@ -691,7 +691,7 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 	if !isMod && (file.UserID == nil || *file.UserID != user.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

@@ -103,8 +103,8 @@ func registerIRoutes(api apiRoutes, iHandler *i.Handler, webhookHandler *apiwebh
 
 	api.POST("/i/pages", pagesHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:pages"))
 
-	api.POST("/i/flashs", flashHandler.My, middleware.RequireAuth(), middleware.RequireScope("read:flash"))
-	api.POST("/i/flashs/likes", flashHandler.MyLikes, middleware.RequireAuth(), middleware.RequireScope("read:flash-likes"))
+	api.POST("/i/flashs", flashHandler.IFlashs, middleware.RequireAuth(), middleware.RequireScope("read:flash"))
+	api.POST("/i/flashs/likes", flashHandler.IFlashsLikes, middleware.RequireAuth(), middleware.RequireScope("read:flash-likes"))
 
 	api.POST("/i/read-announcement", announcementHandler.ReadAnnouncement, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 }

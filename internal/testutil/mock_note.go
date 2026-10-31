@@ -653,12 +653,12 @@ func (m *MockNoteRepository) ListRenotesByUser(userID, renoteID string) ([]*mode
 // ListMentions accepts the `following` flag for signature parity but does not
 // filter on it: the mock has no following graph, so the followee restriction
 // is exercised by the real-DB repository test instead (#1554)。
-func (m *MockNoteRepository) ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string) ([]*model.Note, error) {
+func (m *MockNoteRepository) ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string, ascending bool) ([]*model.Note, error) {
 	_ = following
 	if limit <= 0 {
 		limit = 10
 	}
-	return m.listFiltered(func(n *model.Note) bool {
+	out := m.listFiltered(func(n *model.Note) bool {
 		// viewer (= mention 対象 = userID) が見られる note のみ (#1441)。
 		if !m.canViewerSeeNote(userID, n) {
 			return false
@@ -683,7 +683,18 @@ func (m *MockNoteRepository) ListMentions(userID, visibility string, following b
 			}
 		}
 		return false
-	}, untilID, sinceID, limit), nil
+	}, untilID, sinceID, 0)
+	// 本物と同じく、並びは ascending で決めてから limit で切る (#3369)。
+	sort.SliceStable(out, func(a, b int) bool {
+		if ascending {
+			return out[a].ID < out[b].ID
+		}
+		return out[a].ID > out[b].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *MockNoteRepository) SearchByTag(tagGroups [][]string, viewerID string, limit int, sinceID, untilID string, filter model.NoteSearchTagFilter) ([]*model.Note, error) {

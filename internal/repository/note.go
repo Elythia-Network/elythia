@@ -191,7 +191,9 @@ type NoteRepository interface {
 	// SQL で行うことで handler の post-fetch 振り分けによる under-fill を解消する
 	// (#1451)。following=true のとき note.userId が viewer の followee または
 	// viewer 自身に限定する (upstream mentions.ts following param、#1554)。
-	ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string) ([]*model.Note, error)
+	// The order is ascending when ascending is set (upstream notes/mentions
+	// sorts by `ps.sinceDate || ps.sinceId`, not by the cursors it keeps).
+	ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string, ascending bool) ([]*model.Note, error)
 	// SearchByTag returns notes carrying tag that viewerID is allowed to see.
 	// viewerID 空文字は匿名 (public/home のみ)。discovery 系の tag 検索は
 	// ID 既知公開 (notes/show) doctrine の対象外なので、core/note.CanSeeNote と
@@ -1204,7 +1206,7 @@ func (r *noteRepository) ListRenotesByUser(userID, renoteID string) ([]*model.No
 	return notes, nil
 }
 
-func (r *noteRepository) ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string) ([]*model.Note, error) {
+func (r *noteRepository) ListMentions(userID, visibility string, following bool, limit int, sinceID, untilID string, ascending bool) ([]*model.Note, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1244,12 +1246,16 @@ func (r *noteRepository) ListMentions(userID, visibility string, following bool,
 	if following {
 		q = q.Where(`("userId" IN (SELECT "followeeId" FROM "following" WHERE "followerId" = ?) OR "userId" = ?)`, userID, userID)
 	}
-	// upstream mentions.ts:69 は makePaginationQuery を使わず、sinceId/sinceDate が
+	// upstream mentions.ts:69 は makePaginationQuery の並びを上書きし、sinceId/sinceDate が
 	// あれば untilId の有無に関わらず ASC、無ければ DESC で order する。汎用
 	// paginationOrder (ASC は sinceID && !untilID のみ) と異なるので mentions 専用
 	// の order に揃える (#1948-18)。
+	//
+	// **並びはカーソルから決めず、呼び出し側が渡す (#3369)。** makePaginationQuery は
+	// untilId があれば sinceDate を捨てるが、並びは捨てた sinceDate も見るので ASC に
+	// なる。カーソルだけからは区別できない。
 	mentionsOrder := "id DESC"
-	if sinceID != "" {
+	if ascending {
 		mentionsOrder = "id ASC"
 	}
 	q = q.Order(mentionsOrder).Limit(limit)

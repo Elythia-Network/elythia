@@ -22,6 +22,11 @@ import (
 // repository 側の signature 変更を全面的に避けるための adapter 層として
 // 機能する。
 //
+// **向きごとに組み合わせる形 (#3369)。** 本家で`ps.untilId ?? (ps.untilDate ? … : null)`
+// と書く endpoint (timeline 系など) 用で、`sinceId`と`untilDate`のように向きの違う
+// ID と日付を一緒に送ると両方で絞る。本家で makePaginationQuery に日付まで渡す
+// endpoint は NormalizeCursorIDFirst を使う。
+//
 // drop-in 仕様:
 //   - sinceID が指定されていれば優先、sinceDate は無視 (= upstream 同様)
 //   - sinceDate のみなら ms → aidx prefix に変換して sinceID とする
@@ -61,6 +66,11 @@ func NormalizeCursor(sinceID, untilID string, sinceDate, untilDate *int64) (stri
 	}
 	return sinceID, untilID, true
 }
+
+// CursorNormalizer is the signature of NormalizeCursor and
+// NormalizeCursorIDFirst, for a handler shared by endpoints of both forms to
+// take the one its endpoint needs.
+type CursorNormalizer func(sinceID, untilID string, sinceDate, untilDate *int64) (string, string, bool)
 
 // NormalizeCursorIDFirst is NormalizeCursor for the endpoints whose upstream
 // passes the dates to QueryService.makePaginationQuery: when sinceID or

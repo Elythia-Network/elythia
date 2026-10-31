@@ -2179,6 +2179,30 @@ func TestAttachedChatMessages_OwnerSeesMessages(t *testing.T) {
 	assert.Len(t, out, 2)
 }
 
+// 本家の drive/files/attached-chat-messages は makePaginationQuery に日付まで渡すので、
+// ID があれば日付を捨て、sinceId だけなら昇順で返す (#3369)。
+func TestAttachedChatMessages_IDCursorDropsDateCursor(t *testing.T) {
+	h, repo, fileRepo := attachedHandler(t)
+	owner := u1.ID
+	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
+	at := func(year int) time.Time { return time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC) }
+	msgID := func(year int) string { return id.AidxCutoffPrefix(at(year))[:8] + "msg00001" }
+	for _, year := range []int{2020, 2021, 2022} {
+		seedFileMsg(repo, msgID(year), "f1")
+	}
+
+	body := fmt.Sprintf(`{"fileId":"f1","sinceId":%q,"untilDate":%d}`, msgID(2020), at(2020).AddDate(0, 6, 0).UnixMilli())
+	rec := post(h.AttachedChatMessages, body, u1)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	got := make([]any, 0, len(out))
+	for _, m := range out {
+		got = append(got, m["id"])
+	}
+	assert.Equal(t, []any{msgID(2021), msgID(2022)}, got)
+}
+
 // 本家の paramDef は整数の値を持つ小数 (1e0、10.0) を integer として通す。
 // limit の値もそのまま効く (#3839)。
 func TestAttachedChatMessages_AcceptsIntegerValuedFractions(t *testing.T) {
