@@ -403,3 +403,56 @@ func TestVerifyInboxAdmission_DateFormatsJSAccepts(t *testing.T) {
 		}
 	})
 }
+
+// 署名付きの GET を、見せない投稿を返してよい相手として扱う前の検査 (#3914)。
+// 受信より厳しく、自ホストの未設定と読めない Date も落とす。
+func TestVerifyFetchAdmission(t *testing.T) {
+	const host = "example.com"
+	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	restore := nowFuncForAdmission
+	nowFuncForAdmission = func() time.Time { return base }
+	t.Cleanup(func() { nowFuncForAdmission = restore })
+	now := base.Format(http.TimeFormat)
+	full := sig("(request-target)", "host", "date", "accept")
+
+	tests := []struct {
+		name         string
+		parsed       *ParsedSignature
+		hostHeader   string
+		expectedHost string
+		dateHeader   string
+		wantErr      error
+		wantAnyErr   bool
+	}{
+		{name: "valid", parsed: full, hostHeader: host, expectedHost: host, dateHeader: now},
+		{name: "host compared case-insensitively", parsed: full, hostHeader: "Example.COM", expectedHost: host, dateHeader: now},
+		{name: "nil signature", parsed: nil, hostHeader: host, expectedHost: host, dateHeader: now, wantAnyErr: true},
+		{name: "expected host not configured", parsed: full, hostHeader: host, expectedHost: "", dateHeader: now, wantErr: ErrFetchHostNotConfigured},
+		{name: "request-target unsigned", parsed: sig("host", "date"), hostHeader: host, expectedHost: host, dateHeader: now, wantErr: ErrInboxRequestTargetUnsigned},
+		{name: "date unsigned", parsed: sig("(request-target)", "host"), hostHeader: host, expectedHost: host, dateHeader: now, wantErr: ErrInboxDateUnsigned},
+		{name: "host unsigned", parsed: sig("(request-target)", "date"), hostHeader: host, expectedHost: host, dateHeader: now, wantErr: ErrInboxHostUnsigned},
+		{name: "signed for another host", parsed: full, hostHeader: "other.example", expectedHost: host, dateHeader: now, wantErr: ErrInboxHostMismatch},
+		{name: "date outside skew", parsed: full, hostHeader: host, expectedHost: host, dateHeader: base.Add(-InboxDateSkew - time.Second).Format(http.TimeFormat), wantErr: ErrInboxDateSkew},
+		{name: "empty date", parsed: full, hostHeader: host, expectedHost: host, dateHeader: "", wantErr: ErrFetchDateUnreadable},
+		{name: "unreadable date", parsed: full, hostHeader: host, expectedHost: host, dateHeader: "not a date", wantErr: ErrFetchDateUnreadable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := VerifyFetchAdmission(tt.parsed, tt.hostHeader, tt.expectedHost, tt.dateHeader)
+			switch {
+			case tt.wantErr != nil:
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("want %v, got %v", tt.wantErr, err)
+				}
+			case tt.wantAnyErr:
+				if err == nil {
+					t.Fatal("want an error, got nil")
+				}
+			default:
+				if err != nil {
+					t.Fatalf("want nil, got %v", err)
+				}
+			}
+		})
+	}
+}
