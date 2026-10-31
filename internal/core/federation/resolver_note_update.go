@@ -227,7 +227,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceH
 		newText = mfm.FromHTML(apNote.Content)
 	}
 	// 保存するのは切った本文、判定と hashtag は全文 (create 経路と同じ)。
-	storedText := clipRemoteNoteText(newText)
+	storedText := storedRemoteNoteText(newText)
 	// CW は**下の fields 反映より前に**決める。禁止語の判定を「更新後の値」で
 	// 行うために先に要るが、判定は `existing` を書き換える前に済ませたい
 	// (弾く場合は in-memory の note も無傷で返す)。
@@ -338,8 +338,14 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceH
 		existing.Visibility = model.NoteVisibilityHome
 	}
 	if newText != "" {
-		fields["text"] = &storedText
-		existing.Text = &storedText
+		// 削った結果が空なら、取り込み (IngestNote) と同じく本文無しにする (#3369)。
+		if storedText == "" {
+			fields["text"] = nil
+			existing.Text = nil
+		} else {
+			fields["text"] = &storedText
+			existing.Text = &storedText
+		}
 	}
 	if !slices.Equal([]string(existing.Mentions), []string(mentions)) {
 		fields["mentions"] = mentions

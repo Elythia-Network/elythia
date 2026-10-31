@@ -176,9 +176,11 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 保存するのは切った本文、禁止語・連合のルール・本文からの hashtag の判定は
 	// 切る前の全文で行う (本家 ApNoteService は checkProhibitedWordsContain を
 	// 全文で見てから NoteCreateService.create で切る)。
+	// 切った後に前後の空白を削り、空なら本文無しにする (本家と同じ、#3369)。
 	if fullText != nil {
-		clipped := clipRemoteNoteText(*fullText)
-		note.Text = &clipped
+		if stored := storedRemoteNoteText(*fullText); stored != "" {
+			note.Text = &stored
+		}
 	}
 	if apNote.Summary != "" {
 		// **列の上限で切り、NUL を落とす。** CW は**相手が自由に決められる値**で、

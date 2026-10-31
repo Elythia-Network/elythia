@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"gorm.io/gorm"
 )
 
@@ -186,6 +187,16 @@ func clipRemoteNoteText(s string) string {
 		units += w
 	}
 	return s
+}
+
+// storedRemoteNoteText returns the text of a remote note as it is stored: cut
+// by clipRemoteNoteText, then trimmed like JavaScript's trim(). An empty
+// result means the note has no text.
+//
+// 本家 NoteCreateService は切った後に `data.text.trim()` し、空なら null にする
+// (#3369)。前後の空白は JavaScript の集合で削る (U+FEFF を削り、U+0085 を残す)。
+func storedRemoteNoteText(full string) string {
+	return jsstr.Trim(clipRemoteNoteText(full))
 }
 
 // truncateRunes clips s to at most max runes. byte 単位で切ると壊れた UTF-8 を
