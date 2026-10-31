@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/elythia-network/elythia/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -1219,6 +1220,59 @@ func TestIsSilenced_CanPublicNoteFalseMeansSilenced(t *testing.T) {
 		ID: "a1", UserID: "user1", RoleID: "r1",
 	}
 	assert.True(t, svc.IsSilenced("user1"))
+}
+
+// BoolPolicyMayBeFalse is false only while no base policy, role or provider
+// can make canPublicNote anything but true (#3369).
+func TestBoolPolicyMayBeFalse(t *testing.T) {
+	t.Run("defaults and roles that keep it true", func(t *testing.T) {
+		svc, roleRepo, _, _ := newTestService(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", Policies: datatypes.JSON([]byte(
+			`{"canPublicNote":{"useDefault":true,"priority":2,"value":false},"canInvite":{"useDefault":false,"priority":0,"value":false}}`,
+		))}
+		roleRepo.Roles["r2"] = &model.Role{ID: "r2", Policies: datatypes.JSON([]byte(
+			`{"canPublicNote":{"useDefault":false,"priority":0,"value":true}}`,
+		))}
+		assert.False(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("a role sets it false", func(t *testing.T) {
+		svc, roleRepo, _, _ := newTestService(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", Policies: datatypes.JSON([]byte(
+			`{"canPublicNote":{"useDefault":false,"priority":0,"value":false}}`,
+		))}
+		assert.True(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("a role sets a non-boolean value", func(t *testing.T) {
+		svc, roleRepo, _, _ := newTestService(t)
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", Policies: datatypes.JSON([]byte(
+			`{"canPublicNote":{"useDefault":false,"priority":0,"value":"no"}}`,
+		))}
+		assert.True(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("base policy is false", func(t *testing.T) {
+		svc, _, _, metaRepo := newTestService(t)
+		metaRepo.Meta.Policies = datatypes.JSON([]byte(`{"canPublicNote":false}`))
+		assert.True(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("base policy cannot be read", func(t *testing.T) {
+		svc, _, _, metaRepo := newTestService(t)
+		metaRepo.FetchErr = errors.New("db down")
+		assert.True(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("a provider declares the key", func(t *testing.T) {
+		svc, _, _, _ := newTestService(t)
+		registerProvider(t, svc, "p", []string{role.PolicyCanPublicNote}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return nil, nil
+		})
+		assert.True(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
+	t.Run("a provider of another key", func(t *testing.T) {
+		svc, _, _, _ := newTestService(t)
+		registerProvider(t, svc, "p", []string{"canInvite"}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			return nil, nil
+		})
+		assert.False(t, svc.BoolPolicyMayBeFalse(role.PolicyCanPublicNote))
+	})
 }
 
 // --- per-user role cache (#300 3-5) -----------------------------------------

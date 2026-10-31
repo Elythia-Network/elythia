@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -890,6 +891,46 @@ func (s *Service) IsSilenced(userID string) bool {
 	policies := s.GetUserPolicies(userID)
 	if canPublic, ok := policies["canPublicNote"].(bool); ok {
 		return !canPublic
+	}
+	return false
+}
+
+// BoolPolicyMayBeFalse reports whether the boolean policy key could resolve
+// to something other than true for some user: the base policy (default and
+// meta.policies) is not true, a role sets the key to a value other than true,
+// or an effective-policy provider declares the key. It is conservative and
+// returns true when the base policy or the roles cannot be read.
+//
+// Only meaningful for keys aggregated with OR (canPublicNote and the like):
+// with every candidate true, the cascade cannot produce false.
+//
+// **利用者ごとの policy を引かずに「誰にも当たりえない」を判定するためのもの
+// (#3369)。** リモートの投稿の取り込みは著者ごとに policy を引くと、利用者ごとの
+// キャッシュに受信したノートの著者が際限なく積もる。ロールの一覧とベースの値は
+// 利用者に依らないキャッシュから読む。
+func (s *Service) BoolPolicyMayBeFalse(key string) bool {
+	base := DefaultPoliciesClone()
+	if err := s.applyMetaBasePolicies(base); err != nil {
+		return true
+	}
+	if v, ok := base[key].(bool); !ok || !v {
+		return true
+	}
+	for _, p := range s.snapshotPolicyProviders() {
+		if slices.Contains(p.reg.Keys, key) {
+			return true
+		}
+	}
+	roles, err := s.listRolesCached()
+	if err != nil {
+		return true
+	}
+	for _, in := range newRolePolicyInputs(roles) {
+		if o, ok := in.overrides[key]; ok && !o.UseDefault {
+			if v, ok := o.Value.(bool); !ok || !v {
+				return true
+			}
+		}
 	}
 	return false
 }
