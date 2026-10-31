@@ -771,16 +771,16 @@ func (h *Handler) RoomsShow(c echo.Context) error {
 func (h *Handler) RoomsUpdate(c echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
-		RoomID      string `json:"roomId"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		RoomID      string  `json:"roomId"`
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoomID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
 	// upstream paramDef は name maxLength:256 / description maxLength:1024
 	// (chat/rooms/update.ts)。
-	if utf8.RuneCountInString(req.Name) > 256 || utf8.RuneCountInString(req.Description) > 1024 {
+	if (req.Name != nil && utf8.RuneCountInString(*req.Name) > 256) || (req.Description != nil && utf8.RuneCountInString(*req.Description) > 1024) {
 		return apierr.JSONInvalidParam(c)
 	}
 	room, err := h.repo.FindRoomByID(req.RoomID)
@@ -792,11 +792,14 @@ func (h *Handler) RoomsUpdate(c echo.Context) error {
 		// upstream chat/rooms/update.ts:30 の noSuchRoom id に揃える (#1771)。
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROOM", "No such room.", "fcdb0f92-bda6-47f9-bd05-343e0e020932"))
 	}
-	if req.Name != "" {
-		room.Name = req.Name
+	// 本家の ChatService.updateRoom は送られた値をそのまま set するので、空文字で
+	// 名前や説明を消せる (#3369)。以前は空文字を無視していたので、部屋の説明を
+	// 消す手段が無かった。欠けた項目は本家と同じく変えない。
+	if req.Name != nil {
+		room.Name = *req.Name
 	}
-	if req.Description != "" {
-		room.Description = req.Description
+	if req.Description != nil {
+		room.Description = *req.Description
 	}
 	if err := h.repo.UpdateRoom(room); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
