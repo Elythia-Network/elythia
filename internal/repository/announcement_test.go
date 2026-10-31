@@ -395,6 +395,35 @@ func TestAnnouncementRepository_ReadManagement(t *testing.T) {
 	assert.Empty(t, unread)
 }
 
+// 本家の getUnreadAnnouncements と同じく、silence のお知らせと、
+// 利用者より前に作られた forExistingUsers のお知らせは未読に数えない。
+func TestAnnouncementRepository_UnreadForUser_SkipsSilenceAndOlderForExistingUsers(t *testing.T) {
+	repo := NewAnnouncementRepository(testDB)
+	createTestUser(t, "annunrd5")
+
+	mk := func(id string, silence, forExisting bool) {
+		t.Helper()
+		a := &model.Announcement{ID: id, Title: "T", Text: "t", Icon: "info", Display: "normal", IsActive: true, Silence: silence, ForExistingUsers: forExisting}
+		require.NoError(t, repo.Create(a))
+		t.Cleanup(func() { cleanupAnnouncement(t, id) })
+	}
+	mk("annunrd9s", true, false)  // silence
+	mk("annunrd0e", false, true)  // forExistingUsers、利用者より前
+	mk("annunrd9e", false, true)  // forExistingUsers、利用者より後
+	mk("annunrd0p", false, false) // 通常
+
+	unread, err := repo.UnreadForUser("annunrd5")
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, a := range unread {
+		got[a.ID] = true
+	}
+	assert.False(t, got["annunrd9s"], "silence announcement must not count as unread")
+	assert.False(t, got["annunrd0e"], "forExistingUsers announcement older than the user must not count")
+	assert.True(t, got["annunrd9e"], "forExistingUsers announcement newer than the user counts")
+	assert.True(t, got["annunrd0p"], "plain announcement counts")
+}
+
 func TestAnnouncementRepository_UnreadForUser_Error(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
