@@ -1390,9 +1390,10 @@ func TestTranslate_CWOnlyNote_IsTranslated(t *testing.T) {
 }
 
 // 空白のみ / 空文字は DeepL へ投げずに 204。判定が `text == nil` から
-// `strings.TrimSpace(text) == ""` に変わったことを固定する。
+// 「`text.trim()` が空」に変わったことを固定する。空白は JavaScript の集合
+// (U+FEFF を含む) で見る (#3369)。
 func TestTranslate_BlankText_204(t *testing.T) {
-	for _, txt := range []string{"", "   ", "\n\t "} {
+	for _, txt := range []string{"", "   ", "\n\t ", "\ufeff", " \ufeff\u3000"} {
 		h, noteRepo, sent := captureTranslateHandler(t)
 		v := txt
 		noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &v}
@@ -1400,6 +1401,16 @@ func TestTranslate_BlankText_204(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, rec.Code, "空白のみは 204 (%q)", txt)
 		assert.Empty(t, *sent, "DeepL を呼ばない (%q)", txt)
 	}
+}
+
+// U+0085 は JavaScript の trim() が削らないので、それだけの本文も翻訳に回す (#3369)。
+func TestTranslate_NELOnlyText_IsTranslated(t *testing.T) {
+	h, noteRepo, sent := captureTranslateHandler(t)
+	v := "\u0085"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic, Text: &v}
+	rec := postExtra(h.Translate, `{"noteId":"n1","targetLang":"en"}`, nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "\u0085", *sent)
 }
 
 // notConfiguredTranslator answers like a MetaDeepL whose meta has no key.

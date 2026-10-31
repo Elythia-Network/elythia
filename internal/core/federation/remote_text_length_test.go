@@ -82,6 +82,53 @@ func TestUpdateRemoteNote_ClipsRemoteTextToUpstreamLength(t *testing.T) {
 	assert.Equal(t, 8192, utf16Len(*got.Text))
 }
 
+// 本家 NoteCreateService は切った後に JavaScript の trim() で前後の空白を削り、
+// 空なら本文無しにする (#3369)。U+FEFF は削り、U+0085 は残す。
+func TestIngestNote_TrimsRemoteTextLikeJavaScript(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields map[string]any
+		want   *string
+	}{
+		{"_misskey_content", map[string]any{"_misskey_content": " \ufeff hello \u3000\n"}, ptr("hello")},
+		{"source", map[string]any{"source": map[string]any{"content": "\t hi \u2028", "mediaType": "text/x.misskeymarkdown"}, "content": "<p>x</p>"}, ptr("hi")},
+		{"NEL is kept", map[string]any{"_misskey_content": "\u0085x\u0085"}, ptr("\u0085x\u0085")},
+		{"blank becomes no text", map[string]any{"_misskey_content": " \ufeff\u3000 "}, nil},
+		// 切った後に削る。切り口の直前の空白も削る
+		{"trimmed after the clip", map[string]any{"_misskey_content": strings.Repeat("a", 8191) + " tail"}, ptr(strings.Repeat("a", 8191))},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testutil.NewMockUserRepository()
+			noteRepo := testutil.NewMockNoteRepository()
+			idGen, _ := id.NewGenerator("aidx")
+			r := federation.NewResolverNilDeps(repo, noteRepo, activitypub.NewURLBuilder("https://example.com"), &stubFetcher{body: []byte(sampleActor)}, idGen)
+			note, err := r.IngestNote(remoteNoteJSON(t, "https://remote.example/notes/trim-"+string(rune('a'+i)), tc.fields))
+			require.NoError(t, err)
+			require.NotNil(t, note)
+			assert.Equal(t, tc.want, note.Text)
+		})
+	}
+}
+
+// 編集 (Update) でも同じく削り、空白だけの本文は本文無しにする。
+func TestUpdateRemoteNote_TrimsRemoteTextLikeJavaScript(t *testing.T) {
+	r, noteRepo, _ := newProhibitedWordsUpdateResolver(t, nil)
+	got, err := r.UpdateRemoteNote(remoteNoteJSON(t, "https://remote.example/notes/n1", map[string]any{"_misskey_content": "\ufeff edited \u3000"}), "")
+	require.NoError(t, err)
+	assert.Equal(t, ptr("edited"), got.Text)
+
+	got, err = r.UpdateRemoteNote(remoteNoteJSON(t, "https://remote.example/notes/n1", map[string]any{"_misskey_content": " \ufeff "}), "")
+	require.NoError(t, err)
+	assert.Nil(t, got.Text)
+	last := noteRepo.UpdateFieldsCalls[len(noteRepo.UpdateFieldsCalls)-1]
+	v, written := last["text"]
+	assert.True(t, written)
+	assert.Nil(t, v)
+}
+
+func ptr(s string) *string { return &s }
+
 // 禁止語は切る前の全文で判定する (本家 ApNoteService は全文で
 // checkProhibitedWordsContain を見てから NoteCreateService で切る)。保存される
 // 8192 単位より後ろにある禁止語でも受け取らない。
