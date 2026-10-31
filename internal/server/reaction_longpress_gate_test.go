@@ -10,21 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// blockCommentRe matches a `/* ... */` comment.
-var blockCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)
-
 // htmlCommentRe matches an `<!-- ... -->` comment.
 //
 // **template を無効化できる唯一の書き方。** Vue の template では `//` も `/* */` も
-// コメントにならないので、`@contextmenu` を殺すならこれしかない。開始デリミタだけ
-// 落とす実装では中身が残り、この gate の template 側の検査が空振りする。
+// コメントにならないので、`@contextmenu` を殺すならこれしかない。
 var htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
-
-// lineCommentRe matches a `//` comment to end of line.
-//
-// 行頭とは限らない (`foo(); // メモ`)。URL の `//` を巻き込むが、この gate が
-// 探すのは識別子の有無だけなので害が無い。
-var lineCommentRe = regexp.MustCompile(`(?m)//.*$`)
 
 // TestReactionLongPressIsWired asserts that the reaction button still binds the
 // long-press handler that makes the emoji menu reachable on iOS (#2932).
@@ -46,12 +36,7 @@ var lineCommentRe = regexp.MustCompile(`(?m)//.*$`)
 // `@contextmenu` を殺す唯一の書き方がこれ。初版は開始デリミタだけ消しており、
 // template 側の検査が空振りしていた。
 //
-// **どちらの順序でもネストは解けない。** `//` の除去は URL を巻き込むので、
-// `'https://…'` を含む行に配線を書くとその行の識別子ごと消えて gate が落ちる。
-// 逆に `<!--` を先に落とす今の順序では、文字列や `//` コメントの中に `<!--` が
-// 単独で現れ、後方のどこかに `-->` があると、その間の生きた配線が消える。
-// どちらも偽陽性 (検査していないのに落ちる) で、現 corpus では起きない。
-// 起きたら行を分けること。
+// コメントの剥がし方は `stripComments` (comment_strip_test.go) を見ること。
 func TestReactionLongPressIsWired(t *testing.T) {
 	root := filepath.Join(repoRootDir(t), "frontend", "packages", "frontend")
 	component := filepath.Join(root, "src", "components", "MkReactionsViewer.reaction.vue")
@@ -83,17 +68,6 @@ func TestReactionLongPressIsWired(t *testing.T) {
 	// 出てメニューと競合する (ボタンの中身は絵文字の `<img>`)。
 	require.Containsf(t, src, "-webkit-touch-callout: none",
 		"%s に -webkit-touch-callout: none が無い。iOS で長押しすると画像の callout が出る", component)
-}
-
-// stripComments removes `//` and `/* */` comments so that commented-out code is
-// not mistaken for live wiring.
-func stripComments(src string) string {
-	// **HTML コメントを先に落とす。** 中に `//` や `/* */` があると、先に行/ブロック
-	// コメントを剥がした結果 `<!--` と `-->` が分断されて対応が取れなくなる。
-	src = htmlCommentRe.ReplaceAllString(src, "")
-	src = blockCommentRe.ReplaceAllString(src, "")
-	src = lineCommentRe.ReplaceAllString(src, "")
-	return src
 }
 
 // TestReactableRemoteReactionIsWired asserts that piggybacking on a remote

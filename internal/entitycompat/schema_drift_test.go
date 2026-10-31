@@ -159,6 +159,9 @@ func stripSQLComments(text string) string {
 		case strings.HasPrefix(text[i:], "--"):
 			i = blankUntil(i, func(j int) bool { return text[j] == '\n' }, 0)
 		case strings.HasPrefix(text[i:], "/*"):
+			// 開きの `/*` も潰す。残すと、コメントだけの down を no-op と読めない (#3369 I3)。
+			blank(i)
+			blank(i + 1)
 			i = blankUntil(i+2, func(j int) bool { return strings.HasPrefix(text[j:], "*/") }, 2)
 		case text[i] == '\'':
 			// `''` は文字列中のエスケープ。閉じ引用符の直後がまた引用符なら継続する。

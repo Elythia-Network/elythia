@@ -102,13 +102,12 @@ func noopDownMigrations(t *testing.T) []string {
 
 // downIsNoop reports whether the down script performs no work.
 func downIsNoop(body string) bool {
-	// ブロックコメントを先に落とす (行コメントだけを見る形だと素通りする)。
-	body = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(body, " ")
+	// ブロックコメントも落とす (行コメントだけを見る形だと素通りする)。正規表現で
+	// 剥がすと、文字列の中の `/*` が後ろの `*/` と組になって間の文ごと消えるので、
+	// 文字列を区別する schema_drift_test.go の走査を使う (#3369 I3)。
+	body = stripSQLComments(body)
 	var stmts []string
 	for _, line := range strings.Split(body, "\n") {
-		if i := strings.Index(line, "--"); i >= 0 {
-			line = line[:i]
-		}
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			stmts = append(stmts, trimmed)
 		}
@@ -570,4 +569,11 @@ func TestTrackedMigrationFiles_IgnoresLocalTrack(t *testing.T) {
 
 	require.Equal(t, []string{"migration/000001_a.up.sql"}, trackedMigrationFilesIn(t, root, "migration/*.up.sql"))
 	require.Equal(t, []string{"migration/000001_a.down.sql"}, trackedMigrationFilesIn(t, root, "migration/*.down.sql"))
+}
+
+// 文字列の中の `/*` や `--` で、後ろの文を消さないこと (#3369 I3)。
+func TestDownIsNoopKeepsStatementsAfterCommentLikeStrings(t *testing.T) {
+	require.False(t, downIsNoop("SELECT '/*';\nDROP TABLE a;\n-- */\n"), "a DROP after a string holding /* was stripped")
+	require.False(t, downIsNoop("SELECT 1; -- see a/*\nDROP TABLE a;\n-- */\n"), "a DROP after a line comment holding /* was stripped")
+	require.True(t, downIsNoop("-- nothing\n/* DROP TABLE a; */\nSELECT 1;\n"))
 }
