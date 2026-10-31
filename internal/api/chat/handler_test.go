@@ -2188,6 +2188,34 @@ func TestAttachedChatMessages_ModeratorSeesOthersFile(t *testing.T) {
 	assert.Len(t, out, 1)
 }
 
+// 本家と同じく、moderator 以外はチャットを読めないと拒否する。本家は500だが、
+// 他の chat/* と同じ403にする。moderator は読める (#3369)。
+func TestAttachedChatMessages_ChatAvailability(t *testing.T) {
+	h, repo, fileRepo := attachedHandler(t)
+	owner := u1.ID
+	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &owner}
+	seedFileMsg(repo, "m1", "f1")
+
+	h.SetChatAvailabilityChecker(&stubChatAvailChecker{avail: "unavailable"})
+	rec := post(h.AttachedChatMessages, `{"fileId":"f1"}`, u1)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "ROLE_PERMISSION_DENIED")
+	rec = post(h.AttachedChatMessages, `{"fileId":"f1"}`, &model.User{ID: "mod1"})
+	assert.Equal(t, http.StatusOK, rec.Code, "a moderator is not checked")
+
+	h.SetChatAvailabilityChecker(&stubChatAvailChecker{avail: "readonly"})
+	rec = post(h.AttachedChatMessages, `{"fileId":"f1"}`, u1)
+	assert.Equal(t, http.StatusOK, rec.Code, "readonly can read")
+}
+
+// 本家 attached-chat-messages.ts と同じ文言。
+func TestAttachedChatMessages_NoSuchFileMessage(t *testing.T) {
+	h, _, _ := attachedHandler(t)
+	rec := post(h.AttachedChatMessages, `{"fileId":"ghost"}`, u1)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"message":"No such file."`)
+}
+
 func TestAttachedChatMessages_MissingFileID(t *testing.T) {
 	h, _, _ := attachedHandler(t)
 	rec := post(h.AttachedChatMessages, `{}`, u1)

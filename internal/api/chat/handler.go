@@ -663,22 +663,33 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
+	isMod := h.isModerator(user.ID)
+	// 本家と同じく、moderator 以外はチャットを読めるかを先に見る (#3369)。本家の
+	// checkChatAvailability は素の Error で500になるが、他の chat/* の
+	// RequireChatAvailability と同じ403 ROLE_PERMISSION_DENIED にする。
+	if !isMod && h.chatAvail != nil {
+		policy, _ := h.chatAvail.GetUserPolicies(user.ID)["chatAvailability"].(string)
+		if !middleware.ChatAvailabilityAllows(policy, "read") {
+			return c.JSON(http.StatusForbidden, apierr.RolePermissionDenied())
+		}
+	}
 	if h.fileRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
+	// 本家 attached-chat-messages.ts の文言は`No such file.` (#3369。以前は
+	// `Some files are not found.`)。
 	file, err := h.fileRepo.FindByID(req.FileID)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。
 		return apierr.JSONInternalError(c)
 	}
 	if err != nil || file == nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "Some files are not found.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
 	}
 	// owner-scope: moderator 以外は自分の file のみ参照可 (他人の private chat
 	// の添付を覗けないようにする)。
-	isMod := h.moderatorChecker != nil && h.moderatorChecker.IsModerator(user.ID)
 	if !isMod && (file.UserID == nil || *file.UserID != user.ID) {
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "Some files are not found.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "485ce26d-f5d2-4313-9783-e689d131eafb"))
 	}
 	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
