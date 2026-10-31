@@ -281,6 +281,28 @@ func TestNewHandler_OffsetParses(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+// 本家の chart は自分の paramDef に無い host・userId を知らない項目として無視
+// するので、型の違う値でも400にしない (#3369)。
+func TestCharts_IgnoreFieldsTheChartDoesNotHave(t *testing.T) {
+	h, _ := newHandlerWithAllCharts(t)
+	cases := []struct {
+		name string
+		fn   echo.HandlerFunc
+		body string
+	}{
+		{"notes", h.Notes, `{"span":"hour","host":1,"userId":{}}`},
+		{"instance", h.Instance, `{"span":"hour","host":"example.com","userId":1}`},
+		{"user/notes", h.UserNotes, `{"span":"hour","userId":"u1","host":1}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := newReq(t, tc.body)
+			require.NoError(t, tc.fn(c))
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
+	}
+}
+
 func TestInstanceEndpoints_HappyPath(t *testing.T) {
 	h, _ := newHandlerWithAllCharts(t)
 	cases := []struct {
@@ -557,6 +579,8 @@ func TestInvalidParam_EnvelopeShape(t *testing.T) {
 		{"missing host", h.Instance, `{"span":"hour"}`, "#/required", "must have required property 'host'"},
 		{"missing userId", h.UserNotes, `{"span":"hour"}`, "#/required", "must have required property 'userId'"},
 		{"bad json", h.Notes, `{not json`, "#", "Invalid request body."},
+		{"bad json (instance)", h.Instance, `{not json`, "#", "Invalid request body."},
+		{"wrong host type", h.Instance, `{"span":"hour","host":1}`, "#", "Invalid request body."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
