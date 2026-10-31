@@ -99,7 +99,7 @@ func (h *Handler) Create(c echo.Context) error {
 	if _, err := h.svc.Mute(user.ID, req.UserID, expires); err != nil {
 		switch {
 		case errors.Is(err, coremuting.ErrSelfMute):
-			return c.JSON(http.StatusBadRequest, apierr.Error("MUTEE_IS_YOURSELF", "You cannot mute yourself.", "a4619cb2-5f23-484b-9301-94c903074e10"))
+			return c.JSON(http.StatusBadRequest, apierr.Error("MUTEE_IS_YOURSELF", "Mutee is yourself.", "a4619cb2-5f23-484b-9301-94c903074e10"))
 		case errors.Is(err, coremuting.ErrMuteeNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "6fef56f3-e765-4957-88e5-c6f65329b8a5"))
 		case errors.Is(err, coremuting.ErrAlreadyMuting):
@@ -125,7 +125,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	if err := h.svc.Unmute(user.ID, req.UserID); err != nil {
 		switch {
 		case errors.Is(err, coremuting.ErrSelfMute):
-			return c.JSON(http.StatusBadRequest, apierr.Error("MUTEE_IS_YOURSELF", "You cannot unmute yourself.", "f428b029-6b39-4d48-a1d2-cc1ae6dd5cf9"))
+			return c.JSON(http.StatusBadRequest, apierr.Error("MUTEE_IS_YOURSELF", "Mutee is yourself.", "f428b029-6b39-4d48-a1d2-cc1ae6dd5cf9"))
 		case errors.Is(err, coremuting.ErrMuteeNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "b851d00b-8ab1-4a56-8b1b-e24187cb48ef"))
 		case errors.Is(err, coremuting.ErrNotMuting):

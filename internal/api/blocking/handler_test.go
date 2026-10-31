@@ -240,6 +240,8 @@ func TestCreate_Self(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	// 本家と同じ文言 (#3369)
+	assert.Contains(t, rec.Body.String(), `"message":"Blockee is yourself."`)
 }
 
 func TestCreate_NoSuchUser(t *testing.T) {
@@ -317,6 +319,8 @@ func TestDelete_Self(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Delete(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	// 本家と同じ文言 (#3369)
+	assert.Contains(t, rec.Body.String(), `"message":"Blockee is yourself."`)
 }
 
 func TestDelete_NotBlocking(t *testing.T) {

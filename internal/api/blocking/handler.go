@@ -99,7 +99,7 @@ func (h *Handler) Create(c echo.Context) error {
 	if _, err := h.svc.Block(user.ID, req.UserID); err != nil {
 		switch {
 		case errors.Is(err, coreblocking.ErrSelfBlock):
-			return c.JSON(http.StatusBadRequest, apierr.Error("BLOCKEE_IS_YOURSELF", "You cannot block yourself.", "88b19138-f28d-42c0-8499-6a31bbd0fdc6"))
+			return c.JSON(http.StatusBadRequest, apierr.Error("BLOCKEE_IS_YOURSELF", "Blockee is yourself.", "88b19138-f28d-42c0-8499-6a31bbd0fdc6"))
 		case errors.Is(err, coreblocking.ErrBlockeeNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "7cc4f851-e2f1-4621-9633-ec9e1d00c01e"))
 		case errors.Is(err, coreblocking.ErrAlreadyBlocking):
@@ -123,7 +123,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	if err := h.svc.Unblock(user.ID, req.UserID); err != nil {
 		switch {
 		case errors.Is(err, coreblocking.ErrSelfBlock):
-			return c.JSON(http.StatusBadRequest, apierr.Error("BLOCKEE_IS_YOURSELF", "You cannot unblock yourself.", "06f6fac6-524b-473c-a354-e97a40ae6eac"))
+			return c.JSON(http.StatusBadRequest, apierr.Error("BLOCKEE_IS_YOURSELF", "Blockee is yourself.", "06f6fac6-524b-473c-a354-e97a40ae6eac"))
 		case errors.Is(err, coreblocking.ErrBlockeeNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "8621d8bf-c358-4303-a066-5ea78610eb3f"))
 		case errors.Is(err, coreblocking.ErrNotBlocking):
