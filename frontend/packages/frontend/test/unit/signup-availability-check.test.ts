@@ -29,6 +29,24 @@ vi.mock('@/utility/misskey-api.js', () => ({
 
 const DEBOUNCE_MS = 1000;
 
+type Deferred = { resolve: (value: unknown) => void; reject: (reason: unknown) => void };
+
+// 次の 1 回の呼び出しを、テストが手で解決するまで待たせる。
+function holdNextCall(): Deferred {
+	const held = {} as Deferred;
+	misskeyApi.mockImplementationOnce(() => new Promise((resolve, reject) => {
+		held.resolve = resolve;
+		held.reject = reject;
+	}));
+	return held;
+}
+
+function signalOfCall(endpoint: string, value: Record<string, string>): AbortSignal {
+	const call = misskeyApi.mock.calls.find(c => c[0] === endpoint && JSON.stringify(c[1]) === JSON.stringify(value));
+	if (call?.[3] == null) throw new Error(`no ${endpoint} call for ${JSON.stringify(value)}`);
+	return call[3];
+}
+
 function callsTo(endpoint: string): number {
 	return misskeyApi.mock.calls.filter(call => call[0] === endpoint).length;
 }
@@ -50,17 +68,22 @@ function submitButton(view: RenderResult): HTMLButtonElement {
 }
 
 let savedEmailRequired: boolean | undefined;
+let savedMinimumUsernameLength: number | undefined;
 
 beforeEach(() => {
 	vi.useFakeTimers();
-	misskeyApi.mockClear();
+	// mockClear では holdNextCall の残りが消えず、途中で落ちたテストの分が次のテストへ漏れる。
+	// mockReset は vi.fn に渡した既定の実装へ戻す。
+	misskeyApi.mockReset();
 	savedEmailRequired = instance.emailRequiredForSignup;
+	savedMinimumUsernameLength = (instance as { minimumUsernameLength?: number }).minimumUsernameLength;
 });
 
 afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
 	instance.emailRequiredForSignup = savedEmailRequired as boolean;
+	(instance as { minimumUsernameLength?: number }).minimumUsernameLength = savedMinimumUsernameLength;
 });
 
 function renderForm(): RenderResult {
@@ -127,17 +150,50 @@ describe('MkSignupDialog.form username availability check', () => {
 		}
 	});
 
-	test('a scheduled lookup for a name that is no longer shown does not mark it available', async () => {
+	// 予約中に有効でない値へ直したら、1 秒後に古い名前の結果で「利用可能」にしない
+	test.each([
+		{ name: 'cleared', next: '', minimumLength: 1 },
+		{ name: 'changed to invalid characters', next: 'alice!', minimumLength: 1 },
+		{ name: 'shortened below the minimum', next: 'al', minimumLength: 3 },
+	])('a scheduled lookup is dropped when the name is $name', async ({ next, minimumLength }) => {
+		instance.emailRequiredForSignup = false;
+		(instance as { minimumUsernameLength?: number }).minimumUsernameLength = minimumLength;
+		const view = renderForm();
+		const input = inputOf(view, 'signup-username');
+
+		await fireEvent.update(input, 'alice');
+		await fireEvent.update(input, next);
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+		expect(callsTo('username/available')).toBe(0);
+		expect(view.queryByText(i18n.ts.available)).toBeNull();
+	});
+
+	test.each([
+		{ name: 'success', settle: (held: Deferred) => held.resolve({ available: true }) },
+		{ name: 'failure', settle: (held: Deferred) => held.reject({ code: 'INVALID_PARAM', id: 'x' }) },
+	])('a stale $name response for a name that was changed while waiting is ignored', async ({ settle }) => {
 		instance.emailRequiredForSignup = false;
 		const view = renderForm();
 		const input = inputOf(view, 'signup-username');
 
-		// 予約中に空欄にしたら、1 秒後に古い名前の結果で「利用可能」にしない
-		await fireEvent.update(input, 'alice');
-		await fireEvent.update(input, '');
+		const stale = holdNextCall();
+		await typeAndSettle(input, 'alice');
+		expect(callsTo('username/available')).toBe(1);
+
+		// 応答待ちの間に別の名前へ直してから、古い応答を届ける
+		const fresh = holdNextCall();
+		await fireEvent.update(input, 'alice_2');
+		settle(stale);
+		await vi.advanceTimersByTimeAsync(0);
+		const caption = () => view.getByTestId('signup-username').textContent ?? '';
+		expect(caption()).toContain(i18n.ts.checking);
+		expect(caption()).not.toContain(i18n.ts.available);
+		expect(caption()).not.toContain(i18n.ts.error);
+
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
-		expect(callsTo('username/available')).toBe(0);
-		expect(view.queryByText(i18n.ts.available)).toBeNull();
+		fresh.resolve({ available: true });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(caption()).toContain(i18n.ts.available);
 	});
 });
 
@@ -161,7 +217,66 @@ describe('MkSignupDialog.form email availability check', () => {
 	});
 });
 
+describe('MkSignupDialog.form email stale results', () => {
+	test('a scheduled lookup is dropped when the field is cleared', async () => {
+		instance.emailRequiredForSignup = true;
+		const view = renderForm();
+		const input = inputOf(view, 'signup-email');
+
+		await fireEvent.update(input, 'alice@example.com');
+		await fireEvent.update(input, '');
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+		expect(callsTo('email-address/available')).toBe(0);
+		expect(view.getByTestId('signup-email').textContent).not.toContain(i18n.ts.available);
+	});
+
+	test.each([
+		{ name: 'success', settle: (held: Deferred) => held.resolve({ available: true, reason: null }) },
+		{ name: 'failure', settle: (held: Deferred) => held.reject({ code: 'INVALID_PARAM', id: 'x' }) },
+	])('a stale $name response for an address that was changed while waiting is ignored', async ({ settle }) => {
+		instance.emailRequiredForSignup = true;
+		const view = renderForm();
+		const input = inputOf(view, 'signup-email');
+
+		const stale = holdNextCall();
+		await typeAndSettle(input, 'alice@example.com');
+		expect(callsTo('email-address/available')).toBe(1);
+
+		const fresh = holdNextCall();
+		await fireEvent.update(input, 'bob@example.com');
+		settle(stale);
+		await vi.advanceTimersByTimeAsync(0);
+		const caption = () => view.getByTestId('signup-email').textContent ?? '';
+		expect(caption()).toContain(i18n.ts.checking);
+		expect(caption()).not.toContain(i18n.ts.available);
+		expect(caption()).not.toContain(i18n.ts.error);
+
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+		fresh.resolve({ available: true, reason: null });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(caption()).toContain(i18n.ts.available);
+	});
+});
+
 describe('MkSignupDialog.form unmount', () => {
+	test('in-flight lookups are aborted when the form is closed', async () => {
+		instance.emailRequiredForSignup = true;
+		const view = renderForm();
+		holdNextCall();
+		holdNextCall();
+		await fireEvent.update(inputOf(view, 'signup-username'), 'alice');
+		await fireEvent.update(inputOf(view, 'signup-email'), 'alice@example.com');
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+		const usernameSignal = signalOfCall('username/available', { username: 'alice' });
+		const emailSignal = signalOfCall('email-address/available', { emailAddress: 'alice@example.com' });
+		expect(usernameSignal.aborted).toBe(false);
+		expect(emailSignal.aborted).toBe(false);
+
+		view.unmount();
+		expect(usernameSignal.aborted).toBe(true);
+		expect(emailSignal.aborted).toBe(true);
+	});
+
 	test('a scheduled lookup does not fire after the form is closed', async () => {
 		instance.emailRequiredForSignup = true;
 		const view = renderForm();
