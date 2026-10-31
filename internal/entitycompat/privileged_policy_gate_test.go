@@ -84,13 +84,15 @@ func TestPrivilegedPolicyKeysMatchAdminRoutes(t *testing.T) {
 }
 
 var (
-	policyConstRe       = regexp.MustCompile(`^\s*corerole\.(Policy\w+)\s*$`)
-	policyLiteralRe     = regexp.MustCompile(`^\s*"([^"]+)"\s*$`)
-	requireRolePolicyRe = regexp.MustCompile(`RequireRolePolicy\(`)
+	policyConstRe   = regexp.MustCompile(`^\s*corerole\.(Policy\w+)\s*$`)
+	policyLiteralRe = regexp.MustCompile(`^\s*"([^"]+)"\s*$`)
+	// RequireRolePolicyPublic (匿名も base の policy で評価する形。users/search) も
+	// policy で守る route なので一緒に読む。
+	requireRolePolicyRe = regexp.MustCompile(`RequireRolePolicy(?:Public)?\(`)
 )
 
 // requireRolePolicyArgs returns the policy argument of every
-// RequireRolePolicy call in the registration text.
+// RequireRolePolicy / RequireRolePolicyPublic call in the registration text.
 //
 // 引数は `(checker, policyKey)` の 2 つなので、括弧の深さを見て最後の 1 つを取る。
 func requireRolePolicyArgs(reg string) []string {

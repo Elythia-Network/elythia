@@ -1567,7 +1567,7 @@ errorid-check: ## error id / HTTP status / kind の drift を検査
 # TestCacheSecDrift は allowGet の GET route と cacheSec の Cache-Control の表を見る (#3593)。
 # **アクセス階層の gate では scope の取り違えを検出できない** (#2877)。
 perm-check: ## router middleware の権限が upstream より緩くないか検査
-	go test ./internal/entitycompat/... -run 'TestPermissionDrift|TestSecureDrift|TestOAuthKindDrift|TestCacheSecDrift' -count=1 -v
+	go test ./internal/entitycompat/... -run 'TestPermissionDrift|TestSecureDrift|TestOAuthKindDrift|TestRolePolicyDrift|TestCacheSecDrift' -count=1 -v
 
 .PHONY: wiring-check
 wiring-check: ## router で配線が必要なものが外れていないか検査
