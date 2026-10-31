@@ -83,7 +83,10 @@ func parseRouteLevels(t *testing.T, paths ...string) map[string]string {
 			levels[ep] = "admin"
 		case strings.Contains(reg, "RequireModerator"):
 			levels[ep] = "moderator"
-		case strings.Contains(reg, "RequireRolePolicy"):
+		// RequireRolePolicyPublic は匿名も通す (base の policy で評価する) ので、
+		// 段階としては public。部分一致で RequireRolePolicy に数えると、
+		// RequireAuth を外して Public 版に替えた route を見逃す (#3369)。
+		case strings.Contains(reg, "RequireRolePolicy("):
 			levels[ep] = "rolepolicy"
 		case strings.Contains(reg, "RequireAuth"):
 			levels[ep] = "auth"
