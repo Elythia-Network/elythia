@@ -48,6 +48,7 @@ type env struct {
 	signalContext func() (context.Context, context.CancelFunc)
 
 	avatarBatch          func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.AvatarPublicURLBackfillResult, error)
+	channelUsersBatch    func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.ChannelUsersCountBackfillResult, error)
 	instanceBatch        func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.InstanceCountsBackfillResult, error)
 	noteTagsBatch        func(db *gorm.DB, fromID string, batchSize int, dryRun bool) (maintenance.NoteTagsBackfillResult, error)
 	hashtagMentionsBatch func(db *gorm.DB, fromID string, batchSize int, dryRun bool, seen maintenance.HashtagMentionsSeen) (maintenance.HashtagMentionsBackfillResult, error)
@@ -81,6 +82,7 @@ func defaultEnv() env {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
 		avatarBatch:          maintenance.BackfillAvatarPublicURLBatch,
+		channelUsersBatch:    maintenance.BackfillChannelUsersCountBatch,
 		instanceBatch:        maintenance.BackfillInstanceCountsBatch,
 		noteTagsBatch:        maintenance.BackfillNoteTagsBatch,
 		hashtagMentionsBatch: maintenance.BackfillHashtagMentionsBatch,

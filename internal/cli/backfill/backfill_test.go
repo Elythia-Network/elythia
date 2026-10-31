@@ -48,12 +48,13 @@ func newHarness() *harness {
 // commands lists every batch so the behavior they share can be checked once
 // for all of them.
 var commands = map[string]func(env, []string) int{
-	"avatar-public-url": avatarPublicURL,
-	"emoji-system-file": emojiSystemFile,
-	"instance-counts":   instanceCounts,
-	"note-tags":         noteTags,
-	"hashtag-mentions":  hashtagMentions,
-	"remote-host":       remoteHost,
+	"avatar-public-url":   avatarPublicURL,
+	"channel-users-count": channelUsersCount,
+	"emoji-system-file":   emojiSystemFile,
+	"instance-counts":     instanceCounts,
+	"note-tags":           noteTags,
+	"hashtag-mentions":    hashtagMentions,
+	"remote-host":         remoteHost,
 }
 
 func TestCommands_SharedBehavior(t *testing.T) {
@@ -94,12 +95,13 @@ func TestCommands_SharedBehavior(t *testing.T) {
 func TestExportedEntryPoints_MissingConfig(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.yml")
 	for name, run := range map[string]func([]string) int{
-		"avatar-public-url": AvatarPublicURL,
-		"emoji-system-file": EmojiSystemFile,
-		"instance-counts":   InstanceCounts,
-		"note-tags":         NoteTags,
-		"remote-host":       RemoteHost,
-		"hashtag-mentions":  HashtagMentions,
+		"avatar-public-url":   AvatarPublicURL,
+		"emoji-system-file":   EmojiSystemFile,
+		"channel-users-count": ChannelUsersCount,
+		"instance-counts":     InstanceCounts,
+		"note-tags":           NoteTags,
+		"remote-host":         RemoteHost,
+		"hashtag-mentions":    HashtagMentions,
 	} {
 		assert.Equal(t, 1, run([]string{"-config", missing}), name)
 	}
@@ -236,6 +238,57 @@ func TestInstanceCounts(t *testing.T) {
 			return maintenance.InstanceCountsBackfillResult{}, errBoom
 		}
 		assert.Equal(t, 1, instanceCounts(h.e, []string{"-from", "x"}))
+		assert.Contains(t, h.log.String(), `resume with -from "x"`)
+	})
+}
+
+func TestChannelUsersCount(t *testing.T) {
+	t.Run("logs every change and the totals", func(t *testing.T) {
+		h := newHarness()
+		var cursors []string
+		var batch int
+		results := []maintenance.ChannelUsersCountBackfillResult{
+			{Scanned: 2, LastID: "c2", Changes: []maintenance.ChannelUsersCountChange{
+				{ID: "c1", OldUsers: 5, NewUsers: 2},
+			}},
+			{Scanned: 1, LastID: "c3", Changes: []maintenance.ChannelUsersCountChange{
+				{ID: "c3", OldUsers: 0, NewUsers: 1},
+			}},
+			{},
+		}
+		h.e.channelUsersBatch = func(_ *gorm.DB, from string, n int, _ bool) (maintenance.ChannelUsersCountBackfillResult, error) {
+			cursors = append(cursors, from)
+			batch = n
+			r := results[0]
+			results = results[1:]
+			return r, nil
+		}
+		assert.Equal(t, 0, channelUsersCount(h.e, nil))
+		assert.Equal(t, []string{"", "c2", "c3"}, cursors)
+		assert.Equal(t, 100, batch)
+		assert.Contains(t, h.log.String(), "channel c1 usersCount 5 -> 2")
+		assert.Contains(t, h.log.String(), "channel c3 usersCount 0 -> 1")
+		assert.Contains(t, h.log.String(), "done [applied]: scanned=3 changed=2 usersCountDelta=-2")
+		assert.Len(t, h.sleeps, 2)
+	})
+	t.Run("dry-run label, resume and error", func(t *testing.T) {
+		h := newHarness()
+		var dry bool
+		var from string
+		h.e.channelUsersBatch = func(_ *gorm.DB, f string, _ int, d bool) (maintenance.ChannelUsersCountBackfillResult, error) {
+			dry, from = d, f
+			return maintenance.ChannelUsersCountBackfillResult{}, nil
+		}
+		assert.Equal(t, 0, channelUsersCount(h.e, []string{"-dry-run", "-from", "c9"}))
+		assert.True(t, dry)
+		assert.Equal(t, "c9", from)
+		assert.Contains(t, h.log.String(), "done [dry-run (no writes)]")
+
+		h = newHarness()
+		h.e.channelUsersBatch = func(*gorm.DB, string, int, bool) (maintenance.ChannelUsersCountBackfillResult, error) {
+			return maintenance.ChannelUsersCountBackfillResult{}, errBoom
+		}
+		assert.Equal(t, 1, channelUsersCount(h.e, []string{"-from", "x"}))
 		assert.Contains(t, h.log.String(), `resume with -from "x"`)
 	})
 }
