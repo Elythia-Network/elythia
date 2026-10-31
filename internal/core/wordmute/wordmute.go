@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
 
 // Limits on regex-literal entries.
@@ -58,7 +60,10 @@ const (
 // concatenation). When the text is empty after trim, no rule can hit so the
 // function returns false fast.
 func Match(rulesJSON []byte, text string) bool {
-	text = jsTrim(text)
+	// **本文の前後は frontend (`text.trim()`) と同じ文字で除く (#3369)。** Go の
+	// strings.TrimSpace は U+0085 を除き U+FEFF を除かないので、先頭や末尾に固定する
+	// 規則 (`/^foo/`、`/foo$/`、`/foo/y`) が片方だけで当たっていた。
+	text = jsstr.Trim(text)
 	if text == "" {
 		return false
 	}
@@ -545,7 +550,7 @@ func MatchNote(rulesJSON []byte, noteUserID, viewerID, noteText, noteCW string) 
 	if viewerID != "" && noteUserID == viewerID {
 		return false
 	}
-	combined := jsTrim(noteCW + "\n" + noteText)
+	combined := jsstr.Trim(noteCW + "\n" + noteText)
 	return Match(rulesJSON, combined)
 }
 

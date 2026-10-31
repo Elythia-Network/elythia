@@ -297,13 +297,3 @@ func TestWhatwgHref(t *testing.T) {
 		})
 	}
 }
-
-// TestJSTrim checks the whitespace set of String.prototype.trim.
-func TestJSTrim(t *testing.T) {
-	ws := "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
-	assert.Equal(t, "a b", jsTrim(ws+"a b"+ws))
-	// JS の trim は U+0085・U+180E・U+200B を空白として扱わない
-	for _, s := range []string{"\u0085a", "\u180ea", "\u200ba", "a\u0085", "a\u200b"} {
-		assert.Equal(t, s, jsTrim(s))
-	}
-}

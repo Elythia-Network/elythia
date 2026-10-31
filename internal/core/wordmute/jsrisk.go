@@ -38,27 +38,6 @@ const (
 	guardFoldSpecial
 )
 
-// isJSTrimSpace reports whether JavaScript's String.prototype.trim removes r
-// (WhiteSpace and LineTerminator; the same set migration 000133 uses).
-func isJSTrimSpace(r rune) bool {
-	switch {
-	case r >= 0x09 && r <= 0x0D, r == 0x20, r == 0xA0, r == 0x1680,
-		r >= 0x2000 && r <= 0x200A, r == 0x2028, r == 0x2029,
-		r == 0x202F, r == 0x205F, r == 0x3000, r == 0xFEFF:
-		return true
-	}
-	return false
-}
-
-// jsTrim removes leading and trailing characters like JavaScript's trim().
-//
-// **本文の前後は frontend (`text.trim()`) と同じ文字で除く (#3369)。** Go の
-// strings.TrimSpace は U+0085 を除き U+FEFF を除かないので、先頭や末尾に固定する
-// 規則 (`/^foo/`、`/foo$/`、`/foo/y`) が片方だけで当たっていた。
-func jsTrim(s string) string {
-	return strings.TrimFunc(s, isJSTrimSpace)
-}
-
 // textFeatures returns the guards that s triggers.
 func textFeatures(s string) textGuard {
 	var g textGuard

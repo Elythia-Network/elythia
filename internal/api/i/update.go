@@ -195,30 +195,16 @@ func countMuteWords(raw json.RawMessage) int {
 	for _, item := range arr {
 		switch v := item.(type) {
 		case string:
-			length += utf16Len(v)
+			length += jsstr.Len(v)
 		case []any:
 			for _, sub := range v {
 				if str, ok := sub.(string); ok {
-					length += utf16Len(str)
+					length += jsstr.Len(str)
 				}
 			}
 		}
 	}
 	return length
-}
-
-// utf16Len returns the length of s in UTF-16 code units (JavaScript's
-// String.prototype.length).
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		if r >= 0x10000 {
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n
 }
 
 // normalizeMutedWords validates and normalizes the mutedWords / hardMutedWords

@@ -35,7 +35,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf16"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
 
 const (
@@ -46,30 +47,6 @@ const (
 	// maxSafeBuildLength is MAX_SAFE_BUILD_LENGTH in internal/constants.js.
 	maxSafeBuildLength = maxLength - 6
 )
-
-// jsSpaceClass is the contents of a character class equal to JavaScript's \s,
-// which also matches the characters String.prototype.trim removes.
-//
-// RE2 の \s は ASCII の空白だけで、\v も含まない。JS の \s は Unicode の空白と行終端子を含む。
-const jsSpaceClass = `\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
-
-func isJSSpace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200a
-}
-
-// jsTrim is String.prototype.trim.
-func jsTrim(s string) string {
-	return strings.TrimFunc(s, isJSSpace)
-}
-
-// TrimSpace removes leading and trailing white space the way JavaScript's
-// String.prototype.trim does. Go の strings.TrimSpace とは集合が違う (U+0085 を
-// 除き U+FEFF を除かない)。本家と同じ判定にしたい呼び出し側のために公開する。
-func TrimSpace(s string) string { return jsTrim(s) }
 
 // makeSafe mirrors makeSafeRegex in internal/re.js.
 func makeSafe(src string) string {
@@ -91,8 +68,8 @@ func makeSafe(src string) string {
 // toRE2 rewrites JavaScript's \s into an explicit class so that RE2 matches
 // the same characters.
 func toRE2(src string) string {
-	src = strings.ReplaceAll(src, `[v=\s]`, `[v=`+jsSpaceClass+`]`)
-	return strings.ReplaceAll(src, `\s`, `[`+jsSpaceClass+`]`)
+	src = strings.ReplaceAll(src, `[v=\s]`, `[v=`+jsstr.SpaceClass+`]`)
+	return strings.ReplaceAll(src, `\s`, `[`+jsstr.SpaceClass+`]`)
 }
 
 func safeRe(src string) *regexp.Regexp {
@@ -264,10 +241,10 @@ func cachedParseRange(rng string) ([][]*comparator, bool) {
 // parseRange mirrors the Range constructor. It returns false where the
 // constructor throws.
 func parseRange(rng string) ([][]*comparator, bool) {
-	raw := reSpaces.ReplaceAllString(jsTrim(rng), " ")
+	raw := reSpaces.ReplaceAllString(jsstr.Trim(rng), " ")
 	var set [][]*comparator
 	for _, part := range strings.Split(raw, "||") {
-		comps, ok := parseRangePart(jsTrim(part))
+		comps, ok := parseRangePart(jsstr.Trim(part))
 		if !ok {
 			return nil, false
 		}
@@ -318,7 +295,7 @@ func parseRangePart(r string) ([]*comparator, bool) {
 	comps := make([]*comparator, 0, len(list))
 	for _, c := range list {
 		// replaceGTE0: includePrerelease なので >=0.0.0-0 を * と同じに扱う。
-		c = jsTrim(c)
+		c = jsstr.Trim(c)
 		if reGTE0Pre.MatchString(c) {
 			c = ""
 		}
@@ -354,11 +331,11 @@ func parseRangePart(r string) ([]*comparator, bool) {
 // parseComparator mirrors parseComparator in range.js.
 func parseComparator(comp string) string {
 	comp = replaceFirst(reBuild, comp, func([]string) string { return "" })
-	comp = mapSpaces(jsTrim(comp), replaceCaret)
-	comp = mapSpaces(jsTrim(comp), replaceTilde)
+	comp = mapSpaces(jsstr.Trim(comp), replaceCaret)
+	comp = mapSpaces(jsstr.Trim(comp), replaceTilde)
 	comp = mapSpaces(comp, replaceXRange)
 	// replaceStars: 非 global なので、最初の1つだけを消す。
-	return replaceFirst(reStar, jsTrim(comp), func([]string) string { return "" })
+	return replaceFirst(reStar, jsstr.Trim(comp), func([]string) string { return "" })
 }
 
 func mapSpaces(s string, fn func(string) string) string {
@@ -442,7 +419,7 @@ func replaceCaret(comp string) string {
 
 // replaceXRange mirrors replaceXRange in range.js with includePrerelease.
 func replaceXRange(comp string) string {
-	comp = jsTrim(comp)
+	comp = jsstr.Trim(comp)
 	m := reXRange.FindStringSubmatch(comp)
 	if m == nil {
 		return comp
@@ -529,7 +506,7 @@ func hyphenReplace(m []string) string {
 	default:
 		to = "<" + tM + "." + tm + "." + incr(tp) + "-0"
 	}
-	return jsTrim(from + " " + to)
+	return jsstr.Trim(from + " " + to)
 }
 
 // comparator mirrors classes/comparator.js.
@@ -544,7 +521,7 @@ func (c *comparator) isNullSet() bool { return c.value == "<0.0.0-0" }
 // newComparator mirrors the Comparator constructor. It returns false where
 // the constructor throws.
 func newComparator(comp string) (*comparator, bool) {
-	comp = strings.Join(jsSplitSpaces(jsTrim(comp)), " ")
+	comp = strings.Join(jsSplitSpaces(jsstr.Trim(comp)), " ")
 	m := reComparator.FindStringSubmatch(comp)
 	if m == nil {
 		return nil, false
@@ -606,15 +583,6 @@ type semVer struct {
 	version             string
 }
 
-// utf16Len is the JavaScript length of s.
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		n += utf16.RuneLen(r)
-	}
-	return n
-}
-
 // parseSafeInt returns +s for a string of digits without leading zeros and
 // whether it is at most max.
 func parseSafeInt(s string, max int64) (int64, bool) {
@@ -632,10 +600,10 @@ func parseSafeInt(s string, max int64) (int64, bool) {
 // parseSemVer mirrors the SemVer constructor with loose=false. It returns
 // false where the constructor throws.
 func parseSemVer(version string) (*semVer, bool) {
-	if utf16Len(version) > maxLength {
+	if jsstr.Len(version) > maxLength {
 		return nil, false
 	}
-	m := reFull.FindStringSubmatch(jsTrim(version))
+	m := reFull.FindStringSubmatch(jsstr.Trim(version))
 	if m == nil {
 		return nil, false
 	}

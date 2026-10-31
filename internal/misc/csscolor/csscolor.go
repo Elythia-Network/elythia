@@ -31,6 +31,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
 
 // tinycolor の matchers (tinycolor.js の `matchers`) をそのまま移したもの。
@@ -49,8 +51,8 @@ const (
 	// `\v` も Unicode 空白も含まない。JS の `\s` (WhiteSpace + LineTerminator) は
 	// それらを含むので、素で書くと `rgb(1,\u30002,3)` (全角スペース区切り) を
 	// mk-go だけが reject する — upstream なら色が入るところが NULL になる
-	// (#2726 のレビュー 2 周目で実測)。jsSpace と同じ集合を明示する。
-	jsWS = `\t\n\v\f\r \x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
+	// (#2726 のレビュー 2 周目で実測)。trim と同じ jsstr の集合を使う。
+	jsWS = jsstr.SpaceClass
 
 	permissiveMatch3 = `[` + jsWS + `|\(]+(` + cssUnit + `)[,|` + jsWS + `]+(` + cssUnit +
 		`)[,|` + jsWS + `]+(` + cssUnit + `)[` + jsWS + `]*\)?`
@@ -88,7 +90,7 @@ func Normalize(s string) (hex string, ok bool) {
 // parse mirrors tinycolor's stringInputToObject + inputToRGB for string input.
 // 戻り値は 0-255 の実数 (丸めは呼び出し側)。
 func parse(s string) (r, g, b float64, ok bool) {
-	color := jsToLower(trimJSSpace(s))
+	color := jsToLower(jsstr.Trim(s))
 	if hex, named := names[color]; named {
 		color = hex
 	} else if color == "transparent" {
@@ -148,28 +150,6 @@ func hexPair(s string) float64 {
 func round255(v float64) int {
 	v = math.Min(255, math.Max(0, v))
 	return int(math.Round(v))
-}
-
-// jsSpace reports whether r is whitespace for JS `\s` (= WhiteSpace +
-// LineTerminator)。**上の jsWS と同じ集合**でなければならない
-// (TestJSSpaceMatchesRegexpClass が突き合わせる)。
-//
-// **Go の `unicode.IsSpace` とは 2 つずれる。** JS は ZWNBSP (U+FEFF) を空白に
-// 数えるが Go は数えず、Go は NEL (U+0085) を数えるが JS は数えない。tinycolor は
-// 入力を `/^\s+/` / `/\s+$/` で trim するので、`strings.TrimSpace` を使うと
-// `"\uFEFFred"` を落とし `"\u0085red"` を通してしまう (実測、#2726)。
-func jsSpace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ',
-		0x00a0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200a
-}
-
-// trimJSSpace trims JS `\s` from both ends.
-func trimJSSpace(s string) string {
-	return strings.TrimFunc(s, jsSpace)
 }
 
 // jsToLower lowercases the way JS `String.prototype.toLowerCase()` does.
@@ -258,7 +238,7 @@ func parseFloatJS(s string) float64 {
 // 文字列化して `"1e-7"` の先頭 1 桁だけを読むため。`math.Trunc` で代用すると 0 に
 // なってずれる (#2726)。
 func parseIntJS(s string) float64 {
-	s = trimJSSpace(s)
+	s = jsstr.Trim(s)
 	i := 0
 	neg := false
 	if i < len(s) && (s[i] == '+' || s[i] == '-') {
@@ -362,7 +342,7 @@ func bound01(n string, max float64) float64 {
 // JS は文字列を数値へ暗黙変換して比較するので、"100%" のような数値化できない
 // 文字列は NaN <= 1 = false になり、そのまま返る。
 func convertToPercentage(n string) string {
-	v, err := strconv.ParseFloat(trimJSSpace(n), 64)
+	v, err := strconv.ParseFloat(jsstr.Trim(n), 64)
 	if err != nil || math.IsNaN(v) {
 		return n
 	}

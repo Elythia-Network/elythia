@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	mfmparser "github.com/elythia-network/mfm"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
 
 // ToHTML converts MFM nodes to an HTML string without any mentioned remote
@@ -249,7 +251,7 @@ func renderRuby(b *strings.Builder, n *mfmparser.Node, hc *htmlContext) bool {
 	b.WriteString("<ruby>")
 	renderChildren(b, n.Children[:len(n.Children)-1], hc)
 	b.WriteString("<rp>(</rp><rt>")
-	b.WriteString(EscapeHTML(jsTrim(rt)))
+	b.WriteString(EscapeHTML(jsstr.Trim(rt)))
 	b.WriteString("</rt><rp>)</rp></ruby>")
 	return true
 }
