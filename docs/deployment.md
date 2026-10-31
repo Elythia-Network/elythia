@@ -1641,6 +1641,54 @@ Elythia の `000001` も作るので、TS から引き継いだ DB でも Elythi
 deadlock で片方が失敗する (バッチ側は id の順に渡しているが、行を取る順は planner
 次第)。バッチが落ちたら `-from` で流し直せばよい。
 
+### `backfill channel-users-count` — チャンネルの `usersCount` を数え直す (#3369)
+
+チャンネルの `usersCount` (`channels/*` が返すチャンネルの `usersCount`。frontend は
+「{n}人が参加中」と出す) は、本家では**そのチャンネルに投稿した人の数**で、
+投稿を作ったときにその人の最初の投稿なら 1 足す。#3369 まで Elythia は**フォロー・解除で増減**して
+おり、投稿では増やしていなかった。#3369 から本家と同じく投稿で数えるようになったが、
+積むのは差分なので、それまでに入った値は直らない。このバッチで数え直す。
+
+**値は「いまそのチャンネルに投稿がある利用者の数」** (`note."channelId"` がそのチャンネルの行の
+`"userId"` を重複なく数える)。本家の値は足すだけの累積値で、投稿を消して投稿し直すとまた増える。
+その履歴は DB に残らないので復元できず、`backfill instance-counts` と同じく、いまの実数を正とする。
+
+**いつ流すか。** #3369 を含む版に上げた後に一度流す。**#3369 より前の Elythia を動かしたことがある DB**
+(Elythia 生まれの DB と、TS 版から移行した後に #3369 より前の Elythia を動かした DB) が対象。
+それより前の Elythia はフォローで増減し、投稿では数えていなかったので、フォローが無くても、
+その間にチャンネルへ初めて投稿した人の分が足りない。
+TS 版から移行してすぐ #3369 を含む版を使い始めた DB は、値が本家の数え方のままなので流さなくてよい。
+流しても実数に揃うだけ (本家の累積値は実数より大きいことがあるので、下がる行が出る)。
+
+```bash
+# まず差分を見る (書き込まない)
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill channel-users-count \
+  -config /app/.config/default.yml -dry-run
+
+# 実行
+docker compose run --rm --no-deps --entrypoint /app/elythia app backfill channel-users-count \
+  -config /app/.config/default.yml -batch 100 -sleep-ms 200
+```
+
+`--no-deps` と UDS 構成のサービス名は `backfill instance-counts` と同じ。**無指定で書き込み、
+`-dry-run` で抑止する**側の作法。冪等で、値が既に正しい行は書かない。
+
+出力は差分のある行ごとに `channel <チャンネルの id> usersCount <旧> -> <新>`、最後に
+`done [...]: scanned=<走査した channel 行> changed=<差分のあった行> usersCountDelta=<新 - 旧の合計>`。
+本実行の `changed` は書いた行数。中断したら `-from <最後に出た cursor>` で続きから流せる
+(失敗したバッチは 1 本の UPDATE なので、まるごと書かれていない)。
+
+**負荷とロック。** channel 行を id 順に `-batch` 件ずつ区切り、`backfill instance-counts` と同じく
+**数える SELECT と書く UPDATE の 2 文**で処理する。人数はチャンネルごとに note の
+`"IDX_note_channelId_userId_id"` (`000140`) の該当範囲だけを index only scan で読み、note の全件は走査しない。
+読む量の目安は「チャンネルに付いた投稿の総数」。
+
+**稼働中に流すと、少しずれうる。** 数えた後・書く前にそのチャンネルへ初めて投稿した人の分は、
+バッチの値で上書きされて失われる (書く時点で値が既に一致していればその行は書かない)。
+逆向きもある: 投稿の commit がバッチの集計より前で、その投稿の hook (非同期) がバッチの書き込みの
+後に走ると、集計に入った人をもう一度足して 1 多くなる。
+どちらも 1 チャンネルあたり 1 バッチの時間のあいだに初めて投稿した人数が上限で、もう一度流せば直る。
+
 ### `backfill hashtag-mentions` — 公開範囲を限ったノートだけで使われたタグの利用者を外す
 
 ハッシュタグの利用者 (`hashtag` の `mentioned{,Local,Remote}UserIds` と各数) は、本家と同じく
@@ -1797,7 +1845,8 @@ compose の `run` はサービスの volume をそのまま引き継ぐ。別の
 
 **既定は dry-run で、書き込みには `-apply` が要る。** 姉妹バッチ
 (`backfill remote-host` / `backfill note-tags` / `backfill avatar-public-url` /
-`backfill instance-counts` / `backfill hashtag-mentions` / `backfill chat-reads`) は
+`backfill instance-counts` / `backfill channel-users-count` / `backfill hashtag-mentions` /
+`backfill chat-reads`) は
 **逆** (無指定で書き込み、`-dry-run` で抑止) なので、手が覚えているほうで打たないこと。`-dry-run` と `-apply`
 を両方渡すと落ちる。
 
