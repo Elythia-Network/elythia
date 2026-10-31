@@ -792,6 +792,37 @@ func TestUpdate_ForeignBannerRejected(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "e86c14a4-0da2-4032-8df3-e737a04c7f3b")
 }
 
+// 本家と同じく、チャンネルの存在 → 権限 → バナーのファイルの順で検査する (#3369)。
+// 自分のものでない bannerId を送っても、チャンネルが無ければ NO_SUCH_CHANNEL、
+// 他人のチャンネルなら ACCESS_DENIED を返す。
+func TestUpdate_ChannelChecksComeBeforeBanner(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		channelID string
+		wantCode  string
+	}{
+		{"missing channel", "missing", "NO_SUCH_CHANNEL"},
+		{"someone else's channel", "c1", "ACCESS_DENIED"},
+		{"own channel", "c2", "NO_SUCH_FILE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo, _, _ := newHandler(t)
+			bob, alice := "bob", "alice"
+			repo.Channels["c1"] = &model.Channel{ID: "c1", Name: "ch", UserID: &bob}
+			repo.Channels["c2"] = &model.Channel{ID: "c2", Name: "ch", UserID: &alice}
+			dr := testutil.NewMockDriveFileRepository()
+			require.NoError(t, dr.Create(&model.DriveFile{ID: "b1", UserID: &bob, Type: "image/png", URL: "https://x/b.png"}))
+			h.SetDriveFileRepo(dr)
+			c, rec := newReq(t, `{"channelId":"`+tc.channelID+`","bannerId":"b1"}`)
+			setUser(c, "alice")
+			require.NoError(t, h.Update(c))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"code":"`+tc.wantCode+`"`)
+			assert.Nil(t, repo.Channels["c2"].BannerID, "バナーを書かない")
+		})
+	}
+}
+
 // bannerResolver 未配線 + bannerId 指定は fail-closed (NO_SUCH_FILE)。
 func TestCreate_BannerNoResolverFailsClosed(t *testing.T) {
 	h, _, _, _ := newHandler(t) // SetDriveFileRepo を呼ばない

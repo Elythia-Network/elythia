@@ -118,6 +118,36 @@ func TestUpdate_AccessDenied(t *testing.T) {
 	assert.ErrorIs(t, err, channel.ErrAccessDenied)
 }
 
+// BannerOK is consulted after the existence and permission checks, and only
+// when a banner is set (#3369).
+func TestUpdate_BannerOKAfterChannelChecks(t *testing.T) {
+	svc, repo, _, _ := newSvc(t)
+	owner := "u1"
+	repo.Channels["c1"] = &model.Channel{ID: "c1", Name: "ch", UserID: &owner}
+	var asked []string
+	reject := func(id string) bool { asked = append(asked, id); return false }
+	banner := ptrTo("b1")
+
+	_, err := svc.Update("u1", "missing", channel.UpdateInput{BannerID: &banner, BannerOK: reject})
+	assert.ErrorIs(t, err, channel.ErrChannelNotFound)
+	_, err = svc.Update("u2", "c1", channel.UpdateInput{BannerID: &banner, BannerOK: reject})
+	assert.ErrorIs(t, err, channel.ErrAccessDenied)
+	assert.Empty(t, asked)
+
+	_, err = svc.Update("u1", "c1", channel.UpdateInput{BannerID: &banner, BannerOK: reject})
+	assert.ErrorIs(t, err, channel.ErrNoSuchBanner)
+	assert.Equal(t, []string{"b1"}, asked)
+	assert.Nil(t, repo.Channels["c1"].BannerID)
+
+	// バナーを外す (null) ときは検査しない
+	var none *string
+	_, err = svc.Update("u1", "c1", channel.UpdateInput{BannerID: &none, BannerOK: reject})
+	assert.NoError(t, err)
+	assert.Len(t, asked, 1)
+}
+
+func ptrTo(s string) *string { return &s }
+
 func TestUpdate_NameEmpty(t *testing.T) {
 	svc, repo, _, _ := newSvc(t)
 	owner := "u1"
