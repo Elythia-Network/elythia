@@ -505,7 +505,7 @@ func (m *MockAnnouncementRepository) ListForUser(userID string, activeOnly bool,
 	return result[:limit], nil
 }
 
-func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
+func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
 	var result []*model.Announcement
 	for _, a := range m.Items {
 		if userID != "" {
@@ -539,13 +539,6 @@ func (m *MockAnnouncementRepository) ListForAdmin(userID, status string, limit, 
 	}
 	if limit <= 0 {
 		limit = 10
-	}
-	if sinceID == "" && untilID == "" {
-		if offset >= len(result) {
-			return nil, nil
-		}
-		end := min(offset+limit, len(result))
-		return result[offset:end], nil
 	}
 	if limit > len(result) {
 		limit = len(result)
@@ -991,31 +984,6 @@ func (m *MockAdRepository) FindByID(id string) (*model.Ad, error) {
 		return nil, ErrNotFound
 	}
 	return a, nil
-}
-
-func (m *MockAdRepository) List(limit, offset int) ([]*model.Ad, error) {
-	if m.ListErr != nil {
-		return nil, m.ListErr
-	}
-	rows := make([]*model.Ad, 0, len(m.Ads))
-	for _, a := range m.Ads {
-		rows = append(rows, a)
-	}
-	sortAdsByIDDesc(rows)
-	if limit <= 0 {
-		limit = 30
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(rows) {
-		return []*model.Ad{}, nil
-	}
-	end := offset + limit
-	if end > len(rows) {
-		end = len(rows)
-	}
-	return rows[offset:end], nil
 }
 
 // ListFiltered applies the publishing filter + cursor pagination (#1545).

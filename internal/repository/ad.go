@@ -15,8 +15,6 @@ type AdRepository interface {
 	ListActive(now time.Time) ([]*model.Ad, error)
 	Create(a *model.Ad) error
 	FindByID(id string) (*model.Ad, error)
-	// List returns ads ordered by id DESC with limit/offset pagination.
-	List(limit, offset int) ([]*model.Ad, error)
 	// ListFiltered returns ads with cursor pagination (sinceID/untilID) and an
 	// optional publishing filter (#1545, upstream admin/ad/list)。publishing が
 	// nil なら全件、true なら配信中 (startsAt<=now<expiresAt)、false なら非配信。
@@ -59,20 +57,6 @@ func (r *adRepository) FindByID(id string) (*model.Ad, error) {
 		return nil, err
 	}
 	return &a, nil
-}
-
-func (r *adRepository) List(limit, offset int) ([]*model.Ad, error) {
-	if limit <= 0 {
-		limit = 30
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	var ads []*model.Ad
-	if err := r.db.Order(`"id" DESC`).Limit(limit).Offset(offset).Find(&ads).Error; err != nil {
-		return nil, err
-	}
-	return ads, nil
 }
 
 func (r *adRepository) ListFiltered(publishing *bool, sinceID, untilID string, limit int, now time.Time) ([]*model.Ad, error) {

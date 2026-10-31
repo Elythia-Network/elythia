@@ -462,7 +462,7 @@ func TestAnnouncementRepository_ListForAdmin_FiltersByUserID(t *testing.T) {
 	defer cleanupAnnouncement(t, oUser.ID)
 
 	// userId 指定 → そのユーザー宛のみ
-	rows, err := repo.ListForAdmin(tu.ID, "active", 10, 0, "", "", time.Now())
+	rows, err := repo.ListForAdmin(tu.ID, "active", 10, "", "", time.Now())
 	require.NoError(t, err)
 	ids := make(map[string]bool)
 	for _, r := range rows {
@@ -473,7 +473,7 @@ func TestAnnouncementRepository_ListForAdmin_FiltersByUserID(t *testing.T) {
 	assert.False(t, ids[oUser.ID])
 
 	// userId 未指定 → global only
-	rows, err = repo.ListForAdmin("", "active", 10, 0, "", "", time.Now())
+	rows, err = repo.ListForAdmin("", "active", 10, "", "", time.Now())
 	require.NoError(t, err)
 	ids = make(map[string]bool)
 	for _, r := range rows {
@@ -499,7 +499,7 @@ func TestAnnouncementRepository_ListForAdmin_StatusBranches(t *testing.T) {
 	defer cleanupAnnouncement(t, archived.ID)
 
 	// archived: archived row が含まれ active row が含まれないこと。
-	rows, err := repo.ListForAdmin("", "archived", 10, 0, "", "", time.Now())
+	rows, err := repo.ListForAdmin("", "archived", 10, "", "", time.Now())
 	require.NoError(t, err)
 	archivedIDs := make(map[string]bool)
 	for _, r := range rows {
@@ -509,7 +509,7 @@ func TestAnnouncementRepository_ListForAdmin_StatusBranches(t *testing.T) {
 	assert.True(t, archivedIDs[archived.ID])
 	assert.False(t, archivedIDs[active.ID])
 	// all (両方含む)
-	rows, err = repo.ListForAdmin("", "all", 10, 0, "", "", time.Now())
+	rows, err = repo.ListForAdmin("", "all", 10, "", "", time.Now())
 	require.NoError(t, err)
 	ids := make(map[string]bool)
 	for _, r := range rows {
@@ -519,11 +519,11 @@ func TestAnnouncementRepository_ListForAdmin_StatusBranches(t *testing.T) {
 	assert.True(t, ids[archived.ID])
 
 	// limit / offset / since / until / clamp paths
-	_, err = repo.ListForAdmin("", "active", 0, 0, "", "", time.Now())
+	_, err = repo.ListForAdmin("", "active", 0, "", "", time.Now())
 	require.NoError(t, err)
-	_, err = repo.ListForAdmin("", "active", 1000, 5, "", "", time.Now())
+	_, err = repo.ListForAdmin("", "active", 1000, "", "", time.Now())
 	require.NoError(t, err)
-	_, err = repo.ListForAdmin("", "active", 10, 0, "since_x", "until_x", time.Now())
+	_, err = repo.ListForAdmin("", "active", 10, "since_x", "until_x", time.Now())
 	require.NoError(t, err)
 }
 
