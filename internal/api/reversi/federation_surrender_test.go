@@ -152,7 +152,7 @@ func TestCancelMatch_DeliversLeaveToRemote(t *testing.T) {
 	svc.SetBaseURL("https://example.com")
 	h.SetService(svc)
 
-	rec := post(h.CancelMatch, `{}`, u1)
+	rec := post(h.CancelMatch, `{"userId":"u2"}`, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	// Leave が送られたこと

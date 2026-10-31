@@ -248,9 +248,8 @@ func TestMatchAny_QueueFailureReturns500(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-// cancel-match も待機列が使えないだけで失敗させない (pending game の片付けは
-// 続行する)。
-func TestCancelMatch_QueueFailureStillCleansGames(t *testing.T) {
+// cancel-match も待機列が使えないだけで失敗させない。
+func TestCancelMatch_QueueFailureStillReturns204(t *testing.T) {
 	repo := newMock()
 	idGen, _ := id.NewGenerator("aidx")
 	h := NewHandler(repo, idGen, nil, nil)

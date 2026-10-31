@@ -150,8 +150,10 @@ func TestReversi_LocalInviteRoundTrip(t *testing.T) {
 }
 
 // TestReversi_CancelMatchUndoesPreStart: pre-start のゲームに対して招待側が
-// /api/reversi/cancel-match を呼ぶと AP Leave が相手に飛んで、B 側の row が
-// 消える (= bob の invitations から alice が消える)。
+// 相手の userId を付けて /api/reversi/cancel-match を呼ぶと AP Leave が相手に
+// 飛んで、B 側の row が消える (= bob の invitations から alice が消える)。
+// 同梱の frontend も招待の取り消しでは相手の userId を送る。userId 無しは本家と
+// 同じくランダムマッチの待機列から外すだけで、招待には触らない (#3369)。
 //
 // sync deliver hook (main_test.go の SetSyncDeliverHookForTest) で AP
 // deliver を inline で駆動する (#780)。
@@ -165,7 +167,9 @@ func TestReversi_CancelMatchUndoesPreStart(t *testing.T) {
 	aliceURI := userURI(serverA, alice.ID)
 	warmRemoteUserCache(t, serverB, bob, aliceURI)
 	bobURI := userURI(serverB, bob.ID)
-	warmRemoteUserCache(t, serverA, alice, bobURI)
+	bobOnA := resolveRemoteUser(t, serverA, bobURI, alice)
+	bobIDOnA, _ := bobOnA["id"].(string)
+	require.NotEmpty(t, bobIDOnA, "A 側の bob の id")
 	preCacheReversiFederationVersion(t, 0, serverB.Host)
 
 	// 招待
@@ -180,7 +184,8 @@ func TestReversi_CancelMatchUndoesPreStart(t *testing.T) {
 
 	// 招待キャンセル → Leave activity が B に飛ぶ
 	resp = srvAPIPost(t, serverA, "reversi/cancel-match", map[string]any{
-		"i": alice.Token,
+		"i":      alice.Token,
+		"userId": bobIDOnA,
 	})
 	resp.Body.Close()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)

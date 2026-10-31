@@ -505,9 +505,26 @@ func TestCancelMatch_Success(t *testing.T) {
 	g := sampleGame()
 	g.IsStarted = false
 	repo.games["g1"] = g
-	rec := post(h.CancelMatch, `{}`, u1)
+	rec := post(h.CancelMatch, `{"userId":"u2"}`, u1)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Empty(t, repo.games)
+}
+
+// 本家の matchAnyUserCancel と同じく、userId 無しは待機列から外すだけで、
+// 送った招待も受けた招待も取り消さない (#3369)。
+func TestCancelMatch_WithoutUserIDKeepsPendingGames(t *testing.T) {
+	h, repo := newTestHandler()
+	sent := sampleGame() // User1=u1, User2=u2
+	repo.games["g1"] = sent
+	received := sampleGame()
+	received.ID = "g2"
+	received.User1ID = "u3"
+	received.User2ID = "u1"
+	repo.games["g2"] = received
+
+	rec := post(h.CancelMatch, `{}`, u1)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Len(t, repo.games, 2)
 }
 
 // userId 指定時は upstream matchSpecificUserCancel 互換で、その相手に送った
