@@ -175,5 +175,5 @@ func TestUsersEndpoints_UGCVisibilityNoneKeepsUpstreamErrorOrder(t *testing.T) {
 	h, _, _ := ugcFixture(t, "none")
 	assert.Equal(t, http.StatusBadRequest, postStub(h.Reactions, `{"userId":"rem"}`, nil).Code, "IS_REMOTE_USER")
 	assert.Equal(t, http.StatusBadRequest, postStub(h.Reactions, `{"userId":"ghost"}`, nil).Code, "NO_SUCH_USER")
-	assert.Equal(t, http.StatusNotFound, postStub(h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil).Code, "NO_SUCH_USER")
+	assert.Equal(t, http.StatusBadRequest, postStub(h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil).Code, "NO_SUCH_USER")
 }

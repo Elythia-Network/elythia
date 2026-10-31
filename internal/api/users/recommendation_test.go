@@ -17,8 +17,8 @@ func TestGetFrequentlyRepliedUsers_InvalidAndMissing(t *testing.T) {
 	h, _ := newTestHandler(t)
 	// userId 欠落は 400
 	assert.Equal(t, http.StatusBadRequest, postStub(h.GetFrequentlyRepliedUsers, `{}`, nil).Code)
-	// 存在しない user は NO_SUCH_USER (404)
-	assert.Equal(t, http.StatusNotFound, postStub(h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil).Code)
+	// 存在しない user は NO_SUCH_USER。本家は httpStatusCode を持たないので 400 (#3369)
+	assert.Equal(t, http.StatusBadRequest, postStub(h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil).Code)
 }
 
 func TestGetFollowingUsersByBirthday_InvalidParams(t *testing.T) {

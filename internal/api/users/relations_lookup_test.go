@@ -104,7 +104,7 @@ func TestRelations_UnknownRemoteAcctIsNotFetched(t *testing.T) {
 				h.SetUGCVisibility(tc.ugc)
 
 				rec := relationsStatus(t, ep.pick(h), `{"username":"bob","host":"remote.example"}`, tc.viewer)
-				assert.Equal(t, http.StatusNotFound, rec.Code)
+				assert.Equal(t, http.StatusBadRequest, rec.Code)
 				assert.Equal(t, 0, resolver.calls, "users/followers・following は DB だけを引く")
 
 				var resp map[string]any
