@@ -132,6 +132,12 @@ type TranslateResult struct {
 
 // Translate sends text to DeepL and returns the translated text.
 func (c *DeepLClient) Translate(ctx context.Context, text, targetLang string) (*TranslateResult, error) {
+	// 本家は `targetLang.split('-')[0]` で地域の部分を落としてから送る (#3369)。
+	// 同梱の frontend は `ja-JP` のような地域付きの言語を送るので、そのまま送ると
+	// DeepL が受けない target_lang になる。
+	if i := strings.IndexByte(targetLang, '-'); i >= 0 {
+		targetLang = targetLang[:i]
+	}
 	body := url.Values{
 		"text":        {text},
 		"target_lang": {strings.ToUpper(targetLang)},

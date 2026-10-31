@@ -38,6 +38,24 @@ func TestDeepL_Translate_Success(t *testing.T) {
 	assert.Equal(t, "Hello", result.Text)
 }
 
+// The region of targetLang is dropped before it is sent, as upstream's
+// `targetLang.split('-')[0]` does (#3369).
+func TestDeepL_Translate_DropsRegionOfTargetLang(t *testing.T) {
+	for in, want := range map[string]string{"ja-JP": "JA", "en-US": "EN", "zh-Hans-CN": "ZH", "ja": "JA", "-x": ""} {
+		var got string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			got = r.FormValue("target_lang")
+			_, _ = w.Write([]byte(`{"translations":[{"detected_source_language":"JA","text":"x"}]}`))
+		}))
+		c := NewDeepLWithClient("testkey", srv.URL, srv.Client())
+		_, err := c.Translate(context.Background(), "text", in)
+		srv.Close()
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+}
+
 func TestDeepL_Translate_NoResult(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(deeplResponse{Translations: nil})
