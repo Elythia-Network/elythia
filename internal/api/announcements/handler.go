@@ -497,17 +497,23 @@ func (h *Handler) AdminDelete(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.ID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "id is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
-	// snapshot before delete (log info に含める + global/user 分岐判定)
-	snapshot, _ := h.repo.FindByID(req.ID)
+	// snapshot before delete (log info に含める + global/user 分岐判定)。
+	// 本家 delete.ts と同じく、無いお知らせは NO_SUCH_ANNOUNCEMENT にする (#3369)。
+	// 以前は無くても 204 を返し、逆に DB の障害を NO_SUCH_ANNOUNCEMENT にしていた (#2792)。
+	snapshot, err := h.repo.FindByID(req.ID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ANNOUNCEMENT", "No such announcement.", "ecad8040-a276-4e85-bda9-015a708d291e"))
+		}
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
 	if err := h.repo.Delete(req.ID); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ANNOUNCEMENT", "No such announcement.", "ecad8040-a276-4e85-bda9-015a708d291e"))
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
-	if snapshot != nil {
-		h.logAnnouncementAction(c, moderationlog.LogDeleteGlobalAnnouncement, moderationlog.LogDeleteUserAnnouncement, snapshot, map[string]any{
-			"announcementId": req.ID,
-			"announcement":   snapshot,
-		})
-	}
+	h.logAnnouncementAction(c, moderationlog.LogDeleteGlobalAnnouncement, moderationlog.LogDeleteUserAnnouncement, snapshot, map[string]any{
+		"announcementId": req.ID,
+		"announcement":   snapshot,
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 

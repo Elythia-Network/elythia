@@ -235,10 +235,45 @@ func TestAdUpdate_PartialFields(t *testing.T) {
 	assert.Equal(t, "high", repo.Ads["a1"].Priority)
 }
 
+// 本家 ad/update.ts と同じく、無い広告は 400 NO_SUCH_AD。
 func TestAdUpdate_NotFound(t *testing.T) {
 	h, _ := setupAdHandler(t)
-	assert.Equal(t, http.StatusNotFound,
-		doPost(h.AdUpdate, `{"id":"missing","url":"x"}`, adminUser).Code)
+	rec := doPost(h.AdUpdate, `{"id":"missing","url":"x"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "b7aa1727-1354-47bc-a182-3a9c3973d300")
+}
+
+// 本家 ad/delete.ts と同じく、無い広告は 400 NO_SUCH_AD。
+func TestAdDelete_NotFound(t *testing.T) {
+	h, _ := setupAdHandler(t)
+	rec := doPost(h.AdDelete, `{"id":"missing"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "ccac9863-3a03-416e-b899-8a64041118b1")
+}
+
+type failingFindAdRepo struct{ *testutil.MockAdRepository }
+
+func (f *failingFindAdRepo) FindByID(string) (*model.Ad, error) { return nil, assert.AnError }
+
+type failingDeleteAdRepo struct{ *testutil.MockAdRepository }
+
+func (f *failingDeleteAdRepo) Delete(string) error { return assert.AnError }
+
+// DB の障害は「無い」に丸めず 500 にする (#2792)。
+func TestAdDelete_RepoErrorsAre500(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	h.SetAdRepo(&failingFindAdRepo{testutil.NewMockAdRepository()})
+	assert.Equal(t, http.StatusInternalServerError, doPost(h.AdDelete, `{"id":"a1"}`, adminUser).Code)
+
+	del := &failingDeleteAdRepo{testutil.NewMockAdRepository()}
+	require.NoError(t, del.Create(&model.Ad{ID: "a1"}))
+	h.SetAdRepo(del)
+	assert.Equal(t, http.StatusInternalServerError, doPost(h.AdDelete, `{"id":"a1"}`, adminUser).Code)
+}
+
+func TestAdDelete_EmptyIDIs400(t *testing.T) {
+	h, _ := setupAdHandler(t)
+	assert.Equal(t, http.StatusBadRequest, doPost(h.AdDelete, `{"id":""}`, adminUser).Code)
 }
 
 func TestAdUpdate_MissingID(t *testing.T) {

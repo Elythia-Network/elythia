@@ -110,20 +110,25 @@ func (h *Handler) AdDelete(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	if req.ID == "" {
-		return c.NoContent(http.StatusNoContent)
+		return apierr.JSONInvalidParam(c)
 	}
-	// log info に snapshot を含めるため削除前に取得 (失敗時は log を諦める)
-	snapshot, _ := h.adRepo.FindByID(req.ID)
-	if err := h.adRepo.Delete(req.ID); err == nil {
-		// snapshot が取れたかどうかは moderation log の話で、cache とは無関係。
-		h.invalidateMetaResponseCache()
-		if snapshot != nil {
-			h.logModeration(c, moderationlog.LogDeleteAd, map[string]any{
-				"adId": req.ID,
-				"ad":   snapshot,
-			})
+	// 本家 ad/delete.ts と同じく、無い広告は NO_SUCH_AD にする (#3369)。以前は
+	// 何もせずに 204 を返していた。DB の障害は「無い」に丸めない (#2792)。
+	snapshot, err := h.adRepo.FindByID(req.ID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_AD", "No such ad.", "ccac9863-3a03-416e-b899-8a64041118b1"))
 		}
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
+	if err := h.adRepo.Delete(req.ID); err != nil {
+		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
+	}
+	h.invalidateMetaResponseCache()
+	h.logModeration(c, moderationlog.LogDeleteAd, map[string]any{
+		"adId": req.ID,
+		"ad":   snapshot,
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -197,7 +202,8 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
-		return c.JSON(http.StatusNotFound, apierr.NotFound())
+		// 本家 ad/update.ts の NO_SUCH_AD (400) に揃える (#3369)。以前は 404 NOT_FOUND。
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_AD", "No such ad.", "b7aa1727-1354-47bc-a182-3a9c3973d300"))
 	}
 	fields := map[string]any{}
 	if req.URL != nil {
