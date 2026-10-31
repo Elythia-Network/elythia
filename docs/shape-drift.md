@@ -377,7 +377,7 @@ Elythiaは全認証がtoken経由(session無し)で、native token = `users.toke
 
 テストが `upstream_paramdefs.json` の meta から `meta.kind` を集め (`upstreamOAuthKinds`)、router の `middleware.RequireScope` と突き合わせる。**値の不一致と、kind があるのに `RequireScope` が無い方の両方**を見る (後者は app token が scope 無しで叩ける)。意図的に付けない場合は `kindMissingScope` に upstream の kind を添えて登録する (現在は空)。
 
-**逆向きも見る (#3369)。** 本家は kind が無く資格情報を要する endpoint (`requireCredential` / `requireModerator` / `requireAdmin` のどれか) では app token を一律に拒否する (`ApiCallService.ts`)。Elythia の route がそこに `RequireScope` を付けていると、その scope を持つアプリが本家では叩けないものを叩けるので落とす。2026.10.1 では本家のこの形が 39 件で、Elythia の route で当たるものは無い (数え方: `upstream_paramdefs.json` で meta に `kind` が無く、上の 3 つのどれかが true の endpoint の数)。
+**逆向きも見る (#3369)。** 本家は kind が無く資格情報を要する endpoint (`requireCredential` / `requireModerator` / `requireAdmin` のどれか) では app token を一律に拒否する (`ApiCallService.ts`)。Elythia の route には、app token を拒む `RejectAppToken` か `RequireSecure` を求める。どちらも無いと、scope を問わず app token が handler に届く (`RequireAuth` などは `admitHeldAppUser` を呼ぶため)。app token を通す `RequireScope` (識別子を渡す形も含め、呼び出しの有無で見る) と `AdmitAppUser` が付いていても落とす。意図的に通す route は、理由を添えて `noKindAppTokenAllowed` に登録する (現在は空。使っていない項目も落とす)。2026.10.1 では本家のこの形が 39 件で、Elythia の route で当たるものは無い (数え方: `upstream_paramdefs.json` で meta に `kind` が無く、上の 3 つのどれかが true の endpoint の数)。
 
 数え方: endpoint 単位の map で、2026.10.1 では 298 件 (`upstream_paramdefs.json` で meta に `kind` を持つ endpoint の数)。`kind` は meta 直下のものだけで、`meta.errors` の中の `kind: 'server'` は入らない (paramdef-gen が meta の決まった key だけを残すため)。正規表現で読んでいたころは、`endpoints/i.ts` だけがダブルクォートで書いていたために**最も広く叩かれる `/api/i` が丸ごと検査対象から外れていた** (#2877)。テストは今も `i` の kind を名指しで要求する。
 
@@ -390,7 +390,7 @@ make paramdef-gen     # 5 gate が読む本家の meta (upstream_paramdefs.json)
 
 ## Role policy drift gate（requiredRolePolicy）
 
-`TestPermissionDrift` は本家の `requiredRolePolicy` を段階に数えないので、route から `RequireRolePolicy` を外しても、policy 名を取り違えても素通りする。`TestRolePolicyDrift` は、本家の meta に `requiredRolePolicy` がある endpoint のうち Elythia が実装しているものについて、route の `RequireRolePolicy` / `RequireRolePolicyPublic` に同じ policy があることを見る (#3369)。policy は `corerole.PolicyXxx` の定数かリテラルで書く。変数を経由した形は読めないので落とす。本家より厳しく守るために policy を付けない route は、理由を添えて `rolePolicyStricterThanUpstream` に登録する (現在は空)。使っていない項目も落とす。
+`TestPermissionDrift` は本家の `requiredRolePolicy` を段階に数えないので、route から `RequireRolePolicy` を外しても、policy 名を取り違えても素通りする。`TestRolePolicyDrift` は、本家の meta に `requiredRolePolicy` がある endpoint のうち Elythia が実装しているものについて、route の `RequireRolePolicy` / `RequireRolePolicyPublic` に同じ policy があることを見る (#3369)。`RequireRolePolicyPublic` は匿名も base の policy で通すので、それだけで policy を見てよいのは、本家の `requireCredential` / `requireModerator` / `requireAdmin` がどれも無い endpoint (`users/search`) だけ。`TestPermissionDrift` も、`RequireRolePolicyPublic` だけの route を public の段階に数える。policy は `corerole.PolicyXxx` の定数かリテラルで書く。変数を経由した形は読めないので落とす。本家より厳しく守るために policy を付けない route は、理由を添えて `rolePolicyStricterThanUpstream` に登録する (現在は空)。使っていない項目も落とす。
 
 数え方: 2026.10.1 では 28 件 (`upstream_paramdefs.json` で meta に `requiredRolePolicy` を持つ endpoint の数)。
 
