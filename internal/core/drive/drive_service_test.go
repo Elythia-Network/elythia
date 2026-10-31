@@ -932,6 +932,20 @@ func TestUpdateFolder_HappyPath(t *testing.T) {
 	assert.Equal(t, "New", got.Name)
 }
 
+// An empty name leaves the folder name as it is, as upstream's
+// `if (ps.name)` does (#3369).
+func TestUpdateFolder_EmptyNameKeepsName(t *testing.T) {
+	svc, _, folderRepo := newSvc(t)
+	uid := "u1"
+	folderRepo.Folders["p"] = &model.DriveFolder{ID: "p", Name: "Old", UserID: &uid}
+
+	empty := ""
+	got, err := svc.UpdateFolder(&model.User{ID: "u1"}, "p", drive.UpdateFolderInput{Name: &empty})
+	require.NoError(t, err)
+	assert.Equal(t, "Old", got.Name)
+	assert.Equal(t, "Old", folderRepo.Folders["p"].Name)
+}
+
 func TestUpdateFolder_NotFound(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	_, err := svc.UpdateFolder(&model.User{ID: "u1"}, "ghost", drive.UpdateFolderInput{})

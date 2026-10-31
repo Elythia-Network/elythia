@@ -1717,7 +1717,9 @@ func (s *Service) UpdateFolder(user *model.User, id string, in UpdateFolderInput
 		return nil, err
 	}
 	fields := map[string]any{}
-	if in.Name != nil {
+	// 本家は `if (ps.name) folder.name = ps.name;` なので、空の name は名前を
+	// 変えない (#3369)。
+	if in.Name != nil && *in.Name != "" {
 		fields["name"] = *in.Name
 	}
 	if in.ParentID != nil {
