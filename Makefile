@@ -1545,6 +1545,7 @@ shapecheck-gen: ## shape drift の golden snapshot を再生成
 	go run ./tools/permspec
 	go run ./tools/securespec
 	go run ./tools/schemadrift
+	go run ./tools/paginationspec
 
 # 全 family の drift を severity 付きで一覧表示する (gate にかける前の調査用)。
 shapecheck-report: ## shape drift のレポートを出力
