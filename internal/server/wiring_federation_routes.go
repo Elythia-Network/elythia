@@ -37,6 +37,7 @@ type federationRoutesDeps struct {
 	userRepo                repository.UserRepository
 	noteRepo                repository.NoteRepository
 	metaRepo                repository.MetaRepository
+	instanceRepo            repository.InstanceRepository
 	followingRepo           repository.FollowingRepository
 	followRequestRepo       repository.FollowRequestRepository
 	userRelationRepo        repository.UserRelationReader
@@ -92,6 +93,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	userRepo := d.userRepo
 	noteRepo := d.noteRepo
 	metaRepo := d.metaRepo
+	instanceRepo := d.instanceRepo
 	followingRepo := d.followingRepo
 	followRequestRepo := d.followRequestRepo
 	userRelationRepo := d.userRelationRepo
@@ -158,6 +160,13 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		Memo:          userMemoRepo,
 		Relation:      userRelationRepo,
 	})
+	// 署名付きの GET に、見てよい人ならフォロワー限定・指名の投稿を返す (#3914)。
+	// 鍵は DB にあるものだけで引き、知らない keyId を取りに行かない。署名は受信と
+	// 同じく自ホスト (host:port) に縛る。署名した人のホストは、配送と同じ内容の
+	// 判定 (instanceService の CanFetchOptionalRemoteData。meta を読めないときは
+	// 見せない側) と配送停止のソフトウェアで絞る。
+	apHandler.SetFetchSigner(corefederation.NewSignedFetchAuthenticator(userRepo, federationResolver, s.config.Host),
+		instanceService, corefederation.NewSuspendedChecker(metaRepo, instanceRepo))
 	// AP リソース系エンドポイントは Accept ヘッダで content negotiation する。
 	// ブラウザからのリロード (Accept: text/html など) では SPA 用の HTML を
 	// 返したいので、フォールバックとして frontendHTML を注入しておく。
