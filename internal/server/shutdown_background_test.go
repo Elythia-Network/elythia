@@ -94,16 +94,30 @@ func TestLateBackgroundWait(t *testing.T) {
 // group that does not stop holds the late path only for lateBackgroundWait
 // (1 second with an expired ctx), not for bgwork.MaxWait (#3661 review r2
 // L-6 N7). 保存の期限は待った後に取るので、保存の時間は削られない。
+//
+// **全体の経過ではなく、箱の待ちの区間だけを測る (#3369 I1)。** 以前は
+// StopBackground 全体の経過を 1.2〜2.8 秒で挟んでいたので、実 PostgreSQL への保存と
+// -race の揺れを丸ごと含み、make check の負荷の下で上限を超えて落ちた。ここでは、
+// 止まらない goroutine を足した時刻 (job の finish。この直後に遅い経路の待ちに入る) から、
+// StopWithin が箱の ctx を切った時刻までを測る。StopWithin は待ちの 3/4 で ctx を
+// 切るので、1 秒なら約 0.75 秒、MaxWait (3 秒) なら約 2.25 秒になる。
 func TestServer_StopBackgroundBoundsTheLateWait(t *testing.T) {
 	f := newShutdownOrderFixture(t)
 	f.job.block = make(chan struct{})
 	f.srv.background = bgwork.New()
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
+	var spawned time.Time
+	canceled := make(chan time.Time, 1)
 	finish := f.job.finish
 	f.job.finish = func() {
 		finish()
-		require.True(t, f.srv.background.Go(func(context.Context) { <-release }))
+		spawned = time.Now()
+		require.True(t, f.srv.background.Go(func(ctx context.Context) {
+			<-ctx.Done()
+			canceled <- time.Now()
+			<-release
+		}))
 	}
 	f.srv.addPart("testPart", nil, func(ctx context.Context) {
 		<-ctx.Done()
@@ -111,7 +125,6 @@ func TestServer_StopBackgroundBoundsTheLateWait(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	start := time.Now()
 	stopped := make(chan error, 1)
 	go func() { stopped <- f.srv.StopBackground(ctx) }()
 	select {
@@ -119,10 +132,15 @@ func TestServer_StopBackgroundBoundsTheLateWait(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("StopBackground が返らない")
 	}
-	elapsed := time.Since(start)
-	// 期限 0.3 秒 + 箱の待ち 1 秒 + 保存。MaxWait (3 秒) まで待てば 3.3 秒を超える。
-	assert.GreaterOrEqual(t, elapsed, 1200*time.Millisecond, "遅い経路で箱を待たなかった")
-	assert.Less(t, elapsed, 2800*time.Millisecond, "遅い経路の箱の待ちが上限を守っていない")
+	var waited time.Duration
+	select {
+	case at := <-canceled:
+		waited = at.Sub(spawned)
+	default:
+		t.Fatal("遅い経路が箱の ctx を切らなかった")
+	}
+	assert.GreaterOrEqual(t, waited, 500*time.Millisecond, "遅い経路で箱を待たなかった")
+	assert.Less(t, waited, 1500*time.Millisecond, "遅い経路の箱の待ちが上限を守っていない")
 	assert.EqualValues(t, 1, f.srv.background.Running())
 	f.assertJobWritesSaved(t, 1)
 }
@@ -195,6 +213,7 @@ func TestServer_StopBackgroundLeavesTheLateSaveItsTime(t *testing.T) {
 	left := rec.maxLeft
 	rec.mu.Unlock()
 	// 保存の期限は待った後に取るので、2 秒近くが残る。待つ前に取ると、箱の待ち
-	// (1 秒) の分だけ削られて約 1 秒になる。
-	assert.Greater(t, left, 1700*time.Millisecond, "遅い経路の保存の時間が、箱の待ちに削られた")
+	// (1 秒) の分だけ削られて約 1 秒になる。しきい値はその間の 1.5 秒に置く。1.7 秒では、
+	// make check の負荷の下で保存に入るまでの遅れが 0.3 秒を超えて落ちた (#3369 I1)。
+	assert.Greater(t, left, 1500*time.Millisecond, "遅い経路の保存の時間が、箱の待ちに削られた")
 }
