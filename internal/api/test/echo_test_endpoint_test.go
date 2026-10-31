@@ -2,10 +2,12 @@ package test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -81,6 +83,25 @@ func TestTestEndpoint(t *testing.T) {
 	t.Run("non-string nullableDefault is a 400", func(t *testing.T) {
 		rec := callTest(t, `{"required":true,"nullableDefault":123}`)
 
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("unknown fields are echoed back as is", func(t *testing.T) {
+		// 本家は`return ps`なので、宣言に無い項目もそのまま返す (#3369)。
+		got := decode(t, callTest(t, `{"required":true,"foo":1,"bar":{"x":[true]},"i":"token"}`))
+
+		assert.Equal(t, float64(1), got["foo"])
+		assert.Equal(t, map[string]any{"x": []any{true}}, got["bar"])
+		assert.Equal(t, "token", got["i"])
+		assert.Equal(t, "hello", got["default"], "known fields keep their handling")
+	})
+
+	t.Run("unreadable body is a 400", func(t *testing.T) {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(errors.New("boom")))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		require.NoError(t, NewEchoHandler().Test(e.NewContext(req, rec)))
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 

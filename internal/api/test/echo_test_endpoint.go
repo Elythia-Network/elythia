@@ -1,7 +1,9 @@
 package test
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -21,6 +23,13 @@ func NewEchoHandler() *Handler { return &Handler{} }
 //
 // POST /api/test
 func (h *Handler) Test(c echo.Context) error {
+	// 本家の test.ts は`return ps`で、宣言に無い項目 (`i`を含む) もそのまま返す
+	// (#3369)。Bind が本文を読み切るので、先に読んで戻しておく。
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam())
+	}
+	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	var req struct {
 		Required        *bool           `json:"required"`
 		String          *string         `json:"string"`
@@ -58,6 +67,16 @@ func (h *Handler) Test(c echo.Context) error {
 	}
 	if req.ID != nil {
 		out["id"] = *req.ID
+	}
+	var all map[string]json.RawMessage
+	if json.Unmarshal(body, &all) == nil {
+		for k, v := range all {
+			switch k {
+			case "required", "string", "default", "nullableDefault", "id":
+				continue
+			}
+			out[k] = v
+		}
 	}
 	return c.JSON(http.StatusOK, out)
 }
