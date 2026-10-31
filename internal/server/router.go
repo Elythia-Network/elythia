@@ -2866,6 +2866,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 			"共有 packer で組む一覧 (federation・following・roles・admin) の pinnedNotes などが空、movedTo / alsoKnownAs が null のまま返る"},
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
+		{"following.followingEstablisher", followingService.HasFollowingEstablisher(),
+			"フォローの行の作成と、申請の削除・カウントの加算が別々に書かれ、途中で失敗するとフォローの行だけが残る (再試行も既にフォロー済みで止まる) か、承認で申請だけが消える (#3911)"},
 	})
 }
 

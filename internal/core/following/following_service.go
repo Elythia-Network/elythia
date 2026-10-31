@@ -627,7 +627,20 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		FolloweeHost: followee.Host,
 		WithReplies:  opts.WithReplies,
 	}
-	if err := s.followingRepo.Create(f); err != nil {
+	// どちらかが移行済みなら、カウント・instance の集計列・chart を動かさない。
+	// 本家 insertFollowingDoc の `if (!followeeUser.movedToUri &&
+	// !followerUser.movedToUri)` と同じガードで、unfollow 側
+	// (decrementFollowing) と対になる (#3330)。片側だけ守ると、移行済みの
+	// アカウントへのフォロー (リモートからの Follow は拒否されない) で増えた
+	// カウントが、解除のときには減らずに残る。
+	moved := isMoved(follower) || isMoved(followee)
+	// **同じ組の申請が残っていれば消す (本家 insertFollowingDoc と同じ)。**
+	// 期間の設定 (#3466) を外した後や期間を過ぎた後にフォローし直すと、前に
+	// 作った申請が残ったまま即フォローが成立する。残すと「フォロー済みかつ
+	// 申請中」になり、承認しようとすると following の一意制約で落ちる。
+	// 行の作成・申請の削除・カウントは、まとめて成功するか何も残さない (#3911)。
+	requestDeleted, err := s.establishFollowing(f, repository.EstablishFollowingOpts{IncrementCounts: !moved})
+	if err != nil {
 		// Exists で確かめた後に並行の要求が同じ組を作った (一意制約)。upstream の
 		// insertFollowingDoc も一意制約の違反を握って既にフォロー済みとして扱う。
 		// 500 にしない (カウントは作れた側だけが増やすのでずれない)。
@@ -636,36 +649,10 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		}
 		return nil, err
 	}
-	// **同じ組の申請が残っていれば消す (本家 insertFollowingDoc と同じ)。**
-	// 期間の設定 (#3466) を外した後や期間を過ぎた後にフォローし直すと、前に
-	// 作った申請が残ったまま即フォローが成立する。残すと「フォロー済みかつ
-	// 申請中」になり、承認しようとすると following の一意制約で落ちる。
-	if req, err := s.followRequestRepo.FindByPair(followerID, followeeID); err == nil {
-		// 消せなかったときはエラーを返す (本家も await して投げる)。フォローは
-		// 既に成立しているので、申請が残っても承認の側で成功として片付く。
-		if err := s.followRequestRepo.Delete(req); err != nil {
-			return nil, err
-		}
+	if requestDeleted {
 		s.publishMeUpdated(followee)
-	} else if !repository.IsNotFound(err) {
-		return nil, err
 	}
-
-	// どちらかが移行済みなら、カウント・instance の集計列・chart を動かさない。
-	// 本家 insertFollowingDoc の `if (!followeeUser.movedToUri &&
-	// !followerUser.movedToUri)` と同じガードで、unfollow 側
-	// (decrementFollowing) と対になる (#3330)。片側だけ守ると、移行済みの
-	// アカウントへのフォロー (リモートからの Follow は拒否されない) で増えた
-	// カウントが、解除のときには減らずに残る。
-	moved := isMoved(follower) || isMoved(followee)
 	if !moved {
-		// counterの更新は失敗しても致命ではないが、現状はerror伝播
-		if err := s.userRepo.IncrementFollowingCount(followerID, 1); err != nil {
-			return nil, err
-		}
-		if err := s.userRepo.IncrementFollowersCount(followeeID, 1); err != nil {
-			return nil, err
-		}
 		// remote instance の集計列を incremental 更新 (#596)。failure は warn-log
 		// のみで握り潰し、起動時 RecomputeFollowCounts が安全網。
 		s.adjustInstanceCountsForFollowing(f, 1)
@@ -841,9 +828,6 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		}
 		return ErrRequestNotFound
 	}
-	if err := s.followRequestRepo.Delete(req); err != nil {
-		return err
-	}
 	// **既にフォローが成立しているなら、申請を消すだけで成功とする (#3466)。**
 	// 期間の設定を変えた後のフォローし直しなどで、フォローと申請が両方残った
 	// 行が過去に作られうる。ここで following を作ろうとすると一意制約
@@ -851,6 +835,9 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 	// 申請が承認されないまま止まる。本家 insertFollowingDoc も重複を
 	// (リモートからのフォローでは) 握って申請を消す。
 	alreadyFollowing := func() error {
+		if err := s.followRequestRepo.Delete(req); err != nil {
+			return err
+		}
 		if followee, err := s.userRepo.FindByID(req.FolloweeID); err == nil {
 			s.publishMeUpdated(followee)
 		}
@@ -869,25 +856,34 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		FolloweeHost: req.FolloweeHost,
 		WithReplies:  req.WithReplies,
 	}
-	if err := s.followingRepo.Create(f); err != nil {
-		// 同じ申請を同時に承認した (二度押し、鍵の解除の同時実行) ときは、上の
-		// Exists をすり抜けた片方がここで一意制約に当たる。もう片方が成立させて
-		// いるので、既にフォロー済みのときと同じく成功として扱う。
-		if repository.IsUniqueViolation(err) {
+	// 承認でも本家は insertFollowingDoc を通るので、Follow と同じ移行済みの
+	// ガードを掛ける (#3330)。
+	moved := hasMoved(s.userRepo, req.FollowerID) || hasMoved(s.userRepo, req.FolloweeID)
+	// 申請の削除・行の作成・カウントをまとめて書く (#3911)。申請を先に消して
+	// から作ると、作成が失敗したときに申請だけが消え、承認をやり直せない。
+	if _, err := s.establishFollowing(f, repository.EstablishFollowingOpts{IncrementCounts: !moved, RequireRequest: true}); err != nil {
+		switch {
+		// 同じ申請を同時に承認した (二度押し、鍵の解除の同時実行) ときは、
+		// 後の方の申請の削除が先の方の行ロックを待ってから 0 件になる。もう
+		// 片方が成立させているので、既にフォロー済みのときと同じく成功とする。
+		case errors.Is(err, repository.ErrFollowingAlreadyExists):
+			if followee, ferr := s.userRepo.FindByID(req.FolloweeID); ferr == nil {
+				s.publishMeUpdated(followee)
+			}
+			return nil
+		// 確かめた後に申請が取り消された (follower の取り消し、Undo(Follow))。
+		// 本家と同じく、もう無い申請は承認しない。
+		case repository.IsNotFound(err):
+			return ErrRequestNotFound
+		// 申請とフォローが両方残った過去の行で、上の Exists の後にフォローが
+		// 作られた場合だけ来る。トランザクションは申請の削除ごと戻っているので、
+		// 既にフォロー済みのときと同じく申請を消して成功とする。
+		case repository.IsUniqueViolation(err):
 			return alreadyFollowing()
 		}
 		return err
 	}
-	// 承認でも本家は insertFollowingDoc を通るので、Follow と同じ移行済みの
-	// ガードを掛ける (#3330)。
-	moved := hasMoved(s.userRepo, req.FollowerID) || hasMoved(s.userRepo, req.FolloweeID)
 	if !moved {
-		if err := s.userRepo.IncrementFollowingCount(req.FollowerID, 1); err != nil {
-			return err
-		}
-		if err := s.userRepo.IncrementFollowersCount(req.FolloweeID, 1); err != nil {
-			return err
-		}
 		// remote instance counter +1 (#596)
 		s.adjustInstanceCountsForFollowing(f, 1)
 	}
@@ -1240,6 +1236,77 @@ func hasMoved(userRepo repository.UserRepository, userID string) bool {
 		return false
 	}
 	return isMoved(u)
+}
+
+// establishFollowing creates f, deletes the follow request of the same pair
+// and optionally increments the users' counts. It reports whether a follow
+// request was deleted. See repository.FollowingEstablisher for the contract.
+//
+// 本番の repository は 1 つのトランザクションで書く (#3911。起動時に
+// HasFollowingEstablisher で確かめる)。下の別々の書き込みは、それを持たない
+// テスト用の代替だけが通る。
+func (s *Service) establishFollowing(f *model.Following, opts repository.EstablishFollowingOpts) (bool, error) {
+	if est, ok := s.followingRepo.(repository.FollowingEstablisher); ok {
+		requestDeleted, err := est.CreateEstablished(f, opts)
+		if err != nil {
+			return false, err
+		}
+		// カウントはトランザクションの中で user 表を直接書くので、
+		// CachedUserRepository の IncrementFollowingCount を通らない。古い
+		// カウントを返し続けないよう、ここで同じ無効化 (他のプロセスへの通知を
+		// 含む) を掛ける。
+		if inv, ok := s.userRepo.(userInvalidator); ok && opts.IncrementCounts {
+			inv.Invalidate(f.FollowerID)
+			inv.Invalidate(f.FolloweeID)
+		}
+		return requestDeleted, nil
+	}
+	requestDeleted := false
+	req, err := s.followRequestRepo.FindByPair(f.FollowerID, f.FolloweeID)
+	switch {
+	case err == nil:
+		if err := s.followRequestRepo.Delete(req); err != nil {
+			return false, err
+		}
+		requestDeleted = true
+	case !repository.IsNotFound(err):
+		return false, err
+	case opts.RequireRequest:
+		if already, err := s.followingRepo.Exists(f.FollowerID, f.FolloweeID); err != nil {
+			return false, err
+		} else if already {
+			return false, repository.ErrFollowingAlreadyExists
+		}
+		return false, repository.ErrNotFound
+	}
+	if err := s.followingRepo.Create(f); err != nil {
+		return false, err
+	}
+	if opts.IncrementCounts {
+		if err := s.userRepo.IncrementFollowingCount(f.FollowerID, 1); err != nil {
+			return false, err
+		}
+		if err := s.userRepo.IncrementFollowersCount(f.FolloweeID, 1); err != nil {
+			return false, err
+		}
+	}
+	return requestDeleted, nil
+}
+
+// HasFollowingEstablisher reports whether the following repository writes a
+// new following, its follow request and the counts in one transaction, and
+// whether the user repository can drop the users whose counts it wrote.
+// It is checked at startup (#3911).
+func (s *Service) HasFollowingEstablisher() bool {
+	_, est := s.followingRepo.(repository.FollowingEstablisher)
+	_, inv := s.userRepo.(userInvalidator)
+	return est && inv
+}
+
+// userInvalidator drops cached users. *repository.CachedUserRepository
+// implements it.
+type userInvalidator interface {
+	Invalidate(userID string)
 }
 
 // isMoved reports whether u has a non-empty movedToUri.
