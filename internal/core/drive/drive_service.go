@@ -18,6 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/imagedecode"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/safehttp"
@@ -153,9 +154,14 @@ func (s *Service) MaxUploadBytes(user *model.User) (int64, bool) {
 
 // ValidateFileName mirrors upstream DriveFileEntityService.validateFileName:
 // the trimmed name must be non-empty, at most 200 characters, and must not
-// contain a backslash, a slash, or "..". 長さは JS の String.length (UTF-16)
-// に対し rune 数で近似する。ajv の maxLength (code point で数える) と違い、
-// サロゲートペアの文字を含む名前では本家より緩い (#3369)。
+// contain a backslash, a slash, or "..".
+//
+// **長さと空白は JavaScript の数え方で見る (#3369)。** 本家は `name.length`
+// (UTF-16 の code unit) と `name.trim()` で見るので、rune で数えると絵文字など
+// サロゲートペアの文字を含む名前を本家より長く通し、strings.TrimSpace だと
+// U+FEFF だけの名前を通して U+0085 だけの名前を落とす。ajv の maxLength
+// (code point で数える) とは違う数え方なので、paramDef の検証を通った名前でも
+// ここで落ちることがある (本家も同じ)。
 //
 // **NUL と不正な UTF-8 もここで落とす (#3037)。** `drive_file.name` は
 // varchar なので、そのまま INSERT / UPDATE すると PostgreSQL が SQLSTATE 22021
@@ -163,8 +169,9 @@ func (s *Service) MaxUploadBytes(user *model.User) (int64, bool) {
 // #3022 と同じく**既存の述語に畳んで既存の 400 に落とす** — 利用者にできること
 // は変わらないので、wire に新しいエラーコードを足さない。
 func ValidateFileName(name string) bool {
-	return strings.TrimSpace(name) != "" &&
-		colfit.Fits(name, 200) &&
+	return jsstr.HasNonSpace(name) &&
+		colfit.Storable(name) &&
+		jsstr.Len(name) <= 200 &&
 		!strings.Contains(name, "\\") &&
 		!strings.Contains(name, "/") &&
 		!strings.Contains(name, "..")

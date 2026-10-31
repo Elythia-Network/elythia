@@ -145,8 +145,8 @@ var validEmojiName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 // なる (実測で 259 バイト)。**破壊的ではない** — 取り込みが先なので既存の絵文字は
 // 残り、そのレコードが skip されるだけ。
 //
-// **`drive/files/create` は塞がっている** — `ValidateFileName` が 200 rune で
-// 止めるので、拡張子を足しても列に収まる。`drive.Service.Upload` 自体は名前を
+// **`drive/files/create` は塞がっている** — `ValidateFileName` が UTF-16 で 200
+// (rune でも 200 以下) で止めるので、拡張子を足しても列に収まる。`drive.Service.Upload` 自体は名前を
 // 見ないので、**長さの決まらない名前が届くのは `drive/files/upload-from-url`
 // (`path.Base` をそのまま渡す) とここの 2 つ** (数え方: 非テストの `Upload`
 // 呼び出し 7 箇所から、`ValidateFileName` を通るもの・生成した名前を渡すもの・

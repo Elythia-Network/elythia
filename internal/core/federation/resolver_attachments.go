@@ -210,8 +210,8 @@ func attachmentFileName(rawURL string) string {
 	if !coredrive.ValidateFileName(base) {
 		return fallback
 	}
-	// ここで truncate はしない。`ValidateFileName` が 200 rune で止めるので列
-	// (varchar(256)) には必ず入る。重ねると届かない検査が増えるだけになるので、
+	// ここで truncate はしない。`ValidateFileName` が UTF-16 で 200 (rune でも 200
+	// 以下) で止めるので列 (varchar(256)) には必ず入る。重ねると届かない検査が増えるだけになるので、
 	// 収まることは `TestAttachmentFileName_FitsColumn` で固定する。
 	return base
 }
