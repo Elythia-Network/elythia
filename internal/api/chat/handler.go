@@ -1058,14 +1058,74 @@ func (h *Handler) RoomsTransferOwnership(c echo.Context) error {
 // MessagesCreate handles POST /api/chat/messages/create.
 // service が wire されていれば streaming 配信も同時に行う。
 func (h *Handler) MessagesCreate(c echo.Context) error {
-	user := middleware.GetUser(c)
-	var req struct {
-		Text     *string `json:"text"`
-		ToUserID *string `json:"toUserId"`
-		ToRoomID *string `json:"toRoomId"`
-		FileID   *string `json:"fileId"`
+	return h.messagesCreate(c, messageDestAuto)
+}
+
+// messageDest is the kind of recipient a message-creating route accepts.
+type messageDest int
+
+const (
+	// messageDestAuto picks the room when toRoomId is set and the user
+	// otherwise (Elythia's own chat/messages/create).
+	messageDestAuto messageDest = iota
+	// messageDestUser reads only toUserId (chat/messages/create-to-user).
+	messageDestUser
+	// messageDestRoom reads only toRoomId (chat/messages/create-to-room).
+	messageDestRoom
+)
+
+// messageCreateRequest is the body shared by the message-creating routes.
+type messageCreateRequest struct {
+	Text     *string
+	ToUserID *string
+	ToRoomID *string
+	FileID   *string
+}
+
+// bindMessageCreate binds the body with only the fields dest reads.
+//
+// 本家の create-to-user の paramDef に toRoomId は無く、create-to-room に toUserId は
+// 無い。どちらも知らない項目として無視するので、route ごとに読む項目を分ける
+// (#3369)。以前は共有の構造体で両方を読み、create-to-user に toRoomId を付けると
+// 部屋へ投稿し、create-to-room の型の違う toUserId を400にしていた。
+func bindMessageCreate(c echo.Context, dest messageDest) (messageCreateRequest, error) {
+	var out messageCreateRequest
+	switch dest {
+	case messageDestUser:
+		var req struct {
+			Text     *string `json:"text"`
+			ToUserID *string `json:"toUserId"`
+			FileID   *string `json:"fileId"`
+		}
+		err := c.Bind(&req)
+		out = messageCreateRequest{Text: req.Text, ToUserID: req.ToUserID, FileID: req.FileID}
+		return out, err
+	case messageDestRoom:
+		var req struct {
+			Text     *string `json:"text"`
+			ToRoomID *string `json:"toRoomId"`
+			FileID   *string `json:"fileId"`
+		}
+		err := c.Bind(&req)
+		out = messageCreateRequest{Text: req.Text, ToRoomID: req.ToRoomID, FileID: req.FileID}
+		return out, err
+	default:
+		var req struct {
+			Text     *string `json:"text"`
+			ToUserID *string `json:"toUserId"`
+			ToRoomID *string `json:"toRoomId"`
+			FileID   *string `json:"fileId"`
+		}
+		err := c.Bind(&req)
+		out = messageCreateRequest{Text: req.Text, ToUserID: req.ToUserID, ToRoomID: req.ToRoomID, FileID: req.FileID}
+		return out, err
 	}
-	if err := c.Bind(&req); err != nil {
+}
+
+func (h *Handler) messagesCreate(c echo.Context, dest messageDest) error {
+	user := middleware.GetUser(c)
+	req, err := bindMessageCreate(c, dest)
+	if err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	if h.svc == nil {
@@ -1134,10 +1194,7 @@ func (h *Handler) MessagesCreate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("CONTENT_REQUIRED", "Content required. You need to set text or fileId.", contentRequiredID))
 	}
 
-	var (
-		msg *model.ChatMessage
-		err error
-	)
+	var msg *model.ChatMessage
 	if toRoom {
 		msg, err = h.svc.CreateMessageToRoom(c.Request().Context(), user.ID, *req.ToRoomID, text, fileID)
 	} else {
@@ -1823,12 +1880,12 @@ func (h *Handler) MembersUpdateMembership(c echo.Context) error {
 
 // MessagesCreateToUser handles POST /api/chat/messages/create-to-user.
 func (h *Handler) MessagesCreateToUser(c echo.Context) error {
-	return h.MessagesCreate(c)
+	return h.messagesCreate(c, messageDestUser)
 }
 
 // MessagesCreateToRoom handles POST /api/chat/messages/create-to-room.
 func (h *Handler) MessagesCreateToRoom(c echo.Context) error {
-	return h.MessagesCreate(c)
+	return h.messagesCreate(c, messageDestRoom)
 }
 
 // UserTimeline handles POST /api/chat/messages/user-timeline.
