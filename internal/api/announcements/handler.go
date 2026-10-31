@@ -557,7 +557,7 @@ func (h *Handler) AdminList(c echo.Context) error {
 	}
 	// 絞り込みと isActive の計算は同じ「今」で行う (本家も 1 つの now を使う)。
 	now := h.clock()
-	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, 0, sinceID, untilID, now)
+	items, err := h.repo.ListForAdmin(req.UserID, req.Status, limit, sinceID, untilID, now)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}

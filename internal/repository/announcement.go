@@ -29,7 +29,7 @@ type AnnouncementRepository interface {
 	// user announcements only). When empty, restricts to "userId" IS NULL
 	// (global only), matching upstream Misskey's semantics. status is one
 	// of "all" / "active" / "archived"; empty defaults to "active".
-	ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error)
+	ListForAdmin(userID, status string, limit int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error)
 	// CountReadsByAnnouncementIDs returns reads count keyed by
 	// announcementId. IDs not present have count 0 (caller should default
 	// to 0 when absent).
@@ -181,7 +181,7 @@ func (r *announcementRepository) ListForUser(userID string, activeOnly bool, lim
 	return announcements, nil
 }
 
-func (r *announcementRepository) ListForAdmin(userID, status string, limit, offset int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
+func (r *announcementRepository) ListForAdmin(userID, status string, limit int, sinceID, untilID string, now time.Time) ([]*model.Announcement, error) {
 	q := r.db.Order(paginationOrder(sinceID, untilID, "id"))
 	// upstreamはuserId指定時にannouncement.userId = ?を、未指定時に
 	// announcement.userId IS NULLを当てる。前者がユーザーモデレーション画面
@@ -212,9 +212,6 @@ func (r *announcementRepository) ListForAdmin(userID, status string, limit, offs
 	}
 	if untilID != "" {
 		q = q.Where("id < ?", untilID)
-	}
-	if sinceID == "" && untilID == "" && offset > 0 {
-		q = q.Offset(offset)
 	}
 	var announcements []*model.Announcement
 	if err := q.Find(&announcements).Error; err != nil {

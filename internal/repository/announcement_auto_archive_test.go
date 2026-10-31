@@ -82,13 +82,13 @@ func TestAnnouncementRepository_AutoArchiveAtReadFilters(t *testing.T) {
 	require.NoError(t, err)
 	check(t, items, wantArchived, "zzarc_user_expired")
 
-	items, err = repo.ListForAdmin("", "active", 100, 0, "", "", time.Now())
+	items, err = repo.ListForAdmin("", "active", 100, "", "", time.Now())
 	require.NoError(t, err)
 	check(t, items, wantActive)
-	items, err = repo.ListForAdmin("", "archived", 100, 0, "", "", time.Now())
+	items, err = repo.ListForAdmin("", "archived", 100, "", "", time.Now())
 	require.NoError(t, err)
 	check(t, items, wantArchived)
-	items, err = repo.ListForAdmin(reader.ID, "archived", 100, 0, "", "", time.Now())
+	items, err = repo.ListForAdmin(reader.ID, "archived", 100, "", "", time.Now())
 	require.NoError(t, err)
 	assert.True(t, announcementIDSet(items)["zzarc_user_expired"])
 
@@ -186,15 +186,15 @@ func TestAnnouncementRepository_ListForAdminAtExactExpiry(t *testing.T) {
 	at := time.Now().Add(time.Hour).Truncate(time.Microsecond)
 	createAutoArchiveFixture(t, repo, "zzarcx_boundary", true, &at, nil)
 
-	items, err := repo.ListForAdmin("", "active", 100, 0, "", "", at)
+	items, err := repo.ListForAdmin("", "active", 100, "", "", at)
 	require.NoError(t, err)
 	assert.False(t, announcementIDSet(items)["zzarcx_boundary"], "期限ちょうどの行が active に出た")
-	items, err = repo.ListForAdmin("", "archived", 100, 0, "", "", at)
+	items, err = repo.ListForAdmin("", "archived", 100, "", "", at)
 	require.NoError(t, err)
 	assert.True(t, announcementIDSet(items)["zzarcx_boundary"], "期限ちょうどの行が archived に出ない")
 
 	before := at.Add(-time.Microsecond)
-	items, err = repo.ListForAdmin("", "active", 100, 0, "", "", before)
+	items, err = repo.ListForAdmin("", "active", 100, "", "", before)
 	require.NoError(t, err)
 	assert.True(t, announcementIDSet(items)["zzarcx_boundary"], "期限の前の行が active に出ない")
 }

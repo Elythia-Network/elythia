@@ -92,10 +92,6 @@ func TestAdRepository_CRUD(t *testing.T) {
 	_, err = repo.FindByID("ghost_ad")
 	assert.Error(t, err)
 
-	rows, err := repo.List(10, 0)
-	require.NoError(t, err)
-	assert.NotEmpty(t, rows)
-
 	require.NoError(t, repo.UpdateFields(a.ID, map[string]any{
 		"url":      "https://example.com/renamed",
 		"priority": "high",
@@ -110,13 +106,6 @@ func TestAdRepository_CRUD(t *testing.T) {
 	require.NoError(t, repo.Delete(a.ID))
 	_, err = repo.FindByID(a.ID)
 	assert.Error(t, err)
-}
-
-func TestAdRepository_ListDefaults(t *testing.T) {
-	repo := NewAdRepository(testDB)
-	// 負数 / 0 は default に丸められて成功するだけを確認する。
-	_, err := repo.List(0, -1)
-	require.NoError(t, err)
 }
 
 // #1545: ListFiltered の publishing フィルタ + cursor pagination。
