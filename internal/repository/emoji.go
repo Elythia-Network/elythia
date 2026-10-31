@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -553,6 +554,12 @@ func (r *emojiRepository) ListV2(filter model.EmojiV2Filter) ([]*model.Emoji, er
 	q = q.Limit(limit)
 
 	if filter.Page > 0 {
+		// (page-1)*limit が int で桁あふれすると負になり、OFFSET が効かずに1ページ目を
+		// 返していた (#3369)。本家は JavaScript の数で大きな OFFSET になり、空の一覧に
+		// なる。桁あふれする page は、どの行にも届かないので問い合わせずに空にする。
+		if filter.Page-1 > math.MaxInt/limit {
+			return []*model.Emoji{}, nil
+		}
 		q = q.Offset((filter.Page - 1) * limit)
 	}
 
