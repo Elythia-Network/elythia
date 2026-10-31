@@ -102,12 +102,15 @@ func violatesMinimumUsernameLength(username string, meta *model.Meta, policy Use
 	return len(username) < minimumUsernameLength(meta)
 }
 
-// normalizeAndValidateUsername trims surrounding whitespace and validates
-// the username against upstream Misskey TS の `localUsernameSchema`. 返り値
-// の username は trim 済みなので、caller はそのまま小文字化や DB 永続化に
-// 利用してよい。validation 失敗時は ErrInvalidUsername を返す。
+// normalizeAndValidateUsername validates the username against upstream
+// Misskey TS の `localUsernameSchema` and returns it unchanged. validation
+// 失敗時は ErrInvalidUsername を返す。
+//
+// 本家の SignupService.signup は validateLocalUsername で削らずに判定するので、
+// 前後に空白 (全角の空白を含む) が付いた username は INVALID_USERNAME になる。
+// 以前は前後の空白を削ってから判定していたので、公開の登録や admin/accounts/create
+// で`"a "`が`a`として作られ、`"　a"`は先に作られた`a`と重なって409になっていた (#3369)。
 func normalizeAndValidateUsername(username string) (string, error) {
-	username = strings.TrimSpace(username)
 	if !localUsernamePattern.MatchString(username) {
 		return "", ErrInvalidUsername
 	}
@@ -578,7 +581,9 @@ func (s *Service) CreatePluginManaged(pluginName, username string) (*model.User,
 	if s.db == nil {
 		return nil, errors.New("signup: plugin-managed accounts need the database handle (NewService db)")
 	}
-	username, err := normalizeAndValidateUsername(username)
+	// プラグインの名前は本家の経路ではないので、以前どおり前後の空白を削ってから
+	// 判定する (登録の経路は #3369 で削らないようにした)。
+	username, err := normalizeAndValidateUsername(strings.TrimSpace(username))
 	if err != nil {
 		return nil, err
 	}

@@ -110,6 +110,16 @@ func TestSignup_EmptyUsername(t *testing.T) {
 	assert.ErrorIs(t, err, signup.ErrInvalidUsername)
 }
 
+// 本家と同じく、前後に空白が付いた username は削らずに INVALID_USERNAME にする。
+func TestSignup_SurroundingWhitespaceIsInvalid(t *testing.T) {
+	for _, name := range []string{" alice", "alice ", "\u3000alice", "alice\u3000", "\talice\n"} {
+		svc, userRepo, _ := newTestService(t)
+		_, err := svc.Signup(name, "pass", false, signup.UsernamePolicyPublic)
+		assert.ErrorIs(t, err, signup.ErrInvalidUsername, "%q", name)
+		assert.Empty(t, userRepo.Users, "%q", name)
+	}
+}
+
 func TestSignup_TooLongUsername(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	long := make([]byte, 200)
