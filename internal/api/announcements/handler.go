@@ -277,6 +277,11 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	if err := json.Unmarshal(req.ImageURL, &imageURL); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "imageUrl must be a string or null.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	// 本家 AnnouncementService.create の`values.imageUrl || null`と同じく、空文字は
+	// null として保存する (#3369)。
+	if imageURL != nil && *imageURL == "" {
+		imageURL = nil
+	}
 	if req.Icon == "" {
 		req.Icon = "info"
 	}
