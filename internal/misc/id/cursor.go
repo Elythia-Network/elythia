@@ -26,6 +26,13 @@ import (
 //   - sinceID が指定されていれば優先、sinceDate は無視 (= upstream 同様)
 //   - sinceDate のみなら ms → aidx prefix に変換して sinceID とする
 //   - untilID / untilDate も同パターン
+//   - sinceDate / untilDate の 0 は指定なしと同じ (= upstream 同様)
+//
+// **日付の 0 を時刻 0 のカーソルにしない (#3369)。** 本家は日付を真偽値として
+// 見る (`makePaginationQuery` の `sinceDate && untilDate` / `sinceDate` /
+// `untilDate`、各 endpoint の `ps.untilDate ? … : null`)。JSON の `0` と `-0` は
+// どちらも偽なので、どちらの書き方でも条件を付けない。カーソルにすると
+// `untilDate: 0` は空の一覧、`sinceDate: 0` は昇順の全件になって、本家と分かれる。
 //
 // mk-go の id 生成の既定は aidx (CLAUDE.md Section 6 / `MK_ID=aidx`) なので、
 // aidx 以外の generator (aid / meid / objectid / ulid) で動かしている operator
@@ -43,10 +50,10 @@ import (
 // しまう。ok=false のときに返す `""` は「無視しても DB に NUL を渡さない」ための
 // 値で、**ページを返してよいという意味ではない**。
 func NormalizeCursor(sinceID, untilID string, sinceDate, untilDate *int64) (string, string, bool) {
-	if sinceID == "" && sinceDate != nil {
+	if sinceID == "" && sinceDate != nil && *sinceDate != 0 {
 		sinceID = AidxCutoffPrefix(time.UnixMilli(*sinceDate))
 	}
-	if untilID == "" && untilDate != nil {
+	if untilID == "" && untilDate != nil && *untilDate != 0 {
 		untilID = AidxCutoffPrefix(time.UnixMilli(*untilDate))
 	}
 	if !colfit.Storable(sinceID) || !colfit.Storable(untilID) {

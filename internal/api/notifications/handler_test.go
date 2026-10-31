@@ -137,10 +137,8 @@ func TestShow_IncludeTypesEmptyReturnsEmpty(t *testing.T) {
 	assert.Len(t, resp2, 1, "omitted includeTypes returns all")
 }
 
-// sinceDate=0 (= 1970 epoch) を渡したら全 notification が post-fetch filter
-// を通過する。adapter pattern (= sinceDate → aidx prefix) が effectively に
-// 動くことの positive case (#1174)。
-func TestShow_SinceDate_EpochIncludesAll(t *testing.T) {
+// sinceDate=0 は、本家と同じく指定なしと同じで全件を返す (#1174、#3369)。
+func TestShow_SinceDate_ZeroIncludesAll(t *testing.T) {
 	h, svc := newTestHandler(t)
 	ctx := context.Background()
 	_, err := svc.Create(ctx, notification.CreateInput{
@@ -155,7 +153,7 @@ func TestShow_SinceDate_EpochIncludesAll(t *testing.T) {
 
 	var resp []map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Len(t, resp, 1, "sinceDate=0 (= 1970) で全件含まれること")
+	require.Len(t, resp, 1, "sinceDate=0 で全件含まれること")
 }
 
 // i/notifications・i/notifications-grouped の整数は、本家の ajv と同じく 10.0 や

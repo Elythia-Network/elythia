@@ -115,3 +115,25 @@ func TestNormalizeCursor_DateCursorStaysStorable(t *testing.T) {
 	assert.NotEmpty(t, s)
 	assert.NotEmpty(t, u)
 }
+
+// 本家は sinceDate / untilDate を真偽値として見るので、0 (JSON の -0 も int64 では
+// 0) は指定なしと同じ。時刻 0 のカーソルにすると untilDate: 0 が空の一覧になる。
+func TestNormalizeCursor_ZeroDateIsAbsent(t *testing.T) {
+	zero := int64(0)
+	s, u, ok := NormalizeCursor("", "", &zero, nil)
+	assert.True(t, ok)
+	assert.Empty(t, s, "sinceDate: 0 must not become a cursor")
+	assert.Empty(t, u)
+
+	s, u, ok = NormalizeCursor("", "", nil, &zero)
+	assert.True(t, ok)
+	assert.Empty(t, s)
+	assert.Empty(t, u, "untilDate: 0 must not become a cursor")
+
+	// 負の日付は真なので、本家と同じくカーソルにする
+	neg := int64(-1)
+	s, u, ok = NormalizeCursor("", "", &neg, &neg)
+	assert.True(t, ok)
+	assert.NotEmpty(t, s)
+	assert.NotEmpty(t, u)
+}
