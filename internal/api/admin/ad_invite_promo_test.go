@@ -667,6 +667,54 @@ func TestPromoCreate_Success(t *testing.T) {
 	assert.Equal(t, "authorU", promo.created.UserID)
 }
 
+// JavaScript の Date で表せない日時 (絶対値が 8.64e15 を超える) は 400 にし、
+// 保存しない。境界の値は通す (#3369)。
+func TestAdAndPromo_RejectDatesOutsideJSDateRange(t *testing.T) {
+	const maxMs = int64(8_640_000_000_000_000)
+	for _, tc := range []struct {
+		field string
+		ms    int64
+		ok    bool
+	}{
+		{"expiresAt", maxMs, true},
+		{"expiresAt", maxMs + 1, false},
+		{"startsAt", -maxMs, true},
+		{"startsAt", -maxMs - 1, false},
+	} {
+		name := fmt.Sprintf("%s=%d", tc.field, tc.ms)
+		h, repo := setupAdHandler(t, &model.Ad{ID: "a1", URL: "u", ImageURL: "i"})
+		rec := doPost(h.AdCreate, fmt.Sprintf(`{"url":"u","imageUrl":"i",%q:%d}`, tc.field, tc.ms), adminUser)
+		if tc.ok {
+			assert.Equal(t, http.StatusOK, rec.Code, "create "+name)
+		} else {
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "create "+name)
+			assert.Len(t, repo.Ads, 1, "create "+name)
+		}
+		rec = doPost(h.AdUpdate, fmt.Sprintf(`{"id":"a1",%q:%d}`, tc.field, tc.ms), adminUser)
+		if tc.ok {
+			assert.Equal(t, http.StatusNoContent, rec.Code, "update "+name)
+		} else {
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "update "+name)
+		}
+	}
+	for _, tc := range []struct {
+		ms int64
+		ok bool
+	}{{maxMs, true}, {maxMs + 1, false}, {-maxMs - 1, false}} {
+		h, _, _, _ := newTestHandler(t)
+		promo := &stubPromoRepo{}
+		h.SetPromoNoteRepo(promo)
+		h.SetNoteFinder(&stubNoteFinder{note: &model.Note{ID: "n1", UserID: "u", Visibility: model.NoteVisibilityPublic}})
+		rec := doPost(h.PromoCreate, fmt.Sprintf(`{"noteId":"n1","expiresAt":%d}`, tc.ms), adminUser)
+		if tc.ok {
+			assert.Equal(t, http.StatusNoContent, rec.Code, "promo %d", tc.ms)
+		} else {
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "promo %d", tc.ms)
+			assert.Nil(t, promo.created, "promo %d", tc.ms)
+		}
+	}
+}
+
 // #1466: followers / home / specified visibility note の promote 試行は
 // ACCESS_DENIED (403) で reject される。promo 表示 endpoint が実装された時に
 // 非 public note の本文が viewer に漏れる latent IDOR を create 段で塞ぐ。
