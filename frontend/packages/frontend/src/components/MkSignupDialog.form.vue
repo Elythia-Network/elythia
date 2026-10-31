@@ -93,7 +93,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onBeforeUnmount } from 'vue';
 import { toUnicode } from 'punycode.js';
 import * as Misskey from 'misskey-js';
 import * as config from '@@/js/config.js';
@@ -233,7 +233,12 @@ function onChangeUsername(): void {
 // `username/available` を叩く回数だけが打鍵の止まった後の 1 回に減る。
 // cancelUsernameCheck drops a scheduled lookup and the in-flight request.
 function cancelUsernameCheck(): void {
-	checkUsernameAvailable.cancel();
+	// **`upcomingOnly: true` を外さない (#3912)。** throttle-debounce 5.x の
+	// 引数なしの `cancel()` は、予約済みの呼び出しを消すだけでなく、この
+	// debounce 関数を以後ずっと無効にする。関数はコンポーネントに 1 つしか
+	// 無いので、短すぎる名前や空欄を一度通ると、直した名前でも問い合わせが
+	// 二度と飛ばず「確認しています」のまま登録できなくなる。
+	checkUsernameAvailable.cancel({ upcomingOnly: true });
 	usernameAbortController.value?.abort();
 	usernameAbortController.value = null;
 }
@@ -269,7 +274,8 @@ function onChangeEmail(): void {
 }
 
 function cancelEmailCheck(): void {
-	checkEmailAvailable.cancel();
+	// 利用者名欄と同じ理由で、保留中の呼び出しだけを取り消す (#3912)。
+	checkEmailAvailable.cancel({ upcomingOnly: true });
 	emailAbortController.value?.abort();
 	emailAbortController.value = null;
 }
@@ -292,6 +298,15 @@ const checkEmailAvailable = debounce(1000, (address: string, signal: AbortSignal
 			emailState.value = 'error';
 		}
 	});
+});
+
+// ダイアログを閉じた後に予約済みの問い合わせが飛ばないようにする。
+// もう使わない関数なので、ここでは以後の呼び出しごと無効にしてよい。
+onBeforeUnmount(() => {
+	checkUsernameAvailable.cancel();
+	checkEmailAvailable.cancel();
+	usernameAbortController.value?.abort();
+	emailAbortController.value?.abort();
 });
 
 function onChangePassword(): void {
