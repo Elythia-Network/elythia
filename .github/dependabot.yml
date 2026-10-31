@@ -27,6 +27,9 @@ updates:
     directories:
       - /
       - /deploy/uds
+      # base / head の比較の image (#3544)。ここに無いと、他の Dockerfile だけが新しい
+      # digest になり、これだけ古い digest のまま残る (#3369)。
+      - /tests/bench/ab
     schedule:
       interval: weekly
     ignore:
