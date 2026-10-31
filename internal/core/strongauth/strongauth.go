@@ -368,6 +368,11 @@ func (f secondFactor) rollback() {
 }
 
 // checkCode verifies a TOTP code or a backup code and reserves it.
+//
+// テストモードでも再利用の検査を素通ししない (他の経路の ValidateWithReplay と違う)。
+// strongauth は Elythia 独自のバックアップの画面の再認証で本家に対応物が無く、
+// e2e も使わないので、素通しする理由が無い。testMode の設定を誤ったときに
+// 再認証が弱まる方へ倒れないようにしておく (#3369)。
 func (v *Verifier) checkCode(ctx context.Context, profile *model.UserProfile, code string) (secondFactor, error) {
 	userID := profile.UserID
 	if _, err := twofactor.ConsumeBackupCode([]string(profile.TwoFactorBackupSecret), code); err == nil {
