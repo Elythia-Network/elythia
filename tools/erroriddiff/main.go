@@ -72,6 +72,12 @@ func main() {
 		if d.IsDir() || !strings.HasSuffix(path, ".ts") {
 			return nil
 		}
+		// 本家の Vitest の unit test (`notes/create.test.ts` など) は endpoint ではない。
+		// 残すと `notes/create.test` のような偽の endpoint が golden に混ざる
+		// (tools/apicompat と同じ除外。#3369)。
+		if strings.HasSuffix(path, ".test.ts") {
+			return nil
+		}
 		rel, err := filepath.Rel(*epDir, path)
 		if err != nil {
 			return err

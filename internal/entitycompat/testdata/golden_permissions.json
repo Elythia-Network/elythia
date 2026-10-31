@@ -331,7 +331,6 @@
   "notes/clips": "public",
   "notes/conversation": "public",
   "notes/create": "auth",
-  "notes/create.test": "public",
   "notes/delete": "auth",
   "notes/drafts/count": "auth",
   "notes/drafts/create": "auth",
@@ -435,7 +434,6 @@
   "users/search": "public",
   "users/search-by-username-and-host": "public",
   "users/show": "public",
-  "users/show.test": "public",
   "users/update-memo": "auth",
   "v2/admin/emoji/list": "auth",
   "verify-email": "public"
