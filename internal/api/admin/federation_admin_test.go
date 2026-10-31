@@ -189,6 +189,14 @@ func TestFederationUpdateInstance(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, doPost(h.FederationUpdateInstance, `{}`, adminUser).Code)
 }
 
+// 本家の paramDef に無い isBlocked・isSilenced は、本家と同じく型が違っても
+// 読まずに無視する (#3369)。
+func TestFederationUpdateInstance_IgnoresUnknownFieldsOfAnyType(t *testing.T) {
+	h, _ := setupFederationUpdateInstance(t, &model.Instance{ID: "i1", Host: "remote.example"})
+	rec := doPost(h.FederationUpdateInstance, `{"host":"remote.example","isBlocked":"x","isSilenced":{}}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
 // assertNoLogWritten は「指定期間内に log が 1 件も書かれない」ことを assert
 // する。time.Sleep + assert.Empty より flaky になりにくい (期間中ずっと empty
 // であることを poll する)。
