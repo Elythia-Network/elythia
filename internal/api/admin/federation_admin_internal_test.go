@@ -46,9 +46,7 @@ func TestFederationUpdateInstanceRequest_NotePointerSemantics(t *testing.T) {
 // partial update 互換のため同じ pointer-vs-default 区別が必要。
 //
 // #715 / #724: isSuspended は SQL 列に存在しないので suspensionState enum に
-// 変換する。isBlocked / isSilenced は対応 DB 列が無く mk-go schema にも無い
-// ため updates から落とす (silently dropped、存在しない列への UPDATE で
-// SQL エラーになるのを防ぐ)。
+// 変換する。
 func TestFederationUpdateInstanceRequest_UpdatesIncludesAllSentFields(t *testing.T) {
 	tt := true
 	ff := false
@@ -74,24 +72,14 @@ func TestFederationUpdateInstanceRequest_UpdatesIncludesAllSentFields(t *testing
 			want: map[string]any{"suspensionState": "none"},
 		},
 		{
-			name: "isBlocked dropped (no column)",
-			req:  federationUpdateInstanceRequest{IsBlocked: &ff},
-			want: map[string]any{},
-		},
-		{
-			name: "isSilenced dropped (no column)",
-			req:  federationUpdateInstanceRequest{IsSilenced: &tt},
-			want: map[string]any{},
-		},
-		{
 			name: "moderationNote set",
 			req:  federationUpdateInstanceRequest{ModerationNote: &note},
 			want: map[string]any{"moderationNote": "n"},
 		},
 		{
-			name: "all four set together",
+			name: "all set together",
 			req: federationUpdateInstanceRequest{
-				IsSuspended: &tt, IsBlocked: &ff, IsSilenced: &tt,
+				IsSuspended:    &tt,
 				ModerationNote: &note,
 			},
 			want: map[string]any{

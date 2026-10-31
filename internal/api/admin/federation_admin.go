@@ -233,16 +233,12 @@ func (h *Handler) FederationRemoveAllFollowing(c echo.Context) error {
 // decode 境界で正しく分離できる。string 型だと "" がデフォルト値と区別でき
 // ず空文字列で note を消す操作が無視される (元バグ)。
 //
-// IsBlocked / IsSilenced は upstream Misskey TS の wire 互換のため受信する
-// が、対応 DB 列が無く mk-go schema にも upstream にも存在しないため
-// updates() で silently drop される (#715 / #724)。frontend がスイッチを
-// 操作しても効果なし、将来 schema 拡張で対応 column が増えたら updates()
-// に変換 case を足す。
+// isBlocked / isSilenced は本家の paramDef に無く、本家は知らない項目として
+// 無視する。以前は受けてから捨てていたので、型の違う値 (`"isBlocked":"x"`) を
+// 400 にしていた。本家と同じく読まない (#3369)。
 type federationUpdateInstanceRequest struct {
 	Host           *string `json:"host"`
 	IsSuspended    *bool   `json:"isSuspended"`
-	IsBlocked      *bool   `json:"isBlocked"`
-	IsSilenced     *bool   `json:"isSilenced"`
 	ModerationNote *string `json:"moderationNote"`
 }
 
@@ -256,10 +252,6 @@ type federationUpdateInstanceRequest struct {
 // `suspensionState varchar` enum (`none` / `manuallySuspended` / 等) で
 // 管理しており `isSuspended` 列は存在しない (#715 / #724)。boolean を
 // enum に変換して GORM Updates 用 map に詰める。
-//
-// `isBlocked` / `isSilenced` は upstream にも対応 column が無く、mk-go
-// schema にも存在しない。silently drop。将来 schema 拡張で対応 column が
-// 増えたら本関数で変換を足す。
 func (req federationUpdateInstanceRequest) updates() map[string]any {
 	out := map[string]any{}
 	if req.IsSuspended != nil {
