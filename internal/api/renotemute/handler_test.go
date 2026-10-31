@@ -394,6 +394,17 @@ func TestList_AcceptsIntegerValuedFractions(t *testing.T) {
 	assert.Empty(t, listAfterTwoCreates(t, `{"sinceDate":1e15}`), "sinceDate is read, not just accepted")
 }
 
+// list treats sinceDate / untilDate of 0 (and -0) as absent, as upstream
+// reads them as booleans: not as a cursor at time 0, which made untilDate: 0
+// an empty page (#3369).
+func TestList_ZeroDateIsAbsent(t *testing.T) {
+	for _, body := range []string{`{"untilDate":0}`, `{"untilDate":-0}`, `{"sinceDate":0}`, `{"sinceDate":-0,"untilDate":0}`} {
+		got := listAfterTwoCreates(t, body)
+		require.Len(t, got, 2, body)
+		assert.Equal(t, "carol", got[0]["muteeId"], "%s: newest first, as without a cursor", body)
+	}
+}
+
 // list does not read offset, which upstream's paramDef does not have:
 // upstream ignores it and answers from the top (#3760).
 func TestList_IgnoresOffset(t *testing.T) {
