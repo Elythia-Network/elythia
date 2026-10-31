@@ -16,6 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/chart"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
@@ -249,7 +250,7 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 		// JavaScript の Date で表せない時刻 (絶対値が 8.64e15 ms を超える) は、
 		// int64 の範囲外と同じ 400 にする (#3369)。以前は 500 になっていた。本家も
 		// Invalid Date のまま問い合わせて失敗する (ソースを読む限り 500)。
-		if *offset > maxJSDateMillis || *offset < -maxJSDateMillis {
+		if !jsdate.ValidMillis(*offset) {
 			return "", 0, nil, &paramError{param: "#", reason: "Invalid request body."}
 		}
 		t := time.UnixMilli(*offset)
@@ -257,10 +258,6 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 	}
 	return span, amount, cursor, nil
 }
-
-// maxJSDateMillis is the largest absolute time value of a JavaScript Date
-// (ECMAScript TimeClip: 8.64e15 ms from the epoch).
-const maxJSDateMillis = 8_640_000_000_000_000
 
 // setCacheControl mirrors upstream ApiCallService: an unauthenticated GET
 // to a cacheSec endpoint receives `Cache-Control: public, max-age=<cacheSec>`.

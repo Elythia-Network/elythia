@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
@@ -84,10 +85,6 @@ func (h *Handler) InviteCreate(c echo.Context) error {
 // optional offset (Z or ±HH:mm).
 var jsDateTimeString = regexp.MustCompile(`^([+-]\d{6}|\d{4})(?:-(\d{2})(?:-(\d{2}))?)?(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})?)?$`)
 
-// maxJSDateMillis is the largest absolute millisecond value a JavaScript
-// Date holds (8.64e15).
-const maxJSDateMillis = 8_640_000_000_000_000
-
 // parseJSDateTimeString parses s the way JavaScript's Date.parse reads the
 // Date Time String Format: a date alone is UTC, a date and time without an
 // offset is in loc (the server's time zone, as upstream's process), and
@@ -144,7 +141,7 @@ func parseJSDateTimeString(s string, loc *time.Location) (time.Time, bool) {
 		zone = time.FixedZone("", offset)
 	}
 	t := time.Date(year, time.Month(month), day, hour, minute, sec, nsec, zone)
-	if ms := t.UnixMilli(); ms > maxJSDateMillis || ms < -maxJSDateMillis {
+	if !jsdate.ValidMillis(t.UnixMilli()) {
 		return time.Time{}, false
 	}
 	return t, true
