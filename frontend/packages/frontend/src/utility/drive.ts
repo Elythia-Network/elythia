@@ -18,6 +18,7 @@ import { instance } from '@/instance.js';
 import { globalEvents } from '@/events.js';
 import { getProxiedImageUrl } from '@/utility/media-proxy.js';
 import { genId } from '@/utility/id.js';
+import { chunkedStartRequest } from '@/utility/drive-chunked-start.js';
 
 type UploadReturnType = {
 	filePromise: Promise<Misskey.entities.DriveFile>;
@@ -317,15 +318,7 @@ function uploadFileChunked(file: File | Blob, options: UploadOptions): UploadRet
 
 		void (async () => {
 			try {
-				const name = options.name ?? (file instanceof File ? file.name : 'untitled');
-				const session = await post('drive/files/create-chunked/start', {
-					name,
-					size: file.size,
-					force: true,
-					isSensitive: options.isSensitive ?? false,
-					comment: options.caption ?? null,
-					folderId: options.folderId ?? null,
-				});
+				const session = await post('drive/files/create-chunked/start', chunkedStartRequest(file, options));
 				if (signal.aborted) return;
 				uploadId = session.uploadId;
 
