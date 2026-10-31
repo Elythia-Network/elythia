@@ -9,6 +9,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
+	"github.com/elythia-network/elythia/internal/api/optional"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -19,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
+	"gorm.io/datatypes"
 )
 
 // --- Role endpoints ---
@@ -248,22 +250,22 @@ func (h *Handler) RolesList(c echo.Context) error {
 // regression 重大度高めの bug。本 fix で upstream 15 field 全部を pipe する。
 func (h *Handler) RolesUpdate(c echo.Context) error {
 	var req struct {
-		RoleID                          string          `json:"roleId"`
-		Name                            *string         `json:"name"`
-		Description                     *string         `json:"description"`
-		Color                           *string         `json:"color"`
-		IconURL                         *string         `json:"iconUrl"`
-		Target                          *string         `json:"target"`
-		CondFormula                     *map[string]any `json:"condFormula"`
-		IsModerator                     *bool           `json:"isModerator"`
-		IsAdministrator                 *bool           `json:"isAdministrator"`
-		IsPublic                        *bool           `json:"isPublic"`
-		IsExplorable                    *bool           `json:"isExplorable"`
-		AsBadge                         *bool           `json:"asBadge"`
-		CanEditMembersByModerator       *bool           `json:"canEditMembersByModerator"`
-		PreserveAssignmentOnMoveAccount *bool           `json:"preserveAssignmentOnMoveAccount"`
-		DisplayOrder                    *jsnum.Int      `json:"displayOrder"`
-		Policies                        *map[string]any `json:"policies"`
+		RoleID                          string                    `json:"roleId"`
+		Name                            *string                   `json:"name"`
+		Description                     *string                   `json:"description"`
+		Color                           optional.Nullable[string] `json:"color"`
+		IconURL                         optional.Nullable[string] `json:"iconUrl"`
+		Target                          *string                   `json:"target"`
+		CondFormula                     *map[string]any           `json:"condFormula"`
+		IsModerator                     *bool                     `json:"isModerator"`
+		IsAdministrator                 *bool                     `json:"isAdministrator"`
+		IsPublic                        *bool                     `json:"isPublic"`
+		IsExplorable                    *bool                     `json:"isExplorable"`
+		AsBadge                         *bool                     `json:"asBadge"`
+		CanEditMembersByModerator       *bool                     `json:"canEditMembersByModerator"`
+		PreserveAssignmentOnMoveAccount *bool                     `json:"preserveAssignmentOnMoveAccount"`
+		DisplayOrder                    *jsnum.Int                `json:"displayOrder"`
+		Policies                        *map[string]any           `json:"policies"`
 	}
 	if err := c.Bind(&req); err != nil || req.RoleID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "roleId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -282,26 +284,22 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 	if req.Description != nil {
 		fields["description"] = *req.Description
 	}
-	if req.Color != nil {
-		// mk-go specific drift: upstream は `null` 送出時に column を null
-		// クリアするが、Go の `*string` JSON binding では「field 未送出」と
-		// 「null 明示」を区別できず両者とも nil pointer になる。frontend が
-		// クリア意図で `null` を送ったケースを救済するため、空文字 ("") も
-		// null クリアとして扱う運用にする。upstream は "" を空文字として
-		// 保存するので、theoretically 「色を文字 0 個に設定」したい場合の
-		// 挙動は乖離するが、実用上「色 = empty string」は存在しない (#1102)。
-		if *req.Color == "" {
+	// 本家と同じく、null は列を null で消す (#3369)。欠けは変えない。以前は null と
+	// 欠けを見分けずに変えなかったので、同梱の frontend が色やアイコンを空にして
+	// null を送っても消えなかった。空文字も null で消す扱いは以前から残す (#1102。
+	// 本家は空文字のまま保存する)。
+	if req.Color.Present {
+		if req.Color.Value == nil || *req.Color.Value == "" {
 			fields["color"] = nil
 		} else {
-			fields["color"] = *req.Color
+			fields["color"] = *req.Color.Value
 		}
 	}
-	if req.IconURL != nil {
-		// 上記 Color と同じ理由で空文字を null クリア扱いする。
-		if *req.IconURL == "" {
+	if req.IconURL.Present {
+		if req.IconURL.Value == nil || *req.IconURL.Value == "" {
 			fields["iconUrl"] = nil
 		} else {
-			fields["iconUrl"] = *req.IconURL
+			fields["iconUrl"] = *req.IconURL.Value
 		}
 	}
 	if req.Target != nil {
@@ -324,7 +322,9 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "condFormula must be a JSON object.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 		}
-		fields["condFormula"] = cf
+		// []byte のまま渡すと、simple protocol の接続では jsonb の列に bytea として
+		// 送られて失敗する (#3369)。update-default-policies と同じく datatypes.JSON にする。
+		fields["condFormula"] = datatypes.JSON(cf)
 	}
 	if req.IsModerator != nil {
 		fields["isModerator"] = *req.IsModerator
@@ -359,7 +359,7 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "policies must be a JSON object.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 		}
-		fields["policies"] = pol
+		fields["policies"] = datatypes.JSON(pol)
 	}
 	if len(fields) == 0 {
 		// 全フィールドが nil = 何も変更しないリクエスト。before == after の

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
+	"gorm.io/datatypes"
 )
 
 // ---------------------------------------------------------------------------
@@ -360,7 +361,10 @@ func (m *MockRoleRepository) UpdateFields(id string, fields map[string]any) erro
 		}
 	}
 	if v, ok := fields["condFormula"]; ok {
-		if b, ok := v.([]byte); ok {
+		switch b := v.(type) {
+		case datatypes.JSON:
+			r.CondFormula = b
+		case []byte:
 			r.CondFormula = b
 		}
 	}
@@ -389,7 +393,10 @@ func (m *MockRoleRepository) UpdateFields(id string, fields map[string]any) erro
 		r.DisplayOrder = v.(int)
 	}
 	if v, ok := fields["policies"]; ok {
-		if b, ok := v.([]byte); ok {
+		switch b := v.(type) {
+		case datatypes.JSON:
+			r.Policies = b
+		case []byte:
 			r.Policies = b
 		}
 	}
