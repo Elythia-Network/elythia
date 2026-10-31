@@ -82,7 +82,7 @@ func runParallelDelivery(t testing.TB, configure func(*http.Transport)) reuseRes
 		}
 		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
 	}
-	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, withLookup(lookup))
+	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, WithLookup(lookup))
 	tr.TLSClientConfig = &tls.Config{
 		RootCAs: pool,
 		VerifyConnection: func(tls.ConnectionState) error {
@@ -210,7 +210,7 @@ func TestSSRFSafeTransport_ReusedTransportStillBlocksPrivateDestinations(t *test
 		}
 		return []net.IPAddr{{IP: net.ParseIP(ip)}}, nil
 	}
-	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, withLookup(lookup))
+	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, WithLookup(lookup))
 	tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 	t.Cleanup(tr.CloseIdleConnections)
 	// 用途ごとにタイムアウトだけを変えた client が 1 つの Transport を共有する形。
@@ -279,7 +279,7 @@ func TestSSRFSafeTransport_NewConnectionRechecksAfterRebinding(t *testing.T) {
 	lookup := func(_ context.Context, _ string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP(current.Load().(string))}}, nil
 	}
-	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, withLookup(lookup))
+	tr := NewSSRFSafeTransport([]string{"127.0.0.1/32"}, WithLookup(lookup))
 	tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 	t.Cleanup(tr.CloseIdleConnections)
 	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
@@ -330,7 +330,7 @@ func TestSSRFSafeTransport_ProxyReuseStillChecksEachDestination(t *testing.T) {
 		"two.example":      {"93.184.215.15"},
 		"internal.example": {"10.0.0.5"},
 	})
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup))
 	t.Cleanup(tr.CloseIdleConnections)
 	client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
 	get := func(u string) error {

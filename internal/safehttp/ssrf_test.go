@@ -246,7 +246,7 @@ func TestNewSSRFSafeTransport_ForwardsThroughProxy(t *testing.T) {
 
 	// httptest は 127.0.0.1 で起動するので allowedCIDRs 無しでも proxy
 	// 接続自体は SSRF skip される (proxyAddr 一致)。
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(publicLookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(publicLookup))
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Get("http://example.com/path")
@@ -434,7 +434,7 @@ func TestNewSSRFSafeTransport_IPv6ProxyDefaultPort(t *testing.T) {
 		t.Skip("something is listening on [::1]:80 (e.g. local nginx); cannot observe #486 regression via dial-fail branch")
 	}
 
-	tr := NewSSRFSafeTransport(nil, WithProxy("http://[::1]", nil), withLookup(publicLookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy("http://[::1]", nil), WithLookup(publicLookup))
 	require.NotNil(t, tr)
 	require.NotNil(t, tr.Proxy)
 
@@ -506,7 +506,7 @@ func TestNewSSRFSafeTransport_ProxyBlocksPrivateDestinations(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			proxy, hosts := countingProxy(t)
-			tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+			tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup))
 			client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 			_, err := client.Get(tc.url)
@@ -520,7 +520,7 @@ func TestNewSSRFSafeTransport_ProxyBlocksPrivateDestinations(t *testing.T) {
 // 解決できない宛先は検証できないので proxy に渡さない (fail closed)。
 func TestNewSSRFSafeTransport_ProxyBlocksUnresolvableDestination(t *testing.T) {
 	proxy, hosts := countingProxy(t)
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(fakeLookup(nil)))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(fakeLookup(nil)))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	_, err := client.Get("http://nowhere.example/")
@@ -534,7 +534,7 @@ func TestNewSSRFSafeTransport_ProxyBlocksUnresolvableDestination(t *testing.T) {
 func TestNewSSRFSafeTransport_ProxyForwardsPublicDestination(t *testing.T) {
 	proxy, hosts := countingProxy(t)
 	lookup := fakeLookup(map[string][]string{"remote.example": {"93.184.215.14", "2606:2800:21f:cb07:6820:80da:af6b:8b2c"}})
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	for _, u := range []string{"http://remote.example/a", "http://93.184.215.14:8080/b"} {
@@ -551,7 +551,7 @@ func TestNewSSRFSafeTransport_ProxyForwardsPublicDestination(t *testing.T) {
 func TestNewSSRFSafeTransport_ProxyHonoursAllowedPrivateNetworks(t *testing.T) {
 	proxy, hosts := countingProxy(t)
 	lookup := fakeLookup(map[string][]string{"es.internal": {"10.0.0.5"}})
-	tr := NewSSRFSafeTransport([]string{"10.0.0.0/24"}, WithProxy(proxy.URL, nil), withLookup(lookup))
+	tr := NewSSRFSafeTransport([]string{"10.0.0.0/24"}, WithProxy(proxy.URL, nil), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	for _, u := range []string{"http://10.0.0.5:9200/", "http://es.internal/"} {
@@ -577,7 +577,7 @@ func TestNewSSRFSafeTransport_ProxyChecksRedirectTarget(t *testing.T) {
 	defer proxy.Close()
 
 	lookup := fakeLookup(map[string][]string{"remote.example": {"93.184.215.14"}})
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	_, err := client.Get("http://remote.example/start")
@@ -590,7 +590,7 @@ func TestNewSSRFSafeTransport_ProxyChecksRedirectTarget(t *testing.T) {
 func TestNewSSRFSafeTransport_BypassHostStillCheckedAtDial(t *testing.T) {
 	proxy, hosts := countingProxy(t)
 	lookup := fakeLookup(map[string][]string{"bypass.example": {"127.0.0.1"}})
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, []string{"bypass.example"}), withLookup(lookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, []string{"bypass.example"}), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	_, err := client.Get("http://bypass.example/")

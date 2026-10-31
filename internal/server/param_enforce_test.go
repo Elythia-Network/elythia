@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -316,10 +317,15 @@ var passwordCheckedEndpoints = []string{
 	"i/update-email",
 }
 
-// jobEnqueuingEndpoints are the enforced admin/* endpoints whose accepted
-// corpus inputs reach the job queue. The test server's Redis (miniredis) has
-// no cmsgpack, so the enqueue fails with a 500.
-var jobEnqueuingEndpoints = []string{"admin/drive/clean-remote-files", "admin/emoji/import-zip"}
+// jobEnqueuingEndpoints are the enforced endpoints whose accepted corpus
+// inputs enqueue a job. TestEnforcedEndpointsMatchTheCorpus runs on a real
+// Redis, so each answers 204 and leaves a job in the queue (#3369; with
+// miniredis, which has no cmsgpack, the enqueue failed with a 500).
+var jobEnqueuingEndpoints = []string{
+	"admin/drive/clean-remote-files", "admin/emoji/import-zip", "export-custom-emojis",
+	"i/export-antennas", "i/export-blocking", "i/export-clips", "i/export-favorites",
+	"i/export-following", "i/export-mute", "i/export-notes", "i/export-user-lists",
+}
 
 // metaWritingEndpoints are the enforced admin/* endpoints whose accepted
 // corpus inputs write meta. TestEnforcedEndpointsMatchTheCorpus puts the row
@@ -556,10 +562,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// (ON DELETE CASCADE) が、何を作るかが読めるように明示して消す。
 		require.NoError(t, db.Exec(`DELETE FROM chat_room WHERE "ownerId" = ?`, userID).Error)
 		// export-custom-emojis・fetch-external-resources・request-reset-password・
-		// reset-password・verify-email・v2/admin/emoji/list の受理の入力は書き込まない
-		// (#3845)。export はジョブを積もうとするが、テストの Redis (miniredis) には
-		// cmsgpack が無く、mkq の投入が失敗して 500 になる (ジョブは積まれない。
-		// i/export-* も同じ。#3851)。fetch-external-resources の corpus の url には
+		// reset-password・verify-email・v2/admin/emoji/list の受理の入力は DB に書き込まない
+		// (#3845)。export はジョブを積む (i/export-* も同じ。#3851)。積む先はこのテストだけの
+		// 実 Redis で、worker は動かさない (MK_ONLY_SERVER=1) ので、テストの終わりに
+		// コンテナごと消える (#3369)。fetch-external-resources の corpus の url には
 		// host が無く、取得の前に止まる。request-reset-password は corpus の名前の
 		// 利用者がいないので、password_reset_request の行を作らない。
 		// notes/* の受理の入力は、入力ごとに置き直すノート・投票・下書き・リストと、
@@ -657,9 +663,25 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// proxy を通らないので、上の proxy では数えられない。数えるだけの偽物に差し替え、
 	// 受理の入力が handler の診断まで届いたことを確かめる (#3877)。
 	diag := &countingDiagnostics{}
-	_, on, _ := newParamShadowServersSetup(t, []func(*Server){func(s *Server) {
+	// safehttp は proxy へ渡す前に宛先を手元で名前解決するので、上の proxy では
+	// 名前解決を数えられない (ホスト名の URL は proxy に届く前に名前解決で止まる)。
+	// 外向きの通信の名前解決を、数えて拒否する resolver に差し替える (#3369)。
+	var lookups atomic.Int64
+	var lookedUp sync.Map
+	countingLookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		// IP の literal は既定の resolver と同じくそのまま返す (名前解決ではない)。
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IPAddr{{IP: ip}}, nil
+		}
+		lookups.Add(1)
+		lookedUp.Store(host, true)
+		return nil, &net.DNSError{Err: "name resolution refused in the test", Name: host, IsNotFound: true}
+	}
+	redisClient, redisOptions := newRealRedis(t)
+	_, on, _ := newParamShadowServersOn(t, redisClient, redisOptions, []func(*Server){func(s *Server) {
 		s.selfCheckRunner = diag
 		s.remoteChecker = diag
+		s.outboundLookup = countingLookup
 	}}, func(cfg *config.Config) {
 		cfg.Proxy = proxy.URL
 		// 下の確かめに使う宛先。TEST-NET-1 で、どこへも届かない。
@@ -687,6 +709,15 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	require.EqualValues(t, 1, outbound.Load(), "the recording proxy does not see the outbound requests")
 	outbound.Store(0)
+	// 名前解決も同じく、数えられることを先に確かめる。ホスト名の宛先は proxy に
+	// 届く前に名前解決で止まる。
+	if res, err := on.outboundClient(5 * time.Second).Get("http://lookup-probe.invalid/probe"); err == nil {
+		require.NoError(t, res.Body.Close())
+	}
+	require.EqualValues(t, 1, lookups.Load(), "the counting resolver does not see the name resolution")
+	require.Zero(t, outbound.Load(), "a host name reached the proxy without name resolution")
+	lookups.Store(0)
+	lookedUp.Delete("lookup-probe.invalid")
 
 	// notes/* の受理の入力の多くは、corpus の id (abc123) のノートや下書きが無いと
 	// handler の検査より先に NO_SUCH_NOTE などで止まる。受理の入力ごとに、利用者が持つ
@@ -1039,6 +1070,20 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	// 流す前の admin/meta。meta を書き換えた入力の後に、行とキャッシュを戻した
 	// ことをこれと比べて確かめる。
 	adminMetaBefore := adminPost("admin/meta", `{}`, http.StatusOK)
+	// queuedJobs counts the jobs waiting (or delayed) in every queue of the
+	// test's Redis. No worker runs (MK_ONLY_SERVER=1), so a job stays there.
+	queuedJobs := func() int {
+		t.Helper()
+		names, err := on.queueInspector.Queues()
+		require.NoError(t, err)
+		n := 0
+		for _, q := range names {
+			info, err := on.queueInspector.GetQueueInfo(q)
+			require.NoError(t, err)
+			n += info.Pending + info.Scheduled
+		}
+		return n
+	}
 	seedReached := map[string]int{}
 	jobReached := map[string]int{}
 	diagAccepted := map[string]int{}
@@ -1110,6 +1155,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		if isI {
 			userBefore = readUser()
 		}
+		jobsBefore := -1
+		if tc.ok && slices.Contains(jobEnqueuingEndpoints, tc.ep) {
+			jobsBefore = queuedJobs()
+		}
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
 		if metaWriting {
@@ -1171,6 +1220,17 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &env)
 		name := tc.ep + " " + string(tc.in)
+		// ジョブを積む endpoint の受理の入力は、本番と同じく 204 で、ジョブを積む
+		// (#3857、#3369)。以前は miniredis で積めずに 500 になるのを確かめていた。
+		// admin/drive/clean-remote-files は 1 分の unique の窓で積むので
+		// (EnqueueCleanRemoteFiles)、窓の中の 2 回目は数が増えない。増えたことは endpoint ごとに 1 回以上あれば
+		// よい (ループの後で確かめる)。
+		if jobsBefore >= 0 {
+			assert.Equal(t, http.StatusNoContent, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			if queuedJobs() > jobsBefore {
+				jobReached[tc.ep]++
+			}
+		}
 		if eps[tc.ep].RequireFile {
 			// 本家は requireFile の endpoint (drive/files/create) の引数を multipart の
 			// field から読み、JSON の body には ajv より先に本文の無い 400 を返す
@@ -1241,14 +1301,6 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 				}
 				assert.NotContains(t, notFound, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 				seedReached[tc.ep]++
-			}
-			// ジョブを積む 2 件は、テストの Redis (miniredis) に cmsgpack が無いので
-			// 積めずに 500 になる。積む手前の検査を通り、積むところまで届いたことを
-			// 確かめる (#3857)。
-			if slices.Contains(jobEnqueuingEndpoints, tc.ep) {
-				assert.Equal(t, http.StatusInternalServerError, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
-				assert.Equal(t, "INTERNAL_ERROR", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
-				jobReached[tc.ep]++
 			}
 			// accounts/create の受理の入力は、利用者を作るところまで届く (#3861)。前の
 			// 入力や前の実行が作った利用者と名前 (used_username) が残っていると、409
@@ -1328,6 +1380,13 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	assert.Equal(t, map[string]int{"i/update #/properties/avatarDecorations/items/properties/id/format": 1}, overlayAccepted,
 		"the rejected corpus inputs the overlays accept, by upstream's first error")
 	assert.Zero(t, outbound.Load(), "the corpus inputs made outbound requests")
+	var hosts []string
+	lookedUp.Range(func(k, _ any) bool {
+		hosts = append(hosts, k.(string))
+		return true
+	})
+	slices.Sort(hosts)
+	assert.Zero(t, lookups.Load(), "the corpus inputs resolved host names: %v", hosts)
 	assert.Positive(t, userRewritten, "no accepted corpus input of i/update changed the user row")
 	assert.Equal(t, len(extraAcceptedInputs), extraStricter, "an extra input did not go through handlerStricterThanUpstream")
 	assert.Positive(t, metaRewritten, "no accepted corpus input of admin/update-meta changed the meta row")
@@ -1359,7 +1418,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		assert.Positive(t, seedReached[ep], "no accepted corpus input of %s names the seeded id", ep)
 	}
 	for _, ep := range jobEnqueuingEndpoints {
-		assert.Positive(t, jobReached[ep], "no accepted corpus input of %s", ep)
+		assert.Positive(t, jobReached[ep], "no accepted corpus input of %s enqueued a job", ep)
 	}
 	for ep := range backupAcceptedStop {
 		assert.Positive(t, backupReached[ep], "no accepted corpus input of %s", ep)

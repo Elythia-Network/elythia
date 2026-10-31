@@ -139,6 +139,8 @@ PGPASSWORD=mk psql -h localhost -U mk -d misskey_test \
 | Redis | `SetupRedis` を **27 パッケージ**が使う。**`SkipIfNoDocker` を置いているのは 7 つだけで、残り 20 は `TestMain` で `log.Fatalf` する** (= Docker が無いとそのパッケージは落ちる) | — |
 | PostgreSQL | `SetupPostgres` は `internal/api/test` / `tests/e2e` / `tests/e2e-federation` の **3 パッケージだけ** | `OpenTestDB` / `MustOpenTestDB` を **15 パッケージ**が使い、`TEST_DB_*` の指す PostgreSQL に直接つなぐ |
 
+`internal/server` の照合のテスト (`TestEnforcedEndpointsMatchTheCorpus`) は、ジョブを積む endpoint を本番どおりに通すため、miniredis でなく `SetupRedis` の実 Redis を使う (#3369。miniredis には mkq の Lua が使う `cmsgpack` が無い)。**手元で Docker が無いと、このテストは `SkipIfNoDocker` で skip する** (環境変数 `CI` がある CI では skip せず落ちる)。
+
 つまり **Redis は Docker があれば足りるが、PostgreSQL は自分で用意する必要がある**。`MustOpenTestDB` は失敗時に panic し、しかも `init()` から呼ばれるので、PostgreSQL が無いと該当パッケージはまとめて落ちる (skip されない)。
 
 ```go

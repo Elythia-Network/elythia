@@ -26,7 +26,7 @@ func TestNewSSRFSafeTransport_ProxyResolvesIDNAsDialed(t *testing.T) {
 		"xn--eckve.example": {"93.184.215.14"},
 		"evil.example":      {"10.0.0.5"},
 	})
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	resp, err := client.Get("http://パイ.example/a")
@@ -67,7 +67,7 @@ func TestNewSSRFSafeTransport_ProxyBypassMatchesNormalizedHost(t *testing.T) {
 		return base(ctx, strings.ToLower(host))
 	}
 	tr := NewSSRFSafeTransport([]string{"127.0.0.0/8"},
-		WithProxy(proxy.URL, []string{"パイ.example", "UPPER.example"}), withLookup(lookup))
+		WithProxy(proxy.URL, []string{"パイ.example", "UPPER.example"}), WithLookup(lookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	for _, h := range []string{"パイ.example", "Upper.Example"} {
@@ -102,7 +102,7 @@ func TestNewSSRFSafeTransport_ProxyCachesPassedDestination(t *testing.T) {
 		defer clockMu.Unlock()
 		return now
 	}
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(lookup), withClock(clock))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(lookup), withClock(clock))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	get := func(u string) error {
@@ -151,7 +151,7 @@ func TestProxyCheckCache_ClearsWhenFull(t *testing.T) {
 // と、数値で終わらない名前は従来どおり。
 func TestNewSSRFSafeTransport_ProxyRejectsLooseNumericHosts(t *testing.T) {
 	proxy, hosts := countingProxy(t)
-	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), withLookup(publicLookup))
+	tr := NewSSRFSafeTransport(nil, WithProxy(proxy.URL, nil), WithLookup(publicLookup))
 	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 
 	for _, u := range []string{
