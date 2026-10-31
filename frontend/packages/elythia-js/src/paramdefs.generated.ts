@@ -11,7 +11,8 @@
 // ones are the paramDef's required list. An endpoint whose paramDef has anyOf
 // has a union as its request type; each branch picks the member that requires
 // the branch's required properties and has the two checks, and one more checks
-// that the members picked make up the whole union.
+// that the members picked make up the whole union. The checks take the
+// property names of each type of a union, not only the common ones.
 // tsc fails on a mismatch.
 
 import type { ElythiaEndpoints } from './endpoints.js';
@@ -19,9 +20,11 @@ import type { ElythiaEndpoints } from './endpoints.js';
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Check<T extends true> = T;
 type Req<E extends keyof ElythiaEndpoints> = NonNullable<ElythiaEndpoints[E]['req']>;
-// An index signature (misskey-js's EmptyRequest) names no property.
-type Keys<T> = string extends keyof T ? never : keyof T;
-type RequiredKeys<T> = { [K in Keys<T>]-?: Partial<Pick<T, K>> extends Pick<T, K> ? never : K }[Keys<T>];
+// An index signature (misskey-js's EmptyRequest) names no property. Both take
+// each type of a union on its own: keyof of a union names only the common
+// properties, so a property one type alone has would pass.
+type Keys<T> = T extends unknown ? (string extends keyof T ? never : keyof T) : never;
+type RequiredKeys<T> = T extends unknown ? { [K in Keys<T>]-?: Partial<Pick<T, K>> extends Pick<T, K> ? never : K }[Keys<T>] : never;
 type Member<T, K extends PropertyKey> = Extract<T, Record<K, unknown>>;
 
 export type ParamDefChecks = [

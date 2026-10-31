@@ -35,6 +35,13 @@ import (
 // Path is where the rendered file lives, relative to the repository root.
 const Path = "frontend/packages/elythia-js/src/paramdefs.generated.ts"
 
+// header holds the types the checks use.
+//
+// **Keys と RequiredKeys は union の型を 1 つずつ見る (#3369)。** keyof は union の
+// 共通の項目しか返さないので、anyOf の分岐の必須で選んだ型が 2 つ以上の型の union だと、
+// 片方にだけある宣言に無い項目を見逃していた。選んだ型が union でないことを見る
+// 案 ([U] extends [T]) は、項目を足しただけの型が元の型に代入できるので、この形を
+// 落とせない (tsc で確かめた)。
 const header = `/*
  * SPDX-FileCopyrightText: Elythia-Network
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -48,7 +55,8 @@ const header = `/*
 // ones are the paramDef's required list. An endpoint whose paramDef has anyOf
 // has a union as its request type; each branch picks the member that requires
 // the branch's required properties and has the two checks, and one more checks
-// that the members picked make up the whole union.
+// that the members picked make up the whole union. The checks take the
+// property names of each type of a union, not only the common ones.
 // tsc fails on a mismatch.
 
 import type { ElythiaEndpoints } from './endpoints.js';
@@ -56,9 +64,11 @@ import type { ElythiaEndpoints } from './endpoints.js';
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Check<T extends true> = T;
 type Req<E extends keyof ElythiaEndpoints> = NonNullable<ElythiaEndpoints[E]['req']>;
-// An index signature (misskey-js's EmptyRequest) names no property.
-type Keys<T> = string extends keyof T ? never : keyof T;
-type RequiredKeys<T> = { [K in Keys<T>]-?: Partial<Pick<T, K>> extends Pick<T, K> ? never : K }[Keys<T>];
+// An index signature (misskey-js's EmptyRequest) names no property. Both take
+// each type of a union on its own: keyof of a union names only the common
+// properties, so a property one type alone has would pass.
+type Keys<T> = T extends unknown ? (string extends keyof T ? never : keyof T) : never;
+type RequiredKeys<T> = T extends unknown ? { [K in Keys<T>]-?: Partial<Pick<T, K>> extends Pick<T, K> ? never : K }[Keys<T>] : never;
 `
 
 // anyOfHeader is added to header when a paramDef has anyOf. 使わない型を
