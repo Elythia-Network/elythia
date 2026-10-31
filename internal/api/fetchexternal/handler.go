@@ -13,6 +13,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"io"
 	"net/http"
 	"net/url"
@@ -89,11 +90,18 @@ func (h *Handler) Fetch(c echo.Context) error {
 		return h.invalidSchema(c)
 	}
 	// `data` を string として decode できなければ invalid schema。
+	// 本家は JavaScript のプロパティで読むので、キーは大文字小文字まで完全に一致する
+	// ものだけを読む (v1 の Unmarshal は`DATA`も`data`として読む)。
 	var res struct {
 		Type string `json:"type"`
 		Data string `json:"data"`
 	}
-	if err := json.Unmarshal(body, &res); err != nil {
+	if err := jsonv2.Unmarshal(body, &res, json.DefaultOptionsV1(), jsonv2.MatchCaseInsensitiveNames(false)); err != nil {
+		return h.invalidSchema(c)
+	}
+	// 本家と同じく`!res.data || !res.type`を invalid schema にする (#3369)。以前は
+	// 空の data の hash と照合していた。
+	if res.Data == "" || res.Type == "" {
 		return h.invalidSchema(c)
 	}
 
