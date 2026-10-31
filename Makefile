@@ -1542,8 +1542,6 @@ apicompat: apicompat-routes apicompat-render ## API 互換性マトリクス doc
 shapecheck-gen: ## shape drift の golden snapshot を再生成
 	go run ./tools/shapediff
 	go run ./tools/erroriddiff
-	go run ./tools/permspec
-	go run ./tools/securespec
 	go run ./tools/schemadrift
 	go run ./tools/paginationspec
 
