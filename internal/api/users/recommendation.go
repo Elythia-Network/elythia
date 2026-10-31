@@ -1,12 +1,14 @@
 package users
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -34,6 +36,10 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 	}
 	// 本家の NO_SUCH_USER は httpStatusCode を持たないので 400 (#3369)。
 	if _, err := h.userService.ShowByID(req.UserID); err != nil {
+		// **DB 障害を「居ない」に丸めない** (#2792、#3369)。
+		if !errors.Is(err, coreuser.ErrUserNotFound) {
+			return apierr.JSONInternalError(c)
+		}
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "e6965129-7b2a-40a4-bae2-cd84cd434822"))
 	}
 	viewer := middleware.GetUser(c)
