@@ -1058,6 +1058,9 @@ type pluginJobs struct {
 	// err holds the first registration failure. プラグイン側の callback を
 	// エラーで汚さないため、ここに溜めて呼び出し元がまとめて検査する。
 	err error
+	// handled is the job names already registered. queue の登録は同じ種別の2回目で
+	// panic するので、プラグインの誤りは先にエラーとして返す (#3369)。
+	handled map[string]bool
 }
 
 // taskType namespaces a plugin job so it cannot collide with mk-go's own types.
@@ -1080,6 +1083,22 @@ func (j *pluginJobs) Handle(name string, h plugin.JobHandler) {
 		j.err = fmt.Errorf("ジョブ %q を登録できません (queue server が未配線です)", name)
 		return
 	}
+	// **`_` で始まる名前は本体の予約 (#3369)。** `_peer` と `_notification` は、
+	// 本体が同じプラグインの peer と通知の handler を登録する種別と同じになり、
+	// queue の登録が同じ種別の 2 回目で panic して組み立てが落ちる。積む側
+	// (EnqueuePlugin) と同じ規則で、プラグインの誤りとしてエラーで返す。
+	if !queue.ValidPluginJobName(name) {
+		j.err = fmt.Errorf("ジョブ名 %q は使えません (英数字で始まり、英数字・ハイフン・アンダースコアだけ。_ で始まる名前は本体の予約)", name)
+		return
+	}
+	if j.handled[name] {
+		j.err = fmt.Errorf("ジョブ %q を2回登録しています", name)
+		return
+	}
+	if j.handled == nil {
+		j.handled = map[string]bool{}
+	}
+	j.handled[name] = true
 	j.server.Handle(j.taskType(name), func(ctx context.Context, t driver.Task) error {
 		return pluginJobError(h(ctx, t.Payload()))
 	})
@@ -1087,6 +1106,12 @@ func (j *pluginJobs) Handle(name string, h plugin.JobHandler) {
 
 func (j *pluginJobs) Schedule(cron string, name string, payload any) {
 	if j.err != nil {
+		return
+	}
+	// Handle と同じ規則で見る (#3369)。`_notification` を cron で積めると、通知の
+	// handler が本体からの通知として受け取る。
+	if !queue.ValidPluginJobName(name) {
+		j.err = fmt.Errorf("ジョブ名 %q は使えません (英数字で始まり、英数字・ハイフン・アンダースコアだけ。_ で始まる名前は本体の予約)", name)
 		return
 	}
 	if j.scheduler == nil {

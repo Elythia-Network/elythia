@@ -34,6 +34,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -330,6 +331,9 @@ func (h *Harness) Jobs(def plugin.Definition) *JobSet {
 	if err := def.Jobs(h.Context(), j); err != nil {
 		h.t.Fatalf("plugintest: Jobs に失敗しました: %v", err)
 	}
+	if j.err != nil {
+		h.t.Fatalf("plugintest: ジョブの登録に失敗しました: %v", j.err)
+	}
 	return j.set
 }
 
@@ -608,11 +612,47 @@ type fakeRouter struct{ handlers Handlers }
 func (r *fakeRouter) GET(path string, h plugin.Handler)  { r.handlers["GET "+path] = h }
 func (r *fakeRouter) POST(path string, h plugin.Handler) { r.handlers["POST "+path] = h }
 
-type fakeJobs struct{ set *JobSet }
+type fakeJobs struct {
+	set *JobSet
+	// err is the first registration the host would refuse.
+	err error
+}
 
-func (j *fakeJobs) Handle(name string, h plugin.JobHandler) { j.set.Handlers[name] = h }
+// jobNamePattern is the job names the host accepts.
+//
+// internal/queue の ValidPluginJobName と同じ規則。plugintest から internal/queue を
+// import すると、同梱のプラグインの module が queue の依存 (mkq など) まで要るように
+// なるので写して持ち、一致はテスト (TestValidJobNameMatchesTheHost) が見る。
+var jobNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// validJobName reports whether the host accepts name as a job name.
+func validJobName(name string) bool { return jobNamePattern.MatchString(name) }
+
+// Handle records h like the host: a duplicated name and a name the host
+// refuses (reserved or malformed) fail the setup (#3369).
+func (j *fakeJobs) Handle(name string, h plugin.JobHandler) {
+	if j.err != nil {
+		return
+	}
+	if !validJobName(name) {
+		j.err = fmt.Errorf("ジョブ名 %q は使えません (英数字で始まり、英数字・ハイフン・アンダースコアだけ。_ で始まる名前は本体の予約)", name)
+		return
+	}
+	if _, dup := j.set.Handlers[name]; dup {
+		j.err = fmt.Errorf("ジョブ %q を2回登録しています", name)
+		return
+	}
+	j.set.Handlers[name] = h
+}
 
 func (j *fakeJobs) Schedule(cron string, name string, payload any) {
+	if j.err != nil {
+		return
+	}
+	if !validJobName(name) {
+		j.err = fmt.Errorf("ジョブ名 %q は使えません (英数字で始まり、英数字・ハイフン・アンダースコアだけ。_ で始まる名前は本体の予約)", name)
+		return
+	}
 	j.set.Schedules = append(j.set.Schedules, Schedule{Cron: cron, Name: name, Payload: payload})
 }
 

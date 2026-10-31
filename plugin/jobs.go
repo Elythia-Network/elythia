@@ -16,11 +16,15 @@ import (
 // 任意のタイミングで積むには [Context.Queue] を使う。**Routes からも呼べる**
 // ので、HTTP ハンドラの中で重い処理を後回しにできる。
 type Jobs interface {
-	// Handle registers the handler for a named job.
+	// Handle registers the handler for a named job. A name starts with a
+	// letter or a digit and has only letters, digits, `-` and `_`; the names
+	// starting with `_` are reserved by the host. Registering the same name
+	// twice, or a name that breaks these rules, fails the plugin's setup.
 	Handle(name string, h JobHandler)
 
 	// Schedule runs the named job on a cron expression (5-field, UTC).
-	// The job must also be registered with Handle.
+	// The job must also be registered with Handle. The name follows the same
+	// rules as Handle; a name that breaks them fails the plugin's setup.
 	//
 	// 定期取得のような用途。任意のタイミングで積むなら [Context.Queue]、
 	// プロセス内で完結してよい非同期処理なら [Context.Go]。

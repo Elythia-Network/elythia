@@ -179,3 +179,42 @@ func TestPluginJobs_NoRetryMapsToSkipRetry(t *testing.T) {
 	already := fmt.Errorf("%w: %w", driver.ErrSkipRetry, plugin.ErrNoRetry)
 	assert.Same(t, already, pluginJobError(already), "包み済みのものは二重に包まない")
 }
+
+// 同じジョブ名を2回登録したら、queue の登録へ渡す前にエラーにすること (#3369)。
+// queue の登録は同じ種別の2回目で panic するので、プラグインの誤りで起動を落とさない。
+func TestPluginJobs_RejectsADuplicateName(t *testing.T) {
+	d := newFakeQueueDriver()
+	j := &pluginJobs{name: "demo", server: queue.NewServer(d)}
+	first := func(context.Context, json.RawMessage) error { return nil }
+	j.Handle("sync", first)
+	j.Handle("other", first)
+	require.NoError(t, j.err)
+	j.Handle("sync", func(context.Context, json.RawMessage) error { return errors.New("second") })
+	require.EqualError(t, j.err, `ジョブ "sync" を2回登録しています`)
+	require.NoError(t, d.server.handlers["plugin:demo:sync"](context.Background(), driver.RawTask{TypeName: "plugin:demo:sync"}),
+		"2回目の handler で上書きした")
+}
+
+// 本体が予約する名前 (`_` で始まる名前) は、queue の登録へ渡す前にエラーにすること
+// (#3369)。`_peer`・`_notification` は本体が同じプラグインの peer と通知の handler を
+// 登録する種別と同じになり、queue の登録が panic して組み立てが落ちる。
+func TestPluginJobs_RejectsAReservedName(t *testing.T) {
+	for _, name := range []string{queue.PluginPeerJobName, queue.PluginNotificationJobName, "_x", "a:b"} {
+		d := newFakeQueueDriver()
+		j := &pluginJobs{name: "demo", server: queue.NewServer(d)}
+		j.Handle(name, func(context.Context, json.RawMessage) error { return nil })
+		require.ErrorContains(t, j.err, "は使えません", name)
+		assert.Empty(t, d.server.handlers, "%s reached the queue server", name)
+	}
+}
+
+// Schedule も Handle と同じ規則で名前を見ること (#3369)。`_notification` を cron で
+// 積めると、通知の handler が本体からの通知として受け取る。
+func TestPluginJobs_ScheduleRejectsAReservedName(t *testing.T) {
+	for _, name := range []string{queue.PluginPeerJobName, queue.PluginNotificationJobName, "_x", "a:b", "daily.sync"} {
+		// scheduler の中身は無いので、名前の検査を通ると登録で panic する。
+		j := &pluginJobs{name: "demo", scheduler: &queue.Scheduler{}}
+		require.NotPanics(t, func() { j.Schedule("* * * * *", name, nil) }, name)
+		require.ErrorContains(t, j.err, "は使えません", name)
+	}
+}
