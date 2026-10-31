@@ -73,6 +73,23 @@ func TestFetch_InvalidSchema(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "EXT_RESOURCE_RETURNED_INVALID_SCHEMA")
 }
 
+// 本家と同じく、data か type が空 (欠けを含む) なら invalid schema。キーは大文字
+// 小文字まで完全に一致するものだけを読む (#3369)。hash は data に合わせてあるので、
+// 検査が無ければ 200 になる。
+func TestFetch_EmptyOrMissingTypeOrDataIsInvalidSchema(t *testing.T) {
+	for _, tc := range []struct{ payload, data string }{
+		{`{"type":"theme","data":""}`, ""},
+		{`{"data":"x"}`, "x"},
+		{`{"type":"","data":"x"}`, "x"},
+		{`{"TYPE":"theme","DATA":"x"}`, "x"},
+	} {
+		srv := resourceServer(t, tc.payload)
+		rec := do(t, New(srv.Client(), "mk-test"), `{"url":"`+srv.URL+`","hash":"`+hashOf(tc.data)+`"}`)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, tc.payload)
+		assert.Contains(t, rec.Body.String(), "EXT_RESOURCE_RETURNED_INVALID_SCHEMA", tc.payload)
+	}
+}
+
 func TestFetch_Non2xxIsInvalidSchema(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
