@@ -259,7 +259,7 @@ NUL と併せて 1 箇所で持つ (以前は NUL しか見ておらず、`inter
 
 | 役割 | Elythia の扱い | upstream | 理由 |
 |---|---|---|---|
-| **カーソル** (`sinceId` / `untilId`) | `INVALID_PARAM` (400)。`id.NormalizeCursor` が ok=false を返し、呼び出し側が 400 にする | 同じ (ajv が 400) | 空に倒すと「カーソル無し = 先頭から」になり、**利用者が指定した位置と無関係なページを正しい応答として返す**。無限スクロールが黙って先頭へ戻る |
+| **カーソル** (`sinceId` / `untilId`) | `INVALID_PARAM` (400)。`id.NormalizeCursor` (と、#3369 で足した `id.NormalizeCursorIDFirst`) が ok=false を返し、呼び出し側が 400 にする | 同じ (ajv が 400) | 空に倒すと「カーソル無し = 先頭から」になり、**利用者が指定した位置と無関係なページを正しい応答として返す**。無限スクロールが黙って先頭へ戻る |
 | **単体の id / 完全一致で引く値** (`userId` / `noteId` / `username` / `uri` / `token` など) | **not-found**。repository が引く前に `ErrNotFound` を返し、handler の既存の not-found 応答 (`NO_SUCH_USER` 等) に落ちる | 400 `INVALID_PARAM` (id 系のみ。`username` 等は format が無いので 500) | 列に入らない値は**どの行とも一致しえない**ので「無い」が事実。**引く前に弾く**ので DB 障害を隠していない (#2792 に反しない) |
 | **検索語** (`query` / `host` / 検索用の `username` など) | **空の結果 (200)** | 500 | 保存された text に NUL は現れないので「その語を含む行が無い」が事実として正しい答え。利用者の入力が壊れているわけではないので、**wire に新しいエラーコードを足さない**。AND で畳む語は 1 つでも一致しえなければ全体が空、OR で畳む語 (emoji v2 の `multipleWordsToQuery` と `roleIds`) は**その語だけ**落とす |
 | **認可の入力** (`/proxy` の `?url`) | **403 + `max-age=86400`** (#3036)。`Authorize` が DB を引く前に弾く | 該当なし (open proxy で allowlist を持たない) | 列に入りえない値は allowlist のどの列にも**一致しえない**ので「許可されていない」が事実。そのまま流すと PostgreSQL がクエリごと落として 503 になり、**未認証の利用者が 5xx とエラーログを任意に生成できる**。判定は `colfit.Storable` (NUL と不正な UTF-8 の両方を見る。以前は NUL しか見ておらず、この経路だけが `utf8.ValidString` を併記していた) |
@@ -288,7 +288,7 @@ camelCase の `untilId` / `sinceId` を struct タグで探すので、snake_cas
 見ないため。gate 側も `c.QueryParam` でカーソルを読む形を数えるようにした。
 
 **射程外がある。** gate (`make nulparam-check`) が見るのは (1) カーソル
-(`id.NormalizeCursor` の呼び出し側と、struct タグ / クエリ文字列で
+(`id.NormalizeCursor` / `id.NormalizeCursorIDFirst` の呼び出し側と、struct タグ / クエリ文字列で
 カーソルを受け取る handler)、
 (2) repository の**単一行 lookup** (`Find*` / `Get*` が `(*model.X, error)` を
 返すもの) と `*ByID*`、(3) LIKE パターンを組み立てる関数、の 3 本。
