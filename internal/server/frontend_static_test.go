@@ -151,6 +151,10 @@ func TestFrontendBuild_MissingAndOddPaths(t *testing.T) {
 	for _, path := range []string{
 		"/vite/ja-JP/bSIsCqU1u-zzzzzzzz.js",
 		"/vite/../devmode.go",
+		// `.`・空・`..` のセグメントは正規化して配信しない (#3369)。
+		"/vite/ja-JP/./bSIsCqU1u-0qk-1YEG.js",
+		"/vite/ja-JP//bSIsCqU1u-0qk-1YEG.js",
+		"/vite/x/../ja-JP/bSIsCqU1u-0qk-1YEG.js",
 	} {
 		rec := getFrontend(e, path, "gzip, br")
 		assert.NotEqual(t, http.StatusOK, rec.Code, path)
