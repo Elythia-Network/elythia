@@ -1001,6 +1001,22 @@ func TestEmojiListRemote_HostToPuny(t *testing.T) {
 	assert.Len(t, resp, 1, "IDN host が punycode 正規化されて match する (#1948-13)")
 }
 
+// 本家と同じく、空文字の host は toPuny した空文字で絞るので0件。null と欠けは
+// 全リモートを返す (#3369)。
+func TestEmojiListRemote_EmptyHostMatchesNothing(t *testing.T) {
+	host := "remote.example"
+	h, _ := setupEmojiHandler(t,
+		&model.Emoji{ID: "e1", Name: "alpha", Host: &host},
+	)
+	for body, want := range map[string]int{`{"host":""}`: 0, `{"host":null}`: 1, `{}`: 1} {
+		rec := doPost(h.EmojiListRemote, body, adminUser)
+		require.Equal(t, http.StatusOK, rec.Code, body)
+		var resp []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp), body)
+		assert.Len(t, resp, want, body)
+	}
+}
+
 // #1948-10: EmojiDetailedAdmin の updatedAt は upstream toISOString() (.000Z / null)。
 // raw *time.Time の RFC3339Nano だと wire-byte が乖離する。
 func TestEmojiListV2_UpdatedAtFormat(t *testing.T) {

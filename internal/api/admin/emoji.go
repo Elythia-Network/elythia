@@ -549,8 +549,9 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	var req struct {
-		Query     string     `json:"query"`
-		Host      string     `json:"host"`
+		Query string `json:"query"`
+		// null・欠けと空文字を見分ける (#3369)。
+		Host      *string    `json:"host"`
 		SinceID   string     `json:"sinceId"`
 		UntilID   string     `json:"untilId"`
 		SinceDate *jsnum.Int `json:"sinceDate"`
@@ -575,9 +576,16 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 	// **非正規化のまま保存された行は引けない** — 完全一致なので、`Mixed.Example` の
 	// ような表記で入った emoji は `elythia backfill remote-host` を流すまで出てこない
 	// (user の acct 解決も #2996 で同じになった)。
-	host := req.Host
-	if host != "" {
-		host = toPunyHost(host)
+	//
+	// 本家は`ps.host == null`のときだけ絞らず、空文字も toPuny した値で絞るので、
+	// `{"host":""}`は0件になる (#3369)。リモートの絵文字の host は空でないので、
+	// 問い合わせずに空の一覧を返す。以前は空文字を null と同じく全件にしていた。
+	host := ""
+	if req.Host != nil {
+		host = toPunyHost(*req.Host)
+		if host == "" {
+			return c.JSON(http.StatusOK, []any{})
+		}
 	}
 	// 本家のparamDefにoffsetは無いので読まない(#3857)。admin/emoji/listと同じ。
 	emojis, err := h.emojiRepo.ListRemoteWithFilter(req.Query, host, sinceID, untilID, limit, 0)
