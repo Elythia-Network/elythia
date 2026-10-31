@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -292,7 +293,7 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	var autoArchiveAt *time.Time
 	if req.AutoArchiveAt != nil {
 		ms := int64(*req.AutoArchiveAt)
-		if ms <= h.clock().UnixMilli() || !validDateMillis(ms) {
+		if ms <= h.clock().UnixMilli() || !jsdate.ValidMillis(ms) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_AUTO_ARCHIVE_AT", "Invalid auto archive date.", "2a892bd5-487d-46a2-a5fe-3d85ad51defe"))
 		}
 		t := time.UnixMilli(ms).UTC()
@@ -352,15 +353,6 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	resp := h.entityPacker.PackAnnouncement(a, h.idGen, false, "")
 	resp["imageUrl"] = a.ImageURL // upstream wire は raw imageUrl
 	return c.JSON(http.StatusOK, resp)
-}
-
-// maxDateMillis is the largest absolute millisecond value a JavaScript Date
-// holds (8.64e15). 本家は new Date(ms) が NaN になる値を INVALID_AUTO_ARCHIVE_AT で断る。
-const maxDateMillis = 8_640_000_000_000_000
-
-// validDateMillis reports whether ms is a time a JavaScript Date can hold.
-func validDateMillis(ms int64) bool {
-	return ms >= -maxDateMillis && ms <= maxDateMillis
 }
 
 // isValidAnnouncementIcon reports whether v matches upstream's
@@ -428,7 +420,7 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 		if err := json.Unmarshal(req.AutoArchiveAt, &ms); err != nil {
 			return apierr.JSONInvalidParam(c)
 		}
-		if ms < 0 || !validDateMillis(int64(ms)) {
+		if ms < 0 || !jsdate.ValidMillis(int64(ms)) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_AUTO_ARCHIVE_AT", "Invalid auto archive date.", "01b83d7b-2fd5-4d7c-86c4-d03144d16355"))
 		}
 		autoArchiveAt = time.UnixMilli(int64(ms)).UTC()
