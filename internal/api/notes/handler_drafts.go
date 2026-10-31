@@ -592,9 +592,23 @@ func (h *Handler) allDraftFilesOwned(fileIDs []string, userID string) bool {
 	return true
 }
 
+// pollExpiresAt returns the poll's expiresAt as a time, or nil when it is
+// absent or 0.
+//
+// 本家は `ps.poll?.expiresAt ? new Date(...) : null` なので、0 (と -0) は期限なし
+// として受ける (#3369)。時刻 0 として読むと、期限切れとして断るか 1970 年を保存する。
+func (p *draftPoll) pollExpiresAt() *time.Time {
+	if p == nil || p.ExpiresAt == nil || *p.ExpiresAt == 0 {
+		return nil
+	}
+	t := time.UnixMilli(int64(*p.ExpiresAt))
+	return &t
+}
+
 // pollAlreadyExpired reports whether the poll's expiresAt is in the past.
 func pollAlreadyExpired(p *draftPoll, now time.Time) bool {
-	return p != nil && p.ExpiresAt != nil && time.UnixMilli(int64(*p.ExpiresAt)).Before(now)
+	t := p.pollExpiresAt()
+	return t != nil && t.Before(now)
 }
 
 // applyDraftPoll writes poll fields into the draft. nil clears the poll
@@ -612,12 +626,7 @@ func applyDraftPoll(d *model.NoteDraft, p *draftPoll) {
 	d.PollChoices = model.StringArray(p.Choices)
 	d.PollMultiple = p.Multiple
 	d.PollExpiredAfter = p.ExpiredAfter.Int64Ptr()
-	if p.ExpiresAt != nil {
-		t := time.UnixMilli(int64(*p.ExpiresAt))
-		d.PollExpiresAt = &t
-	} else {
-		d.PollExpiresAt = nil
-	}
+	d.PollExpiresAt = p.pollExpiresAt()
 }
 
 // DraftsDelete handles POST /api/notes/drafts/delete.

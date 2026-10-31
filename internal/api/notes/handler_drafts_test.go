@@ -651,6 +651,33 @@ func TestDraftsUpdate_ExpiredPollRejected(t *testing.T) {
 	assert.False(t, repo.drafts["d1"].HasPoll, "期限切れ poll は適用しない")
 }
 
+// poll.expiresAt の 0 (と -0) は、本家の `ps.poll?.expiresAt ? … : null` と同じく
+// 期限なしとして受ける。期限切れとして断らず、1970 年も保存しない (#3369)。
+func TestDraftsCreateAndUpdate_ZeroPollExpiresAtMeansNoExpiry(t *testing.T) {
+	for _, v := range []string{"0", "-0"} {
+		h, repo := newDraftHandlerWithRepo()
+		rec := postDraft(h.DraftsCreate, `{"text":"t","poll":{"choices":["a","b"],"expiresAt":`+v+`}}`, &model.User{ID: "u1"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Len(t, repo.drafts, 1)
+		for _, d := range repo.drafts {
+			assert.True(t, d.HasPoll)
+			assert.Nil(t, d.PollExpiresAt, "create: expiresAt %s", v)
+		}
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		poll := resp["createdDraft"].(map[string]any)["poll"].(map[string]any)
+		assert.NotContains(t, poll, "expiresAt")
+
+		h, repo = newDraftHandlerWithRepo()
+		past := time.Now().Add(-time.Hour)
+		repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Visibility: "public", HasPoll: true, PollExpiresAt: &past}
+		rec = postDraft(h.DraftsUpdate, `{"draftId":"d1","poll":{"choices":["a"],"expiresAt":`+v+`}}`, &model.User{ID: "u1"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.True(t, repo.drafts["d1"].HasPoll)
+		assert.Nil(t, repo.drafts["d1"].PollExpiresAt, "update: expiresAt %s", v)
+	}
+}
+
 // 所有していない fileId を含む create は NO_SUCH_FILE で弾く。F5。
 func TestDraftsCreate_UnownedFileRejected(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
