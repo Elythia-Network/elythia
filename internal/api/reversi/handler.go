@@ -612,22 +612,27 @@ func (h *Handler) CancelMatch(c echo.Context) error {
 	// userId 未指定 = ランダムマッチの取り消し。待機列から自分を外す (#2407)。
 	// upstream matchAnyUserCancel に対応する。ここで外さないと、取り消した
 	// つもりの利用者が他人にマッチされ続ける。
-	if req.UserID == "" && h.svc != nil {
-		if err := h.svc.CancelMatchAny(ctx, user.ID); err != nil {
-			slog.Warn("reversi cancel-match: dequeue from match-any failed",
-				"userId", user.ID, "err", err)
+	//
+	// 本家の matchAnyUserCancel は待機列から外すだけなので、未開始の対局には触らない
+	// (#3369)。以前は自分の未開始の対局 (受けた招待を含む) を最大10件まで取り消して
+	// いたので、ランダムマッチを取り消すと他人からの招待まで黙って消えていた。
+	if req.UserID == "" {
+		if h.svc != nil {
+			if err := h.svc.CancelMatchAny(ctx, user.ID); err != nil {
+				slog.Warn("reversi cancel-match: dequeue from match-any failed",
+					"userId", user.ID, "err", err)
+			}
 		}
+		return c.NoContent(http.StatusNoContent)
 	}
 	games, _ := h.repo.ListByUser(user.ID, 10)
 	for _, g := range games {
 		if g.IsStarted || g.IsEnded {
 			continue
 		}
-		// userId 指定時は upstream matchSpecificUserCancel 互換 (cancel-match.ts:
-		// 33-38): 自分がその相手に送った招待 (User1=自分, User2=相手) だけを
-		// 取り消す。未指定時は自分の pending を全部片付ける (待機列からの離脱は
-		// 上で済ませてある)。
-		if req.UserID != "" && (g.User1ID != user.ID || g.User2ID != req.UserID) {
+		// upstream matchSpecificUserCancel 互換 (cancel-match.ts:33-38): 自分が
+		// その相手に送った招待 (User1=自分, User2=相手) だけを取り消す。
+		if g.User1ID != user.ID || g.User2ID != req.UserID {
 			continue
 		}
 		if h.svc != nil {
