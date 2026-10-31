@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
 
 // This file translates the `pattern` of a paramDef, which ajv evaluates as
@@ -25,10 +27,6 @@ import (
 //
 // 文字は全部`\x{…}`に直して出す。GoとJSで記号の意味が違っても、取り違えが
 // 起きないようにするため。
-
-// jsSpaceRanges is the set JavaScript's \s matches (WhiteSpace and
-// LineTerminator), written as the inside of a Go character class.
-const jsSpaceRanges = `\x{9}-\x{d}\x{20}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
 
 // jsDot is JavaScript's `.` without the s flag: anything but a line terminator.
 const jsDot = `[^\x{a}\x{d}\x{2028}\x{2029}]`
@@ -212,11 +210,11 @@ func (p *jsRegexpParser) escapeOutside() error {
 		p.pos += 2
 		return nil
 	case 's':
-		p.out.WriteString("[" + jsSpaceRanges + "]")
+		p.out.WriteString("[" + jsstr.SpaceClass + "]")
 		p.pos += 2
 		return nil
 	case 'S':
-		p.out.WriteString("[^" + jsSpaceRanges + "]")
+		p.out.WriteString("[^" + jsstr.SpaceClass + "]")
 		p.pos += 2
 		return nil
 	case '-':
@@ -399,7 +397,7 @@ func (p *jsRegexpParser) classAtom() (r rune, set string, err error) {
 		return 0, set, nil
 	case 's':
 		p.pos += 2
-		return 0, jsSpaceRanges, nil
+		return 0, jsstr.SpaceClass, nil
 	case 'S':
 		// クラスの中の補集合はGoで書けない(使われていない)。
 		return 0, "", fmt.Errorf(`\S inside a class at %d`, p.pos)

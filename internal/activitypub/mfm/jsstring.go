@@ -6,23 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 )
-
-// isJSWhitespace reports whether r is removed by JavaScript's
-// String.prototype.trim: the WhiteSpace and LineTerminator code points of
-// ECMAScript (TAB, VT, FF, SP, NBSP, ZWNBSP, the Zs category, LF, CR, LS, PS).
-//
-// Go の unicode.IsSpace と違い、U+0085 (NEL) を含まず、U+FEFF (BOM) を含む。
-func isJSWhitespace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0x00A0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
-		return true
-	}
-	return 0x2000 <= r && r <= 0x200A
-}
-
-// jsTrim trims s exactly like JavaScript's String.prototype.trim.
-func jsTrim(s string) string { return strings.TrimFunc(s, isJSWhitespace) }
 
 // jsUnixtimeISO returns `new Date(parseInt(text, 10) * 1000).toISOString()`
 // as upstream's unixtime fn computes it. ok is false where JavaScript throws
@@ -30,7 +16,7 @@ func jsTrim(s string) string { return strings.TrimFunc(s, isJSWhitespace) }
 func jsUnixtimeISO(text string) (string, bool) {
 	// parseInt は先頭の空白 (trim と同じ集合) を飛ばし、符号の後ろの数字だけを
 	// 読む。"12abc" は 12、"1e3" は 1、"0x10" は 0 になる
-	s := strings.TrimLeftFunc(text, isJSWhitespace)
+	s := strings.TrimLeftFunc(text, jsstr.IsSpace)
 	neg := false
 	if s != "" && (s[0] == '+' || s[0] == '-') {
 		neg = s[0] == '-'

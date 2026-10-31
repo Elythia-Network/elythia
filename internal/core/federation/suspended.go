@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/misc/semverrange"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -43,7 +44,7 @@ func MatchSuspendedSoftware(softwareName, softwareVersion *string, entries []Sus
 		if strings.ToLower(e.Software) != name {
 			continue
 		}
-		rng := semverrange.TrimSpace(e.VersionRange)
+		rng := jsstr.Trim(e.VersionRange)
 		// **"*" はどのバージョンにも当てる。** 本家はバージョンが semver として
 		// 読めない相手 (`2024.08` のような 2 つの部分だけの版など) には "*" も
 		// 当てないが、Elythia は以前から「全バージョン」として当てており、その
@@ -202,7 +203,7 @@ func ParseSuspendedSoftware(raw []byte) []SuspendedSoftwareEntry {
 // これらは正規表現として読まれず semver の範囲としても不正なので、判定では
 // 黙って何にも当たらない。
 func InvalidVersionRegexp(rng string) bool {
-	rng = semverrange.TrimSpace(rng)
+	rng = jsstr.Trim(rng)
 	if re, ok := versionRegexp(rng); ok {
 		return re == nil
 	}

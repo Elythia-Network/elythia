@@ -209,15 +209,6 @@ func TestRangeCache(t *testing.T) {
 	}
 }
 
-func TestTrimSpace(t *testing.T) {
-	if got := TrimSpace("\ufeff\u3000*\t"); got != "*" {
-		t.Fatalf("TrimSpace = %q, want *", got)
-	}
-	if got := TrimSpace("*\u0085"); got != "*\u0085" {
-		t.Fatalf("TrimSpace must keep U+0085 (not JS white space): %q", got)
-	}
-}
-
 // 配送の worker から同時に呼ばれても、表を壊さないこと。-race で走らせて守る。
 func TestRangeCacheConcurrent(t *testing.T) {
 	var wg sync.WaitGroup

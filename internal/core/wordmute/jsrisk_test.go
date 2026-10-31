@@ -288,26 +288,6 @@ func TestTextFeatures(t *testing.T) {
 	}
 }
 
-// JavaScript の trim() が除く文字は、node 22 で BMP の全域を回して数えた 25 文字。
-// isJSTrimSpace がこの集合とちょうど同じであること (集合の外は除かない)。
-func TestIsJSTrimSpaceMatchesJavaScript(t *testing.T) {
-	want := map[rune]bool{}
-	for _, r := range []rune{
-		0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x00A0, 0x1680,
-		0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
-		0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF,
-	} {
-		want[r] = true
-	}
-	require.Len(t, want, 25)
-	for r := rune(0); r <= 0xFFFF; r++ {
-		assert.Equal(t, want[r], isJSTrimSpace(r), "U+%04X", r)
-	}
-	for r := range want {
-		assert.Equal(t, "a", jsTrim(string(r)+"a"+string(r)), "U+%04X", r)
-	}
-}
-
 // 実際の経路 (MatchAppearNote → MatchNote) でも、本文と CW の前後を JavaScript の
 // trim() と同じ文字で除くこと。U+0085 は除かず、U+FEFF は除く。
 func TestMatchAppearNote_TrimsLikeJavaScript(t *testing.T) {

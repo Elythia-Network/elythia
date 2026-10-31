@@ -2,7 +2,6 @@ package csscolor
 
 import (
 	"math"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -82,16 +81,4 @@ func TestBound01(t *testing.T) {
 	assert.Equal(t, 1.0, bound01("100%", 255))
 	assert.Equal(t, 1.0, bound01("1.0", 255), "小数点を含む 1 は 100% 扱い")
 	assert.InDelta(t, 1.0/255.0, bound01("1", 255), 1e-12)
-}
-
-// jsSpace (trim 側) と jsWS (matcher 側) は同じ集合でなければならない。
-// **片方だけ直す**のが実際に起きた失敗なので、機械的に突き合わせる (#2726)。
-func TestJSSpaceMatchesRegexpClass(t *testing.T) {
-	re := regexp.MustCompile(`^[` + jsWS + `]$`)
-	for r := rune(0); r <= 0xFFFF; r++ {
-		if r >= 0xD800 && r <= 0xDFFF {
-			continue // surrogate は文字列にできない
-		}
-		assert.Equal(t, jsSpace(r), re.MatchString(string(r)), "U+%04X", r)
-	}
 }
