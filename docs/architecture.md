@@ -2296,10 +2296,10 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 値から作る13個の部品の型は12(`deliveryHealth`と`inboxHealth`は同じ型)で、どれも形を満たす。
 値の無いworkerは満たさない。部品の型にメソッドを足して形が変わると、ここが落ちる。
 判定が知る形の一覧 (`valueShapes`) は、`TestValueShapes_CoverEveryRegistrationFromValue` が
-`lifecycle_parts.go` を構文木で読み、`addFromValue` を呼ぶ登録の関数と、その値の引数の interface の型を
-列挙して突き合わせる (1 つも拾えなければ落とす)。登録の形を足して判定に足し忘れると、ここが落ちる。
-ただし読むのは `lifecycle_parts.go` の `Server` のメソッドだけで、別のファイルに置いた登録と、
-型パラメータを持つ自由関数 (メソッドは型パラメータを持てない) で書いた登録は拾えない。
+`internal/server` の非テストの全ファイル (`git ls-files` で列挙) を構文木で読み、`addFromValue` を呼ぶ
+登録の関数と、その値の引数の interface の型を列挙して突き合わせる (1 つも拾えなければ落とす)。
+登録の形を足して判定に足し忘れると、ここが落ちる。メソッドでない関数も読み、値の引数が型パラメータ
+なら、その制約の型を見る (#3369)。
 
 **実行時には拒まない**(`lifecycle.add`は印を見ない)。本番で`lifecycle.add`・`addWithStart`を呼ぶのは、
 値から作る登録(`addFromValue`)と`addWorker`だけで、値を持つ部品が直接通っていないことは上のテストが見る。
