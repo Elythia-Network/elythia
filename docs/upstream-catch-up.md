@@ -226,10 +226,12 @@ git add internal/entitycompat/testdata/
 make upstream-fetch                    # UPSTREAM_MISSKEY_VERSION の本家を取得
 make paramdef-gen                      # 抜き出し (extract.mjs) → corpus (corpus.mjs) → Elythia の宣言の corpus
 go test ./internal/api/paramschema/... # 検証器が新しい paramDef と corpus に合うか
+make perm-check                        # 本家の meta (段階・secure・kind・requiredRolePolicy・cacheSec) と router の middleware が合うか
 git add internal/api/paramschema/upstream_paramdefs.json internal/api/paramschema/testdata/ajv_corpus.jsonl internal/api/paramschema/testdata/ajv_corpus_elythia.jsonl
 ```
 
 - **`frontend/node_modules`が要る。** 抜き出しは本家の`.ts`を`frontend/node_modules/typescript`のパーサーで読み(実行はしない)、corpusは`frontend/node_modules/.pnpm/ajv@<版>`のajvで判定する。ajvの版は本家の`packages/backend/package.json`から読む。frontendはajvに直接依存しておらず、推移的に入っている版を名指しして読むので、本家がajvを上げてその版が`frontend/`の依存に無いと`paramdef-gen`が落ちる。そのときは`frontend/package.json`のdevDependenciesにその版のajvを足し、`make upstream-sync-lock`でlockを作り直す
+- **本家のmetaに、`extract.mjs`の知らないkeyがあっても落ちる**(`unknown key`、#3369)。残すkey(`META_KEYS`)・`doc`に置くkey(`DOC_KEYS`)・読まないと決めたkey(`IGNORED_META_KEYS`)のどこに置くかを決め、残すなら`internal/entitycompat`の`upstreamMeta`にも足して、読むゲートが要るかを決める
 - **抜き出しは、評価できない式が1つでもあれば落ちる**(`unresolved values`)。本家のparamDefが新しい書き方を使い始めたら、`tools/paramdefspec/extract.mjs`の`ev`にその式の評価を足す。推測の値で埋めない
 - **解くのはトップレベルの`const`だけ。** 宣言の後に書き換えられる名前も解かずに落とす。実行時の値が宣言の初期値と違うかもしれないため。`unresolved values`の行の読み方は次のとおり
   - `<名前> is not a const in <ファイル>`: paramDefが`let` / `var`の名前を参照している。宣言の初期値をそのまま使わず、実行時の値を確かめてから`extract.mjs`での扱いを決める

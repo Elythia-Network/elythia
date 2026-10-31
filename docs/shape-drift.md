@@ -334,7 +334,9 @@ make paramdef-gen     # upstream_paramdefs.json を再生成
 
 Misskeyは各endpointのmetaで`requireAdmin`/`requireModerator`/`requireCredential`を宣言する(階層: public < auth < moderator < admin)。Elythiaはrouterで`middleware.RequireAuth`/`RequireModerator`/`RequireAdmin`/`RequireRolePolicy`を適用する。本家のmetaは、`make paramdef-gen`が本家の`.ts`をTypeScriptのパーサーで評価して作る`internal/api/paramschema/upstream_paramdefs.json`から読む。テストがそこから`endpoint→level`を作り(`upstreamPermissions`)、routerのmiddleware levelと突合する。
 
-**本家のmetaの出どころはこの1つ (#3369)。** 以前は`tools/permspec`・`tools/securespec`が本家の`.ts`を正規表現で読み、goldenを4つ(`golden_permissions.json`・`golden_secure_endpoints.json`・`golden_oauth_kinds.json`・`golden_cache_sec.json`)作っていた。コメント・クォート・`60 * 60`・`.test.ts`の書式の揺れで何度も取りこぼしたので、道具とgoldenを消して`upstream_paramdefs.json`のmetaに寄せた。消す前に、4つとも同じ内容になることを確かめた。metaに知らないkeyか、型の違う値があると、読む関数(`upstreamMetasFrom`)が落とす。
+**本家のmetaの出どころはこの1つ (#3369)。** 以前は`tools/permspec`・`tools/securespec`が本家の`.ts`を正規表現で読み、goldenを4つ(`golden_permissions.json`・`golden_secure_endpoints.json`・`golden_oauth_kinds.json`・`golden_cache_sec.json`)作っていた。コメント・クォート・`60 * 60`・`.test.ts`の書式の揺れで何度も取りこぼしたので、道具とgoldenを消して`upstream_paramdefs.json`のmetaに寄せた。消す前に、4つとも同じ内容になることを確かめた。
+
+本家がmetaにkeyを足したときに黙って捨てないよう、2段で止める。`tools/paramdefspec/extract.mjs`は、残すkey(`META_KEYS`)・`doc`に置くkey(`DOC_KEYS`)・読まないと決めたkey(`IGNORED_META_KEYS`。`limit`と`stability`)のどれでもないkeyが本家のmetaにあれば、生成を止める。テストの側では、metaを読む関数(`upstreamMetasFrom`)が、`upstreamMeta`に無いkeyと型の違う値で落ちる。以前は`requiredRolePolicy`を`requireRolePolicy`と綴り違えていて、28件を黙って捨てていた(#3369。数え方: `upstream_paramdefs.json`でmetaに`requiredRolePolicy`を持つendpointの数)。
 
 ### looser方向のみgate
 
@@ -363,7 +365,7 @@ make paramdef-gen     # 本家の meta (upstream_paramdefs.json) を作り直す
 
 `TestSecureDrift`は、Misskeyの`secure: true` endpoint(password変更 / 2FA / data export-import / authorized-apps 等のaccount-security系、51件)が、Elythiaで`middleware.RequireSecure`を適用していることを検証する。
 
-**逆向きも見る (#2877)。** golden に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に golden から消えるだけで、Elythia 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (Elythia独自のendpoint 11件。数え方: `secureStricterThanUpstream`の項目数)。
+**逆向きも見る (#2877)。** 本家の secure の一覧に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に一覧から消えるだけで、Elythia 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (Elythia独自のendpoint 11件。数え方: `secureStricterThanUpstream`の項目数)。
 
 Misskeyの`secure`は「native session token のみ許可、第三者app/OAuth/MiAuth access token 不可」(ApiCallServiceの`isSecure = user != null && token == null`)。これが無いと、有効なaccess tokenを持つ第三者appがpassword変更や2FA解除を駆動できてしまう。
 
@@ -375,14 +377,22 @@ Elythiaは全認証がtoken経由(session無し)で、native token = `users.toke
 
 テストが `upstream_paramdefs.json` の meta から `meta.kind` を集め (`upstreamOAuthKinds`)、router の `middleware.RequireScope` と突き合わせる。**値の不一致と、kind があるのに `RequireScope` が無い方の両方**を見る (後者は app token が scope 無しで叩ける)。意図的に付けない場合は `kindMissingScope` に upstream の kind を添えて登録する (現在は空)。
 
+**逆向きも見る (#3369)。** 本家は kind が無く資格情報を要する endpoint (`requireCredential` / `requireModerator` / `requireAdmin` のどれか) では app token を一律に拒否する (`ApiCallService.ts`)。Elythia の route がそこに `RequireScope` を付けていると、その scope を持つアプリが本家では叩けないものを叩けるので落とす。2026.10.1 では本家のこの形が 39 件で、Elythia の route で当たるものは無い (数え方: `upstream_paramdefs.json` で meta に `kind` が無く、上の 3 つのどれかが true の endpoint の数)。
+
 数え方: endpoint 単位の map で、2026.10.1 では 298 件 (`upstream_paramdefs.json` で meta に `kind` を持つ endpoint の数)。`kind` は meta 直下のものだけで、`meta.errors` の中の `kind: 'server'` は入らない (paramdef-gen が meta の決まった key だけを残すため)。正規表現で読んでいたころは、`endpoints/i.ts` だけがダブルクォートで書いていたために**最も広く叩かれる `/api/i` が丸ごと検査対象から外れていた** (#2877)。テストは今も `i` の kind を名指しで要求する。
 
 ### 運用
 
 ```bash
-make perm-check       # permission / secure / OAuth scope / cacheSec の 4 gate をローカル実行
-make paramdef-gen     # 4 gate が読む本家の meta (upstream_paramdefs.json) を作り直す
+make perm-check       # permission / secure / OAuth scope / role policy / cacheSec の 5 gate をローカル実行
+make paramdef-gen     # 5 gate が読む本家の meta (upstream_paramdefs.json) を作り直す
 ```
+
+## Role policy drift gate（requiredRolePolicy）
+
+`TestPermissionDrift` は本家の `requiredRolePolicy` を段階に数えないので、route から `RequireRolePolicy` を外しても、policy 名を取り違えても素通りする。`TestRolePolicyDrift` は、本家の meta に `requiredRolePolicy` がある endpoint のうち Elythia が実装しているものについて、route の `RequireRolePolicy` / `RequireRolePolicyPublic` に同じ policy があることを見る (#3369)。policy は `corerole.PolicyXxx` の定数かリテラルで書く。変数を経由した形は読めないので落とす。本家より厳しく守るために policy を付けない route は、理由を添えて `rolePolicyStricterThanUpstream` に登録する (現在は空)。使っていない項目も落とす。
+
+数え方: 2026.10.1 では 28 件 (`upstream_paramdefs.json` で meta に `requiredRolePolicy` を持つ endpoint の数)。
 
 ## GET と cacheSec の drift gate（allowGet / cacheSec）
 
@@ -390,8 +400,8 @@ make paramdef-gen     # 4 gate が読む本家の meta (upstream_paramdefs.json)
 
 テストが`upstream_paramdefs.json`のmetaから`allowGet: true`のendpointと`cacheSec`(`60 * 60`のような式はparamdef-genが評価した値、無ければ0)を集め(`upstreamCacheSecs`)、`TestCacheSecDrift`が次を見る。
 
-- goldenの全endpointに、`internal/server`のGETのroute(`api.GET`、またはGETを含む`api.Match`)がある
-- `middleware.APICacheSec`がgoldenの`cacheSec`と過不足なく一致する
+- 本家の`allowGet`の全endpointに、`internal/server`のGETのroute(`api.GET`、またはGETを含む`api.Match`)がある
+- `middleware.APICacheSec`が本家の`cacheSec`と過不足なく一致する
 - `internal/server`が`/api`のgroupに`api.Use(middleware.APICacheControl())`を付けている
 
 数え方: 2026.10.1では`allowGet: true`が24本で、24本とも`cacheSec`を持つ(`upstream_paramdefs.json`のmetaで数える)。`allowGet`の無い`cacheSec`は本家でも意味を持たないので、テストはそれを見つけたら形式の変化を疑って落ちる。`cacheSec`が評価できない式(解決できない識別子など)のときは、paramdef-genが止まる。数でない値が入っていれば、metaを読む関数が落とす。読めないものを0として通すと、そのendpointだけ黙って検査から外れるため。
