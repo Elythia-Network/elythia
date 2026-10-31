@@ -2831,6 +2831,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		webPushNotePacker: webPushNotePacker,
 		webPushUserPacker: webPushUserPacker,
 		noteFieldResolver: noteFieldResolver,
+
+		proxyService:   proxyService,
+		proxyAllowlist: coreSvcs.proxyAllowlist,
 	}
 	s.recordCriticalWiring([]criticalWiring{
 		// 投稿を包む部品の Packer (#3790)。無い部品はリモートのメディアの URL を生のまま出す。

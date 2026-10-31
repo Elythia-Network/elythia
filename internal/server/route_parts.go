@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/emojiapplication"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
+	coremediaproxy "github.com/elythia-network/elythia/internal/core/mediaproxy"
 	coremove "github.com/elythia-network/elythia/internal/core/move"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
@@ -106,4 +107,11 @@ type routeParts struct {
 	webPushNotePacker *corewebpush.NoteRepoPacker
 	webPushUserPacker *corewebpush.UserRepoPacker
 	noteFieldResolver *entity.NoteFieldResolver
+
+	// メディアのプロキシ (#3369)。proxyAllowlist は buildCore が作ったものを入れる。
+	// TestBuiltHandlersHaveNoNilDependencies の assertSharedComponents が、proxyService の
+	// 許可リストがこれと同じ値かを見る (setupRoutes の別名を nil や作り直した値に
+	// 書き換える誤りを落とす)。
+	proxyService   *coremediaproxy.Service
+	proxyAllowlist *coremediaproxy.DBAllowlistChecker
 }

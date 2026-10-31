@@ -1898,7 +1898,11 @@ resolverの`SetBackground`・`SetHostBlockChecker`・`SetSoftwareSuspensionCheck
   roles・canChat・isSilencedが黙って既定値になる。以前の表の行も変数`entityPacker`しか見ていな
   かったので、これは捕まらなかった。照合するのは`*entity.Packer`型の欄だけで、Packerを包む部品
   (`userpack.Packer`・`NoteFieldResolver`など)を作り直して1つのhandlerにだけ渡す誤りは、包む部品の
-  型の欄やinterfaceの欄に現れるので捕まらない(既知の限界。#3834の前から捕まっていなかった)
+  型の欄やinterfaceの欄に現れるので捕まらなかった(#3834の前から捕まっていなかった)。#3369で、
+  同じテストの`assertSharedComponents`が、各部品の直下の欄(interfaceの欄は中の値)のうち
+  `routeParts`・`coreParts`の部品と同じ型のものが、その部品そのものを指すことを見るようにした。
+  型が同じ部品が2つ以上あるときは照合しない。構築子の中で同じPackerから作り直す
+  `webPushNotePacker.files`だけを、理由付きで許す(`sharedComponentAllowed`)
 - **`entitycompat`の`TestEntityPackerDepsAreWired`から`MediaURL: mediaURLCtx`の行を外し、構築子の
   呼び出しの照合に置き換えた。** `PackerDeps`の欄の数と表の行の数(7)を突き合わせる。nilの検査では、
   作り直した`*MediaURLContext`を渡す誤りが捕まらない。`mediaURLCtx`には後から、管理画面の
