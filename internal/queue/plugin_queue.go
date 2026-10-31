@@ -48,6 +48,11 @@ var pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // Redis のキーにならず、プラグイン作者が自分の都合で付けるものだから。
 var pluginJobNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+// ValidPluginJobName reports whether a plugin may use job as a job name. It
+// refuses the names starting with `_`, which the host reserves
+// (PluginPeerJobName, PluginNotificationJobName).
+func ValidPluginJobName(job string) bool { return pluginJobNamePattern.MatchString(job) }
+
 // **AllQueueNames には入れない。** あちらは mk-go が常に持つキューの一覧で、
 // プラグインのキューは構成で変わる。名前が要る側は driver の Inspector
 // (実際に worker が見ているキュー) を引くか、PluginQueuePrefix で判定すること

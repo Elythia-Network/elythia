@@ -352,12 +352,21 @@ var ErrResizeAfterShutdown = errors.New("mkqdriver: pool already shut down")
 // Handle registers a handler for the given task type. Must be called
 // before Start; calls after Start panic. The dispatch fast-path
 // captures a snapshot of the handlers map at Start, so the registry
-// is frozen for the worker's lifetime.
+// is frozen for the worker's lifetime. Registering a task type twice
+// panics, like http.ServeMux.
+//
+// **同じ種別の2回目の登録を黙って上書きにしない (#3369 I7)。** 登録は組み立ての
+// ときだけ行うので、2回目は誤り (一覧の外からの既存の種別の上書き) しかない。
+// 上書きを許すと、一覧のゲートを通らない書き方で既存の handler を差し替えても
+// 何も落ちない。
 func (s *Server) Handle(taskType string, h driver.HandlerFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started {
 		panic("mkqdriver: Handle called after Start")
+	}
+	if _, dup := s.handlers[taskType]; dup {
+		panic(fmt.Sprintf("mkqdriver: Handle called twice for task type %q", taskType))
 	}
 	s.handlers[taskType] = h
 }

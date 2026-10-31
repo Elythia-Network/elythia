@@ -51,19 +51,25 @@ func newMaintenanceRig(t *testing.T) *maintenanceRig {
 
 func (r *maintenanceRig) deps(id string) SupervisorDeps {
 	d := r.env.deps()
-	inner := d.NewServer
 	d.NewServer = func(cfg *config.Config, db *gorm.DB, rc *cache.RedisClients) (*Server, error) {
-		srv, err := inner(cfg, db, rc)
+		// どの世代の worker がジョブを処理したかを見るため、reaction flush の
+		// handler を差し替える。queue の登録は同じ種別の 2 回目で panic するので
+		// (#3369)、組み立ての前に queue の server を包み、組み込みの登録の時点で
+		// 差し替える。gen は組み立てが成功した後に決まり、handler が走るのは Start の後。
+		var gen int32
+		srv, err := newServer(cfg, db, rc, nil, noopStorage, func(s *Server) {
+			s.queueServer = queue.NewServer(&handlerOverrideDriver{
+				Driver: s.queueDriver, taskType: queue.TaskTypeReactionFlush,
+				handle: func(context.Context, driver.Task) error {
+					r.jobs <- gen
+					return nil
+				},
+			})
+		})
 		if err != nil {
 			return nil, err
 		}
-		gen := r.gens.Add(1)
-		// どの世代の worker がジョブを処理したかを見るため、reaction flush の
-		// handler を差し替える (Start の前なので差し替えられる)。
-		srv.queueServer.Handle(queue.TaskTypeReactionFlush, func(context.Context, driver.Task) error {
-			r.jobs <- gen
-			return nil
-		})
+		gen = r.gens.Add(1)
 		return srv, nil
 	}
 	d.Maintenance = r.store
@@ -396,4 +402,28 @@ func TestMaintenance_WarnsWhenRedisMayEvictTheState(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	r.start(t, "proc-a", r.deps("proc-a"))
 	assert.Contains(t, buf.String(), "maxmemory-policy=allkeys-lru")
+}
+
+// handlerOverrideDriver is a queue driver whose server registers handle in
+// place of the handler registered for taskType.
+type handlerOverrideDriver struct {
+	driver.Driver
+	taskType string
+	handle   driver.HandlerFunc
+}
+
+func (d *handlerOverrideDriver) Server() driver.Server {
+	return &handlerOverrideServer{Server: d.Driver.Server(), d: d}
+}
+
+type handlerOverrideServer struct {
+	driver.Server
+	d *handlerOverrideDriver
+}
+
+func (s *handlerOverrideServer) Handle(taskType string, h driver.HandlerFunc) {
+	if taskType == s.d.taskType {
+		h = s.d.handle
+	}
+	s.Server.Handle(taskType, h)
 }

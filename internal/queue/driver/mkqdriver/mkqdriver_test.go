@@ -759,3 +759,13 @@ func TestServer_SetObserver(t *testing.T) {
 	s.SetObserver(nil)
 	assert.Nil(t, s.observer)
 }
+
+// 同じ種別を2回登録すると panic すること (#3369 I7)。別の種別は登録できる。
+func TestServer_HandleRejectsADuplicateTaskType(t *testing.T) {
+	s := &Server{handlers: map[string]driver.HandlerFunc{}}
+	h := func(context.Context, driver.Task) error { return nil }
+	s.Handle("a", h)
+	s.Handle("b", h)
+	assert.PanicsWithValue(t, `mkqdriver: Handle called twice for task type "a"`, func() { s.Handle("a", h) })
+	assert.Len(t, s.handlers, 2)
+}
