@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"regexp"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -84,21 +86,68 @@ var partGoroutineMarkers = map[string]string{
 	"workers": "server.(*Server).addWorker.func",
 }
 
-// countPartGoroutines counts the goroutines of this process whose stack has
-// each marker of partGoroutineMarkers.
-func countPartGoroutines(t *testing.T) map[string]int {
+// partGoroutines returns, for each marker of partGoroutineMarkers, the ids of
+// the goroutines of this process whose stack has it.
+//
+// **数でなく id で見る (#3369 I12)。** 数の増減だけを見ると、前のテストが残した
+// 同じ部品の goroutine が構築の間に抜けたとき、構築中に起動した分と相殺されて緑になる。
+func partGoroutines(t *testing.T) map[string]map[int]bool {
 	t.Helper()
 	var buf bytes.Buffer
 	require.NoError(t, pprof.Lookup("goroutine").WriteTo(&buf, 2))
-	counts := map[string]int{}
-	for _, g := range strings.Split(buf.String(), "\n\n") {
+	return partGoroutinesIn(t, buf.String())
+}
+
+// goroutineHeaderRe matches the first line of a goroutine in a debug=2 dump.
+var goroutineHeaderRe = regexp.MustCompile(`^goroutine (\d+) \[`)
+
+// partGoroutinesIn reads a debug=2 goroutine dump; see partGoroutines.
+func partGoroutinesIn(t *testing.T, dump string) map[string]map[int]bool {
+	t.Helper()
+	ids := map[string]map[int]bool{}
+	for _, g := range strings.Split(dump, "\n\n") {
+		m := goroutineHeaderRe.FindStringSubmatch(g)
+		if m == nil {
+			continue
+		}
+		id, err := strconv.Atoi(m[1])
+		require.NoError(t, err)
 		for key, marker := range partGoroutineMarkers {
 			if strings.Contains(g, marker) {
-				counts[key]++
+				if ids[key] == nil {
+					ids[key] = map[int]bool{}
+				}
+				ids[key][id] = true
 			}
 		}
 	}
-	return counts
+	return ids
+}
+
+// newGoroutines returns the ids in after that are not in before, per marker.
+func newGoroutines(before, after map[string]map[int]bool) map[string][]int {
+	added := map[string][]int{}
+	for key, set := range after {
+		for id := range set {
+			if !before[key][id] {
+				added[key] = append(added[key], id)
+			}
+		}
+	}
+	return added
+}
+
+// 前の goroutine が抜けて同じ数の新しい goroutine が立っても、新しい id として拾うこと。
+func TestNewGoroutines_SeesAReplacementOfTheSameCount(t *testing.T) {
+	marker := partGoroutineMarkers["serverStatsPub"]
+	dump := func(id int) string {
+		return "goroutine " + strconv.Itoa(id) + " [select]:\ngithub.com/x/internal/" + marker + "...)\n"
+	}
+	before := partGoroutinesIn(t, dump(7)+"\n"+"goroutine 1 [running]:\nmain.main()\n")
+	after := partGoroutinesIn(t, dump(9))
+	require.Len(t, before["serverStatsPub"], 1)
+	assert.Equal(t, map[string][]int{"serverStatsPub": {9}}, newGoroutines(before, after))
+	assert.Empty(t, newGoroutines(before, before))
 }
 
 // TestNewServer_ConstructionStartsNoPart checks, on a server built by
@@ -123,7 +172,7 @@ func TestNewServer_ConstructionStartsNoPart(t *testing.T) {
 		return n
 	}
 
-	before := countPartGoroutines(t)
+	before := partGoroutines(t)
 	srv, err := newServer(cfg, db, clients, nil, noopStorage)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.StopBackground(context.Background()) })
@@ -131,29 +180,26 @@ func TestNewServer_ConstructionStartsNoPart(t *testing.T) {
 	// 構築の途中で起動していれば、ここまでにgoroutineが立っている。retentionのworkerは
 	// 起動すればすぐに行を書くので、少し待ってから見る。
 	time.Sleep(300 * time.Millisecond)
-	// 増えていないことを見る。前のテストの残りのgoroutineが抜けて減るのは許す。
-	afterConstruction := countPartGoroutines(t)
-	for key := range partGoroutineMarkers {
-		assert.LessOrEqualf(t, afterConstruction[key], before[key], "construction started the goroutine of %s", key)
+	// 構築の前に無かった部品のgoroutineが1つも無いことを見る。前のテストの残りの
+	// goroutineが抜けるのは許す。
+	for key, ids := range newGoroutines(before, partGoroutines(t)) {
+		assert.Emptyf(t, ids, "construction started the goroutine of %s", key)
 	}
 	assert.Zero(t, retentionRows(), "construction ran retentionAggregateAtStartup")
 
 	require.NoError(t, srv.StartBackground())
 	want := map[string]int{}
-	for key, n := range before {
-		want[key] = n
-	}
 	for key, n := range map[string]int{
 		"instanceTouchBuffer": 1, "sigCapBuffer": 1, "instanceCounterBuffer": 1,
 		"deliveryHealth+inboxHealth": 2, "serverStatsPub": 1, "queueStatsPub": 1,
 		"fedRuleHits": 1, "emojiInvalidationQueue": 1, "workers": 3,
 	} {
-		want[key] += n
+		want[key] = n
 	}
 	assert.Eventually(t, func() bool {
-		got := countPartGoroutines(t)
+		got := newGoroutines(before, partGoroutines(t))
 		for key, n := range want {
-			if got[key] < n {
+			if len(got[key]) < n {
 				return false
 			}
 		}
