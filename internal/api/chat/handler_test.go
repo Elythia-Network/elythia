@@ -710,6 +710,33 @@ func TestMessagesCreate_Service_ToRoom(t *testing.T) {
 	assert.Len(t, repo.Messages, 1)
 }
 
+// 本家の create-to-user は toRoomId を知らない項目として無視し、DM を送る。
+// create-to-room は toUserId を無視するので、型の違う値でも400にしない (#3369)。
+func TestMessagesCreateToUserAndToRoom_IgnoreTheOtherTarget(t *testing.T) {
+	h, repo := newHandlerWithService(t)
+	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: "u1"}
+
+	rec := post(h.MessagesCreateToUser, `{"text":"hi","toUserId":"u2","toRoomId":"r1"}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, repo.Messages, 1)
+	for _, m := range repo.Messages {
+		require.NotNil(t, m.ToUserID)
+		assert.Equal(t, "u2", *m.ToUserID)
+		assert.Nil(t, m.ToRoomID, "create-to-user must not post to the room")
+	}
+
+	rec = post(h.MessagesCreateToRoom, `{"text":"hi","toRoomId":"r1","toUserId":1}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Len(t, repo.Messages, 2)
+
+	// 宛先の項目が無ければ、もう一方があっても400。
+	rec = post(h.MessagesCreateToUser, `{"text":"hi","toRoomId":"r1"}`, u1)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	rec = post(h.MessagesCreateToRoom, `{"text":"hi","toUserId":"u2"}`, u1)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Len(t, repo.Messages, 2)
+}
+
 func TestMessagesCreate_Service_NoTarget(t *testing.T) {
 	h, _ := newHandlerWithService(t)
 	rec := post(h.MessagesCreate, `{"text":"hi"}`, u1)
