@@ -327,62 +327,98 @@ func valueShape(part any) string {
 	return ""
 }
 
-// TestValueShapes_CoverEveryRegistrationFromValue reads lifecycle_parts.go and
-// lists every method of Server that adds a part through addFromValue, with
-// the interface type of the parameter it passes as the value. valueShapes has
-// to list exactly those, so a new shape added to the registrations cannot be
-// missed by valueShape, which partsNotFromValue uses to name the registration
-// a part can move to.
+// TestValueShapes_CoverEveryRegistrationFromValue reads every non-test file of
+// the package and lists every function that adds a part through
+// addFromValue, with the interface type of the parameter it passes as the
+// value. valueShapes has to list exactly those, so a new shape added to the
+// registrations cannot be missed by valueShape, which partsNotFromValue uses
+// to name the registration a part can move to.
 //
 // 構文木で読むのは、形を判定する関数が interface の一覧を実行時に取れないため。
 // 本体の登録を足して valueShapes に足し忘れると、valueShape がその形を知らないままになる。
-// 読むのは lifecycle_parts.go の Server のメソッドだけなので、登録は Server の
-// メソッドとしてこのファイルに置くこと。別のファイルのメソッドと、型パラメータを
-// 持つ自由関数で書いた登録は拾えない (#3701 のレビュー 3 周目、#3369 に記録)。
+// lifecycle_parts.go の Server のメソッドだけを読んでいたので、別のファイルの
+// メソッドと、型パラメータを持つ自由関数で書いた登録を拾えなかった (#3369 I11)。
 func TestValueShapes_CoverEveryRegistrationFromValue(t *testing.T) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "lifecycle_parts.go", nil, 0)
-	require.NoError(t, err)
-	got := map[string]string{}
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil || fn.Body == nil {
-			continue
-		}
-		params := map[string]string{}
-		for _, field := range fn.Type.Params.List {
-			ident, ok := field.Type.(*ast.Ident)
-			if !ok {
-				continue
-			}
-			for _, n := range field.Names {
-				params[n.Name] = ident.Name
-			}
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "addFromValue" || len(call.Args) != 4 {
-				return true
-			}
-			arg, ok := call.Args[1].(*ast.Ident)
-			if !assert.Truef(t, ok, "%s passes a value to addFromValue that is not a parameter", fn.Name.Name) {
-				return true
-			}
-			got[fn.Name.Name] = params[arg.Name]
-			return true
-		})
-	}
+	got := registrationsFromValue(t, packageSources(t))
 	// 何も拾えなかったら落とす (書式が変わって抽出が空振りしたとき)。
-	require.NotEmpty(t, got, "found no registration that calls addFromValue in lifecycle_parts.go")
+	require.NotEmpty(t, got, "found no registration that calls addFromValue in internal/server")
 	want := map[string]string{}
 	for _, sh := range valueShapes {
 		want[sh.registration] = sh.iface
 	}
-	assert.Equal(t, want, got, "valueShapes does not list the registrations of lifecycle_parts.go")
+	assert.Equal(t, want, got, "valueShapes does not list the registrations that call addFromValue")
+}
+
+// registrationsFromValue returns, for each function in files that calls
+// addFromValue, the type name of the parameter it passes as the value. A
+// type parameter is named by its constraint.
+func registrationsFromValue(t *testing.T, files []packageSource) map[string]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	got := map[string]string{}
+	for _, file := range files {
+		f, err := parser.ParseFile(fset, file.name, file.src, 0)
+		require.NoError(t, err)
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			constraints := map[string]string{}
+			if fn.Type.TypeParams != nil {
+				for _, field := range fn.Type.TypeParams.List {
+					ident, ok := field.Type.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					for _, n := range field.Names {
+						constraints[n.Name] = ident.Name
+					}
+				}
+			}
+			params := map[string]string{}
+			for _, field := range fn.Type.Params.List {
+				ident, ok := field.Type.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				typ := ident.Name
+				if c, ok := constraints[typ]; ok {
+					typ = c
+				}
+				for _, n := range field.Names {
+					params[n.Name] = typ
+				}
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "addFromValue" || len(call.Args) != 4 {
+					return true
+				}
+				arg, ok := call.Args[1].(*ast.Ident)
+				if !assert.Truef(t, ok, "%s (%s) passes a value to addFromValue that is not a parameter", fn.Name.Name, file.name) {
+					return true
+				}
+				got[fn.Name.Name] = params[arg.Name]
+				return true
+			})
+		}
+	}
+	return got
+}
+
+// 別のファイルのメソッドと、型パラメータを持つ自由関数の登録も拾うこと (#3369 I11)。
+func TestRegistrationsFromValue_ReadsEveryFileAndFreeFunction(t *testing.T) {
+	got := registrationsFromValue(t, []packageSource{
+		{name: "lifecycle_parts.go", src: "package server\n\nfunc (s *Server) addA(name string, p aShape) { s.lifecycle.addFromValue(name, p, nil, nil) }\n"},
+		{name: "other.go", src: "package server\n\nfunc (s *Server) addB(name string, p bShape) { s.lifecycle.addFromValue(name, p, nil, nil) }\n"},
+		{name: "free.go", src: "package server\n\nfunc addC[T cShape](l *lifecycle, name string, p T) { l.addFromValue(name, p, nil, nil) }\n"},
+	})
+	assert.Equal(t, map[string]string{"addA": "aShape", "addB": "bShape", "addC": "cShape"}, got)
 }
 
 // TestValueShape_ClassifiesThePartTypes pins valueShape on fakes of the five
