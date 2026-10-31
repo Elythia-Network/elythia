@@ -327,6 +327,41 @@ var jobEnqueuingEndpoints = []string{
 	"i/export-following", "i/export-mute", "i/export-notes", "i/export-user-lists",
 }
 
+// elythiaSeededEndpoints are Elythia's own endpoints whose accepted corpus
+// inputs TestEnforcedEndpointsMatchTheCorpus makes reach deep into the
+// handler, by seeding the application, rule or public role (abc123) the
+// input names, or by turning approval-based signup on (#3369). reaches
+// reports whether an input is one that should reach, and stops lists the
+// error codes it must not stop at.
+//
+// signup-application/status・register の corpus の claimCode は、どの申請にも
+// 当たらないので NO_SUCH_APPLICATION で止まる。承認制の検査の後で、コードを引いた
+// 結果なので、届いたと数える (申請を置いて登録まで進めると、corpus の利用者名で
+// 利用者を作ることになる)。
+var elythiaSeededEndpoints = map[string]struct {
+	reaches func(json.RawMessage) bool
+	stops   []string
+}{
+	"admin/emoji-application/related": {namesSeed("applicationId"), []string{"NO_SUCH_APPLICATION"}},
+	"admin/federation/rules/hits":     {namesSeed("ruleId"), []string{"NO_SUCH_RULE"}},
+	"roles/assignment-show":           {namesSeed("roleId"), []string{"NO_SUCH_ROLE"}},
+	"signup-application/apply":        {anyInput, []string{"UNAVAILABLE"}},
+	"signup-application/form-token":   {anyInput, []string{"UNAVAILABLE"}},
+	"signup-application/register":     {anyInput, []string{"UNAVAILABLE"}},
+	"signup-application/status":       {anyInput, []string{"UNAVAILABLE"}},
+}
+
+// anyInput reports true for every input.
+func anyInput(json.RawMessage) bool { return true }
+
+// namesSeed reports whether an input's key names the seeded id (abc123).
+func namesSeed(key string) func(json.RawMessage) bool {
+	return func(raw json.RawMessage) bool {
+		var in map[string]any
+		return json.Unmarshal(raw, &in) == nil && in[key] == "abc123"
+	}
+}
+
 // metaWritingEndpoints are the enforced admin/* endpoints whose accepted
 // corpus inputs write meta. TestEnforcedEndpointsMatchTheCorpus puts the row
 // back after each of them, and drops the caches built from it.
@@ -529,6 +564,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// admin/emoji-application/reset-user-quota が置いた利用者の枠を戻した記録
 		// (#3875)。利用者への外部キーが無いので、利用者を消しても残る。
 		require.NoError(t, db.Exec(`DELETE FROM emoji_application_quota_reset WHERE "userId" = ?`, seedID).Error)
+		// admin/emoji-application/related と admin/federation/rules/hits のために置く
+		// 申請とルール (#3369)。
+		require.NoError(t, db.Exec(`DELETE FROM emoji_application WHERE id = ?`, seedID).Error)
+		require.NoError(t, db.Exec(`DELETE FROM federation_rule WHERE id = ?`, seedID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "user" WHERE id = ?`, seedID).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "user" u WHERE NOT (u.id = ANY(?::varchar[]))
 			AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = u.id)`, keep(keepUsers)).Error)
@@ -905,6 +944,19 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		if moderationEndpoint(ep) {
 			seedModeration(ep)
 		}
+		// Elythia 独自の endpoint のうち、corpus の id (abc123) の申請・ルールが無いと
+		// NO_SUCH_APPLICATION・NO_SUCH_RULE で止まるもの (#3369)。ルールは記録だけの
+		// mode で、条件を持たない。受信を流さないので、何にも当たらない。
+		switch ep {
+		case "admin/emoji-application/related":
+			require.NoError(t, db.Create(&model.EmojiApplication{
+				ID: seedID, UserID: userID, Kind: "own", Status: "pending", Name: "penforce", License: "penforce",
+			}).Error)
+		case "admin/federation/rules/hits":
+			require.NoError(t, db.Create(&model.FederationRule{
+				ID: seedID, CreatedAt: now, UpdatedAt: now, Name: "penforce", Mode: "record", Target: "note",
+			}).Error)
+		}
 	}
 	// テストの管理者と meta が、admin/* の入力で変わらないことを最後に確かめるため、
 	// 流す前の状態を覚えておく (#3854)。
@@ -1085,6 +1137,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		return n
 	}
 	seedReached := map[string]int{}
+	elythiaReached := map[string]int{}
 	jobReached := map[string]int{}
 	diagAccepted := map[string]int{}
 	backupReached := map[string]int{}
@@ -1121,6 +1174,23 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		if tc.ok && isI {
 			seedI(tc.ep)
+		}
+		// roles/assignment-show は、公開のロール (abc123) が無いと NO_SUCH_ROLE で止まる。
+		// signup-application/* は、承認制でないと 503 UNAVAILABLE で止まる。入力ごとに
+		// 公開のロールを置き、承認制の meta に切り替えて、流した後に戻す (#3369)。
+		seededPublicRole := tc.ok && tc.ep == "roles/assignment-show"
+		if seededPublicRole {
+			require.NoError(t, db.Create(&model.Role{
+				ID: seedID, Name: "penforce-public-role", UpdatedAt: now, LastUsedAt: now, IsPublic: true,
+				CondFormula: datatypes.JSON(`{}`), Policies: datatypes.JSON(`{}`),
+			}).Error)
+		}
+		approvalSignup := strings.HasPrefix(tc.ep, "signup-application/")
+		if approvalSignup {
+			require.Equal(t, metaBefore, readMeta(), "meta changed before %s (corpus line %d)", tc.ep, tc.line)
+			require.NoError(t, db.Exec(`UPDATE meta SET "approvalRequiredForSignup" = true,
+				"disableRegistration" = false, "registrationClosed" = false`).Error)
+			dropMetaCaches()
 		}
 		req := httptest.NewRequest(http.MethodPost, "/api/"+tc.ep, bytes.NewReader(tc.in))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -1161,6 +1231,13 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		on.Handler().ServeHTTP(rec, req)
+		if seededPublicRole {
+			require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE "roleId" = ?`, seedID).Error)
+			require.NoError(t, db.Exec(`DELETE FROM role WHERE id = ?`, seedID).Error)
+		}
+		if approvalSignup {
+			restoreMeta()
+		}
 		if metaWriting {
 			changed := !slices.Equal(metaBefore, readMeta())
 			if changed && tc.ep == "admin/update-meta" {
@@ -1223,13 +1300,22 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		// ジョブを積む endpoint の受理の入力は、本番と同じく 204 で、ジョブを積む
 		// (#3857、#3369)。以前は miniredis で積めずに 500 になるのを確かめていた。
 		// admin/drive/clean-remote-files は 1 分の unique の窓で積むので
-		// (EnqueueCleanRemoteFiles)、窓の中の 2 回目は数が増えない。増えたことは endpoint ごとに 1 回以上あれば
-		// よい (ループの後で確かめる)。
+		// (EnqueueCleanRemoteFiles)、窓の中の 2 回目は数が増えない。増えたことは
+		// endpoint ごとに 1 回以上あればよい (ループの後で確かめる)。
 		if jobsBefore >= 0 {
 			assert.Equal(t, http.StatusNoContent, rec.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 			if queuedJobs() > jobsBefore {
 				jobReached[tc.ep]++
 			}
+		}
+		// Elythia 独自の endpoint の受理の入力が、置いた申請・ルール・ロールや承認制の
+		// meta で、handler の奥まで届いたこと (見つからない・使えないで止まっていない
+		// こと) を確かめる (#3369)。
+		if seeded, ok := elythiaSeededEndpoints[tc.ep]; ok && tc.ok && seeded.reaches(tc.in) {
+			// 500 も届いたとは数えない (handler の回帰が INTERNAL_ERROR になる形を落とす)。
+			assert.Less(t, rec.Code, http.StatusInternalServerError, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			assert.NotContains(t, seeded.stops, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+			elythiaReached[tc.ep]++
 		}
 		if eps[tc.ep].RequireFile {
 			// 本家は requireFile の endpoint (drive/files/create) の引数を multipart の
@@ -1419,6 +1505,9 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 	}
 	for _, ep := range jobEnqueuingEndpoints {
 		assert.Positive(t, jobReached[ep], "no accepted corpus input of %s enqueued a job", ep)
+	}
+	for ep := range elythiaSeededEndpoints {
+		assert.Positive(t, elythiaReached[ep], "no accepted corpus input of %s reached the handler", ep)
 	}
 	for ep := range backupAcceptedStop {
 		assert.Positive(t, backupReached[ep], "no accepted corpus input of %s", ep)
