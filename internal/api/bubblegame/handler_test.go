@@ -281,10 +281,22 @@ func (f *failRankingRepo) Ranking(_ string, _ int) ([]*model.BubbleGameRecord, e
 	return nil, errMock
 }
 
+// DB の障害は 500 にし、空の一覧にしない (#3369)。
 func TestRanking_Error(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	h := NewHandler(&failRankingRepo{&mockBubbleGameRepo{}}, idGen, nil)
 	rec := post(h.Ranking, `{"gameMode":"normal"}`, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL_ERROR")
+}
+
+// NUL を含む gameMode は列に入らないので、どの記録とも一致しない。問い合わせずに
+// 空の一覧を返す (本家は問い合わせで失敗して 500。#3369)。
+func TestRanking_NULGameModeIsEmptyWithoutQuery(t *testing.T) {
+	idGen, _ := id.NewGenerator("aidx")
+	repo := &mockBubbleGameRepo{}
+	h := NewHandler(&failRankingRepo{repo}, idGen, nil)
+	rec := post(h.Ranking, `{"gameMode":"a\u0000b"}`, nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "[]\n", rec.Body.String())
 }

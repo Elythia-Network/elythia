@@ -2,6 +2,7 @@ package bubblegame
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -133,11 +134,18 @@ func (h *Handler) Ranking(c echo.Context) error {
 		gameMode = *req.GameMode
 	}
 
-	records, err := h.repo.Ranking(gameMode, 10)
-	if err != nil {
-		// 本家はエラーになりキャッシュされない。空の一覧を public にしない (#3593)。
+	// NUL を含む gameMode は列に入らないので、どの記録とも一致しない。問い合わせる
+	// と PostgreSQL が落とすので、引かずに空の一覧を返す (#3369)。本家は問い合わせで
+	// 失敗して 500 になり、キャッシュされない。空の一覧も public にしない。
+	if !colfit.Storable(gameMode) {
 		middleware.SkipPublicCache(c)
 		return c.JSON(http.StatusOK, []any{})
+	}
+	records, err := h.repo.Ranking(gameMode, 10)
+	if err != nil {
+		// DB の障害を空の一覧にしない (#3369)。以前は 200 の空の一覧を返していた。
+		slog.Error("bubble-game/ranking: Ranking failed", "err", err)
+		return apierr.JSONInternalError(c)
 	}
 
 	result := make([]map[string]any, len(records))

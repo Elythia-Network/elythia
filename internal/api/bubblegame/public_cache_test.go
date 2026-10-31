@@ -13,19 +13,20 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
-// ランキングを読めなかったときの空の一覧は、匿名の GET でも public にしない
-// (本家はエラーになりキャッシュされない、#3593)。
+// ランキングを読めなかったとき (500) と、NUL を含む gameMode の空の一覧は、匿名の
+// GET でも public にしない (本家はどちらもエラーになりキャッシュされない、#3593・#3369)。
 func TestRanking_FallbackIsNotPublic(t *testing.T) {
-	get := func(repo repository.BubbleGameRepository) string {
+	get := func(repo repository.BubbleGameRepository, query string, wantStatus int) string {
 		idGen, _ := id.NewGenerator("aidx")
 		h := NewHandler(repo, idGen, nil)
 		e := echo.New()
 		e.GET("/api/bubble-game/ranking", h.Ranking, middleware.APICacheControl())
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/bubble-game/ranking?gameMode=normal", nil))
-		assert.Equal(t, http.StatusOK, rec.Code)
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/bubble-game/ranking?"+query, nil))
+		assert.Equal(t, wantStatus, rec.Code)
 		return rec.Header().Get(echo.HeaderCacheControl)
 	}
-	assert.Equal(t, "public, max-age=60", get(&mockBubbleGameRepo{}))
-	assert.Empty(t, get(&failRankingRepo{&mockBubbleGameRepo{}}))
+	assert.Equal(t, "public, max-age=60", get(&mockBubbleGameRepo{}, "gameMode=normal", http.StatusOK))
+	assert.Empty(t, get(&failRankingRepo{&mockBubbleGameRepo{}}, "gameMode=normal", http.StatusInternalServerError))
+	assert.Empty(t, get(&mockBubbleGameRepo{}, "gameMode=a%00b", http.StatusOK))
 }
