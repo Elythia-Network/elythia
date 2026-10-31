@@ -49,11 +49,21 @@ const API = path.join(SRC, 'server/api');
 
 // metaのうちAPIの層が読むものだけを残す。rate limit (`ms('1hour')`)と
 // res (`getJsonSchema`)は引数の検証に関係しないので、ここには入れない。
-const META_KEYS = ['requireCredential', 'requireAdmin', 'requireModerator', 'requireFile', 'allowGet', 'cacheSec', 'secure', 'kind', 'prohibitMoved', 'requireRolePolicy'];
+const META_KEYS = ['requireCredential', 'requireAdmin', 'requireModerator', 'requireFile', 'allowGet', 'cacheSec', 'secure', 'kind', 'prohibitMoved', 'requiredRolePolicy'];
 
 // /api.jsonの説明(gen-spec.ts)が読むmetaの項目。引数の検証には使わないので、
 // META_KEYSとは分けてendpointごとの`doc`に置く(#3810)。
 const DOC_KEYS = ['description', 'tags', 'errors', 'res'];
+
+// metaのうち、読まないと決めたもの。limitは有無だけをdocに置く(値は解決しない)。
+// stabilityはgen-spec.tsも読まない。
+const IGNORED_META_KEYS = ['limit', 'stability'];
+
+// 上の3つのどれにも無いkeyがmetaにあれば止める。本家がIEndpointMetaにkeyを
+// 足したとき、黙って捨てると、それを読むべきゲートがあっても気付けない
+// (#3369。requiredRolePolicyを`requireRolePolicy`と綴り違えて、28件を黙って
+// 捨てていた)。足すときは、どこに置くかと、読むゲートが要るかを決める。
+const KNOWN_META_KEYS = new Set([...META_KEYS, ...DOC_KEYS, ...IGNORED_META_KEYS]);
 
 function fail(msg) {
 	console.error(`paramdefspec/extract: ${msg}`);
@@ -453,6 +463,9 @@ for (const { name, file } of listEndpoints()) {
 	if (!fullMeta || typeof fullMeta !== 'object' || fullMeta instanceof Unresolved) {
 		problems.push(`${name}: meta is not an object literal`);
 		continue;
+	}
+	for (const k of Object.keys(fullMeta)) {
+		if (!KNOWN_META_KEYS.has(k)) problems.push(`${name}.meta: unknown key ${k}; add it to META_KEYS, DOC_KEYS or IGNORED_META_KEYS`);
 	}
 	const meta = {};
 	for (const k of META_KEYS) if (Object.hasOwn(fullMeta, k)) meta[k] = fullMeta[k];
