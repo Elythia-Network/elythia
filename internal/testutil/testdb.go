@@ -126,6 +126,32 @@ func testDSN(schema string) string {
 	return dsn
 }
 
+// testDBMaxOpenConns caps the connections of each pool openDSN opens.
+//
+// **手元の make test で、テストの PostgreSQL の同時接続が max_connections (既定 100)
+// に近づき、too many clients で落ちることがあった (#3369)。** 多くは、テストごとに
+// OpenTestDB を呼んで閉じないパッケージ (core/signup・repository など) で、閉じない
+// pool がそれぞれ idle の接続を持ち続けていたもの。上限だけでは pool の数が減らない
+// ので、idle の接続を短い時間で閉じる (testDBConnMaxIdleTime)。
+//
+// 実測 (go test -race -count=1 -shuffle=3 ./...、0.3 秒ごとに pg_stat_activity を数えた
+// 最大): 上限なし 94・75、上限 5・10・20 だけでは 73・79 (2 回)・72 で変わらず、上限 10 と
+// idle 2 秒で 22。DB を使う 6 パッケージを交互に 2 回ずつ流すと、上限なしは 70・63 で
+// 132 秒・254 秒、上限 10 と idle 2 秒は 24・17 で 147 秒・195 秒 (他の負荷と同じ機械で、
+// 時間の差は揺れの内)。トランザクションを開いたまま別の接続を取るテストで詰まることは、
+// 上限 5 と 10 の全体の実行で起きなかった。
+//
+// **効いているのは idle の側なので、上限は 20 と緩めに置く** (上限 20 と idle 2 秒の
+// 全体の実行は、最大 26 で 717 秒)。1 つの pool で接続を
+// 持ったまま別の接続を待つテスト (トランザクションの中から別の接続で読むなど) が、
+// 上限に当たって詰まる余地を減らすため。上限は、同時に書く goroutine を多く立てる
+// テスト (30 本で書く poll の投票など) が 1 つの pool の接続を増やしすぎない歯止め。
+const testDBMaxOpenConns = 20
+
+// testDBConnMaxIdleTime closes a connection of a pool openDSN opens after it
+// sat idle this long (see testDBMaxOpenConns).
+const testDBConnMaxIdleTime = 2 * time.Second
+
 // openDSN opens a GORM connection with the settings shared by every test DB.
 func openDSN(dsn string) (*gorm.DB, error) {
 	// PreferSimpleProtocol: pgx の auto-prepared statement cache を無効化する。
@@ -134,12 +160,22 @@ func openDSN(dsn string) (*gorm.DB, error) {
 	// `ERROR: cached plan must not change result type` が偶発的に出る (#1089)。
 	// simple protocol に倒すと server 側 prepared statement を作らないため本問題が
 	// 構造的に消える。性能は落ちるが test では問題ない。
-	return gorm.Open(postgres.New(postgres.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{
 		DSN:                  dsn,
 		PreferSimpleProtocol: true,
 	}), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(testDBMaxOpenConns)
+	sqlDB.SetConnMaxIdleTime(testDBConnMaxIdleTime)
+	return db, nil
 }
 
 // openTestDBForPackage ensures the package's schema exists, then connects with
