@@ -273,8 +273,11 @@ func (r *announcementRepository) UnreadForUser(userID string) ([]*model.Announce
 	// global announcement(userId IS NULL)は全ユーザーに見せる。
 	// 自動アーカイブの期限を過ぎたものは未読に数えない (本家 2026.10.1 の
 	// getUnreadAnnouncements、#3809)。
+	// silence のお知らせと、登録より前に作られた forExistingUsers のお知らせも
+	// 本家と同じく未読に数えない。後者は本家と同じく id の大小で作成の前後を見る。
 	err := whereAnnouncementActive(r.db, true, time.Now()).Where(
-		`("userId" IS NULL OR "userId" = ?) AND id NOT IN (?)`,
+		`("userId" IS NULL OR "userId" = ?) AND silence = false AND ("forExistingUsers" = false OR id > ?) AND id NOT IN (?)`,
+		userID,
 		userID,
 		r.db.Model(&model.AnnouncementRead{}).Select("\"announcementId\"").Where("\"userId\" = ?", userID),
 	).Order("id DESC").Find(&announcements).Error
