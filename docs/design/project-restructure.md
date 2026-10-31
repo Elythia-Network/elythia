@@ -202,7 +202,7 @@ P3 (#3378) で上のとおりにした (2026-10-05)。
 - 場所は `internal/upstreamsrc` が返す。**submodule へ戻す経路は作らなかった** — P4 で fork が消えたときに、黙って fork を読んでいたことが隠れるため。本家が無ければ「`make upstream-fetch` を実行する」と出して落ちる
 - skip を禁じる変数は `MK_UPSTREAM_REQUIRE`。本家を読むテストは今 `achievement` の 1 本で、`make upstream-check` (golden を本家から作り直して差分が無いこと + このテスト) が立てる。`apicompat` workflow が回す。#3673で`internal/api/paramschema`の`TestResponseMatchesUpstreamEndpointBase`が加わり、2本になった
 - 本家 backend e2e の 3 ファイルは `tests/upstream-e2e/harness/` に置き、実行のたびに本家の `packages/backend/` へコピーする。vitest の設定を本家の外に置いたまま走らせる形は、設定ファイルの import が設定ファイルの場所から解決されて失敗するので採らない
-- 試算: fork と本家は、比較対象として読むパス (`packages/backend/src` / `migration` / `misskey-js/src/autogen`) で差分が 0。本家から作り直した golden 11 個 (`make shapecheck-gen` が書く全て) は、commit 済みのものとバイト一致した
+- 試算: fork と本家は、比較対象として読むパス (`packages/backend/src` / `migration` / `misskey-js/src/autogen`) で差分が 0。本家から作り直した golden 11 個 (`make shapecheck-gen` が書く全て。#3369 で4つ消した) は、commit 済みのものとバイト一致した
 - `UPSTREAM_MISSKEY_VERSION`・`config.MisskeyVersion`・e2e の `misskey/misskey:<版>` が揃っていることを `TestUpstreamVersionIsConsistent` が見る
 
 ### D3. 本家 backend から借りているアセット
