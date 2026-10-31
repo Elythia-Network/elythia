@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -26,6 +27,11 @@ func (h *Handler) PromoCreate(c echo.Context) error {
 	}
 	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.ExpiresAt == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "noteId and expiresAt are required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
+	}
+	// JavaScript の Date で表せない日時は 400 にする (#3369)。本家は Invalid Date の
+	// まま書き込んで 500 になる。以前は桁あふれした日時をそのまま保存していた。
+	if !jsdate.ValidMillis(int64(*req.ExpiresAt)) {
+		return apierr.JSONInvalidParam(c)
 	}
 
 	// noteFinder 未配線時は visibility 検証ができないため fail-closed で

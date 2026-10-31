@@ -9,6 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
@@ -32,6 +33,11 @@ func (h *Handler) AdCreate(c echo.Context) error {
 		IsSensitive bool      `json:"isSensitive"`
 	}
 	if err := c.Bind(&req); err != nil || req.URL == "" || req.ImageURL == "" {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
+	// JavaScript の Date で表せない日時は 400 にする (#3369)。本家は Invalid Date の
+	// まま書き込んで 500 になる。以前は桁あふれした日時をそのまま保存していた。
+	if !jsdate.ValidMillis(int64(req.StartsAt)) || !jsdate.ValidMillis(int64(req.ExpiresAt)) {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
 	}
 	if req.Place == "" {
@@ -194,6 +200,10 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 		IsSensitive *bool      `json:"isSensitive"`
 	}
 	if err := c.Bind(&req); err != nil || req.ID == "" {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
+	// JavaScript の Date で表せない日時は 400 にする (#3369、AdCreate と同じ)。
+	if (req.StartsAt != nil && !jsdate.ValidMillis(int64(*req.StartsAt))) || (req.ExpiresAt != nil && !jsdate.ValidMillis(int64(*req.ExpiresAt))) {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
 	}
 	before, err := h.adRepo.FindByID(req.ID)
