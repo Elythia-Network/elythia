@@ -289,6 +289,26 @@ group を値として使う形 (`registerX(api.Group)` のように関数へ渡�
   中身の`encodedEmojis`。mapやsliceの要素に使う名前の無いstructのフィールドも、指紋に入らない
 - 名前で見る走査なので、意図的な回避は振る舞いのテストで受ける(CLAUDE.md Section 4)
 
+## ID と日付のカーソルの組み合わせ方 (`TestPaginationCursorFormMatchesUpstream`、#3369)
+
+本家は、ID のカーソル (`sinceId` / `untilId`) と日付のカーソル (`sinceDate` / `untilDate`) を endpoint ごとに 2 通りに組み合わせる。
+
+- **ID 優先 (`id-first`)**: `QueryService.makePaginationQuery` に日付まで渡す。ID が 1 つでもあれば日付を捨て、`sinceId` だけなら昇順で返す。Elythia の handler は `id.NormalizeCursorIDFirst` を使う
+- **向きごと (`per-direction`)**: `ps.untilId ?? (ps.untilDate ? … : null)` の形 (timeline 系など)。向きごとに ID か日付を使うので、`sinceId` と `untilDate` は両方で絞る。Elythia の handler は `id.NormalizeCursor` を使う
+
+どちらの形かは、`tools/paginationspec` が本家の `server/api/endpoints` (Service 経由のものは `core/` の Service) を読んで `internal/entitycompat/testdata/golden_pagination_cursor.json` に書く。`make shapecheck-gen` が作り直し、`make upstream-check` が本家の版との一致を見る。日付を宣言するのにどちらの形とも判定できない endpoint があると、推測で埋めずに生成を止める。日付の参照の回数が分類に使った回数と合わないときも止める。2026.10.1 では 78 件で、`id-first` 57 件、`id-first-ordered-by-since` 1 件 (`notes/mentions`。並びを `ps.sinceDate || ps.sinceId` で決める)、`per-direction` 19 件、`unused` 1 件 (`admin/avatar-decorations/list`。宣言だけで読まない) (数え方: golden の値ごとの件数)。
+
+`internal/server` の `TestPaginationCursorFormMatchesUpstream` が、golden と handler の食い違いを落とす。
+
+- **route から handler を引くのは、組み立てたサーバーの route の名前から。** `TestAPIRoutesHaveParamDefs` と同じく本番と同じに組み立てたサーバーの `echo.Routes()` を読み、handler の名前 (`<import path>.(*Handler).<Method>-fm`) からパッケージとメソッドを引く。ソースの登録を静的に読むと、変数を経由した handler の型を引き損ねうる。組み立てに PostgreSQL が要るので、`make gates` ではなく `make test` (CI の `test`) で回る
+- **handler の中は、同じパッケージの関数とメソッドを名前で辿る。** 呼び出したメソッドと呼び出しの引数に渡したメソッドは、同じ名前のものを受け手の型を問わず全部辿る。広めに辿るので、`id-first` の handler が向きごとの helper を共有していれば「両方に届く」で落ちる。同じ名前の別の型のメソッドで取り違えたら、helper の名前を分ける (#3369 で notes の `listRequest.normalize` を `resolve` に改めた)。共有の handler で形が分かれるもの (notes の `serveTimeline`、flash の `my` / `myLikes`) は、正規化の関数 (`id.CursorNormalizer`) を引数で受け、各 endpoint のメソッドが渡す
+- **見えないもの。** 別のパッケージ (core の Service など) で日付を扱う形、変数に入れてから呼ぶメソッド、`internal/misc/id` の dot import (別名の import は解いているので見える)。どちらの関数にも届かなくなった handler は「どちらにも届かない」で落ちる。ただし、正しい関数には直接届き、逆の関数には変数に入れたメソッド値を経由してだけ届く形は見落とす。照合できないものは、日付を扱う経路と一緒に `paginationCursorExempt` に書いて外す。#3369 の時点では空。使われていない項目は落とす
+- **抽出の下限。** 実在する endpoint を形ごとに名指しで要求し (`federation/users` / `notes/global-timeline` / `notes/timeline` など)、照合できた件数にも下限 (`id-first` 50、`per-direction` 15) を置く。#3369 の時点で照合できたのは `id-first` 58 件 (`id-first-ordered-by-since` を含む)、`per-direction` 19 件
+- **本家に無い endpoint は見ない。** golden に無い Elythia 独自の endpoint (`i/flashs` など) は対象外。`i/flashs` / `i/flashs/likes` は `flash/my` / `flash/my-likes` と処理を共有するが、以前の向きごとの組み合わせを残している
+- **golden から行を消しても、このテストは落ちない** (名指しした endpoint を除く)。golden は生成物で、`make upstream-check` が作り直した結果との差分で見る
+
+`make nulparam-check` のカーソルの検査 (`TestCursorGuardsAreChecked` / `TestCursorParamsAreNormalized`) は、`id.NormalizeCursorIDFirst` と、`id.CursorNormalizer` の型の引数を通した呼び出しも、`id.NormalizeCursor` と同じく数える。
+
 ## 変更の経緯 (旧 CLAUDE.md の更新記録)
 
 CLAUDE.md の「更新記録」に書かれていた本文を、#3248 でここへ移した。**記述は当時のまま**で、文中の「Section N」は当時の CLAUDE.md の節を指す。新しいものが上。
