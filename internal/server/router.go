@@ -2867,7 +2867,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		{"following.blockingChecker", followingService.HasBlockingChecker(),
 			"ブロック関係を無視してフォローが成立する (自分がブロックした相手・自分をブロックしている相手の両方。後者は inbox の Follow も通す)"},
 		{"following.followingEstablisher", followingService.HasFollowingEstablisher(),
-			"フォローの行の作成と、申請の削除・カウントの加算が別々に書かれ、途中で失敗するとフォローの行だけが残る (再試行も既にフォロー済みで止まる) か、承認で申請だけが消える (#3911)"},
+			"フォローの行の作成・削除と、申請の削除・カウントの増減が別々に書かれ、途中で失敗するとフォローの行だけが残る (再試行も既にフォロー済みで止まる)、承認で申請だけが消える、解除で行だけが消えてカウントと配送が欠ける (#3911、#3369)"},
 	})
 }
 

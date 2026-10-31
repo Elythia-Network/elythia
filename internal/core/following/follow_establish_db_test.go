@@ -1,6 +1,7 @@
 package following_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -248,4 +249,129 @@ func TestHasFollowingEstablisher(t *testing.T) {
 			assert.Equal(t, tc.want, svc.HasFollowingEstablisher())
 		})
 	}
+}
+
+// 解除で行を消した後にカウントの減算が失敗しても、行を消したままにしない。
+// 再試行で、カウントが 1 回だけ減って解除が成立する (#3369)。
+func TestUnfollow_DB_FailureKeepsFollowingAndRetrySucceeds(t *testing.T) {
+	cases := []struct {
+		name string
+		// failFollower は、follower の行の更新を失敗させるか (false なら followee)。
+		failFollower bool
+	}{
+		{"following count fails", true},
+		{"followers count fails", false},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newApprovalEnv(t)
+			now := time.Now()
+			followee := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+			follower := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+			_, err := e.svc.Follow(follower, followee, following.FollowOptions{})
+			require.NoError(t, err)
+			failed := followee
+			if tc.failFollower {
+				failed = follower
+			}
+			remove := e.injectFailure([]string{"uf_fail_a", "uf_fail_b"}[i], "UPDATE", "user", "NEW", "id", failed)
+
+			require.Error(t, e.svc.Unfollow(follower, followee))
+			assert.True(t, e.isFollowing(follower, followee), "the following row must not be deleted alone")
+			fc, frc := e.counts(follower, followee)
+			assert.Equal(t, 1, fc)
+			assert.Equal(t, 1, frc)
+
+			remove()
+			require.NoError(t, e.svc.Unfollow(follower, followee), "a retry must not stop at ErrNotFollowing")
+			assert.False(t, e.isFollowing(follower, followee))
+			fc, frc = e.counts(follower, followee)
+			assert.Equal(t, 0, fc)
+			assert.Equal(t, 0, frc)
+		})
+	}
+}
+
+// 同じ組の解除が同時に走っても、カウントは 1 回だけ減り、後の方は
+// ErrNotFollowing になる (#3369)。前は後の方が 0 件を消してカウントだけを
+// もう一度減らしていた。重なりは、別のトランザクションで following の行を
+// 握り、両方の解除がその行で待ちに入ってから放して作る。
+func TestUnfollow_DB_ConcurrentUnfollowDecrementsOnce(t *testing.T) {
+	e := newApprovalEnv(t)
+	now := time.Now()
+	followee := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+	follower := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+	_, err := e.svc.Follow(follower, followee, following.FollowOptions{})
+	require.NoError(t, err)
+
+	holder := e.db.Begin()
+	require.NoError(t, holder.Error)
+	defer holder.Rollback()
+	var held int64
+	require.NoError(t, holder.Raw(`SELECT count(*) FROM (SELECT 1 FROM "following" WHERE "followerId" = ? AND "followeeId" = ? FOR UPDATE) f`, follower, followee).Scan(&held).Error)
+	require.EqualValues(t, 1, held)
+	var xid string
+	require.NoError(t, holder.Raw(`SELECT xid(pg_current_xact_id())::text`).Scan(&xid).Error)
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { errs <- e.svc.Unfollow(follower, followee) })
+	}
+	require.Eventually(t, func() bool {
+		var waiting int64
+		if err := e.db.Raw(`SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted AND (
+	(locktype = 'transactionid' AND transactionid::text = ?) OR
+	(locktype = 'tuple' AND relation = 'following'::regclass))`, xid).Scan(&waiting).Error; err != nil {
+			return false
+		}
+		return waiting == 2
+	}, 10*time.Second, 10*time.Millisecond, "both unfollows must wait on the held following")
+	require.NoError(t, holder.Rollback().Error)
+	wg.Wait()
+	close(errs)
+	var ok, notFollowing int
+	for err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, following.ErrNotFollowing):
+			notFollowing++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	assert.Equal(t, 1, ok)
+	assert.Equal(t, 1, notFollowing)
+	fc, frc := e.counts(follower, followee)
+	assert.Equal(t, 0, fc, "the count is decremented once")
+	assert.Equal(t, 0, frc)
+}
+
+// 解除でもカウントを直接書くので、利用者のキャッシュを無効化する (#3369)。
+func TestUnfollow_DB_InvalidatesCachedUserCounts(t *testing.T) {
+	e := newApprovalEnv(t)
+	cached := repository.NewCachedUserRepository(repository.NewUserRepository(e.db))
+	svc := following.NewService(cached, repository.NewFollowingRepository(e.db), e.frRepo, e.idGen, nil, nil, nil, nil)
+	now := time.Now()
+	followee := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+	follower := e.user(userOpts{seenAt: now.Add(-365 * 24 * time.Hour)})
+	_, err := svc.Follow(follower, followee, following.FollowOptions{})
+	require.NoError(t, err)
+	// キャッシュに 1 の値を載せる。載っていることを確かめないと、Follow の側の
+	// 無効化が外れて 0 が残ったとき、解除の側の無効化が外れても緑になる。
+	er, err := cached.FindByID(follower)
+	require.NoError(t, err)
+	require.Equal(t, 1, er.FollowingCount)
+	ee, err := cached.FindByID(followee)
+	require.NoError(t, err)
+	require.Equal(t, 1, ee.FollowersCount)
+
+	require.NoError(t, svc.Unfollow(follower, followee))
+	er, err = cached.FindByID(follower)
+	require.NoError(t, err)
+	ee, err = cached.FindByID(followee)
+	require.NoError(t, err)
+	assert.Equal(t, 0, er.FollowingCount)
+	assert.Equal(t, 0, ee.FollowersCount)
 }
