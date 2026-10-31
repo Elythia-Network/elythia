@@ -30,6 +30,11 @@ updates:
       # base / head の比較の image (#3544)。ここに無いと、他の Dockerfile だけが新しい
       # digest になり、これだけ古い digest のまま残る (#3369)。
       - /tests/bench/ab
+      # 本番の DB の image。ルートの Dockerfile の backup stage と同じ digest に揃える
+      # 決まりなので、ここに無いと backup stage だけが上がる (#3369)。
+      # tests/bench/ab/compose.yml の postgres は compose なのでこの ecosystem では
+      # 上がらない。backup stage を上げたら手で揃える。
+      - /deploy/postgres-bigm
     schedule:
       interval: weekly
     ignore:
