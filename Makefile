@@ -1564,6 +1564,7 @@ errorid-check: ## error id / HTTP status / kind の drift を検査
 # permission drift gate をローカルで実行する。mk-go の router middleware が
 # Misskey の requireAdmin/requireModerator/requireCredential より緩くないか検証。
 # TestOAuthKindDrift は別軸で、meta.kind (OAuth scope) の一致を見る。
+# TestRolePolicyDrift は meta.requiredRolePolicy と route の RequireRolePolicy の policy 名を見る (#3369)。
 # TestCacheSecDrift は allowGet の GET route と cacheSec の Cache-Control の表を見る (#3593)。
 # **アクセス階層の gate では scope の取り違えを検出できない** (#2877)。
 perm-check: ## router middleware の権限が upstream より緩くないか検査
