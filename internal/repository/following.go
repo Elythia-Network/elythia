@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -151,6 +153,101 @@ func (r *followingRepository) Create(f *model.Following) error {
 	}
 	r.rc.Invalidate(RelationFollowing, f.FollowerID)
 	return nil
+}
+
+// FollowingEstablisher creates a following together with the writes that must
+// not be separated from it. It is implemented by the repository returned from
+// NewFollowingRepository; following.Service falls back to separate writes for
+// test doubles that do not implement it.
+type FollowingEstablisher interface {
+	// CreateEstablished deletes the follow request of the same pair, inserts
+	// f and, when opts.IncrementCounts is set, adds 1 to the follower's
+	// followingCount and the followee's followersCount, all in one
+	// transaction. It reports whether a follow request was deleted.
+	//
+	// When opts.RequireRequest is set and there is no follow request to
+	// delete, nothing is written: ErrFollowingAlreadyExists is returned when
+	// the pair already follows, ErrNotFound otherwise. A unique violation of
+	// the insert is returned as is, with nothing written.
+	CreateEstablished(f *model.Following, opts EstablishFollowingOpts) (requestDeleted bool, err error)
+}
+
+// ErrFollowingAlreadyExists is returned by CreateEstablished with
+// RequireRequest when the request is gone because the pair already follows.
+var ErrFollowingAlreadyExists = errors.New("following already exists")
+
+// EstablishFollowingOpts selects the writes CreateEstablished makes.
+type EstablishFollowingOpts struct {
+	// IncrementCounts adds 1 to the users' following / followers counts.
+	IncrementCounts bool
+	// RequireRequest makes CreateEstablished fail with ErrNotFound when the
+	// pair has no follow request (accepting a request).
+	RequireRequest bool
+}
+
+// CreateEstablished implements FollowingEstablisher.
+//
+// 別々に書くと、フォローの行を作った後の申請の削除やカウントの加算が DB の
+// 障害で失敗したとき、行だけが残る。再試行は「既にフォロー済み」で止まり、
+// カウント・通知などを補えない (#3911)。承認では逆に、申請を消した後の作成が
+// 失敗すると申請だけが消える。どちらも 1 つのトランザクションにまとめて防ぐ。
+func (r *followingRepository) CreateEstablished(f *model.Following, opts EstablishFollowingOpts) (bool, error) {
+	// 利用者の削除 (user の行 → CASCADE で申請) とは書く順が逆なので、同じ組の
+	// フォローと削除が重なると片方がデッドロック (40P01) で落ちうる。削除される
+	// 利用者が絡むフォローはどのみち成立しないので、ここでは揃えない。
+	var requestDeleted bool
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Where(`"followerId" = ? AND "followeeId" = ?`, f.FollowerID, f.FolloweeID).
+			Delete(&model.FollowRequest{})
+		if res.Error != nil {
+			return res.Error
+		}
+		requestDeleted = res.RowsAffected > 0
+		if opts.RequireRequest && !requestDeleted {
+			// 同じ申請を同時に承認したもう片方が先に成立させたときは、申請の
+			// 削除がその行のロックを待ってから 0 件になる。コミット済みの行は
+			// このトランザクションから見える (READ COMMITTED) ので、ここで
+			// primary を読んで「取り消された」と区別する。
+			var n int64
+			if err := tx.Model(&model.Following{}).
+				Where(`"followerId" = ? AND "followeeId" = ?`, f.FollowerID, f.FolloweeID).
+				Count(&n).Error; err != nil {
+				return err
+			}
+			if n > 0 {
+				return ErrFollowingAlreadyExists
+			}
+			return ErrNotFound
+		}
+		if err := tx.Create(f).Error; err != nil {
+			return err
+		}
+		if !opts.IncrementCounts {
+			return nil
+		}
+		// **user の行は id の昇順でロックする。** A→B と B→A のフォローが同時に
+		// 走ると、書いた順にロックを取るので互いを待ってデッドロックになる。
+		// 列が違うだけなので、順序を入れ替えても結果は変わらない。
+		updates := []struct{ id, column string }{
+			{f.FollowerID, "followingCount"},
+			{f.FolloweeID, "followersCount"},
+		}
+		if updates[1].id < updates[0].id {
+			updates[0], updates[1] = updates[1], updates[0]
+		}
+		for _, u := range updates {
+			if err := tx.Model(&model.User{}).Where("id = ?", u.id).
+				UpdateColumn(u.column, gorm.Expr(`"`+u.column+`" + 1`)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	r.rc.Invalidate(RelationFollowing, f.FollowerID)
+	return requestDeleted, nil
 }
 
 func (r *followingRepository) Delete(f *model.Following) error {
