@@ -237,14 +237,7 @@ func TestProcessGlobalSettersReadEveryFile(t *testing.T) {
 func nonCommentSource(src string) string {
 	// **block comment も落とす。** `/* entity.SetSilencedLookup(...) */` は
 	// 行コメント判定だけだと生き残り、「コメントアウトして残すのは消すのと
-	// 同じ」が成立しなくなる。
-	src = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(src, "")
-	var kept []string
-	for _, line := range strings.Split(src, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "//") {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.Join(kept, "\n")
+	// 同じ」が成立しなくなる。文字列の中の `/*` で後ろを消さないよう、
+	// go/scanner で剥がす (#3369 I3)。
+	return stripGoComments(src, false)
 }

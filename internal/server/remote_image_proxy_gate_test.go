@@ -307,12 +307,12 @@ func gridImageColumnFiles(t *testing.T) (files []string, scanned int) {
 				return rerr
 			}
 			// **列を数えるときは `//` を落とさない (レビュー M3)。**
-			// `lineCommentRe` は文字列リテラルの `//` も落とすので、同じ行に
-			// URL があると `type: 'image'` ごと消えて**列を数え落とす**
-			// (= 閉世界の主張が崩れる、偽陰性)。コメントアウトされた列を
-			// 数えてしまう側 (落ちる側) に倒すほうが安全。
-			src := htmlCommentRe.ReplaceAllString(string(raw), "")
-			src = blockCommentRe.ReplaceAllString(src, "")
+			// 以前の正規表現は文字列リテラルの `//` も落としたので、同じ行に
+			// URL があると `type: 'image'` ごと消えて**列を数え落とした**
+			// (= 閉世界の主張が崩れる、偽陰性)。今の走査は文字列を区別するが、
+			// 正規表現のリテラルを読み違えると行末まで消しうる。コメントアウト
+			// された列を数えてしまう側 (落ちる側) に倒すほうが安全。
+			src := stripCommentsKeepLine(string(raw))
 			// **1 ファイル 1 件に丸めない。** 既に名指ししているファイルの
 			// 中に 2 本目の画像列が生えると、ファイル名の集合は変わらないので
 			// 素通りする (変異検証で実測した唯一の見逃し)。列 1 本につき
