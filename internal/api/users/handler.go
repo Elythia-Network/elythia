@@ -1022,7 +1022,7 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 		return jsonNoSuchUserForRelations(c, followers)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

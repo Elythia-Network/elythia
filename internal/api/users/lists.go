@@ -414,7 +414,7 @@ func (h *Handler) ListsGetMemberships(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_LIST", "No such list.", noSuchList))
 	}
 
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

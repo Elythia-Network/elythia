@@ -86,7 +86,7 @@ func (h *Handler) timelineAvailable(c echo.Context, policyKey string) bool {
 
 // Timeline handles POST /api/notes/timeline (home timeline).
 func (h *Handler) Timeline(c echo.Context) error {
-	return h.serveTimeline(c, "home", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
+	return h.serveTimeline(c, "home", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
 			WithFiles:             req.WithFiles,
 			WithRenotes:           req.WithRenotes,
@@ -112,7 +112,7 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 	if !h.timelineAvailable(c, role.PolicyLtlAvailable) {
 		return apierr.JSONLtlDisabled(c)
 	}
-	return h.serveTimeline(c, "local", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
+	return h.serveTimeline(c, "local", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
 			WithFiles:          req.WithFiles,
 			WithRenotes:        req.WithRenotes,
@@ -134,7 +134,7 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 	if !h.timelineAvailable(c, role.PolicyGtlAvailable) {
 		return apierr.JSONGtlDisabled(c)
 	}
-	return h.serveTimeline(c, "global", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
+	return h.serveTimeline(c, "global", id.NormalizeCursorIDFirst, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
 			WithFiles:          req.WithFiles,
 			WithRenotes:        req.WithRenotes,
@@ -164,7 +164,7 @@ func (h *Handler) HybridTimeline(c echo.Context) error {
 	if !h.timelineAvailable(c, role.PolicyLtlAvailable) {
 		return apierr.JSONStlDisabled(c)
 	}
-	return h.serveTimeline(c, "hybrid", func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
+	return h.serveTimeline(c, "hybrid", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
 			WithFiles:             req.WithFiles,
 			WithRenotes:           req.WithRenotes,
@@ -358,9 +358,15 @@ func (h *Handler) loadMutedInstances(viewer *model.User) []string {
 
 // serveTimeline factors out the common parsing and error handling for the four
 // timeline endpoints. requireAuthがtrueのときviewer==nilで401相当を返す。
+//
+// normalizeCursor は本家のその endpoint のページ送りの形に合わせる。
+// global-timeline は makePaginationQuery に日付まで渡す (ID があれば日付を捨てる)
+// ので id.NormalizeCursorIDFirst、ほかの 3 つは向きごとに組み合わせるので
+// id.NormalizeCursor (#3369)。
 func (h *Handler) serveTimeline(
 	c echo.Context,
 	kind string,
+	normalizeCursor id.CursorNormalizer,
 	fn func(*model.User, TimelineRequest) ([]*model.Note, error),
 	requireAuth bool,
 ) error {
@@ -389,7 +395,7 @@ func (h *Handler) serveTimeline(
 	// を生成していたが、SQL `id > Generate(time)` 比較では同 msec の早期 ID
 	// を取りこぼすバグがあった。AidxCutoffPrefix (= time prefix + "00000000")
 	// で deterministic + 同 msec 内全 ID を含む正しい cutoff に修正。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := normalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

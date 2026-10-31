@@ -51,7 +51,7 @@ func (h *Handler) SigninHistory(c echo.Context) error {
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。unwrap 後の
 	// string 値を渡す。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(sinceID, untilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(sinceID, untilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

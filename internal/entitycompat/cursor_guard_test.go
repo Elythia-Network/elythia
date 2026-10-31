@@ -42,13 +42,14 @@ func (v cursorGuardViolation) pos() string { return fmt.Sprintf("%s:%d", v.file,
 //   - `id.NormalizeCursor(...)` そのもの
 //   - **それを伝播する wrapper** — 直接の呼び出しを含み、かつ戻り値の最後が
 //     `bool` の関数。現在 5 つある (`chatPageParams.cursor` /
-//     `paginationFromRequest` / `listRequest.normalize` / `parseHostPage` /
+//     `paginationFromRequest` / `listRequest.resolve` / `parseHostPage` /
 //     `bindListRequest`)。wrapper を見ないと、新しい呼び出し側が `_` で
 //     捨てても gate が黙る
 //
 // **wrapper は名前でしか引かない。** 同名で cursor と無関係なメソッドがあると
-// 過検出になる (`internal/api/notes` の `TimelineRequest.normalize` が該当。
-// あちらも `if !req.normalize()` で受けているので違反にはならない)。検出側に
+// 過検出になる (#3369 より前は、`internal/api/notes` の `listRequest.normalize` と
+// `TimelineRequest.normalize` が同名だった。あちらも `if !req.normalize()` で
+// 受けていたので違反にはならなかった)。検出側に
 // 倒れるぶんには安全側なので、型解決は入れていない。**追跡は 1 段だけ**で、
 // wrapper の wrapper は追わない (現状そういう形は無い)。
 //
@@ -148,6 +149,7 @@ func scanCursorGuards(t *testing.T, root string) ([]cursorGuardViolation, int) {
 // は「カーソル無し = 先頭から」になり、利用者の指定と無関係なページを正しい
 // 応答として返す。
 func scanFuncCursorGuards(fset *token.FileSet, fn *ast.FuncDecl, propagators map[string]bool) ([]cursorGuardViolation, int) {
+	propagators = withCursorNormalizerParams(fn, propagators)
 	guarded := map[ast.Expr]bool{}
 	reasons := map[ast.Expr]string{}
 	var calls []*ast.CallExpr
@@ -350,12 +352,57 @@ func blockExits(body *ast.BlockStmt) bool {
 	return found
 }
 
-// isCursorCall reports whether call is id.NormalizeCursor or one of the
+// cursorNormalizers are the functions of internal/misc/id that normalize a
+// cursor and report an unstorable one with ok=false.
+//
+// 本家のページ送りの形に合わせて2つある (#3369)。どちらも ok を返すので、同じく
+// 捨てていないことを見る。
+var cursorNormalizers = map[string]bool{"NormalizeCursor": true, "NormalizeCursorIDFirst": true}
+
+// cursorNormalizerType is the type of a parameter that carries one of
+// cursorNormalizers (`id.CursorNormalizer`).
+const cursorNormalizerType = "CursorNormalizer"
+
+// withCursorNormalizerParams returns propagators plus the names of fn's
+// parameters of type id.CursorNormalizer, so that a call through such a
+// parameter counts as a cursor call.
+//
+// **関数の値で受けて呼ぶ形も数える (#3369)。** 本家の形が endpoint ごとに違うので、
+// 共有の handler (notes の serveTimeline、flash の my) は正規化の関数を引数で
+// 受ける。その呼び出しを数えないと、ok を捨てても gate が黙る。
+func withCursorNormalizerParams(fn *ast.FuncDecl, propagators map[string]bool) map[string]bool {
+	var names []string
+	for _, field := range fn.Type.Params.List {
+		sel, ok := field.Type.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != cursorNormalizerType {
+			continue
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "id" {
+			continue
+		}
+		for _, n := range field.Names {
+			names = append(names, n.Name)
+		}
+	}
+	if len(names) == 0 {
+		return propagators
+	}
+	out := make(map[string]bool, len(propagators)+len(names))
+	for k, v := range propagators {
+		out[k] = v
+	}
+	for _, n := range names {
+		out[n] = true
+	}
+	return out
+}
+
+// isCursorCall reports whether call is one of cursorNormalizers or one of the
 // package-local wrappers that propagate its ok.
 func isCursorCall(call *ast.CallExpr, propagators map[string]bool) bool {
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "id" && fun.Sel.Name == "NormalizeCursor" {
+		if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "id" && cursorNormalizers[fun.Sel.Name] {
 			return true
 		}
 		return propagators[fun.Sel.Name]
@@ -365,7 +412,8 @@ func isCursorCall(call *ast.CallExpr, propagators map[string]bool) bool {
 	return false
 }
 
-// containsNormalizeCursorCall reports whether body calls id.NormalizeCursor.
+// containsNormalizeCursorCall reports whether body calls one of
+// cursorNormalizers.
 func containsNormalizeCursorCall(body *ast.BlockStmt) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -374,7 +422,7 @@ func containsNormalizeCursorCall(body *ast.BlockStmt) bool {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "NormalizeCursor" {
+		if !ok || !cursorNormalizers[sel.Sel.Name] {
 			return true
 		}
 		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "id" {
@@ -468,6 +516,40 @@ func (p params) cursor() (string, string, bool) {
 	require.Len(t, violations, 2, "違反 2 件だけを拾う: %v", violations)
 	assert.Contains(t, violations[0].fn, "Discarded")
 	assert.Contains(t, violations[1].fn, "Unchecked")
+}
+
+// **ID 優先の正規化と、引数で受けた正規化の関数も見る (#3369)。** 本家の
+// ページ送りの形に合わせて id.NormalizeCursorIDFirst を使う handler と、共有の
+// handler が id.CursorNormalizer を引数で受けて呼ぶ形を数えないと、ok を捨てても
+// gate が黙る。
+func TestScanCursorGuards_ChecksIDFirstAndNormalizerParams(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "api", "probe")
+	writeGoFile(t, dir, "h.go", `
+func (h *Handler) IDFirstDiscarded(c echo.Context) error {
+	sinceID, untilID, _ := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, nil, nil)
+	return h.list(sinceID, untilID)
+}
+
+func (h *Handler) ParamDiscarded(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+	sinceID, untilID, _ := normalizeCursor(req.SinceID, req.UntilID, nil, nil)
+	return h.list(sinceID, untilID)
+}
+
+func (h *Handler) ParamGuarded(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+	sinceID, untilID, ok := normalizeCursor(req.SinceID, req.UntilID, nil, nil)
+	if !ok {
+		return apierr.JSONInvalidParam(c)
+	}
+	return h.list(sinceID, untilID)
+}
+`)
+	violations, sites := scanCursorGuards(t, root)
+
+	assert.Equal(t, 3, sites, "ID 優先の正規化か、引数の正規化の関数の呼び出しを数えていない")
+	require.Len(t, violations, 2, "違反 2 件だけを拾う: %v", violations)
+	assert.Contains(t, violations[0].fn, "IDFirstDiscarded")
+	assert.Contains(t, violations[1].fn, "ParamDiscarded")
 }
 
 // **wrapper 経由の呼び出しも見る。** `id.NormalizeCursor` だけを見ていると、
@@ -793,7 +875,7 @@ func scanCursorParamBinders(t *testing.T, root string) ([]cursorGuardViolation, 
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 		propagators := map[string]bool{
-			"cursor": true, "normalize": true, "paginationFromRequest": true,
+			"cursor": true, "resolve": true, "paginationFromRequest": true,
 			"parseHostPage": true, "bindListRequest": true,
 		}
 		for _, decl := range file.Decls {
@@ -812,7 +894,7 @@ func scanCursorParamBinders(t *testing.T, root string) ([]cursorGuardViolation, 
 			if viaQuery {
 				queryBinders++
 			}
-			if hasCursorCall(fn.Body, propagators) {
+			if hasCursorCall(fn.Body, withCursorNormalizerParams(fn, propagators)) {
 				continue
 			}
 			reason := "untilId / sinceId を bind しているのに正規化していない"
@@ -926,6 +1008,47 @@ func TestCursorParamsAreNormalized(t *testing.T) {
 		b.WriteString("結果に使わないパラメータでも通すこと (upstream の ajv も `misskey:id` で弾く)。\n")
 		t.Fatal(b.String())
 	}
+}
+
+// 引数で受けた正規化の関数を呼ぶ handler は、正規化しているとみなす (#3369)。
+func TestScanCursorParamBinders_AcceptsNormalizerParam(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "api", "probe")
+	writeGoFile(t, dir, "h.go", `
+func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+	var req struct {
+		SinceID string `+"`"+`json:"sinceId"`+"`"+`
+	}
+	_ = c.Bind(&req)
+	sinceID, _, ok := normalizeCursor(req.SinceID, "", nil, nil)
+	if !ok {
+		return apierr.JSONInvalidParam(c)
+	}
+	return h.repo.List(sinceID)
+}
+
+func (h *Handler) otherType(c echo.Context, normalizeCursor id.Generator) error {
+	var req struct {
+		SinceID string `+"`"+`json:"sinceId"`+"`"+`
+	}
+	_ = c.Bind(&req)
+	return h.repo.List(normalizeCursor(req.SinceID))
+}
+
+func (h *Handler) otherPackage(c echo.Context, normalizeCursor strutil.CursorNormalizer) error {
+	var req struct {
+		SinceID string `+"`"+`json:"sinceId"`+"`"+`
+	}
+	_ = c.Bind(&req)
+	return h.repo.List(normalizeCursor(req.SinceID))
+}
+`)
+	violations, binders, _ := scanCursorParamBinders(t, root)
+
+	assert.Equal(t, 3, binders)
+	require.Len(t, violations, 2, "id.CursorNormalizer でない引数は正規化とみなさない: %v", violations)
+	assert.Equal(t, "otherType", violations[0].fn)
+	assert.Equal(t, "otherPackage", violations[1].fn)
 }
 
 // 抽出器自身のテスト。

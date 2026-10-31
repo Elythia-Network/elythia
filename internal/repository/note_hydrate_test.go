@@ -310,7 +310,7 @@ func TestNoteRepository_HydrateMatchesPreload(t *testing.T) {
 		{"ListLocalByChannelID", func() ([]*model.Note, error) { return repo.ListLocalByChannelID(f.channelID, "", "", "", 20) }, f.channelQuote},
 		{"ListFeatured", func() ([]*model.Note, error) { return repo.ListFeatured(f.channelID, "", 20, 0) }, f.channelQuote},
 		{"ListFeaturedByUser", func() ([]*model.Note, error) { return repo.ListFeaturedByUser("u_hy3611_2", "u_hy3611_2", "", 20) }, f.quote},
-		{"ListMentions", func() ([]*model.Note, error) { return repo.ListMentions("u_hy3611_1", "", false, 20, "", "") }, f.channelQuote},
+		{"ListMentions", func() ([]*model.Note, error) { return repo.ListMentions("u_hy3611_1", "", false, 20, "", "", false) }, f.channelQuote},
 		{"SearchByTag", func() ([]*model.Note, error) {
 			return repo.SearchByTag([][]string{{f.tag}}, "", 20, "", "", model.NoteSearchTagFilter{})
 		}, f.channelQuote},

@@ -250,7 +250,7 @@ func (h *Handler) Users(c echo.Context) error {
 		limit = 100
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (Notes と同 pattern、#1173)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

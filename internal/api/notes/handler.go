@@ -834,9 +834,9 @@ type listRequest struct {
 	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
-// normalize validates limit and resolves the date cursors. ok=false は
+// resolve validates limit and resolves the date cursors. ok=false は
 // limit が upstream paramDef の範囲外で、呼び出し側は 400 を返す。
-func (r *listRequest) normalize() bool {
+func (r *listRequest) resolve() bool {
 	limit, ok := pagination.ResolveLimit(r.Limit.IntPtr(), 10, 100)
 	if !ok {
 		return false
@@ -846,7 +846,7 @@ func (r *listRequest) normalize() bool {
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。serveList から
 	// 呼ばれて Renotes / Replies / Children の 3 handler で一括適用される。
 	// **列に入らないカーソルもここで ok=false にする (#3025)。**
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(r.SinceID, r.UntilID, r.SinceDate.Int64Ptr(), r.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(r.SinceID, r.UntilID, r.SinceDate.Int64Ptr(), r.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return false
 	}
@@ -880,7 +880,7 @@ func (h *Handler) serveList(c echo.Context, noSuchNoteID string, fn func(*model.
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-	if !req.normalize() {
+	if !req.resolve() {
 		return apierr.JSONInvalidParam(c)
 	}
 
@@ -1370,7 +1370,7 @@ func (h *Handler) BulkShow(c echo.Context) error {
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

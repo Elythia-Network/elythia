@@ -506,6 +506,32 @@ func TestMentions_Success(t *testing.T) {
 	assert.Equal(t, "n1", resp[0]["id"])
 }
 
+// 本家は並びを `(ps.sinceDate || ps.sinceId) ? 'ASC' : 'DESC'` で決めるので、
+// untilId と sinceDate を一緒に送ると、sinceDate を捨てて untilId だけで絞ったうえで
+// 古い順に返す (#3369)。
+func TestMentions_SinceDateOrdersAscendingWithUntilID(t *testing.T) {
+	h, noteRepo, _ := newExtraHandler(t)
+	for _, nid := range []string{"n1", "n2", "n3", "n4"} {
+		noteRepo.Notes[nid] = &model.Note{ID: nid, UserID: "u2", Visibility: "public", Mentions: []string{"u1"}, User: &model.User{ID: "u2"}}
+	}
+	ids := func(body string) []any {
+		rec := postExtra(h.Mentions, body, &model.User{ID: "u1"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var resp []map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		out := make([]any, 0, len(resp))
+		for _, n := range resp {
+			out = append(out, n["id"])
+		}
+		return out
+	}
+	assert.Equal(t, []any{"n1", "n2", "n3"}, ids(`{"untilId":"n4","sinceDate":1779744000000}`))
+	assert.Equal(t, []any{"n3", "n2", "n1"}, ids(`{"untilId":"n4"}`))
+	assert.Equal(t, []any{"n3", "n2", "n1"}, ids(`{"untilId":"n4","sinceDate":0}`), "sinceDate の0は本家でも偽")
+	assert.Equal(t, []any{"n2", "n3", "n4"}, ids(`{"sinceId":"n1"}`))
+	assert.Equal(t, []any{"n2", "n3"}, ids(`{"sinceId":"n1","untilId":"n4"}`), "sinceId があれば untilId があっても昇順")
+}
+
 func TestMentions_InvalidJSON(t *testing.T) {
 	h, _, _ := newExtraHandler(t)
 	rec := postExtra(h.Mentions, `invalid`, &model.User{ID: "u1"})
@@ -1335,7 +1361,7 @@ func TestUnrenote_DeleteError(t *testing.T) {
 
 type failingMentionsRepo struct{ *testutil.MockNoteRepository }
 
-func (f *failingMentionsRepo) ListMentions(_, _ string, _ bool, _ int, _, _ string) ([]*model.Note, error) {
+func (f *failingMentionsRepo) ListMentions(_, _ string, _ bool, _ int, _, _ string, _ bool) ([]*model.Note, error) {
 	return nil, testutil.ErrNotFound
 }
 

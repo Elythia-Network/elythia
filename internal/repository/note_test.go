@@ -2398,16 +2398,16 @@ func TestNoteRepository_ListMentions(t *testing.T) {
 	require.NoError(t, testDB.Create(n).Error)
 	defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, n.ID)
 
-	notes, err := repo.ListMentions(mentionee.ID, "", false, 10, "", "")
+	notes, err := repo.ListMentions(mentionee.ID, "", false, 10, "", "", false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, notes)
 
 	// with cursors
-	notes, err = repo.ListMentions(mentionee.ID, "", false, 10, "", "zzz")
+	notes, err = repo.ListMentions(mentionee.ID, "", false, 10, "", "zzz", false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, notes)
 
-	notes, err = repo.ListMentions(mentionee.ID, "", false, 10, "000", "")
+	notes, err = repo.ListMentions(mentionee.ID, "", false, 10, "000", "", true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, notes)
 }
@@ -2437,12 +2437,12 @@ func TestNoteRepository_ListMentions_Following(t *testing.T) {
 	}
 
 	// following=false は全件 (3)。
-	all, err := repo.ListMentions(viewer.ID, "", false, 50, "", "")
+	all, err := repo.ListMentions(viewer.ID, "", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 
 	// following=true は followed + 自分の note のみ (stranger 除外)。
-	followingOnly, err := repo.ListMentions(viewer.ID, "", true, 50, "", "")
+	followingOnly, err := repo.ListMentions(viewer.ID, "", true, 50, "", "", false)
 	require.NoError(t, err)
 	ids := make(map[string]bool)
 	for _, n := range followingOnly {
@@ -2494,7 +2494,7 @@ func TestNoteRepository_ListMentions_VisibilityPushDown(t *testing.T) {
 
 	// #2106 N27: follow なし / visibleUserIds 非対象でも、mention されていれば
 	// followers / specified note を read できる (upstream の mentions cross-visibility)。
-	out, err := repo.ListMentions(victim.ID, "", false, 50, "", "")
+	out, err := repo.ListMentions(victim.ID, "", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"n_lm_fol", "n_lm_pub", "n_lm_spec"}, idsOf(out),
 		"mention されていれば followers/specified も read 経路では可視")
@@ -2504,14 +2504,14 @@ func TestNoteRepository_ListMentions_VisibilityPushDown(t *testing.T) {
 	require.NoError(t, followingRepo.Create(f))
 	defer testDB.Exec(`DELETE FROM "following" WHERE id = ?`, f.ID)
 	require.NoError(t, repo.UpdateFields("n_lm_spec", map[string]any{"visibleUserIds": model.StringArray{victim.ID}}))
-	out, err = repo.ListMentions(victim.ID, "", false, 50, "", "")
+	out, err = repo.ListMentions(victim.ID, "", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"n_lm_fol", "n_lm_pub", "n_lm_spec"}, idsOf(out))
 }
 
 func TestNoteRepository_ListMentions_DefaultLimit(t *testing.T) {
 	repo := NewNoteRepository(testDB)
-	notes, err := repo.ListMentions("nobody", "", false, 0, "", "")
+	notes, err := repo.ListMentions("nobody", "", false, 0, "", "", false)
 	require.NoError(t, err)
 	assert.Empty(t, notes)
 }
@@ -2520,7 +2520,7 @@ func TestNoteRepository_ListMentions_Error(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	repo := NewNoteRepository(testDB.WithContext(ctx))
-	_, err := repo.ListMentions("x", "", false, 10, "", "")
+	_, err := repo.ListMentions("x", "", false, 10, "", "", false)
 	assert.Error(t, err)
 }
 
@@ -2555,7 +2555,7 @@ func TestNoteRepository_ListMentions_VisibilityFilter(t *testing.T) {
 	}
 
 	// public のみ limit=5 -> public が 5 件きっちり (specified がスロットを食わない)。
-	pub, err := repo.ListMentions(me.ID, "public", false, 5, "", "")
+	pub, err := repo.ListMentions(me.ID, "public", false, 5, "", "", false)
 	require.NoError(t, err)
 	require.Len(t, pub, 5, "public 指定で under-fill しない")
 	for _, n := range pub {
@@ -2563,7 +2563,7 @@ func TestNoteRepository_ListMentions_VisibilityFilter(t *testing.T) {
 	}
 
 	// specified のみ limit=5 -> specified が 5 件。
-	spec, err := repo.ListMentions(me.ID, "specified", false, 5, "", "")
+	spec, err := repo.ListMentions(me.ID, "specified", false, 5, "", "", false)
 	require.NoError(t, err)
 	require.Len(t, spec, 5, "specified 指定で under-fill しない")
 	for _, n := range spec {
@@ -2571,7 +2571,7 @@ func TestNoteRepository_ListMentions_VisibilityFilter(t *testing.T) {
 	}
 
 	// 未指定 (default) -> 全種別 (TS 一致): public + specified の両方が出る。
-	all, err := repo.ListMentions(me.ID, "", false, 100, "", "")
+	all, err := repo.ListMentions(me.ID, "", false, 100, "", "", false)
 	require.NoError(t, err)
 	assert.Len(t, all, 10, "default は全種別を返す")
 }
@@ -2616,19 +2616,19 @@ func TestNoteRepository_ListMentions_VisibleUserIDsOnly(t *testing.T) {
 
 	// recipient (default = 全種別): visibleUserIds 由来 / mentions+visibleUserIds
 	// 両方とも 1 行ずつ。OR は単一行 boolean なので重複しない。
-	out, err := repo.ListMentions(recipient.ID, "", false, 50, "", "")
+	out, err := repo.ListMentions(recipient.ID, "", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, countOf(out, "n_vu_dm"), "@mention の無い specified DM が visibleUserIds 経由で出る")
 	assert.Equal(t, 1, countOf(out, "n_vu_both"), "mentions と visibleUserIds 両方に入っても重複行は出ない")
 
 	// recipient (Direct タブ = visibility=specified): 同じく両方出る。
-	out, err = repo.ListMentions(recipient.ID, "specified", false, 50, "", "")
+	out, err = repo.ListMentions(recipient.ID, "specified", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, countOf(out, "n_vu_dm"), "Direct タブでも visibleUserIds-only DM が出る")
 	assert.Equal(t, 1, countOf(out, "n_vu_both"))
 
 	// stranger: 宛先でも mention 対象でもないので何も出ない (#1441 gate 整合)。
-	out, err = repo.ListMentions(stranger.ID, "", false, 50, "", "")
+	out, err = repo.ListMentions(stranger.ID, "", false, 50, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, countOf(out, "n_vu_dm"))
 	assert.Equal(t, 0, countOf(out, "n_vu_both"))
@@ -2684,8 +2684,10 @@ func TestNoteRepository_SearchByTag_QueryNormalized(t *testing.T) {
 	assert.NotEmpty(t, notes, "全角 query が NFKC normalize されて match (#1948-18)")
 }
 
-// #1948-18: mentions は sinceId があれば untilId の有無に関わらず ASC で order する
-// (upstream mentions.ts:69)。汎用 paginationOrder (sinceID && !untilID で ASC) と異なる。
+// #1948-18: mentions は ascending=true を渡せば、sinceID と untilID が揃っていても
+// ASC で order する (upstream mentions.ts:69)。汎用 paginationOrder (sinceID && !untilID
+// で ASC) と異なる。sinceId から ascending を決める判定は handler のテスト
+// (TestMentions_SinceDateOrdersAscendingWithUntilID) が受け持つ (#3369)。
 func TestNoteRepository_ListMentions_SinceIDWithUntilID_ASC(t *testing.T) {
 	repo := NewNoteRepository(testDB)
 	author := insertTestUser(t, "mord_a", "mordauthor")
@@ -2698,10 +2700,40 @@ func TestNoteRepository_ListMentions_SinceIDWithUntilID_ASC(t *testing.T) {
 		defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, nid)
 	}
 	// sinceID + untilID 両方指定: upstream は ASC。
-	out, err := repo.ListMentions(target.ID, "", false, 50, "mord0", "mord9")
+	out, err := repo.ListMentions(target.ID, "", false, 50, "mord0", "mord9", true)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(out), 2)
 	assert.True(t, out[0].ID < out[1].ID, "sinceId 指定時は untilId があっても ASC (#1948-18)")
+}
+
+// 並びは ascending で決まり、カーソルからは決めない (#3369)。本家の notes/mentions に
+// untilId と sinceDate を送ると、makePaginationQuery が sinceDate を捨てて untilId
+// だけで絞るが、並びは sinceDate を見て ASC になる。handler はそのとき untilID だけと
+// ascending=true を渡す。
+func TestNoteRepository_ListMentions_AscendingWithUntilIDOnly(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	author := insertTestUser(t, "masc_a", "mascauthor")
+	target := insertTestUser(t, "masc_t", "masctarget")
+	defer cleanupUser(t, author.ID)
+	defer cleanupUser(t, target.ID)
+	for _, nid := range []string{"masc1", "masc2", "masc3"} {
+		n := &model.Note{ID: nid, UserID: author.ID, Visibility: "public", Mentions: []string{target.ID}}
+		require.NoError(t, testDB.Create(n).Error)
+		defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, nid)
+	}
+	ids := func(notes []*model.Note) []string {
+		out := make([]string, 0, len(notes))
+		for _, n := range notes {
+			out = append(out, n.ID)
+		}
+		return out
+	}
+	asc, err := repo.ListMentions(target.ID, "", false, 2, "", "masc3", true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"masc1", "masc2"}, ids(asc))
+	desc, err := repo.ListMentions(target.ID, "", false, 2, "", "masc3", false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"masc2", "masc1"}, ids(desc))
 }
 
 // #1683 query (外側OR・内側AND) の複合タグ検索を実 SQL で検証する。

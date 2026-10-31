@@ -42,7 +42,7 @@ func (h *Handler) Clips(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -119,7 +119,7 @@ func (h *Handler) Flashs(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -187,7 +187,7 @@ func (h *Handler) GalleryPosts(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -295,7 +295,7 @@ func (h *Handler) Pages(c echo.Context) error {
 		return c.JSON(http.StatusOK, []any{})
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	cursorSince, cursorUntil, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	cursorSince, cursorUntil, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

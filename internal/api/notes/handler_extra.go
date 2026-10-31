@@ -366,7 +366,7 @@ func (h *Handler) Mentions(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -383,7 +383,12 @@ func (h *Handler) Mentions(c echo.Context) error {
 	// 種別で埋まると limit 未満になる under-fill が起きていた。
 	// following=true のとき followee + 自分の note のみに絞る (upstream
 	// mentions.ts following param、#1554)。
-	notes, err := h.noteRepo.ListMentions(user.ID, req.Visibility, req.Following, limit, sinceID, untilID)
+	// 本家は並びを `(ps.sinceDate || ps.sinceId) ? 'ASC' : 'DESC'` で決める。
+	// makePaginationQuery が捨てた sinceDate も並びには効くので、カーソルとは別に
+	// 渡す (#3369)。日付の0は本家でも偽。
+	sinceDate := req.SinceDate.Int64Ptr()
+	ascending := req.SinceID != "" || (sinceDate != nil && *sinceDate != 0)
+	notes, err := h.noteRepo.ListMentions(user.ID, req.Visibility, req.Following, limit, sinceID, untilID, ascending)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -562,7 +567,7 @@ func (h *Handler) SearchByTag(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}

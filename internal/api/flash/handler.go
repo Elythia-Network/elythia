@@ -262,17 +262,29 @@ type SearchRequest struct {
 	UntilDate *jsnum.Int `json:"untilDate"`
 }
 
-// My handles POST /api/i/flashs and POST /api/flash/my (own list).
+// My handles POST /api/flash/my (own list).
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
 func (h *Handler) My(c echo.Context) error {
+	return h.my(c, id.NormalizeCursorIDFirst)
+}
+
+// IFlashs handles POST /api/i/flashs, Elythia's alias of flash/my.
+//
+// 本家の flash/my は ID があれば日付を捨てる (makePaginationQuery) が、本家に無い
+// i/flashs は以前の向きごとの組み合わせを残す (#3369)。
+func (h *Handler) IFlashs(c echo.Context) error {
+	return h.my(c, id.NormalizeCursor)
+}
+
+func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error {
 	user := middleware.GetUser(c)
 	var req PaginationRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := normalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -318,7 +330,7 @@ func (h *Handler) Search(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -384,6 +396,16 @@ func (h *Handler) Unlike(c echo.Context) error {
 // row id, frontend は it.flash で MkPlayPreview を描画)。mk-go は元々
 // flatten された Flash 配列を返しており frontend が空表示になっていた。
 func (h *Handler) MyLikes(c echo.Context) error {
+	return h.myLikes(c, id.NormalizeCursorIDFirst)
+}
+
+// IFlashsLikes handles POST /api/i/flashs/likes, Elythia's alias of
+// flash/my-likes. IFlashs と同じく、以前の向きごとの組み合わせを残す (#3369)。
+func (h *Handler) IFlashsLikes(c echo.Context) error {
+	return h.myLikes(c, id.NormalizeCursor)
+}
+
+func (h *Handler) myLikes(c echo.Context, normalizeCursor id.CursorNormalizer) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PaginationRequest
@@ -394,7 +416,7 @@ func (h *Handler) MyLikes(c echo.Context) error {
 		return apierr.JSONInvalidParam(c)
 	}
 	// sinceDate / untilDate を aidx prefix に正規化 (#1166)。
-	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
+	sinceID, untilID, cursorOK := normalizeCursor(req.SinceID, req.UntilID, req.SinceDate.Int64Ptr(), req.UntilDate.Int64Ptr())
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
