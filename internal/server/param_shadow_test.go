@@ -393,13 +393,21 @@ var apiRegistrationAllowed = map[string]string{
 	`api.Any("/*", apiCatchall)`: "router.go",
 	// プラグインのroute(/api/plugin/<名前>/...)。Elythia独自で、goldenに無い。
 	`api.Group(pluginRoutePrefix+def.Name, middleware.RejectAppToken())`: "plugin_wiring.go",
+	// 上の登録をするsetupPluginsへ、/apiのgroupを渡す。
+	`s.setupPlugins(api.Group, registeredPlugins, openPluginStorage)`: "router.go",
 }
 
 // apiBypassingRegistration matches a registration on the /api group that
-// does not go through apiRoutes' POST / Match / GET, and one on the echo
-// instance under /api/.
+// does not go through apiRoutes' POST / Match / GET, a use of the /api group
+// as a value (passed to a function or aliased), and one on the echo instance
+// under /api/.
+//
+// **値として使う`api.Group`も落とす (#3369 I10)。** `addXRoutes(api.Group, h)`や
+// `g := api.Group`を通すと、受け取った側の登録はどの名前の走査にも掛からない。
 var apiBypassingRegistration = regexp.MustCompile(
-	`\bapi\.(?:Group\.|Group\(|Add\(|Any\(|PUT\(|PATCH\(|DELETE\(|HEAD\(|OPTIONS\(|CONNECT\(|TRACE\(|RouteNotFound\()[^\n]*` +
+	`[\w.]+\(api\.Group\b[^\n]*?\)` +
+		`|\bapi\.Group(?:[^.(\w]|$)[^\n]*` +
+		`|\bapi\.(?:Group\.|Group\(|Add\(|Any\(|PUT\(|PATCH\(|DELETE\(|HEAD\(|OPTIONS\(|CONNECT\(|TRACE\(|RouteNotFound\()[^\n]*` +
 		`|\becho\.(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Add|Any|Match)\([^\n]*"/api/[^\n]*`)
 
 // TestAPIRegistrationsGoThroughAPIRoutes is the gate of the #3677 review
@@ -408,9 +416,7 @@ var apiBypassingRegistration = regexp.MustCompile(
 //
 // 名前で見る走査なので、普通に書いたときに踏む形(api.Group.POST、api.Add、
 // api.PUTなど)だけを落とす。次の形は見つけられない(docs/gates.mdの既知の限界)。
-//   - *echo.Group型の引数で受け取ったgroupへの登録(registerX(api.Group))
 //   - s.echo.Group("/api")で作った別のgroupへの登録
-//   - g := api.Groupのような別名を通した登録
 //   - "/api/"を定数で書いたs.echo.POST
 //   - e := s.echoのようにechoを別名にしたe.POST("/api/x", h)
 //   - pathをraw stringで書いたs.echo.POST(`/api/x`, h)
@@ -455,6 +461,10 @@ func TestAPIBypassingRegistrationPattern(t *testing.T) {
 		`api.PUT("/x", h)`,
 		`s.echo.POST("/api/notes/create", h)`,
 		`e.echo.Match(methods, "/api/x", h)`,
+		`addXRoutes(api.Group, h)`,
+		`registerX(h, api.Group)`,
+		`g := api.Group`,
+		`return api.Group`,
 	} {
 		assert.True(t, apiBypassingRegistration.MatchString(line), line)
 	}
@@ -465,6 +475,7 @@ func TestAPIBypassingRegistrationPattern(t *testing.T) {
 		`api.Use(mw)`,
 		`s.echo.GET("/api.json", h)`,
 		`apiGroup.PUT("/x", h)`,
+		`api.Groups("/x")`,
 	} {
 		assert.False(t, apiBypassingRegistration.MatchString(line), line)
 	}

@@ -174,13 +174,11 @@ go/types へ移せば消える。
 **既知の限界 (`TestAPIRegistrationsGoThroughAPIRoutes`、#3677)**: このテストは、`apiRoutes` の
 `POST` / `Match` / `GET` を通らない /api の登録 (`withParamShadow` と `requireObjectBody` が
 付かない) を、**名前の正規表現**で探す。落とすのは、普通に書いたときに踏む形 (`api.Group.POST`、
-`api.Group.Add`、`api.Add`、`api.PUT`、`"/api/..."` を書いた `s.echo.POST` など) だけである。
-次の形は拾わない。
+`api.Group.Add`、`api.Add`、`api.PUT`、`"/api/..."` を書いた `s.echo.POST` など) と、`/api` の
+group を値として使う形 (`registerX(api.Group)` のように関数へ渡す、`g := api.Group` のように
+別名にする。#3369) だけである。次の形は拾わない。
 
-- `*echo.Group` 型の引数で受け取った group に登録する (`registerX(api.Group)` と
-  `func registerX(g *echo.Group)`)
 - `s.echo.Group("/api")` で別の group を作って登録する
-- `g := api.Group` のように別名を通して登録する
 - path の `"/api/"` を定数や変数で書いて `s.echo.POST` に渡す
 - `e := s.echo` のように echo のインスタンスを別名にして、`e.POST("/api/x", h)` と書く
 - path を raw string (`` s.echo.POST(`/api/x`, h) ``) で書く
@@ -188,9 +186,8 @@ go/types へ移せば消える。
 この列挙は、敵対的レビュー (#3677 の 2 周目と 3 周目) で確かめた形で、網羅ではない。
 
 許可した登録 (`apiRegistrationAllowed`) は、書いてあるファイルでだけ許す (#3697)。catchall を
-`router.go` から `routes_<領域>.go` へ移すと落ちる。1 つ目の形のうち、`register…Routes` という
-名前の関数で最初の引数を `apiRoutes` 以外にしたものは、`internal/server` の
-`TestSetupRoutesCallsEveryRouteRegistrarOnce` が落とす。名前が違う関数は、そこでも拾わない。
+`router.go` から `routes_<領域>.go` へ移すと落ちる。`api.Group` を値として渡す許可は、
+プラグインのルートを登録する `s.setupPlugins(api.Group, …)` (`router.go`) だけにある。
 
 本家の golden にある endpoint をこれらの形へ移すと、`TestAPICompatDoc_MatchesRouter` と
 `TestParamShadowChangesNoResponse` が別の理由で落とす (#3677 の敵対的レビュー 2 周目で実測)。
