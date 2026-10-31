@@ -155,10 +155,10 @@ func (r *followingRepository) Create(f *model.Following) error {
 	return nil
 }
 
-// FollowingEstablisher creates a following together with the writes that must
-// not be separated from it. It is implemented by the repository returned from
-// NewFollowingRepository; following.Service falls back to separate writes for
-// test doubles that do not implement it.
+// FollowingEstablisher creates and deletes a following together with the
+// writes that must not be separated from it. It is implemented by the
+// repository returned from NewFollowingRepository; following.Service falls
+// back to separate writes for test doubles that do not implement it.
 type FollowingEstablisher interface {
 	// CreateEstablished deletes the follow request of the same pair, inserts
 	// f and, when opts.IncrementCounts is set, adds 1 to the follower's
@@ -170,6 +170,11 @@ type FollowingEstablisher interface {
 	// the pair already follows, ErrNotFound otherwise. A unique violation of
 	// the insert is returned as is, with nothing written.
 	CreateEstablished(f *model.Following, opts EstablishFollowingOpts) (requestDeleted bool, err error)
+	// DeleteEstablished deletes f and, when decrementCounts is set, subtracts
+	// 1 from the follower's followingCount and the followee's followersCount,
+	// in one transaction. When f is already gone, nothing is written and
+	// ErrNotFound is returned.
+	DeleteEstablished(f *model.Following, decrementCounts bool) error
 }
 
 // ErrFollowingAlreadyExists is returned by CreateEstablished with
@@ -225,29 +230,67 @@ func (r *followingRepository) CreateEstablished(f *model.Following, opts Establi
 		if !opts.IncrementCounts {
 			return nil
 		}
-		// **user の行は id の昇順でロックする。** A→B と B→A のフォローが同時に
-		// 走ると、書いた順にロックを取るので互いを待ってデッドロックになる。
-		// 列が違うだけなので、順序を入れ替えても結果は変わらない。
-		updates := []struct{ id, column string }{
-			{f.FollowerID, "followingCount"},
-			{f.FolloweeID, "followersCount"},
-		}
-		if updates[1].id < updates[0].id {
-			updates[0], updates[1] = updates[1], updates[0]
-		}
-		for _, u := range updates {
-			if err := tx.Model(&model.User{}).Where("id = ?", u.id).
-				UpdateColumn(u.column, gorm.Expr(`"`+u.column+`" + 1`)).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+		return addFollowCounts(tx, f, 1)
 	})
 	if err != nil {
 		return false, err
 	}
 	r.rc.Invalidate(RelationFollowing, f.FollowerID)
 	return requestDeleted, nil
+}
+
+// DeleteEstablished implements FollowingEstablisher.
+//
+// 別々に書くと、行を消した後のカウントの減算が DB の障害で失敗したとき、行は
+// 消えたままカウント・配送・hook が欠け、再試行は「フォローしていない」で止まる。
+// また、同じ組の解除が同時に走ると、後の方は 0 件を消してカウントだけをもう
+// 一度減らしていた。消した件数を見て、0 件なら何も書かない (#3369)。
+func (r *followingRepository) DeleteEstablished(f *model.Following, decrementCounts bool) error {
+	// 利用者の削除 (user の行 → CASCADE で following) とは書く順が逆なので、
+	// CreateEstablished と同じく、同じ組の解除と削除が重なると片方がデッドロック
+	// (40P01) で落ちうる。ロールバックで状態は壊れず、再試行で済むので揃えない。
+	var owners []string
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Raw(`DELETE FROM "following" WHERE "id" = ? RETURNING "followerId"`, f.ID).
+			Scan(&owners).Error; err != nil {
+			return err
+		}
+		if len(owners) == 0 {
+			return ErrNotFound
+		}
+		if !decrementCounts {
+			return nil
+		}
+		return addFollowCounts(tx, f, -1)
+	})
+	if err != nil {
+		return err
+	}
+	r.rc.Invalidate(RelationFollowing, append(owners, f.FollowerID)...)
+	return nil
+}
+
+// addFollowCounts adds delta to the follower's followingCount and the
+// followee's followersCount of f within tx.
+//
+// **user の行は id の昇順でロックする。** A→B と B→A のフォロー (解除) が同時に
+// 走ると、書いた順にロックを取るので互いを待ってデッドロックになる。列が違う
+// だけなので、順序を入れ替えても結果は変わらない。
+func addFollowCounts(tx *gorm.DB, f *model.Following, delta int) error {
+	updates := []struct{ id, column string }{
+		{f.FollowerID, "followingCount"},
+		{f.FolloweeID, "followersCount"},
+	}
+	if updates[1].id < updates[0].id {
+		updates[0], updates[1] = updates[1], updates[0]
+	}
+	for _, u := range updates {
+		if err := tx.Model(&model.User{}).Where("id = ?", u.id).
+			UpdateColumn(u.column, gorm.Expr(`"`+u.column+`" + ?`, delta)).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *followingRepository) Delete(f *model.Following) error {

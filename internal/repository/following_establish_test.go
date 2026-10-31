@@ -228,3 +228,150 @@ func TestCreateEstablishedMutualFollowDoesNotDeadlock(t *testing.T) {
 		assert.Equal(t, [2]int{1, 1}, [2]int{ub.FollowingCount, ub.FollowersCount})
 	}
 }
+
+func TestDeleteEstablishedDeletesAndDecrements(t *testing.T) {
+	fx := newEstablishFixture(t, "del_ok")
+	f := fx.following("del_ok_f")
+	_, err := newEstablisher(t).CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+	require.NoError(t, err)
+	require.NoError(t, newEstablisher(t).DeleteEstablished(f, true))
+	followings, _, following, followers := fx.state()
+	assert.EqualValues(t, 0, followings)
+	assert.Equal(t, 0, following)
+	assert.Equal(t, 0, followers)
+}
+
+func TestDeleteEstablishedWithoutCounts(t *testing.T) {
+	fx := newEstablishFixture(t, "del_plain")
+	f := fx.following("del_plain_f")
+	_, err := newEstablisher(t).CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+	require.NoError(t, err)
+	require.NoError(t, newEstablisher(t).DeleteEstablished(f, false))
+	followings, _, following, followers := fx.state()
+	assert.EqualValues(t, 0, followings)
+	assert.Equal(t, 1, following, "counts are left to the caller when decrementCounts is off (moved accounts)")
+	assert.Equal(t, 1, followers)
+}
+
+// 消す行が無ければ、カウントを減らさずに ErrNotFound を返す。同じ組の解除が
+// 同時に走ったとき、後の方がカウントを二重に減らさないため (#3369)。
+func TestDeleteEstablishedGoneRowWritesNothing(t *testing.T) {
+	fx := newEstablishFixture(t, "del_gone")
+	f := fx.following("del_gone_f")
+	_, err := newEstablisher(t).CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+	require.NoError(t, err)
+	require.NoError(t, newEstablisher(t).DeleteEstablished(f, true))
+	require.ErrorIs(t, newEstablisher(t).DeleteEstablished(f, true), ErrNotFound)
+	_, _, following, followers := fx.state()
+	assert.Equal(t, 0, following)
+	assert.Equal(t, 0, followers)
+}
+
+// カウントの減算が失敗しても、行を消したままにしない (#3369)。
+func TestDeleteEstablishedRollsBackOnFailure(t *testing.T) {
+	for i, side := range []string{"follower", "followee"} {
+		t.Run(side+" count fails", func(t *testing.T) {
+			prefix := []string{"del_rb_a", "del_rb_b"}[i]
+			fx := newEstablishFixture(t, prefix)
+			f := fx.following(prefix + "_f")
+			_, err := newEstablisher(t).CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+			require.NoError(t, err)
+			failed := fx.follower
+			if side == "followee" {
+				failed = fx.followee
+			}
+			failOn(t, prefix+"_trg", "UPDATE", "user", "NEW", "id", failed)
+			require.Error(t, newEstablisher(t).DeleteEstablished(f, true))
+			followings, _, following, followers := fx.state()
+			assert.EqualValues(t, 1, followings, "the following row is rolled back")
+			assert.Equal(t, 1, following)
+			assert.Equal(t, 1, followers)
+		})
+	}
+}
+
+// A→B と B→A を同時に解除しても、デッドロックにならない (#3369)。重なりの
+// 作り方は TestCreateEstablishedMutualFollowDoesNotDeadlock と同じ。
+func TestDeleteEstablishedMutualUnfollowDoesNotDeadlock(t *testing.T) {
+	for round := range 5 {
+		prefix := "del_mut" + string(rune('a'+round))
+		a, b := prefix+"_a", prefix+"_b"
+		insertTestUser(t, a, prefix+"a")
+		insertTestUser(t, b, prefix+"b")
+		t.Cleanup(func() {
+			testDB.Exec(`DELETE FROM "following" WHERE "followerId" IN (?, ?)`, a, b)
+			cleanupUser(t, a)
+			cleanupUser(t, b)
+		})
+		est := newEstablisher(t)
+		fs := []*model.Following{
+			{ID: prefix + "_f0", FollowerID: a, FolloweeID: b},
+			{ID: prefix + "_f1", FollowerID: b, FolloweeID: a},
+		}
+		for _, f := range fs {
+			_, err := est.CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+			require.NoError(t, err)
+		}
+
+		holder := testDB.Begin()
+		require.NoError(t, holder.Error)
+		// 途中で落ちても行を握ったまま残さない (待っている側と後片付けが止まる)。
+		defer holder.Rollback()
+		var held int64
+		require.NoError(t, holder.Raw(`SELECT count(*) FROM (SELECT 1 FROM "user" WHERE id = ? FOR UPDATE) u`, min(a, b)).Scan(&held).Error)
+		require.EqualValues(t, 1, held)
+		var xid string
+		require.NoError(t, holder.Raw(`SELECT xid(pg_current_xact_id())::text`).Scan(&xid).Error)
+
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for _, f := range fs {
+			wg.Go(func() { errs <- est.DeleteEstablished(f, true) })
+		}
+		require.Eventually(t, func() bool {
+			var waiting int64
+			if err := testDB.Raw(`SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted AND (
+	(locktype = 'transactionid' AND transactionid::text = ?) OR
+	(locktype = 'tuple' AND relation = '"user"'::regclass))`, xid).Scan(&waiting).Error; err != nil {
+				return false
+			}
+			return waiting == 2
+		}, 10*time.Second, 10*time.Millisecond, "both must wait on the held user row")
+		require.NoError(t, holder.Rollback().Error)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err, "round %d", round)
+		}
+		var ua, ub model.User
+		require.NoError(t, testDB.First(&ua, "id = ?", a).Error)
+		require.NoError(t, testDB.First(&ub, "id = ?", b).Error)
+		assert.Equal(t, [2]int{0, 0}, [2]int{ua.FollowingCount, ua.FollowersCount})
+		assert.Equal(t, [2]int{0, 0}, [2]int{ub.FollowingCount, ub.FollowersCount})
+	}
+}
+
+// 作成・削除のどちらも、コミットした後に follower のフォローの集合のキャッシュを
+// 無効化する。無効化しないと、解除した相手のフォロワー限定の投稿が TTL の間
+// 見え続ける (#3369)。
+func TestEstablishInvalidatesRelationCache(t *testing.T) {
+	fx := newEstablishFixture(t, "est_rc")
+	rc := NewRelationCache(testDB)
+	est, ok := NewFollowingRepositoryWithRelationCache(testDB, rc).(FollowingEstablisher)
+	require.True(t, ok)
+	followees := func() []string {
+		t.Helper()
+		ids, err := rc.FolloweeIDs(fx.follower)
+		require.NoError(t, err)
+		return ids
+	}
+	require.Empty(t, followees(), "warm the cache with no followees")
+
+	f := fx.following("est_rc_f")
+	_, err := est.CreateEstablished(f, EstablishFollowingOpts{IncrementCounts: true})
+	require.NoError(t, err)
+	assert.Equal(t, []string{fx.followee}, followees(), "a follow is visible right after CreateEstablished")
+
+	require.NoError(t, est.DeleteEstablished(f, true))
+	assert.Empty(t, followees(), "an unfollow is visible right after DeleteEstablished")
+}
