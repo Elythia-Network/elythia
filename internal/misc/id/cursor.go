@@ -61,3 +61,25 @@ func NormalizeCursor(sinceID, untilID string, sinceDate, untilDate *int64) (stri
 	}
 	return sinceID, untilID, true
 }
+
+// NormalizeCursorIDFirst is NormalizeCursor for the endpoints whose upstream
+// passes the dates to QueryService.makePaginationQuery: when sinceID or
+// untilID is given, both dates are ignored (#3369).
+//
+// 本家のページ送りは2通りある。`makePaginationQuery(q, sinceId, untilId,
+// sinceDate, untilDate)` は、IDが1つでもあれば日付の分岐に入らない
+// (`core/QueryService.ts`)。`sinceId`と`untilDate`を一緒に送ると、`untilDate`を
+// 捨てて`sinceId`だけで昇順に返す。一方、timeline系の
+// `ps.untilId ?? (ps.untilDate ? … : null)`は向きごとにIDを優先して日付を足すので、
+// NormalizeCursorと同じになる。どのendpointがどちらの形かは、本家のソースから
+// 作るgolden (`internal/entitycompat/testdata/golden_pagination_cursor.json`) が持つ。
+//
+// 並びの向き (sinceIDだけなら昇順) はrepositoryが見るので、日付を捨てれば本家と
+// 同じ向きになる。日付の0と、列に入らないカーソル (ok=false) の扱いは
+// NormalizeCursorと同じ。
+func NormalizeCursorIDFirst(sinceID, untilID string, sinceDate, untilDate *int64) (string, string, bool) {
+	if sinceID != "" || untilID != "" {
+		sinceDate, untilDate = nil, nil
+	}
+	return NormalizeCursor(sinceID, untilID, sinceDate, untilDate)
+}

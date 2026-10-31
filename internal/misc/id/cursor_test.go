@@ -137,3 +137,42 @@ func TestNormalizeCursor_ZeroDateIsAbsent(t *testing.T) {
 	assert.NotEmpty(t, s)
 	assert.NotEmpty(t, u)
 }
+
+func TestNormalizeCursorIDFirst(t *testing.T) {
+	dateMs := int64(1779744000000)
+	zero := int64(0)
+	datePrefix := AidxCutoffPrefix(time.UnixMilli(dateMs))
+	tests := []struct {
+		name                 string
+		sinceID, untilID     string
+		sinceDate, untilDate *int64
+		wantSince, wantUntil string
+		wantOK               bool
+	}{
+		{name: "sinceId drops untilDate", sinceID: "abc", untilDate: &dateMs, wantSince: "abc", wantOK: true},
+		{name: "untilId drops sinceDate", untilID: "xyz", sinceDate: &dateMs, wantUntil: "xyz", wantOK: true},
+		{name: "sinceId drops sinceDate", sinceID: "abc", sinceDate: &dateMs, wantSince: "abc", wantOK: true},
+		{name: "both ids drop both dates", sinceID: "abc", untilID: "xyz", sinceDate: &dateMs, untilDate: &dateMs, wantSince: "abc", wantUntil: "xyz", wantOK: true},
+		{name: "dates only become cursors", sinceDate: &dateMs, untilDate: &dateMs, wantSince: datePrefix, wantUntil: datePrefix, wantOK: true},
+		{name: "untilDate only", untilDate: &dateMs, wantUntil: datePrefix, wantOK: true},
+		{name: "zero date is absent", sinceDate: &zero, untilDate: &zero, wantOK: true},
+		{name: "nothing", wantOK: true},
+		{name: "unstorable id is rejected", sinceID: "a\x00b", untilDate: &dateMs, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, u, ok := NormalizeCursorIDFirst(tt.sinceID, tt.untilID, tt.sinceDate, tt.untilDate)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				return
+			}
+			assert.Equal(t, tt.wantSince, s)
+			assert.Equal(t, tt.wantUntil, u)
+			// ID が無いときは NormalizeCursor と同じ結果になる。
+			if tt.sinceID == "" && tt.untilID == "" {
+				ns, nu, nok := NormalizeCursor(tt.sinceID, tt.untilID, tt.sinceDate, tt.untilDate)
+				assert.Equal(t, []any{ns, nu, nok}, []any{s, u, ok})
+			}
+		})
+	}
+}
