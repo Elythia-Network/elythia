@@ -94,8 +94,7 @@ func (h *Handler) Users(c echo.Context) error {
 	}
 	// カーソルが無いときは、本家の makePaginationQuery と同じく新しい順 (id の降順)
 	// に返す (#3369)。ListUsers は Sort もカーソルも無いと古い順に並べる。
-	// カーソルがあるときは ListUsers が paginationOrder で並べるので、Sort を
-	// 渡さない (渡すと ORDER BY に Sort の向きが先に入る)。
+	// カーソルがあるときは ListUsers が Sort を無視して paginationOrder で並べる。
 	if req.sinceID == "" && req.untilID == "" {
 		filter.Sort = "+createdAt"
 	}
