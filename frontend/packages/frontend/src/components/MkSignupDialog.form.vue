@@ -250,6 +250,10 @@ const checkUsernameAvailable = debounce(1000, (name: string, signal: AbortSignal
 		if (signal.aborted) return;
 		usernameState.value = result.available ? 'ok' : 'unavailable';
 	}).catch((err) => {
+		// **`.then` と同じく、取り消した後の失敗は捨てる (#3912)。** 応答が
+		// 届いた後に取り消すと、4xx の `body.error` が `AbortError` でないまま
+		// ここへ来る。見ないと、直した名前の状態を `'error'` で上書きする。
+		if (signal.aborted) return;
 		if (err.name !== 'AbortError') {
 			usernameState.value = 'error';
 		}
@@ -294,6 +298,8 @@ const checkEmailAvailable = debounce(1000, (address: string, signal: AbortSignal
 			result.reason === 'smtp' ? 'unavailable:smtp' :
 			'unavailable';
 	}).catch((err) => {
+		// 利用者名欄と同じ理由で、取り消した後の失敗は捨てる。
+		if (signal.aborted) return;
 		if (err.name !== 'AbortError') {
 			emailState.value = 'error';
 		}
