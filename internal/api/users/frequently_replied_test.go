@@ -124,3 +124,26 @@ func TestGetFrequentlyRepliedUsers_BatchLookupErrorIs500(t *testing.T) {
 	rec := postStub(h.GetFrequentlyRepliedUsers, `{"userId":"author"}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+type failingFindUserRepo struct{ *countingUserRepo }
+
+func (r *failingFindUserRepo) FindByID(string) (*model.User, error) {
+	return nil, errors.New("connection refused")
+}
+
+// 対象の利用者を引けないのが DB の障害なら、NO_SUCH_USER でなく500にする。
+// 居ないときだけ NO_SUCH_USER (#3369)。
+func TestGetFrequentlyRepliedUsers_UserLookupErrorIs500(t *testing.T) {
+	h, _, _ := newFrequentlyRepliedHandler(t)
+	rec := postStub(h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NO_SUCH_USER")
+
+	repo := &failingFindUserRepo{&countingUserRepo{MockUserRepository: testutil.NewMockUserRepository()}}
+	noteRepo := testutil.NewMockNoteRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coreuser.NewService(repo, noteRepo, testutil.NewMockUserNotePiningRepository(), idGen, nil)
+	h = NewHandler(svc, nil, noteRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	rec = postStub(h.GetFrequentlyRepliedUsers, `{"userId":"author"}`, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
