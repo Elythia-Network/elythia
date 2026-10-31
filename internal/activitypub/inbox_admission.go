@@ -87,6 +87,40 @@ func VerifyInboxAdmission(parsed *ParsedSignature, hostHeader, expectedHost, dat
 		return errors.New("inbox: missing parsed signature")
 	}
 
+	if err := verifySignedTarget(parsed, hostHeader, expectedHost, dateHeader); err != nil {
+		return err
+	}
+
+	// digest: 署名対象であること。署名されていないと Digest 値が認証されず、
+	// 署名を保ったまま body を差し替えられる。
+	if !containsHeaderFold(parsed.Headers, "digest") {
+		return ErrInboxDigestUnsigned
+	}
+
+	algo, value, ok := splitDigestHeader(digestHeader)
+	if !ok {
+		if strings.TrimSpace(digestHeader) == "" {
+			return ErrInboxDigestMissing
+		}
+		return ErrInboxDigestMalformed
+	}
+	if !strings.EqualFold(algo, "SHA-256") {
+		return ErrInboxDigestAlgo
+	}
+
+	sum := sha256.Sum256(body)
+	want := base64.StdEncoding.EncodeToString(sum[:])
+	if subtle.ConstantTimeCompare([]byte(want), []byte(value)) != 1 {
+		return ErrInboxDigestMismatch
+	}
+	return nil
+}
+
+// verifySignedTarget checks the parts of the admission that bind a signature
+// to this request: the signed (request-target), date and host, the Date's clock
+// skew, and that Host is this server. It is shared by VerifyInboxAdmission and
+// VerifyFetchAdmission.
+func verifySignedTarget(parsed *ParsedSignature, hostHeader, expectedHost, dateHeader string) error {
 	// (request-target) / date: 署名対象であること (upstream parseRequest の必須
 	// header ['(request-target)', 'host', 'date'] 相当、#2087)。host と違い configured
 	// host への依存が無いので expectedHost に関わらず必須。production の正規 peer
@@ -112,28 +146,44 @@ func VerifyInboxAdmission(parsed *ParsedSignature, hostHeader, expectedHost, dat
 			return ErrInboxHostMismatch
 		}
 	}
+	return nil
+}
 
-	// digest: 署名対象であること。署名されていないと Digest 値が認証されず、
-	// 署名を保ったまま body を差し替えられる。
-	if !containsHeaderFold(parsed.Headers, "digest") {
-		return ErrInboxDigestUnsigned
-	}
+// ErrFetchHostNotConfigured is returned by VerifyFetchAdmission when the caller
+// has no host to bind the signature to.
+var ErrFetchHostNotConfigured = errors.New("fetch: expected host is not configured")
 
-	algo, value, ok := splitDigestHeader(digestHeader)
-	if !ok {
-		if strings.TrimSpace(digestHeader) == "" {
-			return ErrInboxDigestMissing
-		}
-		return ErrInboxDigestMalformed
-	}
-	if !strings.EqualFold(algo, "SHA-256") {
-		return ErrInboxDigestAlgo
-	}
+// ErrFetchDateUnreadable is returned by VerifyFetchAdmission when the Date is
+// missing or cannot be parsed, so its clock skew cannot be checked.
+var ErrFetchDateUnreadable = errors.New("fetch: date is missing or unreadable")
 
-	sum := sha256.Sum256(body)
-	want := base64.StdEncoding.EncodeToString(sum[:])
-	if subtle.ConstantTimeCompare([]byte(want), []byte(value)) != 1 {
-		return ErrInboxDigestMismatch
+// VerifyFetchAdmission performs the checks a signed GET must pass before its
+// signer is trusted to read a non-public object (#3914): (request-target),
+// date and host must be signed, Host must equal expectedHost, and the Date must
+// be readable and within InboxDateSkew. There is no body, so there is no Digest
+// check.
+//
+// Unlike VerifyInboxAdmission, an empty expectedHost is an error rather than a
+// skipped check.
+func VerifyFetchAdmission(parsed *ParsedSignature, hostHeader, expectedHost, dateHeader string) error {
+	if parsed == nil {
+		return errors.New("fetch: missing parsed signature")
+	}
+	// **自ホストとの一致を飛ばさない。** 受信と違い、ここを通ると見せない投稿を
+	// 返す。host を縛らないと、ある人が他のサーバーへ送った署名付き GET を、
+	// 受け取ったサーバーがこちらへ送り直すだけで、その人として読める。
+	if expectedHost == "" {
+		return ErrFetchHostNotConfigured
+	}
+	if err := verifySignedTarget(parsed, hostHeader, expectedHost, dateHeader); err != nil {
+		return err
+	}
+	// **読めない Date は通さない。** 受信は upstream に合わせて素通しにしている
+	// (verifyDateSkew) が、それでは読めない Date を署名した GET を期限なく使い
+	// 回せる。正規の peer は HTTP-date を送るので、落としても困るのはここで見せる
+	// 投稿だけで、公開の投稿は署名を見ずに返る。
+	if _, ok := parseSignatureDate(strings.TrimSpace(dateHeader)); !ok {
+		return ErrFetchDateUnreadable
 	}
 	return nil
 }
