@@ -278,10 +278,11 @@ func TestUpdate_NoModeratorCheckerFallsBackToOwnerOnly(t *testing.T) {
 
 func TestFollow_HappyPath(t *testing.T) {
 	svc, repo, followRepo, _ := newSvc(t)
-	repo.Channels["c1"] = &model.Channel{ID: "c1"}
+	repo.Channels["c1"] = &model.Channel{ID: "c1", UsersCount: 3}
 	require.NoError(t, svc.Follow("u1", "c1"))
 	assert.Len(t, followRepo.Followings, 1)
-	assert.Equal(t, 1, repo.Channels["c1"].UsersCount)
+	// usersCount は投稿した人の数で、フォローでは動かない (本家と同じ、#3369)。
+	assert.Equal(t, 3, repo.Channels["c1"].UsersCount)
 }
 
 func TestFollow_ChannelNotFound(t *testing.T) {
@@ -300,10 +301,11 @@ func TestFollow_AlreadyFollowing(t *testing.T) {
 
 func TestUnfollow_HappyPath(t *testing.T) {
 	svc, repo, _, _ := newSvc(t)
-	repo.Channels["c1"] = &model.Channel{ID: "c1"}
+	repo.Channels["c1"] = &model.Channel{ID: "c1", UsersCount: 3}
 	require.NoError(t, svc.Follow("u1", "c1"))
 	require.NoError(t, svc.Unfollow("u1", "c1"))
-	assert.Equal(t, 0, repo.Channels["c1"].UsersCount)
+	// フォローの解除でも usersCount は動かない (#3369)。
+	assert.Equal(t, 3, repo.Channels["c1"].UsersCount)
 }
 
 func TestUnfollow_NotFollowing(t *testing.T) {
@@ -602,6 +604,29 @@ func TestOnNotePosted_UpdatesCounters(t *testing.T) {
 	svc.OnNotePosted("c1", "", "")
 	assert.Equal(t, 1, repo.Channels["c1"].NotesCount)
 	require.NotNil(t, repo.Channels["c1"].LastNotedAt)
+}
+
+// usersCount は初めて投稿した利用者の分だけ増える。判定は repository の 1 文
+// (実 DB のテストは internal/repository) で、ここでは呼び出しの配線を見る。
+func TestOnNotePosted_CountsFirstPostIntoUsersCount(t *testing.T) {
+	svc, repo, _, _ := newSvc(t)
+	repo.Channels["c1"] = &model.Channel{ID: "c1"}
+	svc.OnNotePosted("c1", "n1", "alice")
+	assert.Equal(t, 1, repo.Channels["c1"].UsersCount)
+	svc.OnNotePosted("c1", "n2", "alice")
+	assert.Equal(t, 1, repo.Channels["c1"].UsersCount, "second post by the same author")
+	svc.OnNotePosted("c1", "n3", "bob")
+	assert.Equal(t, 2, repo.Channels["c1"].UsersCount, "another author")
+}
+
+// noteID か authorID が無い呼び出しでは数えない (判定の条件が組めないため)。
+func TestOnNotePosted_SkipsUsersCountWithoutIDs(t *testing.T) {
+	svc, repo, _, _ := newSvc(t)
+	repo.Channels["c1"] = &model.Channel{ID: "c1"}
+	svc.OnNotePosted("c1", "", "alice")
+	svc.OnNotePosted("c1", "n1", "")
+	assert.Equal(t, 0, repo.Channels["c1"].UsersCount)
+	assert.Equal(t, 2, repo.Channels["c1"].NotesCount)
 }
 
 func TestOnNotePosted_FansOutUnreadToFollowers(t *testing.T) {

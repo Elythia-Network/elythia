@@ -172,6 +172,10 @@ type MockChannelRepository struct {
 	Channels  map[string]*model.Channel
 	CreateErr error
 	UpdateErr error
+	// PostedAuthors records the authors IncrementUsersCountOnFirstPost has
+	// seen per channel. The mock treats the first call for an author as the
+	// first post (it has no note table to look at).
+	PostedAuthors map[string]map[string]bool
 }
 
 // NewMockChannelRepository creates an empty MockChannelRepository.
@@ -231,6 +235,28 @@ func (m *MockChannelRepository) IncrementCount(channelID, column string, delta i
 	case "usersCount":
 		c.UsersCount += delta
 	}
+	return nil
+}
+
+// IncrementUsersCountOnFirstPost adds 1 to usersCount on the first call for
+// (channelID, authorID). 実装は note を見て判定するが、mock は呼び出しの記録で
+// 代える。判定そのものは repository の実 DB テストが見ている。
+func (m *MockChannelRepository) IncrementUsersCountOnFirstPost(channelID, authorID, _ string) error {
+	c, ok := m.Channels[channelID]
+	if !ok {
+		return nil
+	}
+	if m.PostedAuthors == nil {
+		m.PostedAuthors = make(map[string]map[string]bool)
+	}
+	if m.PostedAuthors[channelID] == nil {
+		m.PostedAuthors[channelID] = make(map[string]bool)
+	}
+	if m.PostedAuthors[channelID][authorID] {
+		return nil
+	}
+	m.PostedAuthors[channelID][authorID] = true
+	c.UsersCount++
 	return nil
 }
 

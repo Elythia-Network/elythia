@@ -258,11 +258,9 @@ func (s *Service) Follow(userID, channelID string) error {
 		FollowerID: userID,
 		FolloweeID: channelID,
 	}
-	if err := s.followingRepo.Create(f); err != nil {
-		return err
-	}
-	_ = s.repo.IncrementCount(channelID, "usersCount", 1)
-	return nil
+	// usersCount はフォローでは動かさない。本家と同じく、チャンネルに投稿した
+	// 人の数を OnNotePosted で数える (#3369)。
+	return s.followingRepo.Create(f)
 }
 
 // Unfollow removes the follow relationship.
@@ -275,11 +273,7 @@ func (s *Service) Unfollow(userID, channelID string) error {
 		}
 		return ErrNotFollowing
 	}
-	if err := s.followingRepo.Delete(f); err != nil {
-		return err
-	}
-	_ = s.repo.IncrementCount(channelID, "usersCount", -1)
-	return nil
+	return s.followingRepo.Delete(f)
 }
 
 // ListFollowed returns the channels followed by the user. 結果には channel の
@@ -385,7 +379,8 @@ func (s *Service) Timeline(channelID, viewerID, untilID, sinceID string, limit i
 	return s.noteRepo.ListByChannelID(channelID, viewerID, untilID, sinceID, limit)
 }
 
-// OnNotePosted updates lastNotedAt / notesCount and, when unreadRepo is
+// OnNotePosted updates lastNotedAt / notesCount, counts the author into
+// usersCount on their first post in the channel, and, when unreadRepo is
 // wired, fans out per-follower unread rows so /api/i can populate
 // hasUnreadChannel. Best-effort: errors are ignored.
 //
@@ -397,6 +392,11 @@ func (s *Service) OnNotePosted(channelID, noteID, authorID string) {
 	now := s.clock()
 	_ = s.repo.UpdateFields(channelID, map[string]any{"lastNotedAt": &now})
 	_ = s.repo.IncrementCount(channelID, "notesCount", 1)
+	// usersCount は本家と同じく「このチャンネルに投稿した人の数」。初めての投稿の
+	// ときだけ 1 増やす (判定は repository の 1 文で行う、#3369)。
+	if noteID != "" && authorID != "" {
+		_ = s.repo.IncrementUsersCountOnFirstPost(channelID, authorID, noteID)
+	}
 	if s.unreadRepo == nil || noteID == "" {
 		return
 	}
