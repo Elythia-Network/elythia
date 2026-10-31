@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -551,6 +552,23 @@ func TestEmojiRepository_ListV2_Basic(t *testing.T) {
 	rows, err := repo.ListV2(model.EmojiV2Filter{Limit: 10})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(rows), 2)
+}
+
+// 桁あふれする page は、1ページ目でなく空の一覧を返す (#3369)。
+func TestEmojiRepository_ListV2_HugePageIsEmpty(t *testing.T) {
+	repo := NewEmojiRepository(testDB)
+	e1 := &model.Emoji{ID: "ev_hp1", Name: "v2hugepage", OriginalURL: "https://x"}
+	require.NoError(t, repo.Create(e1))
+	defer cleanupEmoji(t, e1.ID)
+
+	for _, page := range []int{math.MaxInt / 2, math.MaxInt} {
+		rows, err := repo.ListV2(model.EmojiV2Filter{Limit: 10, Page: page})
+		require.NoError(t, err, page)
+		assert.Empty(t, rows, page)
+	}
+	rows, err := repo.ListV2(model.EmojiV2Filter{Limit: 10, Page: 1})
+	require.NoError(t, err)
+	assert.NotEmpty(t, rows)
 }
 
 // ValidEmojiUpdatedAtFilter が通す値は、実際の PostgreSQL でも落ちないこと (#3518)。
