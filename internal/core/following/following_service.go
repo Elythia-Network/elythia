@@ -745,9 +745,6 @@ func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) err
 		}
 		return ErrNotFollowing
 	}
-	if err := s.followingRepo.Delete(f); err != nil {
-		return err
-	}
 	// どちらかが移行済みならカウントを触らない。upstream
 	// UserFollowingService.decrementFollowing の
 	// `if (!follower.movedToUri && !followee.movedToUri)` と同じガード。
@@ -756,13 +753,16 @@ func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) err
 	// 調整を先に済ませている (#2418)。ここで無条件に減らすと、後から同じ関係を
 	// unfollow したときに二重に減る。
 	moved := hasMoved(s.userRepo, followerID) || hasMoved(s.userRepo, followeeID)
+	// 行の削除とカウントの減算は、まとめて成功するか何も残さない (#3369)。
+	// 同じ組の解除が同時に走ったときは、後の方が 0 件を消して ErrNotFound に
+	// なるので、カウントを二重に減らさず、配送・hook も重ねない。
+	if err := s.removeFollowing(f, !moved); err != nil {
+		if repository.IsNotFound(err) {
+			return ErrNotFollowing
+		}
+		return err
+	}
 	if !moved {
-		if err := s.userRepo.IncrementFollowingCount(followerID, -1); err != nil {
-			return err
-		}
-		if err := s.userRepo.IncrementFollowersCount(followeeID, -1); err != nil {
-			return err
-		}
 		// remote instance counter -1 (#596)
 		s.adjustInstanceCountsForFollowing(f, -1)
 	}
@@ -1293,10 +1293,43 @@ func (s *Service) establishFollowing(f *model.Following, opts repository.Establi
 	return requestDeleted, nil
 }
 
-// HasFollowingEstablisher reports whether the following repository writes a
-// new following, its follow request and the counts in one transaction, and
-// whether the user repository can drop the users whose counts it wrote.
-// It is checked at startup (#3911).
+// removeFollowing deletes f and optionally decrements the users' counts.
+// It returns repository.ErrNotFound when f is already gone. See
+// repository.FollowingEstablisher for the contract.
+//
+// establishFollowing と同じく、本番の repository は 1 つのトランザクションで
+// 書き、下の別々の書き込みはテスト用の代替だけが通る。
+func (s *Service) removeFollowing(f *model.Following, decrementCounts bool) error {
+	if est, ok := s.followingRepo.(repository.FollowingEstablisher); ok {
+		if err := est.DeleteEstablished(f, decrementCounts); err != nil {
+			return err
+		}
+		// カウントをトランザクションの中で直接書くので、establishFollowing と
+		// 同じく利用者のキャッシュを無効化する。
+		if inv, ok := s.userRepo.(userInvalidator); ok && decrementCounts {
+			inv.Invalidate(f.FollowerID)
+			inv.Invalidate(f.FolloweeID)
+		}
+		return nil
+	}
+	if err := s.followingRepo.Delete(f); err != nil {
+		return err
+	}
+	if decrementCounts {
+		if err := s.userRepo.IncrementFollowingCount(f.FollowerID, -1); err != nil {
+			return err
+		}
+		if err := s.userRepo.IncrementFollowersCount(f.FolloweeID, -1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HasFollowingEstablisher reports whether the following repository creates
+// and deletes a following together with its follow request and the counts in
+// one transaction, and whether the user repository can drop the users whose
+// counts it wrote. It is checked at startup (#3911).
 func (s *Service) HasFollowingEstablisher() bool {
 	_, est := s.followingRepo.(repository.FollowingEstablisher)
 	_, inv := s.userRepo.(userInvalidator)
