@@ -26,6 +26,12 @@ func TestValidateFileName(t *testing.T) {
 		{"japanese", "写真.png", true},
 		{"boundary 200 runes", strings.Repeat("あ", 200), true},
 		{"201 runes", strings.Repeat("あ", 201), false},
+		// 本家は name.length (UTF-16) で数えるので、サロゲートペアの文字は 2 (#3369)
+		{"100 emoji are 200 UTF-16 units", strings.Repeat("\U0001F600", 100), true},
+		{"101 emoji are 202 UTF-16 units", strings.Repeat("\U0001F600", 101), false},
+		// 本家の trim() は U+FEFF を除き、U+0085 を除かない
+		{"BOM only", "\ufeff", false},
+		{"NEL only", "\u0085", true},
 		{"empty", "", false},
 		{"spaces only", "   ", false},
 		{"backslash", `a\b.png`, false},

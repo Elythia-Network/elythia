@@ -42,11 +42,12 @@ func TestAttachmentFileName(t *testing.T) {
 	}
 }
 
-// 列 (varchar(256)) に必ず収まること。ValidateFileName が 200 rune で止めるので
+// 列 (varchar(256)) に必ず収まること。ValidateFileName が UTF-16 で 200 単位
+// (rune でも 200 以下) で止めるので
 // 実際には超えないが、上限の出どころを 1 つにしてある。
 func TestAttachmentFileName_FitsColumn(t *testing.T) {
 	for _, raw := range []string{
-		// ValidateFileName を通る最長 (200 rune)。**percent-encoding 後の長さで
+		// ValidateFileName を通る最長 (ASCII で 200 文字)。**percent-encoding 後の長さで
 		// 数える**ので、非 ASCII は 1 文字 9 rune (%E3%81%82) に膨らむ。
 		"https://m.example/" + strings.Repeat("a", 200),
 		// 通らない側 (fallback に落ちる)。
