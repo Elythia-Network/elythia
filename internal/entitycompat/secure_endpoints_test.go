@@ -45,10 +45,10 @@ func TestSecureDrift(t *testing.T) {
 		t.Fatal(b.String())
 	}
 
-	// **逆向きも見る。** golden にない endpoint に RequireSecure が付いていると、
+	// **逆向きも見る。** 本家の secure の一覧にない endpoint に RequireSecure が付いていると、
 	// upstream ではサードパーティアプリから叩けるものが mk-go だけ 403 になる。
 	// 片方向のままだと、upstream が secure を外したとき (2026.9.0 の
-	// `i/revoke-token` がまさにそれ) に golden から消えるだけで、mk-go 側に
+	// `i/revoke-token` がまさにそれ) に一覧から消えるだけで、mk-go 側に
 	// RequireSecure が残っていても緑のまま通る = 機能が丸ごと死んでいても
 	// 検出できない。
 	//

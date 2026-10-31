@@ -27,7 +27,7 @@ var (
 //
 // **method の一覧の変数は、同じファイルの中だけで引く (#3672)。**
 // `chartMethods := []string{...}` はローカル変数なので、別のファイルの同名の
-// 変数は別物。引けなければ GET を含まない扱いになり、golden 側の
+// 変数は別物。引けなければ GET を含まない扱いになり、本家の allowGet の側の
 // 「GET の route が無い」として落ちる (緩む方向には倒れない)。
 func parseGetRoutes(t *testing.T, paths ...string) map[string]bool {
 	t.Helper()
