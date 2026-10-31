@@ -191,7 +191,7 @@ func TestClean_RechecksBeforeDeletingRequests(t *testing.T) {
 	assert.Zero(t, res.RemovedFollowRequests)
 }
 
-// 同じホストを並行して片付けない (数が二重に減る)。別のホストは並行してよい。
+// 同じホストを並行して片付けない (報告する件数が分かれる。#3369)。別のホストは並行してよい。
 func TestClean_RefusesConcurrentCleanOfTheSameHost(t *testing.T) {
 	h := "gone.example"
 	block := make(chan struct{})
