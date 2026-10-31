@@ -111,6 +111,13 @@ type Handler struct {
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3790、#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
+	// fetchSigner は /notes/:id と /notes/:id/activity の署名付き GET から、署名した
+	// リモートの利用者を特定する (#3914)。未配線なら公開の投稿だけを返す (従来どおり)。
+	fetchSigner FetchSignerAuthenticator
+	// fetchDelivery / fetchDeliverSoftware は、署名した人のホストへ配送するかの
+	// 判定 (#3914)。配送しない相手には見せない投稿を返さない。
+	fetchDelivery        DeliveryGate
+	fetchDeliverSoftware SoftwareSuspensionChecker
 }
 
 // SetLocalFederationObserver wires account-level availability and first-reference tracking.
@@ -1038,11 +1045,11 @@ func (h *Handler) Note(c echo.Context) error {
 		return c.NoContent(http.StatusForbidden)
 	}
 	noteID := c.Param("id")
-	// 公開ノートのみAPでフェッチ可能 (非ログインから取得されるため viewer=nil)。
-	// CanSeeNote(nil) は public / home を通すので、upstream の
-	// visibility ∈ {public, home} フィルタと一致する。
-	n, err := h.queryService.Show(nil, noteID)
-	if err != nil {
+	// 署名の無い GET には公開ノートだけを返す (viewer=nil)。CanSeeNote(nil) は
+	// public / home を通すので、upstream の visibility ∈ {public, home} フィルタと
+	// 一致する。それ以外は、署名した人が見てよいときだけ返す (#3914)。
+	n := h.showNoteForFetch(c, noteID)
+	if n == nil {
 		return c.NoContent(http.StatusNotFound)
 	}
 	h.seedAPNote(c, n)
@@ -1440,15 +1447,15 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
-	n, err := h.queryService.Show(nil, c.Param("id"))
-	if err != nil {
+	n := h.showNoteForFetch(c, c.Param("id"))
+	if n == nil {
 		return c.NoContent(http.StatusNotFound)
 	}
 	h.seedAPNote(c, n)
 	// upstream は userHost: IsNull で**ローカル専用** (リモートノートの activity
-	// はこのサーバーの発行物ではないので、redirect でなく 404)。visibility ∈
-	// {public, home} は CanSeeNote(nil) が担保し、localOnly はここで弾く
-	// (Note と同じ)。
+	// はこのサーバーの発行物ではないので、redirect でなく 404)。visibility は
+	// showNoteForFetch が見て (署名の無い GET には public / home だけ)、localOnly は
+	// ここで弾く (Note と同じ)。
 	if n.UserHost != nil || n.LocalOnly {
 		return c.NoContent(http.StatusNotFound)
 	}

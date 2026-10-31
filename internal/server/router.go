@@ -2086,6 +2086,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		userRepo:                userRepo,
 		noteRepo:                noteRepo,
 		metaRepo:                metaRepo,
+		instanceRepo:            instanceRepo,
 		followingRepo:           followingRepo,
 		followRequestRepo:       followRequestRepo,
 		userRelationRepo:        userRelationRepo,
