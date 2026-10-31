@@ -16,7 +16,7 @@
 # Dockerfile について見る。tag は付け替えられるので digest も併記する
 # (`Dockerfile` と同じ値。runtime の alpine も同じ理由。更新は dependabot の
 # `docker` が digest ごと上げる)。
-FROM golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS builder
+FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 
 RUN apk add --no-cache git build-base
 
