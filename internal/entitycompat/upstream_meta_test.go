@@ -14,16 +14,16 @@ import (
 // gates read, as tools/paramdefspec writes it into upstream_paramdefs.json.
 // A key the meta does not declare is nil.
 type upstreamMeta struct {
-	RequireCredential *bool   `json:"requireCredential"`
-	RequireModerator  *bool   `json:"requireModerator"`
-	RequireAdmin      *bool   `json:"requireAdmin"`
-	RequireRolePolicy *string `json:"requireRolePolicy"`
-	RequireFile       *bool   `json:"requireFile"`
-	ProhibitMoved     *bool   `json:"prohibitMoved"`
-	Secure            *bool   `json:"secure"`
-	AllowGet          *bool   `json:"allowGet"`
-	CacheSec          *int    `json:"cacheSec"`
-	Kind              *string `json:"kind"`
+	RequireCredential  *bool   `json:"requireCredential"`
+	RequireModerator   *bool   `json:"requireModerator"`
+	RequireAdmin       *bool   `json:"requireAdmin"`
+	RequiredRolePolicy *string `json:"requiredRolePolicy"`
+	RequireFile        *bool   `json:"requireFile"`
+	ProhibitMoved      *bool   `json:"prohibitMoved"`
+	Secure             *bool   `json:"secure"`
+	AllowGet           *bool   `json:"allowGet"`
+	CacheSec           *int    `json:"cacheSec"`
+	Kind               *string `json:"kind"`
 }
 
 // upstreamMetas returns endpoint -> meta of the upstream endpoints in the
@@ -65,7 +65,7 @@ func upstreamMetasFrom(golden []byte) (map[string]upstreamMeta, error) {
 		dec.DisallowUnknownFields()
 		var m upstreamMeta
 		if err := dec.Decode(&m); err != nil {
-			return nil, fmt.Errorf("upstream_paramdefs.json: %s.meta: %w", name, err)
+			return nil, fmt.Errorf("upstream_paramdefs.json: %s.meta: %w (a new meta key: add it to upstreamMeta and decide whether a gate must read it; a value of an unexpected type: check tools/paramdefspec/extract.mjs)", name, err)
 		}
 		out[name] = m
 	}
