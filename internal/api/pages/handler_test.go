@@ -119,6 +119,32 @@ func TestUpdate_EyeCatchingImageNoSuchFile(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "cfc23c7c-3887-490e-af30-0ed576703c82")
 }
 
+// 空の eyeCatchingImageId は、検証を飛ばす大きな body でだけ handler に届く。
+// drive_file への外部キー (000139) を破らないよう、画像の無い Page として NULL を
+// 書く (#3369)。
+func TestCreateAndUpdate_EmptyEyeCatchingImageIsNull(t *testing.T) {
+	h, repo, _ := newHandler(t)
+	h.driveFileRepo = testutil.NewMockDriveFileRepository()
+	c, rec := newReq(t, `{"title":"t","name":"alpha","eyeCatchingImageId":"","content":[],"variables":[]}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, repo.Pages, 1)
+	for _, p := range repo.Pages {
+		assert.Nil(t, p.EyeCatchingImageID)
+	}
+
+	img := "img"
+	repo.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice", Name: "beta", Title: "t", EyeCatchingImageID: &img}
+	c, rec = newReq(t, `{"pageId":"p1","eyeCatchingImageId":""}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	last := repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
+	require.Contains(t, last, "eyeCatchingImageId")
+	assert.Nil(t, repo.Pages["p1"].EyeCatchingImageID)
+}
+
 func TestCreate_TitleRequired(t *testing.T) {
 	h, _, _ := newHandler(t)
 	c, rec := newReq(t, `{"name":"alpha"}`)

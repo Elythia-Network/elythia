@@ -73,7 +73,7 @@ id: aidx             # Misskey-TS側のID生成方式と一致させること
 
 Elythiaの追加テーブルを作り、共有テーブルを upstream の形に揃える。**Misskey-TSが書いたデータは原則として保持される** (例外は `000081` / `000084` / `000085` / `000094`、後述)。`000082` も行を DELETE するが、対象は upstream Misskey に無い `transfer-ownership` が作った行だけで TS 由来のものは含まない。
 
-共有テーブルにも触るものが 22 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
+共有テーブルにも触るものが 23 件あるので、内容と、TS へ戻したときの影響 (保証はしない) を[破壊的なマイグレーション](#破壊的なマイグレーション)にまとめてある。**先に読むこと。**
 
 **適用する前に、データベースのバックアップを取ること。** down が何もしない (戻せない) ものがあり、戻す手段はバックアップだけになる。
 
@@ -89,7 +89,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 
 ### 破壊的なマイグレーション
 
-「追加のみ」ではない。共有テーブルに触るものが 22 件ある。**うち 16 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 6 件 (`000081` / `000084` / `000085` / `000094` / `000121` / `000138`) は TS が書いた値にも当たる。ただし `000121` と `000138` が変えるのは値ではなく TS の列の型で、全行を書き直すが、TS が書いた値はそのまま残る (`000121` は `public`、`000138` は数を広い型へ移すだけ)。**
+「追加のみ」ではない。共有テーブルに触るものが 23 件ある。**うち 17 件は Elythia 側だけが作るもの (列 / FK / index / seed / 重複行 / 譲渡が残した membership) の除去、その初期化、または upstream 追随で、Misskey-TS が書いた列の値には影響しない。残る 6 件 (`000081` / `000084` / `000085` / `000094` / `000121` / `000138`) は TS が書いた値にも当たる。ただし `000121` と `000138` が変えるのは値ではなく TS の列の型で、全行を書き直すが、TS が書いた値はそのまま残る (`000121` は `public`、`000138` は数を広い型へ移すだけ)。**
 
 | migration | 内容 | 位置づけ |
 |---|---|---|
@@ -114,6 +114,7 @@ docker compose exec app /app/elythia migrate -config .config/default.yml -direct
 | `000121` | `page."visibility"` の型 `page_visibility_enum` を (`public`, `followers`, `specified`) から (`public`, `private`) に作り替え、`followers` / `specified` の行を `private` に `UPDATE` | **Elythia の機能 (#3479)。** Page に作者だけが見られる `private` を足し、派生版の一つと同じ 2 値にする。本家は作成時に必ず `public` を書き、公開範囲を選ぶ API も画面も持たないので、**TS が書いた行は `public` のまま変わらない**。`followers` / `specified` の行を作れたのは、#3479 より前の Elythia の API だけ。enum が既に 2 値なら何もしない。down は 3 値に戻し、`private` の行を `specified` にする (`followers` だった行と `specified` だった行の区別は戻らない)。TS へ戻したときの影響は「[戻らなくなったもの](#戻らなくなったもの)」の上の段落にある |
 | `000133` | `user_profile."mutedWords"` / `"hardMutedWords"` の要素のうち `/.../` の形でない文字列を、同じ語の組 (`"foo"` → `["foo"]`) に `UPDATE`。空白だけの文字列は消す | **Elythia が自分で受け付けた値の書き換え** (#3369)。本家の `i/update` は `/.../` の形 (JavaScript の `^\/(.+)\/(.*)$`、flags は問わない) でない文字列を `INVALID_REGEXP` で拒否し、本家の frontend も作らない。000133 はこの形の文字列 (`/foo/v` なども) を正規表現として残すので、**TS が書いた行は変わらない**。`hardMutedWords` では、#3369 より前の Elythia のサーバーが読んでいた Go の形 (`^/(.+)/([gimsuy]*)$`) も残す。Go の形にだけ当たる文字列 (パターンの中に `\r` や U+2028 を含むもの) は、残しても以後の判定 (JavaScript の形) では何にも当たらない (語の組にしても当たらない)。`mutedWords` の書き換えは、以前は効いていなかった (frontend は `/.../` でない文字列を当てない) 語を効かせ始める。#3369 より前の Elythia の `i/update` だけが受け付けていた。語の組は本家でも有効な形なので、TS へ戻しても読める。down は戻さない (元が文字列か語の組かを区別できない) |
 | `000137` | 従来のローカルユーザーを外部参照済みとして記録し、`user` / `user_pending` の状態制約を検証 | **Elythia が追加した列への backfill と検証。** legacy local account を不可逆な OFF 切替から保護する。down は安全印を保持するため no-op |
+| `000139` | `page."eyeCatchingImageId"` のうち、どの `drive_file` も指していない id と空文字を NULL に `UPDATE` し、本家と同じ名前の外部キー `FK_a9ca79ad939bf06066b81c9d3aa` (`drive_file` へ `ON DELETE SET NULL`) を足す | **upstream 追随** (#3369)。本家 `1756062689648-NonCascadingPageEyeCatching.js` と同じ外部キーにする。Elythia は列だけを作っていたので、drive file を消すと消えた id が残っていた。**TS 製 DB には元から本家の外部キーがあるので、`ON DELETE SET NULL` なら何もしない** (名前と削除時の動作で見る。外部キーがあれば消えた id は残りえないので `UPDATE` も当たらない)。本家の `NonCascadingPageEyeCatching` より前の TS 製 DB に残る `ON DELETE CASCADE` の外部キー (同じ名前か、さらに古い `FK_3126dd7c502c9e4d7597ef7ef10`) は、本家と同じく落としてから張り直す。NULL にする値は表示に使われていなかった (見つからない画像は null として返していた) もので、down でも戻らない |
 | `000138` | `__chart__instance` / `__chart_day__instance` の `___requests_failed` / `___requests_succeeded` / `___requests_received` を `smallint` から `integer` へ広げる | **Elythia の変更 (#3873)。** 本家は `range: 'small'` で 32767 が上限になり、大きなサーバーとの間の 1 日の数が頭打ちになる。値はそのまま移る。down は `smallint` へ戻し、32767 を超えた値を 32767 に切り詰める (`-- data loss:`)。TS へ戻したときの扱いは下記 |
 
 #### `000081` について
@@ -323,7 +324,7 @@ Elythia のコンテナは Misskey-TS と同じ **UID/GID 991** で起動する�
 
 今の版でどこまで戻れるかは、`make dropin-elythia-born-test` (Elythia 生まれの DB を TS に引き渡す) と `make dropin-swap-test` の復路の段階 (TS → Elythia → TS) で**測っている**。どちらも守る対象ではなく、意図的な変更で通らなくなったら期待値を更新し、何が戻らなくなったかを下の「[戻らなくなったもの](#戻らなくなったもの)」に記録する (手順は [dropin-e2e.md](dropin-e2e.md#復路は測る対象-3191))。Elythia が追加したテーブルは Misskey-TS からは無視される。
 
-[破壊的なマイグレーション](#破壊的なマイグレーション) の 22 件は戻らない。うち 16 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。`000137` が追加した初回参照印も安全のため保持する。`000138` は型を広げるだけなので、TS は down を流さなくてもそのまま読める。down で `smallint` へ戻すこともできるが、32767 を超えた値は切り詰められる (下記)。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-elythia-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
+[破壊的なマイグレーション](#破壊的なマイグレーション) の 23 件は戻らない。うち 17 件は Elythia が自分で作ったものの除去・初期化か upstream 追随なので**戻す必要が無い**。`000056` / `000081` / `000082` が消した行と `000053` / `000067` / `000084` / `000085` が上書きした値は、down が `SELECT 1;` の no-op なので復元できない。`000137` が追加した初回参照印も安全のため保持する。`000138` は型を広げるだけなので、TS は down を流さなくてもそのまま読める。down で `smallint` へ戻すこともできるが、32767 を超えた値は切り詰められる (下記)。**`000094` は down を持つが、それでも戻らない** — 消すのは自分で足した列と index だけで、正規化した `ip` の値と統合で消えた行は復元できない (統合前の行数も個別の観測時刻も残っていない)。**`000084` / `000085` が書き換えるのは `meta."repositoryUrl"` と `meta."feedbackUrl"` なので、TS へ戻すときは admin 画面で設定し直すこと** (Elythia のリポジトリと issues を案内したままになる)。この経路を CI で測っているのは `make dropin-swap-test` (TS → Elythia → TS) で、`make dropin-elythia-born-test` は逆に Elythia 生まれの DB を TS に引き渡せるかを見ている。
 
 migration の注記やコードのコメントには、TS へ戻せることを設計の理由にした記述が残っている。**それらは当時の判断の記録で、今は保証ではない。** 往路にも要る制約 (upstream 由来の index を触らない、TS が書いた RSA 鍵のテーブルをそのまま読む、など) は、往路の理由で引き続き守る。
 

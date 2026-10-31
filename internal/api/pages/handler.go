@@ -142,6 +142,7 @@ func (h *Handler) Create(c echo.Context) error {
 	if !h.eyeCatchingImageOK(req.EyeCatchingImageID, user.ID) {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "b7b97489-0f66-4b12-a5ff-b21bd63f6e1c"))
 	}
+	req.EyeCatchingImageID = nilIfEmpty(req.EyeCatchingImageID)
 	p, err := h.svc.Create(corepage.CreateInput{
 		OwnerID:             user.ID,
 		Title:               *req.Title,
@@ -166,6 +167,19 @@ func (h *Handler) Create(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	return c.JSON(http.StatusOK, h.pageToMap(p))
+}
+
+// nilIfEmpty returns nil for an empty eyeCatchingImageId.
+//
+// 空文字は本家の paramDef (misskey:id) が拒否するが、検証を飛ばす大きな body では
+// handler まで届く。eyeCatchingImageId には drive_file への外部キーがある (000139)
+// ので、空文字を書くと外部キーの違反で 500 になる。画像の無い Page として NULL を
+// 書く (#3369)。
+func nilIfEmpty(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
 }
 
 // eyeCatchingImageOK reports whether imageID (when non-nil / non-empty) refers
@@ -343,7 +357,8 @@ func (h *Handler) Update(c echo.Context) error {
 		in.Summary = &req.Summary.Value
 	}
 	if req.EyeCatchingImageID.Present {
-		in.EyeCatchingImageID = &req.EyeCatchingImageID.Value
+		image := nilIfEmpty(req.EyeCatchingImageID.Value)
+		in.EyeCatchingImageID = &image
 	}
 	if req.Content != nil {
 		in.Content = req.Content
