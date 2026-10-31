@@ -218,6 +218,37 @@ func TestUsers_CursorUntilID(t *testing.T) {
 	assert.Equal(t, "u1", rows[1]["id"])
 }
 
+// listUsersRecorder records the filters ListUsers was called with.
+type listUsersRecorder struct {
+	*testutil.MockUserRepository
+	filters []model.UserListFilter
+}
+
+func (r *listUsersRecorder) ListUsers(f model.UserListFilter) ([]*model.User, error) {
+	r.filters = append(r.filters, f)
+	return r.MockUserRepository.ListUsers(f)
+}
+
+// federation/users はカーソルが無いと、本家の makePaginationQuery と同じく新しい順
+// (+createdAt = id の降順) に返す (#3369)。カーソルがあるときは Sort を渡さず、
+// repository の paginationOrder に任せる。
+func TestUsers_NewestFirstWithoutCursor(t *testing.T) {
+	h, _ := newHandler(t)
+	rec := &listUsersRecorder{MockUserRepository: testutil.NewMockUserRepository()}
+	h.SetUserRepo(rec)
+	for _, body := range []string{
+		`{"host":"remote.example"}`,
+		`{"host":"remote.example","sinceId":"u1"}`,
+		`{"host":"remote.example","untilId":"u3"}`,
+	} {
+		require.Equal(t, http.StatusOK, postBody(h.Users, body).Code, body)
+	}
+	require.Len(t, rec.filters, 3)
+	assert.Equal(t, "+createdAt", rec.filters[0].Sort)
+	assert.Empty(t, rec.filters[1].Sort)
+	assert.Empty(t, rec.filters[2].Sort)
+}
+
 // #1957-a: federation/users の embed user に viewer 視点の relation block が乗る。
 // 認証 viewer が remote user を follow していれば isFollowing=true、匿名なら省略。
 func TestUsers_EmbedsViewerRelation(t *testing.T) {

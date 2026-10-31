@@ -85,13 +85,21 @@ func (h *Handler) Users(c echo.Context) error {
 	if h.userRepo == nil || req.host == "" {
 		return c.JSON(http.StatusOK, []any{})
 	}
-	users, err := h.userRepo.ListUsers(model.UserListFilter{
+	filter := model.UserListFilter{
 		Origin:   "remote",
 		Hostname: req.host,
 		Limit:    req.limit,
 		SinceID:  req.sinceID,
 		UntilID:  req.untilID,
-	})
+	}
+	// カーソルが無いときは、本家の makePaginationQuery と同じく新しい順 (id の降順)
+	// に返す (#3369)。ListUsers は Sort もカーソルも無いと古い順に並べる。
+	// カーソルがあるときは ListUsers が paginationOrder で並べるので、Sort を
+	// 渡さない (渡すと ORDER BY に Sort の向きが先に入る)。
+	if req.sinceID == "" && req.untilID == "" {
+		filter.Sort = "+createdAt"
+	}
+	users, err := h.userRepo.ListUsers(filter)
 	if err != nil {
 		return apierr.JSONInternalError(c)
 	}
