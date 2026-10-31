@@ -13,6 +13,9 @@ type ChannelRepository interface {
 	FindByIDs(ids []string) ([]*model.Channel, error)
 	UpdateFields(channelID string, fields map[string]any) error
 	IncrementCount(channelID, column string, delta int) error
+	// IncrementUsersCountOnFirstPost adds 1 to usersCount when noteID is the
+	// author's earliest note in the channel, i.e. the author's first post there.
+	IncrementUsersCountOnFirstPost(channelID, authorID, noteID string) error
 	List(filter model.ChannelListFilter) ([]*model.Channel, error)
 }
 
@@ -66,6 +69,38 @@ func (r *channelRepository) IncrementCount(channelID, column string, delta int) 
 	return r.db.Model(&model.Channel{}).
 		Where("id = ?", channelID).
 		UpdateColumn(column, gorm.Expr("\""+column+"\" + ?", delta)).Error
+}
+
+// IncrementUsersCountOnFirstPost adds 1 to the channel's usersCount when the
+// note noteID (already stored, by authorID in channelID) is the author's
+// earliest note in the channel.
+//
+// 本家は投稿を作った後に (userId, channelId) の note を数え、1 なら加算する。
+// 同じ利用者がすばやく 2 回投稿すると、両方の数え上げが 2 を見て 1 回も加算
+// されないことがある。ここでは「この投稿より id の小さい投稿がそのチャンネルに
+// 無い」を条件にして、条件と加算を 1 文で書く (#3369)。id は時刻順の aidx なので、
+// 同時の投稿でも多くの場合は最初の 1 件だけが加算する。
+//
+// ただし id は INSERT の前に作られ、INSERT は利用者の行のロック (ローカルの利用者
+// では WithLockedUser) などを待つので、id の小さい A より先に B が commit することが
+// ある。B の hook が A の commit 前に走ると B が加算し、その後 A の hook も加算して
+// 2 増える。本家の取りこぼしとは逆向きの誤差で、数え直しの
+// backfill channel-users-count で直る。
+//
+// 投稿そのものがまだ残っていることも条件に入れる。hook は投稿の作成後に非同期で
+// 呼ばれるので、その前に消された投稿では加算しない (本家も数え上げが 0 になり
+// 加算しない)。消して投稿し直すとまた 1 増えるのは本家と同じ。
+//
+// 前の投稿の有無は EXISTS でなく、ORDER BY id DESC LIMIT 1 の scalar subquery で
+// 見る。EXISTS の中の ORDER BY / LIMIT は planner が外し、見積もりを外すと note の
+// 全件を seq scan する。この形なら 000140 の ("channelId", "userId", id) の部分
+// index を後ろから 1 件読むだけで済む (実測は migration のコメント)。
+func (r *channelRepository) IncrementUsersCountOnFirstPost(channelID, authorID, noteID string) error {
+	return r.db.Exec(`UPDATE "channel" SET "usersCount" = "usersCount" + 1
+WHERE id = ?
+  AND EXISTS (SELECT 1 FROM "note" WHERE id = ? AND "channelId" = ? AND "userId" = ?)
+  AND (SELECT id FROM "note" WHERE "channelId" = ? AND "userId" = ? AND id < ? ORDER BY id DESC LIMIT 1) IS NULL`,
+		channelID, noteID, channelID, authorID, channelID, authorID, noteID).Error
 }
 
 // List returns channels matching the filter, ordered by the requested sort.

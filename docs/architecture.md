@@ -3365,7 +3365,7 @@ upstream に無い、または cherrypick 由来の加算機能（wire 互換を
 
 `MK_` プレフィックスの環境変数でオーバーライド可（例 `MK_DB_HOST`）。詳細は [configuration.md](configuration.md)。
 
-マイグレーション（`migration/`、golang-migrate、現在 139 本）:
+マイグレーション（`migration/`、golang-migrate、現在 140 本）:
 
 - TS Misskey の既存テーブルへは原則**追加のみ**。例外が 23 件あり、うち 17 件は Elythia が自分で作ったものの除去・初期化か upstream 追随 ([TS版からの移行](migration-from-ts.md#破壊的なマイグレーション))。Go 固有の追加列・テーブルは `IF NOT EXISTS`。
 - drop-in テストで発見した補完列は専用マイグレーションで追加。

@@ -282,3 +282,95 @@ func TestChannelRepository_List_EscapesLikePattern(t *testing.T) {
 	}
 	assert.Contains(t, ids, "ch_esc_3", "% をリテラル照合できる")
 }
+
+// insertChannelNote stores a note by userID in channelID and removes it at the
+// end of the test.
+func insertChannelNote(t *testing.T, id, userID, channelID string) {
+	t.Helper()
+	cid := channelID
+	require.NoError(t, testDB.Create(&model.Note{
+		ID: id, UserID: userID, ChannelID: &cid, Visibility: model.NoteVisibilityPublic,
+	}).Error)
+	t.Cleanup(func() { cleanupNote(t, id) })
+}
+
+func channelUsersCount(t *testing.T, repo ChannelRepository, id string) int {
+	t.Helper()
+	got, err := repo.FindByID(id)
+	require.NoError(t, err)
+	return got.UsersCount
+}
+
+// usersCount は本家と同じく、チャンネルに初めて投稿した利用者の分だけ増える
+// (#3369)。
+func TestChannelRepository_IncrementUsersCountOnFirstPost(t *testing.T) {
+	repo := NewChannelRepository(testDB)
+	alice := insertTestUser(t, "u_chuc_a", "chucalice")
+	defer cleanupUser(t, alice.ID)
+	bob := insertTestUser(t, "u_chuc_b", "chucbob")
+	defer cleanupUser(t, bob.ID)
+
+	c := newTestChannel("ch_uc_1", "users count", nil)
+	require.NoError(t, repo.Create(c))
+	defer cleanupChannel(t, c.ID)
+	other := newTestChannel("ch_uc_2", "other channel", nil)
+	require.NoError(t, repo.Create(other))
+	defer cleanupChannel(t, other.ID)
+
+	// 別のチャンネルへの投稿は、このチャンネルの最初の投稿の判定に入らない。
+	insertChannelNote(t, "n_uc_00", alice.ID, other.ID)
+
+	insertChannelNote(t, "n_uc_01", alice.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_01"))
+	assert.Equal(t, 1, channelUsersCount(t, repo, c.ID), "first post counts the author")
+
+	insertChannelNote(t, "n_uc_02", alice.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_02"))
+	assert.Equal(t, 1, channelUsersCount(t, repo, c.ID), "second post by the same author does not count")
+
+	insertChannelNote(t, "n_uc_03", bob.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, bob.ID, "n_uc_03"))
+	assert.Equal(t, 2, channelUsersCount(t, repo, c.ID), "another author counts")
+	assert.Equal(t, 0, channelUsersCount(t, repo, other.ID), "only the given channel changes")
+}
+
+// 同じ利用者の投稿が 2 件とも保存された後に、hook が (逆順で) 走っても、加算は
+// 最初の投稿の 1 回だけになる。本家の「後から数えて 1 なら」はこの場合に 1 回も
+// 加算しない。
+func TestChannelRepository_IncrementUsersCountOnFirstPost_OutOfOrder(t *testing.T) {
+	repo := NewChannelRepository(testDB)
+	alice := insertTestUser(t, "u_chuc_c", "chucconc")
+	defer cleanupUser(t, alice.ID)
+	c := newTestChannel("ch_uc_3", "concurrent", nil)
+	require.NoError(t, repo.Create(c))
+	defer cleanupChannel(t, c.ID)
+
+	insertChannelNote(t, "n_uc_11", alice.ID, c.ID)
+	insertChannelNote(t, "n_uc_12", alice.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_12"))
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_11"))
+	assert.Equal(t, 1, channelUsersCount(t, repo, c.ID))
+}
+
+// 最初の投稿を消して投稿し直すと、また 1 増える (本家と同じ)。hook が走る前に
+// 消された投稿では増やさない。
+func TestChannelRepository_IncrementUsersCountOnFirstPost_DeletedNotes(t *testing.T) {
+	repo := NewChannelRepository(testDB)
+	alice := insertTestUser(t, "u_chuc_d", "chucdel")
+	defer cleanupUser(t, alice.ID)
+	c := newTestChannel("ch_uc_4", "deleted", nil)
+	require.NoError(t, repo.Create(c))
+	defer cleanupChannel(t, c.ID)
+
+	insertChannelNote(t, "n_uc_21", alice.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_21"))
+	cleanupNote(t, "n_uc_21")
+
+	insertChannelNote(t, "n_uc_22", alice.ID, c.ID)
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_22"))
+	assert.Equal(t, 2, channelUsersCount(t, repo, c.ID), "re-posting after deleting the first post counts again")
+
+	// 保存されていない (hook の前に消された) 投稿では増やさない。
+	require.NoError(t, repo.IncrementUsersCountOnFirstPost(c.ID, alice.ID, "n_uc_20"))
+	assert.Equal(t, 2, channelUsersCount(t, repo, c.ID), "a note that no longer exists does not count")
+}

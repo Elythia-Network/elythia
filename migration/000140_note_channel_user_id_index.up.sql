@@ -1,0 +1,28 @@
+-- #3369: `note` に ("channelId", "userId", id) の部分 index を張る。
+--
+-- チャンネルの usersCount は、投稿がその人のそのチャンネルでの最初の投稿なら 1 足す
+-- (`ChannelRepository.IncrementUsersCountOnFirstPost`)。判定は
+-- `"channelId" = ? AND "userId" = ? AND id < ?` の投稿が 1 件あるかを見るが、
+-- 既存の index は ("channelId", id DESC) (000123) と ("userId", id DESC) だけで、
+-- どちらも片方の列を filter で読み捨てる。planner は見積もりを外すと note の全件を
+-- seq scan する (検証用の 200 万ノート、投稿 20 万件の利用者が 10 万投稿の
+-- チャンネルへ初めて投稿したとき、NOT EXISTS の形で 282ms / 42,662 buffer。
+-- ORDER BY id DESC LIMIT 1 の scalar subquery にしても、この index が無いと
+-- 000123 の範囲を filter で読み捨てて 11ms / 3,124 buffer。この index で
+-- 0.09ms / 18 buffer、2 回目以降の投稿も 0.06ms / 8 buffer。
+-- PostgreSQL 18.6、キャッシュに載った状態)。
+-- 数え直しの `backfill channel-users-count` の COUNT(DISTINCT "userId") も、この
+-- index の index only scan で読める (同じ fixture の 10 万投稿のチャンネルで
+-- 52ms / 3,114 buffer → 13ms / 498 buffer)。
+--
+-- 本家にこの列の組の index は無い (本家は "channelId" と "userId" の単独の index で
+-- countBy する) ので、Elythia 独自の名前にする。
+-- `channelId` が NULL の行 (ほとんど全部) を入れない部分 index にする (000123 と
+-- 同じ理由。同じ fixture で 4.6MB、note の本体は 333MB)。`"channelId" = $1` は厳格な
+-- 演算子なので、prepared statement の generic plan でもこの index を使える。
+--
+-- 本番の `note` に CONCURRENTLY で張るときの注意 (所要時間、INVALID が残ったときの
+-- 回復) は docs/deployment.md の「大きな表に index を足す migration」にある。
+-- note は最大テーブルなので CONCURRENTLY で書き込みを止めずに作る。
+-- CONCURRENTLY は単一文でしか実行できないので、1 ファイルに 1 本にしている。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_note_channelId_userId_id" ON "note" ("channelId", "userId", "id") WHERE "channelId" IS NOT NULL;
