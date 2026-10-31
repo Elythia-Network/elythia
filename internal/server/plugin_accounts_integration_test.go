@@ -305,6 +305,11 @@ func TestPluginAccounts_TokenOnlyInProcess_RealDB(t *testing.T) {
 	cleanupPluginAccountUsers(t, h.db, "pt_bot", "pt_normal", "pt_root")
 	createLocalUser(t, h.db, "ptnormal", "pt_normal", "ptnormaltoken016", "normal-pass", false)
 	createLocalUser(t, h.db, "ptroot", "pt_root", "ptroottokenxx016", "root-pass", true)
+	// admin/show-user は IP の閲覧の記録 (ip_lookup_log) を書く。外部キーが無く、
+	// 利用者を消しても残るので、明示して消す (#3369)。
+	t.Cleanup(func() {
+		require.NoError(t, h.db.Exec(`DELETE FROM ip_lookup_log WHERE "userId" = ?`, "ptroot").Error)
+	})
 	ctx := context.Background()
 
 	bot, err := h.ctxA.Accounts().Create(ctx, "pt_bot")
