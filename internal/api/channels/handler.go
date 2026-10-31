@@ -431,14 +431,13 @@ func (h *Handler) Update(c echo.Context) error {
 	}
 	// bannerId 設定時は所有権を検証する
 	// (upstream channels/update: bannerId != null → findOneBy({id, userId}) → NO_SUCH_FILE)。
-	if req.BannerID.Value != nil {
-		if !h.bannerOwnedBy(*req.BannerID.Value, user.ID) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "e86c14a4-0da2-4032-8df3-e737a04c7f3b"))
-		}
-	}
+	// 検査はチャンネルの存在と権限の後 (Service.Update の中)。
+	in.BannerOK = func(fileID string) bool { return h.bannerOwnedBy(fileID, user.ID) }
 	ch, err := h.svc.Update(user.ID, req.ChannelID, in)
 	if err != nil {
 		switch {
+		case errors.Is(err, corechannel.ErrNoSuchBanner):
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", "e86c14a4-0da2-4032-8df3-e737a04c7f3b"))
 		case errors.Is(err, corechannel.ErrChannelNotFound):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_CHANNEL", "No such channel.", "f9c5467f-d492-4c3c-9a8d-a70dacc86512"))
 		case errors.Is(err, corechannel.ErrAccessDenied):

@@ -24,6 +24,9 @@ var (
 	ErrAlreadyFollowing = errors.New("already following this channel")
 	// ErrNotFollowing is returned when there is no follow record to delete.
 	ErrNotFollowing = errors.New("not following this channel")
+	// ErrNoSuchBanner is returned by Update when UpdateInput.BannerOK rejects
+	// the banner file.
+	ErrNoSuchBanner = errors.New("no such banner file")
 )
 
 // ModeratorChecker reports whether a user holds a moderator/admin role.
@@ -156,6 +159,10 @@ type UpdateInput struct {
 	IsSensitive *bool
 	// BannerID: nil = 変更なし、*が nil = banner 解除(null)、値 = 設定 (#3758)。
 	BannerID **string
+	// BannerOK reports whether the banner file may be set (the caller owns
+	// it). Update calls it after the existence and permission checks, only
+	// when a banner is set. nil accepts any file.
+	BannerOK func(fileID string) bool
 	// PinnedNoteIDs: nil = 変更なし、非 nil = その配列で置換。
 	PinnedNoteIDs *[]string
 	// AllowRenoteToExternal: nil = 変更なし、非 nil でその値に更新。
@@ -180,6 +187,13 @@ func (s *Service) Update(userID, channelID string, in UpdateInput) (*model.Chann
 	isModerator := s.moderatorChecker != nil && s.moderatorChecker.IsModerator(userID)
 	if !isOwner && !isModerator {
 		return nil, ErrAccessDenied
+	}
+	// バナーのファイルの検査は、本家と同じくチャンネルの存在と権限の後に行う
+	// (#3369)。先に行うと、存在しないチャンネルや他人のチャンネルに自分のものでない
+	// bannerId を送ったときに、NO_SUCH_CHANNEL / ACCESS_DENIED でなく NO_SUCH_FILE
+	// になる。
+	if in.BannerID != nil && *in.BannerID != nil && in.BannerOK != nil && !in.BannerOK(**in.BannerID) {
+		return nil, ErrNoSuchBanner
 	}
 	fields := map[string]any{}
 	if in.Name != nil {
