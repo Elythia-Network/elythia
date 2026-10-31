@@ -304,7 +304,7 @@ gate の外で**実際に届く経路**は測って個別に塞いである。�
 `sw/unregister` の `endpoint` / `auth` / `publickey` (一致する購読が無いものとして 204)。
 認証が要るもの: `i/registry/*` の `key` / `domain`、`sw/register` の `endpoint` /
 `auth` / `publickey`、`drive/files/find-by-hash` の `md5`。管理者向け:
-`admin/show-users` の `host`、`admin/emoji/*-bulk` の `ids`、
+`admin/show-users` の `hostname`、`admin/emoji/*-bulk` の `ids`、
 `admin/federation/remove-all-following` の `host`、`v2/admin/emoji/list` の
 `updatedAtFrom` / `updatedAtTo` / `roleIds`。
 
