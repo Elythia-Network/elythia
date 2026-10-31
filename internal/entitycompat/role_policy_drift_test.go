@@ -19,7 +19,8 @@ var rolePolicyStricterThanUpstream = map[string]string{}
 // requireCredential までで、policy は別の軸)。route から RequireRolePolicy を
 // 外しても、policy 名を取り違えても、あちらは緑のまま通る (#3369)。
 func TestRolePolicyDrift(t *testing.T) {
-	upstream := upstreamRolePolicies(upstreamMetas(t))
+	metas := upstreamMetas(t)
+	upstream := upstreamRolePolicies(metas)
 	// 拾えなくなったら落とす。件数の下限に加えて、名指しで要求する。
 	if len(upstream) < 20 || upstream["invite/create"] != "canInvite" ||
 		upstream["admin/emoji/add"] != "canManageCustomEmojis" || upstream["users/search"] != "canSearchUsers" {
@@ -44,8 +45,20 @@ func TestRolePolicyDrift(t *testing.T) {
 		if !ok {
 			continue // not implemented
 		}
-		got := routeRolePolicies(t, ep, reg)
+		got, publicOnly := routeRolePolicies(t, ep, reg)
 		_, allowed := rolePolicyStricterThanUpstream[ep]
+		m := metas[ep]
+		credential := isTrue(m.RequireCredential) || isTrue(m.RequireModerator) || isTrue(m.RequireAdmin)
+		// RequireRolePolicyPublic はそれ自体では匿名を拒まない (匿名は base の
+		// policy で評価される)。本家が資格情報を要する endpoint で Public 版で
+		// policy を見ていると、RequireAuth を外したときに匿名が通るので、
+		// RequireAuth の有無を問わず RequireRolePolicy を求める。
+		if got[want] && publicOnly[want] && credential {
+			problems = append(problems, ep+": upstream requires a credential, but the route applies "+want+" only with RequireRolePolicyPublic, which does not reject anonymous callers by itself; use RequireRolePolicy")
+			seenAllow[ep] = seenAllow[ep] || allowed
+			checked++
+			continue
+		}
 		switch {
 		case got[want] && allowed:
 			seenAllow[ep] = true
@@ -89,21 +102,30 @@ func upstreamRolePolicies(metas map[string]upstreamMeta) map[string]string {
 	return out
 }
 
-// routeRolePolicies returns the policy keys of every RequireRolePolicy in a
-// route registration, resolving corerole.PolicyXxx constants.
-func routeRolePolicies(t *testing.T, ep, reg string) map[string]bool {
+// routeRolePolicies returns the policy keys of every RequireRolePolicy /
+// RequireRolePolicyPublic in a route registration, resolving
+// corerole.PolicyXxx constants. publicOnly marks the keys applied only with
+// RequireRolePolicyPublic.
+func routeRolePolicies(t *testing.T, ep, reg string) (got, publicOnly map[string]bool) {
 	t.Helper()
-	out := map[string]bool{}
-	for _, arg := range requireRolePolicyArgs(stripGoComments(reg)) {
+	got, publicOnly = map[string]bool{}, map[string]bool{}
+	for _, c := range requireRolePolicyCalls(stripGoComments(reg)) {
+		var key string
 		switch {
-		case policyConstRe.MatchString(arg):
-			out[policyConstValue(t, policyConstRe.FindStringSubmatch(arg)[1])] = true
-		case policyLiteralRe.MatchString(arg):
-			out[policyLiteralRe.FindStringSubmatch(arg)[1]] = true
+		case policyConstRe.MatchString(c.arg):
+			key = policyConstValue(t, policyConstRe.FindStringSubmatch(c.arg)[1])
+		case policyLiteralRe.MatchString(c.arg):
+			key = policyLiteralRe.FindStringSubmatch(c.arg)[1]
 		default:
 			// 読めない形は落とす。変数を経由されると検査できない。
-			t.Fatalf("%s: RequireRolePolicy の policy を定数かリテラルで書いていない: %s", ep, arg)
+			t.Fatalf("%s: RequireRolePolicy の policy を定数かリテラルで書いていない: %s", ep, c.arg)
+		}
+		switch {
+		case !got[key]:
+			got[key], publicOnly[key] = true, c.public
+		case !c.public:
+			publicOnly[key] = false
 		}
 	}
-	return out
+	return got, publicOnly
 }
