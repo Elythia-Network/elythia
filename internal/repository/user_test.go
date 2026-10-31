@@ -874,6 +874,23 @@ func TestUserRepository_ListUsers_Default(t *testing.T) {
 	assert.GreaterOrEqual(t, len(users), 2)
 }
 
+// カーソルがあるときは Sort を無視して id のカーソルで並べる (sinceId だけなら
+// 古い順)。以前は Sort の ORDER BY が先に付いて Sort の向きが勝っていた (#3369)。
+func TestUserRepository_ListUsers_CursorIgnoresSort(t *testing.T) {
+	repo := NewUserRepository(testDB)
+	for _, id := range []string{"lucura", "lucurb", "lucurc"} {
+		u := insertTestUser(t, id, id)
+		defer cleanupUser(t, u.ID)
+	}
+	users, err := repo.ListUsers(model.UserListFilter{Username: "lucur", Sort: "+createdAt", SinceID: "lucura", Limit: 10})
+	require.NoError(t, err)
+	ids := make([]string, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.ID)
+	}
+	assert.Equal(t, []string{"lucurb", "lucurc"}, ids)
+}
+
 // #1957-b: public /users の base filter (isExplorable=TRUE AND isSuspended=FALSE) と
 // 認証 viewer の mute/block 除外 (双方向 block) を検証する。
 func TestUserRepository_ListUsers_ExplorableAndMuteBlockFilter(t *testing.T) {

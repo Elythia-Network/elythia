@@ -755,45 +755,45 @@ func (r *userRepository) ListUsers(filter model.UserListFilter) ([]*model.User, 
 		)`)
 	}
 
-	// sort 方向は upstream admin/show-users.ts:99-110 に一致させる。'+' は
-	// 降順 (新しい/多い順)、'-' は昇順という Misskey の慣習で、key 名も
-	// follower 系は +follower/-follower (followersCount 列) を使う。
-	switch filter.Sort {
-	case "+createdAt":
-		q = q.Order("id DESC")
-	case "-createdAt":
-		q = q.Order("id ASC")
-	case "+updatedAt":
-		// public users.ts は updatedAt sort 時 IS NOT NULL を andWhere して NULL
-		// updatedAt user を除外する (#1975)。admin/show-users は NULLS LAST で
-		// 保持するため UpdatedAtSortNonNull は public /users のみ true。
-		if filter.UpdatedAtSortNonNull {
-			q = q.Where(`"updatedAt" IS NOT NULL`)
-		}
-		q = q.Order(`"updatedAt" DESC NULLS LAST`)
-	case "-updatedAt":
-		if filter.UpdatedAtSortNonNull {
-			q = q.Where(`"updatedAt" IS NOT NULL`)
-		}
-		q = q.Order(`"updatedAt" ASC NULLS FIRST`)
-	case "+lastActiveDate":
-		q = q.Order(`"lastActiveDate" DESC NULLS LAST`)
-	case "-lastActiveDate":
-		q = q.Order(`"lastActiveDate" ASC NULLS FIRST`)
-	case "+follower":
-		q = q.Order(`"followersCount" DESC`)
-	case "-follower":
-		q = q.Order(`"followersCount" ASC`)
-	default:
-		// cursor 指定時は下で id order を付けるので default order は付けない。
-		if filter.SinceID == "" && filter.UntilID == "" {
+	// cursor pagination (federation/users 等、#1732)。非空のときは Sort/Offset を
+	// 無視して id cursor で絞る (makePaginationQuery 互換)。以前は Sort の
+	// ORDER BY を先に付けていたので、両方を渡すと Sort の向きが勝っていた。
+	// 今の呼び出しは両方を渡さないが、型の約束どおりに Sort を付けない (#3369)。
+	cursor := filter.SinceID != "" || filter.UntilID != ""
+	if !cursor {
+		// sort 方向は upstream admin/show-users.ts:99-110 に一致させる。'+' は
+		// 降順 (新しい/多い順)、'-' は昇順という Misskey の慣習で、key 名も
+		// follower 系は +follower/-follower (followersCount 列) を使う。
+		switch filter.Sort {
+		case "+createdAt":
+			q = q.Order("id DESC")
+		case "-createdAt":
+			q = q.Order("id ASC")
+		case "+updatedAt":
+			// public users.ts は updatedAt sort 時 IS NOT NULL を andWhere して NULL
+			// updatedAt user を除外する (#1975)。admin/show-users は NULLS LAST で
+			// 保持するため UpdatedAtSortNonNull は public /users のみ true。
+			if filter.UpdatedAtSortNonNull {
+				q = q.Where(`"updatedAt" IS NOT NULL`)
+			}
+			q = q.Order(`"updatedAt" DESC NULLS LAST`)
+		case "-updatedAt":
+			if filter.UpdatedAtSortNonNull {
+				q = q.Where(`"updatedAt" IS NOT NULL`)
+			}
+			q = q.Order(`"updatedAt" ASC NULLS FIRST`)
+		case "+lastActiveDate":
+			q = q.Order(`"lastActiveDate" DESC NULLS LAST`)
+		case "-lastActiveDate":
+			q = q.Order(`"lastActiveDate" ASC NULLS FIRST`)
+		case "+follower":
+			q = q.Order(`"followersCount" DESC`)
+		case "-follower":
+			q = q.Order(`"followersCount" ASC`)
+		default:
 			q = q.Order("id ASC")
 		}
 	}
-
-	// cursor pagination (federation/users 等、#1732)。非空のときは Sort/Offset を
-	// 無視して id cursor で絞る (makePaginationQuery 互換)。
-	cursor := filter.SinceID != "" || filter.UntilID != ""
 	if filter.SinceID != "" {
 		q = q.Where(`"id" > ?`, filter.SinceID)
 	}
