@@ -30,9 +30,21 @@ func TestLockSchema_RefusesASchemaHeldElsewhere(t *testing.T) {
 	require.NoError(t, other.Close())
 
 	// 持っていた側が終われば (接続が閉じれば) 取れる。
+	//
+	// **すぐに取れるとは限らないので、短い間だけ繰り返す。** 接続を閉じても、
+	// PostgreSQL がその session の advisory lock を外すのは backend が終わった後で、
+	// 直後に取り直すと間に合わずに落ちた (CI で 1 回。#3369)。
 	require.NoError(t, held.Close())
-	again, err := lockSchema(schema)
-	require.NoError(t, err)
+	// assert.Eventually は条件を別の goroutine で走らせ、期限が切れると待たずに返すので、
+	// 外の変数へ代入すると失敗の経路で競合する。同じ goroutine で繰り返す。
+	var again *lockSession
+	var lastErr error
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if again, lastErr = lockSchema(schema); lastErr == nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	require.NoError(t, lastErr, "the lock was not released after the holder closed")
 	require.NoError(t, again.Close())
 }
 
