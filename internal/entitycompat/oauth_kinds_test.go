@@ -30,7 +30,8 @@ var kindMissingScope = map[string]string{}
 // the queue scope could not.
 func TestOAuthKindDrift(t *testing.T) {
 	// 本家の meta.kind は upstream_paramdefs.json の meta から作る (upstreamMetas)。
-	golden := upstreamOAuthKinds(upstreamMetas(t))
+	metas := upstreamMetas(t)
+	golden := upstreamOAuthKinds(metas)
 	// 拾えなくなったら落とす。upstream の書式が変わって空になると、
 	// 検査していないのに緑になる。`i` は正規表現で読んでいたころ、本家だけが
 	// ダブルクォートで書いていて抜け落ちた endpoint なので名指しで要求する。
@@ -44,7 +45,32 @@ func TestOAuthKindDrift(t *testing.T) {
 		t.Fatalf("parsed only %d routes from internal/server (expected >=200); the parser likely broke", len(regs))
 	}
 
-	var mismatched, missing, staleAllow []string
+	var mismatched, missing, staleAllow, scopedNoKind []string
+	// **逆向きも見る (#3369)。** 本家は kind が無く資格情報を要する endpoint に、
+	// app token を一律で拒否する (ApiCallService.ts の `!ep.meta.kind &&
+	// (requireCredential || requireModerator || requireAdmin)`)。Elythia の route が
+	// そこに RequireScope を付けていると、その scope を持つアプリが本家では
+	// 叩けないものを叩ける。
+	noKindChecked, sawChangePassword := 0, false
+	for ep, m := range metas {
+		if m.Kind != nil || excludedEndpoint(ep) ||
+			(!isTrue(m.RequireCredential) && !isTrue(m.RequireModerator) && !isTrue(m.RequireAdmin)) {
+			continue
+		}
+		reg, ok := regs[ep]
+		if !ok {
+			continue // not implemented
+		}
+		noKindChecked++
+		sawChangePassword = sawChangePassword || ep == "i/change-password"
+		if sm := requireScopeRe.FindStringSubmatch(reg); sm != nil {
+			scopedNoKind = append(scopedNoKind, ep+" (mk RequireScope: "+sm[1]+")")
+		}
+	}
+	// 拾えなくなったら落とす。i/change-password は kind を持たない secure の endpoint。
+	if noKindChecked < 20 || !sawChangePassword {
+		t.Fatalf("checked only %d credential endpoints without meta.kind (expected >=20, including i/change-password)", noKindChecked)
+	}
 	for ep, want := range golden {
 		if excludedEndpoint(ep) {
 			continue
@@ -79,6 +105,9 @@ func TestOAuthKindDrift(t *testing.T) {
 	}
 	if len(mismatched) > 0 {
 		fail("oauth kind drift: mk-go's RequireScope does not match Misskey's meta.kind.", mismatched)
+	}
+	if len(scopedNoKind) > 0 {
+		fail("oauth kind drift: Misskey declares no meta.kind (app tokens are always rejected) but mk-go's route has RequireScope (an app token holding the scope gets through).\nReplace RequireScope with RejectAppToken or RequireSecure.", scopedNoKind)
 	}
 	if len(missing) > 0 {
 		fail("oauth kind drift: Misskey declares meta.kind but mk-go's route has no RequireScope (app token bypasses the scope).\nFix the route, or register it in kindMissingScope with the upstream kind.", missing)
