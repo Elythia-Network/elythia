@@ -5,8 +5,8 @@ package htmltext
 import (
 	"regexp"
 	"strings"
-	"unicode"
 
+	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"golang.org/x/net/html"
 )
 
@@ -24,7 +24,9 @@ var nonTextTags = map[string]bool{
 
 // 本家は sanitize-html が文字参照を解いた後に < > & を書き戻し、最後に
 // `&lt;br&gt;` の形だけを空白に替える。文字参照で書いた `<br>` も区切りになる。
-var escapedBreak = regexp.MustCompile(`(?i)<br\s*/?>`)
+// 本家の `\s` は u フラグ付きの JavaScript の空白なので、Go の `\s` (ASCII だけ)
+// でなく jsstr の集合で書く。
+var escapedBreak = regexp.MustCompile(`(?i)<br[` + jsstr.SpaceClass + `]*/?>`)
 
 // PlainText returns the text of html with the separator tags turned into
 // spaces, the non-text tags dropped with their contents, other tags removed
@@ -59,10 +61,9 @@ func PlainText(src string) string {
 
 // collapse replaces runs of white space (JavaScript's \s) with one space and
 // trims both ends.
+//
+// 本家の`\s`は U+0085 (NEL) を含まないので、Go の unicode.IsSpace でなく
+// jsstr.IsSpace で見る (#3369。以前は U+0085 も空白として潰していた)。
 func collapse(s string) string {
-	return strings.Join(strings.FieldsFunc(s, isJSSpace), " ")
-}
-
-func isJSSpace(r rune) bool {
-	return unicode.IsSpace(r) || r == '\uFEFF'
+	return strings.Join(strings.FieldsFunc(s, jsstr.IsSpace), " ")
 }
