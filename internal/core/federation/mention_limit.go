@@ -5,10 +5,14 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// RolePolicyProvider resolves a user's effective role policies. It has the
-// same method set as role.PolicyProvider; *role.Service implements it.
+// RolePolicyProvider resolves a user's effective role policies.
+// *role.Service implements it.
 type RolePolicyProvider interface {
 	GetUserPolicies(userID string) map[string]any
+	// BoolPolicyMayBeFalse reports whether the boolean policy key could be
+	// anything but true for some user. When it is false, the per-user lookup
+	// is skipped.
+	BoolPolicyMayBeFalse(key string) bool
 }
 
 // mentionLimitFor returns the `mentionLimit` policy of the note author userID.
@@ -20,6 +24,26 @@ func (r *Resolver) mentionLimitFor(userID string) int {
 	}
 	return corenote.MentionLimitFor(r.rolePolicyProvider, userID)
 }
+
+// authorCannotPublicNote reports whether the role policies of the note author
+// userID deny public notes (`canPublicNote === false`).
+//
+// 本家はリモートの投稿も NoteCreateService.create を通すので、投稿者のロールの
+// canPublicNote で public を home にする (#3369)。**誰にも当たりえないときは
+// 投稿者の policy を引かない** — 受信したノートのたびに引くと、role.Service の
+// 利用者ごとのキャッシュに受信したノートの著者が際限なく積もる (mentionLimit と
+// 同じ理由)。当たりうるとき (ベースの値が false、false にするロールがある、
+// プラグインが宣言している) だけ引く。
+func (r *Resolver) authorCannotPublicNote(userID string) bool {
+	if r.rolePolicyProvider == nil || !r.rolePolicyProvider.BoolPolicyMayBeFalse(policyCanPublicNote) {
+		return false
+	}
+	v, ok := r.rolePolicyProvider.GetUserPolicies(userID)[policyCanPublicNote].(bool)
+	return ok && !v
+}
+
+// policyCanPublicNote is role.PolicyCanPublicNote. core/role を import しないので写す。
+const policyCanPublicNote = "canPublicNote"
 
 // exceedsRemoteMentionLimit reports whether a remote note with the given
 // resolved mentions and raw Mention tag hrefs is over limit.

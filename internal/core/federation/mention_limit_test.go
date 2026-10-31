@@ -33,6 +33,10 @@ func (f *fakeMentionPolicies) GetUserPolicies(userID string) map[string]any {
 	return map[string]any{"mentionLimit": f.limit}
 }
 
+// BoolPolicyMayBeFalse says no role can deny a boolean policy, so the
+// canPublicNote lookup does not show up in asked.
+func (f *fakeMentionPolicies) BoolPolicyMayBeFalse(string) bool { return false }
+
 // mentionNoteBody renders a public remote note by alice with n Mention tags.
 func mentionNoteBody(noteID string, n int) []byte {
 	tags := make([]string, 0, n)
