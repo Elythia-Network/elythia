@@ -230,16 +230,13 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 	if req.IsSensitive != nil {
 		fields["isSensitive"] = *req.IsSensitive
 	}
-	// pointer 型フィールドは nil (未指定) と 0 (明示的に 0) を区別できるので、
-	// 受け取った値をそのまま UnixMilli に変換する。Create 側と違い 0 を now に
-	// 読み替えない。本家の update.ts は`ps.expiresAt ? new Date(ps.expiresAt) :
-	// undefined`なので 0 を「変えない」として無視するが、Elythia は 0 を1970年
-	// (エポック)として保存する。以前からの差で、docs/divergence/approximations.md に
-	// 書いている(#3854)。
-	if req.StartsAt != nil {
+	// 本家の update.ts は`ps.expiresAt ? new Date(ps.expiresAt) : undefined`なので、
+	// 0 を「変えない」として無視する。Elythia も同じにする (#3369)。以前は 0 を
+	// 1970年 (エポック) として保存し、広告がすぐに期限切れになっていた。
+	if req.StartsAt != nil && *req.StartsAt != 0 {
 		fields["startsAt"] = time.UnixMilli(int64(*req.StartsAt))
 	}
-	if req.ExpiresAt != nil {
+	if req.ExpiresAt != nil && *req.ExpiresAt != 0 {
 		fields["expiresAt"] = time.UnixMilli(int64(*req.ExpiresAt))
 	}
 	if len(fields) == 0 {

@@ -282,24 +282,28 @@ func TestAdUpdate_MissingID(t *testing.T) {
 		doPost(h.AdUpdate, `{}`, adminUser).Code)
 }
 
-// Explicit expiresAt:0 in Update はクライアントが明示的に 1970-01-01 を指定した
-// ケースとして扱う (nil なら変更なし)。handler 側の millisOrNow 適用で now に
-// 読み替えてしまう regression を防ぐ。
-func TestAdUpdate_ExplicitZeroExpiresAtStays1970(t *testing.T) {
+// 本家 ad/update.ts と同じく、0 の startsAt / expiresAt は「変えない」として無視する。
+func TestAdUpdate_ZeroDatesAreIgnored(t *testing.T) {
+	starts := time.UnixMilli(time.Now().UnixMilli())
+	expires := starts.Add(time.Hour)
 	h, repo := setupAdHandler(t,
 		&model.Ad{
 			ID: "a1", URL: "u", Place: "square", Priority: "middle", Ratio: 1, ImageURL: "i",
-			StartsAt:  time.Now(),
-			ExpiresAt: time.Now().Add(time.Hour),
+			StartsAt:  starts,
+			ExpiresAt: expires,
 		},
 	)
 
-	rec := doPost(h.AdUpdate, `{"id":"a1","expiresAt":0}`, adminUser)
+	rec := doPost(h.AdUpdate, `{"id":"a1","expiresAt":0,"startsAt":0}`, adminUser)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
-	// time.UnixMilli(0) は UTC 1970-01-01。time.Now() と大きく異なること。
-	got := repo.Ads["a1"].ExpiresAt
-	assert.Equal(t, int64(0), got.UnixMilli(),
-		"explicit expiresAt:0 should map to UNIX epoch, not time.Now()")
+	assert.Equal(t, expires.UnixMilli(), repo.Ads["a1"].ExpiresAt.UnixMilli())
+	assert.Equal(t, starts.UnixMilli(), repo.Ads["a1"].StartsAt.UnixMilli())
+
+	// 0 でない値は書き換える。
+	rec = doPost(h.AdUpdate, `{"id":"a1","expiresAt":1000,"startsAt":500}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, int64(1000), repo.Ads["a1"].ExpiresAt.UnixMilli())
+	assert.Equal(t, int64(500), repo.Ads["a1"].StartsAt.UnixMilli())
 }
 
 func TestAdDelete_WithRepo(t *testing.T) {
