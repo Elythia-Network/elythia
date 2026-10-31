@@ -134,7 +134,7 @@ func TestRelations_EmptyUsernameIsNoSuchUser(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, body := range []string{`{"username":"","host":null}`, `{"username":"","host":"remote.example"}`} {
 				rec := postStub(tc.handler, body, nil)
-				assert.Equal(t, http.StatusNotFound, rec.Code, body)
+				assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 				assert.Equal(t, "NO_SUCH_USER", errorCode(rec), body)
 				assert.Contains(t, rec.Body.String(), tc.id, body)
 			}
@@ -167,7 +167,7 @@ func TestRelations_UserIDKeyWinsOverUsername(t *testing.T) {
 				`{"userId":null,"username":"` + viewer.Username + `","host":null}`,
 			} {
 				rec := postStub(tc.handler, body, nil)
-				assert.Equal(t, http.StatusNotFound, rec.Code, body)
+				assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 				assert.Equal(t, "NO_SUCH_USER", errorCode(rec), body)
 				assert.Contains(t, rec.Body.String(), tc.id, body)
 			}

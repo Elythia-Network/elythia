@@ -32,8 +32,9 @@ func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
 	}
+	// 本家の NO_SUCH_USER は httpStatusCode を持たないので 400 (#3369)。
 	if _, err := h.userService.ShowByID(req.UserID); err != nil {
-		return c.JSON(http.StatusNotFound, apierr.Error("NO_SUCH_USER", "No such user.", "e6965129-7b2a-40a4-bae2-cd84cd434822"))
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", "e6965129-7b2a-40a4-bae2-cd84cd434822"))
 	}
 	viewer := middleware.GetUser(c)
 	// upstream は reply 集計の 2 つの query に generateVisibilityQuery を掛けるので、

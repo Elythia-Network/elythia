@@ -1634,7 +1634,8 @@ func TestFollowers_LimitOutOfRangeRejected(t *testing.T) {
 func TestFollowers_UserNotFound(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := post(h.Followers, `{"userId": "ghost"}`)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// 本家の NO_SUCH_USER は httpStatusCode を持たないので 400 (#3369)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestFollowers_InvalidParam(t *testing.T) {

@@ -102,7 +102,7 @@ func TestGetFrequentlyRepliedUsers_MissingUserId(t *testing.T) {
 func TestGetFrequentlyRepliedUsers_UserNotFound(t *testing.T) {
 	k := newP189Kit(t)
 	rec := postP189(k.h.GetFrequentlyRepliedUsers, `{"userId":"ghost"}`, nil)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // 第三者 viewer に author の followers/specified reply 対人関係が leak しないこと
