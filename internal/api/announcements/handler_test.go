@@ -244,6 +244,21 @@ func TestAdminCreate_ResponseImageURLRaw(t *testing.T) {
 	}
 }
 
+// 本家と同じく、空の imageUrl は null として保存して返す。
+func TestAdminCreate_EmptyImageURLIsNull(t *testing.T) {
+	h, repo := newTestHandler(t)
+	rec := doPost(h.AdminCreate, `{"title":"News","text":"x","imageUrl":""}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Contains(t, resp, "imageUrl")
+	assert.Nil(t, resp["imageUrl"])
+	require.Len(t, repo.Items, 1)
+	for _, a := range repo.Items {
+		assert.Nil(t, a.ImageURL)
+	}
+}
+
 func TestAdminCreate_InvalidParam(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := doPost(h.AdminCreate, `{}`, nil)
