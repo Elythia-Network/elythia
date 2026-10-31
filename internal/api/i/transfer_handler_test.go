@@ -140,6 +140,20 @@ func TestExport_Following_ExcludeParams(t *testing.T) {
 	assert.True(t, enq.exportCalls[0].ExcludeInactive)
 }
 
+// excludeMuting・excludeInactive は export-following だけが持つ。他の export は
+// 本家と同じく知らない項目として無視するので、型が違っても400にしない (#3369)。
+func TestExport_OtherTypesIgnoreFollowingOnlyParams(t *testing.T) {
+	h, enq := newTransferHandler()
+	user := &model.User{ID: "u1"}
+	rec := post(h.ExportBlocking, `{"excludeMuting":"x","excludeInactive":1}`, user)
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.Len(t, enq.exportCalls, 1)
+	assert.False(t, enq.exportCalls[0].ExcludeMuting)
+
+	rec = post(h.ExportFollowing, `{"excludeMuting":"x"}`, user)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "export-following still reads it")
+}
+
 func TestExport_EnqueuerFailure(t *testing.T) {
 	h, enq := newTransferHandler()
 	enq.exportErr = errors.New("enq boom")
@@ -399,6 +413,19 @@ func TestImport_Following_JobWithReplies(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	require.Len(t, enq.importCalls, 1)
 	assert.True(t, enq.importCalls[0].WithReplies)
+}
+
+// withReplies は import-following だけが持つ。他の import は本家と同じく知らない
+// 項目として無視するので、型が違っても400にしない (#3369)。
+func TestImport_OtherTypesIgnoreWithReplies(t *testing.T) {
+	h, enq, _ := newTransferHandlerWithDrive()
+	rec := post(h.ImportBlocking, `{"fileId":"f1","withReplies":"x"}`, &model.User{ID: ownerID})
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.Len(t, enq.importCalls, 1)
+	assert.False(t, enq.importCalls[0].WithReplies)
+
+	rec = post(h.ImportFollowing, `{"fileId":"f1","withReplies":"x"}`, &model.User{ID: ownerID})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "import-following still reads it")
 }
 
 // stubMoveInValidator は移行直後判定を固定する。

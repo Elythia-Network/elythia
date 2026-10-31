@@ -69,12 +69,20 @@ func (h *Handler) exportHandler(exportType string) echo.HandlerFunc {
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Transfer queue not configured.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
 		// export-following のみ excludeMuting / excludeInactive を受ける
-		// (upstream export-following.ts paramDef)。他 type では無視される。
+		// (upstream export-following.ts paramDef)。他 type の本家の paramDef には
+		// 無く、知らない項目として無視されるので、読まない (#3369。以前は共有の
+		// 構造体で読み、型の違う値を400にしていた)。
 		var req struct {
 			ExcludeMuting   bool `json:"excludeMuting"`
 			ExcludeInactive bool `json:"excludeInactive"`
 		}
-		if err := c.Bind(&req); err != nil {
+		var err error
+		if exportType == transfer.ExportFollowing {
+			err = c.Bind(&req)
+		} else {
+			err = c.Bind(&struct{}{})
+		}
+		if err != nil {
 			return apierr.JSONInvalidParam(c)
 		}
 		if err := h.transferEnqueuer.EnqueueExport(queue.ExportPayload{
@@ -168,7 +176,19 @@ func (h *Handler) validateImportRequest(c echo.Context, importType string) (*mod
 		FileID      string `json:"fileId"`
 		WithReplies *bool  `json:"withReplies"`
 	}
-	if err := c.Bind(&req); err != nil || req.FileID == "" {
+	// withReplies は import-following だけが持つ (本家の paramDef)。他の type では
+	// 知らない項目として無視されるので読まない (#3369。以前は型の違う値を400にしていた)。
+	var err error
+	if importType == transfer.ImportFollowing {
+		err = c.Bind(&req)
+	} else {
+		var other struct {
+			FileID string `json:"fileId"`
+		}
+		err = c.Bind(&other)
+		req.FileID = other.FileID
+	}
+	if err != nil || req.FileID == "" {
 		_ = c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "fileId is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 		return nil, nil, false, false
 	}
