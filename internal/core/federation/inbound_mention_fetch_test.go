@@ -510,6 +510,10 @@ func (p *countingPolicies) GetUserPolicies(string) map[string]any {
 	return map[string]any{"mentionLimit": p.limit}
 }
 
+// BoolPolicyMayBeFalse says no role can deny a boolean policy, so the
+// canPublicNote lookup does not add to calls.
+func (p *countingPolicies) BoolPolicyMayBeFalse(string) bool { return false }
+
 // The fetch limits follow the author's mentionLimit policy, like the limit
 // check of the ingest: a role above the default fetches more than 20 unknown
 // actors, a role below it fetches nothing for a note over it, and a note with

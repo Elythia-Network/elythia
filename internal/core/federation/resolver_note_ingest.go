@@ -220,7 +220,9 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	// 本家はリモートの投稿も NoteCreateService.create を通すので、ローカル投稿と
 	// 同じ降格が掛かる。判定は禁止語と同じく切る前の全文で行う (本家も切る前に
 	// 判定する)。編集 (Update) の取り込みでも同じ判定で降格する (UpdateRemoteNote)。
-	if note.Visibility == model.NoteVisibilityPublic && r.containsSensitiveWords(fullText, note.CW) {
+	// 当たらなければ、本家と同じく投稿者のロールの canPublicNote でも降格する (#3369)。
+	if note.Visibility == model.NoteVisibilityPublic &&
+		(r.containsSensitiveWords(fullText, note.CW) || r.authorCannotPublicNote(actor.ID)) {
 		note.Visibility = model.NoteVisibilityHome
 	}
 	// 連合のルール (#3090)。禁止語と同じく**行を作る前**に評価する。ここより後ろは

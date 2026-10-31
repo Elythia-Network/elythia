@@ -329,8 +329,11 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceH
 	// (取り込みと同じ判定)。編集の取り込みは Elythia の拡張なので本家に対応物は
 	// 無いが、掛けないと当たらない投稿を作ってから差し替えるだけで降格を
 	// 素通りできる。**狭める方向だけ** — 当たらなくなっても public には戻さない
-	// (降格の理由がセンシティブワードかどうかを記録していないため)。
-	if existing.Visibility == model.NoteVisibilityPublic && r.containsSensitiveWords(effectiveText, effectiveCW) {
+	// (降格の理由がセンシティブワードかどうかを記録していないため)。投稿者のロールの
+	// canPublicNote も同じく見る (#3369。作った後にロールで止められた投稿者が、編集で
+	// public のまま本文を差し替え続けられないように)。
+	if existing.Visibility == model.NoteVisibilityPublic &&
+		(r.containsSensitiveWords(effectiveText, effectiveCW) || r.authorCannotPublicNote(existing.UserID)) {
 		fields["visibility"] = model.NoteVisibilityHome
 		existing.Visibility = model.NoteVisibilityHome
 	}
