@@ -107,9 +107,13 @@ type transportOptions struct {
 // net.Resolver.LookupIPAddr).
 type lookupFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
 
-// withLookup overrides DNS resolution for both the dial-time and the
-// proxy-time checks. Test-only.
-func withLookup(fn lookupFunc) Option {
+// WithLookup overrides DNS resolution for both the dial-time and the
+// proxy-time checks. A nil fn keeps the default resolver. Test-only: the
+// server's tests pass a resolver that counts and refuses every lookup.
+//
+// **プロセス全体の変数にしない (#3369)。** 照合のテストが名前解決を数えるための口で、
+// transport ごとに渡す。本番の組み立ては渡さない。
+func WithLookup(fn func(ctx context.Context, host string) ([]net.IPAddr, error)) Option {
 	return func(o *transportOptions) { o.lookup = fn }
 }
 

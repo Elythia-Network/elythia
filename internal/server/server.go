@@ -204,6 +204,11 @@ type Server struct {
 	// 通らない)ので、照合のテストがbeforeSetupで数えるだけの偽物を入れる(#3877)。
 	selfCheckRunner apiadmin.SelfCheckRunner
 	remoteChecker   apiadmin.RemoteChecker
+	// outboundLookupは、外向きの通信(outboundOpts)の名前解決。nilなら既定の
+	// resolver。safehttpはproxyへ渡す前に宛先を手元で名前解決するので、proxyで
+	// 数える照合のテストは名前解決を数えられない。テストがbeforeSetupで、数えて
+	// 拒否するresolverを入れる(#3369)。本番の組み立ては入れない。
+	outboundLookup func(ctx context.Context, host string) ([]net.IPAddr, error)
 	// paramEnforcedは、本家と同じ400で拒否するendpointの一覧。nilなら
 	// paramEnforcedEndpoints(宣言の全部)。本家の残りのendpoint(reset-db)では数えるだけの
 	// 検証を試せないので、影の検証のテストがbeforeSetupで差し替える(#3888)。

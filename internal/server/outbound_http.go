@@ -19,6 +19,8 @@ func (s *Server) outboundOpts() []safehttp.Option {
 		safehttp.WithProxy(s.config.Proxy, s.config.ProxyBypassHosts),
 		safehttp.WithOutgoingAddress(s.config.OutgoingAddress),
 		safehttp.WithAddressFamily(s.config.OutgoingAddressFamily),
+		// nil なら既定の resolver のまま (本番)。
+		safehttp.WithLookup(s.outboundLookup),
 	}
 }
 

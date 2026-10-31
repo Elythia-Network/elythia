@@ -26,6 +26,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -191,18 +192,41 @@ func newParamShadowServers(t *testing.T, opts ...func(*config.Config)) (off, on 
 // functions applied to both servers.
 func newParamShadowServersSetup(t *testing.T, beforeSetup []func(*Server), opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
 	t.Helper()
-	t.Setenv(config.EnvOnlyServer, "1")
-	t.Setenv(config.EnvOnlyQueue, "")
 	mr := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	redisPort, err := strconv.Atoi(mr.Port())
+	require.NoError(t, err)
+	return newParamShadowServersOn(t, redisClient, config.RedisOptions{Host: mr.Host(), Port: redisPort}, beforeSetup, opts...)
+}
+
+// newRealRedis starts a Redis container for t and returns a client on it and
+// its options.
+//
+// **ジョブを積む endpoint を通すテストは、miniredis でなく実 Redis を使う (#3369)。**
+// miniredis には mkq の Lua が使う cmsgpack が無く、ジョブの投入が必ず失敗して
+// 500 になる (本番の挙動と違う)。testcontainers で立てるので Docker が要る。
+// **手元で Docker が無いと、使うテスト (TestEnforcedEndpointsMatchTheCorpus) は
+// skip する** (testutil.SkipIfNoDocker)。CI (環境変数 CI がある) では skip せず落ちる。
+func newRealRedis(t *testing.T) (*redis.Client, config.RedisOptions) {
+	t.Helper()
+	testutil.SkipIfNoDocker(t)
+	tr, err := testutil.SetupRedis(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { tr.Teardown(context.Background()) })
+	return tr.Client, config.RedisOptions{Host: tr.Host(), Port: tr.Port()}
+}
+
+// newParamShadowServersOn is newParamShadowServersSetup on the Redis
+// redisClient talks to (described by redisOptions for the queue driver).
+func newParamShadowServersOn(t *testing.T, redisClient *redis.Client, redisOptions config.RedisOptions, beforeSetup []func(*Server), opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
+	t.Helper()
+	t.Setenv(config.EnvOnlyServer, "1")
+	t.Setenv(config.EnvOnlyQueue, "")
 	redisClients := &cache.RedisClients{
 		Default: redisClient, Pubsub: redisClient, JobQueue: redisClient,
 		Timelines: redisClient, Reactions: redisClient,
 	}
-	redisPort, err := strconv.Atoi(mr.Port())
-	require.NoError(t, err)
-	redisOptions := config.RedisOptions{Host: mr.Host(), Port: redisPort}
 	build := func(disable bool) *Server {
 		cfg := &config.Config{
 			URL: "http://example.test", Host: "example.test", Hostname: "example.test",
