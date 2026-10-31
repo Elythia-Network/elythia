@@ -502,6 +502,22 @@ func TestRoomsUpdate_WithDescription(t *testing.T) {
 	assert.Equal(t, "desc", repo.Rooms["r1"].Description)
 }
 
+// 本家の updateRoom と同じく、空文字の name・description で値を消せる。欠けた
+// 項目は変えない (#3369)。
+func TestRoomsUpdate_EmptyStringsClearAndAbsentKeeps(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", Name: "old", Description: "desc", OwnerID: "u1"}
+
+	rec := post(h.RoomsUpdate, `{"roomId":"r1","description":""}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "", repo.Rooms["r1"].Description)
+	assert.Equal(t, "old", repo.Rooms["r1"].Name, "an absent name must not change")
+
+	rec = post(h.RoomsUpdate, `{"roomId":"r1","name":""}`, u1)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "", repo.Rooms["r1"].Name)
+}
+
 type mockJoinedRepo struct{ *testutil.MockChatRepository }
 
 func (m *mockJoinedRepo) ListJoinedRooms(_, _, _ string, _ int) ([]*model.ChatRoom, error) {
