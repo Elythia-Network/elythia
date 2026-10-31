@@ -10,6 +10,18 @@ import (
 // requireScopeRe extracts the scope string from middleware.RequireScope("...").
 var requireScopeRe = regexp.MustCompile(`RequireScope\("([^"]+)"\)`)
 
+// The calls the reverse kind check looks for, whatever the arguments are.
+var (
+	requireScopeCallRe   = regexp.MustCompile(`\bRequireScope\(`)
+	admitAppUserCallRe   = regexp.MustCompile(`\bAdmitAppUser\(`)
+	rejectAppTokenCallRe = regexp.MustCompile(`\b(?:RejectAppToken|RequireSecure)\(`)
+)
+
+// noKindAppTokenAllowed lists endpoints where upstream declares no meta.kind
+// and requires a credential (so it rejects every app token), but Elythia's
+// route deliberately lets app tokens through. The value is the reason.
+var noKindAppTokenAllowed = map[string]string{}
+
 // kindMissingScope lists endpoints where Misskey declares meta.kind but mk-go's
 // route has no RequireScope, so an app token can drive them without holding the
 // scope. **These are pre-existing gaps, not intentional divergence** — the gate
@@ -48,9 +60,13 @@ func TestOAuthKindDrift(t *testing.T) {
 	var mismatched, missing, staleAllow, scopedNoKind []string
 	// **逆向きも見る (#3369)。** 本家は kind が無く資格情報を要する endpoint に、
 	// app token を一律で拒否する (ApiCallService.ts の `!ep.meta.kind &&
-	// (requireCredential || requireModerator || requireAdmin)`)。Elythia の route が
-	// そこに RequireScope を付けていると、その scope を持つアプリが本家では
-	// 叩けないものを叩ける。
+	// (requireCredential || requireModerator || requireAdmin)`)。Elythia の route は
+	// そこで app token を拒む middleware (RejectAppToken か RequireSecure) を付け、
+	// app token を通すもの (RequireScope、AdmitAppUser) を付けないこと。どれも
+	// 付けないと、scope を問わず app token が handler に届く (RequireAuth などは
+	// admitHeldAppUser を呼ぶため)。
+	var appTokenNotRejected, staleNoKindAllow []string
+	seenAllow := map[string]bool{}
 	noKindChecked, sawChangePassword := 0, false
 	for ep, m := range metas {
 		if m.Kind != nil || excludedEndpoint(ep) ||
@@ -63,8 +79,29 @@ func TestOAuthKindDrift(t *testing.T) {
 		}
 		noKindChecked++
 		sawChangePassword = sawChangePassword || ep == "i/change-password"
-		if sm := requireScopeRe.FindStringSubmatch(reg); sm != nil {
-			scopedNoKind = append(scopedNoKind, ep+" (mk RequireScope: "+sm[1]+")")
+		// 識別子を渡す形 (RequireScope(kind)) も拾うよう、呼び出しの有無で見る。
+		scoped := requireScopeCallRe.MatchString(reg)
+		admits := admitAppUserCallRe.MatchString(reg)
+		rejects := rejectAppTokenCallRe.MatchString(reg)
+		if _, allowed := noKindAppTokenAllowed[ep]; allowed {
+			seenAllow[ep] = true
+			if !scoped && !admits && rejects {
+				staleNoKindAllow = append(staleNoKindAllow, ep+" (the route rejects app tokens now)")
+			}
+			continue
+		}
+		switch {
+		case scoped:
+			scopedNoKind = append(scopedNoKind, ep+" (mk route has RequireScope)")
+		case admits:
+			scopedNoKind = append(scopedNoKind, ep+" (mk route has AdmitAppUser)")
+		case !rejects:
+			appTokenNotRejected = append(appTokenNotRejected, ep)
+		}
+	}
+	for ep := range noKindAppTokenAllowed {
+		if !seenAllow[ep] {
+			staleNoKindAllow = append(staleNoKindAllow, ep+" (upstream declares a kind or no credential, or Elythia does not implement it)")
 		}
 	}
 	// 拾えなくなったら落とす。i/change-password は kind を持たない secure の endpoint。
@@ -107,12 +144,18 @@ func TestOAuthKindDrift(t *testing.T) {
 		fail("oauth kind drift: mk-go's RequireScope does not match Misskey's meta.kind.", mismatched)
 	}
 	if len(scopedNoKind) > 0 {
-		fail("oauth kind drift: Misskey declares no meta.kind (app tokens are always rejected) but mk-go's route has RequireScope (an app token holding the scope gets through).\nReplace RequireScope with RejectAppToken or RequireSecure.", scopedNoKind)
+		fail("oauth kind drift: Misskey declares no meta.kind (app tokens are always rejected) but mk-go's route lets an app token through.\nReplace it with RejectAppToken or RequireSecure, or register the reason in noKindAppTokenAllowed.", scopedNoKind)
+	}
+	if len(appTokenNotRejected) > 0 {
+		fail("oauth kind drift: Misskey declares no meta.kind (app tokens are always rejected) but mk-go's route has neither RejectAppToken nor RequireSecure.\nAdd one of them, or register the reason in noKindAppTokenAllowed.", appTokenNotRejected)
 	}
 	if len(missing) > 0 {
 		fail("oauth kind drift: Misskey declares meta.kind but mk-go's route has no RequireScope (app token bypasses the scope).\nFix the route, or register it in kindMissingScope with the upstream kind.", missing)
 	}
 	// allowlist が実態より広いと、直したものを検出し続けたうえで新しい欠落を隠す。
+	if len(staleNoKindAllow) > 0 {
+		fail("noKindAppTokenAllowed is stale. Remove these entries.", staleNoKindAllow)
+	}
 	if len(staleAllow) > 0 {
 		fail("kindMissingScope is stale: these endpoints now have RequireScope. Remove them from the allowlist.", staleAllow)
 	}
