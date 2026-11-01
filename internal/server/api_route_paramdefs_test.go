@@ -175,6 +175,8 @@ func TestAPIRoutesHaveParamDefs(t *testing.T) {
 		"admin/backup/list": {http.MethodPost},
 		"signup":            {http.MethodPost},
 		"v1/instance/peers": {http.MethodGet},
+		// 本家は fastify.all で登録し、handler が GET と POST 以外を 405 にする (#3926)。
+		"clear-browser-cache": {http.MethodGet, http.MethodPost, http.MethodPut},
 	} {
 		for _, m := range methods {
 			require.True(t, routes[name][m], "the built server has no %s /api/%s", m, name)

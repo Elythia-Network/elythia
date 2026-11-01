@@ -415,6 +415,9 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 var apiRegistrationAllowed = map[string]string{
 	// 登録の無い/api/*に200と空のobjectを返すcatchall。goldenのendpointではない。
 	`api.Any("/*", apiCatchall)`: "router.go",
+	// 本家がendpointの外でfastify.allに直接登録するroute(#3926)。frontendが
+	// 設定画面のキャッシュの削除からGETで呼ぶ。本文を読まないので本文の検査は要らない。
+	`api.Any("/clear-browser-cache", meta.ClearBrowserCache)`: "router.go",
 	// プラグインのroute(/api/plugin/<名前>/...)。Elythia独自で、goldenに無い。
 	`api.Group(pluginRoutePrefix+def.Name, middleware.RejectAppToken())`: "plugin_wiring.go",
 	// 上の登録をするsetupPluginsへ、/apiのgroupを渡す。

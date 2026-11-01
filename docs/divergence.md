@@ -40,7 +40,7 @@ Elythia は Misskey TS からの drop-in 移行 (Misskey TS の DB / Redis を�
 | config キー | 20 前後 | 0 | — |
 | fork frontend の独自変更 | 143 tag (`2026.7.0-mk.0` ～ `2026.10.0-mk.5`) | — | — |
 
-**upstream endpoint の未実装はゼロ** (coverage 100.0%、444/444)。DB schema も upstream の全テーブル・全共有カラムを superset で保持しており、逆方向の欠落は無い。
+**upstream endpoint の未実装はゼロ** (coverage 100.0%、446/446)。DB schema も upstream の全テーブル・全共有カラムを superset で保持しており、逆方向の欠落は無い。
 
 ## 領域ごとの差分
 

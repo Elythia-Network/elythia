@@ -219,8 +219,16 @@ func TestCollectTSDirectRoutes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ApiServerService.ts")
 	src := `
+		// endpoint ごとの登録。path が literal でないので拾わない。型引数から
+		// 後ろの /signup まで伸びて一致してもいけない。
+		fastify.all<{
+			Params: { endpoint: string; },
+		}>('/' + endpoint.name, { bodyLimit: 1024 * 1024 }, async (request, reply) => {
+			return reply;
+		});
+
 		fastify.post<{
-			Body: { username: string; };
+			Body: { username: string; 'hcaptcha-response'?: string; };
 		}>('/signup', (request, reply) => this.signupApiService.signup(request, reply));
 
 		fastify.post<{ Body: { code: string; } }>('/signup-pending', (request, reply) => x);
@@ -231,6 +239,10 @@ func TestCollectTSDirectRoutes(t *testing.T) {
 
 		fastify.post<{ Params: { session: string; } }>('/miauth/:session/check', async (request, reply) => {
 			return {};
+		});
+
+		fastify.all('/clear-browser-cache', (request, reply) => {
+			reply.code(204);
 		});
 
 		fastify.get('/*', (request, reply) => {
@@ -246,6 +258,8 @@ func TestCollectTSDirectRoutes(t *testing.T) {
 		t.Fatalf("collectTSDirectRoutes: %v", err)
 	}
 	want := []tsDirectRoute{
+		{Method: "GET", Path: "/api/clear-browser-cache"},
+		{Method: "POST", Path: "/api/clear-browser-cache"},
 		{Method: "POST", Path: "/api/miauth/:session/check"},
 		{Method: "POST", Path: "/api/signup"},
 		{Method: "POST", Path: "/api/signup-pending"},
@@ -318,5 +332,36 @@ func TestCompareTSDirectNonPOSTImplemented(t *testing.T) {
 	}
 	if strings.Contains(md, "| POST | `/api/v1/instance/peers` |") {
 		t.Error("both table must not render the direct GET route as POST")
+	}
+}
+
+// Any で登録した route (`/api/clear-browser-cache`) は全メソッドの route を持つ。
+// 表に入るのは GET と POST だけで、本家の `fastify.all` と両方に存在する行に
+// なり、HEAD や PUT が「mk-go only」に並ばないこと (#3926)。
+func TestCompareAnyRouteCountsOnlyGETAndPOST(t *testing.T) {
+	var routes []DumpedRoute
+	for _, m := range []string{"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PROPFIND", "PUT", "REPORT", "TRACE"} {
+		routes = append(routes, DumpedRoute{Method: m, Path: "/api/clear-browser-cache"})
+	}
+	mk := &DumpedRoutes{MisskeyVersion: "2026.10.1", MkGoVersion: "2.1.0", Routes: routes}
+	direct := []tsDirectRoute{
+		{Method: "GET", Path: "/api/clear-browser-cache"},
+		{Method: "POST", Path: "/api/clear-browser-cache"},
+	}
+
+	got := compare(nil, direct, mk)
+
+	wantBoth := []BothRoute{
+		{Method: "GET", Path: "/api/clear-browser-cache"},
+		{Method: "POST", Path: "/api/clear-browser-cache"},
+	}
+	if !reflect.DeepEqual(got.Both, wantBoth) {
+		t.Errorf("Both mismatch\n got %v\nwant %v", got.Both, wantBoth)
+	}
+	if len(got.TSOnly) != 0 {
+		t.Errorf("TSOnly should be empty, got %v", got.TSOnly)
+	}
+	if len(got.MkOnly) != 0 {
+		t.Errorf("MkOnly should be empty, got %v", got.MkOnly)
 	}
 }
