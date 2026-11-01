@@ -78,6 +78,12 @@ type counterCheck struct {
 	column string
 	// query returns (id, stored, actual) for rows whose counter disagrees.
 	query string
+	// raiseOnly marks a counter that only ever grows in normal operation, so
+	// only stored < actual is reported and -fix never lowers it.
+	//
+	// 増えるだけのカウンタは、保存値が実件数より大きいのが正常 (消した行の分が
+	// 残る)。小さいのは増やすのに失敗した分なので、そこだけを上げる。
+	raiseOnly bool
 }
 
 // counterChecks are the counters fsck knows how to verify.
@@ -99,12 +105,20 @@ var counterChecks = []counterCheck{
 		        WHERE u."followingCount" <> COALESCE(f.n, 0)`,
 	},
 	{
-		table: "user", column: "notesCount",
+		// 本家は投稿のたびに 1 増やし (NoteCreateService.incNotesCountOfUser)、
+		// 削除では減らさない (NoteDeleteService が減らすのは instance の notesCount
+		// だけ)。Elythia のローカルの投稿も同じ (note.CreateService.Create)。消した投稿の
+		// 分が残る増えるだけの値なので、保存値が実件数より小さいときだけを報告する。
+		//
+		// **リモートの利用者も見る。** 本家はリモートの投稿の受信でも増やし、Elythia も
+		// #3928 から取り込みで増やす。それより前に取り込んだ投稿の分は数えていないので、
+		// 「記録が小さい」と出て、-fix で取り込んだ件数まで上がる。
+		table: "user", column: "notesCount", raiseOnly: true,
 		query: `SELECT u.id AS id, u."notesCount" AS stored, COALESCE(n.n, 0) AS actual
 		        FROM "user" u
 		        LEFT JOIN (SELECT "userId" AS uid, COUNT(*) AS n FROM "note" GROUP BY "userId") n
 		          ON n.uid = u.id
-		        WHERE u."notesCount" <> COALESCE(n.n, 0)`,
+		        WHERE u."notesCount" < COALESCE(n.n, 0)`,
 	},
 	{
 		table: "note", column: "repliesCount",
@@ -202,7 +216,7 @@ func Run(ctx context.Context, db *gorm.DB, opts Options) (Report, error) {
 			continue
 		}
 		for _, d := range rows {
-			if err := repair(ctx, db, d); err != nil {
+			if err := repair(ctx, db, d, c.raiseOnly); err != nil {
 				return rep, err
 			}
 			rep.Repaired++
@@ -245,8 +259,15 @@ func collectDrift(ctx context.Context, db *gorm.DB, c counterCheck, limit int) (
 //
 // 列名は counterChecks の固定値なので識別子として埋め込んでよい。**id は
 // プレースホルダで渡す** (行データ由来なので)。
-func repair(ctx context.Context, db *gorm.DB, d Drift) error {
+//
+// raiseOnly のカウンタは GREATEST で書く。検査から書き戻しまでの間にも
+// サーバーは動いていて値が増えうるので、集めた時点の実件数で上書きすると
+// その間の増分を消してしまう。
+func repair(ctx context.Context, db *gorm.DB, d Drift, raiseOnly bool) error {
 	sql := fmt.Sprintf(`UPDATE %q SET %q = ? WHERE id = ?`, d.Table, d.Column)
+	if raiseOnly {
+		sql = fmt.Sprintf(`UPDATE %q SET %q = GREATEST(%q, ?) WHERE id = ?`, d.Table, d.Column, d.Column)
+	}
 	if err := db.WithContext(ctx).Exec(sql, d.Actual, d.ID).Error; err != nil {
 		return fmt.Errorf("fsck: %s.%s の修正 (%s): %w", d.Table, d.Column, d.ID, err)
 	}
