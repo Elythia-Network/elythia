@@ -1107,6 +1107,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 連合 inbox 経由の invite 受信時にも local 被招待者の reversi stream に
 	// `invited` を push する (#417 P2: リアルタイム招待)。
 	federationProcessor.SetReversiStreamPublisher(reversiPublisher)
+	// instance actor に見せなかった Announce の対象を、actor をフォローして
+	// いるローカルの利用者の鍵で取り直す (#3916)。連合に出していない利用者の鍵は
+	// 使わない (coreSvcs.localFederation で判定)。
+	federationProcessor.SetFollowerFetchKeys(corefederation.NewLocalFollowerKeys(followingRepo, userRepo, keypairRepo, blockingRepo,
+		apURLs, coreSvcs.localFederation))
 
 	// users/show 経由で host が指定されたリモートユーザーをローカル DB に
 	// キャッシュが無くても解決できるようにする (#269)。webfinger で actor URI
