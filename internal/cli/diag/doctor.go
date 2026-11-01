@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/db/pgstat"
 )
 
 // doctorTimeout bounds the whole run so a hung dependency does not leave the
@@ -63,6 +64,7 @@ func doctor(e env, args []string) int {
 	} else {
 		deps.DB = db
 		deps.DBHealth = dbhealth.NewService(db, cfg.DBReplications && len(cfg.DBSlaves) > 0).Report
+		deps.PgStatStatements = func(ctx context.Context) (pgstat.State, error) { return pgstat.Inspect(ctx, db) } // #3909
 		defer e.closeDB(db)
 	}
 	if rdb := openDoctorRedis(cfg); rdb != nil {
