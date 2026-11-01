@@ -283,6 +283,9 @@ func TestFsck_RunFailure(t *testing.T) {
 func TestFsckExitCode(t *testing.T) {
 	drift := []fsck.Drift{{Table: "user", Column: "notesCount"}}
 	orphan := []fsck.Orphan{{Table: "note", Reason: "missing user", Count: 1}}
+	total := func(n int64) []fsck.DriftTotal {
+		return []fsck.DriftTotal{{Table: "user", Column: "notesCount", Count: n}}
+	}
 	tests := []struct {
 		name string
 		r    fsck.Report
@@ -291,7 +294,8 @@ func TestFsckExitCode(t *testing.T) {
 	}{
 		{name: "clean", r: fsck.Report{}, want: 0},
 		{name: "drift without fix", r: fsck.Report{Drifts: drift}, want: 1},
-		{name: "drift fixed", r: fsck.Report{Drifts: drift, Repaired: 1}, fix: true, want: 0},
+		{name: "drift fixed", r: fsck.Report{Drifts: drift, Totals: total(1), Repaired: 1}, fix: true, want: 0},
+		{name: "drift beyond the limit remains after fix", r: fsck.Report{Drifts: drift, Totals: total(3), Repaired: 1}, fix: true, want: 1},
 		{name: "orphan remains after fix", r: fsck.Report{Orphans: orphan}, fix: true, want: 1},
 	}
 	for _, tt := range tests {
@@ -306,20 +310,39 @@ func TestPrintFsckReport(t *testing.T) {
 	for i := range 7 {
 		drifts = append(drifts, fsck.Drift{Table: "user", Column: "notesCount", ID: strconv.Itoa(i), Stored: 1, Actual: 2})
 	}
-	r := fsck.Report{Drifts: drifts, Orphans: []fsck.Orphan{{Table: "note", Reason: "missing user", Count: 3}}}
+	drifts = append(drifts, fsck.Drift{Table: "note", Column: "repliesCount", ID: "n1", Stored: 3, Actual: 1})
+	// notesCount は上限で 7 件だけ集めたが、総数は 2500 件ある。
+	r := fsck.Report{
+		Drifts: drifts,
+		Totals: []fsck.DriftTotal{
+			{Table: "user", Column: "notesCount", Count: 2500},
+			{Table: "note", Column: "repliesCount", Count: 1},
+		},
+		Orphans: []fsck.Orphan{{Table: "note", Reason: "missing user", Count: 3}},
+	}
 
 	var dry bytes.Buffer
 	printFsckReport(&dry, r, false)
-	assert.Contains(t, dry.String(), "カウンタのずれ: 7 件")
-	assert.Contains(t, dry.String(), "... 他 2 件")
+	assert.Contains(t, dry.String(), "カウンタのずれ: 2501 件")
+	assert.Contains(t, dry.String(), "user.notesCount          2500 件 (集めたのは先頭の 7 件)\n")
+	assert.Contains(t, dry.String(), "note.repliesCount        1 件\n", "総数を全部集めた種類には注記を付けない")
+	assert.Contains(t, dry.String(), "... 他 2496 件")
 	assert.Contains(t, dry.String(), "孤児行")
 	assert.Contains(t, dry.String(), "-fix を付けて再実行")
 
-	r.Repaired = 7
+	r.Repaired = 8
 	var fixed bytes.Buffer
 	printFsckReport(&fixed, r, true)
-	assert.Contains(t, fixed.String(), "7 件のカウンタを修正しました")
+	assert.Contains(t, fixed.String(), "8 件のカウンタを修正しました")
+	assert.Contains(t, fixed.String(), "残りの 2493 件は、もう一度 -fix を付けて実行すると直します")
 	assert.NotContains(t, fixed.String(), "-fix を付けて再実行")
+
+	// 全部直したときは残りを出さない。
+	r = fsck.Report{Drifts: drifts[7:], Totals: r.Totals[1:], Repaired: 1}
+	var all bytes.Buffer
+	printFsckReport(&all, r, true)
+	assert.Contains(t, all.String(), "1 件のカウンタを修正しました")
+	assert.NotContains(t, all.String(), "残りの")
 }
 
 func TestCloseDB_ToleratesBrokenHandle(t *testing.T) {
@@ -349,7 +372,7 @@ func TestFsck_FixFlagReachesTheCheck(t *testing.T) {
 			var got []fsck.Options
 			e.runFsck = func(_ context.Context, _ *gorm.DB, opts fsck.Options) (fsck.Report, error) {
 				got = append(got, opts)
-				r := fsck.Report{Drifts: []fsck.Drift{drift}}
+				r := fsck.Report{Drifts: []fsck.Drift{drift}, Totals: []fsck.DriftTotal{{Table: "user", Column: "notesCount", Count: 1}}}
 				if opts.Fix {
 					r.Repaired = 1
 				}

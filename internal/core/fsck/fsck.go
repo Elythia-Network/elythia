@@ -53,12 +53,36 @@ type Orphan struct {
 	Count  int64  `json:"count"`
 }
 
+// DriftTotal is the number of drifts of one counter, counted beyond the
+// collection limit.
+type DriftTotal struct {
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Count  int64  `json:"count"`
+}
+
 // Report is one run's findings.
 type Report struct {
-	Drifts  []Drift  `json:"drifts"`
-	Orphans []Orphan `json:"orphans"`
+	// Drifts holds at most Options.Limit drifts of each counter.
+	Drifts []Drift `json:"drifts"`
+	// Totals holds the real number of drifts of each counter that has any,
+	// in check order. 上限で頭打ちになった Drifts の件数からは、本当の規模が
+	// 分からないので別に数える (#3927)。
+	Totals  []DriftTotal `json:"totals"`
+	Orphans []Orphan     `json:"orphans"`
 	// Repaired counts the drifts written back (Fix=true のときのみ非ゼロ)。
+	// 書き戻すのは集めた Drifts だけなので、DriftTotal より小さいことがある。
 	Repaired int `json:"repaired"`
+}
+
+// DriftTotal returns the number of drifts over every counter, beyond the
+// collection limit.
+func (r Report) DriftTotal() int64 {
+	var n int64
+	for _, t := range r.Totals {
+		n += t.Count
+	}
+	return n
 }
 
 // OK reports whether nothing needs attention.
@@ -277,11 +301,14 @@ func Run(ctx context.Context, db *gorm.DB, opts Options) (Report, error) {
 	var rep Report
 
 	for _, c := range counterChecks {
-		rows, err := collectDrift(ctx, db, c, limit)
+		rows, total, err := collectDrift(ctx, db, c, limit)
 		if err != nil {
 			return rep, err
 		}
 		rep.Drifts = append(rep.Drifts, rows...)
+		if total > 0 {
+			rep.Totals = append(rep.Totals, DriftTotal{Table: c.table, Column: c.column, Count: total})
+		}
 		if !opts.Fix {
 			continue
 		}
@@ -305,24 +332,33 @@ func Run(ctx context.Context, db *gorm.DB, opts Options) (Report, error) {
 	return rep, nil
 }
 
-// collectDrift runs one counter check.
-func collectDrift(ctx context.Context, db *gorm.DB, c counterCheck, limit int) ([]Drift, error) {
+// collectDrift runs one counter check. It returns at most limit drifts and
+// the total number of drifts.
+//
+// 総数は窓関数で同じクエリから取る。COUNT(*) OVER () は LIMIT の前に評価
+// されるので、集計の走査を 2 回せずに上限を超えた分まで数えられる。id で
+// 並べるのは、上限で切ったときにどの行を集めるかを実行ごとに変えないため。
+func collectDrift(ctx context.Context, db *gorm.DB, c counterCheck, limit int) ([]Drift, int64, error) {
 	var rows []struct {
 		ID     string
 		Stored int64
 		Actual int64
+		Total  int64
 	}
-	if err := db.WithContext(ctx).Raw(c.query+" LIMIT ?", limit).Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("fsck: %s.%s の検査: %w", c.table, c.column, err)
+	q := `SELECT d.id, d.stored, d.actual, COUNT(*) OVER () AS total FROM (` + c.query + `) d ORDER BY d.id LIMIT ?`
+	if err := db.WithContext(ctx).Raw(q, limit).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("fsck: %s.%s の検査: %w", c.table, c.column, err)
 	}
 	out := make([]Drift, 0, len(rows))
+	var total int64
 	for _, r := range rows {
 		out = append(out, Drift{
 			Table: c.table, Column: c.column,
 			ID: r.ID, Stored: r.Stored, Actual: r.Actual,
 		})
+		total = r.Total
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // repair writes the recomputed value back.

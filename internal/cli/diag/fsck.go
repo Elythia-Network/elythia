@@ -60,7 +60,8 @@ func fsckExitCode(r fsck.Report, fix bool) int {
 		return 0
 	}
 	// 修正したなら成功扱い。孤児だけが残っている場合は「対応が要る」ので 1。
-	if fix && len(r.Orphans) == 0 {
+	// 書き戻すのは種類ごとに上限までなので、上限を超えたずれが残っていても 1。
+	if fix && len(r.Orphans) == 0 && int64(r.Repaired) >= r.DriftTotal() {
 		return 0
 	}
 	return 1
@@ -73,18 +74,24 @@ func printFsckReport(w io.Writer, r fsck.Report, fix bool) {
 		fmt.Fprintln(w, "  カウンタのずれは見つかりませんでした。")
 	} else {
 		// 全件は出さない。数千件になると読めないので、内訳と先頭だけ示す。
-		byColumn := map[string]int{}
+		// 内訳は上限で頭打ちになった集めた件数ではなく、総数で出す (#3927)。
+		collected := map[string]int{}
 		for _, d := range r.Drifts {
-			byColumn[d.Table+"."+d.Column]++
+			collected[d.Table+"."+d.Column]++
 		}
-		fmt.Fprintf(w, "  カウンタのずれ: %d 件\n", len(r.Drifts))
-		for k, n := range byColumn {
-			fmt.Fprintf(w, "    %-24s %d 件\n", k, n)
+		fmt.Fprintf(w, "  カウンタのずれ: %d 件\n", r.DriftTotal())
+		for _, t := range r.Totals {
+			k := t.Table + "." + t.Column
+			fmt.Fprintf(w, "    %-24s %d 件", k, t.Count)
+			if n := collected[k]; int64(n) < t.Count {
+				fmt.Fprintf(w, " (集めたのは先頭の %d 件)", n)
+			}
+			fmt.Fprintln(w)
 		}
 		fmt.Fprintln(w)
 		for i, d := range r.Drifts {
 			if i >= 5 {
-				fmt.Fprintf(w, "    ... 他 %d 件\n", len(r.Drifts)-i)
+				fmt.Fprintf(w, "    ... 他 %d 件\n", r.DriftTotal()-int64(i))
 				break
 			}
 			fmt.Fprintf(w, "    %s.%s  id=%s  記録 %d → 実際 %d\n",
@@ -104,6 +111,9 @@ func printFsckReport(w io.Writer, r fsck.Report, fix bool) {
 	switch {
 	case fix && r.Repaired > 0:
 		fmt.Fprintf(w, "  %d 件のカウンタを修正しました。\n", r.Repaired)
+		if rest := r.DriftTotal() - int64(r.Repaired); rest > 0 {
+			fmt.Fprintf(w, "  残りの %d 件は、もう一度 -fix を付けて実行すると直します。\n", rest)
+		}
 	case !fix && len(r.Drifts) > 0:
 		fmt.Fprintln(w, "  修正するには -fix を付けて再実行してください。")
 	}

@@ -454,17 +454,47 @@ func TestRun_ReportsOrphansWithoutDeleting(t *testing.T) {
 	assert.EqualValues(t, 1, n, "-fix でも孤児は消さない")
 }
 
-// 上限を超えても壊れない (大規模インスタンスで全件を持たない)。
+// 上限を超えても壊れない (大規模インスタンスで全件を持たない)。集めるのは
+// 上限までだが、種類ごとの総数は上限と別に数える (#3927)。
 func TestRun_RespectsLimit(t *testing.T) {
 	db := newTestDB(t)
-	for _, id := range []string{"a1", "a2", "a3"} {
+	for _, id := range []string{"a3", "a1", "a2"} {
 		seedUser(t, db, id)
 		seedNote(t, db, "n"+id, id)
 	}
 
 	rep, err := Run(context.Background(), db, Options{Limit: 2})
 	require.NoError(t, err)
-	assert.Len(t, rep.Drifts, 2)
+	require.Len(t, rep.Drifts, 2)
+	assert.Equal(t, "a1", rep.Drifts[0].ID, "id の順に集める")
+	assert.Equal(t, "a2", rep.Drifts[1].ID)
+	assert.Equal(t, []DriftTotal{{Table: "user", Column: "notesCount", Count: 3}}, rep.Totals)
+	assert.EqualValues(t, 3, rep.DriftTotal())
+
+	// -fix は集めた分だけ直し、残りは次の実行で直る。
+	rep, err = Run(context.Background(), db, Options{Limit: 2, Fix: true})
+	require.NoError(t, err)
+	assert.Equal(t, 2, rep.Repaired)
+	rep, err = Run(context.Background(), db, Options{Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, rep.Drifts, 1)
+	assert.Equal(t, "a3", rep.Drifts[0].ID)
+	assert.EqualValues(t, 1, rep.DriftTotal())
+}
+
+// ずれの無い種類は Totals に出さない。
+func TestRun_TotalsOmitCleanCounters(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	rep, err := Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.Empty(t, rep.Totals)
+	assert.Zero(t, rep.DriftTotal())
+}
+
+func TestReport_DriftTotal(t *testing.T) {
+	r := Report{Totals: []DriftTotal{{Count: 1500}, {Count: 3}}}
+	assert.EqualValues(t, 1503, r.DriftTotal())
 }
 
 func TestReport_OK(t *testing.T) {
