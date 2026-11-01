@@ -590,6 +590,17 @@ func (r *Resolver) fireNoteCreated(note *model.Note) {
 	safeGoFedHook(r.background, func() { r.noteChartHook.OnNoteCreated(note) })
 }
 
+// incrementAuthorNotesCount adds one to the author's notesCount after a
+// remote note has been stored in the database.
+func (r *Resolver) incrementAuthorNotesCount(userID string) {
+	if r.userRepo == nil {
+		return
+	}
+	if err := r.userRepo.IncrementNotesCount(userID, 1); err != nil {
+		slog.Warn("federation: failed to increment notesCount", "user", userID, "err", err)
+	}
+}
+
 // SetHashtagHook attaches a HashtagHook invoked after a remote note has
 // been ingested or updated, so the hashtag table mentionedUsersCount /
 // mentionedUserIds arrays stay in sync with /api/hashtags/list ranking

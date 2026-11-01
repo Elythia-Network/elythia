@@ -338,6 +338,9 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	if err := p.noteRepo.Create(renote); err != nil {
 		return err
 	}
+	// 本家の announceNote も NoteCreateService を通るので、リノートした人の
+	// notesCount を 1 増やす (#3928)。
+	p.resolver.incrementAuthorNotesCount(announcer.ID)
 	// upstream NoteCreateService の incRenoteCount 条件
 	// (`data.renote.userId !== user.id && !user.isBot`) を inbound Announce
 	// にも適用する。自己 boost と bot の boost は加算しない (#2283)。

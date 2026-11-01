@@ -508,6 +508,10 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 		}
 		return nil, false, err
 	}
+	// 本家はリモートの投稿も NoteCreateService を通すので、投稿者の notesCount を
+	// 1 増やす (#3928)。ephemeral に入れた時点では数えず (投稿者の行が DB に無い
+	// ことがある)、DB に入れたここで数える。失敗はベストエフォートで無視。
+	r.incrementAuthorNotesCount(actor.ID)
 	// ローカルノートへの返信の場合、repliesCount を増やす。
 	// これにより timeline や API 上の「返信数」表示が federated reply も
 	// 含むようになる。失敗はベストエフォートで無視。
