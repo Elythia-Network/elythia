@@ -181,6 +181,20 @@ nodeinfoの`usage.users.total`、`/api/stats`の`usersCount`・`originalUsersCou
 - **「Test Request」はproxyを通さない**(設定の`proxyUrl`を空にする)。Scalarはproxyが未指定だと、layoutによって`proxy.scalar.com`を既定の中継先にし、利用者が入れたアクセストークンも中継先へ渡る。`/api-doc`はAPIと同じoriginから配るので、中継は要らない。モーダルの「Open API Client」のボタンも隠す(`hideClientButton`)。押すと`client.scalar.com`へ`/api.json`の絶対URL付きで移り、その先のScalar Clientは既定で`proxy.scalar.com`を使うため
 - **CSPはfrontendの設定(`frontendContentSecurityPolicy`)に従う**(既定は`off`で何も付けない)。付けるときはfrontendと同じpolicyの`script-src`に、ScalarのファイルのURL(版まで含む)だけを足す。他のページのCSPは変えない。inlineのscriptは無い(Scalarの設定は`data-configuration`属性で渡す)。styleはScalarが実行時に`<style>`を差し込むので、frontendと同じ`'unsafe-inline'`で通す(hashを足すと`'unsafe-inline'`が無視され、Scalarのstyleが止まる)
 
+## GETのルートへのHEAD (#3925)
+
+GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で有効)と同じくHEADにも応え、GETと同じstatusとheaderを本文なしで返す。Echo v4はGETのルートをHEADに広げないので、`internal/server/head_routes.go`がルーターの手前でまとめて振り分ける。#3925より前は、GETのルートへのHEADは405を返していた(`/api`の下では、`api.Any("/*")`のcatch-allが200と空のobjectで答えていた)。例外は、`Upgrade`を求めるHEADで、振り分けずに405のままにする。handlerにはGETに見えるので、振り分けると`/streaming`がWebSocketへ切り替えてしまう(本家の`ws`もRFC 6455も、切り替えはGETに限る)。
+
+細部は次のとおり本家と違う。
+
+| 項目 | 本家 | Elythia |
+|---|---|---|
+| handlerから見たメソッド | `HEAD` | `GET`。本文が無いこと以外はGETと同じに扱わせる(RFC 9110)。本文を読まずに済ませたいhandler(`/files`、`/backup-download`、圧縮済みの静的ファイル)だけが、`internal/misc/headreq`でHEADを見分ける。それ以外(`c.File`で返す静的ファイルなど)は本文を作り、net/httpが捨てる |
+| `allowGet`の`/api/<名前>`へのHEAD | `fastify.all`で登録しているので、`ApiCallService`の`request.method === 'GET'`の分岐に入らない。引数をquery stringでなく本文(HEADなので無い)から読み、`cacheSec`の`Cache-Control`も付けない | GETと同じく引数をquery stringから読み、`Cache-Control`もGETと同じに付ける |
+| POSTだけの`/api/<名前>`へのHEAD | `allowGet`の検査はGETだけを見るので、HEADでもエンドポイントを引数なしで実行する | GETと同じく、`api.Any("/*")`のcatch-allが404(`UNKNOWN_API_ENDPOINT`)を返す |
+
+`e.Any`で登録したルート(`/api/*`のcatch-all、`/oauth/*`など)はHEADのルートを持つので振り分けず、handlerにはHEADのまま届く。ただし、それより具体的なGETのルートがあるパス(`/api/emojis`など)は、本家と同じくそのGETのルートが答える。`/api/*`のcatch-allは、HEADにもGETと同じ404を返す(本家の`fastify.get('/*')`と同じ)。
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。

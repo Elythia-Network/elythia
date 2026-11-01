@@ -768,6 +768,8 @@ r.POST("/admin/stats", func(req plugin.Request) (any, error) {
 
 本体の per-endpoint テーブルはプラグインのパスを持たないので、**登録したルートには一律の既定の上限が掛かる**（`internal/server/middleware/ratelimit_defs.go` の `PluginRouteDefaultLimit`、10 分に 600 回）。数えるのはルート（パスの型）ごとに、本体の endpoint と同じ単位（ログインしていれば利用者とIP、していなければIP）。超えると本体と同じ 429 `RATE_LIMIT_EXCEEDED` になる。`plugin.Router` には上限を宣言する口が無いので、ルートごとに値を変えることはできない。peer の受け口（`_peer`）には掛からない（専用の上限がある）。管理者が `disableEndpointRateLimits` で本体の上限を切ると、これも切れる。
 
+**`r.GET` で登録したルートは HEAD にも応える**（本家の Fastify と同じ。#3925）。`plugin.Request` はメソッドを持たないので、handler は HEAD を見分けられず、GET と同じく最後まで動く（返した本文は本体が捨てる）。状態を変える処理は GET に置かず、POST にする。
+
 この値は叩き続けるものを止めるためのもので、重い処理（画像の生成、外部への問い合わせ、集計クエリ）を守るには緩い。そういう処理は自分でも持つこと。素直なのは結果をキャッシュすることで、`Storage()` に置くか、プロセス内に持つ。
 
 `API().Anonymous()` / `AsUser()` 越しに本体のエンドポイントを呼ぶ分には、本体のレート制限がそのまま効く（`AsUser` ならその利用者の枠）。
