@@ -135,6 +135,13 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	federationHandler := d.federationHandler
 
 	// ActivityPub resource endpoints
+	// ap/show は、instance actor に見せなかった投稿を照会した人の鍵で取り直す (#3915)。
+	// 取り直しは fetcher と resolver の型を見て行うので、満たさなくなったら
+	// ビルドで落ちるようにする (黙って取り直さなくなるのを防ぐ)。
+	var (
+		_ ap.KeyedRemoteFetcher = apFetcher
+		_ ap.KeyedNoteResolver  = federationResolver
+	)
 	apHandler.SetRemote(apFetcher, federationResolver)
 	apHandler.SetExternalRedirectPolicy(func() bool {
 		m, err := metaRepo.Fetch()

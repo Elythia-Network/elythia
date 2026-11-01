@@ -801,8 +801,32 @@ func (h *Handler) APIShow(c echo.Context) error {
 	// timeout) で失敗したときに立てる。webfinger fallback も失敗した場合に
 	// NO_SUCH_OBJECT ではなく REQUEST_FAILED (81b539cf) を返すための記録。
 	fetchRequestFailed := false
+	// **取り込み済みのリモートの投稿は、外へ取りに行かずに返す** (upstream の
+	// fetchAny も DB を先に引く、#3915)。取りに行くと、配送で届いているフォロワー
+	// 限定の投稿でも instance actor では見えず、照会した人の鍵で取り直すことに
+	// なり、要らないのに「誰が照会したか」を相手に伝える。見られない人には
+	// packNoteForAPI が隠す。
+	if h.noteRepo != nil {
+		if found, err := h.noteRepo.FindByURI(uri); err == nil && found.UserHost != nil {
+			// 包むのに作者と埋め込みが要るので、他の経路と同じく関係ごと読み直す。
+			if n, err := h.noteRepo.FindByIDWithRelations(found.ID); err == nil {
+				return c.JSON(http.StatusOK, map[string]any{
+					"type":   "Note",
+					"object": h.packNoteForAPI(middleware.GetUser(c), n),
+				})
+			}
+		}
+	}
 	if h.remoteFetcher != nil {
 		data, fetchErr := h.remoteFetcher.FetchObject(uri)
+		// instance actor に見せなかった (401 / 403 / 404) ものは、照会した人の鍵で
+		// 取り直す (#3915)。フォロワー限定・指名の投稿は、署名した人で見せるかを
+		// 決めるサーバーなら、これで取れる。取れたときだけ viewerKey が立ち、取り
+		// 込みでもその鍵を使う。
+		var viewerKey *activitypub.PrivateKey
+		if retried, key, retryErr, ok := h.refetchAsViewer(middleware.GetUser(c), uri, fetchErr); ok {
+			data, viewerKey, fetchErr = retried, key, retryErr
+		}
 		switch {
 		case fetchErr != nil:
 			// 404 / 410 は「不在」なので NO_SUCH_OBJECT 経路へ。それ以外は
@@ -836,7 +860,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 			// #2662)。
 			case "Note", "Question", "Article", "Audio", "Document", "Image", "Page", "Video", "Event":
 				if h.remoteResolver != nil {
-					if remoteNote, err := h.remoteResolver.ResolveNoteAllowCrossHost(uri); err == nil {
+					if remoteNote, err := h.resolveRemoteNote(uri, viewerKey); err == nil {
 						return c.JSON(http.StatusOK, map[string]any{
 							"type":   "Note",
 							"object": h.packNoteForAPI(middleware.GetUser(c), remoteNote),
@@ -1001,7 +1025,12 @@ func (h *Handler) packNoteForAPI(viewer *model.User, n *model.Note) entity.NoteE
 	// から漏れる IDOR になる。ap/show は RequireAuth なので viewer は通常非 nil だが、
 	// nil でも notehide が fail-closed (followers/specified embed を hide) する。
 	arr := []entity.NoteEntity{h.entityPacker.PackNote(n, h.idGen)}
-	h.noteHider.HideEmbeds(viewer, arr)
+	// **投稿そのものも、見られない viewer には隠す** (upstream の pack は skipHide
+	// を付けずに呼ぶので、hideNote が投稿そのものにも掛かる)。ap/show は照会した人の
+	// 鍵で取り直して、フォロワー限定・指名の投稿を取り込む (#3915)。取り込んだ後に
+	// 別の利用者が同じ URL を照会し、相手のサーバーがそれを返したとき、こちらの
+	// フォローの記録では見られない人に本文を返さない。
+	h.noteHider.HideStoredNotes(viewer, arr)
 	return arr[0]
 }
 
