@@ -4,6 +4,13 @@
 // `user.followersCount` / `followingCount` / `notesCount` と
 // `note.repliesCount` / `renoteCount` / `clippedCount` は増減で維持されている。増減はベスト
 // エフォート (戻り値を捨てる呼び出しがある) なので、失敗すればそのままずれる。
+//
+// **カウンタごとに数え方が違う** (#3927)。`followersCount` / `followingCount` /
+// `repliesCount` は増やすだけでなく減らしもする、行の件数と一致させるつもりの値
+// なので、どちら向きのずれも報告し、-fix は実件数で上書きする。`notesCount` と
+// `renoteCount` は本家も削除で減らさない増えるだけの値なので、保存値が実件数より
+// 小さいときだけを報告し、-fix は上げるだけにする (raiseOnly)。各カウンタの
+// 数え方の根拠は counterChecks の各項目に書く。
 // `instance` 側には RecomputeFollowCounts があるのに user / note 側には無く、
 // 一度ずれると管理者は SQL を手で書くしかなかった (#2473)。
 //
@@ -129,12 +136,42 @@ var counterChecks = []counterCheck{
 		        WHERE t."repliesCount" <> COALESCE(r.n, 0)`,
 	},
 	{
-		table: "note", column: "renoteCount",
-		query: `SELECT t.id AS id, t."renoteCount" AS stored, COALESCE(r.n, 0) AS actual
+		// 本家は、リノート (引用を含む) の作成で、リノートした人が対象の作者でも
+		// bot でもないときだけ 1 増やし (NoteCreateService の
+		// `data.renote.userId !== user.id && !user.isBot` → incRenoteCount)、
+		// 削除では減らさない。Elythia もローカルの投稿・inbox の Announce・
+		// resolver が取り込む引用で同じ条件で増やすので、同じ条件で数えた件数を
+		// 実件数とし、notesCount と同じく保存値が小さいときだけを報告する。
+		//
+		// Elythia は受信した Undo(Announce) で、増やしたときと同じ条件で 1 減らす
+		// (federation.handleUndoAnnounce、本家との意図的な乖離)。そのときは
+		// リノートの行も同時に消すので、保存値と実件数が 1 ずつ下がり、
+		// 「保存値 >= 実件数」の関係は崩れない。
+		//
+		// 崩れるのは、リノートした後に相手の isBot が変わったときだけ
+		// (判定は今の isBot で行うので)。bot のときにリノートして後で bot を
+		// やめると、数えなかったリノートを数えるので「小さい」と出て -fix で
+		// 足される。逆向き (後で bot になった) は「大きい」側なので報告しない。
+		// どちらも本家の値と同じにはならないが、作成時の isBot は DB に残らない。
+		//
+		// 対象の作者は、非正規化した renoteUserId で見る (本家も Elythia もリノートの
+		// 作成のたびに埋める)。note 同士を結合すると、統計が古いときに planner が
+		// 索引を使わない nested loop を選び、検査が何分も返らなかった。renoteUserId
+		// が空の行は数えない — 数えすぎると -fix が本家より大きい値に上げてしまう
+		// ので、迷う行は「小さい」と出さない側に倒す。
+		//
+		// 列は smallint なので、実件数は列に入る上限で頭打ちにする (clippedCount
+		// と同じ理由)。
+		table: "note", column: "renoteCount", raiseOnly: true,
+		query: `SELECT t.id AS id, t."renoteCount" AS stored, LEAST(COALESCE(r.n, 0), 32767) AS actual
 		        FROM "note" t
-		        LEFT JOIN (SELECT "renoteId" AS pid, COUNT(*) AS n FROM "note" WHERE "renoteId" IS NOT NULL GROUP BY "renoteId") r
+		        LEFT JOIN (SELECT rn."renoteId" AS pid, COUNT(*) AS n
+		                   FROM "note" rn
+		                   JOIN "user" ru ON ru.id = rn."userId"
+		                   WHERE rn."renoteId" IS NOT NULL AND rn."userId" <> rn."renoteUserId" AND NOT ru."isBot"
+		                   GROUP BY rn."renoteId") r
 		          ON r.pid = t.id
-		        WHERE t."renoteCount" <> COALESCE(r.n, 0)`,
+		        WHERE t."renoteCount" < LEAST(COALESCE(r.n, 0), 32767)`,
 	},
 	{
 		// 列は smallint なので、実件数は列に入る上限で頭打ちにする。そうしないと
