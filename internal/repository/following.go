@@ -51,6 +51,10 @@ type FollowingRepository interface {
 	// 専用メソッドを分けている (ページング漏れが取りこぼしに直結するため)。
 	// proxy account の除外は caller 側で行う。
 	ListLocalFollowerIDs(followeeID string) ([]string, error)
+	// FollowsAnyOnHost reports whether followerID follows at least one user on
+	// host (followeeHost, in the stored form). ap/show uses it to decide whether
+	// the viewer's key may be shown to that host (#3915).
+	FollowsAnyOnHost(followerID, host string) (bool, error)
 	ListFollowing(userID string, limit, offset int) ([]*model.Following, error)
 
 	// ListFollowingWithCursor is ListFollowing paginated by sinceId/untilId
@@ -452,6 +456,16 @@ func (r *followingRepository) ListLocalFollowerIDs(followeeID string) ([]string,
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *followingRepository) FollowsAnyOnHost(followerID, host string) (bool, error) {
+	if !storable(followerID) || !storable(host) {
+		return false, nil
+	}
+	var exists bool
+	err := r.db.Raw(`SELECT EXISTS (SELECT 1 FROM "following" WHERE "followerId" = ? AND "followeeHost" = ?)`, followerID, host).
+		Scan(&exists).Error
+	return exists, err
 }
 
 // ListFollowing is ListFollowers for the follower side.
