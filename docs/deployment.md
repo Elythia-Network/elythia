@@ -552,39 +552,72 @@ make migrate-up
 ```
 
 ```
-  カウンタのずれ: 2 件
+  カウンタのずれ: 1343 件
     user.followersCount      1 件
-    user.notesCount          1 件
+    user.notesCount          1342 件 (集めたのは先頭の 1000 件)
 
-    user.followersCount  id=u1  記録 7 → 実際 0
-    user.notesCount  id=u1  記録 99 → 実際 2
+    user.followersCount  id=9xk2a1b3c4  記録 7 → 実際 0
+    user.notesCount  id=9xk2a1b3d0  記録 41 → 実際 42
+    user.notesCount  id=9xk2a1b3d1  記録 41 → 実際 42
+    user.notesCount  id=9xk2a1b3d2  記録 41 → 実際 42
+    user.notesCount  id=9xk2a1b3d3  記録 41 → 実際 42
+    ... 他 1338 件
 
   修正するには -fix を付けて再実行してください。
 ```
 
 **既定は読み取り専用**で、`-fix` を付けたときだけ書き戻す。ずれがあれば exit 1 を返す
-(`-fix` で直せば 0)。
+(`-fix` で全部直せば 0)。
 
-> **注意 (#3927): 今の版では `-fix` を流さない。** `user.notesCount` と `note.renoteCount` は、
-> 本家と同じく行の件数と一致させる数え方をしていない (`notesCount` は投稿を消しても減らさない。
-> `renoteCount` は自分のリノートと bot のリノートを数えず、削除でも減らさない)。今の `fsck` は
-> この 2 つを行の件数と比べるので、正しい値まで「ずれ」として出し、`-fix` は投稿を消したことの
-> ある利用者の `notesCount` を下げ、自分のリノートや bot のリノートを `renoteCount` に足してしまう。
-> 直るまでは検査のみで使い、この 2 つの「ずれ」は無視する。
+**集めるのは種類ごとに先頭の 1000 件まで** (id の順)。内訳の件数は上限とは別に数えた総数で、
+上限を超えた種類には「集めたのは先頭の N 件」と付く。`-fix` が直すのも集めた分だけなので、
+上限を超えていれば「残りの N 件は、もう一度 -fix を付けて実行すると直します」と出て exit 1 を
+返す。残りが無くなるまで繰り返す。
 
 ### 検査するもの
 
-| 対象 | 突き合わせ先 |
-|---|---|
-| `user.followersCount` / `followingCount` | `following` の実件数 |
-| `user.notesCount` | `note` の実件数 |
-| `note.repliesCount` / `renoteCount` | `note.replyId` / `renoteId` の実件数 |
-| `note.clippedCount` | `clip_note` の実件数 (列は smallint なので 32767 で頭打ち) |
-| `note.pageCount` | ページの content が参照する件数 (同上) |
-| 孤児行 | 存在しない user を参照する `note` / `drive_file` / `following` |
+カウンタは数え方で 2 種類に分かれる (#3927)。
+
+| 対象 | 突き合わせ先 | 報告するずれ | `-fix` |
+|---|---|---|---|
+| `user.followersCount` / `followingCount` | `following` の件数。相手が移行済み (`movedToUri` がある) の行は数えない。移行済みの利用者自身は検査しない | 大きい・小さいの両方 | 実件数で上書き |
+| `note.repliesCount` | `note.replyId` の件数 | 大きい・小さいの両方 | 実件数で上書き |
+| `note.clippedCount` | `clip_note` の件数 (列は smallint なので 32767 で頭打ち) | 大きい・小さいの両方 | 実件数で上書き |
+| `note.pageCount` | ページの content が参照する件数 (同上) | 大きい・小さいの両方 | 実件数で上書き |
+| `user.notesCount` | `note.userId` の件数 | 記録が小さいときだけ | 実件数まで上げる (下げない) |
+| `note.renoteCount` | `note.renoteId` の件数のうち、対象の作者自身のリノートと bot のリノートを除いたもの (引用は数える。列は smallint なので 32767 で頭打ち) | 記録が小さいときだけ | 実件数まで上げる (下げない) |
+| 孤児行 | 存在しない user を参照する `note` / `drive_file` / `following` | 件数 | 消さない |
 
 これらのカウンタは増減で維持されており、増減はベストエフォート (戻り値を捨てる呼び出しが
 ある) なので失敗すればそのままずれる。
+
+**`notesCount` と `renoteCount` は増えるだけの値**で、行の件数と一致しないのが正常。本家は
+`notesCount` を投稿のたびに増やして削除では減らさず (`NoteCreateService.incNotesCountOfUser`。
+`NoteDeleteService` が減らすのは instance の `notesCount` だけ)、`renoteCount` は対象の作者でも
+bot でもない人のリノートでだけ増やして削除では減らさない。Elythia も同じ条件で増やす。そのため
+記録が実件数より大きいのは消した投稿やリノートの分で、`fsck` は記録が小さいとき (増やすのに
+失敗した分) だけを報告し、`-fix` も上げるだけにする。
+
+- **Elythia は受信した `Undo(Announce)` で `renoteCount` を 1 減らす** (本家との意図的な乖離。
+  [divergence/security.md](divergence/security.md))。このときはリノートの行も消すので、記録と
+  実件数が同じだけ下がり、「記録が小さい」とは出ない
+- **リノートした後に、リノートした人が bot になった・bot をやめたときは、本家の値と合わない。** 判定は今の
+  `isBot` で行い、リノートしたときの `isBot` は DB に残らないため。bot のときのリノートを後から
+  数える側 (bot をやめた) は「記録が小さい」と出て、`-fix` で足される
+- **リモートの利用者の `notesCount` も検査する。** 本家はリモートの投稿の受信でも増やし、Elythia も
+  #3928 から取り込みで増やす。それより前に取り込んだ投稿の分は数えていないので「記録が小さい」と
+  出て、`-fix` で取り込んだ件数まで上がる。`users/show` では元のサーバーの値に差し替えるので (#943)、
+  ここで上げた値が出るのは `ap/show`・`users/search` など、差し替えない場所
+
+**#3927 より前の版で `fsck -fix` を流したことがある DB** では、`notesCount` が消した投稿の分だけ
+下がり、`renoteCount` が作者自身のリノートと bot のリノートを含めた行の件数 (消えたリノートの分は
+引いた値) に書き換わっていることがある。どちらも今の版が数える実件数以上の値なので、今の版の
+`fsck` では「ずれ」として出ず、元の値にも戻せない (元の値は DB に残らない)。
+
+**移行したアカウントが絡むフォローは数えない。** 本家も Elythia も、どちらかが移行済みのフォローでは
+カウントを増減せず、移行のときに旧アカウントのローカルのフォロワーとフォロー先のカウントを
+1 ずつ減らす (行は残す)。
+`fsck` の実件数は、本家が移行済みの相手とのフォローを解除するときに数え直す式と同じ。
 
 ### 孤児行は自動削除しない
 
