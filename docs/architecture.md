@@ -72,14 +72,15 @@ Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを 
 
 ### 3.1 `internal/api/` — HTTP ハンドラ（60 パッケージ / 553 ルート）
 
-upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位で実装。**upstream の 444 endpoint をすべて実装済み** (coverage 100.0%)。一次情報は `make apicompat` が生成する [api-compat.md](api-compat.md)。
+upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位で実装。**upstream の 446 endpoint をすべて実装済み** (coverage 100.0%)。一次情報は `make apicompat` が生成する [api-compat.md](api-compat.md)。
 
-ルート数は `internal/server` が `/api/*` に静的登録する数 (`api.POST` 514 + `api.GET` 14 +
-`api.Match(chartMethods, …)` 12 × 2 methods + catchall の `api.Any` 1 = 553。test mode でだけ
-登録する `/api/reset-db` を含む)。登録は、catchall と `/api/reset-db` が `router.go` の
-`setupRoutes()`、ほかは領域ごとの `routes_<領域>.go` にある (#3697、4.2)。実行時は
-これに同梱プラグインのルートが乗る。`docs/api-compat.md` の 444 + 108 = 552 に catchall を
-足した数と一致する。パッケージ数は、`git ls-files internal/api` のうちテストでない `.go` を持つ
+ルート数は `internal/server` が `/api/*` に静的登録する数 (`api.POST` 516 + `api.GET` 14 +
+`api.Match(chartMethods, …)` 12 × 2 methods = 554 と、`api.Any` 2。test mode でだけ登録する
+`/api/reset-db` を含む)。`api.Any` は catchall と、全メソッドで受ける `/api/clear-browser-cache`
+(#3926)。登録は、この 2 つと `/api/reset-db` が `router.go` の `setupRoutes()`、ほかは領域ごとの
+`routes_<領域>.go` にある (#3697、4.2)。実行時はこれに同梱プラグインのルートが乗る。
+`docs/api-compat.md` の 446 + 110 = 556 は、554 に `/api/clear-browser-cache` の GET と POST を
+足した数と一致する (api-compat.md は GET と POST だけを数え、catchall を数えない)。パッケージ数は、`git ls-files internal/api` のうちテストでない `.go` を持つ
 ディレクトリの数 (`apierr` のような handler でないものも含む)。
 
 前に書いていた「52 パッケージ / 503 ルート」(`api.POST` 466 + `api.GET` 12 + 12 × 2 + 1、
@@ -87,6 +88,7 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 正しかった (その版の `router.go` と api-compat.md で数え直して一致)。数え方は同じで、その後に
 足したルートとパッケージが反映されていなかった。#3697 で数え直した (ルートは `internal/server` の
 非テストの `.go` の構文木で、`api` への `POST` / `GET` / `Match` / `Any` の呼び出しを数えた)。
+#3926 でも同じ数え方で数え直した (`api.POST` は #3926 より前から 516 で、514 のままだった)。
 
 `/api` の外は `s.echo` へ直接登録していて、`setupRoutes()` とその節 (4.2 の「setupRoutes の節」、
 #3901) の本文の登録の式文は 65 (`GET` 51 / `POST` 5 / `OPTIONS` 2 / `Any` 1 / `File` 4 / `Static` 2。

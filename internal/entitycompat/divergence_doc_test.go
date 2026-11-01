@@ -751,11 +751,16 @@ var (
 	routerPostRe  = regexp.MustCompile(`\bapi\.POST\("([^"]+)"`)
 	routerGetRe   = regexp.MustCompile(`\bapi\.GET\("([^"]+)"`)
 	routerMatchRe = regexp.MustCompile(`\bapi\.Match\(chartMethods, "([^"]+)"`)
+	// 全メソッドで受ける route (#3926)。catchall (`"/*"`) は endpoint ではないので
+	// 拾わない。表に載るのは GET と POST (tools/apicompat が他のメソッドを除く)。
+	routerAnyRe = regexp.MustCompile(`\bapi\.Any\("(/[^"*]+)"`)
 
 	// 総数を数える側。抽出できた数と突き合わせて取りこぼしを検出する。
 	routerPostCallRe  = regexp.MustCompile(`\bapi\.POST\(`)
 	routerGetCallRe   = regexp.MustCompile(`\bapi\.GET\(`)
 	routerMatchCallRe = regexp.MustCompile(`\bapi\.Match\(`)
+	routerAnyCallRe   = regexp.MustCompile(`\bapi\.Any\(`)
+	routerCatchallRe  = regexp.MustCompile(`\bapi\.Any\("/\*"`)
 )
 
 // TestAPICompatDoc_MatchesRouter asserts that the committed
@@ -817,6 +822,11 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 		router["POST "+m[1]] = true
 		router["GET "+m[1]] = true
 	}
+	anyRoutes := routerAnyRe.FindAllStringSubmatch(joined, -1)
+	for _, m := range anyRoutes {
+		router["POST "+m[1]] = true
+		router["GET "+m[1]] = true
+	}
 
 	// **0 件で通さない。** どちらかの書式が変わったら黙って空集合同士が一致する。
 	if len(doc) == 0 {
@@ -873,8 +883,6 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 			"POST / GET 以外のメソッドは母集団に入れていない"},
 		{"api.Add(", regexp.MustCompile(`\bapi\.Add\(`), 0,
 			"メソッドを文字列で渡す登録は api.<METHOD>( に一致しない"},
-		{"api.Any(", regexp.MustCompile(`\bapi\.Any\(`), 1,
-			"catchall (\"/*\") 1 件だけを想定している。増えたら実 endpoint かを確認する"},
 		{`s.echo.<METHOD>("/api`, regexp.MustCompile(`\bs\.echo\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE|Any|Match|Add|Static|File|RouteNotFound)\("/api(/|")`), 0,
 			"group を通さず /api 配下へ直接登録すると、このテストから見えない"},
 	} {
@@ -884,6 +892,15 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 理由: %s。**そこに足した endpoint は生成物と照合されない**ので、抽出をその形に
 対応させてからこの固定を解除すること。`, g.name, n, g.want, g.why)
 		}
+	}
+
+	// api.Any は catchall の 1 件と、path を抽出できた分だけのはず。path が literal
+	// でない Any は抽出から漏れ、そこに足した endpoint が生成物と照合されない。
+	if n, catchall, matched := len(routerAnyCallRe.FindAllString(joined, -1)), len(routerCatchallRe.FindAllString(joined, -1)), len(anyRoutes); catchall != 1 || n != catchall+matched {
+		t.Fatalf(`internal/server の api.Any( は %d 件で、catchall ("/*") が %d 件、path を抽出できたのが %d 件。
+
+catchall は 1 件だけを想定している。残りは path を 1 行の literal で書くこと (定数 / 変数
+経由だと、そこに足した endpoint が生成物と照合されない)。`, n, catchall, matched)
 	}
 
 	missing := diffKeys(router, doc) // router にあって doc に無い

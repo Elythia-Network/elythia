@@ -4,8 +4,8 @@
 
 - Misskey (TS) version: `2026.10.1`
 - mk-go version: `2.1.0`
-- TS endpoints (POST `/api/*`): **444**
-- mk-go implemented (TS の subset): **444**
+- TS endpoints (POST `/api/*`): **446**
+- mk-go implemented (TS の subset): **446**
 - mk-go coverage of TS: **100.0%**
 - TS only (mk-go 未実装): **0**
 - mk-go only (TS spec 外): **110**
@@ -147,7 +147,7 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/signup-application/register` |
 | POST | `/api/signup-application/status` |
 
-## 両方に存在する endpoint (444)
+## 両方に存在する endpoint (446)
 
 <details>
 <summary>展開する</summary>
@@ -331,6 +331,8 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/chat/rooms/owned` |
 | POST | `/api/chat/rooms/show` |
 | POST | `/api/chat/rooms/update` |
+| GET | `/api/clear-browser-cache` |
+| POST | `/api/clear-browser-cache` |
 | POST | `/api/clips/add-note` |
 | POST | `/api/clips/create` |
 | POST | `/api/clips/delete` |

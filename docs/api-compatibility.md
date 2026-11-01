@@ -62,7 +62,7 @@ Misskey 公式フロントの一部ページが未登録エンドポイントの
 method に関わらず 404 を返す (#2822。200 だと送信側が「受け口が無い」と
 「プラグインが空の応答を返した」を区別できない。詳細は
 [peer プロトコル](plugin-peer-protocol.md))。いずれも warn ログ
-(`unimplemented API endpoint`) が出る。なお **upstream endpoint の未実装は現在ゼロ (coverage 100.0%、444/444)**。
+(`unimplemented API endpoint`) が出る。なお **upstream endpoint の未実装は現在ゼロ (coverage 100.0%、446/446)**。
 
 ## 対応済みの互換性修正
 
@@ -359,7 +359,7 @@ drop-in テスト (#367) で発見した補完カラム:
   #14554 (2024-09) でコメントアウトごと削除済み。到達するのは API を
   直接叩く場合とサードパーティクライアントだけで、そこでは 204 が返るので
   **成功したように見えて誰にも表示されない**。
-  Elythia はこの状態を忠実に再現している (endpoint を消すと 444/444 の
+  Elythia はこの状態を忠実に再現している (endpoint を消すと 446/446 の
   カバレッジが崩れ、drop-in 切替でも挙動が変わるため)。表示経路を足すなら
   upstream に無い additive 拡張になる。
   ただし入力側だけは Elythia に意図的乖離がある — `admin/promo/create` は public

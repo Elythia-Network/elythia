@@ -197,7 +197,7 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 ## 1. API endpoint
 
-upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 6 件 (POST 5 / GET 1) = **444 件**。うち **444 件すべてを実装済み (coverage 100.0%)**。
+upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。
 
 ### 1-1. Elythia にしかない (110)
 

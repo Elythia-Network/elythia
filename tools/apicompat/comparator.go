@@ -135,8 +135,9 @@ type tsDirectRoute struct {
 	Path   string
 }
 
-// fastifyDirectRe matches `fastify.post(...)` / `fastify.get(...)` route
-// registrations and captures the method plus the quoted path. The generic
+// fastifyDirectRe matches `fastify.post(...)` / `fastify.get(...)` /
+// `fastify.all(...)` route registrations and captures the method plus the
+// quoted path. The generic
 // type parameter (`fastify.post<{ Body: ... }>(`) may span multiple lines,
 // so the path is captured from the argument list rather than requiring it on
 // the same line as the method name.
@@ -147,7 +148,14 @@ type tsDirectRoute struct {
 //	fastify.post<{                                                      // 複数行
 //	    Body: { ... };
 //	}>('/signup', ...)
-var fastifyDirectRe = regexp.MustCompile(`fastify\.(post|get)\s*(?:<[\s\S]*?>)?\s*\(\s*'([^']+)'`)
+//
+// path の文字列の直後が `,` か `)` のもの (path 全体が literal) だけを拾う。
+// endpoint ごとの登録 (`fastify.all('/' + endpoint.name, ...)`) は endpoints/ の
+// file-walk で数えるので、ここで `/` として拾ってはいけない (#3926)。型引数の
+// 部分には `(` を含めない。含めると、拾わない登録の型引数から後ろの別の登録の
+// path まで伸びて一致する (endpoint ごとの `fastify.all<` から `/signup` まで)。
+// `'` は含めてよい (`'hcaptcha-response'?: string;` のような body の型がある)。
+var fastifyDirectRe = regexp.MustCompile(`fastify\.(post|get|all)\s*(?:<[^()]*?>)?\s*\(\s*'([^']+)'\s*[,)]`)
 
 // collectTSDirectRoutes parses ApiServerService.ts and returns the routes it
 // registers straight on fastify (i.e. outside endpoints/).
@@ -171,6 +179,13 @@ func collectTSDirectRoutes(path string) ([]tsDirectRoute, error) {
 		// `fastify.get('/*', ...)` は 404 fallback の catch-all で endpoint
 		// ではない。mk-go 側でも Echo の catch-all を除外している。
 		if p == "/*" {
+			continue
+		}
+		// `fastify.all` は全メソッドで受ける (`/clear-browser-cache` は GET と POST
+		// に応え、それ以外は handler が 405 を返す)。表が扱うのは GET と POST
+		// だけなので、その 2 つとして数える (#3926)。
+		if method == "ALL" {
+			out = append(out, tsDirectRoute{Method: "GET", Path: "/api" + p}, tsDirectRoute{Method: "POST", Path: "/api" + p})
 			continue
 		}
 		out = append(out, tsDirectRoute{Method: method, Path: "/api" + p})
@@ -233,6 +248,12 @@ func compare(tsEndpoints []string, direct []tsDirectRoute, mk *DumpedRoutes) Rep
 		// path が exactly "/api/*" のものは route ではなく Echo 内部 artifact
 		// なので matrix から除外する。
 		if p == "/api/*" || r.Method == "echo_route_not_found" {
+			continue
+		}
+		// 表が扱うのは GET と POST だけ。Any で登録した route (`/api/clear-browser-cache`)
+		// は全メソッドの route を持つので、それ以外を入れると HEAD や PUT の行が
+		// 「mk-go only」に並ぶ (#3926)。
+		if r.Method != "GET" && r.Method != "POST" {
 			continue
 		}
 		if r.Method == "POST" {

@@ -2716,6 +2716,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 実装が出揃うまで pass-through にしている。実装漏れは warn ログで検知する。
 	api.Any("/*", apiCatchall)
 
+	// clear-browser-cache — 本家が endpoint の仕組みの外で fastify.all に直接
+	// 登録する route (ApiServerService.ts)。どのメソッドでも受け、GET と POST
+	// 以外は handler が 405 を返す。endpoint ではないので、本文の検査
+	// (apiRoutes の requireObjectBody) と paramshadow の記録を通さない (#3926)。
+	api.Any("/clear-browser-cache", meta.ClearBrowserCache)
+
 	// フロントエンドの配信と SPA の catchall (#3901 で関数へ移した。呼ぶ位置と中の文の順は
 	// 元のまま。プラグインの準備に失敗したときの return より後)。
 	s.wireFrontendRoutes(frontendRoutesDeps{
