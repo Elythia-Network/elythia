@@ -267,6 +267,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"err", "once", "spec"}, nil},
 	"internal/server.autoscaleRunner": {kindNotCache, "queueのworkerの数をこのプロセスで最後に観測した値。DBから読んだ値ではない",
 		[]string{"cancel", "mu", "stats", "wg", "workerCounts"}, nil},
+	"internal/server.headRoutes": {kindNotCache, "登録したGETとHEADのルートのパスの集合。組み立てでEchoにルートを足すときに記録し、DBから読んだ値を持たない。ルートは世代のServerごとに決まるので、世代と一緒に作り直される",
+		[]string{"get", "head", "mu"}, nil},
 	"internal/server.instanceActorSigner": {kindDropLocal, "",
 		[]string{"cachedKey", "keypair", "lastFailure", "mu", "sysAcct", "urls"}, nil},
 	"internal/server.lifecycle": {kindNotCache, "世代の部品の起動と停止の一覧",

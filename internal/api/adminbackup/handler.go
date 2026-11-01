@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/backupadmin"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
+	"github.com/elythia-network/elythia/internal/misc/headreq"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 )
@@ -216,16 +217,28 @@ func (h *Handler) ServeDownload(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, "Internal Server Error")
 	}
 	defer func() { _ = rc.Close() }()
-	// token は期限内なら何度でも使えるので、実際に取られたことを残す。発行は
-	// moderation log の downloadBackup に残っている。
-	slog.Info("admin/backup: backup downloaded", "userId", g.UserID, "key", g.Key, "ip", c.RealIP(), "range", c.Request().Header.Get("Range"))
+	// HEAD (GET のルートに振り分けられ、handler には GET に見える) では本文を
+	// 読まない。dump を保存先から全部読んで捨てることになり、取られていないのに
+	// 取られた記録も残ってしまう (#3925)。
+	head := headreq.Is(c)
+	if head {
+		// HEAD でも token が使えるかとファイルの情報は分かるので、別の文言で残す。
+		slog.Info("admin/backup: backup download probed (HEAD)", "userId", g.UserID, "key", g.Key, "ip", c.RealIP())
+	} else {
+		// token は期限内なら何度でも使えるので、実際に取られたことを残す。発行は
+		// moderation log の downloadBackup に残っている。
+		slog.Info("admin/backup: backup downloaded", "userId", g.UserID, "key", g.Key, "ip", c.RealIP(), "range", c.Request().Header.Get("Range"))
+	}
 	res.Header().Set("Content-Type", "application/octet-stream")
 	res.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": g.FileName}))
 	// ディレクトリの保存先はファイルを返すので、Range (途切れたダウンロードの
 	// 再開) に応じられる。seek できない実装なら頭から流す。
 	if rs, ok := rc.(io.ReadSeeker); ok {
-		http.ServeContent(res, c.Request(), g.FileName, info.ModTime, rs)
+		http.ServeContent(res, headreq.Request(c), g.FileName, info.ModTime, rs)
 		return nil
+	}
+	if head {
+		return c.NoContent(http.StatusOK)
 	}
 	return c.Stream(http.StatusOK, "application/octet-stream", rc)
 }

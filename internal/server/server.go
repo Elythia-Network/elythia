@@ -755,6 +755,9 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	}
 
 	e := echo.New()
+	// GET のルートを HEAD にも応えさせる (#3925)。ルートの記録と最も外側の
+	// middleware を兼ねるので、ルートと他の middleware より先に置く。
+	headRouting := installHeadRoutes(e)
 	e.HideBanner = true
 	e.HidePort = true
 	applyServerTimeouts(e.Server)
@@ -809,6 +812,9 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 			return nil
 		}
 	})
+	// ここから内側では、GET のルートへ振り分けた HEAD を GET として見せる
+	// (#3925)。アクセスログより内側に置くので、ログには HEAD と出る。
+	e.Use(headRouting.presentAsGET)
 	e.Use(corsMiddleware())
 	// gzip response compression (#413 Phase 3 #12)。Misskey TS は nginx
 	// 前段で gzip するのが定石だが、mk-go は単体運用も想定するので app 側

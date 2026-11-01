@@ -17,6 +17,7 @@ import (
 
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/headreq"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -192,7 +193,8 @@ func filesHandler(lookup filesDriveLookup, primary, local coredrive.Storage) ech
 		}
 
 		setFileResponseHeaders(c, contentType)
-		http.ServeContent(c.Response(), c.Request(), key, modtime, seeker)
+		// HEAD なら ServeContent に本文を写させない (#3925)。
+		http.ServeContent(c.Response(), headreq.Request(c), key, modtime, seeker)
 		return nil
 	}
 }
@@ -243,7 +245,8 @@ func serveRangedFile(c echo.Context, rg coredrive.RangeGetter, key string) error
 	if !ok {
 		return c.NoContent(http.StatusRequestedRangeNotSatisfiable)
 	}
-	head := req.Method == http.MethodHead
+	// GET のルートへ振り分けた HEAD は、handler には GET として見える (#3925)。
+	head := headreq.Is(c)
 	fetchSpec := spec
 	if head && spec == "" {
 		// HEAD は本文を返さないので、MIME の判定に要る先頭だけを取る。

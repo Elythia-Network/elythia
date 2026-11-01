@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
 
+	"github.com/elythia-network/elythia/internal/misc/headreq"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
 
@@ -173,7 +174,7 @@ func servePrecompressed(c echo.Context, fsys fs.FS, name string, orig fs.FileInf
 		return false
 	}
 	defer bestF.Close()
-	req := c.Request()
+	req := headreq.Request(c)
 	h := c.Response().Header()
 	h.Set(echo.HeaderContentType, ctype)
 	h.Set(echo.HeaderContentEncoding, bestEnc)

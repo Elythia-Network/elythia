@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/misc/headreq"
 )
 
 // newFrontendBuildEcho registers the production /vite route behind the
@@ -27,7 +28,7 @@ import (
 //	assets/bSIsCqU1u-14CNCjXV.css               hashed, no precompressed
 //	manifest.json (+ .br)                       not hashed
 //	loader/boot.js                              not hashed
-func newFrontendBuildEcho(t *testing.T) *echo.Echo {
+func newFrontendBuildEcho(t *testing.T, mw ...echo.MiddlewareFunc) *echo.Echo {
 	t.Helper()
 	dir := t.TempDir()
 	write := func(name, body string) {
@@ -45,6 +46,7 @@ func newFrontendBuildEcho(t *testing.T) *echo.Echo {
 	write("loader/boot.js", strings.Repeat("boot();", 300))
 
 	e := echo.New()
+	e.Use(mw...)
 	e.Use(echomw.GzipWithConfig(gzipConfig()))
 	registerFrontendAssets(e, &config.Config{}, "/vite", dir, "http://127.0.0.1:1")
 	return e
@@ -87,6 +89,23 @@ func TestFrontendBuild_PrecompressedVariants(t *testing.T) {
 			}
 		})
 	}
+}
+
+// サーバーが GET のルートへ振り分けた HEAD では、事前圧縮の変種を写さない
+// (#3925)。httptest.ResponseRecorder は net/http と違って本文を捨てないので、
+// 写せば本文に出る。
+func TestFrontendBuild_PrecompressedHEADSkipsTheBodyCopy(t *testing.T) {
+	e := newFrontendBuildEcho(t, func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			headreq.Mark(c)
+			return next(c)
+		}
+	})
+	rec := getFrontend(e, "/vite/ja-JP/bSIsCqU1u-0qk-1YEG.js", "br")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "br", rec.Header().Get(echo.HeaderContentEncoding))
+	assert.Equal(t, strconv.Itoa(len("BROTLI-BYTES")), rec.Header().Get(echo.HeaderContentLength))
+	assert.Empty(t, rec.Body.String())
 }
 
 // 事前圧縮のファイルが無ければ、これまでどおりその場で gzip する。
