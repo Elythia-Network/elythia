@@ -7,7 +7,7 @@
 ## 何が取られるか
 
 - `pg_dump -Fc`で取った、DB全体のdump(custom format)
-- メタ情報(`meta.json`): 取った日時、Elythiaの版とcommit、PostgreSQLの版、取った`pg_dump`の版、管理表(`schema_migrations` / `schema_migrations_local`)の番号、表ごとの行数、DB単位の設定(`ALTER DATABASE ... SET`)、DBのencodingとlocale、入っている拡張(`pg_extension`の名前と版)、sha256
+- メタ情報(`meta.json`): 取った日時、Elythiaの版とcommit、PostgreSQLの版、取った`pg_dump`の版、管理表(`schema_migrations` / `schema_migrations_local`)の番号、表ごとの行数、DB単位の設定(`ALTER DATABASE ... SET`)、DBのencodingとlocale、入っている拡張(`pg_extension`の名前と版。pg_dump 17以降で取るときは`pg_stat_statements`を除く)、sha256
 
 **入らないもの:**
 
@@ -27,6 +27,8 @@ DBを全件数えるので、表が大きいと数える時間がかかる。そ
 ### 拡張
 
 dumpには`CREATE EXTENSION`が入るので、戻す側のPostgreSQLにも同じ拡張が要る。メタ情報の`extensions`に、取った時点の拡張を記録する。
+
+**`pg_stat_statements`は、dumpにもメタ情報にも入れない**(#3909、`pg_dump --exclude-extension`)。trustedでない拡張なので、superuserでないDBの利用者では戻すときに作れないため。中身は測った数字だけで、戻した後にElythiaがDBに繋ぐとき、読み込まれていれば作り直す([pg_stat_statements](deployment.md#pg_stat_statements-重い-sql-を測る))。`--exclude-extension`はpg_dump 17からなので、それより前の`pg_dump`で取るときは従来どおりdumpに入れ、警告のログを出す。
 
 バックアップ用のimageには、UDSの構成のDB(`deploy/postgres-bigm`)と同じ版の**pg_bigmを入れてある**。[確かめる](#確かめる)ときは、このimageの中で使い捨てのPostgreSQLに戻すため。PGroongaなど、それ以外の拡張を入れたDBは、そのままではimageの中で戻せない。確かめるときは、戻す前に`extensions`の拡張が使い捨てのPostgreSQLにあるかを調べ、無ければその名前を出して止める。
 
