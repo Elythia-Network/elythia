@@ -195,6 +195,12 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 `e.Any`で登録したルート(`/api/*`のcatch-all、`/oauth/*`など)はHEADのルートを持つので振り分けず、handlerにはHEADのまま届く。ただし、それより具体的なGETのルートがあるパス(`/api/emojis`など)は、本家と同じくそのGETのルートが答える。`/api/*`のcatch-allは、HEADにもGETと同じ404を返す(本家の`fastify.get('/*')`と同じ)。
 
+## `/api/clear-browser-cache`に無効なtokenを付けたとき (#3926)
+
+`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは`/api`の全体に掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
+
+本体のfrontendは、tokenを付けずに呼ぶ(`misskeyApiGet('clear-browser-cache', {})`)ので、この違いを踏まない。踏むのは、失効したtokenを付けたまま呼ぶ他のクライアントだけなので、全体の認証にこのパスの例外を足すことはしていない。
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。
