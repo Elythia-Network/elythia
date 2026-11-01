@@ -4,15 +4,15 @@
 // `user.followersCount` / `followingCount` / `notesCount` と
 // `note.repliesCount` / `renoteCount` / `clippedCount` は増減で維持されている。増減はベスト
 // エフォート (戻り値を捨てる呼び出しがある) なので、失敗すればそのままずれる。
+// `instance` 側には RecomputeFollowCounts があるのに user / note 側には無く、
+// 一度ずれると管理者は SQL を手で書くしかなかった (#2473)。
 //
 // **カウンタごとに数え方が違う** (#3927)。`followersCount` / `followingCount` /
-// `repliesCount` は増やすだけでなく減らしもする、行の件数と一致させるつもりの値
+// `repliesCount` / `clippedCount` / `pageCount` は行の件数と一致させるつもりの値
 // なので、どちら向きのずれも報告し、-fix は実件数で上書きする。`notesCount` と
 // `renoteCount` は本家も削除で減らさない増えるだけの値なので、保存値が実件数より
 // 小さいときだけを報告し、-fix は上げるだけにする (raiseOnly)。各カウンタの
 // 数え方の根拠は counterChecks の各項目に書く。
-// `instance` 側には RecomputeFollowCounts があるのに user / note 側には無く、
-// 一度ずれると管理者は SQL を手で書くしかなかった (#2473)。
 //
 // `note.clippedCount` は #1768 から clips/add-note と remove-note で増減している。
 // それより前にクリップした行はカウンタが 0 のまま残っているので、実件数
@@ -127,7 +127,7 @@ var counterChecks = []counterCheck{
 		//
 		// **移行したアカウントが絡むフォローは数えない。** 本家も Elythia も、
 		// どちらかが移行済み (movedToUri がある) なら増減を飛ばし、移行の時点で
-		// 旧アカウントと関係のあった相手のカウントを 1 ずつ減らす (行は残す。
+		// 旧アカウントのローカルのフォロワーとフォロー先のカウントを 1 ずつ減らす (行は残す。
 		// AccountMoveService.adjustFollowingCounts / move.Service)。実件数は、
 		// 本家が移行済みの相手との解除のときに数え直す式 (decrementFollowing の
 		// else 側) と同じく、相手が移行済みでない行だけを数え、移行済みの利用者
