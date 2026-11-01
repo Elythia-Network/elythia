@@ -42,6 +42,11 @@ services:
     # 素の image に戻す場合は build: を消して `image: postgres:18-alpine` に。
     build:
       context: deploy/postgres-bigm
+    # pg_stat_statements で重い SQL を測るときは、次の行のコメントを外して
+    # postgres を作り直す (#3909)。拡張は Elythia が DB に繋ぐときに作る。
+    # track_utility=off は、パスワードを含む文 (ALTER ROLE ... PASSWORD など) を
+    # 値ごと記録しないため。手順と読み方は docs/deployment.md の「pg_stat_statements」。
+    # command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track_utility=off"]
     environment:
       POSTGRES_DB: mkgo
       POSTGRES_USER: mkgo

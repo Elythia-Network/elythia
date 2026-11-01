@@ -264,6 +264,71 @@ EXPLAIN SELECT id FROM note WHERE lower(text) LIKE '%検索語%';
 
 `fulltextSearch.provider` は `sqlLike` のままでよい。拡張を外す場合はインデックスを落とすだけで検索自体は動き続ける (seq scan に戻る)。
 
+## pg_stat_statements (重い SQL を測る)
+
+`pg_stat_statements` は PostgreSQL に付いている拡張で、実行された SQL を形ごとにまとめて、回数・合計時間・読んだブロック数を数え続ける。本番で 1 週間ほど取れば、1 回は速いが回数が多くて合計で重い SQL や、本番の行数で初めて遅くなる SQL を、数字で選べる (#3909)。
+
+**使うのは、PostgreSQL の設定に足して再起動するだけ。** `shared_preload_libraries` で `pg_stat_statements` が読み込まれていれば、Elythia が DB に繋ぐとき (起動のときと、メンテナンスの後に繋ぎ直すとき) に、その DB に拡張を作る (`CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public`)。読み込まれていなければ何もしない。migration には入れていない (拡張の作成には superuser が要り、migration は 1 回しか走らず、本体の migration は全員の DB で走るため)。
+
+1. `shared_preload_libraries` に足す。Docker Compose では PostgreSQL のサービス (UDS 構成の `compose.uds.yaml` では `postgres`、`docker-compose.yml` などでは `db`) に `command:` を足す。UDS 構成の `compose.uds.yaml.example` には、コメントで添えてある
+
+```yaml
+  postgres:   # docker-compose.yml などでは db
+    command: ["postgres",
+              "-c", "shared_preload_libraries=pg_stat_statements",
+              "-c", "pg_stat_statements.track_utility=off"]
+```
+
+   `postgresql.conf` で設定するなら `shared_preload_libraries = 'pg_stat_statements'` (ほかのライブラリがあればカンマで並べる)。`track_utility=off` の理由は下の「記録されるもの」
+
+2. PostgreSQL のコンテナを作り直す (UDS 構成なら `docker compose -f compose.uds.yaml up -d postgres`、`docker-compose.yml` なら `docker compose up -d db`)。**この設定は PostgreSQL を再起動しないと効かない**
+3. Elythia を再起動する。ログに `created the pg_stat_statements extension` が出れば作られている
+
+- **DB の利用者が superuser でないと、拡張を作れない。** 作れなかったときは、起動を止めずに警告を出し、superuser で実行する SQL をログに書く。superuser でこの DB に接続して `CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;` を実行する。拡張は `public` に作るので、`public` の schema を消した DB では作れない (その場合は schema を指定して作り、`elythia doctor` で確かめる)
+- 読み込まれているかは、`pg_settings` に `pg_stat_statements.max` があるかで見る (読み込まれたときにだけ定義される)。`shared_preload_libraries` そのものは superuser か `pg_read_all_settings` の一員しか読めないが、こちらは誰でも読める
+- `elythia doctor` と管理画面の `admin/self-check` の `pg-stat-statements` が、読み込みと拡張の食い違い (読み込まれているのに拡張が無い、拡張はあるのに読み込まれていない) を警告する。後者のときは `pg_stat_statements` の view を読むとエラーになる
+
+**読み方。** 合計時間の長い順に 20 件を出す (`psql` などで、Elythia の DB に接続して実行する):
+
+```sql
+SELECT calls,
+       round(total_exec_time::numeric, 1) AS total_ms,
+       round(mean_exec_time::numeric, 2) AS mean_ms,
+       rows,
+       shared_blks_hit + shared_blks_read AS blocks,
+       left(query, 160) AS query
+FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+測り始めをそろえるときは、`SELECT pg_stat_statements_reset();` で数字を 0 に戻す (superuser か、実行の権限を与えた利用者だけが実行できる)。
+
+**記録されるもの。**
+
+- `SELECT` / `INSERT` / `UPDATE` / `DELETE` の値は記録されない。`WHERE id = 'abc'` は `WHERE id = $1` の形にまとめて記録される。SQL の形そのもの (表と列の名前) は残る
+- **それ以外の文 (`CREATE ROLE ... PASSWORD '...'`、`ALTER ROLE ... PASSWORD` など) は、既定 (`pg_stat_statements.track_utility=on`) では値ごと記録される。** パスワードを含む文を DB で実行することがあるなら、上の例のように `track_utility=off` にする。記録は既定でサーバーの再起動をまたいで残る (`pg_stat_statements.save=on`)。消すには `pg_stat_statements_reset()` を実行する
+- **他の利用者の SQL の本文を読めるのは、superuser と `pg_read_all_stats` の一員だけ。** それ以外の利用者には `<insufficient privilege>` と表示される
+
+**ほかに知っておくこと。**
+
+- 拡張を作ると、DB の `public` に `pg_stat_statements` の view と関数が増える。Misskey の表には触れない
+- **バックアップには入れない。** 取るときに `pg_dump --exclude-extension=pg_stat_statements` を付ける (この拡張が入っているときだけ)。superuser でない DB の利用者では、戻すときに作れないため。戻した後に Elythia が DB に繋ぐとき、読み込まれていれば作り直す。`--exclude-extension` は pg_dump 17 からなので、それより前の pg_dump で取るときは従来どおり dump に入れ、警告のログを出す ([バックアップ](backup.md#拡張))
+- **やめるときは、`shared_preload_libraries` から外して PostgreSQL を再起動し、superuser で `DROP EXTENSION pg_stat_statements;` を実行する。** 外すだけでは拡張が残り、`elythia doctor` が警告する
+
+**あわせて `auto_explain` を使う。** 一定時間を超えた SQL の実行計画を PostgreSQL のログに出す。拡張を作らなくてよく、読み込むだけで効く:
+
+```yaml
+  postgres:
+    command: ["postgres",
+              "-c", "shared_preload_libraries=pg_stat_statements,auto_explain",
+              "-c", "pg_stat_statements.track_utility=off",
+              "-c", "auto_explain.log_min_duration=500ms"]
+```
+
+`auto_explain.log_analyze` を `on` にすると実際の行数と時間も出るが、すべての SQL に計測の負荷が掛かるので、本番では既定 (`off`) のままにする。
+
 ## Docker Compose (TCP)
 
 最も簡単な起動方法。PostgreSQL、Redis、Elythiaの3サービスをTCPで接続する。
@@ -587,6 +652,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
   ok    config.url   https://example.com
   ok    database     接続 ok / migration version 140
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
+  ok    pg-stat-statements 使っていない (shared_preload_libraries に無い)
   ok    root user    meta.rootUserId 設定済み
   ok    redis        接続 ok
   FAIL  webfinger    status 403 (連合が無効)
@@ -606,6 +672,8 @@ warn は「見ておくべき」であって「壊れている」ではないた
 |---|---|
 | `config.url` | 絶対 URL か、https か |
 | `database` | 接続と、`schema_migrations` が同梱マイグレーションに追いついているか。fork の系列 (`migration/local/`) を同梱しているときは `schema_migrations_local` も見る ([fork の独自 migration](fork-migrations.md#doctor)) |
+| `database-health` | dead tuple が溜まった表や、VACUUM されていない表が無いか (警告だけ) |
+| `pg-stat-statements` | `pg_stat_statements` の読み込みと拡張が食い違っていないか (警告だけ。[pg_stat_statements](#pg_stat_statements-重い-sql-を測る)) |
 | `root user` | `meta.rootUserId` が設定されているか。**未設定だと root 判定が効かず**、`admin/accounts/create` の初回セットアップ判定がローカル利用者数のガードだけに依存する状態になる。指名し直すには DB を直接更新する (`update-meta` は `rootUserId` を受け付けない) |
 | `redis` | 接続 |
 | `webfinger` | **公開 URL 経由**で `acct:instance.actor@<host>` が引けるか |
