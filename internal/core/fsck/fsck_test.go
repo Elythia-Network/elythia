@@ -49,43 +49,81 @@ func TestRun_CleanDatabase(t *testing.T) {
 	assert.Empty(t, rep.Drifts)
 }
 
-// notesCount のずれを検出すること。増減はベストエフォートなので実際にずれる。
-func TestRun_DetectsNotesCountDrift(t *testing.T) {
+// notesCount は増えるだけの値なので、保存値が実件数より小さい (増やすのに
+// 失敗した) ときだけを報告する (#3927)。
+func TestRun_DetectsLostNotesCountIncrements(t *testing.T) {
 	db := newTestDB(t)
 	seedUser(t, db, "u1")
 	seedNote(t, db, "n1", "u1")
 	seedNote(t, db, "n2", "u1")
-	// カウンタだけを壊す (INSERT はカウンタを更新しないので、明示的にずらす)。
-	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 99 WHERE id = 'u1'`).Error)
+	// seedNote はカウンタを増やさないので、u1 は 0 のまま (2 回の増加を失った状態)。
 
 	rep, err := Run(context.Background(), db, Options{})
 	require.NoError(t, err)
 	require.Len(t, rep.Drifts, 1)
 	assert.Equal(t, "notesCount", rep.Drifts[0].Column)
-	assert.EqualValues(t, 99, rep.Drifts[0].Stored)
+	assert.EqualValues(t, 0, rep.Drifts[0].Stored)
 	assert.EqualValues(t, 2, rep.Drifts[0].Actual)
 	assert.Zero(t, rep.Repaired, "既定では書き込まない")
+}
+
+// 本家もElythiaも投稿を消しても notesCount を減らさないので、保存値が実件数より
+// 大きいのは正常。報告せず、-fix でも下げない (#3927)。
+func TestRun_NotesCountAboveRowCountIsNotDrift(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedNote(t, db, "n1", "u1")
+	// 3 件投稿して 2 件消した利用者。
+	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 3 WHERE id = 'u1'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	assert.True(t, rep.OK())
+	assert.Zero(t, rep.Repaired)
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "notesCount" FROM "user" WHERE id = 'u1'`).Scan(&got).Error)
+	assert.EqualValues(t, 3, got, "-fix でも下げない")
+}
+
+// リモートの利用者も検査する。#3928 より前に取り込んだ投稿の分は数えていない
+// ので、-fix で取り込んだ件数まで上がる (#3927)。
+func TestRun_NotesCountChecksRemoteUsers(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.Exec(
+		`INSERT INTO "user" (id, username, "usernameLower", host, "avatarDecorations") VALUES ('r1', 'r1', 'r1', 'remote.example', '[]')`).Error)
+	seedNote(t, db, "n1", "r1")
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	require.Len(t, rep.Drifts, 1, "リモートの利用者も報告する")
+	assert.Equal(t, "r1", rep.Drifts[0].ID)
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "notesCount" FROM "user" WHERE id = 'r1'`).Scan(&got).Error)
+	assert.EqualValues(t, 1, got)
 }
 
 // **既定は読み取り専用。** 検査しただけで値が変わってはいけない。
 func TestRun_DoesNotWriteWithoutFix(t *testing.T) {
 	db := newTestDB(t)
 	seedUser(t, db, "u1")
-	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 42 WHERE id = 'u1'`).Error)
+	seedNote(t, db, "n1", "u1")
 
-	_, err := Run(context.Background(), db, Options{})
+	rep, err := Run(context.Background(), db, Options{})
 	require.NoError(t, err)
+	require.Len(t, rep.Drifts, 1, "ずれはある")
 
 	var got int64
 	require.NoError(t, db.Raw(`SELECT "notesCount" FROM "user" WHERE id = 'u1'`).Scan(&got).Error)
-	assert.EqualValues(t, 42, got, "値が変わっていない")
+	assert.EqualValues(t, 0, got, "値が変わっていない")
 }
 
 func TestRun_FixRepairsCounters(t *testing.T) {
 	db := newTestDB(t)
 	seedUser(t, db, "u1")
 	seedNote(t, db, "n1", "u1")
-	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 99 WHERE id = 'u1'`).Error)
+	seedNote(t, db, "n2", "u1")
+	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 1 WHERE id = 'u1'`).Error)
 
 	rep, err := Run(context.Background(), db, Options{Fix: true})
 	require.NoError(t, err)
@@ -93,12 +131,34 @@ func TestRun_FixRepairsCounters(t *testing.T) {
 
 	var got int64
 	require.NoError(t, db.Raw(`SELECT "notesCount" FROM "user" WHERE id = 'u1'`).Scan(&got).Error)
-	assert.EqualValues(t, 1, got)
+	assert.EqualValues(t, 2, got)
 
 	// 修正後は clean。
 	rep, err = Run(context.Background(), db, Options{})
 	require.NoError(t, err)
 	assert.True(t, rep.OK())
+}
+
+// 増えるだけのカウンタの書き戻しは、検査の後に増えた値を下げない。検査から
+// 書き戻しまでの間にもサーバーは投稿を受け付けている (#3927)。
+func TestRepair_RaiseOnlyNeverLowers(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	// 検査の時点では 0 → 実際 1 だったが、書き戻す前に 5 まで増えた。
+	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 5 WHERE id = 'u1'`).Error)
+
+	require.NoError(t, repair(context.Background(), db,
+		Drift{Table: "user", Column: "notesCount", ID: "u1", Stored: 0, Actual: 1}, true))
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "notesCount" FROM "user" WHERE id = 'u1'`).Scan(&got).Error)
+	assert.EqualValues(t, 5, got, "増えた値を下げない")
+
+	// raiseOnly でないカウンタは実件数で上書きする。
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followersCount" = 7 WHERE id = 'u1'`).Error)
+	require.NoError(t, repair(context.Background(), db,
+		Drift{Table: "user", Column: "followersCount", ID: "u1", Stored: 7, Actual: 2}, false))
+	require.NoError(t, db.Raw(`SELECT "followersCount" FROM "user" WHERE id = 'u1'`).Scan(&got).Error)
+	assert.EqualValues(t, 2, got)
 }
 
 func TestRun_DetectsFollowCounters(t *testing.T) {
@@ -262,8 +322,8 @@ func TestRun_RespectsLimit(t *testing.T) {
 	db := newTestDB(t)
 	for _, id := range []string{"a1", "a2", "a3"} {
 		seedUser(t, db, id)
+		seedNote(t, db, "n"+id, id)
 	}
-	require.NoError(t, db.Exec(`UPDATE "user" SET "notesCount" = 1`).Error)
 
 	rep, err := Run(context.Background(), db, Options{Limit: 2})
 	require.NoError(t, err)
@@ -298,7 +358,7 @@ func TestRun_ReturnsErrorWhenCheckFails(t *testing.T) {
 // 修正の書き込みが失敗したらエラーを返す。
 func TestRepair_ReturnsErrorOnWriteFailure(t *testing.T) {
 	err := repair(context.Background(), closedDB(t),
-		Drift{Table: "user", Column: "notesCount", ID: "u1", Actual: 1})
+		Drift{Table: "user", Column: "notesCount", ID: "u1", Actual: 1}, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notesCount")
 	assert.Contains(t, err.Error(), "u1", "どの行で失敗したかが分かる")

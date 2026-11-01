@@ -645,9 +645,9 @@ func TestLocalSandbox(t *testing.T) {
 
 func TestVerifyReportsFsckDriftAsWarning(t *testing.T) {
 	e := getVerifyEnv(t)
-	// notesCount を実際の件数 (0) とずらしたユーザーを置く。元の DB にあるずれで、
+	// followersCount を実際の件数 (0) とずらしたユーザーを置く。元の DB にあるずれで、
 	// バックアップの欠陥ではないので、段は通して警告に残す。
-	require.NoError(t, e.db.Exec(`INSERT INTO "user" (id, username, "usernameLower", "avatarDecorations", "notesCount") VALUES ('verifydrift1', 'drift', 'drift', '[]', 5)`).Error)
+	require.NoError(t, e.db.Exec(`INSERT INTO "user" (id, username, "usernameLower", "avatarDecorations", "followersCount") VALUES ('verifydrift1', 'drift', 'drift', '[]', 5)`).Error)
 	t.Cleanup(func() { require.NoError(t, e.db.Exec(`DELETE FROM "user" WHERE id = 'verifydrift1'`).Error) })
 	dump := e.dump(t)
 	s := newMemStorage()
