@@ -121,6 +121,8 @@ var cacheEntries = map[string]cacheEntry{
 		}},
 	"internal/core/federation.chainWait": {kindNotCache, "実行中の解決の待ちの1つ。Resolverから届くが、DropLocalは捨てない。解決が終われば消える",
 		[]string{"running", "waitingOn"}, nil},
+	"internal/core/federation.fetchKeySource": {kindPerCall, "1回の解決の木で、見えない投稿を取り直すのに使うローカルの利用者の鍵(#3915 / #3916)。受信1件か照会1回ごとに作り、onceで1回だけ引く。解決が終われば捨てられる",
+		[]string{"host", "id", "key", "load", "once"}, nil},
 	"internal/core/federation.mentionFetchGuard": {kindThrottle, "mentionの相手の取得の同時数と、URIとホストごとの間引き。Resolverから届くが、DropLocalは捨てない(4.4)",
 		[]string{"hosts", "mu", "slots", "uris"}, nil},
 	"internal/core/federation.missingExtraKeys": {kindDroppedByOwner, "Ed25519の鍵が無いことの記憶。Resolver.DropLocalがdropAllで捨てる",

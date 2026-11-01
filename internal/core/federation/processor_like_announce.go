@@ -160,7 +160,10 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 		// 既存行を引く方式では、Announce の object が document id と別名の URL
 		// (`https://h/@user/1` に対し id は `https://h/notes/1`) のときに何度
 		// 取り込んでも「新規」に見え、既知の note を繰り返し antenna へ押し込める。
-		target, targetCreated, err = p.resolver.ResolveNoteWithCreatedForInbox(targetURI, inboundActorHost(act.Actor))
+		// instance actor に見せなかった対象 (鍵アカウントが自分のフォロワー限定の
+		// 投稿をリノートしたときなど) は、announcer をフォローしているローカルの
+		// 利用者の鍵で取り直す (#3916)。
+		target, targetCreated, err = p.resolver.resolveNoteWithCreatedForInboxRetrying(targetURI, inboundActorHost(act.Actor), p.hiddenNoteRetry(announcer, signer))
 	}
 	if err != nil {
 		// permanent な target resolve 失敗 (削除済 note / followers-only) は
@@ -459,10 +462,45 @@ func (p *Processor) resolveCreateActor(uri string, viaRelay bool) (*model.User, 
 
 // ingestCreateNote persists an inbound Create's note, diverting relay-forwarded
 // ones to the ephemeral store (#2338).
-
+//
+// 引用先が instance actor に見えなくても取り直さない (#3916)。取り直して取り
+// 込んでも、フォロワー限定・指名の投稿は引用先につながず (ingestNoteWithCreated)、
+// 引用のたびにフォロワーの actor を相手に知らせるだけになる。
 func (p *Processor) ingestCreateNote(object []byte, deliveringActorURI string, viaRelay bool, sourceHost string) (*model.Note, bool, error) {
 	if viaRelay {
 		return p.resolver.IngestNoteEphemeralForInbox(object, deliveringActorURI, sourceHost)
 	}
 	return p.resolver.IngestNoteWithCreatedForInbox(object, deliveringActorURI, sourceHost)
+}
+
+// FollowerFetchKeys picks the key of a local follower of a remote actor
+// (#3916). Implemented by LocalFollowerKeys.
+type FollowerFetchKeys interface {
+	KeyForFollowerOf(actor *model.User) *activitypub.PrivateKey
+}
+
+// SetFollowerFetchKeys wires the picker used to retry, with a local follower's
+// key, an Announce target the instance actor cannot see (#3916). Without it
+// nothing is retried.
+func (p *Processor) SetFollowerFetchKeys(k FollowerFetchKeys) {
+	p.followerKeys = k
+}
+
+// hiddenNoteRetry returns the lazy key source for the target of actor's
+// Announce, or nil when it should not be retried: nothing wired, a local or
+// hostless actor, or a relay delivery (signer is a relay).
+//
+// **取り直すのは、その actor をフォローしている人の鍵だけ。** フォロワー限定の
+// 投稿は、相手のサーバーがフォロワーにしか見せない。フォローしていない人の鍵では
+// 取れないうえ、こちらの誰かを無関係な相手に知らせることになる。取り直すのは
+// actor と同じホストの投稿だけで (フォロワーがフォローしているのはその actor)、
+// 鍵は取り直しが要るときに初めて引く (fetchKeySource)。
+func (p *Processor) hiddenNoteRetry(actor, signer *model.User) *fetchKeySource {
+	if p.followerKeys == nil || actor == nil || actor.IsLocal() || actor.Host == nil || p.isRelayDelivery(signer) {
+		return nil
+	}
+	keys := p.followerKeys
+	return lazyFetchKeySource("followers-of\x00"+actor.ID, *actor.Host, func() *activitypub.PrivateKey {
+		return keys.KeyForFollowerOf(actor)
+	})
 }
