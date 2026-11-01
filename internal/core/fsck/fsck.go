@@ -135,6 +135,8 @@ var counterChecks = []counterCheck{
 		//
 		// 本家でも行を直接消す経路 (利用者の削除で following が cascade で消える)
 		// では相手のカウントを減らさないので、保存値が大きいずれは平常時にも出る。
+		// 移行のときに減らす相手も限られる (ローカルのフォロワーだけで proxy を除き、
+		// ローカルのフォロワーがいなければ何も減らさない) ので、そこからも出る。
 		// 下げるのは本家が数え直すときと同じ値なので、-fix で直してよい。
 		table: "user", column: "followersCount",
 		query: `SELECT u.id AS id, u."followersCount" AS stored, COALESCE(f.n, 0) AS actual
@@ -185,12 +187,15 @@ var counterChecks = []counterCheck{
 		// 本家でも利用者の削除 (DeleteAccountProcessorService) は投稿の行を直接
 		// 消して返信先のカウントを減らさないので、保存値が大きいずれは平常時にも
 		// 出る。
+		//
+		// 列は smallint なので、実件数は列に入る上限で頭打ちにする (clippedCount
+		// と同じ理由)。
 		table: "note", column: "repliesCount",
-		query: `SELECT t.id AS id, t."repliesCount" AS stored, COALESCE(r.n, 0) AS actual
+		query: `SELECT t.id AS id, t."repliesCount" AS stored, LEAST(COALESCE(r.n, 0), 32767) AS actual
 		        FROM "note" t
 		        LEFT JOIN (SELECT "replyId" AS pid, COUNT(*) AS n FROM "note" WHERE "replyId" IS NOT NULL GROUP BY "replyId") r
 		          ON r.pid = t.id
-		        WHERE t."repliesCount" <> COALESCE(r.n, 0)`,
+		        WHERE t."repliesCount" <> LEAST(COALESCE(r.n, 0), 32767)`,
 	},
 	{
 		// 本家は、リノート (引用を含む) の作成で、リノートした人が対象の作者でも
@@ -212,9 +217,8 @@ var counterChecks = []counterCheck{
 		// どちらも本家の値と同じにはならないが、作成時の isBot は DB に残らない。
 		//
 		// 対象の作者は、非正規化した renoteUserId で見る (本家も Elythia もリノートの
-		// 作成のたびに埋める)。note 同士を結合すると、統計が古いときに planner が
-		// 索引を使わない nested loop を選び、検査が何分も返らなかった。renoteUserId
-		// が空の行は数えない — 数えすぎると -fix が本家より大きい値に上げてしまう
+		// 作成のたびに埋める)。note 同士の結合が要らなくなる。renoteUserId が空の
+		// 行は数えない — 数えすぎると -fix が本家より大きい値に上げてしまう
 		// ので、迷う行は「小さい」と出さない側に倒す。
 		//
 		// 列は smallint なので、実件数は列に入る上限で頭打ちにする (clippedCount

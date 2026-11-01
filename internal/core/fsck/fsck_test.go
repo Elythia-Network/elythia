@@ -327,6 +327,7 @@ func TestRun_RenoteCountActualIsCappedAtSmallintMax(t *testing.T) {
 	seedNote(t, db, "parent", "u1")
 	require.NoError(t, db.Exec(`INSERT INTO "note" (id, "userId", visibility, "renoteId", "renoteUserId")
 		SELECT 'rn' || g, 'u2', 'public', 'parent', 'u1' FROM generate_series(1, 32768) g`).Error)
+	analyze(t, db, "note")
 
 	rep, err := Run(context.Background(), db, Options{Fix: true})
 	require.NoError(t, err, "-fix が範囲外で失敗しない")
@@ -337,6 +338,71 @@ func TestRun_RenoteCountActualIsCappedAtSmallintMax(t *testing.T) {
 	var got int64
 	require.NoError(t, db.Raw(`SELECT "renoteCount" FROM "note" WHERE id = 'parent'`).Scan(&got).Error)
 	assert.EqualValues(t, 32767, got)
+
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.Empty(t, renoteDrifts(rep), "頭打ちの値に直した後は報告しない")
+}
+
+// repliesCount も smallint なので、32767 で頭打ちにして書き戻す (#3927)。
+// 頭打ちが無いと -fix の UPDATE が範囲外で失敗し、後ろの検査も走らない。
+func TestRun_RepliesCountActualIsCappedAtSmallintMax(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedNote(t, db, "parent", "u1")
+	require.NoError(t, db.Exec(`INSERT INTO "note" (id, "userId", visibility, "replyId")
+		SELECT 'rp' || g, 'u1', 'public', 'parent' FROM generate_series(1, 32768) g`).Error)
+	analyze(t, db, "note")
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err, "-fix が範囲外で失敗しない")
+	var drifts []Drift
+	for _, d := range rep.Drifts {
+		if d.Column == "repliesCount" {
+			drifts = append(drifts, d)
+		}
+	}
+	require.Len(t, drifts, 1)
+	assert.EqualValues(t, 32767, drifts[0].Actual)
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "repliesCount" FROM "note" WHERE id = 'parent'`).Scan(&got).Error)
+	assert.EqualValues(t, 32767, got)
+
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	for _, d := range rep.Drifts {
+		assert.NotEqual(t, "repliesCount", d.Column, "頭打ちの値に直した後は報告しない: %+v", d)
+	}
+}
+
+// analyze refreshes the planner statistics of table after a bulk insert.
+//
+// 直前のテストが行を消した後の統計 (行がほぼ無い) のまま数万行を数えると、
+// planner が集計の副問い合わせを外側の行ごとに数え直す nested loop を選び、
+// 検査が何分も返らない。本番は autovacuum が統計を保つ。
+func analyze(t *testing.T, db *gorm.DB, table string) {
+	t.Helper()
+	require.NoError(t, db.Exec(`ANALYZE "`+table+`"`).Error)
+}
+
+// 増えるだけのカウンタ (消した行の分が残る) だけが raiseOnly で、-fix で下げない。
+// 指定が外れても、競合が無ければ上書きと結果が同じなので、他のテストでは
+// 気付けない。
+func TestCounterChecks_RaiseOnly(t *testing.T) {
+	got := map[string]bool{}
+	for _, c := range counterChecks {
+		got[c.table+"."+c.column] = c.raiseOnly
+	}
+	assert.Equal(t, map[string]bool{
+		"user.followersCount": false,
+		"user.followingCount": false,
+		"user.notesCount":     true,
+		"note.repliesCount":   false,
+		"note.renoteCount":    true,
+		"note.clippedCount":   false,
+		"note.pageCount":      false,
+	}, got)
 }
 
 // pageCount は #3293 から維持しているが、それより前に作ったページが参照する
@@ -579,6 +645,7 @@ func TestRun_ClippedCountActualIsCappedAtSmallintMax(t *testing.T) {
 		SELECT 'c' || g, 'u1', 'c' || g FROM generate_series(1, 32768) g`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO "clip_note" (id, "noteId", "clipId")
 		SELECT 'cn' || g, 'n1', 'c' || g FROM generate_series(1, 32768) g`).Error)
+	analyze(t, db, "clip_note")
 
 	rep, err := Run(context.Background(), db, Options{Fix: true})
 	require.NoError(t, err, "-fix が範囲外で失敗しない")
