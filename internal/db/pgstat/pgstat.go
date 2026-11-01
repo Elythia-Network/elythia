@@ -21,10 +21,18 @@ import (
 // Extension is the name of the library and of the extension.
 const Extension = "pg_stat_statements"
 
-// CreateSQL is the statement Ensure runs, and the one an operator runs as a
-// superuser when Elythia's database user may not. The extension goes to public
-// so that a backup's verify, which pre-creates extensions in public, restores it.
+// CreateSQL is the statement an operator runs as a superuser when Elythia's
+// database user may not create the extension. The extension goes to public so
+// that a backup's verify, which pre-creates extensions in public, restores it.
 const CreateSQL = "CREATE EXTENSION IF NOT EXISTS " + Extension + " WITH SCHEMA public"
+
+// createSQL is the statement Ensure runs: CreateSQL without IF NOT EXISTS.
+//
+// **IF NOT EXISTS を付けない (#3933)。** 付けると、無いことを確かめた後に別の
+// プロセスが先に作り終えていたとき、何もせずに成功で返るので、作っていないのに
+// OutcomeCreated と報告してしまう。付けなければ失敗し、読み直しで
+// OutcomeInstalled になる。
+const createSQL = "CREATE EXTENSION " + Extension + " WITH SCHEMA public"
 
 // loadedSetting is a parameter pg_stat_statements defines only when the server
 // loaded it through shared_preload_libraries.
@@ -86,6 +94,13 @@ var ErrCreate = errors.New("pgstat: create extension")
 // 作れなかったとき (superuser でないなど) は ErrCreate で返す。起動を止める
 // かどうかは呼び出し側が決める (止めずに警告を出す)。
 func Ensure(ctx context.Context, db *gorm.DB) (Outcome, error) {
+	return ensure(ctx, db, nil)
+}
+
+// ensure is Ensure with afterInspect, which runs between reading the state
+// and creating the extension. Tests use it to let another process create the
+// extension in between.
+func ensure(ctx context.Context, db *gorm.DB, afterInspect func()) (Outcome, error) {
 	st, err := Inspect(ctx, db)
 	if err != nil {
 		return "", err
@@ -96,10 +111,13 @@ func Ensure(ctx context.Context, db *gorm.DB) (Outcome, error) {
 	case !st.Preloaded:
 		return OutcomeNotPreloaded, nil
 	}
-	if err := db.WithContext(ctx).Clauses(dbresolver.Write).Exec(CreateSQL).Error; err != nil {
-		// **同時に起動した別のプロセスが作ったなら、失敗ではない。** IF NOT EXISTS
-		// でも、並行に作ると片方が pg_extension の一意制約で落ちる。読み直して
-		// 拡張があれば、作られているので警告しない。
+	if afterInspect != nil {
+		afterInspect()
+	}
+	if err := db.WithContext(ctx).Clauses(dbresolver.Write).Exec(createSQL).Error; err != nil {
+		// **同時に起動した別のプロセスが作ったなら、失敗ではない。** 先に作り
+		// 終えていれば「既にある」で、同時に作っていれば pg_extension の一意制約で
+		// 落ちる。読み直して拡張があれば、作られているので警告しない。
 		if again, ierr := Inspect(ctx, db); ierr == nil && again.Installed {
 			return OutcomeInstalled, nil
 		}

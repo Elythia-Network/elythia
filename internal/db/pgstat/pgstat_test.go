@@ -153,6 +153,22 @@ func TestEnsure_ConcurrentCreate(t *testing.T) {
 	assert.Equal(t, 1, created)
 }
 
+// Another process may finish creating the extension after Ensure read that it
+// was missing and before Ensure creates it (#3933). Ensure reports that it
+// found the extension, not that it created it.
+//
+// TestEnsure_ConcurrentCreate がこの順になるのは負荷の高いときだけなので、
+// ここでは確かめた直後に別の接続で作り終えて、順を決めて起こす。
+func TestEnsure_CreatedByAnotherAfterInspect(t *testing.T) {
+	admin, dsn := preloadedServer(t)
+	other := open(t, dsn("admin", "admin"))
+	outcome, err := ensure(context.Background(), admin, func() {
+		require.NoError(t, other.Exec(CreateSQL).Error)
+	})
+	require.NoError(t, err)
+	assert.Equal(t, OutcomeInstalled, outcome)
+}
+
 // A server that does not preload the library is left alone.
 func TestEnsure_NotPreloaded(t *testing.T) {
 	db := testDB
