@@ -117,7 +117,7 @@ func TestCheckDatabase_LocalMigrations(t *testing.T) {
 func TestRun_ContinuesAfterFailure(t *testing.T) {
 	report := Run(context.Background(), NewChecker("http://"+testutil.DeadAddr(t)), LocalDeps{})
 	assert.False(t, report.OK)
-	assert.Len(t, report.Results, 9, "全項目ぶんの結果が返る")
+	assert.Len(t, report.Results, 10, "全項目ぶんの結果が返る")
 }
 
 // warn だけなら OK は落とさない。「見ておくべき」と「壊れている」を区別する。

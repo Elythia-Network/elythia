@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/db/pgstat"
 )
 
 // LocalDeps are the dependencies the local checks inspect. どれも nil 可で、
@@ -32,6 +33,9 @@ type LocalDeps struct {
 	LocalMigrationLatest int64
 	// DBHealth は PostgreSQL の統計の読み取り (#3095)。nil なら skip。
 	DBHealth func(ctx context.Context) (dbhealth.Report, error)
+	// PgStatStatements は pg_stat_statements の設定と拡張の読み取り (#3909)。
+	// nil なら skip。
+	PgStatStatements func(ctx context.Context) (pgstat.State, error)
 }
 
 // CheckDatabase verifies connectivity and migration state.
@@ -214,6 +218,38 @@ func CheckDatabaseHealth(ctx context.Context, deps LocalDeps) Result {
 		"該当のテーブルに `VACUUM (ANALYZE)` を実行する。繰り返すなら autovacuum の設定 (autovacuum_vacuum_scale_factor など) を見直す。詳細は管理画面の「データベース」")
 }
 
+// CheckPgStatStatements warns when pg_stat_statements is half set up (#3909):
+// preloaded without the extension, or the extension without the preload (its
+// view then fails to read).
+//
+// どちらも使っていないのは既定の状態なので ok にする。警告で止めない (性能を
+// 測る道具で、無くても動く)。
+func CheckPgStatStatements(ctx context.Context, deps LocalDeps) Result {
+	const name = "pg-stat-statements"
+	if deps.PgStatStatements == nil {
+		return skipResult(name, "未配線")
+	}
+	hctx, cancel := context.WithTimeout(ctx, healthTimeout)
+	defer cancel()
+	st, err := deps.PgStatStatements(hctx)
+	if err != nil {
+		return warnResult(name, fmt.Sprintf("状態を読めない: %v", err),
+			"pg_settings と pg_extension を読めるか確認する")
+	}
+	switch {
+	case st.Preloaded && st.Installed:
+		return okResult(name, "有効 (shared_preload_libraries に入っていて、拡張もある)")
+	case !st.Preloaded && !st.Installed:
+		return okResult(name, "使っていない (shared_preload_libraries に無い)")
+	case st.Preloaded:
+		return warnResult(name, "shared_preload_libraries に入っているが、この DB に拡張が無い",
+			"Elythia は起動のときに拡張を作るが、DB の利用者が superuser でないと作れない。superuser でこの DB に接続して `"+pgstat.CreateSQL+";` を実行する")
+	default:
+		return warnResult(name, "拡張はあるが、shared_preload_libraries に入っていない (pg_stat_statements の view を読むとエラーになる)",
+			"PostgreSQL の shared_preload_libraries に pg_stat_statements を足して再起動する。使わないなら superuser で `DROP EXTENSION pg_stat_statements;` を実行する")
+	}
+}
+
 // Run executes every check and returns the aggregate report.
 //
 // 検査は**止めずに全部走らせる**。最初の失敗で打ち切ると、運用者は直しては
@@ -223,6 +259,7 @@ func Run(ctx context.Context, checker *Checker, deps LocalDeps) Report {
 	results = append(results,
 		CheckDatabase(ctx, deps),
 		CheckDatabaseHealth(ctx, deps),
+		CheckPgStatStatements(ctx, deps),
 		CheckRootUser(ctx, deps),
 		CheckRedis(ctx, deps),
 		checker.CheckWebFinger(ctx),

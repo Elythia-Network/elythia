@@ -47,6 +47,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
+	"github.com/elythia-network/elythia/internal/db/pgstat"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
@@ -310,7 +311,9 @@ func (s *Server) wireAdmin(d adminDeps) (*apiadmin.Handler, *emojiapplication.Se
 	if s.selfCheckRunner == nil {
 		s.selfCheckRunner = &selfCheckAdapter{
 			checker: selfcheck.NewChecker(s.config.URL),
-			deps:    selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default, DBHealth: dbHealth.Report},
+			deps: selfcheck.LocalDeps{DB: s.db, Redis: s.redis.Default, DBHealth: dbHealth.Report,
+				// doctor と同じく pg_stat_statements の食い違いを見る (#3909)。
+				PgStatStatements: func(ctx context.Context) (pgstat.State, error) { return pgstat.Inspect(ctx, s.db) }},
 		}
 	}
 	adminHandler.SetSelfCheckRunner(s.selfCheckRunner)
