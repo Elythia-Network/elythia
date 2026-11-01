@@ -98,6 +98,15 @@ func (c *Client) PostSigned(url string, body []byte, key *PrivateKey) (*http.Res
 // GetSigned sends a signed GET to url. acceptOverride may be empty to use the
 // default activity+json accept header.
 func (c *Client) GetSigned(url string, key *PrivateKey, acceptOverride string) (*http.Response, error) {
+	req, err := c.newSignedGet(url, key, acceptOverride)
+	if err != nil {
+		return nil, err
+	}
+	return c.httpClient.Do(req)
+}
+
+// newSignedGet builds the signed GET GetSigned sends.
+func (c *Client) newSignedGet(url string, key *PrivateKey, acceptOverride string) (*http.Request, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -113,7 +122,42 @@ func (c *Client) GetSigned(url string, key *PrivateKey, acceptOverride string) (
 	if err := SignRequest(req, key, "", []string{"(request-target)", "date", "host"}); err != nil {
 		return nil, err
 	}
-	return c.httpClient.Do(req)
+	return req, nil
+}
+
+// FetchJSONWithURLSameHost is FetchJSONWithURL that does not follow a redirect
+// to another host or another scheme: the redirect response itself is
+// returned, so it fails with a *StatusError carrying the 3xx code.
+//
+// **利用者の鍵で署名した GET に使う (#3915)。** Go の client は host を跨ぐ
+// redirect でも Signature ヘッダを付けたまま送るので、追従すると、照会した人の
+// keyId (= その人の actor) が飛び先のホストへ届く。飛び先は相手が自由に選べる。
+func (c *Client) FetchJSONWithURLSameHost(url string, key *PrivateKey) ([]byte, string, error) {
+	req, err := c.newSignedGet(url, key, "")
+	if err != nil {
+		return nil, "", err
+	}
+	hc := *c.httpClient
+	next := hc.CheckRedirect
+	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		// scheme も見る。同じホストでも http へ落ちると、署名が平文で流れる。
+		if len(via) > 0 && (!strings.EqualFold(r.URL.Host, via[0].URL.Host) || r.URL.Scheme != via[0].URL.Scheme) {
+			return http.ErrUseLastResponse
+		}
+		if next != nil {
+			return next(r, via)
+		}
+		// net/http の既定と同じ上限。
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	return readAPResponse(resp, url)
 }
 
 // finalURLOf returns the response's final request URL (after redirects). Go's
@@ -135,6 +179,12 @@ func (c *Client) FetchJSONWithURL(url string, key *PrivateKey) ([]byte, string, 
 	if err != nil {
 		return nil, "", err
 	}
+	return readAPResponse(resp, url)
+}
+
+// readAPResponse reads an AP object response for FetchJSONWithURL: non-2xx is a
+// *StatusError, and the Content-Type must be an ActivityPub one.
+func readAPResponse(resp *http.Response, url string) ([]byte, string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		drainBody(resp)

@@ -8,6 +8,7 @@ import (
 
 	"log/slog"
 
+	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -135,6 +136,18 @@ func (r *Resolver) ResolveNoteAllowCrossHost(uri string) (*model.Note, error) {
 	return r.resolveNoteDepth(uri, 0, true, false, nil)
 }
 
+// ResolveNoteAllowCrossHostWithKey is ResolveNoteAllowCrossHost that retries a
+// note the instance actor cannot see with key, the key of the local user who
+// asked (#3915). Only the note at uri itself is retried: its quote targets,
+// actors and their featured notes are never fetched with key. A nil key
+// behaves exactly like ResolveNoteAllowCrossHost.
+func (r *Resolver) ResolveNoteAllowCrossHostWithKey(uri string, key *activitypub.PrivateKey) (*model.Note, error) {
+	// 木を根で作る。1 段目と 2 段目が同じ待ちの予算を使うように (retryHiddenNote は
+	// chain から鍵を足すので、ここで採番しないと段ごとに別の木になる)。
+	chain := (&resolveChain{fetchKey: newFetchKeySource(key, uri)}).ensureTree()
+	return r.resolveNoteDepth(uri, 0, true, false, chain)
+}
+
 // resolveNoteDepth is ResolveNote carrying the current recursion depth so the
 // note/quote chain can be bounded (#1828)。quote 解決経路 (resolveQuoteURI) が
 // depth+1 で再入する。allowCrossHost は user-initiated ap/show 経路でのみ true。
@@ -198,8 +211,11 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 	// inner が nil のことがある。木の識別子はここで確定させる。
 	inner = inner.ensureTree()
 	v, err := r.joinResolveOpt(&r.resolveNoteGroup, inner, noteWaitKey(key), key, mayWait, func() (any, error) {
-		return r.resolveNoteOnce(uri, depth, allowCrossHost, ephemeral, !mayWait, inner)
+		return r.resolveNoteOnce(uri, depth, allowCrossHost, ephemeral, !mayWait, inner, nil)
 	})
+	if hiddenNoteFetch(err, uri) {
+		v, err = r.retryHiddenNote(uri, depth, allowCrossHost, ephemeral, mayWait, chain, err)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -216,6 +232,71 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 		}
 	}
 	return rn.note, rn.created, nil
+}
+
+// retryHiddenNote is the second stage of resolveNoteDepthOptCreated (#3915):
+// after the instance actor's fetch was refused or not found (hiddenErr), it
+// resolves uri again fetching with the chain's local user key, when the chain
+// has one for uri's host.
+//
+// **2 段に分ける。** 1 段目 (instance actor) は鍵の無い解決と同じ singleflight で
+// まとめ、同じ投稿への受信が重なっても取得と取り込みは 1 回で済む。鍵で取り直す
+// 2 段目だけ、鍵ごとの singleflight にする。鍵を 1 段目の鍵に混ぜると、送ってきた
+// actor ごとに別の呼び出しになり、取得と取り込みの前処理が並行して重なる。
+//
+// 鍵での取得そのものが失敗したときは hiddenErr を返す。取り直しの側の取得の
+// エラー (5xx、別ホストへの redirect を拒んだ 3xx など) を返すと、恒久的に捨てる
+// はずの 404 が再試行される一時的なエラーに化ける。取得に成功した後の失敗 (著者の
+// 解決、DB の障害など) は、そのまま返す (置き換えると、再試行されるはずの一時的な
+// 失敗が恒久的な 404 に化ける)。
+func (r *Resolver) retryHiddenNote(uri string, depth int, allowCrossHost, ephemeral, mayWait bool, chain *resolveChain, hiddenErr error) (any, error) {
+	id := chain.fetchKeyIDFor(uri)
+	if id == "" {
+		return nil, hiddenErr
+	}
+	key := "key\x00" + id + "\x00" + noteGroupKeyForChain(uri, allowCrossHost, ephemeral, chain)
+	inner := chain.with(key, "").ensureTree()
+	v, err := r.joinResolveOpt(&r.resolveNoteGroup, inner, noteWaitKey(key), key, mayWait, func() (any, error) {
+		// 鍵は取り直すと決まってから、先頭の呼び出しだけが引く (受信では、ここで
+		// 初めてフォロワーを探す。相乗りした呼び出しは同じ id = 同じ鍵なので引かない)。
+		fetchKey := inner.fetchKeyFor(uri)
+		if fetchKey == nil {
+			return nil, errNoFetchKey
+		}
+		return r.resolveNoteOnce(uri, depth, allowCrossHost, ephemeral, !mayWait, inner, fetchKey)
+	})
+	if err != nil {
+		var nfe *noteFetchError
+		if errors.Is(err, errNoFetchKey) || (errors.As(err, &nfe) && nfe.uri == uri) {
+			return nil, hiddenErr
+		}
+		return nil, err
+	}
+	return v, nil
+}
+
+// errNoFetchKey is returned inside retryHiddenNote when the chain's key source
+// has no key after all (no usable local user).
+var errNoFetchKey = errors.New("federation: no local user key to retry with")
+
+// noteFetchError marks a failure to fetch the note document itself in
+// resolveNoteOnce, as opposed to a failure later in ingest (the author's
+// actor, the database). It unwraps to the fetch error, so callers that look
+// for a *activitypub.StatusError still find it.
+type noteFetchError struct {
+	uri string
+	err error
+}
+
+func (e *noteFetchError) Error() string { return e.err.Error() }
+func (e *noteFetchError) Unwrap() error { return e.err }
+
+// hiddenNoteFetch reports whether err is the instance actor's fetch of the note
+// at uri itself being refused or not found (401 / 403 / 404), the only case
+// retryHiddenNote retries.
+func hiddenNoteFetch(err error, uri string) bool {
+	var nfe *noteFetchError
+	return errors.As(err, &nfe) && nfe.uri == uri && HiddenFromInstanceActor(nfe.err)
 }
 
 // chainAfterProbe records the resolved document identity on the chain, under
@@ -289,7 +370,10 @@ func (r *Resolver) noteByAnyURI(uri, docID string) *model.Note {
 // resolveNoteOnce is the body of resolveNoteDepth, invoked once per URI by
 // resolveGroup. depth は quote chain の現在の深さ。allowCrossHost は
 // user-initiated ap/show 経路でのみ true。
-func (r *Resolver) resolveNoteOnce(uri string, depth int, allowCrossHost, ephemeral, bestEffortEntry bool, chain *resolveChain) (*resolvedNote, error) {
+//
+// fetchKey, when set, fetches the note with that local user's key instead of
+// the instance actor's (the second stage, retryHiddenNote).
+func (r *Resolver) resolveNoteOnce(uri string, depth int, allowCrossHost, ephemeral, bestEffortEntry bool, chain *resolveChain, fetchKey *activitypub.PrivateKey) (*resolvedNote, error) {
 	if r.noteRepo == nil {
 		return nil, ErrInvalidNote
 	}
@@ -335,9 +419,11 @@ func (r *Resolver) resolveNoteOnce(uri string, depth int, allowCrossHost, epheme
 	if !r.hostAllowedForURI(uri) {
 		return nil, ErrHostNotAllowed
 	}
-	body, finalURL, err := r.fetchObjectWithFinalURL(uri)
+	body, finalURL, err := r.fetchNoteWithFinalURL(uri, fetchKey)
 	if err != nil {
-		return nil, err
+		// 取り直し (retryHiddenNote) は、この投稿そのものの取得の失敗だけで判断する。
+		// 取り込みの中 (著者の解決など) の 401・403・404 と区別するため、目印を付ける。
+		return nil, &noteFetchError{uri: uri, err: err}
 	}
 	// note.id host が body を返した host と一致するか検証 (object-spoofing 防止、
 	// #1820)。IngestNote は apNote.ID をそのまま note.URI に採用するため、ここで
@@ -516,7 +602,10 @@ func (r *Resolver) resolveQuoteURI(uri string, depth int, ephemeral bool, chain 
 	}
 	// quote 解決は federation-loop 扱いで Strict (request host binding 有効)。
 	// ephemeral は親から引き継ぐ (引用先だけ DB に落ちるのを防ぐ)。
-	if n, err := r.resolveNoteDepth(uri, depth+1, false, ephemeral, chain); err == nil {
+	// **引用先は利用者の鍵で取り直さない (#3915 / #3916)。** フォロワー限定・指名の
+	// 投稿は引用先にしない (ingestNoteWithCreated) ので、取り直して取り込んでも
+	// 引用はつながらず、鍵の持ち主の actor を相手に知らせるだけになる。
+	if n, err := r.resolveNoteDepth(uri, depth+1, false, ephemeral, chain.withoutFetchKey()); err == nil {
 		return n, nil
 	} else if chain != nil && chain.inboundLocalReferences &&
 		(errors.Is(err, ErrInboundLocalReferenceUnavailable) || errors.Is(err, ErrInboundLocalReferenceFailure)) {

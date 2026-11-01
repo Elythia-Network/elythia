@@ -377,3 +377,64 @@ func TestFetchUnsignedJSONWithURL_FollowsCrossHostRedirect(t *testing.T) {
 	require.JSONEq(t, `{"ok":true}`, string(body))
 	require.Contains(t, finalURL, victim.URL, "飛び先を呼び出し側へ返していない")
 }
+
+// **利用者の鍵で署名した GET は、別のホストへの redirect を追わない (#3915)。** 追うと
+// Signature ヘッダが付いたまま飛び先へ届き、照会した人の keyId を飛び先に知らせる。
+// 同じホストの中の redirect は追う。
+func TestFetchJSONWithURLSameHost(t *testing.T) {
+	privPEM, _, err := GenerateRSAKeypair()
+	require.NoError(t, err)
+	key, err := NewPrivateKey("https://local.example/users/viewer#main-key", privPEM)
+	require.NoError(t, err)
+
+	var elsewhereHit bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		elsewhereHit = true
+		w.Header().Set("Content-Type", MimeType)
+		_, _ = w.Write([]byte(`{"id":"x"}`))
+	}))
+	defer elsewhere.Close()
+
+	var sigOnFinal string
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/away":
+			http.Redirect(w, r, elsewhere.URL+"/x", http.StatusFound)
+		case "/moved":
+			http.Redirect(w, r, "/final", http.StatusFound)
+		case "/plain":
+			// 同じホストのまま scheme だけ変える。
+			http.Redirect(w, r, "https://"+r.Host+"/final", http.StatusFound)
+		default:
+			sigOnFinal = r.Header.Get("Signature")
+			w.Header().Set("Content-Type", MimeType)
+			_, _ = w.Write([]byte(`{"id":"y"}`))
+		}
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.Client(), "test")
+	_, _, err = c.FetchJSONWithURLSameHost(origin.URL+"/away", key)
+	var se *StatusError
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, http.StatusFound, se.StatusCode)
+	assert.False(t, elsewhereHit, "the redirect to another host is not followed")
+
+	body, finalURL, err := c.FetchJSONWithURLSameHost(origin.URL+"/moved", key)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"y"}`, string(body))
+	assert.Equal(t, origin.URL+"/final", finalURL)
+	assert.Contains(t, sigOnFinal, key.KeyID)
+
+	sigOnFinal = ""
+	_, _, err = c.FetchJSONWithURLSameHost(origin.URL+"/plain", key)
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, http.StatusFound, se.StatusCode, "a redirect to another scheme is not followed")
+	assert.Empty(t, sigOnFinal)
+
+	// 通常の FetchJSONWithURL は従来どおり追う。
+	elsewhereHit = false
+	_, _, err = c.FetchJSONWithURL(origin.URL+"/away", key)
+	require.NoError(t, err)
+	assert.True(t, elsewhereHit)
+}
