@@ -126,6 +126,11 @@ type Processor struct {
 	// 従来通り renote として処理される。
 	relayActorChecker RelayActorChecker
 
+	// followerKeys は、instance actor に見せなかった Announce の対象を取り直す
+	// ときに、actor をフォローしているローカルの利用者の鍵を選ぶ (#3916)。
+	// nil なら取り直さない。
+	followerKeys FollowerFetchKeys
+
 	// Chat federation (CherryPick互換)
 	chatService ChatMessageReceiver
 	// chatRoomReceiver は group chat (room) federation の inbound 操作

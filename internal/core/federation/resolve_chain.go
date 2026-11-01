@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -222,16 +223,16 @@ func (c *resolveChain) fetchKeyFor(uri string) *activitypub.PrivateKey {
 	if !c.fetchKeyAppliesTo(uri) {
 		return nil
 	}
-	return c.fetchKey.key
+	return c.fetchKey.get()
 }
 
 // fetchKeyIDFor identifies the key this chain would retry the note at uri with,
-// or "" when it would not retry it.
+// without loading it, or "" when it would not retry it.
 func (c *resolveChain) fetchKeyIDFor(uri string) string {
 	if !c.fetchKeyAppliesTo(uri) {
 		return ""
 	}
-	return c.fetchKey.key.KeyID
+	return c.fetchKey.id
 }
 
 // fetchKeyAppliesTo reports whether this chain has a key for the host of uri.
@@ -263,9 +264,17 @@ func (c *resolveChain) withoutFetchKey() *resolveChain {
 // **鍵を使うのは 1 つのホストだけ。** 引用先と actor の解決では鍵を外すが、
 // ホストでも縛っておく。どこかの経路で鍵が枝に漏れても、相手が選んだ他の
 // ホストへ鍵の持ち主の署名付き GET を出させないため。
+//
+// **受信では鍵を要るときに 1 回だけ引く (#3916)。** 取り直しが要るのは見えない
+// 投稿に当たったときだけで、鍵を引くにはフォロワーを探して DB を何度か引く。
+// 解決のたびに先に引くと、ほとんどの受信で無駄になる。
 type fetchKeySource struct {
-	key  *activitypub.PrivateKey
+	// id は singleflight の鍵に入れる。同じ id なら同じ鍵になる。
+	id   string
 	host string
+	once sync.Once
+	load func() *activitypub.PrivateKey
+	key  *activitypub.PrivateKey
 }
 
 // newFetchKeySource returns a source for key used only for notes on the host of
@@ -278,5 +287,26 @@ func newFetchKeySource(key *activitypub.PrivateKey, uri string) *fetchKeySource 
 	if err != nil {
 		return nil
 	}
-	return &fetchKeySource{key: key, host: host}
+	s := &fetchKeySource{id: key.KeyID, host: host, key: key}
+	s.once.Do(func() {})
+	return s
+}
+
+// lazyFetchKeySource returns a source that calls load on first use, for notes
+// on host only. id must name whose key load returns. It returns nil when host
+// is empty.
+func lazyFetchKeySource(id, host string, load func() *activitypub.PrivateKey) *fetchKeySource {
+	if host == "" {
+		return nil
+	}
+	return &fetchKeySource{id: id, host: host, load: load}
+}
+
+func (s *fetchKeySource) get() *activitypub.PrivateKey {
+	s.once.Do(func() {
+		if s.load != nil {
+			s.key = s.load()
+		}
+	})
+	return s.key
 }

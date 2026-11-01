@@ -82,3 +82,27 @@ func TestResolveChain_CarriesFetchKey(t *testing.T) {
 	// 1 段目 (instance actor) は鍵の有無に関わらず同じ呼び出しにまとまる。
 	assert.Equal(t, noteGroupKeyForChain(uri, true, false, nil), noteGroupKeyForChain(uri, true, false, root))
 }
+
+// A lazy key is loaded only when a note on its host needs the retry, and at
+// most once; grouping the resolve does not load it (#3916).
+func TestLazyFetchKeySource(t *testing.T) {
+	key := genTestRSAKey(t)
+	loads := 0
+	src := lazyFetchKeySource("followers-of\x00alice", "remote.example", func() *activitypub.PrivateKey {
+		loads++
+		return key
+	})
+	chain := &resolveChain{fetchKey: src}
+	assert.Equal(t, "followers-of\x00alice", chain.fetchKeyIDFor("https://remote.example/notes/1"))
+	assert.Empty(t, chain.fetchKeyIDFor("https://third.example/notes/1"))
+	_ = noteGroupKeyForChain("https://remote.example/notes/1", false, false, chain)
+	assert.Nil(t, chain.fetchKeyFor("https://third.example/notes/1"))
+	assert.Zero(t, loads, "neither grouping nor another host loads the key")
+	assert.Same(t, key, chain.fetchKeyFor("https://remote.example/notes/1"))
+	assert.Same(t, key, chain.with("k", "").fetchKeyFor("https://remote.example/notes/2"))
+	assert.Equal(t, 1, loads)
+
+	assert.Nil(t, lazyFetchKeySource("x", "", func() *activitypub.PrivateKey { return key }))
+	none := &resolveChain{fetchKey: lazyFetchKeySource("x", "remote.example", func() *activitypub.PrivateKey { return nil })}
+	assert.Nil(t, none.fetchKeyFor("https://remote.example/notes/1"))
+}

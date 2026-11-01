@@ -57,7 +57,16 @@ func (r *Resolver) ResolveNoteForInbox(uri, sourceHost string) (*model.Note, err
 }
 
 func (r *Resolver) ResolveNoteWithCreatedForInbox(uri, sourceHost string) (*model.Note, bool, error) {
-	return r.resolveNoteDepthOptCreated(uri, 0, false, false, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
+	return r.resolveNoteWithCreatedForInboxRetrying(uri, sourceHost, nil)
+}
+
+// resolveNoteWithCreatedForInboxRetrying is ResolveNoteWithCreatedForInbox that
+// retries a note the instance actor cannot see with keys (#3916). nil keys
+// never retries.
+func (r *Resolver) resolveNoteWithCreatedForInboxRetrying(uri, sourceHost string, keys *fetchKeySource) (*model.Note, bool, error) {
+	// 木を根で作る。1 段目と 2 段目 (retryHiddenNote) が同じ待ちの予算を使うように。
+	chain := (&resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost, fetchKey: keys}).ensureTree()
+	return r.resolveNoteDepthOptCreated(uri, 0, false, false, true, chain)
 }
 
 func (r *Resolver) ResolveNoteEphemeralForInbox(uri, sourceHost string) (*model.Note, error) {
