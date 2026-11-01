@@ -235,6 +235,18 @@ func (m *MockFollowingRepository) FollowsAnyOnHost(followerID, host string) (boo
 	return false, nil
 }
 
+// ListLocalFollowerIDsLimit mirrors repository.followingRepository.ListLocalFollowerIDsLimit.
+func (m *MockFollowingRepository) ListLocalFollowerIDsLimit(followeeID string, limit int) ([]string, error) {
+	ids, err := m.ListLocalFollowerIDs(followeeID)
+	if err != nil || len(ids) <= limit {
+		return ids, err
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return ids[:limit], nil
+}
+
 // ListLocalFollowerIDs mirrors repository.followingRepository.ListLocalFollowerIDs
 // (followeeId 一致かつ followerHost IS NULL の followerId を全件)。
 // 実装同様 followerId 昇順で返し、caller が順序に依存できるようにする。
