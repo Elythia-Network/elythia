@@ -268,7 +268,7 @@ EXPLAIN SELECT id FROM note WHERE lower(text) LIKE '%検索語%';
 
 `pg_stat_statements` は PostgreSQL に付いている拡張で、実行された SQL を形ごとにまとめて、回数・合計時間・読んだブロック数を数え続ける。本番で 1 週間ほど取れば、1 回は速いが回数が多くて合計で重い SQL や、本番の行数で初めて遅くなる SQL を、数字で選べる (#3909)。
 
-**使うのは、PostgreSQL の設定に足して再起動するだけ。** `shared_preload_libraries` で `pg_stat_statements` が読み込まれていれば、Elythia が DB に繋ぐとき (起動のときと、メンテナンスの後に繋ぎ直すとき) に、その DB に拡張を作る (`CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public`)。読み込まれていなければ何もしない。migration には入れていない (拡張の作成には superuser が要り、migration は 1 回しか走らず、本体の migration は全員の DB で走るため)。
+**使うのは、PostgreSQL の設定に足して再起動するだけ。** `shared_preload_libraries` で `pg_stat_statements` が読み込まれていれば、Elythia が DB に繋ぐとき (起動のときと、メンテナンスの後に繋ぎ直すとき) に、その DB に拡張を作る (`CREATE EXTENSION pg_stat_statements WITH SCHEMA public`。同時に起動した別のプロセスが先に作っていれば、作られているとみなす)。読み込まれていなければ何もしない。migration には入れていない (拡張の作成には superuser が要り、migration は 1 回しか走らず、本体の migration は全員の DB で走るため)。
 
 1. `shared_preload_libraries` に足す。Docker Compose では PostgreSQL のサービス (UDS 構成の `compose.uds.yaml` では `postgres`、`docker-compose.yml` などでは `db`) に `command:` を足す。UDS 構成の `compose.uds.yaml.example` には、コメントで添えてある
 
