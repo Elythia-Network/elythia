@@ -760,7 +760,13 @@ func apiCatchall(c echo.Context) error {
 	// エンドポイントへの 404 は Misskey 公式フロントの一部ページで例外を
 	// 投げてしまうため、実装が出揃うまで pass-through にしている。実装漏れは
 	// warn ログで検知する。
-	if c.Request().Method == http.MethodGet || isPluginPeerPath(path) {
+	//
+	// **HEAD も GET と同じく 404 (#3925)。** 本家の `fastify.get('/*')` は
+	// Fastify の exposeHeadRoutes で HEAD にも応える。この catch-all は
+	// api.Any で HEAD も持つので、GET のルートへの振り分け (headRoutes) を
+	// 通らず HEAD のまま届く。
+	method := c.Request().Method
+	if method == http.MethodGet || method == http.MethodHead || isPluginPeerPath(path) {
 		return c.JSON(http.StatusNotFound, apierr.Error(
 			"UNKNOWN_API_ENDPOINT",
 			"Unknown API endpoint.",

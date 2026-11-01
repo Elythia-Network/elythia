@@ -87,6 +87,10 @@ func TestNewServer_GETRoutesAnswerHEAD(t *testing.T) {
 		{path: "/identicon/hr_user", status: http.StatusOK},
 		{path: "/api/emojis", status: http.StatusOK},
 		{path: "/api/server-info", status: http.StatusOK},
+		// api.Any("/*") の catch-all。POST だけのエンドポイントと未知のパスは、
+		// GET と同じく 404。
+		{path: "/api/notes/create", status: http.StatusNotFound},
+		{path: "/api/no-such-endpoint", status: http.StatusNotFound},
 		{path: "/.well-known/nodeinfo", status: http.StatusOK},
 		{path: "/.well-known/webfinger?resource=acct:hr_user@example.test", status: http.StatusOK},
 		{path: "/proxy/image.webp"},
