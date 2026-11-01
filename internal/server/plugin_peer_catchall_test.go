@@ -66,6 +66,12 @@ func TestAPICatchall_PeerPathIsNotFound(t *testing.T) {
 	// GET は従来どおり 404。
 	code, _ = call(http.MethodGet, "/api/notes/create")
 	assert.Equal(t, http.StatusNotFound, code)
+
+	// HEAD も GET と同じく 404 (#3925)。
+	code, _ = call(http.MethodHead, "/api/notes/create")
+	assert.Equal(t, http.StatusNotFound, code)
+	code, _ = call(http.MethodHead, "/api/no-such-endpoint")
+	assert.Equal(t, http.StatusNotFound, code)
 }
 
 // 恒久的な失敗 (受け口が無い / 署名が通らない / ブロック) はキューに再送させない。
