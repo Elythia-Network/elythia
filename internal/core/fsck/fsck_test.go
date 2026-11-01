@@ -184,13 +184,13 @@ func TestRun_DetectsFollowCounters(t *testing.T) {
 func TestRun_DetectsNoteCounters(t *testing.T) {
 	db := newTestDB(t)
 	seedUser(t, db, "u1")
+	seedUser(t, db, "u2")
 	seedNote(t, db, "parent", "u1")
 	require.NoError(t, db.Exec(
 		`INSERT INTO "note" (id, "userId", visibility, "replyId") VALUES ('r1', 'u1', 'public', 'parent')`).Error)
+	seedRenote(t, db, "rn1", "u2", "parent", nil)
 	require.NoError(t, db.Exec(
-		`INSERT INTO "note" (id, "userId", visibility, "renoteId") VALUES ('rn1', 'u1', 'public', 'parent')`).Error)
-	require.NoError(t, db.Exec(
-		`UPDATE "note" SET "repliesCount" = 9, "renoteCount" = 9 WHERE id = 'parent'`).Error)
+		`UPDATE "note" SET "repliesCount" = 9, "renoteCount" = 0 WHERE id = 'parent'`).Error)
 
 	_, err := Run(context.Background(), db, Options{Fix: true})
 	require.NoError(t, err)
@@ -200,6 +200,108 @@ func TestRun_DetectsNoteCounters(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT "renoteCount" FROM "note" WHERE id = 'parent'`).Scan(&renotes).Error)
 	assert.EqualValues(t, 1, replies)
 	assert.EqualValues(t, 1, renotes)
+}
+
+// seedRenote inserts a renote of target by userID. A non-nil text makes it a
+// quote.
+func seedRenote(t *testing.T, db *gorm.DB, id, userID, target string, text *string) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO "note" (id, "userId", visibility, "renoteId", "renoteUserId", text)
+		 VALUES (?, ?, 'public', ?, (SELECT "userId" FROM "note" WHERE id = ?), ?)`,
+		id, userID, target, target, text).Error)
+}
+
+// renoteDrifts returns only the renoteCount drifts.
+func renoteDrifts(rep Report) []Drift {
+	var out []Drift
+	for _, d := range rep.Drifts {
+		if d.Column == "renoteCount" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// 本家は自分のノートのリノートと bot のリノートを renoteCount に数えない
+// (`data.renote.userId !== user.id && !user.isBot`)。引用は数える。fsck も
+// 同じ条件で数え、記録が小さいときだけを報告する (#3927)。
+func TestRun_RenoteCountExcludesSelfAndBotRenotes(t *testing.T) {
+	db := newTestDB(t)
+	for _, id := range []string{"u1", "u2", "u3", "b1"} {
+		seedUser(t, db, id)
+	}
+	require.NoError(t, db.Exec(`UPDATE "user" SET "isBot" = true WHERE id = 'b1'`).Error)
+	seedNote(t, db, "parent", "u1")
+	quote := "quote"
+	seedRenote(t, db, "self", "u1", "parent", nil)
+	seedRenote(t, db, "bot", "b1", "parent", nil)
+	seedRenote(t, db, "pure", "u2", "parent", nil)
+	seedRenote(t, db, "quote", "u3", "parent", &quote)
+	// renoteUserId が空の行 (通常の経路では作られない) は、自分のリノートかを
+	// 判定できないので数えない。
+	require.NoError(t, db.Exec(
+		`INSERT INTO "note" (id, "userId", visibility, "renoteId") VALUES ('unknown', 'u2', 'public', 'parent')`).Error)
+	require.NoError(t, db.Exec(`UPDATE "note" SET "renoteCount" = 2 WHERE id = 'parent'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.Empty(t, renoteDrifts(rep), "自分と bot のリノートは数えない")
+
+	// 1 回の増加を失った状態は報告し、-fix で数えた件数まで上げる。
+	require.NoError(t, db.Exec(`UPDATE "note" SET "renoteCount" = 1 WHERE id = 'parent'`).Error)
+	rep, err = Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	drifts := renoteDrifts(rep)
+	require.Len(t, drifts, 1)
+	assert.Equal(t, "parent", drifts[0].ID)
+	assert.EqualValues(t, 1, drifts[0].Stored)
+	assert.EqualValues(t, 2, drifts[0].Actual)
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "renoteCount" FROM "note" WHERE id = 'parent'`).Scan(&got).Error)
+	assert.EqualValues(t, 2, got)
+}
+
+// リノートを消しても本家は renoteCount を減らさないので、記録が数えた件数より
+// 大きいのは正常。報告せず、-fix でも下げない (#3927)。
+func TestRun_RenoteCountAboveCountedRenotesIsNotDrift(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedUser(t, db, "u2")
+	seedNote(t, db, "parent", "u1")
+	seedRenote(t, db, "rn1", "u2", "parent", nil)
+	// 3 回リノートされて 2 件が消えたノート。
+	require.NoError(t, db.Exec(`UPDATE "note" SET "renoteCount" = 3 WHERE id = 'parent'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err)
+	assert.Empty(t, renoteDrifts(rep))
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "renoteCount" FROM "note" WHERE id = 'parent'`).Scan(&got).Error)
+	assert.EqualValues(t, 3, got, "-fix でも下げない")
+}
+
+// renoteCount は smallint なので、数えた件数が上限を超えるノートは 32767 で
+// 頭打ちにして書き戻す。頭打ちが無いと -fix の UPDATE が範囲外で失敗し続ける。
+func TestRun_RenoteCountActualIsCappedAtSmallintMax(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db, "u1")
+	seedUser(t, db, "u2")
+	seedNote(t, db, "parent", "u1")
+	require.NoError(t, db.Exec(`INSERT INTO "note" (id, "userId", visibility, "renoteId", "renoteUserId")
+		SELECT 'rn' || g, 'u2', 'public', 'parent', 'u1' FROM generate_series(1, 32768) g`).Error)
+
+	rep, err := Run(context.Background(), db, Options{Fix: true})
+	require.NoError(t, err, "-fix が範囲外で失敗しない")
+	drifts := renoteDrifts(rep)
+	require.Len(t, drifts, 1)
+	assert.EqualValues(t, 32767, drifts[0].Actual)
+
+	var got int64
+	require.NoError(t, db.Raw(`SELECT "renoteCount" FROM "note" WHERE id = 'parent'`).Scan(&got).Error)
+	assert.EqualValues(t, 32767, got)
 }
 
 // pageCount は #3293 から維持しているが、それより前に作ったページが参照する
