@@ -96,20 +96,45 @@ type counterCheck struct {
 // counterChecks are the counters fsck knows how to verify.
 var counterChecks = []counterCheck{
 	{
+		// 本家はフォローの成立で 1 増やし (UserFollowingService.insertFollowingDoc)、
+		// 解除で 1 減らす (decrementFollowing)。Elythia も同じ
+		// (following.Service、行の作成・削除と同じトランザクション)。行の件数と
+		// 一致させるつもりの値なので、どちら向きのずれも報告する。
+		//
+		// **移行したアカウントが絡むフォローは数えない。** 本家も Elythia も、
+		// どちらかが移行済み (movedToUri がある) なら増減を飛ばし、移行の時点で
+		// 旧アカウントと関係のあった相手のカウントを 1 ずつ減らす (行は残す。
+		// AccountMoveService.adjustFollowingCounts / move.Service)。実件数は、
+		// 本家が移行済みの相手との解除のときに数え直す式 (decrementFollowing の
+		// else 側) と同じく、相手が移行済みでない行だけを数え、移行済みの利用者
+		// 自身は数え直さない。
+		//
+		// 本家でも行を直接消す経路 (利用者の削除で following が cascade で消える)
+		// では相手のカウントを減らさないので、保存値が大きいずれは平常時にも出る。
+		// 下げるのは本家が数え直すときと同じ値なので、-fix で直してよい。
 		table: "user", column: "followersCount",
 		query: `SELECT u.id AS id, u."followersCount" AS stored, COALESCE(f.n, 0) AS actual
 		        FROM "user" u
-		        LEFT JOIN (SELECT "followeeId" AS uid, COUNT(*) AS n FROM "following" GROUP BY "followeeId") f
+		        LEFT JOIN (SELECT f."followeeId" AS uid, COUNT(*) AS n
+		                   FROM "following" f
+		                   JOIN "user" o ON o.id = f."followerId"
+		                   WHERE COALESCE(o."movedToUri", '') = ''
+		                   GROUP BY f."followeeId") f
 		          ON f.uid = u.id
-		        WHERE u."followersCount" <> COALESCE(f.n, 0)`,
+		        WHERE COALESCE(u."movedToUri", '') = '' AND u."followersCount" <> COALESCE(f.n, 0)`,
 	},
 	{
+		// followersCount と同じ (相手はフォロー先)。
 		table: "user", column: "followingCount",
 		query: `SELECT u.id AS id, u."followingCount" AS stored, COALESCE(f.n, 0) AS actual
 		        FROM "user" u
-		        LEFT JOIN (SELECT "followerId" AS uid, COUNT(*) AS n FROM "following" GROUP BY "followerId") f
+		        LEFT JOIN (SELECT f."followerId" AS uid, COUNT(*) AS n
+		                   FROM "following" f
+		                   JOIN "user" o ON o.id = f."followeeId"
+		                   WHERE COALESCE(o."movedToUri", '') = ''
+		                   GROUP BY f."followerId") f
 		          ON f.uid = u.id
-		        WHERE u."followingCount" <> COALESCE(f.n, 0)`,
+		        WHERE COALESCE(u."movedToUri", '') = '' AND u."followingCount" <> COALESCE(f.n, 0)`,
 	},
 	{
 		// 本家は投稿のたびに 1 増やし (NoteCreateService.incNotesCountOfUser)、
@@ -128,6 +153,14 @@ var counterChecks = []counterCheck{
 		        WHERE u."notesCount" < COALESCE(n.n, 0)`,
 	},
 	{
+		// 本家は返信の作成で 1 増やし (NoteCreateService.saveReply、自分への返信も
+		// bot の返信も数える)、削除で 1 減らす (NoteDeleteService)。Elythia も
+		// ローカルの投稿・resolver が取り込む返信で増やし、DeleteService で減らす。
+		// 行の件数と一致させるつもりの値なので、どちら向きのずれも報告する。
+		//
+		// 本家でも利用者の削除 (DeleteAccountProcessorService) は投稿の行を直接
+		// 消して返信先のカウントを減らさないので、保存値が大きいずれは平常時にも
+		// 出る。
 		table: "note", column: "repliesCount",
 		query: `SELECT t.id AS id, t."repliesCount" AS stored, COALESCE(r.n, 0) AS actual
 		        FROM "note" t

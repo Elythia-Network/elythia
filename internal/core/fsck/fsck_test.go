@@ -181,6 +181,41 @@ func TestRun_DetectsFollowCounters(t *testing.T) {
 	assert.EqualValues(t, 1, followers)
 }
 
+// 移行したアカウントが絡むフォローは、本家もElythiaもカウントに入れない。
+// 実件数は相手が移行済みでない行だけを数え、移行済みの利用者自身は検査しない
+// (本家 decrementFollowing の数え直しと同じ式)。
+func TestRun_FollowCountsExcludeMovedAccounts(t *testing.T) {
+	db := newTestDB(t)
+	for _, id := range []string{"u1", "u2", "m1"} {
+		seedUser(t, db, id)
+	}
+	require.NoError(t, db.Exec(`UPDATE "user" SET "movedToUri" = 'https://remote.example/users/new' WHERE id = 'm1'`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO "following" (id, "followerId", "followeeId") VALUES
+		('f1', 'u1', 'm1'), ('f2', 'm1', 'u2'), ('f3', 'u1', 'u2')`).Error)
+	// u1 は u2 だけを、u2 は u1 だけを数える。m1 の値は移行のときに 0 にした後、
+	// 数え直されない。
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followingCount" = 1 WHERE id = 'u1'`).Error)
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followersCount" = 1 WHERE id = 'u2'`).Error)
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followersCount" = 5, "followingCount" = 5 WHERE id = 'm1'`).Error)
+
+	rep, err := Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	assert.True(t, rep.OK(), "%+v", rep.Drifts)
+
+	// 移行の前の値 (移行済みの相手を含めた値) が残っていれば、下げる向きに報告する。
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followingCount" = 2 WHERE id = 'u1'`).Error)
+	require.NoError(t, db.Exec(`UPDATE "user" SET "followersCount" = 2 WHERE id = 'u2'`).Error)
+	rep, err = Run(context.Background(), db, Options{})
+	require.NoError(t, err)
+	got := map[string]Drift{}
+	for _, d := range rep.Drifts {
+		got[d.Column+"/"+d.ID] = d
+	}
+	require.Len(t, got, 2, "%+v", rep.Drifts)
+	assert.EqualValues(t, 1, got["followingCount/u1"].Actual)
+	assert.EqualValues(t, 1, got["followersCount/u2"].Actual)
+}
+
 func TestRun_DetectsNoteCounters(t *testing.T) {
 	db := newTestDB(t)
 	seedUser(t, db, "u1")
