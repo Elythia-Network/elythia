@@ -115,6 +115,24 @@ func (f *APFetcher) FetchObjectSignedOnly(uri string) ([]byte, error) {
 	return body, err
 }
 
+// FetchObjectWithFinalURLSignedBy performs a GET signed with key, a local
+// user's key rather than the instance actor's, and never falls back to an
+// unsigned one (#3915). It does not follow a redirect to another host, so the
+// user's keyId only reaches the host that was asked. It also returns the final
+// response URL, like FetchObjectWithFinalURL.
+func (f *APFetcher) FetchObjectWithFinalURLSignedBy(uri string, key *activitypub.PrivateKey) ([]byte, string, error) {
+	if key == nil {
+		return nil, "", ErrNoSigner
+	}
+	return f.client.FetchJSONWithURLSameHost(uri, key)
+}
+
+// FetchObjectSignedBy is FetchObjectWithFinalURLSignedBy without the final URL.
+func (f *APFetcher) FetchObjectSignedBy(uri string, key *activitypub.PrivateKey) ([]byte, error) {
+	body, _, err := f.FetchObjectWithFinalURLSignedBy(uri, key)
+	return body, err
+}
+
 // FetchObjectUnsigned performs an explicit unsigned GET. nodeinfo /
 // .well-known/* など peer 認証を要求しない discovery endpoint 用 (#419
 // Devin review)。SignerProvider が wire されていても署名を付けない。

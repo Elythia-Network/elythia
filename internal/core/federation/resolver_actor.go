@@ -130,6 +130,7 @@ func (r *Resolver) resolveActor(uri string, allowCrossHost, skipFeatured bool, c
 // resolveActorOnce is the body of resolveActor, invoked once per URI by
 // resolveGroup.
 func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preassignedID string, ephemeral, viaRelay, skipFeatured bool, chain *resolveChain) (*model.User, error) {
+	chain = chain.withoutFetchKey()
 	// fragment 付き URL は HTTP(S) で fragment が送られず正しく解決できないため
 	// 拒否する (本家 Resolver の b94fd5b1 guard、#1828)。keyId fragment は
 	// ResolveActorByKeyID -> ResolveKeyURL で除去済みなのでここには来ない。

@@ -182,7 +182,7 @@ func TestResolveNoteOnce_AncestorIngestingGateIsBestEffortOnly(t *testing.T) {
 	// 印は枝ごと引き継がれるので、featured の内側で走る引用解決もこの形になる。
 	t.Run("quote path ingests anyway", func(t *testing.T) {
 		r, noteRepo := newAliasEnv(t, actorURI, "mira", aliasURI, noteURI)
-		resolved, err := r.resolveNoteOnce(aliasURI, 0, false, false, false, ancestor().asBestEffort())
+		resolved, err := r.resolveNoteOnce(aliasURI, 0, false, false, false, ancestor().asBestEffort(), nil)
 		require.NoError(t, err, "引用経路で諦めている (renoteId を恒久的に落とす)")
 		require.NotNil(t, resolved)
 		// **wrapper ではなく note を見る。** wrapper は err==nil なら必ず非 nil
@@ -193,7 +193,7 @@ func TestResolveNoteOnce_AncestorIngestingGateIsBestEffortOnly(t *testing.T) {
 
 	t.Run("featured path gives up", func(t *testing.T) {
 		r, noteRepo := newAliasEnv(t, actorURI, "mira", aliasURI, noteURI)
-		note, err := r.resolveNoteOnce(aliasURI, 0, false, false, true, ancestor())
+		note, err := r.resolveNoteOnce(aliasURI, 0, false, false, true, ancestor(), nil)
 		require.ErrorIs(t, err, ErrNoteAncestorIngesting)
 		assert.Nil(t, note)
 		assert.Empty(t, noteRepo.Notes, "祖先の取り込みを横取りしないこと")
@@ -208,7 +208,7 @@ func TestResolveNoteOnce_AncestorIngestingGateIsBestEffortOnly(t *testing.T) {
 		uri := noteURI
 		require.NoError(t, noteRepo.Create(&model.Note{ID: "9mira0000000000000000", UserID: user.ID, URI: &uri}))
 
-		resolved, err := r.resolveNoteOnce(aliasURI, 0, false, false, true, ancestor())
+		resolved, err := r.resolveNoteOnce(aliasURI, 0, false, false, true, ancestor(), nil)
 		require.NoError(t, err)
 		require.NotNil(t, resolved)
 		require.NotNil(t, resolved.note)

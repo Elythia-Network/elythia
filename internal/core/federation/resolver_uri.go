@@ -2,7 +2,9 @@ package federation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -80,6 +82,45 @@ func (r *Resolver) fetchObjectWithFinalURL(uri string) ([]byte, string, error) {
 	}
 	body, err := r.fetcher.FetchObject(uri)
 	return body, "", err
+}
+
+// keyedFetcher is implemented by APFetcher: a GET signed with the given key,
+// with no unsigned fallback.
+type keyedFetcher interface {
+	FetchObjectWithFinalURLSignedBy(uri string, key *activitypub.PrivateKey) ([]byte, string, error)
+}
+
+// fetchNoteWithFinalURL fetches a note: with the instance actor's key when
+// fetchKey is nil, and otherwise signed with fetchKey, a local user's key, with
+// no unsigned fallback and no redirect to another host (#3915).
+//
+// **先に instance actor で取る。** 利用者の鍵で取るのは、instance actor での
+// 取得が見えなかったとき (retryHiddenNote) だけ。最初から利用者の鍵で取ると、
+// 取りに行くたびに相手のサーバーへ「こちらの誰が見ようとしたか」が伝わる。
+func (r *Resolver) fetchNoteWithFinalURL(uri string, fetchKey *activitypub.PrivateKey) ([]byte, string, error) {
+	if fetchKey == nil {
+		return r.fetchObjectWithFinalURL(uri)
+	}
+	kf, ok := r.fetcher.(keyedFetcher)
+	if !ok {
+		return nil, "", ErrNoSigner
+	}
+	return kf.FetchObjectWithFinalURLSignedBy(uri, fetchKey)
+}
+
+// HiddenFromInstanceActor reports whether a fetch error means the object may
+// exist but was not shown to the instance actor: 401, 403 or 404. A server that
+// decides by the signer (followers-only, specified) answers one of these.
+func HiddenFromInstanceActor(err error) bool {
+	var se *activitypub.StatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch se.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
 }
 
 // FetchNoteForVerification fetches a remote Note without ingesting it and
