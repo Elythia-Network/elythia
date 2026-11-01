@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -563,4 +564,89 @@ func TestTake_IgnoresDatabaseTimeouts(t *testing.T) {
 	meta, err := Take(context.Background(), p.takeOptions(st))
 	require.NoError(t, err)
 	assert.Equal(t, int64(2000000), meta.RowCounts["public.big"])
+}
+
+// pg_stat_statements is left out of the dump and of meta.json (#3909): it is
+// not a trusted extension, so a database user that is not a superuser could
+// not restore it, while verify (whose superuser pre-creates extensions) would
+// still pass. Elythia creates it again after a restore.
+func TestTake_LeavesPgStatStatementsOut(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	p.exec(t, `CREATE EXTENSION pg_stat_statements`)
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	meta, err := Take(context.Background(), p.takeOptions(st))
+	require.NoError(t, err)
+
+	for _, e := range meta.Extensions {
+		assert.NotEqual(t, "pg_stat_statements", e.Name)
+	}
+	assert.True(t, slices.ContainsFunc(meta.Extensions, func(e ExtensionInfo) bool { return e.Name == "pg_trgm" }),
+		"other extensions are still recorded")
+
+	r, err := st.Get(context.Background(), Key(meta.ID, DumpFile))
+	require.NoError(t, err)
+	dump, err := io.ReadAll(r)
+	require.NoError(t, r.Close())
+	require.NoError(t, err)
+	list := p.pgRestoreList(t, dump)
+	assert.NotContains(t, list, "pg_stat_statements")
+	assert.Contains(t, list, "EXTENSION - pg_trgm")
+}
+
+func TestWithoutDumpExcludedExtensions(t *testing.T) {
+	kept, excluded := withoutDumpExcludedExtensions([]ExtensionInfo{{Name: "pg_trgm"}, {Name: "pg_stat_statements"}, {Name: "plpgsql"}})
+	assert.Equal(t, []ExtensionInfo{{Name: "pg_trgm"}, {Name: "plpgsql"}}, kept)
+	assert.Equal(t, []string{"pg_stat_statements"}, excluded)
+	kept, excluded = withoutDumpExcludedExtensions([]ExtensionInfo{})
+	assert.Empty(t, kept)
+	assert.Nil(t, excluded, "nothing to exclude: pg_dump gets no --exclude-extension")
+}
+
+// oldPgDumpRunner reports pg_dump 16 for `--version` and runs everything else
+// with the wrapped runner.
+type oldPgDumpRunner struct{ Runner }
+
+func (r oldPgDumpRunner) Command(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
+	if len(args) == 1 && args[0] == "--version" {
+		return exec.CommandContext(ctx, "echo", "pg_dump (PostgreSQL) 16.4")
+	}
+	return r.Runner.Command(ctx, env, name, args...)
+}
+
+// pg_dump 16 and earlier do not know --exclude-extension: the backup keeps
+// pg_stat_statements as before instead of failing every time (#3909).
+func TestTake_OldPgDumpKeepsPgStatStatements(t *testing.T) {
+	p := newDatabase(t)
+	p.seedSimple(t)
+	p.exec(t, `CREATE EXTENSION pg_stat_statements`)
+	st, err := NewDirStorage(markedDir(t))
+	require.NoError(t, err)
+	opts := p.takeOptions(st)
+	opts.Runner = oldPgDumpRunner{Runner: opts.Runner}
+	meta, err := Take(context.Background(), opts)
+	require.NoError(t, err)
+	assert.Equal(t, "pg_dump (PostgreSQL) 16.4", meta.PgDumpVersion)
+	assert.True(t, slices.ContainsFunc(meta.Extensions, func(e ExtensionInfo) bool { return e.Name == "pg_stat_statements" }))
+
+	r, err := st.Get(context.Background(), Key(meta.ID, DumpFile))
+	require.NoError(t, err)
+	dump, err := io.ReadAll(r)
+	require.NoError(t, r.Close())
+	require.NoError(t, err)
+	assert.Contains(t, p.pgRestoreList(t, dump), "EXTENSION - pg_stat_statements")
+}
+
+func TestPgDumpCanExcludeExtensions(t *testing.T) {
+	for version, want := range map[string]bool{
+		"pg_dump (PostgreSQL) 18.6": true,
+		"pg_dump (PostgreSQL) 17.0": true,
+		"pg_dump (PostgreSQL) 16.4": false,
+		"pg_dump (PostgreSQL) 9.6":  false,
+		"":                          false,
+		"something else":            false,
+	} {
+		assert.Equal(t, want, pgDumpCanExcludeExtensions(version), "%q", version)
+	}
 }

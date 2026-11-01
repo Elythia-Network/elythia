@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -219,6 +220,15 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	if meta.Extensions, err = ReadExtensions(ctx, tx); err != nil {
 		return nil, err
 	}
+	var excluded []string
+	if pgDumpCanExcludeExtensions(pgDumpVersion) {
+		meta.Extensions, excluded = withoutDumpExcludedExtensions(meta.Extensions)
+	} else if _, skipped := withoutDumpExcludedExtensions(meta.Extensions); len(skipped) > 0 {
+		// pg_dump 16 以前は --exclude-extension を知らない。付けると取る処理が
+		// 毎回落ちるので、従来どおり dump に入れる。
+		logger.Warn("backup: pg_dump is older than 17 and cannot leave these extensions out of the dump; a restore by a database user that is not a superuser may fail to create them",
+			"extensions", skipped, "pgDump", pgDumpVersion)
+	}
 	if meta.RowCounts, err = CountRows(ctx, tx); err != nil {
 		return nil, err
 	}
@@ -232,7 +242,7 @@ func Take(ctx context.Context, o TakeOptions) (meta *Meta, err error) {
 	}
 	dumpKey := Key(id, meta.DumpFile)
 
-	stored, err := streamDump(ctx, o.Storage, dumpKey, runner, pgDump, dump, snapshot, o.Recipients)
+	stored, err := streamDump(ctx, o.Storage, dumpKey, runner, pgDump, dump, snapshot, o.Recipients, excluded)
 	// dump を Put した後で失敗したら、途中の世代を残さない。meta.json が無いので
 	// 読む側は無視するが、容量の料金はかかる。
 	defer func() {
@@ -311,6 +321,42 @@ func deleteQuietly(ctx context.Context, st Storage, logger *slog.Logger, key str
 	}
 }
 
+// dumpExcludedExtensions are left out of the dump and of meta.Extensions.
+//
+// **pg_stat_statements は dump に入れない (#3909)。** trusted でない拡張なので、
+// superuser でない DB の利用者では戻すときの CREATE EXTENSION が落ちる。一方
+// verify は使い捨てのサーバーで superuser が先に作るので通り、戻せないことに
+// 気付けない。中身は測った数字だけで戻す意味も無く、戻した後に世代を作るとき
+// Elythia が作り直す (internal/db/pgstat)。
+var dumpExcludedExtensions = []string{"pg_stat_statements"}
+
+// pgDumpCanExcludeExtensions reports whether the pg_dump whose `--version`
+// line is version knows --exclude-extension (17 and later). An unreadable
+// version counts as no.
+func pgDumpCanExcludeExtensions(version string) bool {
+	major, err := parseToolMajor(version)
+	return err == nil && major >= 17
+}
+
+// withoutDumpExcludedExtensions splits exts into the ones the dump keeps and
+// the names of dumpExcludedExtensions that are installed (to pass to pg_dump
+// --exclude-extension).
+//
+// 外すのは入っているときだけにする。--exclude-extension は pg_dump 17 から
+// なので、使わない運営者の pg_dump の版を問わないため。17 より前の pg_dump では
+// 外さない (Take が pgDumpCanExcludeExtensions で見る)。
+func withoutDumpExcludedExtensions(exts []ExtensionInfo) (kept []ExtensionInfo, excluded []string) {
+	kept = make([]ExtensionInfo, 0, len(exts))
+	for _, e := range exts {
+		if slices.Contains(dumpExcludedExtensions, e.Name) {
+			excluded = append(excluded, e.Name)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept, excluded
+}
+
 // readPgDumpVersion runs `pg_dump --version` and returns its first line.
 func readPgDumpVersion(ctx context.Context, runner Runner, pgDump string) (string, error) {
 	out, err := runner.Command(ctx, nil, pgDump, "--version").Output()
@@ -329,7 +375,7 @@ type storedDump struct {
 
 // streamDump runs pg_dump and streams its output, encrypted when recipients
 // are given, into storage under key.
-func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDump string, dump DumpConn, snapshot string, recipients []age.Recipient) (storedDump, error) {
+func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDump string, dump DumpConn, snapshot string, recipients []age.Recipient, excludeExtensions []string) (storedDump, error) {
 	dumpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -372,12 +418,16 @@ func streamDump(ctx context.Context, st Storage, key string, runner Runner, pgDu
 	if dump.Password != "" {
 		env = append(env, "PGPASSWORD="+dump.Password)
 	}
-	cmd := runner.Command(dumpCtx, env, pgDump,
+	args := []string{
 		"--format=custom",
-		"--snapshot="+snapshot,
+		"--snapshot=" + snapshot,
 		"--no-password",
-		"--dbname="+dump.URI,
-	)
+		"--dbname=" + dump.URI,
+	}
+	for _, name := range excludeExtensions {
+		args = append(args, "--exclude-extension="+name)
+	}
+	cmd := runner.Command(dumpCtx, env, pgDump, args...)
 	cmd.Stdout = io.MultiWriter(sink, plainHash)
 	stderr := &tailBuffer{max: 8 << 10}
 	cmd.Stderr = stderr
