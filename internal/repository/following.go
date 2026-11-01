@@ -55,6 +55,10 @@ type FollowingRepository interface {
 	// host (followeeHost, in the stored form). ap/show uses it to decide whether
 	// the viewer's key may be shown to that host (#3915).
 	FollowsAnyOnHost(followerID, host string) (bool, error)
+	// ListLocalFollowerIDsLimit is ListLocalFollowerIDs returning at most limit
+	// ids, in the same (followerId) order. 受信で取り直すのに使うフォロワーを
+	// 選ぶとき (#3916) は先頭の数人しか見ないので、全件を読まない。
+	ListLocalFollowerIDsLimit(followeeID string, limit int) ([]string, error)
 	ListFollowing(userID string, limit, offset int) ([]*model.Following, error)
 
 	// ListFollowingWithCursor is ListFollowing paginated by sinceId/untilId
@@ -466,6 +470,21 @@ func (r *followingRepository) FollowsAnyOnHost(followerID, host string) (bool, e
 	err := r.db.Raw(`SELECT EXISTS (SELECT 1 FROM "following" WHERE "followerId" = ? AND "followeeHost" = ?)`, followerID, host).
 		Scan(&exists).Error
 	return exists, err
+}
+
+func (r *followingRepository) ListLocalFollowerIDsLimit(followeeID string, limit int) ([]string, error) {
+	var ids []string
+	if limit <= 0 {
+		return ids, nil
+	}
+	if err := r.db.Model(&model.Following{}).
+		Where(`"followeeId" = ? AND "followerHost" IS NULL`, followeeID).
+		Order(`"followerId"`).
+		Limit(limit).
+		Pluck(`"followerId"`, &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // ListFollowing is ListFollowers for the follower side.

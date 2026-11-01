@@ -537,6 +537,32 @@ func TestFollowingRepository_ListLocalFollowerIDs(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
+// ListLocalFollowerIDsLimit は ListLocalFollowerIDs と同じ順で先頭の limit 件だけ
+// 返す (#3916)。
+func TestFollowingRepository_ListLocalFollowerIDsLimit(t *testing.T) {
+	repo := NewFollowingRepository(testDB)
+	followee := insertTestUser(t, "u_lfl_fe", "lflfe")
+	defer cleanupUser(t, followee.ID)
+	for _, id := range []string{"u_lfl_c", "u_lfl_a", "u_lfl_b"} {
+		u := insertTestUser(t, id, id+"n")
+		defer cleanupUser(t, u.ID)
+		insertFollowing(t, "f_"+id, u.ID, followee.ID)
+		defer testDB.Exec(`DELETE FROM "following" WHERE id = ?`, "f_"+id)
+	}
+	all, err := repo.ListLocalFollowerIDs(followee.ID)
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+	for limit, want := range map[int][]string{0: {}, 2: all[:2], 3: all, 5: all} {
+		got, err := repo.ListLocalFollowerIDsLimit(followee.ID, limit)
+		require.NoError(t, err)
+		if len(want) == 0 {
+			assert.Empty(t, got, "limit %d", limit)
+		} else {
+			assert.Equal(t, want, got, "limit %d", limit)
+		}
+	}
+}
+
 // FollowsAnyOnHost は、follower がそのホストの誰かを 1 人でもフォローしていれば
 // true (#3915)。ホストは保存された形のまま完全一致で比べる。
 func TestFollowingRepository_FollowsAnyOnHost(t *testing.T) {
