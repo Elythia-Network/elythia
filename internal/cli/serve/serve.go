@@ -23,6 +23,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	mkdb "github.com/elythia-network/elythia/internal/db"
+	"github.com/elythia-network/elythia/internal/db/pgstat"
 	"github.com/elythia-network/elythia/internal/maintmode"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/redislog"
@@ -97,23 +98,58 @@ func defaultEnv() env {
 			return server.New(cfg, db, redis)
 		},
 		newSupervisor: func(cfg *config.Config, redis *cache.RedisClients) (supervisor, error) {
-			return server.NewSupervisor(cfg, redis, server.SupervisorDeps{
-				OpenDB:      model.NewDatabase,
-				NewServer:   server.New,
-				CloseDB:     mkdb.Close,
-				Maintenance: maintmode.NewStore(redis.Default, redis.Pubsub, cfg.Redis.KeyPrefix()),
-				// どのプロセスも判定役の候補になる。管理画面から入れたときに受けた
-				// プロセスが落ちても、ほかのプロセスが判定を引き継ぐ (設計第2版 §2.1)。
-				MaintenanceCounter: &maintmode.PGCounter{
-					Targets: maintmode.TargetsFromConfig(cfg, "elythia-judge/"+processID()),
-				},
-				ProcessID: processID(),
-			})
+			return server.NewSupervisor(cfg, redis, supervisorDeps(cfg, redis))
 		},
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
 		createFile: func(path string) (io.WriteCloser, error) { return os.Create(path) },
+	}
+}
+
+// supervisorDeps is what the Supervisor of `elythia serve` is built with.
+func supervisorDeps(cfg *config.Config, redis *cache.RedisClients) server.SupervisorDeps {
+	return server.SupervisorDeps{
+		OpenDB:    model.NewDatabase,
+		NewServer: server.New,
+		CloseDB:   mkdb.Close,
+		// shared_preload_libraries に pg_stat_statements があれば、拡張を
+		// 作る (#3909)。世代を作るたびに確かめる。
+		PrepareDB:   func(db *gorm.DB) { prepareDatabase(db, slog.Default(), ensurePgStatStatements) },
+		Maintenance: maintmode.NewStore(redis.Default, redis.Pubsub, cfg.Redis.KeyPrefix()),
+		// どのプロセスも判定役の候補になる。管理画面から入れたときに受けた
+		// プロセスが落ちても、ほかのプロセスが判定を引き継ぐ (設計第2版 §2.1)。
+		MaintenanceCounter: &maintmode.PGCounter{
+			Targets: maintmode.TargetsFromConfig(cfg, "elythia-judge/"+processID()),
+		},
+		ProcessID: processID(),
+	}
+}
+
+// ensurePgStatStatements is what supervisorDeps' PrepareDB runs. Tests replace
+// it to see the wiring.
+var ensurePgStatStatements = pgstat.Ensure
+
+// prepareDatabaseTimeout bounds prepareDatabase, so a slow database delays a
+// generation by at most this much.
+const prepareDatabaseTimeout = 10 * time.Second
+
+// prepareDatabase creates pg_stat_statements when the server preloads it and
+// the database lacks it (#3909). The Supervisor runs it on every database it
+// opens. It only logs: stopping the start for a measuring tool would turn a
+// missing permission into an outage.
+func prepareDatabase(db *gorm.DB, log *slog.Logger, ensure func(context.Context, *gorm.DB) (pgstat.Outcome, error)) {
+	ctx, cancel := context.WithTimeout(context.Background(), prepareDatabaseTimeout)
+	defer cancel()
+	outcome, err := ensure(ctx, db)
+	switch {
+	case errors.Is(err, pgstat.ErrCreate):
+		log.Warn("pg_stat_statements is preloaded but the extension could not be created; run this as a superuser in the Elythia database",
+			"sql", pgstat.CreateSQL+";", "error", err)
+	case err != nil:
+		log.Warn("could not check pg_stat_statements", "error", err)
+	case outcome == pgstat.OutcomeCreated:
+		log.Info("created the pg_stat_statements extension")
 	}
 }
 
