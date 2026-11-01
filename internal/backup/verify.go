@@ -882,8 +882,8 @@ func (v *verifier) usable(ctx context.Context, conn *pgx.Conn, db *gorm.DB) ([]s
 		return nil, failf("fsck cannot run on the restored database: %v", err)
 	}
 	var warnings []string
-	if len(rep.Drifts) > 0 {
-		warnings = append(warnings, fmt.Sprintf("fsck: %d counter drift(s) (also present in the source database)", len(rep.Drifts)))
+	if n := rep.DriftTotal(); n > 0 {
+		warnings = append(warnings, fmt.Sprintf("fsck: %d counter drift(s) (also present in the source database)", n))
 	}
 	for _, o := range rep.Orphans {
 		warnings = append(warnings, fmt.Sprintf("fsck: %d orphan row(s) in %s: %s", o.Count, o.Table, o.Reason))
