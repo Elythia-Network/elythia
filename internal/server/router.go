@@ -2697,6 +2697,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}); d != nil {
 		notificationHook.SetCreatedObserver(d)
 		chatService.SetMessageObserver(d)
+		// リバーシの招待と対局の進み (#3942)。どちらも通知を作らないので、招待を
+		// 作る所 (API と連合の受信) と対局の stream に出す所から直に呼ぶ。
+		reversiService.SetGameObserver(d)
+		reversiHandler.SetInviteObserver(d)
+		federationProcessor.SetReversiInviteObserver(d)
 	}
 	// 消したプラグインのデータが残っていないかを知らせる (#2479)。
 	// 自動では消さないので、残っていること自体を見えるようにする。

@@ -748,7 +748,7 @@ func TestEngineFromGame_BadLogs(t *testing.T) {
 
 func TestService_Nil_NoPanic(t *testing.T) {
 	s := NewService(newFakeRepo(), nil, nil)
-	s.publish("g1", "t", nil) // no publisher → no-op
+	s.publish(context.Background(), &model.ReversiGame{ID: "g1"}, "t", nil) // no publisher → no-op
 	s.setTurnTimer(context.Background(), "g1", 0, 90)
 
 	_, err := s.turnTimerExists(context.Background(), "g1", 0)

@@ -63,6 +63,8 @@ func pluginNotificationJobHandler(h plugin.NotificationHandler) driver.HandlerFu
 			ChatMessageID:  ev.ChatMessageID,
 			CreatedAt:      ev.CreatedAt,
 			NoteVisibility: ev.NoteVisibility,
+			GameID:         ev.GameID,
+			GameEvent:      ev.GameEvent,
 		}))
 	}
 }

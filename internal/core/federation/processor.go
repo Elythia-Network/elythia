@@ -118,6 +118,8 @@ type Processor struct {
 	// reversiStreamPub: 招待受信時に recipient の `reversi:<id>` stream
 	// に `invited` イベントを publish する (#417 P2 リアルタイム招待)。
 	reversiStreamPub ReversiStreamPublisher
+	// reversiInviteObs: 招待受信時にプラグインが管理するアカウントへ知らせる (#3942)。
+	reversiInviteObs ReversiInviteObserver
 
 	// Relay follow-accept / -reject hook. nil 時は relay 特化処理をスキップ。
 	relayMarker RelayStatusMarker
@@ -1138,6 +1140,12 @@ func (p *Processor) SetReversi(
 // by handleReversiInvite to push `invited` events in real-time (#417 P2)。
 func (p *Processor) SetReversiStreamPublisher(pub ReversiStreamPublisher) {
 	p.reversiStreamPub = pub
+}
+
+// SetReversiInviteObserver wires the observer told about invitations that
+// arrive over federation (#3942).
+func (p *Processor) SetReversiInviteObserver(o ReversiInviteObserver) {
+	p.reversiInviteObs = o
 }
 
 // mayBeQuoteAuthorization reports whether a Delete's object may be a FEP-044f

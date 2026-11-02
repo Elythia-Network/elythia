@@ -22,6 +22,13 @@ type ReversiStreamPublisher interface {
 	PublishInvited(targetUserID string, inviter *model.User)
 }
 
+// ReversiInviteObserver is told about invitations that arrive over
+// federation, with the game created for them (#3942). プラグインが管理する
+// アカウントへの通知 (core/pluginnotify) が実装する。未設定なら呼ばない。
+type ReversiInviteObserver interface {
+	ReversiInvited(ctx context.Context, inviteeID, inviterID, gameID string)
+}
+
 // --- Incoming reversi AP activities (CherryPick compatible) ---
 //
 // All four activity types carry a custom Game object as `object`, structured
@@ -131,6 +138,10 @@ func (p *Processor) handleReversiInvite(act genericActivity) error {
 	// (#417 P2: polling/reload 依存の解消)。
 	if p.reversiStreamPub != nil {
 		p.reversiStreamPub.PublishInvited(invitee.ID, actor)
+	}
+	// Elythia: プラグインが管理するアカウントへも知らせる (#3942)
+	if p.reversiInviteObs != nil {
+		p.reversiInviteObs.ReversiInvited(ctx, invitee.ID, actor.ID, game.ID)
 	}
 	return nil
 }

@@ -36,6 +36,13 @@ type ReversiStreamPublisher interface {
 	PublishInvited(targetUserID string, inviter *model.User)
 }
 
+// InviteObserver is told about invitations to local users, with the game
+// (#3942). プラグインが管理するアカウントへの通知 (core/pluginnotify) が実装する。
+// stream の `invited` と違い、対局の ID を渡す。
+type InviteObserver interface {
+	ReversiInvited(ctx context.Context, inviteeID, inviterID, gameID string)
+}
+
 // Handler handles reversi/* endpoints.
 type Handler struct {
 	repo         repository.ReversiRepository
@@ -46,6 +53,7 @@ type Handler struct {
 	fedCache     *corereversi.FederationIDCache
 	userRepo     repository.UserRepository
 	streamPub    ReversiStreamPublisher
+	inviteObs    InviteObserver
 	fedChecker   FederationAvailabilityChecker
 	remoteLookup RemoteUserLookup
 	// lites は reversi/invitations の招待者 (UserLite) の instance と絵文字を
@@ -114,6 +122,12 @@ func (h *Handler) SetRemoteUserLookup(r RemoteUserLookup) {
 // される (Match 側で h.userRepo != nil guard がある)。
 func (h *Handler) SetStreamPublisher(p ReversiStreamPublisher) {
 	h.streamPub = p
+}
+
+// SetInviteObserver attaches the observer told about local invitations
+// (#3942).
+func (h *Handler) SetInviteObserver(o InviteObserver) {
+	h.inviteObs = o
 }
 
 // SetFederation attaches federation support.
@@ -521,9 +535,15 @@ func (h *Handler) Match(c echo.Context) error {
 					_ = h.deliverer.DeliverToUser(user.ID, targetUser, body)
 				}
 			}
-		} else if h.streamPub != nil {
+		} else {
 			// local: stream に invited イベントを push (#417 P2)
-			h.streamPub.PublishInvited(targetUser.ID, user)
+			if h.streamPub != nil {
+				h.streamPub.PublishInvited(targetUser.ID, user)
+			}
+			// Elythia: プラグインが管理するアカウントへも知らせる (#3942)
+			if h.inviteObs != nil {
+				h.inviteObs.ReversiInvited(c.Request().Context(), targetUser.ID, user.ID, game.ID)
+			}
 		}
 	}
 
@@ -857,6 +877,11 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	// specific-match の invited と同じ経路。
 	if h.streamPub != nil {
 		h.streamPub.PublishInvited(res.OpponentID, user)
+	}
+	// Elythia: 待っていたのがプラグインの管理するアカウントなら、組まれた対局を
+	// 知らせる (#3942)。bot は stream の invited を受けられないので、これで対局を知る
+	if h.inviteObs != nil {
+		h.inviteObs.ReversiInvited(ctx, res.OpponentID, user.ID, game.ID)
 	}
 	return c.JSON(http.StatusOK, packGame(h.entityPacker, game, h.idGen))
 }

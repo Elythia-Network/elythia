@@ -46,6 +46,10 @@ var handlerNilAllowed = map[string]string{
 	// newPluginNotificationDispatcher が nil でないとき (通知を受け取るプラグインが
 	// 居るとき) だけ SetMessageObserver を呼ぶ。テストの組み立てはプラグインを登録しない。
 	"chatService.messageObserver": "通知を受け取るプラグインが居ないときは配線しない (newPluginNotificationDispatcher が nil)",
+	// リバーシの招待をプラグインへ届ける口 (#3942)。chatService.messageObserver と同じく、
+	// newPluginNotificationDispatcher が nil でないときだけ setupRoutes が入れる。
+	"reversi.inviteObs":                    "通知を受け取るプラグインが居ないときは配線しない (newPluginNotificationDispatcher が nil)",
+	"federationProcessor.reversiInviteObs": "通知を受け取るプラグインが居ないときは配線しない (newPluginNotificationDispatcher が nil)",
 	// 依存ではなく状態。updated の間引きの窓 (clip ごと) で、最初の publishUpdated が
 	// 作る。組み立てた直後はまだクリップを更新していないので nil。
 	"clipService.pendingUpdated": "依存ではなく状態。最初の publishUpdated が作るので、組み立てた直後は nil",
