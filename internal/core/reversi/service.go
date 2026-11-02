@@ -200,6 +200,8 @@ type Service struct {
 	avatarURL func(*model.User) string
 	// observer は stream に出すイベントを、対局の行と一緒に受ける (#3942)。nil なら呼ばない。
 	observer GameObserver
+	// matched は招待が受けられたことを招待した人に知らせる (#3946)。nil なら知らせない。
+	matched MatchedNotifier
 	// lockWait は手のロックを待つ上限。0 なら putStoneLockWait (テストが短くする)。
 	lockWait time.Duration
 }

@@ -68,3 +68,26 @@ func (p *ReversiGamePublisher) PublishInvited(targetUserID string, inviter *mode
 		slog.Warn("reversi publisher: publish invited failed", "topic", topic, "err", err)
 	}
 }
+
+// PublishMatched emits a `matched` event to the inviter's `reversi:<userID>`
+// stream topic when their invitation is accepted (#3946)。body は本家
+// ReversiService.matched と同じ `{ game: ReversiGameDetailed }`。招待した人の画面は
+// これを受けて対局へ移る。
+func (p *ReversiGamePublisher) PublishMatched(targetUserID string, game map[string]any) {
+	if p.pub == nil || targetUserID == "" || game == nil {
+		return
+	}
+	env := map[string]any{
+		"type": "matched",
+		"body": map[string]any{"game": game},
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		slog.Warn("reversi publisher: marshal matched failed", "err", err)
+		return
+	}
+	topic := "reversi:" + targetUserID
+	if err := p.pub.Publish(context.Background(), topic, json.RawMessage(raw)); err != nil {
+		slog.Warn("reversi publisher: publish matched failed", "topic", topic, "err", err)
+	}
+}

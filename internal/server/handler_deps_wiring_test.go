@@ -378,6 +378,9 @@ var requiredNonEmptyStrings = []string{
 // entitycompat の TestEntityPackerDepsAreWired も見る)。
 var nestedDepChecks = map[string][]string{
 	"admin.ipLookupAudit": {"repo", "idGen"},
+	// 招待が受けられたことを招待した人に知らせる役 (#3946)。無いと、招待した人の
+	// 画面が待ったまま進まない
+	"reversi.svc": {"matched"},
 	"notes.entityPacker": {
 		"mediaURL", "avatarDecoration", "emojiDecoration", "canChat", "userRoles",
 		"showRemoteBadges", "instanceIconURL", "silenced",

@@ -148,23 +148,38 @@ func (p *Processor) handleReversiInvite(act genericActivity) error {
 
 // handleReversiJoin processes an incoming Join for a game we (the local
 // inviter) previously sent Invite for. CherryPick semantics: the remote
-// player has accepted; no local state change beyond acknowledging existence.
+// player has accepted. The local inviter is told so (stream `matched`, #3946).
 func (p *Processor) handleReversiJoin(act genericActivity) error {
 	if !p.reversiReady() {
 		return ErrUnsupportedActivity
 	}
-	_, gameObj, state, err := p.parseReversiActivity(act)
+	actor, gameObj, state, err := p.parseReversiActivity(act)
 	if err != nil {
 		return err
 	}
 	if gameObj == nil || state.GameSessionID == "" {
 		return errors.New("reversi join: missing game state")
 	}
-	gameID, err := p.reversiFedCache.Get(context.Background(), state.GameSessionID)
+	ctx := context.Background()
+	gameID, err := p.reversiFedCache.Get(ctx, state.GameSessionID)
 	if err != nil || gameID == "" {
 		return fmt.Errorf("reversi join: unknown session %s", state.GameSessionID)
 	}
 	slog.Info("reversi federation: peer joined", "session", state.GameSessionID, "gameId", gameID)
+	// Elythia: 招待した人の画面を対局へ進める (#3946)。受けたと言えるのは招待された
+	// 本人だけなので、Join の送り手が対局の User2 のときに限る
+	game, err := p.reversiRepo.FindByID(gameID)
+	if repository.IsNotFound(err) {
+		// 取り消された後に届いた Join。知らせる対局が無い
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reversi join: find game %s: %w", gameID, err)
+	}
+	if game.User2ID != actor.ID {
+		return nil
+	}
+	p.reversiSvc.AcceptInvitation(ctx, game)
 	return nil
 }
 
