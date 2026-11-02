@@ -175,6 +175,26 @@ describe('MkImgWithBlurhash', () => {
 			expect(getCanvas(container).classList.contains('test-leave-active')).toBe(true);
 		});
 
+		// 退場のクラスを渡さない呼び出しは、部品の既定のクラス (transition_leaveActive) で
+		// 消える。既定のクラスはテンプレートから渡す (#3950。script で $style を読むと、
+		// 本番のビルドでは空になる)
+		test('uses the default leave class when the caller gives none', async () => {
+			const noLeave = { duration: 500, leaveToClass: 'test-leave-to' };
+			const { container, rerender } = renderImg({ src: 'https://example.com/a.png', transition: noLeave, forceBlurhash: false });
+			await settle();
+			await loadImage(getImg(container));
+			await rerender({ src: 'https://example.com/a.png', transition: noLeave, forceBlurhash: true });
+			await nextTick();
+			await new Promise((r) => setTimeout(r, 50));
+			expect([...getImg(container).classList].some((c) => c.includes('transition_leaveActive'))).toBe(true);
+
+			// canvas の側も同じ既定のクラスで消える
+			await rerender({ src: 'https://example.com/a.png', transition: noLeave, forceBlurhash: false });
+			await nextTick();
+			await new Promise((r) => setTimeout(r, 50));
+			expect([...getCanvas(container).classList].some((c) => c.includes('transition_leaveActive'))).toBe(true);
+		});
+
 		test('switches at once when animation is off', async () => {
 			(prefer.s as Record<string, unknown>).animation = false;
 			const { container, rerender } = renderImg({ src: 'https://example.com/a.png', transition, forceBlurhash: false });

@@ -60,13 +60,13 @@ describe('MkDeferredMount', () => {
 		const { container } = render(() => h(MkDeferredMount, { defer: true, class: 'note', 'data-scroll-anchor': 'a' }, () => h(Content, { label: 'A' })));
 		const wrapper = container.firstElementChild as HTMLElement;
 		expect(container.querySelector('article')).toBeNull();
-		expect(wrapper.className).toContain('placeholder');
+		expect(wrapper.style.height).toBe('160px');
 		expect(wrapper.classList.contains('note')).toBe(true);
 		expect(wrapper.getAttribute('data-scroll-anchor')).toBe('a');
 
 		await grantAll();
 		expect(wrapper.querySelector('article')?.textContent).toBe('A');
-		expect(wrapper.className).not.toContain('placeholder');
+		expect(wrapper.style.height).toBe('');
 		// 根の要素を替えない
 		expect(container.firstElementChild).toBe(wrapper);
 	});

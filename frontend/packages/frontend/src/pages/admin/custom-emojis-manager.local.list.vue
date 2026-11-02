@@ -70,6 +70,7 @@ export type EmojiSearchQuery = {
 </script>
 
 <script setup lang="ts">
+// eslint-disable-next-line no-restricted-imports -- 本家のまま。本番のビルドでは空を返し、行の色付けが効いていない (直すのは別の issue)
 import { computed, defineAsyncComponent, onMounted, ref, nextTick, useCssModule } from 'vue';
 import * as Misskey from 'misskey-js';
 import type { RequestLogItem } from '@/pages/admin/custom-emojis-manager.impl.js';

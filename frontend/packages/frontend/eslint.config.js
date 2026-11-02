@@ -56,9 +56,14 @@ export default [
 			}],
 			// MFM は src/utility/mfm.ts を通して扱う (解析器を差し替える口をそこに置いている)。
 			// shared の punycode の制限もここで指定し直す。
+			// useCssModule は本番のビルドで空を返すことがある。rollup-plugin-unwind-css-module-class-name
+			// は、描画関数に `_ctx.$style` の参照が 1 つも残らない部品から CSS Modules の表を外す。
+			// script の最上位で $style を宣言すると必ずこの条件に当たる。開発時と vitest では動くので
+			// 気付けない (#3950。アバターの画像が枠より大きく描かれた)
 			'no-restricted-imports': ['error', {
 				paths: [
 					{ name: 'punycode' },
+					{ name: 'vue', importNames: ['useCssModule'], message: '本番のビルドでは、描画関数に _ctx.$style の参照が残らない部品で空を返す。クラスはテンプレートの $style で参照する' },
 					...mfmParserImports,
 				],
 				patterns: mfmParserImportPatterns,

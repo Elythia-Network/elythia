@@ -140,6 +140,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script setup lang="ts">
+// eslint-disable-next-line no-restricted-imports -- 本家のまま。本番のビルドでは空を返し、行の色付けが効いていない (直すのは別の issue)
 import { computed, onMounted, ref, useCssModule } from 'vue';
 import * as Misskey from 'misskey-js';
 import type { GridSortOrderKey, RequestLogItem } from '@/pages/admin/custom-emojis-manager.impl.js';
