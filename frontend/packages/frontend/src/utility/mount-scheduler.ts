@@ -75,19 +75,37 @@ export function createMountScheduler(perFrame: number, waitFrame: () => Promise<
 	};
 }
 
+/** What `quietTransitions` reads from the list on each render. */
+export type QuietTransitionsInput = {
+	newestId: string | null | undefined;
+	/** The id of the last (oldest) item. */
+	lastId: string | null | undefined;
+	/** `Paginator.generation`, which changes on every reload. */
+	generation: number;
+};
+
 /**
  * Wraps a list's `fetchOlder` so that the list can tell which items appeared because of it.
  *
  * `shouldDefer(id)` is true for items older than everything the list showed when the wrapped
  * call started, while it runs (including the render that shows the fetched items). The list
  * passes it to `MkDeferredMount`'s `defer`.
+ *
+ * `quietTransitions(list)` tells the list to turn off its TransitionGroup: from the render that
+ * adds the fetched items until the newest item changes or the list is reloaded.
  */
 export function deferOlderMounts(
 	fetchOlder: () => Promise<void>,
 	currentIds: () => string[],
-): { fetchOlder: () => Promise<void>; shouldDefer: (id: string) => boolean } {
+): {
+	fetchOlder: () => Promise<void>;
+	shouldDefer: (id: string) => boolean;
+	quietTransitions: (list: QuietTransitionsInput) => boolean;
+} {
 	let boundary: string | null = null;
 	let running = false;
+	let quiet = false;
+	let quietWhile: Pick<QuietTransitionsInput, 'newestId' | 'generation'> | null = null;
 	return {
 		async fetchOlder() {
 			// 実行中にもう一度呼ばれたら (v-appear は後から呼び直す)、境に触らない。
@@ -108,6 +126,24 @@ export function deferOlderMounts(
 			}
 		},
 		shouldDefer: (id) => boundary != null && id < boundary,
+		quietTransitions(list) {
+			// 切るのは足した分を描くときから。読み足した分は末尾に入り、始めた時点の最古より
+			// 古いので、末尾がそれより古くなった描画がそれに当たる。読み足しを始めたとき
+			// (ボタンの表示が替わる描画)、何も足さなかったとき (末尾・失敗・重複だけ)、
+			// 待つ間に新着や削除で件数が変わったときには切り替えない。TransitionGroup は
+			// 渡す値が変わると一覧ごと描き直し、全件の位置を測るので、切り替える回数を
+			// 増やすとかえって重くなる (#3939 の実装中に確認)
+			// 境は包んだ呼び出しの最中だけ立っている
+			if (boundary != null && list.lastId != null && list.lastId < boundary) {
+				quiet = true;
+				quietWhile = { newestId: list.newestId, generation: list.generation };
+			} else if (quiet && (list.newestId !== quietWhile?.newestId || list.generation !== quietWhile?.generation)) {
+				// 戻すのは先頭が変わったとき (新着など) か、再読み込みしたとき。どのみち一覧を
+				// 描き直すときなので、戻すための描き直しが増えない
+				quiet = false;
+			}
+			return quiet;
+		},
 	};
 }
 

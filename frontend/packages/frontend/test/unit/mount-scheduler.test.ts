@@ -133,6 +133,49 @@ describe('deferOlderMounts', () => {
 		expect(m.shouldDefer('n001')).toBe(false);
 	});
 
+	test('quiets transitions from the render that adds the fetched items until the newest item changes', async () => {
+		let resolve!: () => void;
+		const m = deferOlderMounts(() => new Promise<void>(r => { resolve = r; }), () => ['n050', 'n049']);
+		const list = (newestId: string, lastId: string, generation = 1) => ({ newestId, lastId, generation });
+		expect(m.quietTransitions(list('n050', 'n049'))).toBe(false);
+
+		const done = m.fetchOlder();
+		// 読み足しを始めたとき (末尾はまだ始めた時点の最古) は切り替えない
+		expect(m.quietTransitions(list('n050', 'n049'))).toBe(false);
+		// 足した分を描くとき
+		expect(m.quietTransitions(list('n050', 'n020'))).toBe(true);
+		resolve();
+		await done;
+
+		// 次の読み足しを始めるときも、先頭が同じなら切ったまま (描き直しを増やさない)
+		expect(m.quietTransitions(list('n050', 'n020'))).toBe(true);
+		// 新着で先頭が変わったら戻す
+		expect(m.quietTransitions(list('n060', 'n020'))).toBe(false);
+		expect(m.quietTransitions(list('n060', 'n020'))).toBe(false);
+	});
+
+	test('does not quiet transitions unless older items were added at the end', async () => {
+		let resolve!: () => void;
+		const m = deferOlderMounts(() => new Promise<void>(r => { resolve = r; }), () => ['n050', 'n049']);
+		const done = m.fetchOlder();
+		// 待つ間に新着が先頭に入り、応答では何も足さなかった (末尾・失敗・重複だけ)。
+		// 件数は増えても、切り替えると一覧ごと描き直すだけになる
+		expect(m.quietTransitions({ newestId: 'n060', lastId: 'n049', generation: 1 })).toBe(false);
+		// 待つ間に末尾が消えた
+		expect(m.quietTransitions({ newestId: 'n060', lastId: 'n050', generation: 1 })).toBe(false);
+		resolve();
+		await done;
+	});
+
+	test('restores transitions when the list is reloaded', async () => {
+		const m = deferOlderMounts(async () => {
+			expect(m.quietTransitions({ newestId: 'n050', lastId: 'n020', generation: 1 })).toBe(true);
+		}, () => ['n050']);
+		await m.fetchOlder();
+		// 先頭の id が同じでも、再読み込みで一覧を入れ替えたら戻す
+		expect(m.quietTransitions({ newestId: 'n050', lastId: 'n036', generation: 2 })).toBe(false);
+	});
+
 	test('defers nothing when the list is empty', async () => {
 		const m = deferOlderMounts(async () => {
 			expect(m.shouldDefer('n001')).toBe(false);
