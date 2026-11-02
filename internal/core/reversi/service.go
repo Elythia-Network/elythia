@@ -2,6 +2,7 @@ package reversi
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,6 +166,14 @@ type FederationDeliverer interface {
 	DeliverToUser(signerUserID string, recipient *model.User, body []byte) error
 }
 
+// GameObserver is told about every event the Service publishes for a game,
+// with the game itself (#3942). プラグインが管理するアカウントへの通知
+// (core/pluginnotify) が実装する。stream と違い対局者を知る必要があるので、
+// gameID でなく行を渡す。
+type GameObserver interface {
+	ReversiGameEvent(ctx context.Context, game *model.ReversiGame, event string)
+}
+
 // UserLookup is the minimal interface used by the Service to resolve the
 // opposing player during federation delivery. repository.UserRepository が
 // そのまま満たすので実体実装の追加は不要。
@@ -189,6 +198,10 @@ type Service struct {
 	// stream で配る UserLite の avatarUrl を決める関数。core は entity を import
 	// できないので、メディアプロキシを通す (*entity.Packer).IdenticonURL を server から渡す。
 	avatarURL func(*model.User) string
+	// observer は stream に出すイベントを、対局の行と一緒に受ける (#3942)。nil なら呼ばない。
+	observer GameObserver
+	// lockWait は手のロックを待つ上限。0 なら putStoneLockWait (テストが短くする)。
+	lockWait time.Duration
 }
 
 // NewService constructs a Service with the required dependencies.
@@ -217,6 +230,12 @@ func (s *Service) SetFederationDeliverer(d FederationDeliverer) {
 // actor / opponent Host / URI。
 func (s *Service) SetUserRepo(r UserLookup) {
 	s.userRepo = r
+}
+
+// SetGameObserver sets the observer told about every published game event
+// (#3942).
+func (s *Service) SetGameObserver(o GameObserver) {
+	s.observer = o
 }
 
 // SetAvatarURLFunc sets the function that resolves the avatarUrl of the
@@ -410,7 +429,7 @@ func (s *Service) UpdateReady(ctx context.Context, gameID, userID string, ready 
 		}
 		return ErrAlreadyStarted
 	}
-	s.publish(gameID, "changeReadyStates", map[string]any{
+	s.publish(ctx, game, "changeReadyStates", map[string]any{
 		"user1": game.User1Ready,
 		"user2": game.User2Ready,
 	})
@@ -465,12 +484,12 @@ func (s *Service) UpdateSettings(ctx context.Context, gameID, userID, key string
 	}
 	var valueAny any
 	_ = json.Unmarshal(value, &valueAny)
-	s.publish(gameID, "updateSettings", map[string]any{
+	s.publish(ctx, game, "updateSettings", map[string]any{
 		"userId": userID,
 		"key":    key,
 		"value":  valueAny,
 	})
-	s.publish(gameID, "changeReadyStates", map[string]any{
+	s.publish(ctx, game, "changeReadyStates", map[string]any{
 		"user1": false, "user2": false,
 	})
 	// 連合対戦の場合は settings Update を相手に配信 (#417 P1)。
@@ -506,7 +525,7 @@ func (s *Service) CancelGame(ctx context.Context, gameID, userID string) error {
 		return err
 	}
 	s.cleanupFedCache(ctx, gameID)
-	s.publish(gameID, "canceled", map[string]any{"userId": userID})
+	s.publish(ctx, game, "canceled", map[string]any{"userId": userID})
 	return nil
 }
 
@@ -546,9 +565,15 @@ func (s *Service) StartGame(ctx context.Context, game *model.ReversiGame) error 
 		game.CRC32 = &crc
 	}
 
+	// 初期ターンタイマー: logsCount=0 (まだ一手も置かれていない)。
+	// Elythia: 始まった印を書く前に置く (#3942)。後に置くと、その間に時間切れを申告
+	// されて、始まった直後の先手が負けになる (キーが無いと時間切れとみなすため)。
+	// 取り合いに負けても、勝った側と同じキーを置き直すだけ。
+	s.setTurnTimer(ctx, game.ID, 0, game.TimeLimitForEachTurn)
+
 	// 並行UpdateReadyの両者がboth-readyを観測すると、StartGameに二重到達
 	// する (#1626)。isStarted=falseをguardにしたatomic claimで先勝ちを決め、
-	// 負けた側はtimer設定もstarted publishもせず静かに成功扱いにする。
+	// 負けた側はstarted publishもせず静かに成功扱いにする。
 	claimed, err := s.repo.MarkStarted(game)
 	if err != nil {
 		return err
@@ -556,9 +581,7 @@ func (s *Service) StartGame(ctx context.Context, game *model.ReversiGame) error 
 	if !claimed {
 		return nil
 	}
-	// 初期ターンタイマー: logsCount=0 (まだ一手も置かれていない)
-	s.setTurnTimer(ctx, game.ID, 0, game.TimeLimitForEachTurn)
-	s.publish(game.ID, "started", map[string]any{"game": s.packGame(game)})
+	s.publish(ctx, game, "started", map[string]any{"game": s.packGame(game)})
 	return nil
 }
 
@@ -571,6 +594,17 @@ func (s *Service) StartGame(ctx context.Context, game *model.ReversiGame) error 
 // the client can reconcile its optimistic move (upstream putStoneToGame の id、
 // #1549)。federation 経由など op id が無い経路は空文字を渡す。
 func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, opID string) error {
+	// Elythia: 同じ対局の手を直列にする (#3942)。読んでから行ごと書き戻すので、並行した
+	// 2 手が同じ盤面を見て両方とも通り、後から書いた方だけが残る。人の UI では起きにくいが、
+	// プラグインの bot は通知を並行に処理する (プラグインのキューは同時に 2 本)。後から来た
+	// 手は、ロックが空いてから最新の盤面で手番を確かめ直す。対局者でない人にはロックを
+	// 取らせない (他人の対局のロックを占有して手を待たせられる)
+	if g, err := s.Get(ctx, gameID); err != nil {
+		return err
+	} else if !isPlayer(g, userID) {
+		return ErrNotPlayer
+	}
+	defer s.lockGame(ctx, gameID)()
 	game, err := s.Get(ctx, gameID)
 	if err != nil {
 		return err
@@ -650,10 +684,14 @@ func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, 
 			return err
 		}
 	} else {
+		// Elythia: 次の手番のタイマーは、手を書く前に置く (#3942)。後に置くと、その間に
+		// 時間切れを申告されて相手が負けになる (手数が進んだのにキーが無い瞬間ができる。
+		// 打った本人が申告の時機を選べる。レビューで実測)。書けなかったときは、使われない
+		// キーが残るだけ
+		s.setTurnTimer(ctx, game.ID, len(logs), game.TimeLimitForEachTurn)
 		if err := s.repo.Update(game); err != nil {
 			return err
 		}
-		s.setTurnTimer(ctx, game.ID, len(logs), game.TimeLimitForEachTurn)
 	}
 
 	// upstream putStoneToGame は log event に client op id を含める
@@ -662,7 +700,7 @@ func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, 
 	if opID != "" {
 		logID = opID
 	}
-	s.publish(gameID, "log", map[string]any{
+	s.publish(ctx, game, "log", map[string]any{
 		"pos":       pos,
 		"color":     colorInt,
 		"player":    myColor,
@@ -671,7 +709,7 @@ func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, 
 		"id":        logID,
 	})
 	if engine.Turn == nil {
-		s.publish(gameID, "ended", map[string]any{
+		s.publish(ctx, game, "ended", map[string]any{
 			"winnerId": game.WinnerID,
 			"game":     s.packGame(game),
 		})
@@ -707,23 +745,16 @@ func (s *Service) cleanupFedCache(ctx context.Context, gameID string) {
 
 // Surrender marks the opposing user as the winner and ends the game.
 func (s *Service) Surrender(ctx context.Context, gameID, userID string) error {
-	game, err := s.Get(ctx, gameID)
-	if err != nil {
+	// Elythia: 手と同じロックの中で終局させる (#3942)。どちらも行ごと書き戻すので、
+	// 交差すると後から書いた方が投了か手を消す (投了は stream と連合には配られたのに、
+	// DB では対局が続く)。断る投了はロックを取らずに返す
+	if _, err := s.surrenderable(ctx, gameID, userID); err != nil {
 		return err
 	}
-	// PutStone 等と同じ順序でガードする。未スタートの対局に対する surrender は
-	// 「勝ち逃げ」と区別が付かなくなるので、開始前は拒否する。
-	// #2106 L17 (intentional divergence): vanilla/cherrypick の surrender は IsStarted を
-	// ガードせず pending game も終局させられるが、mk-go は勝ち逃げ防止のため未開始を
-	// NOT_STARTED で弾く意図的拡張。除去せず明文化する。
-	if !game.IsStarted {
-		return ErrNotStarted
-	}
-	if game.IsEnded {
-		return ErrAlreadyEnded
-	}
-	if !isPlayer(game, userID) {
-		return ErrNotPlayer
+	defer s.lockGame(ctx, gameID)()
+	game, err := s.surrenderable(ctx, gameID, userID)
+	if err != nil {
+		return err
 	}
 	winnerID := opponent(game, userID)
 	now := time.Now()
@@ -734,7 +765,7 @@ func (s *Service) Surrender(ctx context.Context, gameID, userID string) error {
 	if err := s.repo.Update(game); err != nil {
 		return err
 	}
-	s.publish(gameID, "ended", map[string]any{
+	s.publish(ctx, game, "ended", map[string]any{
 		"winnerId": winnerID,
 		"reason":   "surrender",
 		"game":     s.packGame(game),
@@ -746,9 +777,64 @@ func (s *Service) Surrender(ctx context.Context, gameID, userID string) error {
 	return nil
 }
 
+// surrenderable reads the game and reports why userID cannot surrender it.
+func (s *Service) surrenderable(ctx context.Context, gameID, userID string) (*model.ReversiGame, error) {
+	game, err := s.Get(ctx, gameID)
+	if err != nil {
+		return nil, err
+	}
+	// PutStone 等と同じ順序でガードする。未スタートの対局に対する surrender は
+	// 「勝ち逃げ」と区別が付かなくなるので、開始前は拒否する。
+	// #2106 L17 (intentional divergence): vanilla/cherrypick の surrender は IsStarted を
+	// ガードせず pending game も終局させられるが、mk-go は勝ち逃げ防止のため未開始を
+	// NOT_STARTED で弾く意図的拡張。除去せず明文化する。
+	if !game.IsStarted {
+		return nil, ErrNotStarted
+	}
+	if game.IsEnded {
+		return nil, ErrAlreadyEnded
+	}
+	if !isPlayer(game, userID) {
+		return nil, ErrNotPlayer
+	}
+	return game, nil
+}
+
 // CheckTimeout is invoked when a client claims the opponent's turn timer has
 // expired. If the matching Redis key is gone, the opponent wins by timeout.
 func (s *Service) CheckTimeout(ctx context.Context, gameID string) error {
+	// Elythia: 時間切れにするときだけロックを取り、読み直して確かめる (#3942)。手を打つ
+	// 処理と行ごとの書き戻しが交差しないようにする。ほとんどの申告 (時間が残っている) は
+	// ロックを取らずに返すので、誰でも呼べる申告でロックを占有されない
+	if expired, err := s.turnExpired(ctx, gameID); err != nil || !expired {
+		return err
+	}
+	defer s.lockGame(ctx, gameID)()
+	return s.checkTimeout(ctx, gameID)
+}
+
+// turnExpired reports whether the game is in progress and its current turn
+// timer is gone.
+func (s *Service) turnExpired(ctx context.Context, gameID string) (bool, error) {
+	game, err := s.Get(ctx, gameID)
+	if err != nil {
+		return false, err
+	}
+	if !game.IsStarted || game.IsEnded {
+		return false, nil
+	}
+	var logs [][]int
+	if len(game.Logs) > 0 {
+		_ = json.Unmarshal(game.Logs, &logs)
+	}
+	exists, err := s.turnTimerExists(ctx, gameID, len(logs))
+	if err != nil {
+		return false, err
+	}
+	return !exists, nil
+}
+
+func (s *Service) checkTimeout(ctx context.Context, gameID string) error {
 	game, err := s.Get(ctx, gameID)
 	if err != nil {
 		return err
@@ -789,7 +875,7 @@ func (s *Service) CheckTimeout(ctx context.Context, gameID string) error {
 	if err := s.repo.Update(game); err != nil {
 		return err
 	}
-	s.publish(gameID, "ended", map[string]any{
+	s.publish(ctx, game, "ended", map[string]any{
 		"winnerId": winnerID,
 		"reason":   "timeout",
 		"game":     s.packGame(game),
@@ -800,11 +886,18 @@ func (s *Service) CheckTimeout(ctx context.Context, gameID string) error {
 
 // --- helpers ---
 
-func (s *Service) publish(gameID, eventType string, body any) {
-	if s.publisher == nil {
-		return
+// publish pushes an event to the game's stream and tells the observer.
+//
+// Elythia: 観測者 (プラグインへの通知、#3942) にも同じ時機で知らせる。stream に
+// 出すイベントと 1 対 1 にしておくと、プラグインが受け取るイベントの名前と時機を
+// フロントエンドと同じにできる。
+func (s *Service) publish(ctx context.Context, game *model.ReversiGame, eventType string, body any) {
+	if s.publisher != nil {
+		s.publisher.PublishGameEvent(game.ID, eventType, body)
 	}
-	s.publisher.PublishGameEvent(gameID, eventType, body)
+	if s.observer != nil {
+		s.observer.ReversiGameEvent(ctx, game, eventType)
+	}
 }
 
 func (s *Service) setTurnTimer(ctx context.Context, gameID string, turnIndex, seconds int) {
@@ -812,7 +905,69 @@ func (s *Service) setTurnTimer(ctx context.Context, gameID string, turnIndex, se
 		return
 	}
 	key := turnTimerKey(gameID, turnIndex)
-	s.redis.Set(ctx, key, "1", time.Duration(seconds)*time.Second)
+	// Elythia: 置けなかったら記録する (#3942)。タイマーが無いと、相手は時間切れをすぐに
+	// 申告できる (CheckTimeout はキーが無ければ時間切れとみなす)
+	if err := s.redis.Set(ctx, key, "1", time.Duration(seconds)*time.Second).Err(); err != nil {
+		slog.Warn("reversi: set turn timer failed", "gameId", gameID, "turn", turnIndex, "err", err)
+	}
+}
+
+// putStoneLockTTL bounds how long one move holds the game's lock (a crashed
+// holder releases it by expiry). putStoneLockWait is how long a move waits for it.
+const (
+	putStoneLockTTL  = 10 * time.Second
+	putStoneLockWait = 3 * time.Second
+)
+
+var releaseGameLock = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+`)
+
+func gameLockKey(gameID string) string {
+	return "reversi:game:putLock:" + gameID
+}
+
+// lockGame takes the game's lock for one move and returns the release.
+//
+// **取れなくても手は止めない。** Redis の障害と、待ちの上限を過ぎたとき (持っている
+// 処理が止まったときなど) は、ロック無しで従来どおり進める。手が打てなくなる方が、
+// まれに 1 手が失われるより害が大きい。
+func (s *Service) lockGame(ctx context.Context, gameID string) func() {
+	if s.redis == nil {
+		return func() {}
+	}
+	key := gameLockKey(gameID)
+	token := crand.Text()
+	wait := s.lockWait
+	if wait <= 0 {
+		wait = putStoneLockWait
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		ok, err := s.redis.SetNX(ctx, key, token, putStoneLockTTL).Result()
+		if err != nil {
+			slog.Warn("reversi: game lock failed; moving without it", "gameId", gameID, "err", err)
+			return func() {}
+		}
+		if ok {
+			return func() {
+				_ = releaseGameLock.Run(context.WithoutCancel(ctx), s.redis, []string{key}, token).Err()
+			}
+		}
+		if time.Now().After(deadline) {
+			slog.Warn("reversi: game lock wait timed out; moving without it", "gameId", gameID)
+			return func() {}
+		}
+		select {
+		case <-ctx.Done():
+			return func() {}
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 }
 
 func (s *Service) turnTimerExists(ctx context.Context, gameID string, turnIndex int) (bool, error) {

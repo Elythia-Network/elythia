@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -22,6 +23,14 @@ import (
 // TypeChatMessage is the event type for a direct chat message. チャットは
 // 通知を作らないので、通知の type には無い独自の値。
 const TypeChatMessage = "chatMessage"
+
+// The event types for reversi (#3942). どちらも通知を作らないので独自の値。
+const (
+	// TypeReversiInvited is an invitation to (or a random match into) a game.
+	TypeReversiInvited = "reversiInvited"
+	// TypeReversiGame is a change of a game the account plays in.
+	TypeReversiGame = "reversiGame"
+)
 
 // Event is the queue payload for one delivery.
 //
@@ -35,10 +44,14 @@ type Event struct {
 	NoteID    string `json:"noteId,omitempty"`
 	// NoteVisibility は通知を作った時点の投稿の公開範囲 (mention / reply /
 	// quote だけ)。
-	NoteVisibility string    `json:"noteVisibility,omitempty"`
-	Reaction       string    `json:"reaction,omitempty"`
-	ChatMessageID  string    `json:"chatMessageId,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	NoteVisibility string `json:"noteVisibility,omitempty"`
+	Reaction       string `json:"reaction,omitempty"`
+	ChatMessageID  string `json:"chatMessageId,omitempty"`
+	// GameID と GameEvent はリバーシだけ (#3942)。GameEvent は対局の stream に
+	// 出すイベントの名前。
+	GameID    string    `json:"gameId,omitempty"`
+	GameEvent string    `json:"gameEvent,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Enqueuer puts one delivery onto a plugin's own queue. 実装は queue.Client。
@@ -187,6 +200,78 @@ func (d *Dispatcher) DirectMessageCreated(ctx context.Context, msg *model.ChatMe
 		ChatMessageID: msg.ID,
 		CreatedAt:     d.now(),
 	})
+}
+
+// ReversiInvited implements the reversi invite observers of api/reversi and
+// core/federation (#3942).
+//
+// 招待は通知を作らないので、Hook の抑制の判定を通らない。チャットと同じく
+// ここで相手を見る (ミュート・ブロックした相手からの招待に bot が応じない)。
+// 招待は対局ごとに 1 回なので、ID は対局から作る (再送の Invite は届く前に
+// 処理側が畳む)。
+func (d *Dispatcher) ReversiInvited(ctx context.Context, inviteeID, inviterID, gameID string) {
+	if inviteeID == "" || inviterID == "" || gameID == "" || inviteeID == inviterID {
+		return
+	}
+	invitee, err := d.deps.Users.FindByID(inviteeID)
+	if err != nil {
+		return
+	}
+	plugin, ok := d.owner(invitee)
+	if !ok {
+		return
+	}
+	if !d.allowed(plugin, invitee.ID, inviterID) {
+		return
+	}
+	d.enqueue(ctx, plugin, Event{
+		ID:        TypeReversiInvited + ":" + gameID,
+		Type:      TypeReversiInvited,
+		AccountID: invitee.ID,
+		UserID:    inviterID,
+		GameID:    gameID,
+		CreatedAt: d.now(),
+	})
+}
+
+// ReversiGameEvent implements reversi.GameObserver (#3942).
+//
+// 対局者のうちプラグインが管理するアカウントへ積む。始めた (受けた) 対局の
+// 進みなので、相手のミュート・ブロックは見ない (見ると、対局の途中で相手を
+// ミュートしただけで bot が手を打てなくなる)。中身は載せない。
+//
+// ID は積むたびに作る。同じ対局の同じ種類のイベントは何度も起きる (手は 1 手
+// ごとに log) ので、対局と種類からは作れない。再試行は同じジョブを積み直すので
+// 同じ ID のまま届く。宛先のアカウントも入れる。同じプラグインの 2 つのアカウントが
+// 対局すると、同じ時刻で 2 件を積むので、ID で冪等に書いたプラグインが片方を捨てる。
+func (d *Dispatcher) ReversiGameEvent(ctx context.Context, game *model.ReversiGame, event string) {
+	if game == nil || event == "" {
+		return
+	}
+	now := d.now()
+	for _, p := range [][2]string{{game.User1ID, game.User2ID}, {game.User2ID, game.User1ID}} {
+		player, other := p[0], p[1]
+		if player == "" || player == other {
+			continue
+		}
+		u, err := d.deps.Users.FindByID(player)
+		if err != nil {
+			continue
+		}
+		plugin, ok := d.owner(u)
+		if !ok {
+			continue
+		}
+		d.enqueue(ctx, plugin, Event{
+			ID:        fmt.Sprintf("%s:%s:%s:%s:%d", TypeReversiGame, game.ID, u.ID, event, now.UnixNano()),
+			Type:      TypeReversiGame,
+			AccountID: u.ID,
+			UserID:    other,
+			GameID:    game.ID,
+			GameEvent: event,
+			CreatedAt: now,
+		})
+	}
 }
 
 // allowed reports whether the managed account still wants to hear from

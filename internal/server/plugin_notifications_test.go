@@ -98,6 +98,7 @@ func TestPluginNotificationJobHandler(t *testing.T) {
 	body, err := json.Marshal(pluginnotify.Event{
 		ID: "n1", Type: "reaction", AccountID: "acc", UserID: "alice", NoteID: "note1",
 		Reaction: ":x@.:", ChatMessageID: "m1", CreatedAt: at, NoteVisibility: "followers",
+		GameID: "game1", GameEvent: "log",
 	})
 	require.NoError(t, err)
 	task := driver.RawTask{TypeName: "plugin:demo:_notification", Body: body}
@@ -106,6 +107,7 @@ func TestPluginNotificationJobHandler(t *testing.T) {
 	assert.Equal(t, plugin.Notification{
 		ID: "n1", Type: plugin.NotificationReaction, AccountID: "acc", UserID: "alice", NoteID: "note1",
 		Reaction: ":x@.:", ChatMessageID: "m1", CreatedAt: at, NoteVisibility: "followers",
+		GameID: "game1", GameEvent: "log",
 	}, got)
 
 	ret = boom

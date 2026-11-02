@@ -64,6 +64,39 @@ const (
 	// NotificationChatMessage: an account sent a direct (1:1) chat message to
 	// the managed account. ルームのメッセージは届けない。
 	NotificationChatMessage NotificationType = "chatMessage"
+	// NotificationReversiInvited: an account invited the managed account to a
+	// reversi game, from this server or over federation, or matched it in a
+	// random match (#3942). 受けるなら AsUser で `reversi/match` に UserID を
+	// 渡す (ランダムマッチで組まれた対局は既に成立しているので要らない)。
+	// 招待した相手をミュート・ブロックしていると届かない。
+	NotificationReversiInvited NotificationType = "reversiInvited"
+	// NotificationReversiGame: a reversi game the managed account plays in
+	// moved on (#3942). 何が起きたかは [Notification.GameEvent] にある。
+	//
+	// **中身は載せない。** 盤面や手番は `reversi/show-game` で読み直すこと。
+	// 通知は順序どおりに届くとは限らず、同じものが二度届くこともあるので、
+	// 届いた順に手を数えたりせず、読み直した対局で判断する。
+	NotificationReversiGame NotificationType = "reversiGame"
+)
+
+// The values of [Notification.GameEvent] (#3942). 本体が対局の stream
+// (`reversiGame` チャンネル) に出すイベントの名前と同じ。知らない値は無視すること。
+const (
+	// ReversiGameReadyStates: a player changed its ready state.
+	ReversiGameReadyStates = "changeReadyStates"
+	// ReversiGameSettings: a player changed a setting before the start (it
+	// also resets both ready states).
+	ReversiGameSettings = "updateSettings"
+	// ReversiGameStarted: both players got ready and the game started.
+	ReversiGameStarted = "started"
+	// ReversiGameLog: a player put a stone (the managed account's own moves
+	// included).
+	ReversiGameLog = "log"
+	// ReversiGameEnded: the game ended (no more moves, surrender or timeout).
+	ReversiGameEnded = "ended"
+	// ReversiGameCanceled: a player canceled the game before the start. 対局は
+	// 消えているので `reversi/show-game` は失敗する。
+	ReversiGameCanceled = "canceled"
 )
 
 // Notification is one notification addressed to a managed account.
@@ -73,7 +106,8 @@ const (
 // その時点の可視性で判定されるので、削除された投稿は取れない。
 type Notification struct {
 	// ID identifies this delivery. Retries of the same notification carry the
-	// same ID. 通知なら通知の ID、チャットならメッセージの ID。
+	// same ID. 通知なら通知の ID、チャットならメッセージの ID。リバーシの招待は
+	// 対局ごとに 1 つ、対局の進みは届けるたびに別の ID。
 	ID string
 	// Type is the kind of notification.
 	Type NotificationType
@@ -81,6 +115,8 @@ type Notification struct {
 	AccountID string
 	// UserID is the account that caused it (the author of the mention, the
 	// follower, the sender of the message, ...). リモートの利用者のこともある。
+	// リバーシでは、招待した相手 ([NotificationReversiInvited]) か、対局の相手
+	// ([NotificationReversiGame]、自分の手で起きたイベントでも相手)。
 	UserID string
 	// NoteID is the related note: the mentioning / replying / quoting note
 	// itself, or the managed account's note that got the reaction. Empty for
@@ -98,6 +134,12 @@ type Notification struct {
 	NoteVisibility string
 	// ChatMessageID is the message, only for [NotificationChatMessage].
 	ChatMessageID string
+	// GameID is the reversi game, only for [NotificationReversiInvited] and
+	// [NotificationReversiGame].
+	GameID string
+	// GameEvent is what happened to the game (one of the ReversiGame*
+	// constants), only for [NotificationReversiGame].
+	GameEvent string
 	// CreatedAt is when the host created the notification (or stored the
 	// message).
 	CreatedAt time.Time

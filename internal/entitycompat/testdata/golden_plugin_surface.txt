@@ -122,6 +122,8 @@ plugin:   field Migration.Version int
 plugin:   field Notification.AccountID string
 plugin:   field Notification.ChatMessageID string
 plugin:   field Notification.CreatedAt time.Time
+plugin:   field Notification.GameEvent string
+plugin:   field Notification.GameID string
 plugin:   field Notification.ID string
 plugin:   field Notification.NoteID string
 plugin:   field Notification.NoteVisibility string
@@ -188,6 +190,14 @@ plugin: const NotificationMention
 plugin: const NotificationQuote
 plugin: const NotificationReaction
 plugin: const NotificationReply
+plugin: const NotificationReversiGame
+plugin: const NotificationReversiInvited
+plugin: const ReversiGameCanceled
+plugin: const ReversiGameEnded
+plugin: const ReversiGameLog
+plugin: const ReversiGameReadyStates
+plugin: const ReversiGameSettings
+plugin: const ReversiGameStarted
 plugin: func (*APIError) Error() string
 plugin: func (*StatusError) Error() string
 plugin: func (Definition) Validate() error
