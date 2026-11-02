@@ -4,18 +4,20 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div ref="root" :class="['chromatic-ignore', $style.root, { [$style.cover]: cover }]" :title="title ?? ''">
-	<TransitionGroup
-		:duration="prefer.s.animation && props.transition?.duration || undefined"
-		:enterActiveClass="prefer.s.animation && props.transition?.enterActiveClass || undefined"
-		:leaveActiveClass="prefer.s.animation && (props.transition?.leaveActiveClass ?? $style.transition_leaveActive) || undefined"
-		:enterFromClass="prefer.s.animation && props.transition?.enterFromClass || undefined"
-		:leaveToClass="prefer.s.animation && props.transition?.leaveToClass || undefined"
-		:enterToClass="prefer.s.animation && props.transition?.enterToClass || undefined"
-		:leaveFromClass="prefer.s.animation && props.transition?.leaveFromClass || undefined"
-	>
+<div :class="['chromatic-ignore', $style.root, { [$style.cover]: cover }]" :title="title ?? ''">
+	<!--
+		Elythia: 切り替えに TransitionGroup を使わない (#3935)。
+		TransitionGroup は画像のデコードのたびに canvas の退場・img の出現・canvas の
+		移動の遷移を走らせ、そのたびに getComputedStyle でページ全体のスタイル
+		再計算を強制していた (画像 1 枚につき数回)。アバターもこの部品なので、タイムラインのノート 1 件ごとに
+		起きる。クラス名に undefined を渡しても既定の v- のクラスで同じ処理をするので、
+		「アニメーションを減らす」でも止まらなかった。
+		遷移は、呼び出し側が transition を渡したとき (ギャラリーのセンシティブの切り替え)
+		だけ canvas と img に掛ける。それ以外は css を切った Transition にして、Vue に
+		getComputedStyle を読ませない。
+	-->
+	<Transition v-bind="transitionProps">
 		<MkBlurhash
-			key="canvas"
 			:class="$style.canvas"
 			:blurhash="hash ?? null"
 			:height="props.height"
@@ -23,29 +25,38 @@ SPDX-License-Identifier: AGPL-3.0-only
 			:onlyAvgColor="props.onlyAvgColor"
 			:show="hide"
 		/>
+	</Transition>
+	<!--
+		Elythia: 隠している間も display: none にしない (#3935)。loading="lazy" の画像は、
+		箱が無いと画面に近付いても読み込まれない。隠している間は canvas の上に重ねて
+		見えなくしておき、大きさは canvas が決める (以前と同じ並び)。
+		遷移を掛けるとき (ギャラリー) だけは、以前と同じく v-show で消し、退場の遷移を
+		見せる。display: none の間は lazy だと読み込まれないので、そのときは eager にする。
+	-->
+	<Transition v-bind="transitionProps">
 		<img
-			v-show="!hide"
-			key="img"
+			v-show="!cssTransition || !hide"
 			ref="img"
-			:height="imgHeight ?? undefined"
-			:width="imgWidth ?? undefined"
-			:class="$style.img"
+			:height="imgHeight"
+			:width="imgWidth"
+			:class="[$style.img, { [$style.imgHidden]: hide && !cssTransition }]"
 			:src="src ?? undefined"
 			:title="title ?? undefined"
 			:alt="alt ?? undefined"
 			:data-marker="marker ?? undefined"
-			loading="eager"
+			:loading="cssTransition ? 'eager' : 'lazy'"
 			decoding="async"
 			draggable="false"
 			tabindex="-1"
 			style="-webkit-user-drag: none;"
+			@load="onImgLoad"
 		/>
-	</TransitionGroup>
+	</Transition>
 </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, useTemplateRef, watch, ref } from 'vue';
+import { computed, useCssModule, useTemplateRef, watch, ref } from 'vue';
 import { prefer } from '@/preferences.js';
 import MkBlurhash from '@/components/MkBlurhash.vue';
 
@@ -81,40 +92,53 @@ const props = withDefaults(defineProps<{
 	onlyAvgColor: false,
 });
 
-const root = useTemplateRef('root');
+const $style = useCssModule();
 const img = useTemplateRef('img');
 const loaded = ref(false);
-const imgWidth = ref(props.width);
-const imgHeight = ref(props.height);
 const hide = computed(() => !loaded.value || props.forceBlurhash);
-
-function waitForDecode() {
-	if (props.src != null && props.src !== '') {
-		nextTick()
-			.then(() => img.value?.decode())
-			.then(() => {
-				loaded.value = true;
-			}, error => {
-				console.log('Error occurred during decoding image', img.value, error);
-			});
-	} else {
-		loaded.value = false;
-	}
-}
-
-watch([() => props.width, () => props.height, root], () => {
-	const ratio = props.width / props.height;
-	const clientWidth = root.value?.clientWidth ?? 300;
-	imgWidth.value = clientWidth;
-	imgHeight.value = Math.round(clientWidth / ratio);
-}, {
-	immediate: true,
+const cssTransition = computed(() => prefer.s.animation && props.transition != null);
+const transitionProps = computed(() => {
+	if (!cssTransition.value) return { css: false };
+	const t = props.transition;
+	return {
+		css: true,
+		duration: t?.duration,
+		enterActiveClass: t?.enterActiveClass,
+		leaveActiveClass: t?.leaveActiveClass ?? $style.transition_leaveActive,
+		enterFromClass: t?.enterFromClass,
+		leaveToClass: t?.leaveToClass,
+		enterToClass: t?.enterToClass,
+		leaveFromClass: t?.leaveFromClass,
+	};
 });
 
-watch(() => props.src, () => {
-	waitForDecode();
-}, {
-	immediate: true,
+// Elythia: 縦横比は受け取った幅と高さから決める (#3935)。以前は mount のたびに
+// clientWidth を読んでいて、読み込みの途中で DOM が汚れているとレイアウトを強制した。
+// img は CSS で幅も高さも 100% にしているので、属性は縦横比を伝えるだけで、
+// 値が実寸でも表示の幅でも見た目は変わらない。
+const validSize = computed(() => Number.isFinite(props.width) && Number.isFinite(props.height) && props.width > 0 && props.height > 0);
+const imgWidth = computed(() => validSize.value ? props.width : undefined);
+const imgHeight = computed(() => validSize.value ? props.height : undefined);
+
+// Elythia: デコードは load の後に行う (#3935)。loading="lazy" の画像は画面に近付く
+// まで読み込まれないので、src が変わった直後に decode() を待つと、遅延の扱いが
+// ブラウザで異なる。load が来てから decode() を待てば、どのブラウザでも同じになる。
+function onImgLoad() {
+	const el = img.value;
+	if (el == null) return;
+	const src = props.src;
+	el.decode().then(() => {
+		// 待っている間に src が変わっていたら、古い画像の完了で表示を切り替えない
+		if (props.src === src) loaded.value = true;
+	}, error => {
+		// Elythia: 要素そのものは渡さない。DevTools を開いているとコンソールが要素を
+		// 保持し続け、外れた DOM が残る (#3935 の計測で見つけた)。
+		console.log('Error occurred during decoding image', src, error);
+	});
+}
+
+watch(() => props.src, (src) => {
+	if (src == null || src === '') loaded.value = false;
 });
 </script>
 
@@ -150,5 +174,12 @@ watch(() => props.src, () => {
 
 .img {
 	object-fit: contain;
+}
+
+.imgHidden {
+	position: absolute;
+	top: 0;
+	left: 0;
+	visibility: hidden;
 }
 </style>
