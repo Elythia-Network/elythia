@@ -2502,6 +2502,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	reversiHandler.SetService(reversiService)
 	reversiHandler.SetFederation(s.config.URL, deliverService, reversiFedCache, userRepo)
 	reversiHandler.SetStreamPublisher(reversiPublisher)
+	// 招待が受けられたら、招待した人の reversi stream に matched を流す (#3946)。
+	// 連合の Join も Service を通るので、包んで流す役 (Handler) を Service に渡す
+	reversiService.SetMatchedNotifier(reversiHandler)
 	// #417 P3: reversi 連合対応ホストのみ Invite を送る。Federation check
 	// 用の HTTP client は SSRF-safe transport + timeout を明示的に渡す
 	// (既存の webfingerClient と同じ設定を流用)。

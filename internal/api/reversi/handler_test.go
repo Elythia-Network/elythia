@@ -803,11 +803,21 @@ type stubStreamPubCall struct {
 }
 
 type stubStreamPub struct {
-	calls []stubStreamPubCall
+	calls   []stubStreamPubCall
+	matched []stubMatchedCall
+}
+
+type stubMatchedCall struct {
+	targetUserID string
+	game         map[string]any
 }
 
 func (s *stubStreamPub) PublishInvited(targetUserID string, inviter *model.User) {
 	s.calls = append(s.calls, stubStreamPubCall{targetUserID: targetUserID, inviter: inviter})
+}
+
+func (s *stubStreamPub) PublishMatched(targetUserID string, game map[string]any) {
+	s.matched = append(s.matched, stubMatchedCall{targetUserID: targetUserID, game: game})
 }
 
 type mockDeliverer struct {

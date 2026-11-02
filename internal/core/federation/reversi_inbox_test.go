@@ -16,6 +16,7 @@ import (
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,8 +42,9 @@ func TestMain(m *testing.M) {
 // --- in-memory reversi repository ---
 
 type fedFakeReversiRepo struct {
-	mu    sync.Mutex
-	games map[string]*model.ReversiGame
+	mu      sync.Mutex
+	games   map[string]*model.ReversiGame
+	findErr error
 }
 
 func newFedFakeReversiRepo() *fedFakeReversiRepo {
@@ -60,11 +62,14 @@ func (r *fedFakeReversiRepo) Create(g *model.ReversiGame) error {
 func (r *fedFakeReversiRepo) FindByID(id string) (*model.ReversiGame, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.findErr != nil {
+		return nil, r.findErr
+	}
 	if g, ok := r.games[id]; ok {
 		clone := *g
 		return &clone, nil
 	}
-	return nil, assertError
+	return nil, repository.ErrNotFound
 }
 
 func (r *fedFakeReversiRepo) Update(g *model.ReversiGame) error {
@@ -176,12 +181,6 @@ func (r *fedFakeReversiRepo) findGameBySession(t *testing.T, cache *corereversi.
 	}
 	return g
 }
-
-var assertError = assertErrSentinel("not found")
-
-type assertErrSentinel string
-
-func (e assertErrSentinel) Error() string { return string(e) }
 
 // --- bundle helper ---
 

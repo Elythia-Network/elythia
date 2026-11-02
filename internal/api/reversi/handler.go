@@ -30,10 +30,12 @@ type FederationDeliverer interface {
 	DeliverToUser(signerUserID string, recipient *model.User, body []byte) error
 }
 
-// ReversiStreamPublisher publishes `invited` events to a local user's
-// reversi stream topic (#417 P2)。実装は internal/stream.ReversiGamePublisher。
+// ReversiStreamPublisher publishes `invited` and `matched` events to a local
+// user's reversi stream topic (#417 P2、#3946)。実装は
+// internal/stream.ReversiGamePublisher。
 type ReversiStreamPublisher interface {
 	PublishInvited(targetUserID string, inviter *model.User)
+	PublishMatched(targetUserID string, game map[string]any)
 }
 
 // InviteObserver is told about invitations to local users, with the game
@@ -384,6 +386,7 @@ func (h *Handler) ShowGame(c echo.Context) error {
 		if err := h.sendJoinForAcceptedInvite(c, viewer, game); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
 			return federationDisabledResponse(c)
 		}
+		h.acceptInvitation(c, game)
 	}
 	return c.JSON(http.StatusOK, packGame(h.entityPacker, game, h.idGen))
 }
@@ -464,6 +467,7 @@ func (h *Handler) Match(c echo.Context) error {
 		if err := h.sendJoinForAcceptedInvite(c, user, existing); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
 			return federationDisabledResponse(c)
 		}
+		h.acceptInvitation(c, existing)
 		return c.JSON(http.StatusOK, packGame(h.entityPacker, existing, h.idGen))
 	}
 
@@ -474,11 +478,21 @@ func (h *Handler) Match(c echo.Context) error {
 	// 上の inbound-accept (mk-go 独自の Join 送信) が既に担うのでここでは扱わない。
 	// multiple=true は upstream 同様このスキップで毎回新規作成する (#1774)。
 	if !req.Multiple {
-		if existing := h.findPendingInvitationFrom(req.UserID, user.ID); existing != nil && h.withinMatchDedupWindow(existing) {
+		existing := h.findPendingInvitationFrom(req.UserID, user.ID)
+		// Elythia: 相手が受けた自分発の招待は、本家と同じく対局を返す (#3946)。本家は
+		// 受けた時点で行を作り、作られてから 3 分以内の対局を返す (ReversiService.ts:
+		// 103-112)。こちらは受けてから 3 分で数える。作られてからの 3 分で切ると、
+		// 招待から 3 分を過ぎて受けられたときに新しい招待を作ってしまう。stream の
+		// matched を取りこぼしても、画面は次の heartbeat で対局へ移れる
+		if existing != nil && h.svc != nil && h.svc.InvitationAcceptedRecently(c.Request().Context(), existing.ID) {
+			return c.JSON(http.StatusOK, packGame(h.entityPacker, existing, h.idGen))
+		}
+		if existing != nil && h.withinMatchDedupWindow(existing) {
 			// まだ相手が accept していない自分発の招待。upstream は招待を
 			// Redis にしか置かず、対局成立まで null (= 204) を返す
 			// (match.ts:68 `if (game == null) return;`)。200 で game を返すと
 			// フロントが即ゲーム画面に遷移してしまう (#1553 と同じ罠)。
+			h.markInviterWaiting(c, existing)
 			return c.NoContent(http.StatusNoContent)
 		}
 	}
@@ -512,6 +526,7 @@ func (h *Handler) Match(c echo.Context) error {
 	if err := h.repo.Create(game); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	h.markInviterWaiting(c, game)
 
 	// ターゲット種別によって挙動分岐:
 	//   - remote: federation session を Redis に保存 + Invite 送信
@@ -610,6 +625,33 @@ func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User
 	}
 	h.fedCache.MarkJoinSent(ctx, sessionID)
 	return nil
+}
+
+// acceptInvitation records that the caller (User2) accepted the pending game,
+// so the inviter's screen moves to the game (#3946).
+func (h *Handler) acceptInvitation(c echo.Context, game *model.ReversiGame) {
+	if h.svc != nil {
+		h.svc.AcceptInvitation(c.Request().Context(), game)
+	}
+}
+
+// markInviterWaiting records that the caller is waiting for their invitation
+// to be accepted, so the `matched` reaches them (#3946). 画面は待っている間
+// 5 秒ごとに reversi/match を呼ぶので、そのたびに付け直す。
+func (h *Handler) markInviterWaiting(c echo.Context, game *model.ReversiGame) {
+	if h.svc != nil {
+		h.svc.MarkInviterWaiting(c.Request().Context(), game.ID)
+	}
+}
+
+// ReversiMatched implements core/reversi.MatchedNotifier: it publishes
+// `matched` with the game to the inviter's reversi stream (#3946). 対局は
+// reversi/match が返すのと同じ形 (本家の packDetail) で包む。
+func (h *Handler) ReversiMatched(inviterID string, game *model.ReversiGame) {
+	if h.streamPub == nil {
+		return
+	}
+	h.streamPub.PublishMatched(inviterID, packGame(h.entityPacker, game, h.idGen))
 }
 
 func federationDisabledResponse(c echo.Context) error {
@@ -835,6 +877,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 		if err := h.sendJoinForAcceptedInvite(c, user, g); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
 			return federationDisabledResponse(c)
 		}
+		h.acceptInvitation(c, g)
 		return c.JSON(http.StatusOK, packGame(h.entityPacker, g, h.idGen))
 	}
 
