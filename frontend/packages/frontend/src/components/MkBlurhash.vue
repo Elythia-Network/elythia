@@ -19,11 +19,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 import DrawBlurhash from '@/workers/draw-blurhash?worker';
 import TestWebGL2 from '@/workers/test-webgl2?worker';
 import { WorkerMultiDispatch } from '@@/js/worker-multi-dispatch.js';
+import { WorkerReplyRouter } from '@/utility/worker-reply-router.js';
 
 // テスト環境で Web Worker インスタンスは作成できない
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error
 const isTest = (import.meta.env.MODE === 'test' || window.isPlaywright);
+
+// Elythia: worker の返事は 1 つのリスナーで受けて id で配る (#3935)。以前は部品ごとに
+// 全 worker へリスナーを足していて、1 通の返事が表示中の全部品に配られていた。
+let replyRouter: WorkerReplyRouter<{ id: string; bitmap: ImageBitmap }> | null = null;
 
 const canvasPromise = new Promise<WorkerMultiDispatch | HTMLCanvasElement>(resolve => {
 	if (isTest) {
@@ -41,6 +46,7 @@ const canvasPromise = new Promise<WorkerMultiDispatch | HTMLCanvasElement>(resol
 				() => new DrawBlurhash(),
 				Math.min(navigator.hardwareConcurrency - 1, 4),
 			);
+			replyRouter = new WorkerReplyRouter(workers);
 			resolve(workers);
 		} else {
 			const canvas = window.document.createElement('canvas');
@@ -78,6 +84,7 @@ const canvasWidth = ref(64);
 const canvasHeight = ref(64);
 const viewId = genId();
 const bitmapTmp = shallowRef<CanvasImageSource | undefined>();
+let unmounted = false;
 
 watch([() => props.width, () => props.height, canvas], () => {
 	const ratio = props.width / props.height;
@@ -137,7 +144,10 @@ async function draw() {
 	if (props.onlyAvgColor) return;
 
 	const work = await canvasPromise;
+	// 外れた後に登録すると、Map に残り続ける
+	if (unmounted) return;
 	if (work instanceof WorkerMultiDispatch) {
+		replyRouter?.set(viewId, data => drawImage(data.bitmap));
 		work.postMessage(
 			{
 				id: viewId,
@@ -156,16 +166,7 @@ async function draw() {
 	}
 }
 
-function workerOnMessage(event: MessageEvent) {
-	if (event.data.id !== viewId) return;
-	drawImage(event.data.bitmap as ImageBitmap);
-}
-
-canvasPromise.then(work => {
-	if (work instanceof WorkerMultiDispatch) {
-		work.addListener(workerOnMessage);
-	}
-
+canvasPromise.then(() => {
 	draw();
 });
 
@@ -177,10 +178,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-	canvasPromise.then(work => {
-		if (work instanceof WorkerMultiDispatch) {
-			work.removeListener(workerOnMessage);
-		}
-	});
+	unmounted = true;
+	replyRouter?.delete(viewId);
 });
 </script>
