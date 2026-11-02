@@ -46,6 +46,50 @@ export const focusNext = (input: MaybeHTMLElement | null | undefined, self = fal
 	}
 };
 
+// Elythia: 一覧の項目を、外側の箱 (MkDeferredMount の `data-far-item`) の中にあっても前後へ
+// たどる (#3941)。focusNext / focusPrev は隣の兄弟しか見ないので、項目を div で包むと兄弟が
+// 無くなり、キーボードでノートの間を移れなくなる (本家でも日付の区切りと広告の枝では同じ)。
+// 移り先は外側の箱の中のノートに限る。一覧の外のボタンやセレクトへは移らない。上がるのは
+// 外側の箱と区切りの div の分まで
+const ITEM_CLIMB_LIMIT = 2;
+const ITEM_ATTR = 'data-far-item';
+
+const findItem = (input: MaybeHTMLElement | null | undefined, next: boolean): HTMLElement | 'scrolled' | null => {
+	let node = getElementOrNull(input);
+	for (let climb = 0; node != null && climb <= ITEM_CLIMB_LIMIT; climb++) {
+		for (let sibling = next ? node.nextElementSibling : node.previousElementSibling; sibling != null; sibling = next ? sibling.nextElementSibling : sibling.previousElementSibling) {
+			const item = sibling.hasAttribute(ITEM_ATTR) ? sibling : sibling.querySelector(`[${ITEM_ATTR}]`);
+			if (item == null) continue;
+			// 画面から遠くて中身を外した項目は、飛ばさずに画面へ入れて止める。飛ばすと、間の
+			// 外した項目を全部越えて遠くへ移る。入れれば mount し直されるので、次に押すと移れる
+			if (item.childElementCount === 0) {
+				item.scrollIntoView({ block: next ? 'end' : 'start' });
+				return 'scrolled';
+			}
+			// 項目の根は中で最初の tabindex="0" (中の動画なども tabindex="0" だが、文書の順で根が先)
+			const root = item.querySelector('[tabindex="0"]');
+			if (isFocusable(root)) return root;
+		}
+		node = node.parentElement;
+	}
+	return null;
+};
+
+/** Whether the element is inside a list item wrapper that `focusNextItem` / `focusPrevItem` can walk. */
+export const isInWrappedItem = (input: MaybeHTMLElement | null | undefined): boolean => getElementOrNull(input)?.closest(`[${ITEM_ATTR}]`) != null;
+
+/** Focuses the next item of a list whose items are wrapped by `MkDeferredMount`. */
+export const focusNextItem = (input: MaybeHTMLElement | null | undefined, scroll = true) => {
+	const element = findItem(input, true);
+	if (element != null && element !== 'scrolled') focusOrScroll(element, scroll);
+};
+
+/** Focuses the previous item of a list whose items are wrapped by `MkDeferredMount`. */
+export const focusPrevItem = (input: MaybeHTMLElement | null | undefined, scroll = true) => {
+	const element = findItem(input, false);
+	if (element != null && element !== 'scrolled') focusOrScroll(element, scroll);
+};
+
 export const focusParent = (input: MaybeHTMLElement | null | undefined, self = false, scroll = true) => {
 	const element = self ? input : getNodeOrNull(input)?.parentElement;
 	if (element == null) return;

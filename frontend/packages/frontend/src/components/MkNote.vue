@@ -214,7 +214,7 @@ import { i18n } from '@/i18n.js';
 import { userPage } from '@@/js/user.js';
 import { getNoteSummary } from '@/utility/get-note-summary.js';
 import { isEnabledUrlPreview } from '@/utility/url-preview.js';
-import { focusPrev, focusNext } from '@/utility/focus.js';
+import { focusPrev, focusNext, focusPrevItem, focusNextItem, isInWrappedItem } from '@/utility/focus.js';
 import number from '@/filters/number.js';
 import { DI } from '@/di.js';
 import type { Keymap } from '@/utility/hotkey.js';
@@ -376,11 +376,13 @@ const keymap = {
 	},
 	'up|k|shift+tab': {
 		allowRepeat: true,
-		callback: () => focusPrev(rootEl.value),
+		// Elythia: 一覧の外側の箱の中にあるときは、箱をまたいで前後のノートへ移る (#3941)。
+		// それ以外 (ユーザーページや検索の一覧など) は本家と同じ
+		callback: () => (isInWrappedItem(rootEl.value) ? focusPrevItem(rootEl.value) : focusPrev(rootEl.value)),
 	},
 	'down|j|tab': {
 		allowRepeat: true,
-		callback: () => focusNext(rootEl.value),
+		callback: () => (isInWrappedItem(rootEl.value) ? focusNextItem(rootEl.value) : focusNext(rootEl.value)),
 	},
 } as const satisfies Keymap;
 </script>
