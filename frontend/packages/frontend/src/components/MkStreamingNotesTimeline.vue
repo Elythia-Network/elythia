@@ -61,12 +61,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<span style="height: 1em; width: 1px; background: var(--MI_THEME-divider);"></span>
 						<span>{{ getSeparatorInfo(paginator.items.value[i -1].createdAt, note.createdAt)?.nextText }} <i class="ti ti-chevron-down"></i></span>
 					</div>
-					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :class="$style.note">
+					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :unmountWhenFar="true" :class="$style.note">
 						<MkNote :note="note" :withHardMute="true"/>
 					</MkDeferredMount>
 				</div>
 				<div v-else-if="note._shouldInsertAd_" :data-scroll-anchor="note.id">
-					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :class="$style.note">
+					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :unmountWhenFar="true" :class="$style.note">
 						<MkNote :note="note" :withHardMute="true"/>
 					</MkDeferredMount>
 					<div :class="$style.ad">
@@ -74,7 +74,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</div>
 				</div>
 				<!-- Elythia: 古いものを読み足したときは、中身を数フレームに分けて組み立てる (#3937) -->
-				<MkDeferredMount v-else :defer="olderMounts.shouldDefer(note.id)" :class="$style.note" :data-scroll-anchor="note.id">
+				<MkDeferredMount v-else :defer="olderMounts.shouldDefer(note.id)" :unmountWhenFar="true" :class="$style.note" :data-scroll-anchor="note.id">
 					<MkNote :note="note" :withHardMute="true"/>
 				</MkDeferredMount>
 			</template>
@@ -90,7 +90,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, watch, onUnmounted, provide, useTemplateRef, TransitionGroup, onMounted, shallowRef, ref, markRaw } from 'vue';
+import { computed, watch, onUnmounted, provide, useTemplateRef, TransitionGroup, onMounted, onActivated, onDeactivated, shallowRef, ref, markRaw } from 'vue';
 import * as Misskey from 'misskey-js';
 import { useInterval } from '@@/js/use-interval.js';
 import { getScrollContainer, scrollToTop } from '@@/js/scroll.js';
@@ -116,6 +116,7 @@ import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions } from '@/utility/reconnect-resync.js';
 import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
 import { deferOlderMounts } from '@/utility/mount-scheduler.js';
+import { createFarItems, FAR_ITEMS } from '@/utility/far-items.js';
 
 const props = withDefaults(defineProps<{
 	src: BasicTimelineType | 'mentions' | 'directs' | 'list' | 'antenna' | 'channel' | 'role';
@@ -275,6 +276,22 @@ watch(rootEl, (el) => {
 		scrollContainer.addEventListener('scroll', onScrollContainerScroll, { passive: true }); // ほんとはscrollendにしたいけどiosが非対応
 	}
 }, { immediate: true });
+
+// Elythia: 画面から遠いノートを DOM から外す (#3941)。読んだ分を全部 mount したままだと、
+// 下へ読むほど DOM とメモリが増え続けていた。スクロールの容器が決まってから見始め、
+// KeepAlive で裏に回っている間は止める
+const farItems = createFarItems();
+provide(FAR_ITEMS, farItems);
+watch(rootEl, (el) => {
+	if (el) {
+		farItems.connect(scrollContainer, el);
+	} else {
+		farItems.disconnect();
+	}
+}, { immediate: true });
+onActivated(() => farItems.resume());
+onDeactivated(() => farItems.pause());
+onUnmounted(() => farItems.disconnect());
 
 onUnmounted(() => {
 	if (scrollContainer) {

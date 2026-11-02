@@ -55,7 +55,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<span>{{ getSeparatorInfo(paginator.items.value[i -1].createdAt, notification.createdAt)?.nextText }} <i class="ti ti-chevron-down"></i></span>
 				</div>
 				<!-- Elythia: 古いものを読み足したときは、中身を数フレームに分けて組み立てる (#3937) -->
-				<MkDeferredMount :defer="olderMounts.shouldDefer(notification.id)" :class="$style.content">
+				<MkDeferredMount :defer="olderMounts.shouldDefer(notification.id)" :unmountWhenFar="true" :class="$style.content">
 					<MkNote v-if="['reply', 'quote', 'mention'].includes(notification.type) && 'note' in notification" :note="notification.note" :withHardMute="true"/>
 					<XNotification v-else :notification="notification" :withTime="true" :full="true"/>
 				</MkDeferredMount>
@@ -72,7 +72,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { onUnmounted, onMounted, computed, useTemplateRef, TransitionGroup, markRaw, watch } from 'vue';
+import { onUnmounted, onMounted, onActivated, onDeactivated, computed, provide, useTemplateRef, TransitionGroup, markRaw, watch } from 'vue';
 import * as Misskey from 'misskey-js';
 import { notificationTypes } from 'misskey-js';
 import { useInterval } from '@@/js/use-interval.js';
@@ -91,6 +91,7 @@ import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions, NOTIFICATION_RESYNC_PARAMS } from '@/utility/reconnect-resync.js';
 import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
 import { deferOlderMounts } from '@/utility/mount-scheduler.js';
+import { createFarItems, FAR_ITEMS } from '@/utility/far-items.js';
 
 const props = defineProps<{
 	excludeTypes?: typeof notificationTypes[number][] | null;
@@ -174,6 +175,22 @@ watch(rootEl, (el) => {
 		scrollContainer.addEventListener('scroll', onScrollContainerScroll, { passive: true }); // ほんとはscrollendにしたいけどiosが非対応
 	}
 }, { immediate: true });
+
+// Elythia: 画面から遠い項目を DOM から外す (#3941)。読んだ分を全部 mount したままだと、
+// 下へ読むほど DOM とメモリが増え続けていた。スクロールの容器が決まってから見始め、
+// KeepAlive で裏に回っている間は止める
+const farItems = createFarItems();
+provide(FAR_ITEMS, farItems);
+watch(rootEl, (el) => {
+	if (el) {
+		farItems.connect(scrollContainer, el);
+	} else {
+		farItems.disconnect();
+	}
+}, { immediate: true });
+onActivated(() => farItems.resume());
+onDeactivated(() => farItems.pause());
+onUnmounted(() => farItems.disconnect());
 
 function onNotification(notification: Misskey.entities.Notification) {
 	const isMuted = props.excludeTypes ? props.excludeTypes.includes(notification.type as typeof notificationTypes[number]) : false;
