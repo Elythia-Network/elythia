@@ -44,13 +44,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<span style="height: 1em; width: 1px; background: var(--MI_THEME-divider);"></span>
 					<span>{{ getSeparatorInfo(paginator.items.value[i -1].createdAt, notification.createdAt)?.nextText }} <i class="ti ti-chevron-down"></i></span>
 				</div>
-				<MkNote v-if="['reply', 'quote', 'mention'].includes(notification.type) && 'note' in notification" :class="$style.content" :note="notification.note" :withHardMute="true"/>
-				<XNotification v-else :class="$style.content" :notification="notification" :withTime="true" :full="true"/>
+				<!-- Elythia: 古いものを読み足したときは、中身を数フレームに分けて組み立てる (#3937) -->
+				<MkDeferredMount :defer="olderMounts.shouldDefer(notification.id)" :class="$style.content">
+					<MkNote v-if="['reply', 'quote', 'mention'].includes(notification.type) && 'note' in notification" :note="notification.note" :withHardMute="true"/>
+					<XNotification v-else :notification="notification" :withTime="true" :full="true"/>
+				</MkDeferredMount>
 			</div>
 		</component>
 		<!-- mk-go: レート制限の理由と再試行 (#2955)。落とすだけだと「これで全部」に見える。 -->
 		<MkRateLimitedNotice :paginator="paginator"/>
-		<button v-show="paginator.canFetchOlder.value" key="_more_" v-appear="prefer.s.enableInfiniteScroll ? paginator.fetchOlder : null" :disabled="paginator.fetchingOlder.value" class="_button" :class="$style.more" @click="paginator.fetchOlder">
+		<button v-show="paginator.canFetchOlder.value" key="_more_" v-appear="prefer.s.enableInfiniteScroll ? olderMounts.fetchOlder : null" :disabled="paginator.fetchingOlder.value" class="_button" :class="$style.more" @click="olderMounts.fetchOlder">
 			<div v-if="!paginator.fetchingOlder.value">{{ i18n.ts.loadMore }}</div>
 			<MkLoading v-else/>
 		</button>
@@ -67,6 +70,7 @@ import { getScrollContainer, scrollToTop } from '@@/js/scroll.js';
 import XNotification from '@/components/MkNotification.vue';
 import MkRateLimitedNotice from '@/components/MkRateLimitedNotice.vue';
 import MkNote from '@/components/MkNote.vue';
+import MkDeferredMount from '@/components/MkDeferredMount.vue';
 import { useStream } from '@/stream.js';
 import { i18n } from '@/i18n.js';
 import MkPullToRefresh from '@/components/MkPullToRefresh.vue';
@@ -76,6 +80,7 @@ import { isSeparatorNeeded, getSeparatorInfo } from '@/utility/timeline-date-sep
 import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions, NOTIFICATION_RESYNC_PARAMS } from '@/utility/reconnect-resync.js';
 import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
+import { deferOlderMounts } from '@/utility/mount-scheduler.js';
 
 const props = defineProps<{
 	excludeTypes?: typeof notificationTypes[number][] | null;
@@ -123,6 +128,8 @@ const { isPausing: isPausingUpdate } = useTimelineUpdatePause({
 	onVisibleAtTop: () => releaseQueue(),
 	onActivatedAtTop: () => paginator.releaseQueue(),
 });
+
+const olderMounts = deferOlderMounts(() => paginator.fetchOlder(), () => paginator.items.value.map(x => x.id));
 
 function isTop() {
 	if (scrollContainer == null) return true;
@@ -241,8 +248,11 @@ defineExpose({
 .transition_x_enterActive {
 	transition: transform 0.7s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.7s cubic-bezier(0.23, 1, 0.32, 1);
 
+	// Elythia: 中身を後回しにした項目は、外側の div にクラスが付くので中身にも掛ける (#3937)
 	&.content,
-	.content {
+	.content,
+	&.content > *,
+	.content > * {
 		/* Skip Note Rendering有効時、TransitionGroupで通知を追加するときに一瞬がくっとなる問題を抑制する */
 		content-visibility: visible !important;
 	}

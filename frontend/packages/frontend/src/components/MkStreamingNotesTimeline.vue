@@ -51,20 +51,27 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<span style="height: 1em; width: 1px; background: var(--MI_THEME-divider);"></span>
 						<span>{{ getSeparatorInfo(paginator.items.value[i -1].createdAt, note.createdAt)?.nextText }} <i class="ti ti-chevron-down"></i></span>
 					</div>
-					<MkNote :class="$style.note" :note="note" :withHardMute="true"/>
+					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :class="$style.note">
+						<MkNote :note="note" :withHardMute="true"/>
+					</MkDeferredMount>
 				</div>
 				<div v-else-if="note._shouldInsertAd_" :data-scroll-anchor="note.id">
-					<MkNote :class="$style.note" :note="note" :withHardMute="true"/>
+					<MkDeferredMount :defer="olderMounts.shouldDefer(note.id)" :class="$style.note">
+						<MkNote :note="note" :withHardMute="true"/>
+					</MkDeferredMount>
 					<div :class="$style.ad">
 						<MkAd :preferForms="['horizontal', 'horizontal-big']"/>
 					</div>
 				</div>
-				<MkNote v-else :class="$style.note" :note="note" :withHardMute="true" :data-scroll-anchor="note.id"/>
+				<!-- Elythia: 古いものを読み足したときは、中身を数フレームに分けて組み立てる (#3937) -->
+				<MkDeferredMount v-else :defer="olderMounts.shouldDefer(note.id)" :class="$style.note" :data-scroll-anchor="note.id">
+					<MkNote :note="note" :withHardMute="true"/>
+				</MkDeferredMount>
 			</template>
 		</component>
 		<!-- mk-go: レート制限の理由と再試行 (#2955)。落とすだけだと「これで全部」に見える。 -->
 		<MkRateLimitedNotice :paginator="paginator"/>
-		<button v-show="paginator.canFetchOlder.value" key="_more_" v-appear="prefer.s.enableInfiniteScroll ? paginator.fetchOlder : null" :disabled="paginator.fetchingOlder.value" class="_button" :class="$style.more" @click="paginator.fetchOlder">
+		<button v-show="paginator.canFetchOlder.value" key="_more_" v-appear="prefer.s.enableInfiniteScroll ? olderMounts.fetchOlder : null" :disabled="paginator.fetchingOlder.value" class="_button" :class="$style.more" @click="olderMounts.fetchOlder">
 			<div v-if="!paginator.fetchingOlder.value">{{ i18n.ts.loadMore }}</div>
 			<MkLoading v-else :inline="true"/>
 		</button>
@@ -89,6 +96,7 @@ import { instance } from '@/instance.js';
 import { prefer } from '@/preferences.js';
 import { store } from '@/store.js';
 import MkNote from '@/components/MkNote.vue';
+import MkDeferredMount from '@/components/MkDeferredMount.vue';
 import MkButton from '@/components/MkButton.vue';
 import { i18n } from '@/i18n.js';
 import { DI } from '@/di.js';
@@ -97,6 +105,7 @@ import { isSeparatorNeeded, getSeparatorInfo } from '@/utility/timeline-date-sep
 import { Paginator } from '@/utility/paginator.js';
 import { createReconnectResync, paginatorResyncOptions } from '@/utility/reconnect-resync.js';
 import { useTimelineUpdatePause } from '@/composables/use-timeline-update-pause.js';
+import { deferOlderMounts } from '@/utility/mount-scheduler.js';
 
 const props = withDefaults(defineProps<{
 	src: BasicTimelineType | 'mentions' | 'directs' | 'list' | 'antenna' | 'channel' | 'role';
@@ -223,6 +232,8 @@ const { isPausing: isPausingUpdate, recordScrollPosition } = useTimelineUpdatePa
 	onVisibleAtTop: () => releaseQueue(),
 	onActivatedAtTop: () => paginator.releaseQueue(),
 });
+
+const olderMounts = deferOlderMounts(() => paginator.fetchOlder(), () => paginator.items.value.map(x => x.id));
 
 function isTop() {
 	if (scrollContainer == null) return true;
@@ -475,8 +486,11 @@ defineExpose({
 .transition_x_enterActive {
 	transition: transform 0.7s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.7s cubic-bezier(0.23, 1, 0.32, 1);
 
+	// Elythia: 中身を後回しにした項目は、外側の div にクラスが付くので中身にも掛ける (#3937)
 	&.note,
-	.note {
+	.note,
+	&.note > *,
+	.note > * {
 		/* Skip Note Rendering有効時、TransitionGroupでnoteを追加するときに一瞬がくっとなる問題を抑制する */
 		content-visibility: visible !important;
 	}
@@ -507,7 +521,9 @@ defineExpose({
 	background: var(--MI_THEME-panel);
 }
 
-.note:not(:empty) {
+// Elythia: 中身を後回しにした項目は外側の div に付くので、ハードミュートで中身が空の
+// div のときも線を出さない (#3937)
+.note:not(:empty):not(:has(> :only-child:empty)) {
 	border-bottom: solid 0.5px var(--MI_THEME-divider);
 }
 
