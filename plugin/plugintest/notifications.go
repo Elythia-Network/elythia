@@ -52,6 +52,11 @@ func (h *Harness) Notifications(def plugin.Definition) {
 //
 // ID が空なら連番を、CreatedAt がゼロなら現在時刻を入れる。同じ ID で 2 回
 // 呼べば、再試行で同じ通知がもう一度届いた場合を試せる。
+//
+// リバーシの通知 ([plugin.NotificationReversiInvited] と
+// [plugin.NotificationReversiGame]) は GameID を、reversiGame はさらに GameEvent を
+// 要る (本番では必ず入る)。中身は持たないので、handler が読み直す
+// `reversi/show-game` などは [Harness.WithAPI] の偽物で返す。
 func (h *Harness) Notify(n plugin.Notification) error {
 	h.t.Helper()
 	fn, n, err := h.prepareNotify(n)
@@ -74,6 +79,17 @@ func (h *Harness) prepareNotify(n plugin.Notification) (plugin.NotificationHandl
 	}
 	if n.Type == "" {
 		return nil, n, fmt.Errorf("plugintest: Notification.Type が空です")
+	}
+	// 本番が必ず埋める欄が空の通知は届かない (#3942)。リバーシは対局を読み直す前提
+	// なので、GameID が無いと handler は何もできない
+	switch n.Type {
+	case plugin.NotificationReversiInvited, plugin.NotificationReversiGame:
+		if n.GameID == "" {
+			return nil, n, fmt.Errorf("plugintest: %s の Notification.GameID が空です (本番では必ず入ります)", n.Type)
+		}
+		if n.Type == plugin.NotificationReversiGame && n.GameEvent == "" {
+			return nil, n, fmt.Errorf("plugintest: reversiGame の Notification.GameEvent が空です (本番では必ず入ります)")
+		}
 	}
 	if !custom {
 		if err := h.deliverable(n.AccountID); err != nil {
