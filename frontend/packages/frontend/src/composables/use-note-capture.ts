@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { onUnmounted, reactive } from 'vue';
+import { inject, onUnmounted, reactive } from 'vue';
 import * as Misskey from 'misskey-js';
 import { EventEmitter } from 'eventemitter3';
 import { createVisibilityAwareInterval } from '@@/js/interval.js';
@@ -15,6 +15,7 @@ import { store } from '@/store.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { prefer } from '@/preferences.js';
 import { globalEvents } from '@/events.js';
+import { ITEM_DISPOSE, ITEM_STATE } from '@/utility/far-items.js';
 
 export const noteEvents = new EventEmitter<{
 	[ev: `reacted:${string}`]: (ctx: { userId: Misskey.entities.User['id']; reaction: string; emoji?: { name: string; url: string; } | null; }) => void;
@@ -99,9 +100,7 @@ function pollingSubscribe(props: {
 	const { note, $note } = props;
 
 	function onFetched(data: Pick<Misskey.entities.Note, 'reactions' | 'reactionEmojis'>): void {
-		$note.reactions = data.reactions;
-		$note.reactionCount = Object.values(data.reactions).reduce((a, b) => a + b, 0);
-		$note.reactionEmojis = data.reactionEmojis;
+		applyFetched($note, data);
 	}
 
 	pollingEnqueue(note);
@@ -111,6 +110,39 @@ function pollingSubscribe(props: {
 		pollingDequeue(note);
 		fetchEvent.off(note.id, onFetched);
 	});
+}
+
+function applyFetched($note: ReactiveNoteData, data: Pick<Misskey.entities.Note, 'reactions' | 'reactionEmojis'>): void {
+	$note.reactions = data.reactions;
+	$note.reactionCount = Object.values(data.reactions).reduce((a, b) => a + b, 0);
+	$note.reactionEmojis = data.reactionEmojis;
+}
+
+// Elythia: 画面から遠くて外していたノートを戻したときに、外していた間に届かなかった
+// リアクションを 1 回だけ取り直す (#3941)。ポーリングの仕組みに載せて、ほかのノートと
+// まとめて取る
+function refreshOnce(props: {
+	note: Pick<Misskey.entities.Note, 'id' | 'createdAt'>;
+	$note: ReactiveNoteData;
+}) {
+	const { note, $note } = props;
+	let queued = true;
+
+	function onFetched(data: Pick<Misskey.entities.Note, 'reactions' | 'reactionEmojis'>): void {
+		applyFetched($note, data);
+		done();
+	}
+
+	function done() {
+		if (!queued) return;
+		queued = false;
+		pollingDequeue(note);
+		fetchEvent.off(note.id, onFetched);
+	}
+
+	pollingEnqueue(note);
+	fetchEvent.on(note.id, onFetched);
+	onUnmounted(done);
 }
 
 function realtimeSubscribe(props: {
@@ -200,7 +232,13 @@ export function useNoteCapture(props: {
 } {
 	const { note, parentNote, mock } = props;
 
-	const $note = reactive<ReactiveNoteData>({
+	// Elythia: 一覧が画面から遠い項目を外すときは、写しを項目の側に預けておき、戻したときに
+	// そこから続ける (#3941)。部品の中にだけ持つと、届いていたリアクションが消えて数が戻る
+	const itemState = inject(ITEM_STATE, null);
+	const stateKey = `noteCapture:${parentNote?.id ?? ''}:${note.id}`;
+	const kept = itemState?.get(stateKey) as Reactive<ReactiveNoteData> | undefined;
+
+	const $note = kept ?? reactive<ReactiveNoteData>({
 		reactions: Object.entries(note.reactions).reduce((acc, [name, count]) => {
 			// Normalize reactions
 			const normalizedName = name.replace(/^:(\w+):$/, ':$1@.:');
@@ -216,10 +254,26 @@ export function useNoteCapture(props: {
 		myReaction: note.myReaction,
 		pollChoices: note.poll?.choices ?? [],
 	});
+	if (kept == null) itemState?.set(stateKey, $note);
 
-	noteEvents.on(`reacted:${note.id}`, onReacted);
-	noteEvents.on(`unreacted:${note.id}`, onUnreacted);
-	noteEvents.on(`pollVoted:${note.id}`, onPollVoted);
+	// 写しを預けるときは、ほかの項目からの反映 (同じノートのリノートからリアクションしたなど) を
+	// 外している間も受けるよう、項目の寿命で購読する。再利用するときは最初の購読が生きている
+	const itemDispose = inject(ITEM_DISPOSE, null);
+	if (kept == null) {
+		noteEvents.on(`reacted:${note.id}`, onReacted);
+		noteEvents.on(`unreacted:${note.id}`, onUnreacted);
+		noteEvents.on(`pollVoted:${note.id}`, onPollVoted);
+		const offNoteEvents = () => {
+			noteEvents.off(`reacted:${note.id}`, onReacted);
+			noteEvents.off(`unreacted:${note.id}`, onUnreacted);
+			noteEvents.off(`pollVoted:${note.id}`, onPollVoted);
+		};
+		if (itemState != null && itemDispose != null) {
+			itemDispose(offNoteEvents);
+		} else {
+			onUnmounted(offNoteEvents);
+		}
+	}
 
 	// 操作がダブっていないかどうかを簡易的に記録するためのMap
 	const reactionUserMap = new Map<Misskey.entities.User['id'], string | typeof noReaction>();
@@ -291,6 +345,9 @@ export function useNoteCapture(props: {
 			realtimeSubscribe({
 				note,
 			});
+			// 外していた間はストリームを購読していないので、戻したときに取り直す。ポーリングの
+			// 側は購読そのものが取り直しになる
+			if (kept != null) refreshOnce({ note, $note });
 		} else {
 			pollingSubscribe({
 				note,
@@ -298,12 +355,6 @@ export function useNoteCapture(props: {
 			});
 		}
 	}
-
-	onUnmounted(() => {
-		noteEvents.off(`reacted:${note.id}`, onReacted);
-		noteEvents.off(`unreacted:${note.id}`, onUnreacted);
-		noteEvents.off(`pollVoted:${note.id}`, onPollVoted);
-	});
 
 	// 投稿からある程度経過している(=タイムラインを遡って表示した)ノートは、イベントが発生する可能性が低いためそもそも購読しない
 	// ただし「リノートされたばかりの過去のノート」(= parentNoteが存在し、かつparentNoteの投稿日時が最近)はイベント発生が考えられるため購読する

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ref } from 'vue';
+import { inject, ref } from 'vue';
 import type { Ref } from 'vue';
 import * as mfm from '@/utility/mfm.js';
 import * as Misskey from 'misskey-js';
@@ -31,6 +31,7 @@ import { getPluginHandlers } from '@/plugin.js';
 import { $i } from '@/i.js';
 import { i18n } from '@/i18n.js';
 import { globalEvents, useGlobalEvent } from '@/events.js';
+import { ITEM_DISPOSE, ITEM_STATE } from '@/utility/far-items.js';
 import MkUsersTooltip from '@/components/MkUsersTooltip.vue';
 import MkReactionsViewerDetails from '@/components/MkReactionsViewer.details.vue';
 import MkRippleEffect from '@/components/MkRippleEffect.vue';
@@ -145,7 +146,13 @@ export function useNote(
 
 	// 各種フラグ状態
 	const showContent = ref(false);
-	const isDeleted = ref(false);
+	// Elythia: 一覧が画面から遠い項目を外すときは、削除の印を項目の側に預け、外している間に
+	// 消されたことも受ける (#3941)。部品の中にだけ持つと、戻したときに消えたノートが出る
+	const itemState = inject(ITEM_STATE, null);
+	const itemDispose = inject(ITEM_DISPOSE, null);
+	const deletedKey = `noteDeleted:${rawNote.id}:${appearNote.id}`;
+	const keptDeleted = itemState?.get(deletedKey) as Ref<boolean> | undefined;
+	const isDeleted = keptDeleted ?? ref(false);
 	const translating = ref(false);
 	const translation = ref<Misskey.entities.NotesTranslateResponse | null>(null);
 
@@ -171,11 +178,20 @@ export function useNote(
 	};
 
 	// グローバルイベントの監視
-	useGlobalEvent('noteDeleted', (noteId) => {
+	const onNoteDeleted = (noteId: string) => {
 		if (noteId === rawNote.id || noteId === appearNote.id) {
 			isDeleted.value = true;
 		}
-	});
+	};
+	if (itemState != null && itemDispose != null) {
+		if (keptDeleted == null) {
+			itemState.set(deletedKey, isDeleted);
+			globalEvents.on('noteDeleted', onNoteDeleted);
+			itemDispose(() => globalEvents.off('noteDeleted', onNoteDeleted));
+		}
+	} else {
+		useGlobalEvent('noteDeleted', onNoteDeleted);
+	}
 
 	// ツールチップのセットアップ (Mockでない場合のみ)
 	if (!props.mock) {
