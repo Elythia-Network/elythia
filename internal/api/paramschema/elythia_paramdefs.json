@@ -1749,6 +1749,63 @@
 			},
 			"meta": {}
 		},
+		"reversi/claim-time-is-up": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"gameId": {
+						"type": "string",
+						"format": "misskey:id"
+					}
+				},
+				"required": [
+					"gameId"
+				]
+			},
+			"meta": {}
+		},
+		"reversi/put-stone": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"gameId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"pos": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"id": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"gameId",
+					"pos"
+				]
+			},
+			"meta": {}
+		},
+		"reversi/ready": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"gameId": {
+						"type": "string",
+						"format": "misskey:id"
+					},
+					"ready": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"gameId",
+					"ready"
+				]
+			},
+			"meta": {}
+		},
 		"roles/assignment-show": {
 			"paramDef": {
 				"type": "object",

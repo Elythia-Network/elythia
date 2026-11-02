@@ -16,6 +16,11 @@ func registerGamesRoutes(api apiRoutes, reversiHandler *apireversi.Handler, bubb
 	api.POST("/reversi/cancel-match", reversiHandler.CancelMatch, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/reversi/surrender", reversiHandler.Surrender, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 	api.POST("/reversi/verify", reversiHandler.Verify)
+	// Elythia: 対局の操作の REST の入口 (#3942)。websocket の reversiGame チャンネルと
+	// 同じく write:account を要求する。
+	api.POST("/reversi/ready", reversiHandler.Ready, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/reversi/put-stone", reversiHandler.PutStone, middleware.RequireAuth(), middleware.RequireScope("write:account"))
+	api.POST("/reversi/claim-time-is-up", reversiHandler.ClaimTimeIsUp, middleware.RequireAuth(), middleware.RequireScope("write:account"))
 
 	// bubble-game/* — バブルゲーム (実データ)
 	api.POST("/bubble-game/register", bubbleGameHandler.Register, middleware.RequireAuth(), middleware.RequireScope("write:account"))
