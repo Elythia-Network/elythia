@@ -92,9 +92,20 @@ func TestHarness_PrepareNotify(t *testing.T) {
 		"凍結中":           {Type: plugin.NotificationMention, AccountID: frozen.ID},
 		"削除済み":          {Type: plugin.NotificationMention, AccountID: gone.ID},
 		"型が空":           {AccountID: mine.ID},
+		// 本番が必ず埋める欄が空のリバーシの通知 (#3942)
+		"招待の GameID が空":    {Type: plugin.NotificationReversiInvited, AccountID: mine.ID},
+		"対局の GameID が空":    {Type: plugin.NotificationReversiGame, AccountID: mine.ID, GameEvent: plugin.ReversiGameLog},
+		"対局の GameEvent が空": {Type: plugin.NotificationReversiGame, AccountID: mine.ID, GameID: "g1"},
 	} {
 		_, _, err := h.prepareNotify(n)
 		assert.Error(t, err, name)
+	}
+	for name, n := range map[string]plugin.Notification{
+		"招待": {Type: plugin.NotificationReversiInvited, AccountID: mine.ID, GameID: "g1"},
+		"対局": {Type: plugin.NotificationReversiGame, AccountID: mine.ID, GameID: "g1", GameEvent: plugin.ReversiGameLog},
+	} {
+		_, _, err := h.prepareNotify(n)
+		assert.NoError(t, err, name)
 	}
 
 	fn, got, err := h.prepareNotify(plugin.Notification{Type: plugin.NotificationFollow, AccountID: mine.ID})
