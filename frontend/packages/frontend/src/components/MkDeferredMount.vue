@@ -4,9 +4,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <script lang="ts">
-import { defineComponent, h, inject, onMounted, onUnmounted, provide, ref, useCssModule, useTemplateRef } from 'vue';
+import { defineComponent, h, inject, onMounted, onUnmounted, provide, ref, useTemplateRef } from 'vue';
 import { mountScheduler } from '@/utility/mount-scheduler.js';
 import { FAR_ITEM_ATTR, FAR_ITEMS, ITEM_DISPOSE, ITEM_STATE } from '@/utility/far-items.js';
+
+// 中身が入るまでの仮の高さ (px)。「もっと見る」がすぐに画面へ入って、次の読み足しを
+// 始めない程度にあればよい
+const PLACEHOLDER_HEIGHT = 160;
 
 /**
  * Renders its slot, optionally a few frames later, and optionally only while it is near
@@ -29,8 +33,6 @@ export default defineComponent({
 		unmountWhenFar: { type: Boolean, default: false },
 	},
 	setup(props, { slots }) {
-		const $style = useCssModule();
-
 		if (!props.defer && !props.unmountWhenFar) {
 			// 属性 (class や data-scroll-anchor) を中身に渡すため、slot を配列のまま返さず
 			// 1 つの vnode にする。配列 (Fragment) を返すと、属性が中身へ渡らない
@@ -94,8 +96,11 @@ export default defineComponent({
 			return h('div', {
 				ref: 'rootEl',
 				[FAR_ITEM_ATTR]: props.unmountWhenFar ? '' : undefined,
-				class: ready.value ? undefined : $style.placeholder,
-				style: far ? { height: `${farHeight.value}px` } : undefined,
+				// 中身が入るまでの仮の高さは、インラインで付ける (#3950)。useCssModule は使わない
+				// (eslint で禁じている)。この部品は描画関数の形のおかげで本番のビルドでも
+				// CSS Modules の表が残っていたが、それは unwind のプラグインが処理を飛ばした
+				// 偶然で、テンプレートを持つ部品では空を返す
+				style: far ? { height: `${farHeight.value}px` } : ready.value ? undefined : { height: `${PLACEHOLDER_HEIGHT}px` },
 			}, ready.value && !far ? slots.default?.() : undefined);
 		};
 	},
@@ -108,11 +113,3 @@ function isPlayingMedia(el: Element): boolean {
 	return false;
 }
 </script>
-
-<style lang="scss" module>
-.placeholder {
-	// 中身が入るまでの仮の高さ。「もっと見る」がすぐに画面へ入って、次の読み足しを
-	// 始めない程度にあればよい
-	height: 160px;
-}
-</style>

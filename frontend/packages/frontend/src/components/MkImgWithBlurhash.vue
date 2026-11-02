@@ -16,7 +16,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		だけ canvas と img に掛ける。それ以外は css を切った Transition にして、Vue に
 		getComputedStyle を読ませない。
 	-->
-	<Transition v-bind="transitionProps">
+	<Transition v-bind="transitionProps" :leaveActiveClass="leaveActiveClass($style.transition_leaveActive)">
 		<MkBlurhash
 			:class="$style.canvas"
 			:blurhash="hash ?? null"
@@ -33,7 +33,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		遷移を掛けるとき (ギャラリー) だけは、以前と同じく v-show で消し、退場の遷移を
 		見せる。display: none の間は lazy だと読み込まれないので、そのときは eager にする。
 	-->
-	<Transition v-bind="transitionProps">
+	<Transition v-bind="transitionProps" :leaveActiveClass="leaveActiveClass($style.transition_leaveActive)">
 		<img
 			v-show="!cssTransition || !hide"
 			ref="img"
@@ -56,7 +56,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, useCssModule, useTemplateRef, watch, ref } from 'vue';
+import { computed, useTemplateRef, watch, ref } from 'vue';
 import { prefer } from '@/preferences.js';
 import MkBlurhash from '@/components/MkBlurhash.vue';
 
@@ -92,11 +92,23 @@ const props = withDefaults(defineProps<{
 	onlyAvgColor: false,
 });
 
-const $style = useCssModule();
 const img = useTemplateRef('img');
 const loaded = ref(false);
 const hide = computed(() => !loaded.value || props.forceBlurhash);
 const cssTransition = computed(() => prefer.s.animation && props.transition != null);
+
+// Elythia: $style は script で読まない (useCssModule を使わない)。本番のビルドでは
+// rollup-plugin-unwind-css-module-class-name が、描画関数に `_ctx.$style` の参照が
+// 1 つも残らない部品から CSS Modules の表を外す。script の最上位で $style を宣言すると
+// テンプレートの $style もそれを指すので、必ずこの条件に当たり、useCssModule() が空を
+// 返してクラスが全部 undefined になる (#3950。アバターの画像が枠より大きく描かれ、
+// 拡大されて見えた)。開発時と vitest ではこの処理が走らないので気付けない。退場の
+// クラスは、既定のクラスと合わせてテンプレートから渡す (transitionProps には入れない)
+function leaveActiveClass(defaultClass: string): string | undefined {
+	if (!cssTransition.value) return undefined;
+	return props.transition?.leaveActiveClass ?? defaultClass;
+}
+
 const transitionProps = computed(() => {
 	if (!cssTransition.value) return { css: false };
 	const t = props.transition;
@@ -104,7 +116,6 @@ const transitionProps = computed(() => {
 		css: true,
 		duration: t?.duration,
 		enterActiveClass: t?.enterActiveClass,
-		leaveActiveClass: t?.leaveActiveClass ?? $style.transition_leaveActive,
 		enterFromClass: t?.enterFromClass,
 		leaveToClass: t?.leaveToClass,
 		enterToClass: t?.enterToClass,
