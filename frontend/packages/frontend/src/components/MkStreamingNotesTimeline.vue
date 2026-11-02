@@ -34,6 +34,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div :class="$style.newBg2"></div>
 			<button class="_button" :class="$style.newButton" @click="releaseQueue()"><i class="ti ti-circle-arrow-up"></i> {{ i18n.ts.newNote }}</button>
 		</div>
+		<!--
+			Elythia: 古いものを読み足したら、遷移を切る (#3939)。読み足した項目はたいてい画面の下に
+			足されて見えないのに、出現の遷移の終わりを知るために Vue が項目ごとに getComputedStyle を
+			読み、そのたびにページ全体のスタイル再計算が走っていた (見える位置に足したときは、
+			出現の動きが付かないだけ)。移動のクラスも外すと、描いた後に
+			全件の位置を測り直す処理 (移動のアニメーションのため) も省かれる。描く前の全件の位置の
+			計測は TransitionGroup の作りで止められない。切る期間は deferOlderMounts の
+			quietTransitions を参照。
+		-->
 		<component
 			:is="prefer.s.animation ? TransitionGroup : 'div'"
 			:class="$style.notes"
@@ -41,7 +50,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			:leaveActiveClass="$style.transition_x_leaveActive"
 			:enterFromClass="$style.transition_x_enterFrom"
 			:leaveToClass="$style.transition_x_leaveTo"
-			:moveClass="$style.transition_x_move"
+			:moveClass="quietTransitions() ? undefined : $style.transition_x_move"
+			:css="!quietTransitions()"
 			tag="div"
 		>
 			<template v-for="(note, i) in paginator.items.value" :key="note.id">
@@ -234,6 +244,11 @@ const { isPausing: isPausingUpdate, recordScrollPosition } = useTimelineUpdatePa
 });
 
 const olderMounts = deferOlderMounts(() => paginator.fetchOlder(), () => paginator.items.value.map(x => x.id));
+const quietTransitions = () => olderMounts.quietTransitions({
+	newestId: paginator.items.value[0]?.id,
+	lastId: paginator.items.value.at(-1)?.id,
+	generation: paginator.generation,
+});
 
 function isTop() {
 	if (scrollContainer == null) return true;
