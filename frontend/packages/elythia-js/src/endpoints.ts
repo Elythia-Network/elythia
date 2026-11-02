@@ -691,6 +691,36 @@ export type ElythiaEndpoints = {
 		req: Misskey.entities.FlashMyLikesRequest;
 		res: Misskey.entities.FlashMyLikesResponse;
 	};
+	'reversi/claim-time-is-up': {
+		/**
+		 * Claims the turn timer of the game ran out (the `claimTimeIsUp` message of
+		 * the `reversiGame` channel). Does nothing while the time remains; read
+		 * `reversi/show-game` to see whether the game ended. Anyone can call it.
+		 */
+		req: { gameId: string };
+		res: undefined;
+	};
+	'reversi/put-stone': {
+		/** Puts a stone (the `putStone` message of the `reversiGame` channel). */
+		req: {
+			gameId: string;
+			pos: number;
+			/** Echoed back in the `log` event of the stream, to match the operation. */
+			id?: string;
+		};
+		res: undefined;
+	};
+	'reversi/ready': {
+		/**
+		 * Changes the caller's ready state (the `ready` message of the `reversiGame`
+		 * channel). The game starts when both players are ready.
+		 */
+		req: {
+			gameId: string;
+			ready: boolean;
+		};
+		res: undefined;
+	};
 	'roles/assignment-show': {
 		/**
 		 * Whether the caller has an exact assignment of the role. A private role
