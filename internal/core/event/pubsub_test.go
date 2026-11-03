@@ -443,16 +443,18 @@ func TestPubSubService_PreservesOrderWithinTopic(t *testing.T) {
 	}
 }
 
-// prefix の glob の特殊文字を逃がし、別のサービスのチャネルを受けないこと。
-func TestPubSubService_PatternEscapesPrefix(t *testing.T) {
+// prefix の glob の特殊文字を、パターンとして読まないこと。
+//
+// SUBSCRIBE はチャネル名の完全一致なので、prefix に `*` や `[` があっても、
+// 別のサービスや別のアプリのチャネルを受けない (#3991 より前の PSUBSCRIBE は
+// prefix を逃がしていた)。
+func TestPubSubService_PrefixIsLiteral(t *testing.T) {
 	svc := NewPubSubService(testRedis.Client, "a*[b]?\\:")
-	assert.Equal(t, "a\\*\\[b\\]\\?\\\\:*", svc.pattern())
 
 	ctx := context.Background()
 	defer svc.Close()
 	var got atomic.Int32
 	_ = svc.Subscribe(ctx, "x", func([]byte) { got.Add(1) })
-	time.Sleep(100 * time.Millisecond)
 	// prefix を glob として読むと一致してしまうチャネル。配る先はチャネル名の
 	// 完全一致で決まるので、受けたかどうかは Redis が数えた受け手の数で見る。
 	n, err := testRedis.Client.Publish(ctx, "aZZbQ:x", "1").Result()

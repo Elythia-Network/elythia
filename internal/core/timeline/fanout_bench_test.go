@@ -83,6 +83,23 @@ func redisMaxOutputBuffer(b *testing.B) int64 {
 	return -1
 }
 
+// redisNetOutput reads total_net_output_bytes: everything the Redis has sent
+// to its clients, pub/sub messages included.
+func redisNetOutput(b *testing.B) int64 {
+	b.Helper()
+	info, err := testRedis.Client.Info(context.Background(), "stats").Result()
+	if err != nil {
+		b.Fatalf("info stats: %v", err)
+	}
+	for _, line := range strings.Split(info, "\r\n") {
+		if v, ok := strings.CutPrefix(line, "total_net_output_bytes:"); ok {
+			n, _ := strconv.ParseInt(v, 10, 64)
+			return n
+		}
+	}
+	return -1
+}
+
 // processCPU returns the user+sys CPU time this process has used.
 func processCPU() time.Duration {
 	var ru syscall.Rusage
@@ -122,9 +139,11 @@ func BenchmarkFanoutHook_Followers(b *testing.B) {
 			defer ps.Close()
 			h.SetStreamingPublisher(stream.NewNotePublisher(ps, idGen, nil))
 			if c.subscribed {
-				// 本番と同じく、自プロセスが <prefix>* を PSUBSCRIBE している状態に
-				// する。フォロワー宛ての PUBLISH はすべてこの接続へ流れ、購読者の
-				// いない宛先の分は enqueue で捨てられる。
+				// 本番と同じく、自プロセスがストリームを購読している状態にする。
+				// #3991 より前は <prefix>* の PSUBSCRIBE だったので、フォロワー宛ての
+				// PUBLISH はすべてこの接続へ流れ、購読者のいない宛先の分は enqueue で
+				// 捨てていた。今は購読しているトピック (ここでは bench-sink) だけを
+				// SUBSCRIBE するので、フォロワー宛ての分は届かない。
 				unsub := ps.Subscribe(ctx, "bench-sink", func([]byte) {})
 				defer unsub()
 				time.Sleep(200 * time.Millisecond)
@@ -134,6 +153,7 @@ func BenchmarkFanoutHook_Followers(b *testing.B) {
 
 			testRedis.Client.ConfigResetStat(ctx)
 			cpu0, _ := redisCPUAndCalls(b)
+			out0 := redisNetOutput(b)
 			go0 := processCPU()
 			rt.n = 0
 			b.ReportAllocs()
@@ -164,6 +184,8 @@ func BenchmarkFanoutHook_Followers(b *testing.B) {
 			b.ReportMetric(float64(calls["publish"])/float64(b.N), "publish/op")
 			b.ReportMetric(float64(calls["ltrim"])/float64(b.N), "ltrim/op")
 			b.ReportMetric(float64(redisMaxOutputBuffer(b)), "redis-max-outbuf-bytes")
+			// INFO の応答の分も入るが、前後で同じなので比べるのに困らない。
+			b.ReportMetric(float64(redisNetOutput(b)-out0)/float64(b.N), "redis-out-bytes/op")
 		})
 	}
 }

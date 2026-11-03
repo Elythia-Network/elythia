@@ -52,7 +52,7 @@ func twoBuses(t *testing.T, prefix string) (*event.PubSubService, *event.PubSubS
 }
 
 // waitSubscribed blocks until every bus receives a probe, i.e. until their
-// PSUBSCRIBE is in place. A publish sent before that is not delivered.
+// Redis subscription is in place.
 func waitSubscribed(t *testing.T, buses ...*event.PubSubService) {
 	t.Helper()
 	got := make([]atomic.Bool, len(buses))

@@ -72,11 +72,11 @@ func TestConnect_WriteInOneProcessReachesAnother(t *testing.T) {
 	stopA := Connect(cacheA, busA, "A")
 	stopB := Connect(cacheB, busB, "B")
 	t.Cleanup(func() { stopA(); stopB() })
-	// PSUBSCRIBE は非同期に張られる。張り終わる前の publish は届かない。
-	require.Eventually(t, func() bool {
-		n, err := testRedis.Client.PubSubNumPat(context.Background()).Result()
-		return err == nil && n >= 1
-	}, 5*time.Second, 10*time.Millisecond)
+	// Subscribe は Redis の SUBSCRIBE が効いてから戻る (#3991)。両方の bus が
+	// 購読していれば、この後の publish は届く。
+	subs, err := testRedis.Client.PubSubNumSub(context.Background(), "rcx3607:"+Topic).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(2), subs["rcx3607:"+Topic])
 
 	got, err := cacheB.MutedUserIDs(viewer)
 	require.NoError(t, err)
