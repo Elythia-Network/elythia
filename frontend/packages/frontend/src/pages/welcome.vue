@@ -12,20 +12,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue';
-import * as Misskey from 'misskey-js';
+import { computed } from 'vue';
 import { instanceName } from '@@/js/config.js';
 import XSetup from './welcome.setup.vue';
 import XEntranceClassic from './welcome.entrance.classic.vue';
 import XEntranceSimple from './welcome.entrance.simple.vue';
 import { definePage } from '@/page.js';
-import { fetchInstance } from '@/instance.js';
+// Elythia: 読み込み済みのインスタンス情報ですぐ描く。本家は /api/meta を取り直してから描く (#3967)
+import { useWelcomeInstance } from '@/utility/elythia-welcome-instance.js';
 
-const instance = ref<Misskey.entities.MetaDetailed | null>(null);
-
-fetchInstance(true).then((res) => {
-	instance.value = res;
-});
+const instance = useWelcomeInstance();
 
 const headerActions = computed(() => []);
 
