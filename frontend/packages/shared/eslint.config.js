@@ -20,7 +20,8 @@ export function loaderScriptConfig(injected) {
 		files: ['public/loader/*.js'],
 		languageOptions: {
 			parser: espree,
-			// boot.js はトランスパイルされずにそのまま配られるので、vite の build.target
+			// boot.js はビルドで esbuild の minify を通る (#3968) が、esbuild が下げられない構文
+			// (正規表現の修飾子など) はそのまま配られるので、vite の build.target
 			// (chrome130 / firefox132 / safari18.2) が解釈できる年に留める。ES2025 の
 			// 正規表現の修飾子 ((?i:...)) は safari18.2 で解釈できない
 			ecmaVersion: 2024,
