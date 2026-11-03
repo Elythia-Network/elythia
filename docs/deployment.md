@@ -1144,6 +1144,14 @@ ElythiaはMisskeyのSPAフロントエンドをそのまま配信する。フロ
 ```nginx
 upstream mkgo {
     server 127.0.0.1:3000;
+    # Elythia への接続を使い回す (下記の注意点を参照)
+    keepalive 32;
+}
+
+# WebSocket の要求にだけ `Connection: upgrade` を付け、それ以外は空にする
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      '';
 }
 
 server {
@@ -1173,6 +1181,7 @@ server {
     location = /backup-download {
         proxy_pass http://mkgo;
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -1185,7 +1194,7 @@ server {
         proxy_pass http://mkgo;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1198,7 +1207,9 @@ server {
 **注意点:**
 - `client_max_body_size`はElythiaの`maxFileSize`設定 (デフォルト250MB) 以上に設定する
 - `proxy_read_timeout 1d`はWebSocket (`/streaming`)のために必要
-- `Upgrade`/`Connection`ヘッダーはWebSocketパススルーに必要
+- `Upgrade`/`Connection`ヘッダーはWebSocketパススルーに必要。`Connection`は`map`で、WebSocketの要求のときだけ`upgrade`、それ以外は空にする
+- **`upstream`の`keepalive`と、各`location`の`proxy_http_version 1.1`と`Connection`の指定は、Elythiaへの接続を使い回すために要る。** どれかが無いと(nginxの既定はHTTP/1.0)、nginxはAPIや静的ファイルの要求のたびにElythiaへの接続を張り直して閉じる(`Connection`を指定しないと、nginxは`Connection: close`を送る)。隔離した環境で`POST /api/meta`を300件、1本の接続で順に流すと、Elythiaが受け入れた接続は、無いときの300回から1回になった(#3963)。nginxの待機中の接続は、`upstream`ブロックの`keepalive_timeout`の既定(60秒。`http`や`server`の階層にある、クライアント向けの同じ名前の指令とは別)で閉じ、ElythiaのIdleTimeout(120秒)より短いので、Elythiaが先に閉じた接続へ要求を送る形にはならない。`upstream`の`keepalive_timeout`を120秒以上にしないこと。この例より前の形を写した環境は、設定を直してnginxをreloadすれば反映される
+- **同じnginxのほかの設定に、同じ名前の`map $http_upgrade $connection_upgrade`が無いか確かめる。** nginxの公式のWebSocketの例は、同じ変数名で`'' close;`と書く。nginxは同じ変数の`map`が二度あっても`nginx -t`でエラーにせず、後から読まれた定義が勝つ。`'' close;`の方が勝つと、WebSocket以外の要求に`Connection: close`が付き、接続の使い回しが黙って効かなくなる(WebSocketはつながる)。あれば、この例と同じ`'' '';`に直すか、片方を消す
 - **アクセスログにクエリ文字列を出さない。** 同梱フロントは WebSocket を
   `/streaming?i=<トークン>` で開く。`i` はスコープ制限のないネイティブ
   ログイントークンなので、既定の `combined` (= `$request` を含む) のままだと
@@ -1246,10 +1257,11 @@ Cloudflareを経由する構成ではリクエストボディが**100MB (Free/Pr
 ```nginx
 upstream mkgo {
     server unix:/run/mkgo/mkgo.sock;
+    keepalive 32;
 }
 ```
 
-upstream以外の設定はTCP構成と同じ。
+upstream以外の設定はTCP構成と同じ。同梱の`deploy/uds/nginx/mkgo.conf`に、UDSの`upstream`と`keepalive`の実例がある(HTTPだけの構成なので、`listen`や`X-Forwarded-Proto`などはこの例と違う。TLSの足し方は[docker-uds.md](docker-uds.md#tls-を足したい場合))。
 
 ## オブジェクトストレージ
 
