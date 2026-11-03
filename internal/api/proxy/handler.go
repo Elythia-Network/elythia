@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/config"
@@ -301,6 +302,9 @@ func (h *Handler) Handle(c echo.Context) error {
 	// vice-versa (#637 review UR-012).
 	c.Response().Header().Set("Vary", "Accept")
 	setProxyContentSecurityHeaders(c)
+	if result.Size > 0 {
+		c.Response().Header().Set(echo.HeaderContentLength, strconv.FormatInt(result.Size, 10))
+	}
 	c.Response().WriteHeader(http.StatusOK)
 	_, _ = io.Copy(c.Response(), result.Body)
 	return nil
