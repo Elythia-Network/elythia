@@ -818,8 +818,9 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	e.Use(corsMiddleware())
 	// gzip response compression (#413 Phase 3 #12)。Misskey TS は nginx
 	// 前段で gzip するのが定石だが、mk-go は単体運用も想定するので app 側
-	// で提供する。設定は gzipConfig() に集約してテストと共有。
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	// で提供する。設定は gzipConfig() と gzipMiddleware() に集約してテストと
+	// 共有。画像・動画・音声と 206 は圧縮しない (#3966)。
+	e.Use(gzipMiddleware())
 
 	// CachedUserRepository を一度だけ構築して auth middleware と
 	// setupRoutes (services) が同じ cache を共有するようにする (#300 3-3)。
