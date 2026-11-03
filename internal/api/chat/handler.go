@@ -2253,31 +2253,60 @@ func (h *Handler) History(c echo.Context) error {
 	// 計算して各 message に isRead を載せる (#1749)。packMessageDetailed 自体は
 	// isRead を出さない (#861) ため、history endpoint でのみ上乗せする。
 	out := h.packMessagesDetailed(msgs, user.ID)
-	for i, m := range msgs {
-		out[i]["isRead"] = h.historyItemIsRead(user.ID, m, req.Room)
+	isRead := h.historyIsRead(user.ID, msgs, req.Room)
+	for i := range msgs {
+		out[i]["isRead"] = isRead[i]
 	}
 	return h.jsonOK(c, out)
 }
 
-// historyItemIsRead reports whether the conversation represented by a history
-// item has no unread messages for meID. Mirrors upstream getRoomReadStateMap /
+// historyIsRead reports, for each history item, whether its conversation has
+// no unread messages for meID. Mirrors upstream getRoomReadStateMap /
 // getUserReadStateMap (mk-go は reads 配列から会話単位で導出する)。クエリ失敗時は
 // upstream の `?? false` と同じく未読 (false) 扱いにする。
-func (h *Handler) historyItemIsRead(meID string, m *model.ChatMessage, room bool) bool {
-	if room {
-		if m.ToRoomID == nil {
-			return true
+//
+// 会話ごとに 1 本ずつ引いていたのを、まとめて 1 本にした (#3990)。
+func (h *Handler) historyIsRead(meID string, msgs []*model.ChatMessage, room bool) []bool {
+	out := make([]bool, len(msgs))
+	keys := make([]string, len(msgs))
+	has := make([]bool, len(msgs))
+	var ids []string
+	for i, m := range msgs {
+		if room {
+			if m.ToRoomID == nil {
+				// 部屋の無い項目は未読を持ちえないので既読 (従来どおり)。
+				out[i] = true
+				continue
+			}
+			keys[i] = *m.ToRoomID
+		} else {
+			// 1-on-1: 相手 = 自分が sender なら toUser、そうでなければ fromUser。
+			keys[i] = m.FromUserID
+			if keys[i] == meID && m.ToUserID != nil {
+				keys[i] = *m.ToUserID
+			}
 		}
-		unread, err := h.repo.HasUnreadInRoom(meID, *m.ToRoomID)
-		return err == nil && !unread
+		has[i] = true
+		ids = append(ids, keys[i])
 	}
-	// 1-on-1: 相手 = 自分が sender なら toUser、そうでなければ fromUser。
-	otherID := m.FromUserID
-	if otherID == meID && m.ToUserID != nil {
-		otherID = *m.ToUserID
+	if len(ids) == 0 {
+		return out
 	}
-	unread, err := h.repo.HasUnreadFromUser(meID, otherID)
-	return err == nil && !unread
+	var (
+		unread map[string]bool
+		err    error
+	)
+	if room {
+		unread, err = h.repo.UnreadInRooms(meID, ids)
+	} else {
+		unread, err = h.repo.UnreadFromUsers(meID, ids)
+	}
+	for i := range msgs {
+		if has[i] {
+			out[i] = err == nil && !unread[keys[i]]
+		}
+	}
+	return out
 }
 
 // UnreadCount handles POST /api/chat/unread-count.
