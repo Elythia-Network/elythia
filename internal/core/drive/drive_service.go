@@ -873,12 +873,28 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	var blurhash *string
 	var properties datatypes.JSON
 
-	alts := s.generateAlts(ctx, in.Body, info.MimeType)
+	// Sensitive media detection をするかと、どの経路で判定するかは、代替画像を
+	// 作る前に決める (#3995)。公式の detector で画像を判定するときは、
+	// `ProcessAll` のデコードから判定用の縮小も作り、もう一度デコードしない。
+	// system file は user 紐付きが無いので skip。alwaysMarkNsfw role policy が
+	// true の user は既に IsSensitive=true で確定しているので detect の意味が
+	// ない、skip して負荷を減らす (#1028)。
+	detect := !in.IsSensitive && !rolePolicyForceSensitive && in.User != nil
+	var sensSettings SensitiveSettings
+	var sensRoute sensitiveRoute
+	if detect {
+		sensSettings = s.currentSensitiveSettings()
+		sensRoute = s.sensitiveRouteFor(in.User, info.MimeType, sensSettings)
+	}
+
+	var detectionImage []byte
+	alts := s.generateAlts(ctx, in.Body, info.MimeType, sensRoute == sensitiveOfficialImage)
 	if alts != nil {
 		thumbnail = alts.thumbnail
 		webpublic = alts.webpublic
 		blurhash = alts.blurhash
 		properties = alts.properties
+		detectionImage = alts.detection
 	}
 
 	// サムネイル/webpublic を storage に保存
@@ -948,11 +964,9 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		RequestHeaders:     in.RequestHeaders,
 	}
 
-	// Sensitive media detection フック (system file は user 紐付きが無いので skip)
-	// alwaysMarkNsfw role policy が true の user は既に IsSensitive=true で
-	// 確定しているので detect の意味がない、skip して負荷を減らす (#1028)。
-	if !f.IsSensitive && !rolePolicyForceSensitive && in.User != nil {
-		f.IsSensitive = s.detectSensitive(ctx, in.User, in.Body, info.MimeType)
+	// Sensitive media detection フック。判定するかは上で決めてある。
+	if detect {
+		f.IsSensitive = s.judgeSensitive(ctx, sensRoute, in.Body, info.MimeType, sensSettings, detectionImage)
 	}
 
 	if err := s.fileRepo.Create(f); err != nil {
@@ -988,118 +1002,180 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	return f, nil
 }
 
-// detectSensitive runs sensitive media detection based on meta config.
-// ベストエフォート: detector 未設定やエラー時は false を返す。
-//
-// ctx は upload リクエストの context を伝播する (#749)。client が早期に
-// 切断したら detector 呼び出しもキャンセルされる。
-func (s *Service) detectSensitive(ctx context.Context, user *model.User, body []byte, mime string) bool {
-	settings := SensitiveSettings{Config: s.sensitiveCfg}
+// sensitiveRoute is how one upload is judged for sensitive media.
+type sensitiveRoute int
+
+const (
+	// sensitiveSkip: 判定しない (非センシティブ)。
+	sensitiveSkip sensitiveRoute = iota
+	// sensitiveSilenced: mediaSilencedHosts のリモートユーザー (無条件でセンシティブ)。
+	sensitiveSilenced
+	// sensitiveLegacy: 旧来の SensitiveDetector にバイト列を渡す。
+	sensitiveLegacy
+	// sensitiveOfficialFrames: 公式 detector に動画 / APNG のフレームを渡す。
+	sensitiveOfficialFrames
+	// sensitiveOfficialImage: 公式 detector に 299x299 へ正規化した画像を渡す。
+	sensitiveOfficialImage
+)
+
+// currentSensitiveSettings returns the live sensitive detection settings.
+func (s *Service) currentSensitiveSettings() SensitiveSettings {
 	if s.sensitiveSettingsProvider != nil {
-		settings = s.sensitiveSettingsProvider()
+		return s.sensitiveSettingsProvider()
 	}
+	return SensitiveSettings{Config: s.sensitiveCfg}
+}
+
+// sensitiveRouteFor decides how an upload of mime by user is judged.
+//
+// 判定の前にデコード済みの像を使い回せるかを決めるため、`judgeSensitive` から
+// 分けてある (#3995)。どの経路でも判定は best-effort で、失敗は非センシティブ。
+func (s *Service) sensitiveRouteFor(user *model.User, mime string, settings SensitiveSettings) sensitiveRoute {
 	cfg := settings.Config
 
 	// mediaSilencedHosts: リモートユーザーのホストが silenced ならば無条件 sensitive
 	if user.Host != nil && IsSilencedHost(*user.Host, cfg.SilencedHosts) {
-		return true
+		return sensitiveSilenced
 	}
 
 	// 公式 sensitive-detector (2026.7.0) は meta の API URL 設定時のみ有効。
 	officialEnabled := s.officialSensitiveDetector != nil && strings.TrimSpace(settings.Official.APIURL) != ""
 
 	if !cfg.SetFlagAutomatically || (s.sensitiveDetector == nil && !officialEnabled) {
-		return false
+		return sensitiveSkip
 	}
 
 	isLocal := user.Host == nil || *user.Host == ""
 	if !ShouldDetect(cfg, isLocal) {
-		return false
+		return sensitiveSkip
 	}
 
 	if officialEnabled {
-		return s.detectSensitiveOfficial(ctx, body, mime, cfg, settings.Official)
+		// upstream は `image/apng` を動画側 (FFmpeg フレーム抽出) に流す。mk-go の
+		// mime 検出は APNG を image/vnd.mozilla.apng と報告するため両方受ける。
+		isAPNG := mime == "image/apng" || mime == "image/vnd.mozilla.apng"
+		if (IsVideoMIME(mime) || isAPNG) && cfg.EnableForVideos {
+			return sensitiveOfficialFrames
+		}
+		if IsVideoMIME(mime) {
+			// 動画で enableForVideos=false は判定しない (upstream analyzeVideo)。
+			return sensitiveSkip
+		}
+		if !isMimeImage(mime) {
+			// upstream の isMimeImage('sharp-convertible-image-with-bmp') guard 相当。
+			return sensitiveSkip
+		}
+		return sensitiveOfficialImage
 	}
 
 	// 動画チェック: enableForVideos が false なら動画はスキップ
 	if IsVideoMIME(mime) && !cfg.EnableForVideos {
-		return false
+		return sensitiveSkip
 	}
-
-	score, err := s.sensitiveDetector.Detect(ctx, body, mime)
-	if err != nil {
-		// detector が落ちていても upload 自体は通す best-effort 実装だが、
-		// silently 飲み込むと「自動付与が動いていない」ことに operator が
-		// 気付けない (#750)。warn ログだけ残す。body 内容は出さない (privacy)。
-		slog.Warn("drive: sensitive detector failed", "mime", mime, "err", err)
-		return false
-	}
-
-	threshold := SensitivityThreshold(cfg.Sensitivity)
-	return score >= threshold
+	return sensitiveLegacy
 }
 
-// detectSensitiveOfficial runs the upstream 2026.7.0 detection pipeline:
-// 画像は 299x299 PNG に正規化して単発判定、動画/APNG はフレーム抽出して
-// batch 判定 + 割合集約。すべての失敗は fail-open (非センシティブ)。
-func (s *Service) detectSensitiveOfficial(ctx context.Context, body []byte, mime string, cfg SensitiveConfig, official OfficialDetectorSettings) bool {
+// detectSensitive runs sensitive media detection based on meta config.
+// ベストエフォート: detector 未設定やエラー時は false を返す。
+//
+// ctx は upload リクエストの context を伝播する (#749)。client が早期に
+// 切断したら detector 呼び出しもキャンセルされる。
+func (s *Service) detectSensitive(ctx context.Context, user *model.User, body []byte, mime string) bool {
+	settings := s.currentSensitiveSettings()
+	return s.judgeSensitive(ctx, s.sensitiveRouteFor(user, mime, settings), body, mime, settings, nil)
+}
+
+// judgeSensitive runs the detection chosen by sensitiveRouteFor.
+//
+// normalized is the image already normalized for the official detector
+// (ImageAlts.Detection). nil means "not prepared" and the image is decoded
+// and normalized here as before.
+func (s *Service) judgeSensitive(ctx context.Context, route sensitiveRoute, body []byte, mime string, settings SensitiveSettings, normalized []byte) bool {
+	cfg := settings.Config
+	switch route {
+	case sensitiveSilenced:
+		return true
+	case sensitiveOfficialFrames:
+		return s.detectSensitiveOfficialFrames(ctx, body, mime, cfg, settings.Official)
+	case sensitiveOfficialImage:
+		return s.detectSensitiveOfficialImage(ctx, body, mime, cfg, settings.Official, normalized)
+	case sensitiveLegacy:
+		score, err := s.sensitiveDetector.Detect(ctx, body, mime)
+		if err != nil {
+			// detector が落ちていても upload 自体は通す best-effort 実装だが、
+			// silently 飲み込むと「自動付与が動いていない」ことに operator が
+			// 気付けない (#750)。warn ログだけ残す。body 内容は出さない (privacy)。
+			slog.Warn("drive: sensitive detector failed", "mime", mime, "err", err)
+			return false
+		}
+		return score >= SensitivityThreshold(cfg.Sensitivity)
+	default:
+		return false
+	}
+}
+
+// detectSensitiveOfficialFrames runs the upstream 2026.7.0 detection
+// pipeline for videos and APNG: フレーム抽出して batch 判定 + 割合集約。
+// すべての失敗は fail-open (非センシティブ)。
+func (s *Service) detectSensitiveOfficialFrames(ctx context.Context, body []byte, mime string, cfg SensitiveConfig, official OfficialDetectorSettings) bool {
+	threshold := OfficialSensitivityThreshold(cfg.Sensitivity)
+	extractor, ok := s.videoProcessor.(DetectionFrameExtractor)
+	if !ok {
+		slog.Warn("drive: official sensitive detection for videos requires FFmpeg video processor", "mime", mime)
+		return false
+	}
+	frames, err := extractor.ExtractDetectionFrames(ctx, body)
+	if err != nil || len(frames) == 0 {
+		if err != nil {
+			slog.Warn("drive: detection frame extraction failed", "mime", mime, "err", err)
+		}
+		return false
+	}
+	predictions := s.officialSensitiveDetector.DetectMany(ctx, frames, official)
+	// 判定に成功したフレームのみ集約する。0 件なら false (upstream の
+	// results.length > 0 ガード = 全動画センシティブ化バグの回避)。
+	var judged []bool
+	for _, preds := range predictions {
+		if preds == nil {
+			continue
+		}
+		sensitive, _ := JudgePredictions(preds, threshold)
+		judged = append(judged, sensitive)
+	}
+	return AggregateFrameJudgements(judged, threshold)
+}
+
+// detectSensitiveOfficialImage runs the upstream 2026.7.0 detection pipeline
+// for still images: 299x299 PNG に正規化して単発判定。すべての失敗は
+// fail-open (非センシティブ)。
+func (s *Service) detectSensitiveOfficialImage(ctx context.Context, body []byte, mime string, cfg SensitiveConfig, official OfficialDetectorSettings, normalized []byte) bool {
 	threshold := OfficialSensitivityThreshold(cfg.Sensitivity)
 
-	// upstream は `image/apng` を動画側 (FFmpeg フレーム抽出) に流す。mk-go の
-	// mime 検出は APNG を image/vnd.mozilla.apng と報告するため両方受ける。
-	isAPNG := mime == "image/apng" || mime == "image/vnd.mozilla.apng"
-	if (IsVideoMIME(mime) || isAPNG) && cfg.EnableForVideos {
-		extractor, ok := s.videoProcessor.(DetectionFrameExtractor)
-		if !ok {
-			slog.Warn("drive: official sensitive detection for videos requires FFmpeg video processor", "mime", mime)
+	if normalized == nil {
+		// **ここも枠を取る (#3037)。** `NormalizeImageForDetection` は
+		// `decodeImage` (= `DecodeWithPixelCap(body, UpstreamMaxPixels)`) +
+		// `imaging.Fill` で、`processImage` と**同じ cap・同じ大きさ**の中間
+		// バッファを確保する。枠の外に置くと、並行アップロードのぶんだけ
+		// 無制限に積み上がって「同時にデコードする本数を縛る」という枠の不変条件が
+		// 成立しない。
+		//
+		// アップロードの経路では、ふつうは `ProcessAll` が同じ枠の中で作った
+		// 縮小が渡ってくるのでここへは来ない (#3995)。来るのは、デコードに
+		// 失敗した画像 (ここでも失敗する)、枠を待つ間に中断された場合、
+		// `ProcessAllWithDetection` を持たない processor の場合。
+		release, slotOK := s.acquireMediaSlot(ctx)
+		if !slotOK {
+			slog.Warn("drive: センシティブ判定の枠を待っている間に中断されました", "mime", mime)
 			return false
 		}
-		frames, err := extractor.ExtractDetectionFrames(ctx, body)
-		if err != nil || len(frames) == 0 {
-			if err != nil {
-				slog.Warn("drive: detection frame extraction failed", "mime", mime, "err", err)
-			}
+		defer release()
+
+		var err error
+		normalized, err = NormalizeImageForDetection(body, mime)
+		if err != nil {
+			slog.Warn("drive: image normalization for detection failed", "mime", mime, "err", err)
 			return false
 		}
-		predictions := s.officialSensitiveDetector.DetectMany(ctx, frames, official)
-		// 判定に成功したフレームのみ集約する。0 件なら false (upstream の
-		// results.length > 0 ガード = 全動画センシティブ化バグの回避)。
-		var judged []bool
-		for _, preds := range predictions {
-			if preds == nil {
-				continue
-			}
-			sensitive, _ := JudgePredictions(preds, threshold)
-			judged = append(judged, sensitive)
-		}
-		return AggregateFrameJudgements(judged, threshold)
-	}
-	if IsVideoMIME(mime) {
-		// 動画で enableForVideos=false は判定しない (upstream analyzeVideo)。
-		return false
-	}
-	if !isMimeImage(mime) {
-		// upstream の isMimeImage('sharp-convertible-image-with-bmp') guard 相当。
-		return false
-	}
-
-	// **ここも枠を取る (#3037)。** `NormalizeImageForDetection` は
-	// `decodeImage` (= `DecodeWithPixelCap(body, UpstreamMaxPixels)`) +
-	// `imaging.Fill` で、`processImage` と**同じ cap・同じ大きさ**の中間
-	// バッファを確保する。枠の外に置くと、並行アップロードのぶんだけ
-	// 無制限に積み上がって「同時にデコードする本数を縛る」という枠の不変条件が
-	// 成立しない。
-	release, slotOK := s.acquireMediaSlot(ctx)
-	if !slotOK {
-		slog.Warn("drive: センシティブ判定の枠を待っている間に中断されました", "mime", mime)
-		return false
-	}
-	defer release()
-
-	normalized, err := NormalizeImageForDetection(body, mime)
-	if err != nil {
-		slog.Warn("drive: image normalization for detection failed", "mime", mime, "err", err)
-		return false
 	}
 	predictions := s.officialSensitiveDetector.DetectMany(ctx, [][]byte{normalized}, official)
 	if len(predictions) == 0 || predictions[0] == nil {
@@ -1115,6 +1191,8 @@ type generateAltsResult struct {
 	webpublic  *ProcessedImage
 	blurhash   *string
 	properties datatypes.JSON
+	// detection is ImageAlts.Detection (#3995). nil unless requested.
+	detection []byte
 }
 
 // generateAlts runs image or video processing on the uploaded file.
@@ -1124,7 +1202,10 @@ type generateAltsResult struct {
 // 並行アップロードで掛け算されるとプロセスごと落ちる (Go の大確保失敗は
 // `throw("out of memory")` で recover できない)。枠が空くまで待つのは、
 // アップロード自体を失敗させるより背圧として素直なため。
-func (s *Service) generateAlts(ctx context.Context, body []byte, mimeType string) *generateAltsResult {
+//
+// withDetection も立っていれば、同じデコードからセンシティブ判定に渡す縮小も
+// 作る (#3995)。processor が対応していなければ作らない (判定の側がデコードする)。
+func (s *Service) generateAlts(ctx context.Context, body []byte, mimeType string, withDetection bool) *generateAltsResult {
 	image := isMimeImage(mimeType) && s.imageProcessor != nil
 	video := isMimeVideo(mimeType) && s.videoProcessor != nil
 	if !image && !video {
@@ -1158,7 +1239,7 @@ func (s *Service) generateAlts(ctx context.Context, body []byte, mimeType string
 		return nil
 	}
 	defer release()
-	return s.processImage(body, mimeType)
+	return s.processImage(body, mimeType, withDetection)
 }
 
 // acquireMediaSlot takes one processing slot, returning the release func.
@@ -1196,9 +1277,9 @@ func (s *Service) acquireMediaSlot(ctx context.Context) (func(), bool) {
 }
 
 // processImage runs all image processing steps (best-effort).
-func (s *Service) processImage(body []byte, mimeType string) *generateAltsResult {
+func (s *Service) processImage(body []byte, mimeType string, withDetection bool) *generateAltsResult {
 	if bp, ok := s.imageProcessor.(BatchImageProcessor); ok {
-		return processImageOnce(bp, body, mimeType)
+		return processImageOnce(bp, body, mimeType, withDetection)
 	}
 	result := &generateAltsResult{}
 
@@ -1227,12 +1308,18 @@ func (s *Service) processImage(body []byte, mimeType string) *generateAltsResult
 
 // processImageOnce is processImage for processors that decode once (#3609).
 // 読めない画像は代替画像なしで続行する (アップロードは拒否しない)。
-func processImageOnce(bp BatchImageProcessor, body []byte, mimeType string) *generateAltsResult {
+func processImageOnce(bp BatchImageProcessor, body []byte, mimeType string, withDetection bool) *generateAltsResult {
 	result := &generateAltsResult{}
-	alts := bp.ProcessAll(body, mimeType)
+	var alts *ImageAlts
+	if dp, ok := bp.(DetectionImageProcessor); ok && withDetection {
+		alts = dp.ProcessAllWithDetection(body, mimeType)
+	} else {
+		alts = bp.ProcessAll(body, mimeType)
+	}
 	if alts == nil {
 		return result
 	}
+	result.detection = alts.Detection
 	if alts.Width > 0 || alts.Height > 0 {
 		props := map[string]int{"width": alts.Width, "height": alts.Height}
 		if data, err := json.Marshal(props); err == nil {

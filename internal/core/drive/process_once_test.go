@@ -505,7 +505,7 @@ func TestProcessImage_UsesSingleDecode(t *testing.T) {
 	f := &fakeBatchProcessor{t: t, alts: &ImageAlts{Width: 30, Height: 20, Blurhash: "LKO2", Thumbnail: thumb, Webpublic: wp}}
 	s := &Service{imageProcessor: f}
 
-	got := s.processImage([]byte("x"), "image/png")
+	got := s.processImage([]byte("x"), "image/png", false)
 	assert.Equal(t, 1, f.calls)
 	assert.JSONEq(t, `{"width":30,"height":20}`, string(got.properties))
 	require.NotNil(t, got.blurhash)
@@ -515,7 +515,7 @@ func TestProcessImage_UsesSingleDecode(t *testing.T) {
 
 	// 読めない画像: 何も作らないが、結果は空で返す (アップロードは続ける)。
 	f.alts = nil
-	got = s.processImage([]byte("x"), "image/png")
+	got = s.processImage([]byte("x"), "image/png", false)
 	require.NotNil(t, got)
 	assert.Nil(t, got.properties)
 	assert.Nil(t, got.blurhash)
