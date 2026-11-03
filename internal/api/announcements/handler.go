@@ -34,6 +34,12 @@ type BroadcastPublisher interface {
 	PublishBroadcast(eventType string, body any)
 }
 
+// ArchiveScheduler schedules the auto-archive job of an announcement at its
+// autoArchiveAt (#3994). queue.Client satisfies it.
+type ArchiveScheduler interface {
+	ScheduleAnnouncementArchive(id string, at time.Time) error
+}
+
 // Handler handles announcement-related API endpoints.
 type Handler struct {
 	repo                repository.AnnouncementRepository
@@ -47,6 +53,31 @@ type Handler struct {
 	entityPacker *entity.Packer
 	// clock は自動アーカイブの期限と比べる現在時刻 (#3809)。テストで差し替える。
 	clock func() time.Time
+	// archiveScheduler は自動アーカイブの期限の時刻にジョブを積む (#3994)。nil なら
+	// 積まない (起動時の処理と日次の保険が落とす)。
+	archiveScheduler ArchiveScheduler
+}
+
+// SetArchiveScheduler sets where the auto-archive jobs are scheduled (#3994).
+// nil disables scheduling.
+func (h *Handler) SetArchiveScheduler(s ArchiveScheduler) {
+	h.archiveScheduler = s
+}
+
+// scheduleArchive schedules the auto-archive job of a when it is active and has
+// an autoArchiveAt, like upstream AnnouncementService.create / update.
+//
+// 積めなくても API は失敗させない (本家は失敗を返す)。お知らせは既に保存済みで、
+// 読むときに期限を見るので見え方は変わらず、DB の isActive は起動時の処理か日次の
+// 保険が落とす。
+func (h *Handler) scheduleArchive(c echo.Context, a *model.Announcement) {
+	if h.archiveScheduler == nil || a == nil || !a.IsActive || a.AutoArchiveAt == nil {
+		return
+	}
+	if err := h.archiveScheduler.ScheduleAnnouncementArchive(a.ID, *a.AutoArchiveAt); err != nil {
+		slog.WarnContext(c.Request().Context(), "announcement: schedule auto-archive failed",
+			"announcementId", a.ID, "err", err)
+	}
 }
 
 // SetClock overrides the time source the auto-archive checks compare
@@ -330,6 +361,7 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	if err := h.repo.Create(a); err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	h.scheduleArchive(c, a)
 	// upstream AnnouncementService.create: per-user (userId 指定) は main へ、
 	// global (userId 無し) は broadcast stream へ announcementCreated を流す (#2056)。
 	// #2106 L24/L52: create event は upstream 同様 me-less で pack する (viewerID="" → forYou=false)。
@@ -358,6 +390,14 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 	resp := h.entityPacker.PackAnnouncement(a, h.idGen, false, "")
 	resp["imageUrl"] = a.ImageURL // upstream wire は raw imageUrl
 	return c.JSON(http.StatusOK, resp)
+}
+
+// sameTimePtr reports whether a and b are both nil or the same instant.
+func sameTimePtr(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // isValidAnnouncementIcon reports whether v matches upstream's
@@ -479,12 +519,25 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 	if len(fields) == 0 {
 		return c.NoContent(http.StatusNoContent)
 	}
+	// 更新の前の期限と isActive を値で控える (repository によっては before が更新後の
+	// 行と同じものを指す)。
+	var beforeAutoArchiveAt *time.Time
+	if before.AutoArchiveAt != nil {
+		t := *before.AutoArchiveAt
+		beforeAutoArchiveAt = &t
+	}
+	beforeActive := before.IsActive
 	if err := h.repo.UpdateFields(req.ID, fields); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ANNOUNCEMENT", "No such announcement.", "d3aae5a7-6372-4cb4-b61c-f511ffc2d7cc"))
 	}
 	after, err := h.repo.FindByID(req.ID)
 	if err != nil {
 		return c.NoContent(http.StatusNoContent)
+	}
+	// 本家 AnnouncementService.update と同じく、期限か isActive が変わったときに積む。
+	// 古い期限のジョブは取り消さない (走っても、保存されている期限と比べて何もしない)。
+	if !sameTimePtr(beforeAutoArchiveAt, after.AutoArchiveAt) || beforeActive != after.IsActive {
+		h.scheduleArchive(c, after)
 	}
 	h.logAnnouncementAction(c, moderationlog.LogUpdateGlobalAnnouncement, moderationlog.LogUpdateUserAnnouncement, before, map[string]any{
 		"announcementId": req.ID,

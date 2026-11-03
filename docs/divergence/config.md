@@ -77,7 +77,7 @@ upstream は用途ごとに **10 queue** に分けるが、Elythia は **8 queue
 |---|---|
 | `deliver` | `deliver` |
 | `inbox` | `inbox` |
-| `system` | `maintenance` (cron 群: chart tick/resync/clean, checkExpiredMutings, archiveAnnouncements, clean, cleanRemoteNotes, checkModeratorsActivity, instanceRefresh, retentionAggregate, chunkedUploadGc, orphanUserCleanup, orphanAttachmentCleanup) |
+| `system` | `maintenance` (cron 群: chart tick/resync/clean, checkExpiredMutings, archiveAnnouncements, clean, cleanRemoteNotes, checkModeratorsActivity, instanceRefresh, retentionAggregate, chunkedUploadGc, orphanUserCleanup, orphanAttachmentCleanup, resendQuoteRequests) |
 | `endedPollNotification` | **queue ではなく常駐 goroutine** (`corepoll.ExpiryWorker`、60 秒間隔) |
 | `postScheduledNote` | `deliver` の `note:postScheduled` |
 | `db` | `export` の `export` / `import` / `importCustomEmojis`、`deliver` の `maintenance:deleteAccount` |
@@ -89,17 +89,22 @@ upstream は用途ごとに **10 queue** に分けるが、Elythia は **8 queue
 
 `objectStorage` は `deleteFile` / `cleanRemoteFiles` とも upstream と同じ job 構成 (#2325)。振り分けも upstream に揃えてあり、ローカル FS 保存 (`storedInternal=true`) の実体は同期削除、object storage 上の実体だけを queue に逃がす。`clean-remote-files` は「job 1 本が内部でバッチ削除を回す」形も upstream と同じで、リモートキャッシュの件数ぶん job を積んで Redis を圧迫することはない。ただし Elythia はリモートメディアをキャッシュしないので、**Elythia が作った行に対しては対象が 0 件になる** (対象は `isLink=false` のリモート行で、それを作る経路が無い)。**TS 製の DB を引き継いだときだけ対象がある** (§5.5)。job 構成を upstream に揃えてあるのは drop-in 復路のため。
 
-**お知らせの自動アーカイブ (#3809) は、お知らせごとの遅延ジョブではなく毎分の定期処理で行う。**
+**お知らせの自動アーカイブ (#3809) は、本家と同じくお知らせごとの遅延ジョブで行う (#3994)。違うのは queue とジョブの中身。**
 本家 2026.10.1 は `system` queue に `archiveAnnouncement` ジョブ (job ID `archiveAnnouncement-<id>-<期限のミリ秒>`) を
 お知らせごとに予約し、期限・`isActive` の変更や削除で取り消して予約し直し、起動時に Redis から消えた分を
-予約し直す。Elythia はそのジョブを消費せず、`maintenance:archiveAnnouncements` (毎分) が `isActive` が true で
-期限を過ぎた行をまとめて `isActive = false` に落とし、`updatedAt` をその時刻にする (本家のジョブと同じ更新)。
-期限はそのときに保存されている値と比べるので、期限を延ばした行は落とさない (本家がジョブの予約時刻と保存値を
-照合するのと同じ意味)。API (`announcements`・`admin/announcements/list`・未読のお知らせ) は本家と同じく
-読むときに期限を見るので、見え方は本家と変わらない。違うのは、DB の `isActive` / `updatedAt` が変わるのが
-期限から最大でおよそ 1 分遅れる点 (`admin/announcements/list` の `updatedAt` に出る) だけ。TS の DB を
-引き継いだときに Redis に残っている本家の `archiveAnnouncement` ジョブは処理しないが、同じ行をこの定期処理が
-落とす。
+予約し直す。Elythia は作成と、期限か `isActive` を変えた更新のときに、`maintenance:archiveAnnouncements` を
+期限の時刻 (1 秒遅らせる) に積む。古い予定のジョブは取り消さない。ジョブは payload のお知らせだけでなく、
+そのときに `isActive` が true で期限を過ぎた行をまとめて `isActive = false` に落とし、`updatedAt` をその時刻にする
+(本家のジョブと同じ更新)。期限はそのときに保存されている値と比べるので、期限を延ばした・消した・お知らせを消した後に
+古いジョブが走っても、その行は落とさない (本家がジョブの予約時刻と保存値を照合するのと同じ意味)。起動時には
+queue を回すプロセスが同じジョブを 1 つ積み、期限を過ぎた行を落としてから、まだ期限の来ていない行のジョブを積み直す。
+加えて、プロセスが動いたままジョブだけが失われたとき (Redis のデータが消えた、管理画面から消した) の保険として、
+1 日 1 回 (00:10、プロセスの TZ) の cron で同じ処理を流す。API (`announcements`・`admin/announcements/list`・
+未読のお知らせ) は本家と同じく読むときに期限を見るので、見え方は本家と変わらない。違うのは、DB の `isActive` /
+`updatedAt` が変わるのが期限から 1 秒ほど遅れる点と、ジョブが失われたとき・管理画面の promote で期限の前に走らされたとき (期限前なので何もせずに終わり、積み直さない) には保険の cron まで最大 1 日遅れる点
+(`admin/announcements/list` の `updatedAt` に出る) だけ。#3994 より前は毎分の cron で、何もしない回の完了の
+記録を 7 日ぶん Redis にためていた。TS の DB を引き継いだときに Redis に残っている本家の `archiveAnnouncement`
+ジョブは処理しないが、同じ行を起動時のジョブが落とすか、まだ期限前なら積み直す。
 
 `note:postScheduled` / `maintenance:deleteAccount` が task type の接頭辞と違う `deliver` に載っているのは意図的なもの。いずれも実行結果が連合配送につながるジョブで、worker 2 本の `maintenance` より 16 本の `deliver` の方が捌ける。task type と queue の対応は `internal/queue/routing_test.go` が表として固定しており、変えると落ちる (#2327)。
 

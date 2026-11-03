@@ -2,6 +2,7 @@ package announcements_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -266,6 +267,97 @@ func TestAdminUpdate_ParamShapeIsCheckedBeforeAutoArchiveAt(t *testing.T) {
 			rec := doPost(h.AdminUpdate, body, nil)
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			assert.Equal(t, "INVALID_PARAM", decodeError(t, rec.Body.Bytes())["code"])
+		})
+	}
+}
+
+type fakeArchiveScheduler struct {
+	got []string // "<id> <unix ms>"
+	err error
+}
+
+func (s *fakeArchiveScheduler) ScheduleAnnouncementArchive(id string, at time.Time) error {
+	s.got = append(s.got, fmt.Sprintf("%s %d", id, at.UnixMilli()))
+	return s.err
+}
+
+// 作成で期限があれば、その時刻のジョブを積む (#3994。本家と同じ)。期限が無い・
+// 作成の時点で非アクティブなら積まない。
+func TestAdminCreate_SchedulesAutoArchive(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	at := now.Add(time.Hour)
+
+	h, repo := newTestHandler(t)
+	h.SetClock(func() time.Time { return now })
+	sched := &fakeArchiveScheduler{}
+	h.SetArchiveScheduler(sched)
+	rec := doPost(h.AdminCreate, fmt.Sprintf(`{"title":"t","text":"x","imageUrl":null,"autoArchiveAt":%d}`, at.UnixMilli()), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	a := onlyItem(t, repo.Items)
+	assert.Equal(t, []string{fmt.Sprintf("%s %d", a.ID, at.UnixMilli())}, sched.got)
+
+	rec = doPost(h.AdminCreate, `{"title":"t","text":"x","imageUrl":null}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Len(t, sched.got, 1, "no expiry, no job")
+
+	// 積めなくても作成は成功する (起動時の処理と日次の保険が落とす)。
+	h, repo = newTestHandler(t)
+	h.SetClock(func() time.Time { return now })
+	h.SetArchiveScheduler(&fakeArchiveScheduler{err: errors.New("redis down")})
+	rec = doPost(h.AdminCreate, fmt.Sprintf(`{"title":"t","text":"x","imageUrl":null,"autoArchiveAt":%d}`, at.UnixMilli()), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Len(t, repo.Items, 1)
+}
+
+// 作成の途中で期限が来て非アクティブで作ったものには積まない。
+func TestAdminCreate_DoesNotScheduleInactive(t *testing.T) {
+	h, repo := newTestHandler(t)
+	start := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	at := start.Add(time.Millisecond)
+	calls := 0
+	h.SetClock(func() time.Time {
+		calls++
+		if calls%2 == 1 {
+			return start
+		}
+		return at
+	})
+	sched := &fakeArchiveScheduler{}
+	h.SetArchiveScheduler(sched)
+	rec := doPost(h.AdminCreate, fmt.Sprintf(`{"title":"t","text":"x","imageUrl":null,"autoArchiveAt":%d}`, at.UnixMilli()), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.False(t, onlyItem(t, repo.Items).IsActive)
+	assert.Empty(t, sched.got)
+}
+
+// 更新では、期限か isActive が変わり、更新後にアクティブで期限があるときだけ積む
+// (本家 AnnouncementService.update と同じ条件)。
+func TestAdminUpdate_SchedulesAutoArchive(t *testing.T) {
+	old := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	newAt := old.Add(time.Hour)
+	for _, tc := range []struct {
+		name   string
+		before model.Announcement
+		body   string
+		want   []string
+	}{
+		{"sets a time", model.Announcement{ID: "a1", IsActive: true}, fmt.Sprintf(`{"id":"a1","autoArchiveAt":%d}`, newAt.UnixMilli()), []string{fmt.Sprintf("a1 %d", newAt.UnixMilli())}},
+		{"moves the time", model.Announcement{ID: "a1", IsActive: true, AutoArchiveAt: &old}, fmt.Sprintf(`{"id":"a1","autoArchiveAt":%d}`, newAt.UnixMilli()), []string{fmt.Sprintf("a1 %d", newAt.UnixMilli())}},
+		{"reactivates", model.Announcement{ID: "a1", IsActive: false, AutoArchiveAt: &newAt}, `{"id":"a1","isActive":true}`, []string{fmt.Sprintf("a1 %d", newAt.UnixMilli())}},
+		{"same time", model.Announcement{ID: "a1", IsActive: true, AutoArchiveAt: &newAt}, fmt.Sprintf(`{"id":"a1","autoArchiveAt":%d}`, newAt.UnixMilli()), nil},
+		{"other field", model.Announcement{ID: "a1", IsActive: true, AutoArchiveAt: &newAt}, `{"id":"a1","title":"new"}`, nil},
+		{"clears", model.Announcement{ID: "a1", IsActive: true, AutoArchiveAt: &old}, `{"id":"a1","autoArchiveAt":null}`, nil},
+		{"deactivates", model.Announcement{ID: "a1", IsActive: true, AutoArchiveAt: &old}, `{"id":"a1","isActive":false}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newTestHandler(t)
+			a := tc.before
+			repo.Items["a1"] = &a
+			sched := &fakeArchiveScheduler{}
+			h.SetArchiveScheduler(sched)
+			rec := doPost(h.AdminUpdate, tc.body, nil)
+			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			assert.Equal(t, tc.want, sched.got)
 		})
 	}
 }

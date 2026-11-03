@@ -147,8 +147,8 @@ func (s *Server) buildQueue(w *wiring, coreSvcs core, idGen id.Generator) queueP
 	// user mute と channel mute の両方の期限切れ行を prune する。
 	checkExpiredMutingsProcessor := processors.NewCheckExpiredMutingsProcessor(mutingRepo, channelMutingRepo)
 
-	// お知らせの自動アーカイブ (#3809): scheduler の cron (毎分) が enqueue する。
-	// 期限を過ぎた行の isActive を false に落とす。
+	// お知らせの自動アーカイブ (#3809): 期限の時刻の遅延ジョブ・起動時のジョブ・日次の
+	// 保険の cron が enqueue する (#3994)。期限を過ぎた行の isActive を false に落とす。
 	archiveAnnouncementsProc := processors.NewArchiveAnnouncementsProcessor(w.repos.announcement)
 
 	// Daily generic clean (#1563): scheduler の cron (0 0 * * *) が enqueue する。

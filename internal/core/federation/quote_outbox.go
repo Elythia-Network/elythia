@@ -2,6 +2,7 @@ package federation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -20,12 +21,19 @@ type QuoteRequestStore interface {
 	FindByRequestURI(requestURI string) (*model.NoteQuoteRequest, error)
 	Ensure(noteID, requestURI string, nextResendAt time.Time) (*model.NoteQuoteRequest, error)
 	DueResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error)
+	UpcomingResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error)
 	ClaimResend(noteID string, due time.Time, next *time.Time) (bool, error)
 	ListByApprovalURI(approvalURI string, limit int) ([]model.NoteQuoteRequest, error)
 	MarkAccepted(noteID, approvalURI string) (bool, error)
 	MarkRevoked(noteID string) (bool, error)
 	MarkUpdateSent(noteID, state, approvalURI string) error
 	MarkRejected(noteID string) error
+}
+
+// ResendScheduler schedules the job that runs the resends due at a time
+// (#3994). queue.Client satisfies it.
+type ResendScheduler interface {
+	ScheduleQuoteRequestResend(noteID string, at time.Time) error
 }
 
 // QuoteApprovalLookup finds an approval granted to a quoting note.
@@ -51,12 +59,32 @@ type QuoteOutbox struct {
 	requests  QuoteRequestStore
 	approvals QuoteApprovalLookup
 	deliver   QuoteOutboxDelivery
+	// scheduler は送り直しの予定の時刻にジョブを積む (#3994)。nil なら積まない
+	// (起動時の処理だけが送り直す)。
+	scheduler ResendScheduler
 }
 
 // NewQuoteOutbox constructs a QuoteOutbox. decider supplies the note / user
 // lookups, the approval store and the rules shared with incoming requests.
 func NewQuoteOutbox(decider *QuoteRequestHandler, requests QuoteRequestStore, approvals QuoteApprovalLookup, deliver QuoteOutboxDelivery) *QuoteOutbox {
 	return &QuoteOutbox{decider: decider, requests: requests, approvals: approvals, deliver: deliver}
+}
+
+// SetResendScheduler sets where the resend jobs are scheduled (#3994). nil
+// disables scheduling.
+func (o *QuoteOutbox) SetResendScheduler(s ResendScheduler) {
+	o.scheduler = s
+}
+
+// scheduleResend schedules the job for the resend slot at of noteID. 積めなく
+// ても呼び出し元を失敗させない (起動時の処理が、予定から 3 分以内なら拾う)。
+func (o *QuoteOutbox) scheduleResend(noteID string, at time.Time) {
+	if o.scheduler == nil {
+		return
+	}
+	if err := o.scheduler.ScheduleQuoteRequestResend(noteID, at); err != nil {
+		slog.Warn("quote resend: schedule", "noteId", noteID, "err", err)
+	}
 }
 
 // quoteTarget returns the note quoted by note when note will be delivered as a
@@ -134,8 +162,12 @@ func (o *QuoteOutbox) RequestApproval(note *model.Note, author *model.User) erro
 		return fmt.Errorf("quote outbox: find quoted author: %w", err)
 	}
 	// 返ってくる Accept は id で照合するので、送る前に記録する。
-	if _, err := o.requests.Ensure(note.ID, o.decider.urls.QuoteRequestURI(note.ID), o.decider.now().Add(quoteRequestResendAfter[0])); err != nil {
+	req, err := o.requests.Ensure(note.ID, o.decider.urls.QuoteRequestURI(note.ID), o.decider.now().Add(quoteRequestResendAfter[0]))
+	if err != nil {
 		return fmt.Errorf("quote outbox: record request: %w", err)
+	}
+	if req.State == model.QuoteRequestPending && req.NextResendAt != nil {
+		o.scheduleResend(note.ID, *req.NextResendAt)
 	}
 	if err := o.deliver.SendQuoteRequest(note, *target.URI, quotedAuthor); err != nil {
 		return fmt.Errorf("quote outbox: send request: %w", err)
@@ -160,22 +192,58 @@ var quoteRequestResendAfter = []time.Duration{time.Minute, 10 * time.Minute}
 // その間に相手側で承認・取り消しが済んでいれば取り消しを元に戻しうる。
 const quoteRequestResendTolerance = 3 * time.Minute
 
-// quoteRequestResendBatch bounds how many resends one run takes.
+// QuoteRequestResendTolerance exports quoteRequestResendTolerance for the check
+// that the retries of a slot job end within it (#3994).
+const QuoteRequestResendTolerance = quoteRequestResendTolerance
+
+// quoteRequestResendBatch bounds how many resends one query takes.
 const quoteRequestResendBatch = 100
 
+// quoteRequestUpcomingLimit bounds how many upcoming resends the startup run
+// schedules again. 予定が残るのは最初の送信から 10 分の間だけなので、普通は
+// 多くない。
+const quoteRequestUpcomingLimit = 10000
+
 // ResendPending sends again the QuoteRequests that are still pending and due
-// (#3238)。毎分の定期処理から呼ぶ。送った件数を返す。
+// (#3238)。予定の時刻の遅延ジョブ・起動時の処理・2 分ごとの保険の cron から呼ぶ
+// (#3994)。送った件数を返す。
 //
 // 行を取り分けてから送る (取り分けは「保留中で予定が変わっていない」ときだけ成功する)
-// ので、複数の worker が同時に走っても二重に送らない。送る前に、投稿がまだ引用で、
-// 公開範囲が対象かを確かめ直す。1 件の失敗で残りを止めない (取り分けた分は次の予定へ
-// 進むので、失敗した回は送り直さない)。
+// ので、複数の worker が同時に走っても、同じ予定のジョブが重なっても二重に送らない。
+// 送る前に、投稿がまだ引用で、公開範囲が対象かを確かめ直す。1 件の失敗で残りを
+// 止めない (取り分けた分は次の予定へ進むので、失敗した回は送り直さない)。次の予定が
+// あれば、その時刻のジョブを積む。
+//
+// 期限の来た行を全部処理する (1 回の問い合わせは quoteRequestResendBatch 件まで)。
+// 起動時には止まっていた間の分がまとめて来うるので、1 回で終わらせる。1 件も
+// 取り分けられなかった回 (取り分けの失敗が続くとき) で打ち切る。
+//
+// **取り分けに失敗した行が 1 件でもあれば、残りを処理し終えてから error を返す**
+// (#3994 の敵対的レビュー)。ジョブを失敗させて queue に試し直させるため (毎分の
+// cron だった頃は次の分が拾った)。取り分けは「保留中で予定が変わっていない」とき
+// だけ成功するので、試し直しで済んだ行を二重に送ることは無い。
 func (o *QuoteOutbox) ResendPending(now time.Time) (int, error) {
-	due, err := o.requests.DueResends(now, quoteRequestResendBatch)
-	if err != nil {
-		return 0, fmt.Errorf("quote resend: find due: %w", err)
-	}
 	sent := 0
+	var claimErr error
+	for {
+		due, err := o.requests.DueResends(now, quoteRequestResendBatch)
+		if err != nil {
+			return sent, errors.Join(fmt.Errorf("quote resend: find due: %w", err), claimErr)
+		}
+		n, claimed, err := o.resendBatch(now, due)
+		sent += n
+		if err != nil && claimErr == nil {
+			claimErr = err
+		}
+		if len(due) < quoteRequestResendBatch || claimed == 0 {
+			return sent, claimErr
+		}
+	}
+}
+
+// resendBatch takes and sends the rows of due, returning how many it sent, how
+// many it took, and the first error of taking a row.
+func (o *QuoteOutbox) resendBatch(now time.Time, due []model.NoteQuoteRequest) (sent, claimedRows int, claimErr error) {
 	for _, req := range due {
 		if req.NextResendAt == nil {
 			continue
@@ -189,9 +257,19 @@ func (o *QuoteOutbox) ResendPending(now time.Time) (int, error) {
 		claimed, err := o.requests.ClaimResend(req.NoteID, *req.NextResendAt, next)
 		if err != nil {
 			slog.Warn("quote resend: claim", "noteId", req.NoteID, "err", err)
+			if claimErr == nil {
+				claimErr = fmt.Errorf("quote resend: claim %s: %w", req.NoteID, err)
+			}
 			continue
 		}
-		if !claimed || now.Sub(*req.NextResendAt) > quoteRequestResendTolerance {
+		if !claimed {
+			continue
+		}
+		claimedRows++
+		if next != nil {
+			o.scheduleResend(req.NoteID, *next)
+		}
+		if now.Sub(*req.NextResendAt) > quoteRequestResendTolerance {
 			continue
 		}
 		ok, err := o.resend(req.NoteID)
@@ -203,7 +281,33 @@ func (o *QuoteOutbox) ResendPending(now time.Time) (int, error) {
 			sent++
 		}
 	}
-	return sent, nil
+	return sent, claimedRows, claimErr
+}
+
+// ScheduleUpcomingResends schedules again the jobs of the resends that are
+// pending and not yet due (#3994), and returns how many it tried to schedule. 起動時に
+// 呼ぶ。Redis のジョブが失われていても、まだ来ていない予定を落とさない。既に積まれて
+// いる予定は queue 側で重ならない (重なっても取り分けで一度しか送らない)。
+func (o *QuoteOutbox) ScheduleUpcomingResends(now time.Time) (int, error) {
+	if o.scheduler == nil {
+		return 0, nil
+	}
+	rows, err := o.requests.UpcomingResends(now, quoteRequestUpcomingLimit)
+	if err != nil {
+		return 0, fmt.Errorf("quote resend: find upcoming: %w", err)
+	}
+	if len(rows) == quoteRequestUpcomingLimit {
+		slog.Warn("quote resend: too many upcoming resends; the rest are not scheduled", "limit", quoteRequestUpcomingLimit)
+	}
+	n := 0
+	for _, req := range rows {
+		if req.NextResendAt == nil {
+			continue
+		}
+		o.scheduleResend(req.NoteID, *req.NextResendAt)
+		n++
+	}
+	return n, nil
 }
 
 // resend sends the QuoteRequest of the quoting note again, if it still quotes

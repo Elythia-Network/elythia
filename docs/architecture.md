@@ -2407,8 +2407,8 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   起動せずに`errGenerationStopped`を返す(1度きりの起動の結果なので、後の呼び出しも同じエラーを返す)。
   起動の途中で停止が始まったときは、停止は起動が済むのを待ってから印を立て、その起動が起動したもの
   をすべて止める。起動の間はmutexを握ったままにした。起動は部品のgoroutineを立てるほか、cronの登録
-  (`registerSchedulerJobs`の12個の登録の関数)と撤去(`PruneUnregistered`)でRedisを
-  `context.Background()`のまま呼ぶので、その分だけ長くかかりうる
+  (`registerSchedulerJobs`の12個の登録の関数)と撤去(`PruneUnregistered`)、起動時のジョブの投入
+  (`enqueueDueJobsAtStartup`、#3994)でRedisを`context.Background()`のまま呼ぶので、その分だけ長くかかりうる
   - **本番の経路に足す待ちは無い。** Supervisorは`StartBackground`と`StopBackground`をどちらも`genMu`の
     下で呼ぶので、固まった起動は#3709の前から停止を止めていた(`Supervisor.Shutdown`は
     `lockBefore(&s.genMu, b.drainUntil)`で見切って進む)。走っている起動を`runMu`で待つのは、

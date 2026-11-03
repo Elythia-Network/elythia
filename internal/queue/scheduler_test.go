@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/elythia-network/elythia/internal/queue"
+	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/elythia-network/elythia/internal/queue/driver/mkqdriver"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -131,4 +132,69 @@ func TestScheduler_EveryCronCarriesRetention(t *testing.T) {
 		assert.Equal(t, map[string]any{"age": week}, tmpl["removeOnComplete"], key)
 		assert.Equal(t, map[string]any{"age": week}, tmpl["removeOnFail"], key)
 	}
+}
+
+// **毎分の cron を無くした (#3994)。** お知らせの自動アーカイブと引用の送り直しは
+// 期限の時刻の遅延ジョブにしたので、毎分の cron を登録しない。前の版が Redis に
+// 残した毎分のスケジュールは、版を上げた後の起動で、同じ schedule ID への低頻度の
+// 保険の登録 (お知らせは日次、送り直しは 2 分ごと) が置き換える。
+func TestScheduler_PerMinuteCronsAreGoneAfterUpgrade(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+	flushTestRedis(t)
+	ctx := context.Background()
+
+	// 前の版の登録 (毎分) を Redis に残す。
+	old := newDriver(t).Scheduler()
+	for _, tt := range []string{queue.TaskTypeArchiveAnnouncements, queue.TaskTypeResendQuoteRequests} {
+		require.NoError(t, old.Register("* * * * *", tt, nil, driver.WithQueue(queue.MaintenanceQueueName)))
+	}
+	repeatKey := "bull:" + queue.MaintenanceQueueName + ":repeat"
+	ids, err := testRedis.Client.ZRange(ctx, repeatKey, 0, -1).Result()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{queue.TaskTypeArchiveAnnouncements, queue.TaskTypeResendQuoteRequests}, ids)
+
+	// 新しい版の起動: 引数を取らない Register* を全部呼んでから撤去する
+	// (server の registerSchedulerJobs と同じ順)。
+	s := queue.NewScheduler(newDriver(t))
+	t.Cleanup(s.Shutdown)
+	v := reflect.ValueOf(s)
+	for i := range v.NumMethod() {
+		m := v.Type().Method(i)
+		if !strings.HasPrefix(m.Name, "Register") || m.Type.NumIn() != 1 {
+			continue
+		}
+		out := v.Method(i).Call(nil)
+		if err, _ := out[0].Interface().(error); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+	}
+	_, err = s.PruneUnregistered()
+	require.NoError(t, err)
+
+	ids, err = testRedis.Client.ZRange(ctx, repeatKey, 0, -1).Result()
+	require.NoError(t, err)
+	require.Contains(t, ids, queue.TaskTypeResendQuoteRequests)
+	require.Contains(t, ids, queue.TaskTypeArchiveAnnouncements)
+
+	// 残った全てのスケジュールに、毎分の cron が無いこと。
+	zsets, err := testRedis.Client.Keys(ctx, "bull:*:repeat").Result()
+	require.NoError(t, err)
+	require.NotEmpty(t, zsets)
+	patterns := map[string]string{}
+	for _, z := range zsets {
+		members, err := testRedis.Client.ZRange(ctx, z, 0, -1).Result()
+		require.NoError(t, err)
+		for _, id := range members {
+			key := z + ":" + id
+			pattern, err := testRedis.Client.HGet(ctx, key, "pattern").Result()
+			require.NoError(t, err, key)
+			patterns[key] = pattern
+			assert.NotEqual(t, "* * * * *", pattern, key)
+		}
+	}
+	require.Greater(t, len(patterns), 5, "schedules were not found")
+	assert.Equal(t, "10 0 * * *", patterns[repeatKey+":"+queue.TaskTypeArchiveAnnouncements],
+		"the announcement archive keeps only the daily safety run")
+	assert.Equal(t, "*/2 * * * *", patterns[repeatKey+":"+queue.TaskTypeResendQuoteRequests],
+		"the resend keeps only the safety run every 2 minutes")
 }

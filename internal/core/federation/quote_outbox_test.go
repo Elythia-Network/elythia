@@ -3,6 +3,8 @@ package federation
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,10 @@ type qoRequests struct {
 	err      error
 	dueErr   error
 	claimErr error
+	// claimFails は、その noteId の取り分けを残りの回数だけ失敗させる。
+	claimFails map[string]int
+	// upcomingErr は UpcomingResends を失敗させる。
+	upcomingErr error
 	// claimLost は、別の worker が先に取り分けた状態を作る (DueResends の後、
 	// ClaimResend の前に予定を進める)。
 	claimLost bool
@@ -81,9 +87,27 @@ func (r *qoRequests) DueResends(now time.Time, limit int) ([]model.NoteQuoteRequ
 	return out, nil
 }
 
+func (r *qoRequests) UpcomingResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error) {
+	if r.upcomingErr != nil {
+		return nil, r.upcomingErr
+	}
+	var out []model.NoteQuoteRequest
+	for _, q := range r.rows {
+		if q.State == model.QuoteRequestPending && q.NextResendAt != nil && q.NextResendAt.After(now) && len(out) < limit {
+			out = append(out, *q)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NoteID < out[j].NoteID })
+	return out, nil
+}
+
 func (r *qoRequests) ClaimResend(noteID string, due time.Time, next *time.Time) (bool, error) {
 	if r.claimErr != nil {
 		return false, r.claimErr
+	}
+	if r.claimFails[noteID] > 0 {
+		r.claimFails[noteID]--
+		return false, errors.New("db blip")
 	}
 	q := r.rows[noteID]
 	if r.claimLost && q != nil && q.NextResendAt != nil {
@@ -851,13 +875,13 @@ func TestQuoteOutbox_ResendFailures(t *testing.T) {
 	_, err := e.o.ResendPending(now)
 	assert.Error(t, err)
 
-	// 取り分けに失敗したものは送らず、残りは続ける。
+	// 取り分けに失敗したものは送らず、error を返して queue に試し直させる (#3994)。
 	e = newQOEnv(t)
 	e.h.now = func() time.Time { return now }
 	e.requested(t)
 	e.requests.claimErr = errors.New("db down")
 	sent, err := e.o.ResendPending(now.Add(time.Minute))
-	require.NoError(t, err)
+	assert.Error(t, err)
 	assert.Zero(t, sent)
 	assert.Len(t, e.delivery.requests, 1)
 
@@ -933,4 +957,177 @@ func TestQuoteOutbox_ResendSkipsSuspendedQuoter(t *testing.T) {
 			assert.Len(t, e.delivery.requests, 1)
 		})
 	}
+}
+
+type qoScheduler struct {
+	got []string // "<noteId> <RFC 3339 time>"
+	err error
+}
+
+func (s *qoScheduler) ScheduleQuoteRequestResend(noteID string, at time.Time) error {
+	s.got = append(s.got, noteID+" "+at.UTC().Format(time.RFC3339))
+	return s.err
+}
+
+func qoAt(noteID string, at time.Time) string {
+	return noteID + " " + at.UTC().Format(time.RFC3339)
+}
+
+// 送り直しの予定を書くたびに、その時刻のジョブを積む (#3994)。最初の送信で 1 分後、
+// 1 回目の送り直しで 10 分後。最後の枠の後は積まない。
+func TestQuoteOutbox_SchedulesResendJobs(t *testing.T) {
+	e := newQOEnv(t)
+	sched := &qoScheduler{}
+	e.o.SetResendScheduler(sched)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	assert.Equal(t, []string{qoAt("q1", now.Add(time.Minute))}, sched.got)
+
+	// 予定の時刻のジョブ: 送り、次の予定のジョブを積む。
+	t1 := now.Add(time.Minute)
+	sent, err := e.o.ResendPending(t1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent)
+	assert.Equal(t, []string{qoAt("q1", t1), qoAt("q1", now.Add(10*time.Minute))}, sched.got)
+
+	// 同じ予定のジョブが重なって走っても、2 回目は送らず、積みもしない。
+	sent, err = e.o.ResendPending(t1)
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 2)
+	assert.Len(t, sched.got, 2)
+
+	// 最後の枠: 送るが、次は積まない。
+	sent, err = e.o.ResendPending(now.Add(10 * time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent)
+	assert.Len(t, sched.got, 2)
+}
+
+// 承認された後に古い予定のジョブが走っても送らない (行の今の状態を確かめ直す)。
+func TestQuoteOutbox_StaleResendJobAfterAnswer(t *testing.T) {
+	e := newQOEnv(t)
+	sched := &qoScheduler{}
+	e.o.SetResendScheduler(sched)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.h.now = func() time.Time { return now }
+	e.requested(t)
+	require.NoError(t, e.o.HandleAnswer(qoCarolURI, qrBase+"/notes/q1#quote-request", true, qoApproval))
+	before := len(e.delivery.requests)
+
+	sent, err := e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, before)
+	assert.Len(t, sched.got, 1, "no further job")
+}
+
+// 積めなくても、引用の承認を求める処理は失敗させない。
+func TestQuoteOutbox_ScheduleFailureDoesNotFailRequest(t *testing.T) {
+	e := newQOEnv(t)
+	e.o.SetResendScheduler(&qoScheduler{err: errors.New("redis down")})
+	e.requested(t)
+	assert.Len(t, e.delivery.requests, 1)
+}
+
+// 1 回で、期限の来た行を全部処理する (起動時に止まっていた間の分がまとめて来る)。
+// 1 回の問い合わせは 100 件まで。
+func TestQuoteOutbox_ResendPendingDrainsEveryDueRow(t *testing.T) {
+	e := newQOEnv(t)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	const rows = 2*quoteRequestResendBatch + 50
+	for i := range rows {
+		due := now.Add(-time.Minute)
+		id := fmt.Sprintf("n%03d", i)
+		e.requests.rows[id] = &model.NoteQuoteRequest{NoteID: id, State: model.QuoteRequestPending, NextResendAt: &due}
+	}
+	_, err := e.o.ResendPending(now)
+	require.NoError(t, err)
+	for id, q := range e.requests.rows {
+		assert.Equal(t, 1, q.ResendCount, "row %s was not taken", id)
+	}
+}
+
+// 取り分けが 1 件も成功しない回で打ち切る (失敗が続いても回り続けない)。
+func TestQuoteOutbox_ResendPendingStopsWhenNothingIsTaken(t *testing.T) {
+	e := newQOEnv(t)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for i := range quoteRequestResendBatch + 1 {
+		due := now.Add(-time.Minute)
+		id := fmt.Sprintf("n%03d", i)
+		e.requests.rows[id] = &model.NoteQuoteRequest{NoteID: id, State: model.QuoteRequestPending, NextResendAt: &due}
+	}
+	e.requests.claimErr = errors.New("db down")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sent, err := e.o.ResendPending(now)
+		assert.Error(t, err, "the failure of taking is reported")
+		assert.Zero(t, sent)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ResendPending did not return")
+	}
+}
+
+// 起動時に、まだ来ていない予定のジョブを積み直す (#3994)。期限の来たもの・保留で
+// ないものは積まない。
+func TestQuoteOutbox_ScheduleUpcomingResends(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	past, future, later := now.Add(-time.Minute), now.Add(time.Minute), now.Add(9*time.Minute)
+	e := newQOEnv(t)
+	e.requests.rows["due"] = &model.NoteQuoteRequest{NoteID: "due", State: model.QuoteRequestPending, NextResendAt: &past}
+	e.requests.rows["up1"] = &model.NoteQuoteRequest{NoteID: "up1", State: model.QuoteRequestPending, NextResendAt: &future}
+	e.requests.rows["up2"] = &model.NoteQuoteRequest{NoteID: "up2", State: model.QuoteRequestPending, NextResendAt: &later}
+	e.requests.rows["done"] = &model.NoteQuoteRequest{NoteID: "done", State: model.QuoteRequestAccepted, NextResendAt: &later}
+	e.requests.rows["last"] = &model.NoteQuoteRequest{NoteID: "last", State: model.QuoteRequestPending}
+
+	// 積む先が無ければ何もしない。
+	n, err := e.o.ScheduleUpcomingResends(now)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+
+	sched := &qoScheduler{}
+	e.o.SetResendScheduler(sched)
+	n, err = e.o.ScheduleUpcomingResends(now)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	assert.Equal(t, []string{qoAt("up1", future), qoAt("up2", later)}, sched.got)
+
+	e.requests.upcomingErr = errors.New("db down")
+	_, err = e.o.ScheduleUpcomingResends(now)
+	assert.Error(t, err)
+}
+
+// 1 件の取り分けが一時的に失敗しても残りは処理し、error を返す。queue の試し直しは
+// 失敗した行だけを送り、済んだ行を二重に送らない (#3994 の敵対的レビュー)。
+func TestQuoteOutbox_ResendClaimFailureIsRetried(t *testing.T) {
+	e := newQOEnv(t)
+	sched := &qoScheduler{}
+	e.o.SetResendScheduler(sched)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.h.now = func() time.Time { return now }
+	e.requested(t) // q1
+	n2 := e.quote("q2", "remote", model.NoteVisibilityPublic)
+	require.NoError(t, e.o.RequestApproval(n2, e.dave))
+	require.Len(t, e.delivery.requests, 2)
+	e.requests.claimFails = map[string]int{"q1": 1}
+
+	t1 := now.Add(time.Minute)
+	sent, err := e.o.ResendPending(t1)
+	assert.Error(t, err, "a failed take makes the job fail")
+	assert.Equal(t, 1, sent, "the other row is still sent")
+	assert.Equal(t, 0, e.requests.rows["q1"].ResendCount)
+	assert.Equal(t, 1, e.requests.rows["q2"].ResendCount)
+
+	// queue の試し直し (30 秒後)。
+	sent, err = e.o.ResendPending(t1.Add(30 * time.Second))
+	require.NoError(t, err)
+	assert.Equal(t, 1, sent, "only the row that failed is sent")
+	assert.Equal(t, 1, e.requests.rows["q1"].ResendCount)
+	assert.Equal(t, 1, e.requests.rows["q2"].ResendCount, "q2 is not sent twice")
+	assert.Len(t, e.delivery.requests, 4)
 }

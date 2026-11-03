@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -655,6 +656,20 @@ func (m *MockAnnouncementRepository) ArchiveExpired(now time.Time) (int64, error
 		}
 	}
 	return n, nil
+}
+
+// ListScheduledArchives mirrors the repository: active announcements whose
+// autoArchiveAt is after now, ordered by id.
+func (m *MockAnnouncementRepository) ListScheduledArchives(now time.Time) ([]*model.Announcement, error) {
+	var out []*model.Announcement
+	for _, a := range m.Items {
+		if a.IsActive && a.AutoArchiveAt != nil && a.AutoArchiveAt.After(now) {
+			cp := *a
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 // announcementActiveNow mirrors the repository's read-time rule (#3809): an

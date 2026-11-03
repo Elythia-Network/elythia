@@ -264,6 +264,10 @@ func TestParamShadowChangesNoResponse(t *testing.T) {
 	const adminRoleID, adminAssignID = "pshadow-admin-role", "pshadow-admin-assign"
 	// 数えるだけの例は admin/update-meta に置く (下の requests)。受理する入力は
 	// meta を書き換えるので、流す前の行へ戻す。
+	// meta の行は起動時か最初の読み込みで作られる。-shuffle でこのテストがパッケージの
+	// 最初の方に回ると、まだ行が無いので、読む前に作っておく (#3994 で順序が変わって表に出た)。
+	_, err := repository.NewMetaRepository(db).Fetch()
+	require.NoError(t, err)
 	var metaBefore []string
 	require.NoError(t, db.Raw(`SELECT row_to_json(m)::text FROM meta m ORDER BY id`).Scan(&metaBefore).Error)
 	require.Len(t, metaBefore, 1)

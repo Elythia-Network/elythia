@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,4 +210,59 @@ func TestAnnouncementRepository_CreateWritesInactive(t *testing.T) {
 	got, err := repo.FindByID("zzarc_create_off")
 	require.NoError(t, err)
 	assert.False(t, got.IsActive)
+}
+
+// 起動時に遅延ジョブを積み直す対象 (#3994): isActive が true で、期限がまだ来て
+// いない行だけ。期限を過ぎた行は ArchiveExpired が落とすので積まない。
+func TestAnnouncementRepository_ListScheduledArchives(t *testing.T) {
+	repo := NewAnnouncementRepository(testDB)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	past, future, exact := now.Add(-time.Minute), now.Add(time.Hour), now
+	createAutoArchiveFixture(t, repo, "zzarcs_future", true, &future, nil)
+	createAutoArchiveFixture(t, repo, "zzarcs_exact", true, &exact, nil)
+	createAutoArchiveFixture(t, repo, "zzarcs_past", true, &past, nil)
+	createAutoArchiveFixture(t, repo, "zzarcs_off", false, &future, nil)
+	createAutoArchiveFixture(t, repo, "zzarcs_plain", true, nil, nil)
+
+	rows, err := repo.ListScheduledArchives(now)
+	require.NoError(t, err)
+	got := map[string]*model.Announcement{}
+	for _, a := range rows {
+		if strings.HasPrefix(a.ID, "zzarcs_") {
+			got[a.ID] = a
+		}
+	}
+	require.Len(t, got, 1, "only the active row not yet due")
+	require.NotNil(t, got["zzarcs_future"])
+	require.NotNil(t, got["zzarcs_future"].AutoArchiveAt)
+	assert.True(t, got["zzarcs_future"].AutoArchiveAt.Equal(future))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = NewAnnouncementRepository(testDB.WithContext(ctx)).ListScheduledArchives(now)
+	assert.Error(t, err)
+}
+
+// 期限の時刻に積んだジョブが、その後の変更の後に走ったとき (#3994)。ジョブは保存されて
+// いる今の期限と比べるので、期限を延ばした・消した・お知らせを消した行は落とさない。
+func TestAnnouncementRepository_ArchiveExpired_StaleJob(t *testing.T) {
+	repo := NewAnnouncementRepository(testDB)
+	at := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Second)
+	createAutoArchiveFixture(t, repo, "zzarcy_moved", true, &at, nil)
+	createAutoArchiveFixture(t, repo, "zzarcy_cleared", true, &at, nil)
+	createAutoArchiveFixture(t, repo, "zzarcy_deleted", true, &at, nil)
+	require.NoError(t, repo.UpdateFields("zzarcy_moved", map[string]any{"autoArchiveAt": at.Add(time.Hour)}))
+	require.NoError(t, repo.UpdateFields("zzarcy_cleared", map[string]any{"autoArchiveAt": nil}))
+	require.NoError(t, repo.Delete("zzarcy_deleted"))
+
+	// 古い期限 (at) の時刻に走ったジョブ。
+	_, err := repo.ArchiveExpired(at)
+	require.NoError(t, err)
+	for _, id := range []string{"zzarcy_moved", "zzarcy_cleared"} {
+		a, err := repo.FindByID(id)
+		require.NoError(t, err)
+		assert.True(t, a.IsActive, "%s was archived by a stale job", id)
+	}
+	_, err = repo.FindByID("zzarcy_deleted")
+	assert.True(t, IsNotFound(err))
 }

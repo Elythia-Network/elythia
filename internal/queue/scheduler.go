@@ -120,27 +120,45 @@ func (s *Scheduler) RegisterCheckExpiredMutingsJob() error {
 	)
 }
 
-// RegisterArchiveAnnouncementsJob registers the per-minute archive of
-// announcements whose autoArchiveAt has passed (#3809). The archive is
+// RegisterArchiveAnnouncementsJob registers the daily safety run of the
+// announcement auto-archive (#3809, #3994) at 00:10. The archive is
 // implemented by processors.ArchiveAnnouncementsProcessor.
 //
-// 毎分にするのは、落とした時刻が updatedAt に残り、本家 (期限ちょうどの遅延ジョブ) と
-// の差を小さくするため。対象は isActive が true で期限を過ぎた行だけの UPDATE 1 本。
+// **期限どおりに落とすのは、お知らせごとの遅延ジョブ** (作成・期限の変更のときに
+// ScheduleAnnouncementArchive で積む。本家と同じ形) と、起動時の積み直しで行う
+// (#3994)。以前の毎分の cron は、何もしない回の完了の記録を 7 日ぶん (2 万件ほど)
+// Redis にためていた。ここは、プロセスが動いたままジョブだけが消えたとき (Redis の
+// データが失われた、管理画面から消した) の保険で、1 日 1 回にした。API は読むときにも
+// 期限を見るので、保険で落とすのが遅れても見え方は変わらない (変わるのは DB の
+// isActive と updatedAt)。
+//
+// task type が毎分の cron と同じなので、登録 (schedule ID は task type) が毎分の
+// スケジュールを置き換える。
 func (s *Scheduler) RegisterArchiveAnnouncementsJob() error {
-	return s.register("* * * * *", TaskTypeArchiveAnnouncements, nil,
+	return s.register("10 0 * * *", TaskTypeArchiveAnnouncements, nil,
 		driver.WithQueue(MaintenanceQueueName),
 		driver.WithMaxRetry(0),
-		driver.WithUnique(time.Minute),
+		driver.WithUnique(24*time.Hour),
 	)
 }
 
-// RegisterResendQuoteRequestsJob registers the per-minute resend of pending
-// QuoteRequests (#3238)。送り直しの予定は 1 分単位なので毎分回す。
+// RegisterResendQuoteRequestsJob registers the safety run of the
+// QuoteRequest resend (#3238, #3994) every 2 minutes. The resend is
+// implemented by core/federation.QuoteOutbox.ResendPending.
+//
+// **送り直しは、予定の時刻の遅延ジョブで行う** (予定を書くたびに
+// ScheduleQuoteRequestResend で積む)。ここは、そのジョブが失われた・消された・
+// 期限の前に走った (管理画面の promote)・DB の障害が試し直しを超えた、ときの保険で、
+// 枠を処理し (3 分の許容を過ぎていれば送らずに使い切る)、次の枠の予定を積む (次の
+// 枠を生かす)。**2 分ごとにするのは、どの 3 分の窓 (許容) にも 1 回は入るように
+// するため** (#3994 の敵対的レビュー)。発火から処理までの遅れが 60 秒以内なら窓に
+// 収まる。maintenance の queue が詰まると、その分ずれる。以前は毎分で、何もしない回の完了の記録を
+// 7 日ぶんためていた。2 分ごとなら 7 日で約 5,000 件。
 func (s *Scheduler) RegisterResendQuoteRequestsJob() error {
-	return s.register("* * * * *", TaskTypeResendQuoteRequests, nil,
+	return s.register("*/2 * * * *", TaskTypeResendQuoteRequests, nil,
 		driver.WithQueue(MaintenanceQueueName),
 		driver.WithMaxRetry(0),
-		driver.WithUnique(time.Minute),
+		driver.WithUnique(2*time.Minute),
 	)
 }
 
