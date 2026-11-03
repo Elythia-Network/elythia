@@ -961,8 +961,10 @@ func (m *MockAdRepository) ListActive(now time.Time) ([]*model.Ad, error) {
 		return nil, m.ListErr
 	}
 	rows := make([]*model.Ad, 0)
+	// 本物の ListActive と同じく、曜日の指定も見る (#3971)
+	day := 1 << int(now.Weekday())
 	for _, a := range m.Ads {
-		if !a.StartsAt.After(now) && a.ExpiresAt.After(now) {
+		if !a.StartsAt.After(now) && a.ExpiresAt.After(now) && (a.DayOfWeek == 0 || a.DayOfWeek&day != 0) {
 			rows = append(rows, a)
 		}
 	}
