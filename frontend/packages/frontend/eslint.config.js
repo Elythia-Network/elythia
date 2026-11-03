@@ -3,7 +3,7 @@ import tsParser from '@typescript-eslint/parser';
 import parser from 'vue-eslint-parser';
 import pluginVue from 'eslint-plugin-vue';
 import pluginMisskey from '@misskey-dev/eslint-plugin';
-import sharedConfig from '../shared/eslint.config.js';
+import sharedConfig, { loaderScriptConfig } from '../shared/eslint.config.js';
 
 const mfmParserImports = [
 	{ name: 'mfm-js', message: 'mfm-js is no longer used. Use `@/utility/mfm.js`.' },
@@ -189,4 +189,11 @@ export default [
 			}],
 		},
 	},
+	// サーバーが boot.js の前に置く定数 (internal/server/frontend.go)
+	loaderScriptConfig({
+		VERSION: 'readonly',
+		CLIENT_ENTRY: 'readonly',
+		CLIENT_PRELOADS: 'readonly',
+		LANGS: 'readonly',
+	}),
 ];

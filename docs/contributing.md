@@ -73,7 +73,7 @@ commit する手順は無い。
 
 CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
 
-手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + frontend の eslint** までをまとめて回す (#2892 / #2906 / #3324)。vitest は `make frontend-test`。frontend 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
+手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
 `make plugins-all` は workspace のビルドより先に回す。生成物の
 `server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと

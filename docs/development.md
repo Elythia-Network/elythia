@@ -143,7 +143,7 @@ cd mk && docker compose up -d
 | `make plugin-test` | 同梱プラグインのテスト (別 module なので `./...` に含まれない) |
 | `make plugin-doc-check` | `docs/plugins/authoring.md` の Go スニペットが実際にコンパイルできるか |
 | `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、`frontend/` の `@elythia-network/mfm` から作り直したものと一致するか。node_modules が要るので `make gates` には入れず、手元では `make frontend-check` から、CI では `frontend` workflow の `frontend-lint` job から呼ばれる (#3324) |
-| `make frontend-lint` | fork frontend の eslint。CI `frontend` workflow の `frontend-lint` job の eslint step のうち frontend の分と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}"`)。`make frontend-check` から呼ばれる (#2906)。実測 55 秒 |
+| `make frontend-lint` | fork frontend の eslint。CI `frontend` workflow の `frontend-lint` job の eslint step のうち frontend と frontend-embed の分と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}" "public/loader/*.js"`。起動画面のスクリプトを含める、#3954)。`make frontend-check` から呼ばれる (#2906)。実測 70 秒 (#3954 で frontend-embed を足す前は 55 秒) |
 | `make frontend-test` | fork frontend の vitest (`test/unit/**/*.test.ts`)。CI `frontend` workflow の `frontend-test` job の frontend unit tests step と同じ |
 | `make plugin-dev` | プラグインを編集しながら動かす (`PLUGIN=plugins/status`) |
 
@@ -472,7 +472,7 @@ make federation-mastodon-e2e # 本物の Mastodon と引用の承認 (FEP-044f) 
 make diff-check              # Elythia と TS のレスポンスを値レベルで diff (#2078)
 make playwright-check        # Playwright を作り直して実行
 make frontend-check          # frontend/ の型チェック + frontend/ を読むゲート + eslint
-make frontend-lint           # eslint だけ (CI と同じ範囲、実測 55 秒)
+make frontend-lint           # eslint だけ (CI と同じ範囲、実測 70 秒)
 make e2e-down-all            # 検証用スタックを一括撤去 (**本番 project `mk` は対象外**)
 ```
 

@@ -288,7 +288,7 @@ required の `test` で走る。
 `make plugins-all` を workspace のビルドより先に回す。frontend が import する
 `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
 無いとビルドが import で落ちる。`make frontend-check` は frontend の型・ゲート・
-`emoji-regex-check`・frontend の eslint までを手元でまとめて回す target (CI の job ではない)。
+`emoji-regex-check`・frontend と frontend-embed の eslint までを手元でまとめて回す target (CI の job ではない)。
 **vitest はそこに入っていない** (`make frontend-test`)。ほかの workspace の eslint や check-dts などは
 `.github/workflows/frontend.yml` の各 step をそのまま叩く。
 
@@ -302,7 +302,7 @@ make frontend-test
 
 **本番を動かしているチェックアウトでは `pnpm -r build` / `pnpm build` を流さないこと。** frontend 自身のビルドが `frontend/built` を消してから作り直すので、そこを bind mount している本番が 404 になる (#3379 の切り替え後)。手元の検証は別の worktree で行う。
 
-eslint (frontend だけ) を回すなら `make frontend-lint` (実測 55 秒)。
+eslint (frontend と frontend-embed だけ) を回すなら `make frontend-lint` (実測 70 秒。frontend-embed を足す前の #2906 の時点では 55 秒)。
 
 **`emoji-regex-check` が落ちたとき (#3324):** サーバーの MFM の解析器 (Go のモジュール `github.com/elythia-network/mfm`、#3514) が持つ Unicode 絵文字の正規表現 (モジュールの `emoji_regex_gen.go`) と、`frontend/` に pnpm install した frontend の MFM の解析器 (`@elythia-network/mfm`、#3515) が持つ正規表現が食い違っている。frontend の解析器は、emoji-data の正規表現と、その元の emoji-data の版・使い方を写した mfm-js の版を `built/emoji-regex.gen.js` に書き出しており、検査ツールはそれを Go の正規表現へ変換してモジュールのファイルと突き合わせる。どちらも Elythia-Network/mfm から出ているので、`… is stale` で Go のモジュールの側が名指しされたら、片方だけを上げているので、`go.mod` (`go get`) と `frontend/` の `@elythia-network/mfm` を同じリリースへ揃える。snapshot (`tools/emojiregex/testdata/source.txt`) が名指しされたら、`make emoji-regex` で書き写して差分ごとコミットする。検査ツールが `declarations` や `flags`、構文のエラーで落ちたら、解析器の書き出す形か正規表現の構文が変わっているので、検査ツール (`tools/emojiregex/`) を直す。
 
