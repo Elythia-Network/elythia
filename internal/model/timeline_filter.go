@@ -17,10 +17,26 @@ type TimelineDBFilter struct {
 	// semantics)。Redis fanout 経路 (post-fetch) では in-memory 版
 	// ApplyFilter が同等処理を担う。
 	//
-	// production code path では UseMutingSubquery=true で subquery 経路を
-	// 使うので本フィールドは空のまま。test と非 viewer 駆動経路では literal
-	// list を直接渡す override path として残す。
+	// UseMutingSubquery=true のときは、MutedUserIDsComplete が立っていて件数が
+	// 上限以下のときだけ、この一覧を muting テーブルへの subquery の代わりに
+	// 使う (#3987)。UseMutingSubquery=false なら、そのまま一覧で絞る。
 	MutedUserIDs []string
+	// MutedUserIDsComplete reports that MutedUserIDs is the viewer's complete
+	// list of active mutes (possibly empty), read successfully from the
+	// relation cache or the repository. Only then may the repository replace
+	// the muting subquery with the list (#3987).
+	//
+	// 読めなかった (best-effort で空にした) 一覧で subquery を外すと、ミュートが
+	// 黙って効かなくなる。「読めた」ことを空の一覧と区別するために分けてある。
+	MutedUserIDsComplete bool
+	// RenoteMutedUserIDs lists the users whose pure renotes the viewer has
+	// muted. Used instead of the renote_muting subquery when
+	// RenoteMutedUserIDsComplete is set and it is short enough (#3987), or
+	// on its own when UseRenoteMutingSubquery is false.
+	RenoteMutedUserIDs []string
+	// RenoteMutedUserIDsComplete is MutedUserIDsComplete for
+	// RenoteMutedUserIDs.
+	RenoteMutedUserIDsComplete bool
 	// HideFollowersOnlyReplyFromNonFollowee が true のとき、返信先が followers
 	// 限定の投稿で、viewer がその投稿者をフォローしておらず自分でもないノートを
 	// 除外する。upstream timeline.ts の noteFilter と同じ判定を SQL 側でも行う。
@@ -32,13 +48,15 @@ type TimelineDBFilter struct {
 	// literal IN (...) で渡す方式に対し、bind parameter 数が viewer の
 	// mute 件数に比例しないため heavy-mute viewer (>1000 mute) でも
 	// PostgreSQL の planning コスト / parameter limit に達しない。
-	// MutedUserIDs より優先 (両方 set されたら subquery が勝つ)。
+	// MutedUserIDs より優先する。ただし MutedUserIDsComplete が立っていて件数が
+	// 上限以下なら一覧を使う (#3987。applyTimelineFilter を参照)。
 	UseMutingSubquery bool
 	// UseRenoteMutingSubquery が true の場合、ViewerID を使って
 	// renote_muting テーブルへの subquery で **pure renote のみ** を除外
 	// する filter を適用する (#903)。MutedUserIDs と異なり投稿者の plain
 	// note は通す。upstream Misskey TS の
 	// generateMutedUserRelatedRenotesQuery と同 semantics。
+	// RenoteMutedUserIDsComplete が立っていて件数が上限以下なら一覧を使う (#3987)。
 	UseRenoteMutingSubquery bool
 	// BlockerIDs は viewer を block している user の id 一覧 (被block、#1681)。
 	// note/reply/renote のいずれかの author が含まれる note を除外する

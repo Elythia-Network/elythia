@@ -43,9 +43,14 @@ type TimelineFilter struct {
 	//
 	// この in-memory ApplyFilter は Redis fanout 経路 (cached note ID から
 	// 解決した note slice) で動作する。DB fallback path では同じ
-	// MutedUserIDs が toDBFilter 経由で SQL の NOT IN として push-down
-	// されるので、両経路で同 semantics に保たれる (#892)。
+	// MutedUserIDs が toDBFilter 経由で SQL に push-down される (#892)。SQL は
+	// MutedUserIDsComplete が立っていて件数が少ないときだけこの一覧を使い、
+	// それ以外は muting テーブルへの subquery で絞る (#3987)。
 	MutedUserIDs []string
+	// MutedUserIDsComplete reports that MutedUserIDs was read successfully
+	// and is the viewer's complete list of active mutes (#3987). The handler
+	// sets it; when false the DB fallback keeps the muting subquery.
+	MutedUserIDsComplete bool
 	// FollowingIDs は viewer がフォローしている user の集合。
 	//
 	// upstream の HTL は取得側の noteFilter で「返信先が followers 限定の投稿で、
@@ -60,6 +65,9 @@ type TimelineFilter struct {
 	//   - pure renote (= text なし / file なし / renoteId あり) のみ skip
 	// upstream Misskey TS の generateMutedUserRelatedRenotesQuery と同 semantics。
 	RenoteMutedUserIDs []string
+	// RenoteMutedUserIDsComplete is MutedUserIDsComplete for
+	// RenoteMutedUserIDs (#3987).
+	RenoteMutedUserIDsComplete bool
 	// BlockerIDs は viewer を block している user の id (被block、#1681)。
 	// note/reply/renote のいずれかの author が含まれる note を除外する
 	// (upstream generateBlockedUserQueryForNotes)。

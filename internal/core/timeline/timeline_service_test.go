@@ -368,11 +368,26 @@ func TestToDBFilter_UseMutingSubquery(t *testing.T) {
 	assert.False(t, out.UseMutingSubquery, "anonymous viewer では subquery off")
 	assert.Equal(t, "", out.ViewerID)
 
-	// MutedUserIDs literal は SQL 経路に**伝搬しない**ことを明示的に
-	// 検証する (#894)。subquery 経路が production の SQL 経路で、literal
-	// は test override 専用の design intent を regression guard として固定。
-	out = toDBFilter(TimelineFilter{MutedUserIDs: []string{"u1", "u2"}}, "viewer2")
-	assert.Empty(t, out.MutedUserIDs, "literal は意図的に drop し subquery に委譲する")
+	// ミュートの一覧は、読めたかどうか (Complete) と一緒に SQL 経路へ渡す
+	// (#3987)。一覧を使うかは repository が Complete と件数で決めるので、
+	// subquery の指定は viewer があれば立ったまま。
+	out = toDBFilter(TimelineFilter{
+		MutedUserIDs:               []string{"u1", "u2"},
+		MutedUserIDsComplete:       true,
+		RenoteMutedUserIDs:         []string{"r1"},
+		RenoteMutedUserIDsComplete: true,
+	}, "viewer2")
+	assert.Equal(t, []string{"u1", "u2"}, out.MutedUserIDs)
+	assert.True(t, out.MutedUserIDsComplete)
+	assert.Equal(t, []string{"r1"}, out.RenoteMutedUserIDs)
+	assert.True(t, out.RenoteMutedUserIDsComplete)
+	assert.True(t, out.UseMutingSubquery)
+	assert.True(t, out.UseRenoteMutingSubquery)
+
+	// 読めなかった一覧 (Complete=false) はそのまま偽で渡り、subquery が残る。
+	out = toDBFilter(TimelineFilter{MutedUserIDs: nil}, "viewer2")
+	assert.False(t, out.MutedUserIDsComplete)
+	assert.False(t, out.RenoteMutedUserIDsComplete)
 
 	// MutedChannelIDs / その他 filter はそのまま伝搬する (regression guard)。
 	withReplies := true

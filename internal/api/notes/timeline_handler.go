@@ -88,20 +88,22 @@ func (h *Handler) timelineAvailable(c echo.Context, policyKey string) bool {
 func (h *Handler) Timeline(c echo.Context) error {
 	return h.serveTimeline(c, "home", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
-			WithFiles:             req.WithFiles,
-			WithRenotes:           req.WithRenotes,
-			IncludeMyRenotes:      req.IncludeMyRenotes,
-			IncludeRenotedMyNotes: req.IncludeRenotedMyNotes,
-			IncludeLocalRenotes:   req.IncludeLocalRenotes,
-			AllowPartial:          req.AllowPartial,
-			PageFilter:            req.pageFilter,
-			MutedChannelIDs:       req.rel.timelineMutedChannelIDs(),
-			MutedUserIDs:          req.rel.timelineMutedUserIDs(),
-			RenoteMutedUserIDs:    req.rel.timelineRenoteMutedUserIDs(),
-			BlockerIDs:            req.rel.timelineBlockerIDs(),
-			MutedInstances:        h.loadMutedInstances(viewer),
-			FollowedChannelIDs:    req.rel.timelineFollowedChannelIDs(),
-			FollowingIDs:          req.rel.timelineFollowingIDs(),
+			WithFiles:                  req.WithFiles,
+			WithRenotes:                req.WithRenotes,
+			IncludeMyRenotes:           req.IncludeMyRenotes,
+			IncludeRenotedMyNotes:      req.IncludeRenotedMyNotes,
+			IncludeLocalRenotes:        req.IncludeLocalRenotes,
+			AllowPartial:               req.AllowPartial,
+			PageFilter:                 req.pageFilter,
+			MutedChannelIDs:            req.rel.timelineMutedChannelIDs(),
+			MutedUserIDs:               req.rel.timelineMutedUserIDs(),
+			MutedUserIDsComplete:       req.rel.timelineMutedUserIDsComplete(),
+			RenoteMutedUserIDs:         req.rel.timelineRenoteMutedUserIDs(),
+			RenoteMutedUserIDsComplete: req.rel.timelineRenoteMutedUserIDsComplete(),
+			BlockerIDs:                 req.rel.timelineBlockerIDs(),
+			MutedInstances:             h.loadMutedInstances(viewer),
+			FollowedChannelIDs:         req.rel.timelineFollowedChannelIDs(),
+			FollowingIDs:               req.rel.timelineFollowingIDs(),
 		}
 		return h.timelineService.HomeTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, true)
@@ -114,16 +116,18 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 	}
 	return h.serveTimeline(c, "local", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
-			WithFiles:          req.WithFiles,
-			WithRenotes:        req.WithRenotes,
-			WithReplies:        req.WithReplies,
-			AllowPartial:       req.AllowPartial,
-			PageFilter:         req.pageFilter,
-			MutedChannelIDs:    req.rel.timelineMutedChannelIDs(),
-			MutedUserIDs:       req.rel.timelineMutedUserIDs(),
-			RenoteMutedUserIDs: req.rel.timelineRenoteMutedUserIDs(),
-			BlockerIDs:         req.rel.timelineBlockerIDs(),
-			MutedInstances:     h.loadMutedInstances(viewer),
+			WithFiles:                  req.WithFiles,
+			WithRenotes:                req.WithRenotes,
+			WithReplies:                req.WithReplies,
+			AllowPartial:               req.AllowPartial,
+			PageFilter:                 req.pageFilter,
+			MutedChannelIDs:            req.rel.timelineMutedChannelIDs(),
+			MutedUserIDs:               req.rel.timelineMutedUserIDs(),
+			MutedUserIDsComplete:       req.rel.timelineMutedUserIDsComplete(),
+			RenoteMutedUserIDs:         req.rel.timelineRenoteMutedUserIDs(),
+			RenoteMutedUserIDsComplete: req.rel.timelineRenoteMutedUserIDsComplete(),
+			BlockerIDs:                 req.rel.timelineBlockerIDs(),
+			MutedInstances:             h.loadMutedInstances(viewer),
 		}
 		return h.timelineService.LocalTimeline(c.Request().Context(), viewer, req.UntilID, req.SinceID, int(*req.Limit), f)
 	}, false)
@@ -136,15 +140,17 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 	}
 	return h.serveTimeline(c, "global", id.NormalizeCursorIDFirst, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
-			WithFiles:          req.WithFiles,
-			WithRenotes:        req.WithRenotes,
-			AllowPartial:       req.AllowPartial,
-			PageFilter:         req.pageFilter,
-			MutedChannelIDs:    req.rel.timelineMutedChannelIDs(),
-			MutedUserIDs:       req.rel.timelineMutedUserIDs(),
-			RenoteMutedUserIDs: req.rel.timelineRenoteMutedUserIDs(),
-			BlockerIDs:         req.rel.timelineBlockerIDs(),
-			MutedInstances:     h.loadMutedInstances(viewer),
+			WithFiles:                  req.WithFiles,
+			WithRenotes:                req.WithRenotes,
+			AllowPartial:               req.AllowPartial,
+			PageFilter:                 req.pageFilter,
+			MutedChannelIDs:            req.rel.timelineMutedChannelIDs(),
+			MutedUserIDs:               req.rel.timelineMutedUserIDs(),
+			MutedUserIDsComplete:       req.rel.timelineMutedUserIDsComplete(),
+			RenoteMutedUserIDs:         req.rel.timelineRenoteMutedUserIDs(),
+			RenoteMutedUserIDsComplete: req.rel.timelineRenoteMutedUserIDsComplete(),
+			BlockerIDs:                 req.rel.timelineBlockerIDs(),
+			MutedInstances:             h.loadMutedInstances(viewer),
 			// upstream global-timeline は未ログインの閲覧者に
 			// generateUgcVisibilityQueryForVisitor を掛ける (`local` ならリモートの
 			// 投稿者のノートを除く)。後から落とすとページが欠けるので filter に渡し、
@@ -166,19 +172,21 @@ func (h *Handler) HybridTimeline(c echo.Context) error {
 	}
 	return h.serveTimeline(c, "hybrid", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
-			WithFiles:             req.WithFiles,
-			WithRenotes:           req.WithRenotes,
-			WithReplies:           req.WithReplies,
-			IncludeMyRenotes:      req.IncludeMyRenotes,
-			IncludeRenotedMyNotes: req.IncludeRenotedMyNotes,
-			IncludeLocalRenotes:   req.IncludeLocalRenotes,
-			AllowPartial:          req.AllowPartial,
-			PageFilter:            req.pageFilter,
-			MutedChannelIDs:       req.rel.timelineMutedChannelIDs(),
-			MutedUserIDs:          req.rel.timelineMutedUserIDs(),
-			RenoteMutedUserIDs:    req.rel.timelineRenoteMutedUserIDs(),
-			BlockerIDs:            req.rel.timelineBlockerIDs(),
-			MutedInstances:        h.loadMutedInstances(viewer),
+			WithFiles:                  req.WithFiles,
+			WithRenotes:                req.WithRenotes,
+			WithReplies:                req.WithReplies,
+			IncludeMyRenotes:           req.IncludeMyRenotes,
+			IncludeRenotedMyNotes:      req.IncludeRenotedMyNotes,
+			IncludeLocalRenotes:        req.IncludeLocalRenotes,
+			AllowPartial:               req.AllowPartial,
+			PageFilter:                 req.pageFilter,
+			MutedChannelIDs:            req.rel.timelineMutedChannelIDs(),
+			MutedUserIDs:               req.rel.timelineMutedUserIDs(),
+			MutedUserIDsComplete:       req.rel.timelineMutedUserIDsComplete(),
+			RenoteMutedUserIDs:         req.rel.timelineRenoteMutedUserIDs(),
+			RenoteMutedUserIDsComplete: req.rel.timelineRenoteMutedUserIDsComplete(),
+			BlockerIDs:                 req.rel.timelineBlockerIDs(),
+			MutedInstances:             h.loadMutedInstances(viewer),
 			// upstream hybrid-timeline も getFromDb で
 			// `channelId IN (followingChannelIds) OR channelId IS NULL` を
 			// 付ける。渡さないと DB 経路 (FTT 無効時・cache miss 時) で
@@ -278,6 +286,30 @@ func (r *requestRelations) timelineMutedUserIDs() []string {
 		return nil
 	}
 	return ids
+}
+
+// timelineMutedUserIDsComplete reports whether timelineMutedUserIDs is the
+// viewer's complete mute list: a viewer is present, the repository is wired
+// and the list was read without error (#3987).
+//
+// 偽のとき、DB の経路は一覧を使わず muting テーブルへの subquery で絞る。
+// 読めずに空にした一覧で subquery を外すと、ミュートが黙って効かなくなる。
+func (r *requestRelations) timelineMutedUserIDsComplete() bool {
+	if r.viewer == nil || r.h.mutingRepo == nil {
+		return false
+	}
+	_, err := r.mutedUserIDs()
+	return err == nil
+}
+
+// timelineRenoteMutedUserIDsComplete is timelineMutedUserIDsComplete for the
+// renote-mute list (#3987).
+func (r *requestRelations) timelineRenoteMutedUserIDsComplete() bool {
+	if r.viewer == nil || r.h.renoteMutingRepo == nil {
+		return false
+	}
+	_, err := r.renoteMutedUserIDs()
+	return err == nil
 }
 
 // timelineRenoteMutedUserIDs returns userIDs that viewer has renote-muted.

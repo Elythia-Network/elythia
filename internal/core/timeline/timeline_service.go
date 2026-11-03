@@ -749,17 +749,17 @@ func toDBFilter(f TimelineFilter, viewerID string) model.TimelineDBFilter {
 		// FollowingIDs が配線されている経路 (HTL / STL) でだけ SQL 側の gate も
 		// 有効にする。post-fetch だけだと DB fallback がすり抜ける。
 		HideFollowersOnlyReplyFromNonFollowee: f.FollowingIDs != nil,
-		// production の SQL 経路では muting テーブルへの subquery で filter
-		// する (#894)。viewer 単位で bind parameter 数が固定 (2) なので
-		// heavy-mute viewer (>1000 mute) でも planning コストが膨らまない。
-		// Redis cache 経路 (in-memory ApplyFilter) は引き続き
-		// TimelineFilter.MutedUserIDs (loadMutedUserIDs で事前取得) を使う。
-		// MutedUserIDs literal は test override 用に残す (本 toDBFilter から
-		// は伝搬しない)。
-		UseMutingSubquery: viewerID != "",
-		// renote-mute も同様に subquery 経路を使う (#903)。pure renote 条件
-		// は applyTimelineFilter 側で組み立てる。
-		UseRenoteMutingSubquery: viewerID != "",
+		// SQL 経路のミュートは、handler がキャッシュから読めた一覧 (Complete) が
+		// 短ければその配列で、そうでなければ muting / renote_muting テーブルへの
+		// subquery で絞る (#894 / #903 / #3987)。一覧を読めなかったときは
+		// Complete が偽なので subquery のまま (ミュートが黙って外れない)。
+		// Redis cache 経路 (in-memory ApplyFilter) も同じ一覧を使う。
+		UseMutingSubquery:          viewerID != "",
+		MutedUserIDs:               f.MutedUserIDs,
+		MutedUserIDsComplete:       f.MutedUserIDsComplete,
+		UseRenoteMutingSubquery:    viewerID != "",
+		RenoteMutedUserIDs:         f.RenoteMutedUserIDs,
+		RenoteMutedUserIDsComplete: f.RenoteMutedUserIDsComplete,
 		// 被block / instance-mute は loader で取得した literal list を両経路に
 		// 渡す (#1681)。anon viewer では空。
 		BlockerIDs:     f.BlockerIDs,
