@@ -112,7 +112,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 				<template v-else>
 					<div v-if="gridItems.length > 0" :class="$style.gridArea">
-						<MkGrid :data="gridItems" :settings="setupGrid()" @event="onGridEvent"/>
+						<MkGrid :data="gridItems" :settings="setupGrid({ changedRow: $style.changedRow })" @event="onGridEvent"/>
 					</div>
 
 					<div :class="$style.footer">
@@ -140,8 +140,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script setup lang="ts">
-// eslint-disable-next-line no-restricted-imports -- 本家のまま。本番のビルドでは空を返し、行の色付けが効いていない (直すのは別の issue)
-import { computed, onMounted, ref, useCssModule } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as Misskey from 'misskey-js';
 import type { GridSortOrderKey, RequestLogItem } from '@/pages/admin/custom-emojis-manager.impl.js';
 import type { GridCellValueChangeEvent, GridEvent } from '@/components/grid/grid-event.js';
@@ -173,9 +172,12 @@ type GridItem = {
 	host: string;
 };
 
-function setupGrid(): GridSetting {
-	const $style = useCssModule();
-
+// Elythia: 行の色のクラスはテンプレートの $style から受け取る (useCssModule を使わない)。
+// 本番のビルドでは rollup-plugin-unwind-css-module-class-name がテンプレートの $style.xxx を
+// 固定の文字列に置き換え、描画関数に `_ctx.$style` の参照が残らないので CSS Modules の表を
+// 外す。script の useCssModule() はその空の表を読み、クラスが undefined になって行に色が
+// 付かなかった (#3955)。開発時と vitest ではこの処理が走らないので気付けない
+function setupGrid(rowClass: { changedRow: string }): GridSetting {
 	return {
 		row: {
 			// グリッドの行数をあらかじめ100行確保する
@@ -184,7 +186,7 @@ function setupGrid(): GridSetting {
 				{
 					// チェックされたら背景色を変える
 					condition: ({ row }) => gridItems.value[row.index].checked,
-					applyStyle: { className: $style.changedRow },
+					applyStyle: { className: rowClass.changedRow },
 				},
 			],
 			contextMenuFactory: (row, context) => {
