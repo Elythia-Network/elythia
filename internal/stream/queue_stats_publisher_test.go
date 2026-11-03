@@ -29,8 +29,8 @@ func TestQueueStatsPublisher_PublishesDeliverAndInboxDepths(t *testing.T) {
 	// stub は queue 名で値を切り替えられるようにする (deliver / inbox で
 	// 同じ inspector を共有するため)。
 	infos := map[string]*QueueStatsInfo{
-		"deliver": {Active: 3, Pending: 7, Scheduled: 2, Retry: 1},
-		"inbox":   {Active: 5, Pending: 11, Scheduled: 0, Retry: 4},
+		"deliver": {Active: 3, Pending: 7, Delayed: 3},
+		"inbox":   {Active: 5, Pending: 11, Delayed: 4},
 	}
 	insp := &perQueueInspector{infos: infos}
 	pub := &capturePubSub{}
@@ -60,7 +60,7 @@ func TestQueueStatsPublisher_PublishesDeliverAndInboxDepths(t *testing.T) {
 		require.NoError(t, json.Unmarshal(c.payload, &body))
 		assert.Equal(t, 3, body.Deliver.Active)
 		assert.Equal(t, 7, body.Deliver.Waiting)
-		// Bull delayed = Scheduled + Retry
+		// Bull delayed = 予定 + 再試行待ち (driver が合計を返す、#3962)
 		assert.Equal(t, 3, body.Deliver.Delayed)
 		// inbox は #534 で専用 queue 化、#565 で worker 化されたので
 		// 実数を出す (#654)。
@@ -224,7 +224,7 @@ func TestQueueStatsPublisher_DoubleStopSafe(t *testing.T) {
 
 // publisher が ring buffer に snapshot を貯めて Log() で返せること (#571 item 2)
 func TestQueueStatsPublisher_LogReturnsRecentSnapshots(t *testing.T) {
-	insp := &stubQueueInspector{info: &QueueStatsInfo{Active: 1, Pending: 2, Scheduled: 3}}
+	insp := &stubQueueInspector{info: &QueueStatsInfo{Active: 1, Pending: 2, Delayed: 3}}
 	pub := &capturePubSub{}
 	p := NewQueueStatsPublisher(insp, pub, 10*time.Millisecond)
 	p.Start()

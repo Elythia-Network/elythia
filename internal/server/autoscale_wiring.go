@@ -356,9 +356,9 @@ func autoScaledQueues(cfg *config.Config) (managed, skipped []string) {
 // aggressively scale up on a Redis hiccup).
 func readQueueDepth(drv driver.Driver, qname string) int {
 	// **集計 API を使わない。** ここは 1Hz x 管理キュー数で回るので、
-	// GetQueueInfo (全カウント + repeat ZCARD + delayed 全件の ZRANGE +
-	// N x HGETALL + paused 判定) を毎秒引くとアイドル時の Redis コマンドの
-	// 大半をこれが占める。実測で毎秒 90 前後 (#2605)。使うのは深さ 1 個
+	// GetQueueInfo (全カウント + repeat ZCARD + paused 判定。#3962 までは
+	// delayed 全件の ZRANGE + N x HGETALL も) を毎秒引くとアイドル時の Redis
+	// コマンドの大半をこれが占めた。実測で毎秒 90 前後 (#2605)。使うのは深さ 1 個
 	// だけなので、キューあたり 1 往復 (wait の長さと pause フラグの 2 コマンド)
 	// で足りる。**pause 中は 0** — BullMQ 6 では pause してもジョブが wait に
 	// 残るので、そのまま読むと取れないキューの worker を増やす (#3166)。

@@ -707,9 +707,9 @@ func (h *Handler) queueIsManaged(qname string) bool {
 // postScheduledNote 等) を列挙しうるが、mk-go が実行しない queue は GetQueueInfo
 // が空を返すため 0 表示になる (#1393 で別途整理予定)。
 func shapeQueueForFrontend(info *QueueInfoResult, completed, failed *QueueMetricsResult, db map[string]any, runtime *QueueRuntime) map[string]any {
-	// delayed は Misskey 用語で scheduled + retry の合計に相当する
+	// delayed は Misskey 用語で、未来実行予定と再試行待ちの合計
 	// (どちらも「すぐには実行されない」状態)。
-	delayed := info.Scheduled + info.Retry
+	delayed := info.Delayed
 
 	// metrics は driver から渡された QueueMetricsResult を採用し、
 	// nil/欠損時は info.Completed / info.Failed の累積値で count を埋め、
@@ -1357,9 +1357,8 @@ func (h *Handler) QueueStats(c echo.Context) error {
 			"active":    info.Active,
 			"completed": info.Completed,
 			"failed":    info.Failed,
-			// Bull の delayed は Scheduled (未来実行予定) と Retry
-			// (失敗後再試行待ち) の両方を含む (#654)。
-			"delayed": info.Scheduled + info.Retry,
+			// Bull の delayed は未来実行予定と失敗後再試行待ちの両方を含む (#654)。
+			"delayed": info.Delayed,
 		}
 	}
 	return c.JSON(http.StatusOK, result)

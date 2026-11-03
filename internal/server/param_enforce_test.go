@@ -1132,7 +1132,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		for _, q := range names {
 			info, err := on.queueInspector.GetQueueInfo(q)
 			require.NoError(t, err)
-			n += info.Pending + info.Scheduled
+			n += info.Pending + info.Delayed
 		}
 		return n
 	}

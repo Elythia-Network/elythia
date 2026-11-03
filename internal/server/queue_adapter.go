@@ -36,8 +36,7 @@ func (a *queueStatsInspectorAdapter) GetQueueInfo(qname string) (*stream.QueueSt
 	return &stream.QueueStatsInfo{
 		Active:    info.Active,
 		Pending:   info.Pending,
-		Scheduled: info.Scheduled,
-		Retry:     info.Retry,
+		Delayed:   info.Delayed,
 		Completed: info.Completed,
 	}, nil
 }
@@ -63,8 +62,7 @@ func (a *queueInspectorAdapter) GetQueueInfo(qname string) (*apiadmin.QueueInfoR
 		Pending:       info.Pending,
 		Completed:     info.Completed,
 		Failed:        info.Failed,
-		Scheduled:     info.Scheduled,
-		Retry:         info.Retry,
+		Delayed:       info.Delayed,
 		IsPaused:      info.IsPaused,
 		QualifiedName: info.QualifiedName,
 	}, nil

@@ -547,10 +547,9 @@ func TestInspector_QueueMetrics_InvalidArgs(t *testing.T) {
 // mk-go-specific behaviour added for #455: registering a repeatable
 // schedule via Scheduler.Register populates `bull:<queue>:repeat`,
 // and Inspector.GetQueueInfo surfaces those entries through the
-// Scheduled field even though mkq does not pre-allocate concrete
-// delayed jobs into the `bull:<queue>:delayed` ZSET.
+// Delayed field.
 //
-// admin/job-queue.vue maps Scheduled into its "Delayed" KPI column,
+// admin/job-queue.vue shows Delayed in its "Delayed" KPI column,
 // so without this addition operators running mk-go on the mkq driver
 // would see Delayed=0 even with N cron jobs registered.
 func TestInspector_GetQueueInfo_IncludesRepeatSchedules(t *testing.T) {
@@ -560,7 +559,7 @@ func TestInspector_GetQueueInfo_IncludesRepeatSchedules(t *testing.T) {
 	// Pre-condition: zero before any schedule is registered.
 	infoBefore, err := d.Inspector().GetQueueInfo("maintenance")
 	require.NoError(t, err)
-	assert.Equal(t, 0, infoBefore.Scheduled)
+	assert.Equal(t, 0, infoBefore.Delayed)
 
 	require.NoError(t, sched.Register("0 0 * * *", "task:daily", nil,
 		driver.WithQueue("maintenance"),
@@ -572,13 +571,21 @@ func TestInspector_GetQueueInfo_IncludesRepeatSchedules(t *testing.T) {
 	infoAfter, err := d.Inspector().GetQueueInfo("maintenance")
 	require.NoError(t, err)
 	// addJobScheduler-11.lua は repeat ZSET と delayed ZSET の両方に
-	// 書き込むので、Scheduled には少なくとも 2 (repeat ZCARD 由来) と、
-	// fresh state では加えて concrete delayed の 2 が足される。本番の
-	// steady-state では concrete delayed が即 promote されて 0 になり、
-	// repeat ZCARD だけが残る。assertion は「register した数以上が
-	// 見える」という性質に留め、過剰カウント側は許容する。
-	assert.GreaterOrEqual(t, infoAfter.Scheduled, 2,
-		"Scheduled should reflect at least the repeat ZSET cardinality")
+	// 書き込むので、Delayed は「delayed の件数 + repeat の件数」になり、
+	// 次回の発火を 2 回数える (以前からの挙動)。
+	//
+	// **下限だけを見ると repeat の加算を外しても通る (#3962 のレビュー)。**
+	// 登録直後は delayed にも実体のジョブが 2 件あるので、`>= 2` は
+	// delayed の件数だけで満たされる。Redis の実数から期待値を組み、
+	// 等号で固定する。
+	ctx := context.Background()
+	delayedZ, err := testRedis.Client.ZCard(ctx, "bull:maintenance:delayed").Result()
+	require.NoError(t, err)
+	repeatZ, err := testRedis.Client.ZCard(ctx, "bull:maintenance:repeat").Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(2), repeatZ, "both schedules should be registered")
+	assert.Equal(t, int(delayedZ+repeatZ), infoAfter.Delayed,
+		"Delayed should be the delayed bucket plus the repeat schedules")
 	assert.GreaterOrEqual(t, infoAfter.Size, 2)
 }
 
@@ -606,16 +613,16 @@ func TestInspector_RunTaskPromotesDelayed(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond)
 }
 
-// TestInspector_GetQueueInfo_FailedReportedAsFailedNotRetry verifies the
+// TestInspector_GetQueueInfo_FailedReportedAsFailedNotDelayed verifies the
 // post-#1187 semantic: ErrSkipRetry / permanent failures land in the failed
-// bucket and are reported via `Failed`. They no longer leak into `Retry`
-// — Retry is reserved for delayed bucket entries with `atm > 0`.
+// bucket and are reported via `Failed`. They do not leak into `Delayed`,
+// which counts the delayed bucket (scheduled and retry-backoff alike).
 //
 // 旧 #1181 fix では mkq の bucket 構造を「retry-backoff も failed bucket
 // に居る」と誤解して `Retry = counts.Failed` にしていたが、mkq#64 close
 // 時の upstream comment で訂正された (delayed bucket が両者を混在させて
 // いるのが正しい)。本 test は新 semantic を pin する (#1187)。
-func TestInspector_GetQueueInfo_FailedReportedAsFailedNotRetry(t *testing.T) {
+func TestInspector_GetQueueInfo_FailedReportedAsFailedNotDelayed(t *testing.T) {
 	d := newDriver(t)
 	srv := d.Server()
 	var wg sync.WaitGroup
@@ -640,9 +647,9 @@ func TestInspector_GetQueueInfo_FailedReportedAsFailedNotRetry(t *testing.T) {
 	ins := d.Inspector()
 	require.Eventually(t, func() bool {
 		info, err := ins.GetQueueInfo("deliver")
-		return err == nil && info.Failed >= 1 && info.Retry == 0
+		return err == nil && info.Failed >= 1 && info.Delayed == 0
 	}, 5*time.Second, 50*time.Millisecond,
-		"permanent failure should land in Failed, not Retry (#1187)")
+		"permanent failure should land in Failed, not Delayed (#1187)")
 }
 
 // TestInspector_GetQueueInfo_UnknownQueue: queueFor が nil を返す未知 queue
@@ -696,38 +703,37 @@ func TestInspector_ListScheduledTasks_BoundaryPaging(t *testing.T) {
 	assert.Empty(t, rows)
 }
 
-// TestInspector_GetQueueInfo_RetryReflectsDelayedAtmPositive verifies the
-// new semantic for the retry-backoff path: a delayed bucket entry with
-// `atm > 0` (= 過去に attempt 失敗して backoff 待ち) is surfaced as
-// `Retry` (= NOT `Scheduled`, NOT `Failed`) (#1187, mkq#64 close).
+// TestInspector_GetQueueInfo_DelayedCountsWithoutReadingJobs verifies that
+// Delayed counts every delayed bucket entry, retry-backoff waiters
+// (`atm > 0`) included, and that it gets there without reading the jobs.
 //
-// driver level に backoff option が無いので、natural な retry cycle を
-// 回す代わりに WithProcessIn で初回 delayed に積んだ後 HSET で `atm` を
-// 直接 1 に書き換えて simulate する (white-box; mkq の HASH key 構造を
-// 既存 `TestEnqueue_MaxRetryAppliedToBullMQHash` と同じ手法で利用)。
-func TestInspector_GetQueueInfo_RetryReflectsDelayedAtmPositive(t *testing.T) {
+// 管理画面の統計は 10 秒ごとに deliver と inbox について呼ばれる。以前は
+// 予定と再試行待ちを数え分けるために delayed を全件 HGETALL していたので、
+// 落ちたサーバーへの再試行がたまるほど重くなった (#3962)。
+func TestInspector_GetQueueInfo_DelayedCountsWithoutReadingJobs(t *testing.T) {
 	d := newDriver(t)
 	ctx := context.Background()
 
-	require.NoError(t, d.Client().Enqueue(ctx,
-		"ins:retry-pending", nil,
-		driver.WithQueue("deliver"),
-		driver.WithProcessIn(time.Hour),
-	))
+	const n = 5
+	for range n {
+		require.NoError(t, d.Client().Enqueue(ctx,
+			"ins:delayed-count", nil,
+			driver.WithQueue("deliver"),
+			driver.WithProcessIn(time.Hour),
+		))
+	}
+	// 2 件を retry-backoff 待ち (atm > 0) にする。合計に入ることを見る。
+	for _, id := range []int{1, 3} {
+		require.NoError(t, testRedis.Client.HSet(ctx, fmt.Sprintf("bull:deliver:%d", id), "atm", 1).Err())
+	}
 
-	// 最新 job ID を `bull:<queue>:id` カウンタから取り、HASH の atm を
-	// 1 に上書きする (= mkq が retry-backoff で 1 度 attempt 済の状態を
-	// simulate)。
-	idStr, err := testRedis.Client.Get(ctx, "bull:deliver:id").Result()
+	require.NoError(t, testRedis.Client.ConfigResetStat(ctx).Err())
+	info, err := d.Inspector().GetQueueInfo("deliver")
 	require.NoError(t, err)
-	require.NoError(t, testRedis.Client.HSet(ctx, "bull:deliver:"+idStr, "atm", 1).Err())
-
-	ins := d.Inspector()
-	info, err := ins.GetQueueInfo("deliver")
-	require.NoError(t, err)
-	assert.Equal(t, 1, info.Retry, "atm>0 delayed entry should be classified as Retry (#1187)")
-	assert.Equal(t, 0, info.Scheduled, "scheduled should not include atm>0 entries")
+	assert.Equal(t, n, info.Delayed, "scheduled and retry-backoff entries must both count as delayed")
+	assert.Equal(t, n, info.Size)
 	assert.Equal(t, 0, info.Failed, "failed bucket must remain untouched by retry-backoff entries")
+	assert.Equal(t, int64(0), hgetallCalls(t), "GetQueueInfo must not read the delayed jobs")
 }
 
 // TestInspector_ListRetryTasks_FiltersDelayedAtmPositive verifies that
@@ -1501,7 +1507,7 @@ func TestScheduler_RepeatedRegisterDoesNotDuplicate(t *testing.T) {
 	infoRepeat, err := d.Inspector().GetQueueInfo("maintenance")
 	require.NoError(t, err)
 
-	assert.Equal(t, infoOnce.Scheduled, infoRepeat.Scheduled,
+	assert.Equal(t, infoOnce.Delayed, infoRepeat.Delayed,
 		"re-registering the same scheduleID must not add more scheduled entries")
 
 	// repeat ZSET も 1 エントリのまま (scheduleID がキー)。

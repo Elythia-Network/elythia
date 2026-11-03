@@ -36,8 +36,15 @@ type InspectorInfo struct {
 	Pending   int
 	Completed int
 	Failed    int
-	Scheduled int
-	Retry     int
+	// Delayed is the number of jobs that will not run right away: the
+	// delayed bucket (scheduled enqueues and retry-backoff waiters alike)
+	// plus the registered repeat schedules. A repeat schedule is counted
+	// twice, because its next run also sits in the delayed bucket.
+	//
+	// 予定と再試行待ちを数え分けない (#3962)。数え分けには delayed の全件を
+	// 本文まで読む必要があり、使う側 (admin/queue と stream の queueStats) は
+	// どちらも合計しか出さないため。
+	Delayed int
 	// IsPaused reports whether the queue is paused (BullMQ meta.paused)。
 	// upstream admin/queue は queueInfo.isPaused でボタンを切り替える (#17436)。
 	IsPaused bool
@@ -139,14 +146,10 @@ type Inspector interface {
 	//
 	// **オートスケーラは 1Hz x 管理キュー数で回るので、集計 API を使わせない。**
 	// GetQueueInfo は admin パネル向けに wait/active/delayed/completed/failed の
-	// 全カウント + repeat の ZCARD + delayed 全件の ZRANGE + N x HGETALL +
-	// paused 判定を 1 回で引く。オートスケーラが使うのは Pending 1 個だけで、
-	// 残りは捨てている。実測でこれがアイドル時の Redis コマンドの 6 割 (毎秒
-	// 90 前後) を占めていた (#2605)。
-	//
-	// delayed が federation 障害で数千件に膨らむと GetQueueInfo の
-	// ZRANGE + N x HGETALL もそれに比例する。admin パネルを開いている間だけ
-	// なら許容でも、常時 1Hz で走らせる先ではない。
+	// 全カウント + repeat の ZCARD + paused 判定を 1 回で引く。オートスケーラが
+	// 使うのは Pending 1 個だけで、残りは捨てている。実測でこれがアイドル時の
+	// Redis コマンドの 6 割 (毎秒 90 前後) を占めていた (#2605。当時は delayed
+	// 全件の ZRANGE + N x HGETALL も含んでいた。#3962 で外した)。
 	DispatchableCount(qname string) (int, error)
 
 	DeleteTask(qname, taskID string) error

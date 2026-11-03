@@ -528,13 +528,10 @@ func TestStartAutoScale_RecordsScaleEventsForAdminUI(t *testing.T) {
 // **オートスケーラが admin 集計 API を叩かないこと。**
 //
 // ticker は 1Hz x 管理キュー数で回る。`GetQueueInfo` は全カウント +
-// repeat の ZCARD + delayed 全件の ZRANGE + N x HGETALL + paused 判定を
-// 1 回で引くので、毎秒引くとアイドル時の Redis コマンドの大半をこれが
-// 占める (本番実測で毎秒 90 前後、全体の 6 割)。使うのは Pending 1 個
-// だけなので、キューあたり 1 コマンドで足りる (#2605)。
-//
-// delayed が federation 障害で数千件に膨らむと GetQueueInfo のコストも
-// それに比例するので、常時経路から外しておく意味は平常時より大きい。
+// repeat の ZCARD + paused 判定を 1 回で引くので、毎秒引くとアイドル時の
+// Redis コマンドの大半をこれが占める (本番実測で毎秒 90 前後、全体の 6 割。
+// 当時は delayed 全件の ZRANGE + N x HGETALL も含んでいた。#3962 で外した)。
+// 使うのは Pending 1 個だけなので、キューあたり 1 コマンドで足りる (#2605)。
 func TestStartAutoScale_UsesDispatchableCountNotQueueInfo(t *testing.T) {
 	cfg := &config.Config{JobQueueAutoScale: true}
 	d := newScriptableDriver(map[string]int{"export": 4})
