@@ -34,37 +34,49 @@ func injectRenoteMyReaction(payload []byte, viewerID string) []byte {
 			Cache     []string        `json:"reactionAndUserPairCache"`
 		} `json:"renote"`
 	}
-	if err := json.Unmarshal(payload, &probe); err != nil {
+	if err := decodeStreamPayload(payload, &probe); err != nil {
 		return payload
 	}
 	if !probe.isPureRenote() || probe.Renote == nil {
 		return payload
 	}
-	// upstream populateMyReaction は reactionsCount = Σ(reactions の値) (種類数でなく
-	// 総数) で cache 充足を判定する。総数 > cache 長なら cache は truncated なので
-	// 算出しない (upstream は DB fallback だが mk-go は cache-only、#2058)。
-	reactionCount := reactionValueSum(probe.Renote.Reactions)
-	if reactionCount == 0 || len(probe.Renote.Cache) < reactionCount {
-		return payload
-	}
-	prefix := viewerID + "/"
-	reaction := ""
-	for _, pair := range probe.Renote.Cache {
-		if strings.HasPrefix(pair, prefix) {
-			// pair suffix は raw reaction。REST 経路と同じく colon-form/legacy 正規化を
-			// 適用しないと reactions map の key (正規化済) と突合できない (#2058 HIGH)。
-			reaction = entity.NormalizeReactionWithLegacy(pair[len(prefix):])
-			break
-		}
-	}
+	reaction := renoteMyReaction(probe.Renote.Reactions, probe.Renote.Cache, viewerID)
 	if reaction == "" {
 		return payload // viewer は reaction していない → myReaction null のまま
 	}
+	return setRenoteMyReaction(payload, reaction)
+}
+
+// renoteMyReaction returns viewerID's normalized reaction on a pure renote's
+// target, computed from the target's reactions and reactionAndUserPairCache
+// (#2058). "" when the cache is truncated or the viewer has not reacted.
+func renoteMyReaction(reactions json.RawMessage, cache []string, viewerID string) string {
+	// upstream populateMyReaction は reactionsCount = Σ(reactions の値) (種類数でなく
+	// 総数) で cache 充足を判定する。総数 > cache 長なら cache は truncated なので
+	// 算出しない (upstream は DB fallback だが mk-go は cache-only、#2058)。
+	reactionCount := reactionValueSum(reactions)
+	if reactionCount == 0 || len(cache) < reactionCount {
+		return ""
+	}
+	prefix := viewerID + "/"
+	for _, pair := range cache {
+		if strings.HasPrefix(pair, prefix) {
+			// pair suffix は raw reaction。REST 経路と同じく colon-form/legacy 正規化を
+			// 適用しないと reactions map の key (正規化済) と突合できない (#2058 HIGH)。
+			return entity.NormalizeReactionWithLegacy(pair[len(prefix):])
+		}
+	}
+	return ""
+}
+
+// setRenoteMyReaction re-encodes payload with renote.myReaction set. It returns
+// payload unchanged when the note cannot be decoded or has no renote.
+func setRenoteMyReaction(payload []byte, reaction string) []byte {
 	// full unmarshal → set → re-marshal (hideNoteRawForViewer と同パターン)。算出に
 	// 成功した pure-renote-with-reactions のときだけ marshal するので hot-path 全体には
 	// 乗らない。
 	var full entity.NoteEntity
-	if err := json.Unmarshal(payload, &full); err != nil || full.Renote == nil {
+	if err := decodeStreamPayload(payload, &full); err != nil || full.Renote == nil {
 		return payload
 	}
 	full.Renote.MyReaction = &reaction
@@ -136,9 +148,15 @@ type streamVisibilityProbe struct {
 // public / home are always visible.
 func streamNoteVisibleForViewer(payload []byte, viewerID string, snap map[string]bool) bool {
 	var p streamVisibilityProbe
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
+	return streamVisibilityAllows(&p, viewerID, snap)
+}
+
+// streamVisibilityAllows is the decision of streamNoteVisibleForViewer over an
+// already decoded probe.
+func streamVisibilityAllows(p *streamVisibilityProbe, viewerID string, snap map[string]bool) bool {
 	switch p.Visibility {
 	case string(model.NoteVisibilityPublic), string(model.NoteVisibilityHome):
 		return true
@@ -180,7 +198,7 @@ func noteChannelID(payload []byte) string {
 	var p struct {
 		ChannelID *string `json:"channelId"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil || p.ChannelID == nil {
+	if err := decodeStreamPayload(payload, &p); err != nil || p.ChannelID == nil {
 		return ""
 	}
 	return *p.ChannelID
@@ -192,7 +210,7 @@ func noteVisibility(payload []byte) string {
 	var p struct {
 		Visibility string `json:"visibility"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return ""
 	}
 	return p.Visibility
@@ -226,7 +244,7 @@ func anonRequireSigninDrop(payload []byte, viewerID string) bool {
 		Renote *embedRef `json:"renote"`
 		Reply  *embedRef `json:"reply"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
 	requiresSignin := func(b *bool) bool { return b != nil && *b }
@@ -268,7 +286,7 @@ func anonUGCVisibilityDrop(ctx stream.ChannelContext, payload []byte, viewerID s
 			Host *string `json:"host"`
 		} `json:"user"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil || p.User == nil {
+	if err := decodeStreamPayload(payload, &p); err != nil || p.User == nil {
 		return true
 	}
 	return ugcvisibility.HidesNote(policy, p.User.Host)
@@ -281,7 +299,7 @@ func streamNoteID(payload []byte) string {
 	var p struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return ""
 	}
 	return p.ID
@@ -340,12 +358,9 @@ func hideNoteRawForViewer(payload []byte, viewer *model.User, snap map[string]bo
 		Renote json.RawMessage `json:"renote"`
 		Reply  json.RawMessage `json:"reply"`
 	}
-	if err := json.Unmarshal(payload, &probe); err != nil {
+	if err := decodeStreamPayload(payload, &probe); err != nil {
 		return payload, false
 	}
-	hideTop := topNoteHideable(probe.embedProbe, probe.Reply, viewer, snap, nowMs)
-	hideRenote := embedRawHideable(probe.Renote, viewer, snap, nowMs)
-	hideReply := embedRawHideable(probe.Reply, viewer, snap, nowMs)
 	// depth-2 embed (renote.renote / renote.reply): packer がこれらを出すため、
 	// 非公開の note が renote 経由で leak しないよう embed gate を適用する。
 	// renote raw から nested renote / reply を取り出す。
@@ -360,55 +375,86 @@ func hideNoteRawForViewer(payload []byte, viewer *model.User, snap map[string]bo
 			renoteReplyRaw = rp.Reply
 		}
 	}
-	hideRenoteRenote := embedRawHideable(renoteRenoteRaw, viewer, snap, nowMs)
-	hideRenoteReply := embedRawHideable(renoteReplyRaw, viewer, snap, nowMs)
-	// **#2106 L5 の降格も反映する (viewer 非依存)。** REST (`notehide`) と
-	// push (`core/webpush`) は packed の `visibility` を `followers` へ
-	// 書き換えるのに、stream だけ元の `public` のまま流していた。同じノートが
-	// 経路によって違う visibility で届く。
-	downTop := corenote.ShouldDowngradeVisibility(embedFactsFromProbe(probe.embedProbe), nowMs)
-	downRenote := embedRawDowngradable(probe.Renote, nowMs)
-	downReply := embedRawDowngradable(probe.Reply, nowMs)
-	downRenoteRenote := embedRawDowngradable(renoteRenoteRaw, nowMs)
-	downRenoteReply := embedRawDowngradable(renoteReplyRaw, nowMs)
-	if !hideTop && !hideRenote && !hideReply && !hideRenoteRenote && !hideRenoteReply &&
-		!downTop && !downRenote && !downReply && !downRenoteRenote && !downRenoteReply {
+	plan := planHide(&probe.embedProbe, replyTargetAuthorID(probe.Reply),
+		embedProbeFromRaw(probe.Renote), embedProbeFromRaw(probe.Reply),
+		embedProbeFromRaw(renoteRenoteRaw), embedProbeFromRaw(renoteReplyRaw),
+		viewer, snap, nowMs)
+	return applyHidePlan(payload, plan)
+}
+
+// hidePlan records which parts of a streamed note hideNoteRawForViewer must
+// blank (hide*) or downgrade to followers visibility (down*).
+type hidePlan struct {
+	hideTop, hideRenote, hideReply, hideRenoteRenote, hideRenoteReply bool
+	downTop, downRenote, downReply, downRenoteRenote, downRenoteReply bool
+}
+
+func (p hidePlan) empty() bool {
+	return p == hidePlan{}
+}
+
+// planHide computes the hidePlan from the decoded top-level note and its embeds.
+// A nil embed is absent (or could not be probed) and is never hidden.
+func planHide(top *embedProbe, replyAuthorID string, renote, reply, renoteRenote, renoteReply *embedProbe, viewer *model.User, snap map[string]bool, nowMs int64) hidePlan {
+	return hidePlan{
+		hideTop:          topNoteHideable(*top, replyAuthorID, viewer, snap, nowMs),
+		hideRenote:       embedHideable(renote, viewer, snap, nowMs),
+		hideReply:        embedHideable(reply, viewer, snap, nowMs),
+		hideRenoteRenote: embedHideable(renoteRenote, viewer, snap, nowMs),
+		hideRenoteReply:  embedHideable(renoteReply, viewer, snap, nowMs),
+		// **#2106 L5 の降格も反映する (viewer 非依存)。** REST (`notehide`) と
+		// push (`core/webpush`) は packed の `visibility` を `followers` へ
+		// 書き換えるのに、stream だけ元の `public` のまま流していた。同じノートが
+		// 経路によって違う visibility で届く。
+		downTop:          corenote.ShouldDowngradeVisibility(embedFactsFromProbe(*top), nowMs),
+		downRenote:       embedDowngradable(renote, nowMs),
+		downReply:        embedDowngradable(reply, nowMs),
+		downRenoteRenote: embedDowngradable(renoteRenote, nowMs),
+		downRenoteReply:  embedDowngradable(renoteReply, nowMs),
+	}
+}
+
+// applyHidePlan returns payload verbatim (changed=false) when plan is empty;
+// otherwise it decodes a FRESH NoteEntity, applies plan and re-marshals, never
+// mutating the shared input buffer.
+func applyHidePlan(payload []byte, plan hidePlan) ([]byte, bool) {
+	if plan.empty() {
 		// 隠すものが無い (= no-embed / public / own / follower) → verbatim。
 		return payload, false
 	}
 	var full entity.NoteEntity
-	if err := json.Unmarshal(payload, &full); err != nil {
+	if err := decodeStreamPayload(payload, &full); err != nil {
 		return payload, false
 	}
-	if hideTop {
+	if plan.hideTop {
 		entity.HideNoteEntity(&full)
 	}
-	if hideRenote && full.Renote != nil {
+	if plan.hideRenote && full.Renote != nil {
 		entity.HideNoteEntity(full.Renote)
 	}
-	if hideRenoteRenote && full.Renote != nil && full.Renote.Renote != nil {
+	if plan.hideRenoteRenote && full.Renote != nil && full.Renote.Renote != nil {
 		entity.HideNoteEntity(full.Renote.Renote)
 	}
-	if hideRenoteReply && full.Renote != nil && full.Renote.Reply != nil {
+	if plan.hideRenoteReply && full.Renote != nil && full.Renote.Reply != nil {
 		entity.HideNoteEntity(full.Renote.Reply)
 	}
-	if hideReply && full.Reply != nil {
+	if plan.hideReply && full.Reply != nil {
 		entity.HideNoteEntity(full.Reply)
 	}
 	// **hide の後に書き換える。** hide の判定は元の visibility を読むので、
 	// 先に降格すると判定が変わる (notehide / webpush と同じ順)。
-	downgradeVisibility(&full, downTop)
+	downgradeVisibility(&full, plan.downTop)
 	if full.Renote != nil {
-		downgradeVisibility(full.Renote, downRenote)
+		downgradeVisibility(full.Renote, plan.downRenote)
 		if full.Renote.Renote != nil {
-			downgradeVisibility(full.Renote.Renote, downRenoteRenote)
+			downgradeVisibility(full.Renote.Renote, plan.downRenoteRenote)
 		}
 		if full.Renote.Reply != nil {
-			downgradeVisibility(full.Renote.Reply, downRenoteReply)
+			downgradeVisibility(full.Renote.Reply, plan.downRenoteReply)
 		}
 	}
 	if full.Reply != nil {
-		downgradeVisibility(full.Reply, downReply)
+		downgradeVisibility(full.Reply, plan.downReply)
 	}
 	out, err := json.Marshal(&full)
 	if err != nil {
@@ -419,12 +465,12 @@ func hideNoteRawForViewer(payload []byte, viewer *model.User, snap map[string]bo
 
 // topNoteHideable decides whether the top-level note (decoded as embedProbe over
 // the payload root) must be blanked for viewer using the author-preference gate
-// only. replyRaw carries the note's reply target so the
+// only. replyAuthorID is the note's reply target author ("" when none) so the
 // makeNotesFollowersOnlyBefore downgrade's reply-target escape hatch can fire.
-func topNoteHideable(p embedProbe, replyRaw json.RawMessage, viewer *model.User, snap map[string]bool, nowMs int64) bool {
+func topNoteHideable(p embedProbe, replyAuthorID string, viewer *model.User, snap map[string]bool, nowMs int64) bool {
 	f := embedFactsFromProbe(p)
-	if rid := replyTargetAuthorID(replyRaw); rid != "" {
-		f.ReplyTargetAuthorID = rid
+	if replyAuthorID != "" {
+		f.ReplyTargetAuthorID = replyAuthorID
 	}
 	return corenote.HideNoteByPrefsDecision(viewer, f, followsFromSnap(snap), nowMs)
 }
@@ -444,31 +490,36 @@ func replyTargetAuthorID(raw json.RawMessage) string {
 	return r.UserID
 }
 
-// embedRawHideable decodes the embed-probe metadata from a raw embed object and
-// runs the FULL embed decision. Absent/null embed or a probe-decode error →
-// false (nothing to hide / cannot probe).
-func embedRawHideable(raw json.RawMessage, viewer *model.User, snap map[string]bool, nowMs int64) bool {
+// embedProbeFromRaw decodes the embed-probe metadata from a raw embed object.
+// Absent/null embed or a probe-decode error → nil (nothing to hide / cannot
+// probe).
+func embedProbeFromRaw(raw json.RawMessage) *embedProbe {
 	if len(raw) == 0 || string(raw) == "null" {
-		return false
+		return nil
 	}
 	var p embedProbe
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return false
+		return nil
 	}
-	return corenote.HideEmbedDecision(viewer, embedFactsFromProbe(p), followsFromSnap(snap), nowMs)
+	return &p
 }
 
-// embedRawDowngradable reports whether a raw embed's packed visibility must be
+// embedHideable runs the FULL embed decision. nil embed → false.
+func embedHideable(p *embedProbe, viewer *model.User, snap map[string]bool, nowMs int64) bool {
+	if p == nil {
+		return false
+	}
+	return corenote.HideEmbedDecision(viewer, embedFactsFromProbe(*p), followsFromSnap(snap), nowMs)
+}
+
+// embedDowngradable reports whether an embed's packed visibility must be
 // rewritten to `followers` (#2106 L5, upstream treatVisibility)。Viewer 非依存。
-func embedRawDowngradable(raw json.RawMessage, nowMs int64) bool {
-	if len(raw) == 0 || string(raw) == "null" {
+// nil embed → false.
+func embedDowngradable(p *embedProbe, nowMs int64) bool {
+	if p == nil {
 		return false
 	}
-	var p embedProbe
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return false
-	}
-	return corenote.ShouldDowngradeVisibility(embedFactsFromProbe(p), nowMs)
+	return corenote.ShouldDowngradeVisibility(embedFactsFromProbe(*p), nowMs)
 }
 
 // downgradeVisibility rewrites n's packed visibility when down is true.
@@ -615,14 +666,14 @@ func (f *noteFilter) shouldEmit(payload []byte, hardMuteRules []byte, viewerID s
 	// 読み、規則があれば埋め込みまで含めた probe を 1 回で読む。
 	if len(hardMuteRules) == 0 {
 		var note emitProbe
-		if err := json.Unmarshal(payload, &note); err != nil {
+		if err := decodeStreamPayload(payload, &note); err != nil {
 			// パース失敗時はそのまま送信
 			return true
 		}
 		return f.passes(note)
 	}
 	var p hardMuteProbe
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return true
 	}
 	if !f.passes(p.emitProbe) {
@@ -676,7 +727,7 @@ type hardMuteProbe struct {
 // rules hide it (see hardMutedProbe). An undecodable payload is not muted.
 func hardMutedPayload(payload, rules []byte, viewerID string, nowMs int64) bool {
 	var p hardMuteProbe
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
 	return hardMutedProbe(&p, rules, viewerID, nowMs)
@@ -800,13 +851,19 @@ func replyShouldEmit(payload []byte, viewerID string, snap map[string]bool, para
 		return true
 	}
 	var note notePayload
-	if err := json.Unmarshal(payload, &note); err != nil {
+	if err := decodeStreamPayload(payload, &note); err != nil {
 		return true
 	}
+	return replyGateAllows(&note, viewerID, snap, paramWithReplies, mode)
+}
+
+// replyGateAllows is the decision of replyShouldEmit over an already decoded
+// note. replyGateGlobal must be handled by the caller before decoding.
+func replyGateAllows(note *notePayload, viewerID string, snap map[string]bool, paramWithReplies bool, mode replyGateMode) bool {
 	// 純粋リノートは、リノート先が「フォローしていない人の followers 限定投稿
 	// への返信」なら弾く (upstream home-timeline.ts:76-80)。リノートそのものは
 	// reply ではないので、下の reply gate では拾えない。
-	if !renotedReplyVisibleTo(&note, viewerID, snap) {
+	if !renotedReplyVisibleTo(note, viewerID, snap) {
 		return false
 	}
 	if note.ReplyID == nil {

@@ -78,31 +78,32 @@ func (c *AntennaChannel) Init(params json.RawMessage) error {
 }
 
 func (c *AntennaChannel) OnRedisEvent(payload []byte) {
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// per-subscriber 可視性 re-filter (#1573 課題2 / #1549)。push 時点の owner
 	// CanSeeNote (#1464) は subscriber == owner を前提に gate するが、push 後に
 	// 著者が followers 化 / owner が unfollow した stale-narrowing はカバー
 	// しない。fail-closed: 非可視 / 壊れた payload を drop する。
-	if !streamNoteVisibleForViewer(payload, viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
+	if !note.visibleForViewer(viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerIDFromCtx(c.ctx)) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
 		return
 	}
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
 	// embedded renote/reply の per-viewer 可視性 gate (#1536)。絶対に消さない:
 	// 消すと non-visible な引用/返信元が top-level antenna note 経由で漏れる
 	// IDOR を再 open する。
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerIDFromCtx(c.ctx))
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に inject する
+	// (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerIDFromCtx(c.ctx))))
 }
 
 func (c *AntennaChannel) OnClientMessage(string, json.RawMessage) {}

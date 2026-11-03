@@ -53,33 +53,34 @@ func (c *LocalTimelineChannel) Init(params json.RawMessage) error {
 // 3 escape hatch を OR で評価する。
 func (c *LocalTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// anon viewer + note/renote/reply 著者が requireSigninToViewContents なら note を
 	// 丸ごと drop (#1942、upstream local-timeline.ts の 3 連 gate)。hideEmbeds の
 	// blank 化より前に弾いて「何も送らない」upstream 挙動に揃える。
-	if anonRequireSigninDrop(payload, viewerID) {
+	if note.anonRequireSigninDrop(viewerID) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerID) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
 	// live note も user-mute / block / instance-mute / renote-mute / channel-mute で
 	// filter する (upstream channel.ts isNoteMutedOrBlocked、#1812)。snapshot は
 	// connection 確立時にロード済 (未配線/anon は nil で fail-open)。
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	if !replyShouldEmit(payload, viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateLocal) {
+	if !note.replyShouldEmit(viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateLocal) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に in-memory 算出して inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerID)
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に in-memory
+	// 算出して inject する (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerID)))
 }
 
 // OnClientMessage is unused for the local timeline channel.
@@ -116,32 +117,33 @@ func (c *GlobalTimelineChannel) Init(params json.RawMessage) error {
 // ので、ここでも replyShouldEmit を呼ばずに pass-through 相当の挙動になる。
 func (c *GlobalTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// anon viewer + note/renote/reply 著者が requireSigninToViewContents なら drop
 	// (#1942、upstream global-timeline.ts の 3 連 gate)。hideEmbeds より前に弾く。
-	if anonRequireSigninDrop(payload, viewerID) {
+	if note.anonRequireSigninDrop(viewerID) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerID) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
 	// live note も user-mute / block / instance-mute / renote-mute / channel-mute で
 	// filter する (upstream channel.ts isNoteMutedOrBlocked、#1812)。snapshot は
 	// connection 確立時にロード済 (未配線/anon は nil で fail-open)。
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	if !replyShouldEmit(payload, viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateGlobal) {
+	if !note.replyShouldEmit(viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateGlobal) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に in-memory 算出して inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerID)
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に in-memory
+	// 算出して inject する (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerID)))
 }
 func (c *GlobalTimelineChannel) OnClientMessage(string, json.RawMessage) {}
 func (c *GlobalTimelineChannel) Dispose() {
@@ -182,27 +184,28 @@ func (c *HomeTimelineChannel) Init(params json.RawMessage) error {
 // replyShouldEmit の paramWithReplies には false を渡す。
 func (c *HomeTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerID) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
 	// live note も user-mute / block / instance-mute / renote-mute / channel-mute で
 	// filter する (upstream channel.ts isNoteMutedOrBlocked、#1812)。snapshot は
 	// connection 確立時にロード済 (未配線/anon は nil で fail-open)。
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	if !replyShouldEmit(payload, viewerID, c.ctx.FollowingSnapshot(), false, replyGateHome) {
+	if !note.replyShouldEmit(viewerID, c.ctx.FollowingSnapshot(), false, replyGateHome) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に in-memory 算出して inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerID)
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に in-memory
+	// 算出して inject する (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerID)))
 }
 
 func (c *HomeTimelineChannel) OnClientMessage(string, json.RawMessage) {}
@@ -251,35 +254,36 @@ func (c *HybridTimelineChannel) Init(params json.RawMessage) error {
 // が違う (#1063)。
 func (c *HybridTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// anon viewer + requireSigninToViewContents は note を丸ごと drop (#1942)。
 	// upstream hybrid-timeline.ts は requireCredential=true で anon が到達しない
 	// 前提のため明示 gate を持たないが、mk-go は cookie/anon が hybrid の
 	// localTimeline topic を購読できるため、LTL/GTL と同じく blank shell を送らず
 	// drop して揃える (requireCredential 非適用の root cause は別 issue)。
-	if anonRequireSigninDrop(payload, viewerID) {
+	if note.anonRequireSigninDrop(viewerID) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerID) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
 	// live note も user-mute / block / instance-mute / renote-mute / channel-mute で
 	// filter する (upstream channel.ts isNoteMutedOrBlocked、#1812)。snapshot は
 	// connection 確立時にロード済 (未配線/anon は nil で fail-open)。
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	if !replyShouldEmit(payload, viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateHybrid) {
+	if !note.replyShouldEmit(viewerID, c.ctx.FollowingSnapshot(), c.filter.WithReplies, replyGateHybrid) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に in-memory 算出して inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerID)
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に in-memory
+	// 算出して inject する (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerID)))
 }
 
 func (c *HybridTimelineChannel) OnClientMessage(string, json.RawMessage) {}

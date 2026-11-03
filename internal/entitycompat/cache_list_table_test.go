@@ -321,6 +321,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"ctx", "filter", "mu", "q", "seen", "topics"}, nil},
 	"internal/stream/channels.UserListChannel": {kindPerConnection, "1つの購読のチャンネルの、リストのメンバーの設定。チャンネルの開始のときにDBから読み、dropAllの後も購読が続く間は古いまま残る。メンテナンスでは世代ごと作り直し、接続を1012で閉じる(4.4、#3802)",
 		[]string{"ctx", "filter", "memberships", "mu", "owners", "streamTopic", "topic", "withRepliesByUser"}, nil},
+	"internal/stream/channels.payloadDecodeHook": {kindNotCache, "テストだけが入れる、配信1回あたりのpayloadの解析の回数を数える関数(#3986)。本番はnilのままで、DB・設定・外部から読んだ値を持たない",
+		[]string{}, nil},
 	"plugin.registryMu": {kindProcessGlobal, "プラグインの登録(initで積む)を守るlock。値の写しではない",
 		[]string{"var:registry"}, nil},
 }
