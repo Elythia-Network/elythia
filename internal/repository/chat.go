@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/pgarray"
 	"gorm.io/gorm"
 )
 
@@ -74,11 +75,18 @@ type ChatRepository interface {
 	CountUnread(userID string) (int64, error)
 
 	// HasUnreadFromUser reports whether readerID has any unread 1-on-1 message
-	// from otherID. Used by chat/history to populate isRead (#1749)。
+	// from otherID. chat/history populated isRead with it (#1749) until #3990
+	// batched the lookup into UnreadFromUsers.
 	HasUnreadFromUser(readerID, otherID string) (bool, error)
 	// HasUnreadInRoom reports whether readerID has any unread message in roomID
-	// (excluding their own). Used by chat/history to populate isRead (#1749)。
+	// (excluding their own). Batched as UnreadInRooms (#3990).
 	HasUnreadInRoom(readerID, roomID string) (bool, error)
+	// UnreadFromUsers is the batched HasUnreadFromUser: the returned set holds
+	// each otherID for which HasUnreadFromUser(readerID, otherID) is true.
+	// chat/history uses it to populate isRead with one query (#1749, #3990)。
+	UnreadFromUsers(readerID string, otherIDs []string) (map[string]bool, error)
+	// UnreadInRooms is the batched HasUnreadInRoom, as UnreadFromUsers.
+	UnreadInRooms(readerID string, roomIDs []string) (map[string]bool, error)
 
 	// Mark read
 	MarkRead(userID, messageID string) error
@@ -587,6 +595,59 @@ func (r *chatRepository) HasUnreadInRoom(readerID, roomID string) (bool, error) 
 	return count > 0, nil
 }
 
+// UnreadFromUsers returns the subset of otherIDs from which readerID has an
+// unread 1-on-1 message. The per-ID condition is HasUnreadFromUser's.
+func (r *chatRepository) UnreadFromUsers(readerID string, otherIDs []string) (map[string]bool, error) {
+	if len(otherIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	// 条件は HasUnreadFromUser と同じ。相手ごとに LIMIT 1 で引き、
+	// (fromUserId, toUserId) の複合 index を 1 件見つけた所で止める。EXISTS に
+	// すると、準備済みの文の汎用の計画が hash semi join を選び、自分宛ての DM を
+	// 全部読む (3 万通の利用者で 5ms。LATERAL + LIMIT 1 は 0.3ms、#3990)。
+	var ids []string
+	if err := r.db.Raw(`
+		SELECT o.id FROM unnest(?::varchar[]) AS o(id)
+		CROSS JOIN LATERAL (
+			SELECT 1 FROM "chat_message"
+			WHERE "fromUserId" = o.id AND "toUserId" = ? AND NOT ("reads" @> ARRAY[?]::varchar[])
+			LIMIT 1
+		) unread
+	`, pgarray.StringArray(otherIDs), readerID, readerID).Scan(&ids).Error; err != nil {
+		return nil, err
+	}
+	return chatIDSet(ids), nil
+}
+
+// UnreadInRooms returns the subset of roomIDs in which readerID has an unread
+// message authored by someone else. The per-ID condition is HasUnreadInRoom's.
+func (r *chatRepository) UnreadInRooms(readerID string, roomIDs []string) (map[string]bool, error) {
+	if len(roomIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	// UnreadFromUsers と同じく、部屋ごとに LIMIT 1 で引く。
+	var ids []string
+	if err := r.db.Raw(`
+		SELECT o.id FROM unnest(?::varchar[]) AS o(id)
+		CROSS JOIN LATERAL (
+			SELECT 1 FROM "chat_message"
+			WHERE "toRoomId" = o.id AND "fromUserId" <> ? AND NOT ("reads" @> ARRAY[?]::varchar[])
+			LIMIT 1
+		) unread
+	`, pgarray.StringArray(roomIDs), readerID, readerID).Scan(&ids).Error; err != nil {
+		return nil, err
+	}
+	return chatIDSet(ids), nil
+}
+
+func chatIDSet(ids []string) map[string]bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
+
 func (r *chatRepository) MarkRead(userID, messageID string) error {
 	return r.db.Exec(`UPDATE "chat_message" SET "reads" = array_append("reads", ?) WHERE "id" = ? AND NOT ("reads" @> ARRAY[?]::varchar[])`,
 		userID, messageID, userID).Error
@@ -617,7 +678,8 @@ func (r *chatRepository) UpdateDeliveryStatus(messageID string, delivering, fail
 }
 
 // ListHistory returns the most recent message per conversation (1-on-1 or
-// room) involving userID, using DISTINCT ON to pick one row per conversation.
+// room) involving userID, using GROUP BY + max(id) to pick one row per
+// conversation.
 func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMessage, error) {
 	if limit <= 0 {
 		limit = 10
@@ -626,11 +688,9 @@ func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMes
 		limit = 100
 	}
 	// 1対1 (toUserId/fromUserId) とルーム (toRoomId経由のmembership) をUNION
-	// し、会話keyごとの最新メッセージを取る。
+	// し、会話ごとの最新メッセージの id を max(id) で取る。会話の鍵は
+	// dmHistoryPeerSQL と toRoomId。
 	// GORMの.Limit()は.Raw()の後では無視されるため、SQL内にLIMITを埋め込む。
-	// DISTINCT ONはconversation_keyの昇順を強制するため、そのままLIMITを
-	// 掛けるとアルファベット順で先頭N件が返ってしまう。外側のサブクエリで
-	// id DESCに並べ直してからLIMITすることで最新のN会話を取得する。
 	// Raw SQLではPreloadが使えないため、2段階で取得する:
 	// 1) Raw SQLで対象メッセージIDを取得
 	// 2) 通常のGORMクエリでPreload("FromUser")付きで再取得
@@ -639,25 +699,23 @@ func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMes
 	var ids []string
 	err := r.db.Raw(`
 		SELECT id FROM (
-			SELECT DISTINCT ON (conversation_key) *
-			FROM (
-				SELECT *, LEAST("fromUserId","toUserId") || '-' || GREATEST("fromUserId","toUserId") AS conversation_key
-				FROM "chat_message"
-				WHERE ("fromUserId" = ? OR "toUserId" = ?) AND "toRoomId" IS NULL
-				UNION ALL
-				SELECT cm.*, 'room:' || cm."toRoomId" AS conversation_key
-				FROM "chat_message" cm
-				WHERE cm."toRoomId" IS NOT NULL
-				AND (
-					EXISTS (SELECT 1 FROM "chat_room_membership" m WHERE m."roomId" = cm."toRoomId" AND m."userId" = ?)
-					OR EXISTS (SELECT 1 FROM "chat_room" cr WHERE cr."id" = cm."toRoomId" AND cr."ownerId" = ?)
-				)
-			) sub
-			ORDER BY conversation_key, id DESC
+			SELECT max(id) AS id
+			FROM "chat_message"
+			WHERE ("fromUserId" = ? OR "toUserId" = ?) AND "toRoomId" IS NULL
+			GROUP BY `+dmHistoryPeerSQL+`
+			UNION ALL
+			SELECT max(cm.id) AS id
+			FROM "chat_message" cm
+			WHERE cm."toRoomId" IS NOT NULL
+			AND (
+				EXISTS (SELECT 1 FROM "chat_room_membership" m WHERE m."roomId" = cm."toRoomId" AND m."userId" = ?)
+				OR EXISTS (SELECT 1 FROM "chat_room" cr WHERE cr."id" = cm."toRoomId" AND cr."ownerId" = ?)
+			)
+			GROUP BY cm."toRoomId"
 		) conversations
 		ORDER BY id DESC
 		LIMIT ?
-	`, userID, userID, userID, userID, limit).Pluck("id", &ids).Error
+	`, userID, userID, userID, userID, userID, userID, limit).Pluck("id", &ids).Error
 	if err != nil {
 		return nil, err
 	}
@@ -679,6 +737,9 @@ func (r *chatRepository) ListHistory(userID string, limit int) ([]*model.ChatMes
 // 降順に並べたうえで切るので、前のページの最後の id を渡せば続きになる。
 // 絞るのは会話ごとの最新を選んだ後で、選ぶ前に絞ると、新しいメッセージの
 // ある会話が古いメッセージで別のページに再び現れる。
+//
+// 会話ごとの最新は GROUP BY + max(id) で求める (#3990)。以前の DISTINCT ON は
+// 利用者の DM を全行、会話の鍵の文字列ごとに並べ替えていた。
 func (r *chatRepository) ListUserHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error) {
 	if limit <= 0 {
 		limit = 10
@@ -688,19 +749,14 @@ func (r *chatRepository) ListUserHistory(userID string, limit int, untilID strin
 	}
 	var ids []string
 	err := r.db.Raw(`
-		SELECT id FROM (
-			SELECT DISTINCT ON (conversation_key) *
-			FROM (
-				SELECT *, LEAST("fromUserId","toUserId") || '-' || GREATEST("fromUserId","toUserId") AS conversation_key
-				FROM "chat_message"
-				WHERE ("fromUserId" = ? OR "toUserId" = ?) AND "toRoomId" IS NULL
-			) sub
-			ORDER BY conversation_key, id DESC
-		) conversations
-		WHERE (? = '' OR id < ?)
+		SELECT max(id) AS id
+		FROM "chat_message"
+		WHERE ("fromUserId" = ? OR "toUserId" = ?) AND "toRoomId" IS NULL
+		GROUP BY `+dmHistoryPeerSQL+`
+		HAVING (? = '' OR max(id) < ?)
 		ORDER BY id DESC
 		LIMIT ?
-	`, userID, userID, untilID, untilID, limit).Pluck("id", &ids).Error
+	`, userID, userID, userID, userID, untilID, untilID, limit).Pluck("id", &ids).Error
 	if err != nil {
 		return nil, err
 	}
@@ -714,6 +770,16 @@ func (r *chatRepository) ListUserHistory(userID string, limit int, untilID strin
 	return msgs, nil
 }
 
+// dmHistoryPeerSQL is the conversation key of a DM row for the history
+// queries: the peer of the user bound to its two placeholders.
+//
+// 以前の鍵 LEAST(from,to) || '-' || GREATEST(from,to) と 1 対 1 に対応する。
+// WHERE で from か to の一方は自分なので、相手が決まれば鍵が決まる。自分宛て
+// (from = to = 自分) と、宛先の無い自分の送信 (to IS NULL。LEAST / GREATEST
+// は NULL を無視するので以前の鍵も「自分-自分」) は、どちらも相手 = 自分の
+// 1 つの会話になる。
+const dmHistoryPeerSQL = `CASE WHEN "fromUserId" = ? THEN COALESCE("toUserId", ?) ELSE "fromUserId" END`
+
 // ListRoomHistory returns the latest message per room that userID owns or
 // is a member of. Mirrors upstream ChatService.roomHistory (#692)。
 func (r *chatRepository) ListRoomHistory(userID string, limit int, untilID string) ([]*model.ChatMessage, error) {
@@ -725,17 +791,15 @@ func (r *chatRepository) ListRoomHistory(userID string, limit int, untilID strin
 	}
 	var ids []string
 	err := r.db.Raw(`
-		SELECT id FROM (
-			SELECT DISTINCT ON ("toRoomId") cm.*
-			FROM "chat_message" cm
-			WHERE cm."toRoomId" IS NOT NULL
-			AND (
-				EXISTS (SELECT 1 FROM "chat_room_membership" m WHERE m."roomId" = cm."toRoomId" AND m."userId" = ?)
-				OR EXISTS (SELECT 1 FROM "chat_room" cr WHERE cr."id" = cm."toRoomId" AND cr."ownerId" = ?)
-			)
-			ORDER BY "toRoomId", cm.id DESC
-		) conversations
-		WHERE (? = '' OR id < ?)
+		SELECT max(cm.id) AS id
+		FROM "chat_message" cm
+		WHERE cm."toRoomId" IS NOT NULL
+		AND (
+			EXISTS (SELECT 1 FROM "chat_room_membership" m WHERE m."roomId" = cm."toRoomId" AND m."userId" = ?)
+			OR EXISTS (SELECT 1 FROM "chat_room" cr WHERE cr."id" = cm."toRoomId" AND cr."ownerId" = ?)
+		)
+		GROUP BY cm."toRoomId"
+		HAVING (? = '' OR max(cm.id) < ?)
 		ORDER BY id DESC
 		LIMIT ?
 	`, userID, userID, untilID, untilID, limit).Pluck("id", &ids).Error

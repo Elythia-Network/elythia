@@ -612,6 +612,28 @@ func (m *MockChatRepository) HasUnreadInRoom(readerID, roomID string) (bool, err
 	return false, nil
 }
 
+// UnreadFromUsers is the batched HasUnreadFromUser.
+func (m *MockChatRepository) UnreadFromUsers(readerID string, otherIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, id := range otherIDs {
+		if u, _ := m.HasUnreadFromUser(readerID, id); u {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// UnreadInRooms is the batched HasUnreadInRoom.
+func (m *MockChatRepository) UnreadInRooms(readerID string, roomIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, id := range roomIDs {
+		if u, _ := m.HasUnreadInRoom(readerID, id); u {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 func readsContains(reads []string, id string) bool {
 	for _, r := range reads {
 		if r == id {
