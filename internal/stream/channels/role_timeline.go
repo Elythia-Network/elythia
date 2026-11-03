@@ -78,30 +78,31 @@ func (c *RoleTimelineChannel) OnRedisEvent(payload []byte) {
 	if c.explorable == nil || !c.explorable.IsPublicExplorable(c.roleID) {
 		return
 	}
-	if noteVisibility(payload) != string(model.NoteVisibilityPublic) {
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
+	if note.visibility() != string(model.NoteVisibilityPublic) {
 		return
 	}
 	// anon viewer + 著者 requireSigninToViewContents は note を丸ごと drop する
 	// (upstream role-timeline.ts:53-55 の note/renote/reply 3 連 gate、channel /
 	// hashtag と同じ。role-timeline にだけ移植が漏れていた、#1780)。
-	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonRequireSigninDrop(viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerIDFromCtx(c.ctx)) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
 		return
 	}
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerIDFromCtx(c.ctx))
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に inject する
+	// (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerIDFromCtx(c.ctx))))
 }
 
 func (c *RoleTimelineChannel) OnClientMessage(string, json.RawMessage) {}

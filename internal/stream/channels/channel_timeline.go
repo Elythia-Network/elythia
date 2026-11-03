@@ -38,40 +38,41 @@ func (c *ChannelTimelineChannel) Init(params json.RawMessage) error {
 }
 
 func (c *ChannelTimelineChannel) OnRedisEvent(payload []byte) {
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// channelId 一致を確認 (defense-in-depth)。topic 購読で基本保証されるが、
 	// fanout が channel:<note.channelId> へ publish するので payload 側でも照合。
-	if noteChannelID(payload) != c.channelID {
+	if note.channelID() != c.channelID {
 		return
 	}
 	// anon viewer + 著者 requireSigninToViewContents は note を丸ごと drop する
 	// (#1549, upstream channel.ts の note/renote/reply 3 連 gate)。hideEmbeds の
 	// blank 化より前に弾いて「何も送らない」upstream 挙動に揃える。
-	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonRequireSigninDrop(viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// per-subscriber 可視性 gate (#1549, fail-closed)。channel note は通常
 	// public だが、共通ゲートを通して非可視/壊れた payload を drop する。
-	if !streamNoteVisibleForViewer(payload, viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
+	if !note.visibleForViewer(viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// channel timeline は upstream channel.ts の override に倣い、視聴中 channel
 	// 自身の mute は無視する (直接見ている channel の note は流す)。他 channel への
 	// renote の channel-mute のみ適用する (#1812)。
-	if noteMutedOrBlockedInChannel(payload, c.ctx.MuteBlockSnapshot(), c.channelID) {
+	if note.mutedOrBlockedInChannel(c.ctx.MuteBlockSnapshot(), c.channelID) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerIDFromCtx(c.ctx))
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に inject する
+	// (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerIDFromCtx(c.ctx))))
 }
 
 func (c *ChannelTimelineChannel) OnClientMessage(string, json.RawMessage) {}

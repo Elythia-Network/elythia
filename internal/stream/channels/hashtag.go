@@ -113,14 +113,16 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 }
 
 func (c *HashtagChannel) OnRedisEvent(payload []byte) {
+	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
+	note := newNoteView(payload)
 	// 単一 tag topic ヒットでは AND グループ成立を保証できないため、payload の tags
 	// に対して OR-of-ANDs を再評価する (#1549)。
-	if !c.matchesQuery(payload) {
+	if !c.matchesView(note) {
 		return
 	}
 	// dedupe: 同 note が複数 subscribed tag topic 経由で重複到着するので noteId で
 	// 1 回に絞る。fanout は topic ごとに呼ばれ並行しうるため mutex で保護する。
-	if id := streamNoteID(payload); id != "" {
+	if id := note.id(); id != "" {
 		c.mu.Lock()
 		if _, dup := c.seen[id]; dup {
 			c.mu.Unlock()
@@ -135,29 +137,36 @@ func (c *HashtagChannel) OnRedisEvent(payload []byte) {
 	// anon viewer + 著者 requireSigninToViewContents は note を丸ごと drop する
 	// (#1549, upstream hashtag.ts の note/renote/reply 3 連 gate)。hideEmbeds の
 	// blank 化より前に弾いて「何も送らない」upstream 挙動に揃える。
-	if anonRequireSigninDrop(payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonRequireSigninDrop(viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerIDFromCtx(c.ctx)) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerIDFromCtx(c.ctx)) {
 		return
 	}
 	// per-subscriber 可視性 gate (#1549, fail-closed)。TS notesStream は全可視性を
 	// 流して consumer 側で isNoteVisibleForMe する設計に合わせる。
-	if !streamNoteVisibleForViewer(payload, viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
+	if !note.visibleForViewer(viewerIDFromCtx(c.ctx), c.ctx.FollowingSnapshot()) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerIDFromCtx(c.ctx)) {
 		return
 	}
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerIDFromCtx(c.ctx))
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に inject する
+	// (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerIDFromCtx(c.ctx))))
+}
+
+// matchesView is matchesQuery over the decoded note.
+func (c *HashtagChannel) matchesView(v noteView) bool {
+	if v.n == nil {
+		return c.matchesQuery(v.raw)
+	}
+	return c.matchesTags(v.n.Tags)
 }
 
 // matchesQuery evaluates the TS OR-of-ANDs hashtag query
@@ -167,11 +176,16 @@ func (c *HashtagChannel) matchesQuery(payload []byte) bool {
 	var p struct {
 		Tags []string `json:"tags"`
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
-	noteTags := make(map[string]struct{}, len(p.Tags))
-	for _, t := range p.Tags {
+	return c.matchesTags(p.Tags)
+}
+
+// matchesTags is the decision of matchesQuery over the note's decoded tags.
+func (c *HashtagChannel) matchesTags(tags []string) bool {
+	noteTags := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
 		noteTags[searchnorm.Normalize(t)] = struct{}{}
 	}
 	for _, group := range c.q {

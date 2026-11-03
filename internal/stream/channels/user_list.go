@@ -124,19 +124,18 @@ func (c *UserListChannel) Init(params json.RawMessage) error {
 }
 
 func (c *UserListChannel) OnRedisEvent(payload []byte) {
+	// payload は配信1回につき1回だけ解析し、membership event の判別と各判定は
+	// その結果を読む (#3986)。
+	note := newNoteView(payload)
 	// userListStream: topic からの membership event は {type, body} envelope で
 	// 届く (#1549)。note 配信 (userListTimeline:) は raw note payload なので
 	// top-level type を持たず、ここで分岐できる。
-	var env struct {
-		Type string          `json:"type"`
-		Body json.RawMessage `json:"body"`
-	}
-	if json.Unmarshal(payload, &env) == nil && (env.Type == "userAdded" || env.Type == "userRemoved" || env.Type == "userUpdated") {
-		c.applyMembershipEvent(env.Type, env.Body)
+	if typ, body, ok := note.membershipEvent(); ok {
+		c.applyMembershipEvent(typ, body)
 		// userUpdated は snapshot 更新専用の internal event。upstream に無く frontend も
 		// 解さないので client へは流さない (#2051)。
-		if env.Type != "userUpdated" {
-			_ = c.ctx.Send(env.Type, env.Body)
+		if typ != "userUpdated" {
+			_ = c.ctx.Send(typ, body)
 		}
 		return
 	}
@@ -144,13 +143,13 @@ func (c *UserListChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
 	// 未ログインの viewer には meta.ugcVisibilityForVisitor を適用する
 	// (upstream NoteStreamingHidingService.filter)。
-	if anonUGCVisibilityDrop(c.ctx, payload, viewerID) {
+	if note.anonUGCVisibilityDrop(c.ctx, viewerID) {
 		return
 	}
-	if !c.filter.shouldEmit(payload, c.ctx.HardMuteRules(), viewerID) {
+	if !note.shouldEmit(&c.filter, c.ctx.HardMuteRules(), viewerID) {
 		return
 	}
-	if noteMutedOrBlocked(payload, c.ctx.MuteBlockSnapshot()) {
+	if note.mutedOrBlocked(c.ctx.MuteBlockSnapshot()) {
 		return
 	}
 	// followers visibility note の defense-in-depth filter (#1465)。fanout 段
@@ -162,27 +161,23 @@ func (c *UserListChannel) OnRedisEvent(payload []byte) {
 	// 弾く設計なので来ない / lookup 未配線) の場合は fail-closed で drop する。
 	// public / home / specified は fanout 段で適切に gate 済 (specified は
 	// shouldFanoutToFollowers が除外) のためここでは何もしない。
-	if !userListVisibilityShouldEmit(payload, viewerID, c.ctx.FollowingSnapshot()) {
+	if !note.userListVisibilityShouldEmit(viewerID, c.ctx.FollowingSnapshot()) {
 		return
 	}
 	// per-member withReplies gate (#2020)。snapshot 配線時のみ適用。投稿者の
 	// withReplies を mu 下で 1 件 lookup してから gate に渡す (#2051)。
 	if c.withRepliesByUser != nil {
-		var author struct {
-			UserID string `json:"userId"`
-		}
-		_ = json.Unmarshal(payload, &author)
+		authorID := note.userID()
 		c.mu.RLock()
-		authorWithReplies := c.withRepliesByUser[author.UserID]
+		authorWithReplies := c.withRepliesByUser[authorID]
 		c.mu.RUnlock()
-		if !userListReplyShouldEmit(payload, viewerID, authorWithReplies, c.ctx.FollowingSnapshot()) {
+		if !note.userListReplyShouldEmit(viewerID, authorWithReplies, c.ctx.FollowingSnapshot()) {
 			return
 		}
 	}
-	payload = hideEmbeds(c.ctx, payload)
-	// pure renote の renote.myReaction を viewer 毎に inject (#2058)。
-	payload = injectRenoteMyReaction(payload, viewerID)
-	_ = c.ctx.Send("note", json.RawMessage(payload))
+	// 埋め込みを隠し、pure renote の renote.myReaction を viewer 毎に inject する
+	// (#1536 / #2058)。書き換えが要らなければ元の bytes を送る。
+	_ = c.ctx.Send("note", json.RawMessage(note.forViewer(c.ctx, viewerID)))
 }
 
 // applyMembershipEvent live-updates the withReplies snapshot on membership
@@ -237,11 +232,8 @@ type userListVisibilityPayload struct {
 
 // userListReplyPayload は reply gate が参照する最小 fields。
 type userListReplyPayload struct {
-	UserID string `json:"userId"`
-	Reply  *struct {
-		UserID     string `json:"userId"`
-		Visibility string `json:"visibility"`
-	} `json:"reply"`
+	UserID string     `json:"userId"`
+	Reply  *replyMeta `json:"reply"`
 }
 
 // userListReplyShouldEmit applies upstream user-list.ts の per-member withReplies
@@ -256,9 +248,15 @@ type userListReplyPayload struct {
 // lookup 済)。
 func userListReplyShouldEmit(payload []byte, viewerID string, authorWithReplies bool, following map[string]bool) bool {
 	var note userListReplyPayload
-	if err := json.Unmarshal(payload, &note); err != nil || note.Reply == nil {
+	if err := decodeStreamPayload(payload, &note); err != nil || note.Reply == nil {
 		return true
 	}
+	return userListReplyAllows(&note, viewerID, authorWithReplies, following)
+}
+
+// userListReplyAllows is the decision of userListReplyShouldEmit over an
+// already decoded note whose Reply is non-nil.
+func userListReplyAllows(note *userListReplyPayload, viewerID string, authorWithReplies bool, following map[string]bool) bool {
 	isMe := viewerID != "" && viewerID == note.UserID
 	if authorWithReplies {
 		if note.Reply.Visibility == "followers" {
@@ -290,9 +288,15 @@ func userListReplyShouldEmit(payload []byte, viewerID string, authorWithReplies 
 //     followingSnapshot lookup が未配線 / 取得失敗で nil 返却の場合に備える)。
 func userListVisibilityShouldEmit(payload []byte, viewerID string, snap map[string]bool) bool {
 	var note userListVisibilityPayload
-	if err := json.Unmarshal(payload, &note); err != nil {
+	if err := decodeStreamPayload(payload, &note); err != nil {
 		return false
 	}
+	return userListVisibilityAllows(note, viewerID, snap)
+}
+
+// userListVisibilityAllows is the decision of userListVisibilityShouldEmit over
+// an already decoded note.
+func userListVisibilityAllows(note userListVisibilityPayload, viewerID string, snap map[string]bool) bool {
 	if note.Visibility != "followers" {
 		return true
 	}

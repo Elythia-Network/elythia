@@ -60,9 +60,15 @@ func noteMutedOrBlocked(payload []byte, snap *stream.MuteBlockSnapshot) bool {
 		return false
 	}
 	var p muteBlockProbe
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
+	return muteBlockProbeDrops(p, snap)
+}
+
+// muteBlockProbeDrops is the decision of noteMutedOrBlocked over an already
+// decoded probe. snap must be non-nil.
+func muteBlockProbeDrops(p muteBlockProbe, snap *stream.MuteBlockSnapshot) bool {
 	if mutedOrBlockedExceptChannel(p, snap) {
 		return true
 	}
@@ -85,9 +91,15 @@ func noteMutedOrBlockedInChannel(payload []byte, snap *stream.MuteBlockSnapshot,
 		return false
 	}
 	var p muteBlockProbe
-	if err := json.Unmarshal(payload, &p); err != nil {
+	if err := decodeStreamPayload(payload, &p); err != nil {
 		return false
 	}
+	return muteBlockProbeDropsInChannel(p, snap, viewingChannelID)
+}
+
+// muteBlockProbeDropsInChannel is the decision of noteMutedOrBlockedInChannel
+// over an already decoded probe. snap must be non-nil.
+func muteBlockProbeDropsInChannel(p muteBlockProbe, snap *stream.MuteBlockSnapshot, viewingChannelID string) bool {
 	if mutedOrBlockedExceptChannel(p, snap) {
 		return true
 	}
