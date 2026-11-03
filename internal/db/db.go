@@ -27,9 +27,13 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 		Logger: newGormLogger(cfg),
 		// TypeORM互換: テーブル名をそのまま使う
 		DisableNestedTransaction: true,
-		// クエリのprepared statementをコネクション単位でキャッシュし、
-		// パース/プラン作成のオーバーヘッドを削減する
-		PrepareStmt: true,
+		// PrepareStmt は使わない (#3964)。文のキャッシュは pgx の既定
+		// (QueryExecModeCacheStatement、接続ごとの LRU) に任せる。GORM の
+		// PrepareStmt はトランザクションの中では文をそのトランザクションに結び
+		// 付け直し、トランザクションごとに Parse して終わりに閉じていた。pgx の
+		// キャッシュはトランザクションをまたいで使い回し、列の型が変わって
+		// `cached plan must not change result type` で失敗した文は捨てて次に
+		// 準備し直す (PrepareStmt では同じ接続で失敗し続けた)。
 	})
 	if err != nil {
 		if hint := cfg.DBTLSErrorHint(err); hint != "" {
@@ -144,14 +148,6 @@ func closeConnPool(pool gorm.ConnPool) error {
 	switch p := pool.(type) {
 	case *sql.DB:
 		return p.Close()
-	case gorm.GetDBConnector:
-		// PrepareStmt を有効にしているので、プールは *gorm.PreparedStmtDB に
-		// 包まれて渡ってくる。
-		sqlDB, err := p.GetDBConn()
-		if err != nil {
-			return fmt.Errorf("get replica sql.DB: %w", err)
-		}
-		return sqlDB.Close()
 	default:
 		return fmt.Errorf("close connection pool: unsupported type %T", pool)
 	}

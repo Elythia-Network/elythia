@@ -38,7 +38,8 @@ func (r *sqlRecorder) Trace(_ context.Context, _ time.Time, fc func() (string, i
 // TestListFollowersToNotify_GenericPlanUsesPartialIndex pins the literal
 // 'normal' in ListFollowersToNotify (#3590).
 //
-// 本番は PrepareStmt: true なので、同じ文が繰り返されると generic plan に切り替わる。
+// 本番は pgx の文のキャッシュで準備した文を使い回すので (internal/db、#3964)、
+// 同じ文が繰り返されると generic plan に切り替わる。
 // notify を bind 変数にすると、generic plan では部分 index (000131,
 // WHERE "notify" = 'normal') の述語を満たすと判定できず、使われない。GORM が実際に
 // 出す SQL を PREPARE し、generic plan を強制して確かめる。
