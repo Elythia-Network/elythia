@@ -2356,6 +2356,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	)
 	checkModeratorsActivityProcessor := processors.NewCheckModeratorsActivityProcessor(modActivitySvc)
 
+	// 日次のcleanが、相手がリモートの未開始の対局を消すときに相手へ知らせる(#3956)。
+	// 配送の一式(SetFederationDelivererなど)は下のreversi/*の配線でServiceに入る。
+	// 渡すのはポインタなので順番は問わないが、processorへのsetterは登録より前に置く。
+	cleanGenericProcessor.SetOutdatedFederatedGameCanceler(reversiService)
+
 	// queue の handler の登録 (#3690)。組み込みの job 種別とそれを受ける processor の
 	// 対応は builtinQueueHandlers (wiring_queue.go) の一覧にだけ書き、ここで 1 回
 	// 登録する。登録は driver の map に入れるだけで、読まれるのは queueServer.Start

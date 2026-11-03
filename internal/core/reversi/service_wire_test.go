@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,12 @@ type fakeRepo struct {
 	games     map[string]*model.ReversiGame
 	findErr   error
 	updateErr error
+	// listErr / deleteErrは掃除の経路(#3956)の失敗を作る。
+	listErr   error
+	deleteErr error
+	// beforeDeleteはDeleteNotStartedの直前に呼ばれ、読んでから消すまでの間に
+	// 対局が始まる・消える競合を作る。
+	beforeDelete func(id string)
 }
 
 func newFakeRepo() *fakeRepo {
@@ -171,6 +178,46 @@ func (r *fakeRepo) DeleteOutdatedGames(thresholdID string) (int64, error) {
 		}
 	}
 	return n, nil
+}
+
+// ListOutdatedFederatedGames mirrors the repository: not-started games older
+// than thresholdID with a preloaded remote player, oldest first.
+func (r *fakeRepo) ListOutdatedFederatedGames(thresholdID string, limit int) ([]*model.ReversiGame, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	remote := func(u *model.User) bool { return u != nil && u.Host != nil }
+	out := make([]*model.ReversiGame, 0)
+	for id, g := range r.games {
+		if id < thresholdID && !g.IsStarted && (remote(g.User1) || remote(g.User2)) {
+			clone := *g
+			out = append(out, &clone)
+		}
+	}
+	slices.SortFunc(out, func(a, b *model.ReversiGame) int { return strings.Compare(a.ID, b.ID) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) DeleteNotStarted(id string) (bool, error) {
+	if r.beforeDelete != nil {
+		r.beforeDelete(id)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deleteErr != nil {
+		return false, r.deleteErr
+	}
+	g, ok := r.games[id]
+	if !ok || g.IsStarted {
+		return false, nil
+	}
+	delete(r.games, id)
+	return true, nil
 }
 
 // --- capture publisher ---

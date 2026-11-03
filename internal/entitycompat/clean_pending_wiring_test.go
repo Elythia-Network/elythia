@@ -105,6 +105,16 @@ func TestCleanProcessorReceivesThePendingPruner(t *testing.T) {
 		"日次の clean の job を、setter を呼んだのと別の processor が受ける。")
 }
 
+// **日次のcleanに、連合の対局を知らせるServiceが渡っていること(#3956)。**
+//
+// setterに渡さなくてもbuildもテストも通り、相手がリモートの未開始の対局が、
+// 相手に知らせずに消える状態へ黙って戻る。引数まで照合し、配送の一式を入れた
+// reversiService以外(nilなど)を渡す形を落とす。
+func TestCleanProcessorReceivesTheReversiCanceler(t *testing.T) {
+	assertWired(t, serverPkg, "cleanGenericProcessor.SetOutdatedFederatedGameCanceler(reversiService)",
+		"掃除で消す連合のリバーシの対局を、相手のサーバーに知らせなくなる。")
+}
+
 // pendingPrunerParamIndex returns the flattened index of the pruner parameter
 // and the total parameter count of NewCleanProcessor.
 //

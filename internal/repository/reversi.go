@@ -47,6 +47,14 @@ type ReversiRepository interface {
 	// games never started within ~10 minutes are pruned by the clean cron
 	// (#1563). Returns rows deleted.
 	DeleteOutdatedGames(thresholdID string) (int64, error)
+	// ListOutdatedFederatedGames returns up to limit games that
+	// DeleteOutdatedGames would remove and that have a remote player, oldest
+	// first, with User1 and User2 preloaded (#3956). The clean cron notifies
+	// the remote side about these before they are removed.
+	ListOutdatedFederatedGames(thresholdID string, limit int) ([]*model.ReversiGame, error)
+	// DeleteNotStarted removes the game only while it is not started and
+	// reports whether a row was removed (#3956).
+	DeleteNotStarted(id string) (bool, error)
 }
 
 type reversiRepository struct {
@@ -65,6 +73,28 @@ func (r *reversiRepository) Create(game *model.ReversiGame) error {
 func (r *reversiRepository) DeleteOutdatedGames(thresholdID string) (int64, error) {
 	res := r.db.Where(`"id" < ? AND "isStarted" = ?`, thresholdID, false).Delete(&model.ReversiGame{})
 	return res.RowsAffected, res.Error
+}
+
+func (r *reversiRepository) ListOutdatedFederatedGames(thresholdID string, limit int) ([]*model.ReversiGame, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var games []*model.ReversiGame
+	err := r.db.Preload("User1").Preload("User2").
+		Where(`"id" < ? AND "isStarted" = ?`, thresholdID, false).
+		Where(`EXISTS (SELECT 1 FROM "user" u WHERE u."id" IN ("reversi_game"."user1Id", "reversi_game"."user2Id") AND u."host" IS NOT NULL)`).
+		Order(`"id" ASC`).
+		Limit(limit).
+		Find(&games).Error
+	return games, err
+}
+
+func (r *reversiRepository) DeleteNotStarted(id string) (bool, error) {
+	// 読んでから消すまでに始まった対局を消さないよう、未開始であることをDELETEの
+	// 条件に含める。MarkStartedも同じ行を"isStarted" = falseで取り合うので、
+	// どちらか一方だけが勝つ。
+	res := r.db.Where(`"id" = ? AND "isStarted" = ?`, id, false).Delete(&model.ReversiGame{})
+	return res.RowsAffected > 0, res.Error
 }
 
 func (r *reversiRepository) FindByID(id string) (*model.ReversiGame, error) {

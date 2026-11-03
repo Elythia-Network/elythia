@@ -42,6 +42,87 @@ func TestReversiRepository_DeleteOutdatedGames(t *testing.T) {
 	assert.NoError(t, err, "新しい game は残る")
 }
 
+// TestReversiRepository_ListOutdatedFederatedGames checks that the clean cron
+// only gets the outdated not-started games with a remote player, oldest first
+// and bounded by limit (#3956).
+func TestReversiRepository_ListOutdatedFederatedGames(t *testing.T) {
+	repo := NewReversiRepository(testDB)
+	local1 := insertTestUser(t, "u_revf_l1", "reversifed1")
+	defer cleanupUser(t, local1.ID)
+	local2 := insertTestUser(t, "u_revf_l2", "reversifed2")
+	defer cleanupUser(t, local2.ID)
+	remote := insertRemoteTestUser(t, "u_revf_r1", "reversifedr", "remote.example")
+	defer cleanupUser(t, remote.ID)
+
+	mk := func(id, u1, u2 string, started bool) *model.ReversiGame {
+		return &model.ReversiGame{
+			ID: id, User1ID: u1, User2ID: u2, IsStarted: started,
+			Map: model.StringArray{"--------"}, BW: "random", TimeLimitForEachTurn: 90, Logs: datatypes.JSON("[]"),
+		}
+	}
+	ids := []string{"aaa_fed_invite", "aab_fed_invitee", "aac_fed_started", "aad_local", "zzz_fed_new"}
+	defer testDB.Exec(`DELETE FROM "reversi_game" WHERE id IN ?`, ids)
+	require.NoError(t, repo.Create(mk("aaa_fed_invite", local1.ID, remote.ID, false)))  // 招待した側がローカル
+	require.NoError(t, repo.Create(mk("aab_fed_invitee", remote.ID, local1.ID, false))) // 招待された側がローカル
+	require.NoError(t, repo.Create(mk("aac_fed_started", local1.ID, remote.ID, true)))  // 開始済み
+	require.NoError(t, repo.Create(mk("aad_local", local1.ID, local2.ID, false)))       // ローカル同士
+	require.NoError(t, repo.Create(mk("zzz_fed_new", local1.ID, remote.ID, false)))     // 閾値より新しい
+
+	games, err := repo.ListOutdatedFederatedGames("bbb_threshold", 100)
+	require.NoError(t, err)
+	got := make([]string, 0, len(games))
+	for _, g := range games {
+		got = append(got, g.ID)
+		require.NotNil(t, g.User1, "User1 is preloaded")
+		require.NotNil(t, g.User2, "User2 is preloaded")
+	}
+	assert.Equal(t, []string{"aaa_fed_invite", "aab_fed_invitee"}, got)
+
+	games, err = repo.ListOutdatedFederatedGames("bbb_threshold", 1)
+	require.NoError(t, err)
+	require.Len(t, games, 1)
+	assert.Equal(t, "aaa_fed_invite", games[0].ID, "oldest first under the limit")
+
+	games, err = repo.ListOutdatedFederatedGames("bbb_threshold", 0)
+	require.NoError(t, err)
+	assert.Len(t, games, 2, "limit <= 0 falls back to the default")
+}
+
+// TestReversiRepository_DeleteNotStarted checks that the clean cron never
+// removes a game that started after it was listed (#3956).
+func TestReversiRepository_DeleteNotStarted(t *testing.T) {
+	repo := NewReversiRepository(testDB)
+	u1 := insertTestUser(t, "u_revn_1", "reversins1")
+	defer cleanupUser(t, u1.ID)
+	u2 := insertTestUser(t, "u_revn_2", "reversins2")
+	defer cleanupUser(t, u2.ID)
+	mk := func(id string, started bool) *model.ReversiGame {
+		return &model.ReversiGame{
+			ID: id, User1ID: u1.ID, User2ID: u2.ID, IsStarted: started,
+			Map: model.StringArray{"--------"}, BW: "random", TimeLimitForEachTurn: 90, Logs: datatypes.JSON("[]"),
+		}
+	}
+	require.NoError(t, repo.Create(mk("rev_dns_pending", false)))
+	require.NoError(t, repo.Create(mk("rev_dns_started", true)))
+	defer testDB.Exec(`DELETE FROM "reversi_game" WHERE id IN (?,?)`, "rev_dns_pending", "rev_dns_started")
+
+	ok, err := repo.DeleteNotStarted("rev_dns_started")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	_, err = repo.FindByID("rev_dns_started")
+	require.NoError(t, err, "a started game is kept")
+
+	ok, err = repo.DeleteNotStarted("rev_dns_pending")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	_, err = repo.FindByID("rev_dns_pending")
+	require.Error(t, err)
+
+	ok, err = repo.DeleteNotStarted("rev_dns_pending")
+	require.NoError(t, err)
+	assert.False(t, ok, "an already removed game reports false")
+}
+
 // TestReversiRepository_UpdateReadyState_Guards verifies the atomic ready
 // update and its pre-start guard semantics (#1626).
 func TestReversiRepository_UpdateReadyState_Guards(t *testing.T) {

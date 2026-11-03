@@ -19,8 +19,13 @@ import (
 // --- Federation ID cache (existing) ---
 
 // FederationIDTTL is how long a reversi federation session mapping lives in
-// Redis. 長時間ゲーム (持ち時間無制限) でも 1 日持てば十分というトレードオフ。
-const FederationIDTTL = 24 * time.Hour
+// Redis. 長時間ゲーム (持ち時間無制限) でも 1 日余り持てば十分というトレードオフ。
+//
+// 25時間にしているのは、未開始の対局を消す掃除(#3956)が対応を使って相手に知らせるため。
+// 掃除は毎日0時に、作られてから10分を過ぎた対局を消すので、前日の23時50分より後に
+// 作られた対局は翌々日の0時(作られてから24時間〜24時間10分)まで残る。24時間だと
+// その前に対応が切れて知らせられない。acceptedTTL(accept.go)と同じ考え方。
+const FederationIDTTL = 25 * time.Hour
 
 // FederationIDCache manages federationId ↔ gameId mapping in Redis.
 // This is the PRIMARY store for reversi federation session mapping — there
@@ -103,7 +108,7 @@ func (c *FederationIDCache) IsJoinSent(ctx context.Context, federationID string)
 }
 
 // MarkJoinSent records that Join has been delivered. TTL は federation 本体
-// の mapping (24h) と合わせる。
+// の mapping (FederationIDTTL) と合わせる。
 func (c *FederationIDCache) MarkJoinSent(ctx context.Context, federationID string) {
 	if c.redis == nil || federationID == "" {
 		return
@@ -531,6 +536,50 @@ func (s *Service) CancelGame(ctx context.Context, gameID, userID string) error {
 	return nil
 }
 
+// CancelOutdatedFederatedGames removes up to limit abandoned pre-start games
+// older than thresholdID that have a remote player, telling the remote side
+// the same way CancelGame does (#3956). It returns how many games were listed
+// and how many were removed; a game started or canceled after it was listed is
+// left alone and not counted as removed.
+func (s *Service) CancelOutdatedFederatedGames(ctx context.Context, thresholdID string, limit int) (listed, removed int, err error) {
+	games, err := s.repo.ListOutdatedFederatedGames(thresholdID, limit)
+	if err != nil {
+		return 0, 0, fmt.Errorf("list outdated federated reversi games: %w", err)
+	}
+	for _, game := range games {
+		// 先に行を消し、消せたものだけ知らせる。読んでから消すまでに始まった対局や、
+		// 利用者が取り消した対局(CancelGameが知らせ済み)には送らない。配送に要る
+		// 相手との対応はRedisにあり、行を消しても残っている。
+		ok, err := s.repo.DeleteNotStarted(game.ID)
+		if err != nil {
+			return len(games), removed, fmt.Errorf("delete outdated reversi game %s: %w", game.ID, err)
+		}
+		if !ok {
+			continue
+		}
+		removed++
+		// 送り手はローカルの側の利用者。招待した側(User1)がローカルならUndo(Invite)、
+		// 招待された側だけがローカルならLeaveになる(CancelGameと同じ分岐)。
+		if actorID := localPlayerID(game); actorID != "" {
+			s.deliverUndoInviteToOpponent(ctx, game, actorID)
+		}
+		s.cleanupFedCache(ctx, game.ID)
+	}
+	return len(games), removed, nil
+}
+
+// localPlayerID returns the id of the local player of a preloaded game,
+// preferring User1, or "" when neither preloaded player is local.
+func localPlayerID(game *model.ReversiGame) string {
+	if game.User1 != nil && game.User1.Host == nil {
+		return game.User1ID
+	}
+	if game.User2 != nil && game.User2.Host == nil {
+		return game.User2ID
+	}
+	return ""
+}
+
 // --- Start ---
 
 // StartGame transitions the game to in-progress state. color 割り当ては
@@ -735,7 +784,7 @@ func (s *Service) PutStone(ctx context.Context, gameID, userID string, pos int, 
 // cleanupFedCache removes the federation session mapping for a terminated
 // game。ゲーム終了 / キャンセル時にすべての経路 (PutStone 自然終了 /
 // Surrender / CancelGame / CheckTimeout) から呼び出して Redis の mapping
-// が 24h TTL で残り続けるのを防ぐ。
+// が FederationIDTTL で切れるまで残り続けるのを防ぐ。
 func (s *Service) cleanupFedCache(ctx context.Context, gameID string) {
 	if s.fedCache == nil {
 		return

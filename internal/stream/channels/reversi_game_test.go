@@ -76,6 +76,12 @@ func (r *channelFakeRepo) Delete(id string) error {
 	return nil
 }
 
+func (r *channelFakeRepo) ListOutdatedFederatedGames(string, int) ([]*model.ReversiGame, error) {
+	return nil, nil
+}
+
+func (r *channelFakeRepo) DeleteNotStarted(string) (bool, error) { return false, nil }
+
 func (r *channelFakeRepo) DeleteOutdatedGames(thresholdID string) (int64, error) {
 	var n int64
 	for id, g := range r.games {
