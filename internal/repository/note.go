@@ -9,6 +9,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/misc/searchnorm"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/pgarray"
 	"gorm.io/gorm"
 )
 
@@ -1387,6 +1388,26 @@ func (r *noteRepository) IncrementUserNotesCount(userID string, delta int) error
 	return r.db.Exec(`UPDATE "user" SET "notesCount" = "notesCount" + ? WHERE "id" = ?`, delta, userID).Error
 }
 
+// maxTimelineMuteArrayIDs is the largest mute (or renote-mute) list the
+// timeline SQL takes as an array instead of the correlated subquery (#3987).
+//
+// 配列は要素の数だけ選択率の見積りが重くなり、件数が増えると計画の時間が
+// subquery を超える。60 万ノートの検証用 DB のホームの SQL (custom plan) で、
+// 計画の時間は subquery が件数に依らず約 1.8ms、配列が 3 件で 1.0ms、30 件で
+// 1.5ms、60 件で 2.0ms、100 件で 2.2ms、300 件で 4.1ms だった。実行の時間は
+// どちらもほぼ同じ。境目の 55 件前後より少し手前に置く。
+const maxTimelineMuteArrayIDs = 50
+
+// useTimelineMuteSubquery reports whether a mute condition of the timeline SQL
+// should use the correlated subquery rather than the list (#3987). The list is
+// used only when the caller read it completely and it is short enough.
+func useTimelineMuteSubquery(subqueryRequested bool, viewerID string, listComplete bool, listLen int) bool {
+	if !subqueryRequested || viewerID == "" {
+		return false
+	}
+	return !listComplete || listLen > maxTimelineMuteArrayIDs
+}
+
 // applyTimelineFilter adds common filter conditions to a GORM query builder.
 func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 	if f.LocalUsersOnly {
@@ -1477,34 +1498,22 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 		// 「ミュートされたチャンネルのリノート対策」)。
 		q = q.Where(`("renoteChannelId" IS NULL OR "renoteChannelId" NOT IN ?)`, f.MutedChannelIDs)
 	}
-	// muted user filter は 2 経路を持つ (#892 / #894):
-	//   1. UseMutingSubquery=true: muting テーブルへの NOT EXISTS (production)。
-	//      bind parameter が viewer 単位で 2 つ ($viewerID を 2 度) のみで、
-	//      mute 件数に比例しないので heavy-mute viewer でも planning コスト
-	//      が膨らまない。
-	//   2. MutedUserIDs literal: 既存テスト互換のための override path
-	//      (test や非 viewer 駆動経路で muteeID 集合を直接指定したいとき)。
-	//      Subquery が使えるなら 1. を優先。
-	// 共通の WHERE は: userId が active mute されておらず、かつ renoteUserId
-	// が NULL でなければ renoteUserId も active mute されていないこと。
-	if f.UseMutingSubquery && f.ViewerID != "" {
-		// NOT EXISTS による anti-join (Postgres planner が semi-join 相当に
-		// 最適化、IDX_muting_muterId_muteeId 複合 index で seek)。NOT IN
-		// subquery より NULL 取り扱いがロバストかつ index 使用が明確。
-		// active mute = expiresAt nil or future、mutingRepository.ListMuteeIDs
-		// と同 semantics を SQL 内で表現。
-		//
-		// Postgres NOW() は transaction 開始時刻 (= query 内で constant)。
-		// in-memory ApplyFilter (Redis cache 経路) は Go time.Now() を使う
-		// が、mutingRepo.ListMuteeIDs と timeline 取得は同一 request 内 (=
-		// サブ秒) で連続実行されるため、境界 expiresAt の片方に倒れて 2
-		// 経路で挙動が分岐する race window は無視できる。
+	// muted user filter は 2 経路を持つ (#892 / #894 / #3987):
+	//   1. 一覧の配列: MutedUserIDs を 1 つの配列の bind parameter で渡す。
+	//      UseMutingSubquery=false のときと、handler がキャッシュから読めた一覧
+	//      (MutedUserIDsComplete) が maxTimelineMuteArrayIDs 件以下のとき。
+	//   2. UseMutingSubquery=true: muting テーブルへの NOT EXISTS。一覧が読めて
+	//      いないときと、ミュートの多い閲覧者のとき。
+	// 共通の WHERE は: note / renote / reply の投稿者が active mute されていない
+	// こと (upstream generateMutedUserQueryForNotes は 3 author すべて見る、#1681)。
+	if useTimelineMuteSubquery(f.UseMutingSubquery, f.ViewerID, f.MutedUserIDsComplete, len(f.MutedUserIDs)) {
+		// NOT EXISTS による anti-join (IDX_muting_muterId_muteeId 複合 index で
+		// seek)。NOT IN subquery より NULL 取り扱いがロバストかつ index 使用が明確。
+		// active mute = expiresAt nil or future。RelationCache.MutedUserIDs と
+		// mutingRepository.ListMuteeIDs と同じ判定を SQL 内で表現する。
 		notExistsForCol := func(col string) string {
 			return `NOT EXISTS (SELECT 1 FROM "muting" m WHERE m."muterId" = ? AND m."muteeId" = ` + col + ` AND (m."expiresAt" IS NULL OR m."expiresAt" > NOW()))`
 		}
-		// note/renote/reply のいずれかの author が active mute なら除外
-		// (upstream generateMutedUserQueryForNotes は 3 author すべて見る、#1681)。
-		// reply著者mute は #1681 で追加 (旧実装は userId + renoteUserId のみ)。
 		q = q.Where(
 			notExistsForCol(`"note"."userId"`)+
 				` AND ("renoteUserId" IS NULL OR `+notExistsForCol(`"note"."renoteUserId"`)+`)`+
@@ -1512,11 +1521,27 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 			f.ViewerID, f.ViewerID, f.ViewerID,
 		)
 	} else if len(f.MutedUserIDs) > 0 {
-		// "userId" は JOIN 併用時の曖昧性回避のため "note". で修飾 (#1498)。
-		// reply著者も check (#1681、upstream parity)。
+		// 相関副問い合わせ 3 つを配列の比較にすると、計画の時間が 4〜6 割減る
+		// (#3987)。この SQL は generic plan が極端に遅く、PostgreSQL は毎回
+		// custom plan を立て直すので、計画の重さがそのまま毎回かかっている。
+		// 本家の DB の経路 (QueryService.generateMutedUserQueryForNotes /
+		// generateMutedUserRenotesQueryForNotes) は副問い合わせのままで、
+		// キャッシュ (userMutingsCache / renoteMutingsCache) を使うのは Redis の
+		// 経路 (FanoutTimelineEndpointService) だけ。Elythia は Redis の経路と
+		// 同じキャッシュを DB の経路でも使う。無効化の通知を取りこぼしたときの
+		// 差は docs/divergence/operations.md に書いた。
+		//
+		// 一覧は期限切れを除いたもの (RelationCache.MutedUserIDs)。期限の判定は
+		// SQL の NOW() ではなく Go の時刻で、Redis の list の経路 (ApplyFilter) と
+		// 同じ一覧を使うので、2 つの経路の結果が揃う。
+		//
+		// IN (?, ?, ...) に展開せず配列 1 つで渡すのは、件数ごとに別の文になって
+		// prepared statement が増えないようにするため。"userId" は JOIN 併用時の
+		// 曖昧性回避のため "note". で修飾する (#1498)。
+		muted := pgarray.StringArray(f.MutedUserIDs)
 		q = q.Where(
-			`"note"."userId" NOT IN ? AND ("renoteUserId" IS NULL OR "renoteUserId" NOT IN ?) AND ("replyUserId" IS NULL OR "replyUserId" NOT IN ?)`,
-			f.MutedUserIDs, f.MutedUserIDs, f.MutedUserIDs,
+			`"note"."userId" <> ALL(?::varchar[]) AND ("renoteUserId" IS NULL OR "renoteUserId" <> ALL(?::varchar[])) AND ("replyUserId" IS NULL OR "replyUserId" <> ALL(?::varchar[]))`,
+			muted, muted, muted,
 		)
 	}
 	// blocked-by filter (#1681): viewer を block している user が note/reply/renote
@@ -1544,17 +1569,19 @@ func applyTimelineFilter(q *gorm.DB, f model.TimelineDBFilter) *gorm.DB {
 	// そのまま通す。upstream Misskey TS の
 	// generateMutedUserRelatedRenotesQuery と同 semantics。
 	//
-	// SQL は subquery 経路のみ実装 (UseRenoteMutingSubquery=true 必須):
-	// renote_muting への NOT EXISTS で bind parameter を viewer 単位に固定
-	// (#894 user-mute subquery と同 pattern)。user-mute のような literal
-	// path (RenoteMutedUserIDs を直接 IN) は現状 test/production とも未使用
-	// なので未実装。必要になったら同 file の MutedUserIDs literal 分岐と
-	// 同 pattern で追加可能。
+	// user-mute と同じく、読めた一覧が短ければ配列、そうでなければ
+	// renote_muting への NOT EXISTS で絞る (#3987)。renote_muting には期限が
+	// 無いので、一覧と subquery の判定は行の有無だけで揃う。
 	// pure renote condition は pureRenoteCondSQL (text/cw/files/poll/reply 全空) を共有 (#1888)。
-	if f.UseRenoteMutingSubquery && f.ViewerID != "" {
+	if useTimelineMuteSubquery(f.UseRenoteMutingSubquery, f.ViewerID, f.RenoteMutedUserIDsComplete, len(f.RenoteMutedUserIDs)) {
 		q = q.Where(
 			`NOT (EXISTS (SELECT 1 FROM "renote_muting" rm WHERE rm."muterId" = ? AND rm."muteeId" = "note"."userId") AND `+pureRenoteCondSQL+`)`,
 			f.ViewerID,
+		)
+	} else if len(f.RenoteMutedUserIDs) > 0 {
+		q = q.Where(
+			`NOT ("note"."userId" = ANY(?::varchar[]) AND `+pureRenoteCondSQL+`)`,
+			pgarray.StringArray(f.RenoteMutedUserIDs),
 		)
 	}
 	// suspended-user filter (#1686): note/reply/renote のいずれかの author が
