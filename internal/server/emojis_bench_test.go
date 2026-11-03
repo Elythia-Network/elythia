@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,7 +41,7 @@ func newEmojisBenchEcho(tb testing.TB, n int) *echo.Echo {
 	}
 	h := apiemojis.NewHandler(repository.NewCachedEmojiRepository(mock))
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 	e.GET("/api/emojis", h.Emojis)
 	return e
 }

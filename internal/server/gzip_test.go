@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +17,7 @@ import (
 // 1KB 以上の JSON body を要求すると gzip-encoded で返ってくる。
 func TestGzipMiddleware_CompressesLargeJSON(t *testing.T) {
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 
 	// 1KB 以上の payload。MinLength=1024 を超えさせる。
 	payload := map[string]any{"text": strings.Repeat("a", 2000)}
@@ -48,7 +47,7 @@ func TestGzipMiddleware_CompressesLargeJSON(t *testing.T) {
 // overhead が savings を上回る判断)。
 func TestGzipMiddleware_SkipsSmallBody(t *testing.T) {
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 
 	e.GET("/api/small", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"ok": "yes"})
@@ -68,7 +67,7 @@ func TestGzipMiddleware_SkipsSmallBody(t *testing.T) {
 // AcceptEncoding に gzip が入っていても Content-Encoding は付かない。
 func TestGzipMiddleware_SkipsStreamingRoute(t *testing.T) {
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 
 	// 1KB 以上の本文を返しても、/streaming パスは Skipper で gzip を
 	// 切るので Content-Encoding が付かないこと。
@@ -90,7 +89,7 @@ func TestGzipMiddleware_SkipsStreamingRoute(t *testing.T) {
 // gzip すると Content-Length が消え、Range の応答まで包まれる。
 func TestGzipMiddleware_SkipsBackupDownload(t *testing.T) {
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 	e.GET("/backup-download", func(c echo.Context) error {
 		return c.String(http.StatusOK, strings.Repeat("x", 2000))
 	})
@@ -106,7 +105,7 @@ func TestGzipMiddleware_SkipsBackupDownload(t *testing.T) {
 // (Echo middleware の負荷ハンドリング)。
 func TestGzipMiddleware_DoesNotCompressWithoutAcceptEncoding(t *testing.T) {
 	e := echo.New()
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 
 	e.GET("/api/big", func(c echo.Context) error {
 		return c.String(http.StatusOK, strings.Repeat("a", 2000))

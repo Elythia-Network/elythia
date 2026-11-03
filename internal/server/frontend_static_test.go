@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,7 +46,7 @@ func newFrontendBuildEcho(t *testing.T, mw ...echo.MiddlewareFunc) *echo.Echo {
 
 	e := echo.New()
 	e.Use(mw...)
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 	registerFrontendAssets(e, &config.Config{}, "/vite", dir, "http://127.0.0.1:1")
 	return e
 }

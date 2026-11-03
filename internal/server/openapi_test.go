@@ -13,7 +13,6 @@ import (
 	"github.com/elythia-network/elythia/internal/api/openapi"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,7 +120,7 @@ func TestOpenAPISpec_BuildError(t *testing.T) {
 // 二重に包まない。Accept-Encodingのq=0も尊重する。
 func TestOpenAPISpec_PrecompressedBehindGlobalGzip(t *testing.T) {
 	s, e := newOpenAPITestServer(t)
-	e.Use(echomw.GzipWithConfig(gzipConfig()))
+	e.Use(gzipMiddleware())
 	e.GET("/api.json", s.OpenAPISpec)
 	_, want := getAPIJSON(t, s, e)
 
