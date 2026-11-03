@@ -552,8 +552,14 @@ type NormalizedActivity struct {
 	// source は NormalizeActivity に渡された本文 (正規化の前の生のバイト)。
 	// 署名の検証や LD-Signature の検査に使うのはこちらで、act.raw ではない。
 	source []byte
-	act    genericActivity
-	err    error
+	// sourceDoc は source を encoding/json で map[string]any へ decode した値
+	// (正規化の前)。正規化のために decode した値を、LD-Signature の禁止された
+	// directive の検査に使い回す (#3988)。source が JSON のオブジェクトで、
+	// 1 要素の配列を剥がしていないときだけ埋まる。それ以外 (剥がした・正規化に
+	// 失敗した) では nil で、検査は source を decode し直す。
+	sourceDoc map[string]any
+	act       genericActivity
+	err       error
 	// unwrappedFrom / unwrappedSize は 1 要素の配列を剥がしたときの前後の長さ
 	// (剥がしていなければ 0)。ログにだけ使う。
 	unwrappedFrom, unwrappedSize int
@@ -573,14 +579,19 @@ func NormalizeActivity(body []byte) NormalizedActivity {
 	// Normalize の前で剥がす: Normalize は内部で json.Unmarshal → 再
 	// encode するが top-level の array → object 変換はしないので、
 	// object 化はここで済ませる必要がある。
-	if unwrapped, ok := tryUnwrapSingletonArray(body); ok {
+	unwrapped, isUnwrapped := tryUnwrapSingletonArray(body)
+	if isUnwrapped {
 		n.unwrappedFrom, n.unwrappedSize = len(body), len(unwrapped)
 		body = unwrapped
 	}
-	normalized, err := activitypub.Normalize(body)
+	normalized, decoded, err := activitypub.NormalizeDecoded(body)
 	if err != nil {
 		n.err = err
 		return n
+	}
+	// 剥がした後の値は source (配列) の decode ではないので持たない。
+	if doc, ok := decoded.(map[string]any); ok && !isUnwrapped {
+		n.sourceDoc = doc
 	}
 	// Normalize は内部で json.Marshal して再エンコードするため、ここでの
 	// Unmarshal は構文エラーで失敗しない。型エラー (actor が object など) は

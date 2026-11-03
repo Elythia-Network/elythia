@@ -259,6 +259,27 @@ func (v *LDSignatureVerifier) CheckForbiddenDirectivesIfPresent(rawBody []byte) 
 	if err := json.Unmarshal(rawBody, &act); err != nil {
 		return fmt.Errorf("ld-sig: body unmarshal: %w", err)
 	}
+	return checkForbiddenDirectivesInDocument(act)
+}
+
+// CheckForbiddenDirectivesInSource is CheckForbiddenDirectivesIfPresent on
+// activity.Source(). It reuses the raw body NormalizeActivity already decoded
+// instead of decoding Source() again; the result is the same.
+func (v *LDSignatureVerifier) CheckForbiddenDirectivesInSource(activity NormalizedActivity) error {
+	if v == nil {
+		return nil
+	}
+	// 検査するのは正規化の前の生の本文。正規化は @context を落とし、キーを
+	// 書き換えるので、act.raw を見ると検査が変わる。sourceDoc は source を
+	// json.Unmarshal した値そのもので、CheckForbiddenDirectivesIfPresent が
+	// decode する値と同じになる (#3988)。
+	if activity.sourceDoc == nil {
+		return v.CheckForbiddenDirectivesIfPresent(activity.source)
+	}
+	return checkForbiddenDirectivesInDocument(activity.sourceDoc)
+}
+
+func checkForbiddenDirectivesInDocument(act map[string]any) error {
 	if sigRaw, hasSig := act["signature"]; !hasSig || sigRaw == nil {
 		return nil
 	}

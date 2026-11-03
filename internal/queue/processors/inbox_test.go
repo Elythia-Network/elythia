@@ -487,13 +487,16 @@ type stubLDVerifier struct {
 	creatorCount int
 	// compactedBody overrides the Body VerifyAndCompact returns.
 	compactedBody []byte
-	// CheckForbiddenDirectivesIfPresent outcome (signer==actor path, #2106 N26).
+	// CheckForbiddenDirectivesInSource outcome (signer==actor path, #2106 N26).
 	forbiddenErr   error
 	forbiddenCount int
+	// forbiddenSources records the Source of each checked activity.
+	forbiddenSources [][]byte
 }
 
-func (s *stubLDVerifier) CheckForbiddenDirectivesIfPresent(_ []byte) error {
+func (s *stubLDVerifier) CheckForbiddenDirectivesInSource(activity federation.NormalizedActivity) error {
 	s.forbiddenCount++
+	s.forbiddenSources = append(s.forbiddenSources, activity.Source())
 	return s.forbiddenErr
 }
 

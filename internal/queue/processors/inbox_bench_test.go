@@ -173,12 +173,18 @@ func misskeyCreateBody(tb testing.TB, n int, pad int) []byte {
 	return b
 }
 
-func benchmarkInboxHandle(b *testing.B, pad int) {
+func benchmarkInboxHandle(b *testing.B, pad int, replayKeyTransition bool) {
 	// 破棄のログ (凍結済み actor) が測定を支配しないよう、捨てる。
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	b.Cleanup(func() { slog.SetDefault(prev) })
 	p := newInboxPipeline(b)
+	if !replayKeyTransition {
+		// 起動から inboxReplayTTL の間は前の形の再投函の鍵 (本文の SHA-256) も
+		// 計算する (#3988)。既定では、その窓が過ぎた後の定常状態を測る。
+		after := p.inbox.LegacyReplayKeysUntilForTest().Add(time.Second)
+		p.inbox.SetNowForTest(func() time.Time { return after })
+	}
 	body := misskeyCreateBody(b, 0, pad)
 	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(b, signedInboxPayload(b, p.key, body))}
 	// 1 回目で鍵のキャッシュを温める (backoff の記録もここで入る)。
@@ -199,8 +205,18 @@ func benchmarkInboxHandle(b *testing.B, pad int) {
 
 // BenchmarkInboxHandle_Small measures one signed Misskey Create through the
 // whole worker path (signature verify, actor gate, process prelude).
-func BenchmarkInboxHandle_Small(b *testing.B) { benchmarkInboxHandle(b, 0) }
+func BenchmarkInboxHandle_Small(b *testing.B) { benchmarkInboxHandle(b, 0, false) }
 
 // BenchmarkInboxHandle_Large is the same with a ~62KB body (the text appears
 // three times: content / _misskey_content / source).
-func BenchmarkInboxHandle_Large(b *testing.B) { benchmarkInboxHandle(b, 20000) }
+func BenchmarkInboxHandle_Large(b *testing.B) { benchmarkInboxHandle(b, 20000, false) }
+
+// BenchmarkInboxHandle_SmallReplayKeyTransition is BenchmarkInboxHandle_Small
+// while the processor also derives the replay key of before #3988.
+func BenchmarkInboxHandle_SmallReplayKeyTransition(b *testing.B) { benchmarkInboxHandle(b, 0, true) }
+
+// BenchmarkInboxHandle_LargeReplayKeyTransition is BenchmarkInboxHandle_Large
+// while the processor also derives the replay key of before #3988.
+func BenchmarkInboxHandle_LargeReplayKeyTransition(b *testing.B) {
+	benchmarkInboxHandle(b, 20000, true)
+}

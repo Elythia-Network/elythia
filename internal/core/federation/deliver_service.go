@@ -345,7 +345,7 @@ func (s *DeliverService) confirmOutboundLocalNotes(body []byte) error {
 	if s.urls == nil || s.noteRepo == nil {
 		return nil
 	}
-	_, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), string(body))
+	_, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), body)
 	if len(noteIDs) == 0 {
 		return nil
 	}
@@ -411,7 +411,7 @@ func (s *DeliverService) preflightBodyReferences(body []byte, knownUsers map[str
 		return nil, nil
 	}
 	userIDs := map[string]struct{}{}
-	ids, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), string(body))
+	ids, noteIDs := activitypub.ExtractLocalAPReferences(s.urls.BaseURL(), body)
 	for _, id := range ids {
 		userIDs[id] = struct{}{}
 	}

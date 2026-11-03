@@ -429,7 +429,7 @@ func (h *Handler) observeLocalInboxBodyTargets(body []byte, host string) error {
 	if h.userRepo == nil || h.localFederationObserver == nil || h.resolver == nil {
 		return nil
 	}
-	userIDs, noteIDs := h.resolver.ExtractLocalAPReferences(string(body))
+	userIDs, noteIDs := h.resolver.ExtractLocalAPReferences(body)
 	if len(userIDs)+len(noteIDs) > maxInboxBodyReferences {
 		return errLocalInboxTooManyReferences
 	}

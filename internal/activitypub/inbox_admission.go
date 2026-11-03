@@ -286,6 +286,18 @@ func containsHeaderFold(headers []string, name string) bool {
 	return false
 }
 
+// IsSignedSHA256Digest reports whether digestHeader is a `SHA-256=<value>`
+// Digest header and the signature covers it: the shape VerifyInboxAdmission
+// requires before it compares the value with the body. It does not look at
+// the body, so it does not prove that the value matches one.
+func IsSignedSHA256Digest(parsed *ParsedSignature, digestHeader string) bool {
+	if parsed == nil || !containsHeaderFold(parsed.Headers, "digest") {
+		return false
+	}
+	algo, _, ok := splitDigestHeader(digestHeader)
+	return ok && strings.EqualFold(algo, "SHA-256")
+}
+
 // splitDigestHeader parses a `algorithm=value` Digest header, mirroring
 // upstream's `^([a-zA-Z0-9\-]+)=(.+)$` regex by splitting on the first `=`
 // (base64 values can themselves contain `=` padding, so only the first

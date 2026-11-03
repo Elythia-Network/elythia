@@ -123,18 +123,31 @@ var ErrConflictingKeys = errors.New("activitypub: conflicting json-ld keys")
 // Returns ErrConflictingKeys if two source keys collapse to the same canonical
 // name with different values.
 func Normalize(body []byte) ([]byte, error) {
+	normalized, _, err := NormalizeDecoded(body)
+	return normalized, err
+}
+
+// NormalizeDecoded is Normalize that also returns body as encoding/json decoded
+// it into an `any`, before normalization. Normalization builds new values and
+// never modifies the decoded one, so callers may inspect it as the raw body
+// (decoded is nil when body is empty or err is non-nil).
+func NormalizeDecoded(body []byte) (normalized []byte, decoded any, err error) {
 	if len(body) == 0 {
-		return body, nil
+		return body, nil, nil
 	}
 	var raw any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	normalized, err := normalizeValue(raw)
+	out, err := normalizeValue(raw)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return json.Marshal(normalized)
+	normalized, err = json.Marshal(out)
+	if err != nil {
+		return nil, nil, err
+	}
+	return normalized, raw, nil
 }
 
 // setCanonical writes one canonical key, refusing a second source key that
