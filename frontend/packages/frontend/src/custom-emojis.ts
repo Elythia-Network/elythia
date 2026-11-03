@@ -50,7 +50,26 @@ export function removeCustomEmojis(emojis: Misskey.entities.EmojiSimple[]) {
 	set('emojis', customEmojis.value);
 }
 
-export async function fetchCustomEmojis(force = false) {
+type EmojisResponse = { emojis: Misskey.entities.EmojiSimple[] };
+
+declare global {
+	interface Window {
+		/** The /api/emojis request started by public/loader/boot.js. Resolves to null when it was not sent or failed. */
+		__elythia_emojis_prefetch__?: Promise<EmojisResponse | null>;
+	}
+}
+
+/**
+ * Takes the /api/emojis request that boot.js started, at most once.
+ */
+function takePrefetchedEmojis(): Promise<EmojisResponse | null> | undefined {
+	const prefetch = window.__elythia_emojis_prefetch__;
+	// 1 回だけ使う。残すと、1 時間後の取り直しに起動時の古い応答を渡してしまう
+	delete window.__elythia_emojis_prefetch__;
+	return prefetch;
+}
+
+export async function fetchCustomEmojis(force = false, prefetched?: Promise<EmojisResponse | null>) {
 	const now = Date.now();
 
 	let res;
@@ -59,7 +78,8 @@ export async function fetchCustomEmojis(force = false) {
 	} else {
 		const lastFetchedAt = await get('lastEmojisFetchedAt');
 		if (lastFetchedAt && (now - lastFetchedAt) < 1000 * 60 * 60) return;
-		res = await misskeyApiGet('emojis', {});
+		// boot.js が先に始めた要求があれば使う (#3993)。失敗 (null) なら今までどおり要求する
+		res = (prefetched ? await prefetched : null) ?? await misskeyApiGet('emojis', {});
 	}
 
 	customEmojis.value = res.emojis;
@@ -70,13 +90,14 @@ export async function fetchCustomEmojis(force = false) {
 /**
  * Refreshes the custom emoji list while the client boots.
  * Waits for the request only when there is no cached list.
+ * Uses the request that boot.js started early, if any.
  */
 export async function refreshCustomEmojisOnBoot(): Promise<void> {
 	// Elythia: 手元 (IndexedDB) に一覧があるときは、/api/emojis の応答を待たずに画面を出す (#3613)。
 	// 取得は裏で続け、返ってきたら customEmojis を差し替える。描いてある絵文字 (MkCustomEmoji) と
 	// リアクションのチップは customEmojis を読んでいるので、差し替えに追従する。
 	// 一覧が空 (初回や消去の後) のときだけ、絵文字が名前のまま出ないよう待つ。
-	const pending = fetchCustomEmojis().catch(() => { /* empty */ });
+	const pending = fetchCustomEmojis(false, takePrefetchedEmojis()).catch(() => { /* empty */ });
 	if (customEmojis.value.length === 0) await pending;
 }
 

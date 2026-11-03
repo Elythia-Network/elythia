@@ -61,6 +61,85 @@
 	}
 	//#endregion
 
+	//#region Prefetch emojis
+	// Elythia: 手元の絵文字の一覧が古いか無いとき、/api/emojis の要求を JS の読み込みと並べて
+	// 始めておく (#3993)。一覧が無いと起動は応答を待つ (custom-emojis.ts の
+	// refreshCustomEmojisOnBoot、#3613) ので、entry が動き出してから要求すると 1 往復が直列に入る。
+	// 結果は window.__elythia_emojis_prefetch__ の Promise で渡し、アプリが 1 回だけ取り出す。
+	// この Promise は reject しない (上の onunhandledrejection が起動失敗の画面を出すため)。
+	// 失敗は null で表し、アプリは今までどおりの要求を改めて行う。
+	{
+		// アプリの fetchCustomEmojis と同じ判定にする。値は idb-keyval の既定の store
+		// (keyval-store / keyval) にあり、IndexedDB が使えない環境では localStorage の
+		// idbfallback:: の下 (utility/idb-proxy.ts) にある。IndexedDB から読めないとき
+		// (使えない・DB がまだ無い・読み込みに失敗した) は、localStorage の方を読む。
+		const readLastEmojisFetchedAt = () => new Promise((resolve) => {
+			const fromLocalStorage = () => {
+				try {
+					const v = localStorage.getItem('idbfallback::lastEmojisFetchedAt');
+					resolve(v == null ? null : JSON.parse(v));
+				} catch {
+					resolve(null);
+				}
+			};
+			let req;
+			try {
+				req = indexedDB.open('keyval-store');
+			} catch {
+				fromLocalStorage();
+				return;
+			}
+			// DB がまだ無い (初めての訪問)。ここで作ると store の無い DB が残り、idb-keyval が
+			// store を作れなくなる (作るのは onupgradeneeded だけ) ので、作らずに取りやめる。
+			req.onupgradeneeded = () => {
+				req.transaction.abort();
+			};
+			req.onerror = (ev) => {
+				ev.preventDefault();
+				fromLocalStorage();
+			};
+			req.onsuccess = () => {
+				const db = req.result;
+				try {
+					const get = db.transaction('keyval', 'readonly').objectStore('keyval').get('lastEmojisFetchedAt');
+					get.onsuccess = () => {
+						db.close();
+						resolve(get.result);
+					};
+					get.onerror = () => {
+						db.close();
+						resolve(null);
+					};
+				} catch {
+					db.close();
+					resolve(null);
+				}
+			};
+		});
+
+		const prefetchEmojis = async () => {
+			try {
+				const lastFetchedAt = await readLastEmojisFetchedAt();
+				if (lastFetchedAt && (Date.now() - lastFetchedAt) < 1000 * 60 * 60) return null;
+				// misskeyApiGet('emojis', {}) と同じ要求にする (HTTP のキャッシュも同じ URL で共有する)
+				const res = await window.fetch(`${window.location.origin}/api/emojis?`, {
+					method: 'GET',
+					credentials: 'omit',
+					cache: 'default',
+				});
+				if (res.status !== 200) return null;
+				const body = await res.json();
+				if (body == null || !Array.isArray(body.emojis)) return null;
+				return body;
+			} catch {
+				return null;
+			}
+		};
+
+		window.__elythia_emojis_prefetch__ = prefetchEmojis();
+	}
+	//#endregion
+
 	//#region Script
 	async function importAppScript() {
 		await import(CLIENT_ENTRY ? `/vite/${CLIENT_ENTRY.replace('scripts', lang)}` : '/vite/src/_boot_.ts')
