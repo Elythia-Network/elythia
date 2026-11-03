@@ -1246,8 +1246,17 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeliveryHook.SetQuoteOutbox(quoteOutbox)
 	federationProcessor.SetQuoteAnswerHandler(quoteOutbox)
 	apRenderer.SetQuoteApprovalResolver(quoteOutbox.ApprovalURI)
-	// 保留のまま残った QuoteRequest を毎分確かめて送り直す (#3238)。
+	// 保留のまま残った QuoteRequest を、予定の時刻のジョブで確かめて送り直す (#3238)。
+	// 予定を書くたびにその時刻のジョブを積む (#3994。以前は毎分の cron、今は 2 分ごとの
+	// 保険)。期限の前に走ったジョブ (管理画面の promote) は、期限の時刻に積み直す。
+	if s.queueClient != nil {
+		quoteOutbox.SetResendScheduler(s.queueClient)
+		archiveAnnouncementsProc.SetScheduler(s.queueClient)
+	}
 	resendQuoteRequestsProcessor := processors.NewResendQuoteRequestsProcessor(quoteOutbox)
+	if s.queueClient != nil {
+		resendQuoteRequestsProcessor.SetRequeuer(s.queueClient)
+	}
 	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
 	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
 		quoteRequestDeliveryHook, noteDeliveryHook, apURLs))
@@ -2416,6 +2425,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	announcementHandler := apiannouncements.NewHandler(announcementRepo, idGen, entityPacker) // #3796
 	announcementHandler.SetMainStreamPublisher(mainStreamPublisher)
 	announcementHandler.SetBroadcastPublisher(broadcastPublisher) // global announcementCreated (#2056)
+	// 自動アーカイブの期限の時刻にジョブを積む (#3994)。queueClient が nil のまま
+	// interface に入れると nil にならないので分ける。
+	if s.queueClient != nil {
+		announcementHandler.SetArchiveScheduler(s.queueClient)
+	}
 
 	// 管理画面の API と、DB のバックアップの管理画面 (#3901 で関数へ移した。呼ぶ位置と
 	// 中の文の順は元のまま。作った handler と service は同じ名前で受ける)。

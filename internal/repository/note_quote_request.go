@@ -140,6 +140,16 @@ func (r *NoteQuoteRequestRepository) DueResends(now time.Time, limit int) ([]mod
 	return rows, err
 }
 
+// UpcomingResends returns pending requests whose next resend is after now
+// (at most limit, soonest first). 起動時に、まだ来ていない送り直しの遅延ジョブを
+// 積み直すのに使う (#3994)。
+func (r *NoteQuoteRequestRepository) UpcomingResends(now time.Time, limit int) ([]model.NoteQuoteRequest, error) {
+	var rows []model.NoteQuoteRequest
+	err := r.db.Where(`"state" = 'pending' AND "nextResendAt" IS NOT NULL AND "nextResendAt" > ?`, now).
+		Order(`"nextResendAt"`).Limit(limit).Find(&rows).Error
+	return rows, err
+}
+
 // ClaimResend takes a due resend: it counts the resend and moves the schedule
 // to next (nil = no more) only if the request is still pending and still due
 // at due. 取り分けられるのは 1 回だけ (複数の worker が同じ行を引いても二重に送らない)。

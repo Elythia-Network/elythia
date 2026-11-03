@@ -166,7 +166,8 @@ type Server struct {
 	// stopped, before they stop anything.
 	//
 	// 起動の間は握ったままにする。起動は部品のgoroutineを立てるほか、cronの登録
-	// (registerSchedulerJobsの12個の登録の関数)と撤去(PruneUnregistered)でRedisを
+	// (registerSchedulerJobsの12個の登録の関数)と撤去(PruneUnregistered)、起動時の
+	// ジョブの投入(enqueueDueJobsAtStartup、#3994)でRedisを
 	// context.Background()のまま呼ぶので、その分だけ長くかかりうる。本番の経路では
 	// StartBackgroundとStopBackgroundをどちらもSupervisorのgenMuの下で呼ぶので、
 	// 固まった起動は#3709の前から停止を止めていた(Supervisor.ShutdownはlockBeforeで
@@ -1158,6 +1159,22 @@ func (s *Server) registerSchedulerJobs() {
 	}
 }
 
+// enqueueDueJobsAtStartup puts the startup run of the jobs that otherwise
+// run only at a due time (#3994): the announcement auto-archive and the
+// QuoteRequest resend. Each handles what came due while no job ran and
+// schedules again the jobs not yet due.
+//
+// cron と同じく queue を回すプロセスだけが積む。積めなくても起動は止めない
+// (お知らせは日次の保険が落とす。送り直しは配送の queue も使えないので送れない)。
+func (s *Server) enqueueDueJobsAtStartup() {
+	if s.queueClient == nil {
+		return
+	}
+	if err := s.queueClient.EnqueueDueJobsAtStartup(); err != nil {
+		slog.Warn("enqueue due jobs at startup failed", "err", err)
+	}
+}
+
 // SetSyncDeliverHookForTest replaces the queued deliver enqueue with the
 // supplied synchronous hook. e2e_federation 系テストで queue worker 経由の
 // deliver が動かない/動かしたくないシナリオで、sign + HTTP POST を inline
@@ -1257,6 +1274,7 @@ func (s *Server) startBackground(what backgroundStart) error {
 		}
 		s.autoscale = runner
 		s.registerSchedulerJobs()
+		s.enqueueDueJobsAtStartup()
 	}
 	// chart は **両方の role で回す**。メモリ上の集計バッファはプロセスごとに
 	// 溜まり (API 経由の投稿は server、連合 inbox 由来は queue)、自分の分は

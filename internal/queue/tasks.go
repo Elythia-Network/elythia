@@ -83,18 +83,24 @@ const TaskTypeChartClean = "chart:clean"
 // 残るため hygiene)。channel-mute erase は mk-go に expiresAt 列が無いため別 issue。
 const TaskTypeCheckExpiredMutings = "maintenance:checkExpiredMutings"
 
-// TaskTypeArchiveAnnouncements is the task type for the per-minute job that
-// sets isActive to false on announcements whose autoArchiveAt has passed
-// (#3809).
+// TaskTypeArchiveAnnouncements is the task type for the job that sets
+// isActive to false on announcements whose autoArchiveAt has passed (#3809).
 //
-// 本家 2026.10.1 は system queue の遅延ジョブ (archiveAnnouncement) をお知らせごとに
-// 予約するが、Elythia はそれを消費しないので、期限を過ぎた行をまとめて落とす定期処理に
-// した。読むときに期限を見ているので、落とすのが遅れても API の見え方は変わらない。
+// 本家 2026.10.1 と同じく、お知らせごとに期限の時刻の遅延ジョブを積む (#3994。
+// Client.ScheduleAnnouncementArchive)。加えて起動時に 1 回と、保険の 1 日 1 回の
+// cron で同じ処理を流す。どの回も payload を信じず、その時点で期限を過ぎた行を
+// まとめて落とす。本家の system queue の archiveAnnouncement ジョブ (TS の DB を
+// 引き継いだときに Redis に残っているもの) は消費しない。読むときに期限を見て
+// いるので、落とすのが遅れても API の見え方は変わらない。
 const TaskTypeArchiveAnnouncements = "maintenance:archiveAnnouncements"
 
-// TaskTypeResendQuoteRequests is the task type for the per-minute resend of
+// TaskTypeResendQuoteRequests is the task type for the resend of
 // QuoteRequests that are still pending (FEP-044f、#3238)。Mastodon が取り込みと
 // 競合して黙って捨てた QuoteRequest を、保留中か確かめてから送り直す。
+//
+// 送り直しの予定 (nextResendAt) を書くたびに、その時刻の遅延ジョブを積む (#3994。
+// Client.ScheduleQuoteRequestResend。以前は毎分の cron)。起動時にも 1 回流し、
+// ジョブが失われたときの保険として 2 分ごとの cron でも流す。
 const TaskTypeResendQuoteRequests = "maintenance:resendQuoteRequests"
 
 // TaskTypeClean is the task type for the daily generic clean job. Mirrors

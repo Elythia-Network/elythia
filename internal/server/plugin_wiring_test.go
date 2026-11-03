@@ -1511,21 +1511,22 @@ func TestRegisterSchedulerJobs_PrunesAfterEveryRegistration(t *testing.T) {
 		"全ての登録が撤去より前にあること")
 }
 
-// お知らせの自動アーカイブの定期処理 (#3809) が毎分の cron として登録されること。
-// 登録が抜けても読むときの絞り込みで見え方は変わらないので、ほかのテストでは
-// 気付けない (DB の isActive が落ちなくなるだけ)。
+// お知らせの自動アーカイブ (#3809) の保険の cron が 1 日 1 回、引用の送り直しの
+// 保険の cron が 2 分ごとで登録され、毎分の cron が無いこと (#3994。どちらも期限の
+// 時刻の遅延ジョブにした)。保険の登録が抜けても普段の見え方は変わらないので、ほかの
+// テストでは気付けない (ジョブが失われたときに拾われなくなるだけ)。
 func TestRegisterSchedulerJobs_RegistersArchiveAnnouncements(t *testing.T) {
 	drv := newFakeQueueDriver()
 	s := &Server{queueScheduler: queue.NewScheduler(drv)}
 	s.registerSchedulerJobs()
 
-	var crons []string
+	crons := map[string][]string{}
 	for _, c := range drv.scheduler.calls {
-		if c.taskType == queue.TaskTypeArchiveAnnouncements {
-			crons = append(crons, c.cron)
-		}
+		crons[c.taskType] = append(crons[c.taskType], c.cron)
+		assert.NotEqual(t, "* * * * *", c.cron, "%s runs every minute", c.taskType)
 	}
-	assert.Equal(t, []string{"* * * * *"}, crons)
+	assert.Equal(t, []string{"10 0 * * *"}, crons[queue.TaskTypeArchiveAnnouncements])
+	assert.Equal(t, []string{"*/2 * * * *"}, crons[queue.TaskTypeResendQuoteRequests])
 }
 
 // 配線が `def.Jobs != nil` を渡していること。**pluginQueue を直接組み立てる

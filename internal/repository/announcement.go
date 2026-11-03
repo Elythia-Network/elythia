@@ -44,6 +44,10 @@ type AnnouncementRepository interface {
 	// whose autoArchiveAt is at or before now, and returns how many rows it
 	// changed (#3809).
 	ArchiveExpired(now time.Time) (int64, error)
+	// ListScheduledArchives returns the active announcements whose
+	// autoArchiveAt is after now, i.e. those still waiting for their archive
+	// job (#3994).
+	ListScheduledArchives(now time.Time) ([]*model.Announcement, error)
 }
 
 // whereAnnouncementActive narrows q to the announcements that are active at
@@ -293,4 +297,15 @@ func (r *announcementRepository) ArchiveExpired(now time.Time) (int64, error) {
 		Where(`"isActive" = true AND "autoArchiveAt" IS NOT NULL AND "autoArchiveAt" <= ?`, now).
 		Updates(map[string]any{"isActive": false, "updatedAt": now})
 	return res.RowsAffected, res.Error
+}
+
+func (r *announcementRepository) ListScheduledArchives(now time.Time) ([]*model.Announcement, error) {
+	// 起動時に、期限がまだ来ていないお知らせの遅延ジョブを積み直すのに使う (#3994。
+	// 本家 AnnouncementService.onModuleInit と同じ対象)。期限付きのお知らせは
+	// 管理者が手で作るものだけなので、件数で区切らない。
+	var rows []*model.Announcement
+	err := r.db.Select(`"id"`, `"autoArchiveAt"`).
+		Where(`"isActive" = true AND "autoArchiveAt" IS NOT NULL AND "autoArchiveAt" > ?`, now).
+		Order("id").Find(&rows).Error
+	return rows, err
 }

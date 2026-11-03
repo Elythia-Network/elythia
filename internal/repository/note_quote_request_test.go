@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -323,4 +324,41 @@ func TestNoteQuoteRequestRepository_ResendOnlyPending(t *testing.T) {
 	for _, r := range rows {
 		assert.NotContains(t, []string{"qp_accepted", "qp_rejected", "qp_revoked"}, r.NoteID)
 	}
+}
+
+// 起動時に遅延ジョブを積み直す対象 (#3994): 保留中で、送り直しの予定がまだ来て
+// いないものを近い順に。
+func TestNoteQuoteRequestRepository_UpcomingResends(t *testing.T) {
+	seedUser(t, "qu_author")
+	repo := NewNoteQuoteRequestRepository(testDB)
+	base := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for id, at := range map[string]time.Time{
+		"qu_due":   base.Add(-time.Minute),
+		"qu_near":  base.Add(time.Minute),
+		"qu_far":   base.Add(9 * time.Minute),
+		"qu_exact": base,
+		"qu_done":  base.Add(time.Minute),
+	} {
+		seedQuoteAuthNote(t, id, "qu_author")
+		_, err := repo.Ensure(id, "https://l.example/notes/"+id+"#quote-request", at)
+		require.NoError(t, err)
+	}
+	// 保留でない行は、予定が残っていても返さない (MarkAccepted は予定を消すので、状態だけ
+	// 変えて予定を残した形を作る)。
+	require.NoError(t, testDB.Model(&model.NoteQuoteRequest{}).Where(`"noteId" = ?`, "qu_done").
+		Update("state", model.QuoteRequestAccepted).Error)
+
+	rows, err := repo.UpcomingResends(base, 10)
+	require.NoError(t, err)
+	var ids []string
+	for _, r := range rows {
+		if strings.HasPrefix(r.NoteID, "qu_") {
+			ids = append(ids, r.NoteID)
+		}
+	}
+	assert.Equal(t, []string{"qu_near", "qu_far"}, ids)
+
+	limited, err := repo.UpcomingResends(base, 1)
+	require.NoError(t, err)
+	assert.Len(t, limited, 1)
 }

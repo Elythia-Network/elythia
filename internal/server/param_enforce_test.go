@@ -981,6 +981,10 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		return rows
 	}
 	adminBefore := readAdmin()
+	// meta の行は起動時か最初の読み込みで作られる。-shuffle の順序に依らないよう、
+	// 読む前に作っておく。
+	_, metaErr := repository.NewMetaRepository(db).Fetch()
+	require.NoError(t, metaErr)
 	metaBefore := readMeta()
 	// 行が無いと、変わらないことの確かめが空振りする。
 	require.Len(t, metaBefore, 1)
