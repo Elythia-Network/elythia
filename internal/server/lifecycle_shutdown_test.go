@@ -214,21 +214,21 @@ func TestServer_StopBackgroundSends1012AndLeavesTimeForHooks(t *testing.T) {
 // fails to build releases the Redis subscriptions setupRoutes opened. 作り直しの
 // 失敗はメンテナンスの後で繰り返すので、漏れると試すたびに増える (#3463 review M2)。
 //
-// **PubSubService はパターン (PSUBSCRIBE) で購読するので、PubSubNumPat で数える。**
-// 以前は PubSubChannels("*") で数えていたが、miniredis はパターンの購読をそこに
-// 出さないので、cleanupConstruction の Close を消しても通っていた。前提 (購読を
-// 張ってから失敗している) も、失敗させる時点のパターンの数で直接確かめる。
+// **PubSubService は購読者のいるトピックだけを SUBSCRIBE する (#3991) ので、
+// PubSubChannels で数える。** PSUBSCRIBE で購読していた頃は、miniredis がパターンの
+// 購読を PubSubChannels に出さず、cleanupConstruction の Close を消しても通っていた。
+// 前提 (購読を張ってから失敗している) も、失敗させる時点のチャネルの数で直接確かめる。
 func TestNew_FailedConstructionClosesItsSubscriptions(t *testing.T) {
 	db, clients, mr, cfg := constructionFixture(t)
 	var built *Server
-	patternsAtFailure := -1
-	fail := failingRoutesWith(func() { patternsAtFailure = mr.PubSubNumPat() })
+	channelsAtFailure := -1
+	fail := failingRoutesWith(func() { channelsAtFailure = len(mr.PubSubChannels("")) })
 	_, err := newServer(cfg, db, clients, []plugin.Definition{fail}, noopStorage, func(s *Server) { built = s })
 	require.Error(t, err)
-	require.Positive(t, patternsAtFailure, "前提: 購読を張ってから失敗している")
+	require.Positive(t, channelsAtFailure, "前提: 購読を張ってから失敗している")
 	// 待った後の数を出すため EventuallyWithT で読む (Eventually の引数は待つ前に評価される)。
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat(), "失敗した構築の購読が残っている")
+		assert.Zero(c, len(mr.PubSubChannels("")), "失敗した構築の購読が残っている")
 	}, 5*time.Second, 20*time.Millisecond)
 	// 失敗した構築の箱も閉じている (#3661)。使われない世代の goroutine を起動しない。
 	assert.False(t, built.background.Go(func(context.Context) {}), "失敗した構築の箱が閉じていない")

@@ -91,7 +91,7 @@ var cacheEntries = map[string]cacheEntry{
 			"group": "実行中の集計をまとめるsingleflight。鍵に世代の番号を含める(4.4)",
 		}},
 	"internal/core/event.PubSubService": {kindNotCache, "Redisの購読と、トピックごとのハンドラの登録",
-		[]string{"client", "closed", "mu", "nextID", "overflowMinInterval", "prefix", "ps", "startOnce", "subs"}, nil},
+		[]string{"acks", "barrierSeq", "barriers", "beforeSync", "client", "closed", "confirmTimeout", "confirmations", "degraded", "dirty", "done", "mu", "nextID", "overflowMinInterval", "prefix", "ps", "startOnce", "subs", "subscribed", "unconfirmed", "waiting", "wake"}, nil},
 	"internal/core/federation.DeliverService": {kindDropLocal, "",
 		[]string{"cacheGen", "cacheMu", "capCache", "capGroup", "clock", "enqueuer", "followingRepo", "hostBlocker", "keypairExtraRepo", "keypairRepo", "localFederationObserver", "localReferenceCache", "noteRepo", "publickeyExtraRepo", "signerCache", "signerGroup", "syncDeliverHook", "urls", "userRepo"}, map[string]string{
 			"capGroup":            "実行中の読み込みをまとめるsingleflight。鍵に世代の番号を含める(4.4)",

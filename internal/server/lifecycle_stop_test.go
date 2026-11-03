@@ -104,14 +104,14 @@ func (d *closeRecordingDriver) Close() error {
 // panicStopServer returns a server-role generation whose parts first, the
 // ones in panicking (whose stops panic after recording) and last record their
 // stop in the returned log, whose queue driver records its Close there too,
-// and whose internalPubSub holds a pattern subscription on mr.
+// and whose internalPubSub holds a channel subscription on mr.
 func panicStopServer(t *testing.T, mr *miniredis.Miniredis, names []string, panicking map[string]bool) (*Server, *[]string) {
 	t.Helper()
 	rc := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rc.Close() })
 	ps := event.NewPubSubService(rc, "test:")
 	ps.Subscribe(context.Background(), "topic", func([]byte) {})
-	require.Eventually(t, func() bool { return mr.PubSubNumPat() == 1 }, 5*time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return len(mr.PubSubChannels("")) == 1 }, 5*time.Second, 10*time.Millisecond,
 		"前提: 購読を張っている")
 	log := &[]string{}
 	s := &Server{
@@ -148,7 +148,7 @@ func TestServer_StopBackgroundGoesOnAfterAPanickingStop(t *testing.T) {
 	assert.NotContains(t, err.Error(), `"first"`)
 	assert.NotContains(t, err.Error(), `"fourth"`)
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat(), "the Redis subscriptions were not closed after the panic")
+		assert.Zero(c, len(mr.PubSubChannels("")), "the Redis subscriptions were not closed after the panic")
 	}, 5*time.Second, 20*time.Millisecond)
 	// 2回目は1回目の結果を返し、止め直さない。
 	assert.Equal(t, err, s.StopBackground(context.Background()))
@@ -164,7 +164,7 @@ func TestServer_StopBackgroundWithoutAPanic(t *testing.T) {
 	require.NoError(t, s.StopBackground(context.Background()))
 	assert.Equal(t, []string{"first", "second", "third", "queueDriver.Close"}, *log)
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat())
+		assert.Zero(c, len(mr.PubSubChannels("")))
 	}, 5*time.Second, 20*time.Millisecond)
 }
 
@@ -246,7 +246,7 @@ func TestServer_FailedConstructionCleanupGoesOnAfterAPanickingStop(t *testing.T)
 	assert.Equal(t, []string{"first", "second", "third", "queueDriver.Close"}, *log)
 	assert.Nil(t, s.queueDriver)
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat(), "the Redis subscriptions were not closed after the panic")
+		assert.Zero(c, len(mr.PubSubChannels("")), "the Redis subscriptions were not closed after the panic")
 	}, 5*time.Second, 20*time.Millisecond)
 	// 記録はstopAllの1部品1行だけ(後始末で重ねて記録しない)。プロセス全体のloggerには
 	// 並行するほかのテストの行も入るので、この変更の行とpanicの値を含む行だけを数える。
@@ -307,7 +307,7 @@ func TestSupervisor_StopGenerationGoesOnAfterAPanickingStop(t *testing.T) {
 	called, _ := rec.result()
 	assert.Equal(t, listed, called, "the parts after the panicking ones were not stopped")
 	env.requireNoBackends(t)
-	env.requireNoPatterns(t, "the generation left its Redis subscriptions after the panic")
+	env.requireNoChannels(t, "the generation left its Redis subscriptions after the panic")
 
 	// genMuを握ったまま抜けていないので、次の世代を作れる。
 	_, err = sup.startGeneration()

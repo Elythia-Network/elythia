@@ -272,7 +272,7 @@ func TestSupervisor_FailedStartStopsEveryPart(t *testing.T) {
 	sup.genMu.Unlock()
 	assert.Equal(t, http.StatusServiceUnavailable, serveStatus(t, sup, http.MethodGet, "/healthz"))
 	env.requireNoBackends(t)
-	env.requireNoPatterns(t, "the failed generation left its Redis subscriptions")
+	env.requireNoChannels(t, "the failed generation left its Redis subscriptions")
 }
 
 // startRecordingDriver is a driver.Driver whose worker records its Start in

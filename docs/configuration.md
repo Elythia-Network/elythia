@@ -130,6 +130,8 @@ cp .config/docker.yml.example .config/docker.yml
 | `redisForTimelines.*` | タイムラインキャッシュ |
 | `redisForReactions.*` | リアクションバッファ |
 
+**`redisForPubsub` のユーザーに Redis の ACL を設定するときは、チャネルを接頭辞の単位で許す (`&stream:*` と `&internal:*`、または `allchannels`)。** Elythia は購読者のいるチャネルだけを、チャネルごとに `SUBSCRIBE` する (#3991)。チャネルの一部だけを許す設定では、拒まれたチャネルを送り直し続け、拒まれるチャネルが多いと受信全体が遅れる。拒まれるチャネルを抱えたまま Redis への接続が切れると、繋ぎ直しで許されたチャネルまで張られなくなる。#3991 より前の形 (`PSUBSCRIBE stream:*`) は、チャネルの一部だけを許す設定ではそもそも購読できなかった。
+
 ### ジョブキュー制御
 
 | キー | 型 | デフォルト | 説明 |

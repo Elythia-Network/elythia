@@ -145,7 +145,7 @@ func TestServer_StopBackgroundGoesOnAfterAPanickingStep(t *testing.T) {
 	assert.ErrorContains(t, err, `part "second" panicked`)
 	require.ErrorIs(t, err, context.DeadlineExceeded, "the echo step did not run after the panic")
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat(), "the Redis subscriptions were not closed after the panic")
+		assert.Zero(c, len(mr.PubSubChannels("")), "the Redis subscriptions were not closed after the panic")
 	}, 5*time.Second, 20*time.Millisecond)
 	out := logs.String()
 	assert.Contains(t, out, `"step":"queueDriver"`)
@@ -221,7 +221,7 @@ func TestServer_ShutdownAfterAPanickingQueueStep(t *testing.T) {
 			}
 			assert.Equal(t, []string{"queueDriver.Close"}, *log)
 			assert.EventuallyWithT(t, func(c *assert.CollectT) {
-				assert.Zero(c, mr.PubSubNumPat())
+				assert.Zero(c, len(mr.PubSubChannels("")))
 			}, 5*time.Second, 20*time.Millisecond)
 		})
 	}
@@ -241,7 +241,7 @@ func TestServer_FailedConstructionCleanupGoesOnAfterAPanickingStep(t *testing.T)
 	assert.Equal(t, []string{"first", "queueDriver.Close"}, *log)
 	assert.Nil(t, s.lifecycle.parts)
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Zero(c, mr.PubSubNumPat(), "the Redis subscriptions were not closed after the panic")
+		assert.Zero(c, len(mr.PubSubChannels("")), "the Redis subscriptions were not closed after the panic")
 	}, 5*time.Second, 20*time.Millisecond)
 	out := logs.String()
 	assert.Equal(t, 1, strings.Count(out, `"panic":"queue driver close failed"`), "the panic was not logged once")

@@ -120,33 +120,33 @@ func (e *lifecycleEnv) requireNoBackends(t *testing.T) {
 		"generation の DB 接続が残っている")
 }
 
-// numPat returns how many distinct pattern subscriptions the Redis holds.
+// channels returns the channels the Redis has subscribers on.
 //
-// PubSubService は topic ごとの SUBSCRIBE ではなく `<prefix>*` の PSUBSCRIBE を
-// 1 本持つので、チャネルの NUMSUB ではなく pattern の数で購読の有無を見る。この
-// Redis は環境ごとの専用なので、数はこのサーバーの世代のものだけになる。
-func (e *lifecycleEnv) numPat(t *testing.T) int64 {
+// PubSubService は購読者のいるトピックだけを SUBSCRIBE する (#3991) ので、
+// チャネルの一覧で購読の有無を見る。この Redis は環境ごとの専用なので、一覧は
+// このサーバーの世代のものだけになる。
+func (e *lifecycleEnv) channels(t *testing.T) []string {
 	t.Helper()
-	n, err := e.rdb.PubSubNumPat(context.Background()).Result()
+	chs, err := e.rdb.PubSubChannels(context.Background(), "*").Result()
 	require.NoError(t, err)
-	return n
+	return chs
 }
 
-// requireNoPatterns waits for the pattern subscriptions to go away: closing a
-// subscription closes its connection, and Redis drops the pattern
+// requireNoChannels waits for the channel subscriptions to go away: closing a
+// subscription closes its connection, and Redis drops the subscriptions
 // asynchronously after it notices the closed socket.
 //
-// go-redis の PubSub.Close は PUNSUBSCRIBE を送らず接続を閉じるだけなので、
-// Close の直後に別の接続で PUBSUB NUMPAT を数えると、まだ数に入っていることが
-// ある (待機中の手元でも Close の直後の 2000 回中 79 回、#3369)。
-func (e *lifecycleEnv) requireNoPatterns(t *testing.T, msgAndArgs ...any) {
+// go-redis の PubSub.Close は UNSUBSCRIBE を送らず接続を閉じるだけなので、
+// Close の直後に別の接続で数えると、まだ数に入っていることがある (PSUBSCRIBE で
+// 購読していた頃、待機中の手元でも Close の直後の 2000 回中 79 回、#3369)。
+func (e *lifecycleEnv) requireNoChannels(t *testing.T, msgAndArgs ...any) {
 	t.Helper()
 	ok := assert.Eventually(t, func() bool {
-		n, err := e.rdb.PubSubNumPat(context.Background()).Result()
-		return err == nil && n == 0
+		chs, err := e.rdb.PubSubChannels(context.Background(), "*").Result()
+		return err == nil && len(chs) == 0
 	}, 5*time.Second, 20*time.Millisecond, msgAndArgs...)
 	if !ok {
-		t.Logf("PUBSUB NUMPAT = %d", e.numPat(t))
+		t.Logf("PUBSUB CHANNELS = %v", e.channels(t))
 	}
 }
 
@@ -222,7 +222,7 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		// /api/meta は DB を読む。世代が実際に DB に繋がっていることの確認。
 		require.Equal(t, http.StatusOK, serveStatus(t, sup, http.MethodPost, "/api/meta"), "cycle %d", cycle)
 		require.Positive(t, env.backends(t), "cycle %d: 世代が DB に繋がっていない (前提)", cycle)
-		require.Positive(t, env.numPat(t), "cycle %d: 世代が Redis を購読していない (前提)", cycle)
+		require.NotEmpty(t, env.channels(t), "cycle %d: 世代が Redis を購読していない (前提)", cycle)
 		ws := dialStreaming(t, ts, env.cfg.URL)
 
 		sup.genMu.Lock()
@@ -230,7 +230,7 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		sup.genMu.Unlock()
 		require.Eventually(t, func() bool { return oldSrv.streamManager.Count() == 1 },
 			5*time.Second, 10*time.Millisecond)
-		// 購読を閉じるのは stopGeneration の中で終わっていること。Redis 側が pattern を
+		// 購読を閉じるのは stopGeneration の中で終わっていること。Redis 側が購読を
 		// 外すのは非同期なので下で待つが、プロセスの中の購読は戻った時点で 0 のはず。
 		// stream: の本体の購読は streamManager.CloseAll が先に全部外すので、それを
 		// 見ても PubSubService.Close を見たことにならない。テストが自分で 1 つ
@@ -250,7 +250,7 @@ func TestSupervisor_RecyclesGenerationsWithoutLeaking(t *testing.T) {
 		assert.Zero(t, rep.OpenConns)
 		assert.Equal(t, stream.ServiceRestartCloseCode, closeCodeOf(t, ws), "cycle %d", cycle)
 		env.requireNoBackends(t)
-		env.requireNoPatterns(t, "cycle %d: 古い世代の購読が残っている", cycle)
+		env.requireNoChannels(t, "cycle %d: 古い世代の購読が残っている", cycle)
 		assert.Equal(t, http.StatusServiceUnavailable, serveStatus(t, sup, http.MethodGet, "/healthz"))
 
 		_, err := sup.startGeneration()
