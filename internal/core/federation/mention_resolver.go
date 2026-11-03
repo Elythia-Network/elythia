@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"gorm.io/gorm"
 )
@@ -15,7 +16,13 @@ type UserMentionResolver struct {
 	userRepo                repository.UserRepository
 	urls                    *activitypub.URLBuilder
 	localFederationObserver activitypub.LocalFederationObserver
+	// findUser は WithUserLookup で差し替えた引き方。nil なら userRepo.FindByID。
+	findUser func(userID string) (*model.User, error)
 }
+
+// ap の GET は要求の中で引いた利用者を使い回すために WithUserLookup を型の検査で探す。
+// 実装が外れると黙って共有の引き方に戻るので、ここで固定する (#3989)。
+var _ activitypub.UserLookupMentionResolver = (*UserMentionResolver)(nil)
 
 func (r *UserMentionResolver) SetLocalFederationObserver(observer activitypub.LocalFederationObserver) {
 	r.localFederationObserver = observer
@@ -24,6 +31,16 @@ func (r *UserMentionResolver) SetLocalFederationObserver(observer activitypub.Lo
 // NewUserMentionResolver constructs a UserMentionResolver.
 func NewUserMentionResolver(userRepo repository.UserRepository, urls *activitypub.URLBuilder) *UserMentionResolver {
 	return &UserMentionResolver{userRepo: userRepo, urls: urls}
+}
+
+// WithUserLookup returns a copy of r that looks mentioned users up through
+// find instead of the repository. find must return repository errors unchanged
+// (gorm.ErrRecordNotFound for a missing user) so the not-found handling stays
+// the same. The receiver is not modified.
+func (r *UserMentionResolver) WithUserLookup(find func(userID string) (*model.User, error)) activitypub.MentionResolver {
+	cp := *r
+	cp.findUser = find
+	return &cp
 }
 
 // ResolveMention looks up the user by ID and returns the mention name and URI.
@@ -36,7 +53,12 @@ func NewUserMentionResolver(userRepo repository.UserRepository, urls *activitypu
 // gorm.ErrRecordNotFound は明示的に not-found sentinel に変換し、それ以外の
 // error は DB 障害として呼び出し元に伝える (#572 item 2)。
 func (r *UserMentionResolver) ResolveMention(userID string) (name, uri string, err error) {
-	u, err := r.userRepo.FindByID(userID)
+	var u *model.User
+	if r.findUser != nil {
+		u, err = r.findUser(userID)
+	} else {
+		u, err = r.userRepo.FindByID(userID)
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", "", activitypub.ErrMentionUserNotFound

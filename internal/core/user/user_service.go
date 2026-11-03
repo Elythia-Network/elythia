@@ -214,6 +214,13 @@ func (s *Service) FindManyByIDs(ids []string) ([]*model.User, error) {
 	return s.userRepo.FindManyByIDs(ids)
 }
 
+// FindByID returns the bare User row for the given ID without the profile.
+// Errors come from the repository unchanged, so a missing user is
+// repository.IsNotFound (not ErrUserNotFound as with ShowByID).
+func (s *Service) FindByID(id string) (*model.User, error) {
+	return s.userRepo.FindByID(id)
+}
+
 // ShowByID returns the user (and profile) for the given ID.
 func (s *Service) ShowByID(id string) (*UserWithProfile, error) {
 	u, err := s.userRepo.FindByID(id)

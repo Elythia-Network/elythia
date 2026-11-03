@@ -10,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,20 @@ func TestService_ShowByID_Success(t *testing.T) {
 	assert.Equal(t, "alice", bundle.User.Username)
 	require.NotNil(t, bundle.Profile)
 	assert.Equal(t, "hello", *bundle.Profile.Description)
+}
+
+func TestService_FindByID(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	repo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+	svc := user.NewService(repo, nil, nil, nil, nil)
+
+	u, err := svc.FindByID("u1")
+	require.NoError(t, err)
+	assert.Equal(t, "alice", u.Username)
+
+	_, err = svc.FindByID("missing")
+	assert.True(t, repository.IsNotFound(err), "the repository error is returned unchanged")
+	assert.False(t, errors.Is(err, user.ErrUserNotFound))
 }
 
 func TestService_ShowByID_NotFound(t *testing.T) {
