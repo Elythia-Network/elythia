@@ -849,6 +849,19 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	storedInternal := StorageIsLocal(backend)
 
 	var accessKey, url string
+	// 原本の書き込みは、代替画像の生成と並行に走らせる (#3996)。結果は
+	// サムネイル・webpublic の書き込みと一緒に待つ (waitStoredObjects)。
+	//
+	// 原本の書き込みが失敗したら altCtx を取り消し、代替画像の生成を止める。
+	// 逐次だった頃は原本の失敗で代替画像を作る前に戻っていたので、ストレージが
+	// 落ちている間にデコードや ffmpeg を空回りさせない。止まるのは、メディア
+	// 処理の枠の待ち (Acquire は ctx が切れていれば枠が空いていても失敗する) と
+	// ffmpeg (CommandContext)。デコードは ctx を見ないが、枠を取る時点で原本が
+	// 失敗していれば始まらない。取り消しの理由が原本の失敗なら、返すのは
+	// 原本のエラー (waitStoredObjects) で、要求の取り消しとは混ざらない。
+	var originalPut *pendingPut
+	altCtx, cancelAlts := context.WithCancel(ctx)
+	defer cancelAlts()
 	if in.PreStored != nil {
 		// chunked upload (#2313) は既に multipart で object を組み終えている。
 		// ここで Put し直すと本体をもう一度丸ごと転送することになるので skip する。
@@ -862,10 +875,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		if err != nil {
 			return nil, err
 		}
-		url, err = backend.Put(accessKey, bytes.NewReader(info.Body))
-		if err != nil {
-			return nil, err
-		}
+		originalPut = startPut(backend, accessKey, info.Body, cancelAlts)
 	}
 
 	// 画像/動画処理 (best-effort)
@@ -888,7 +898,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	}
 
 	var detectionImage []byte
-	alts := s.generateAlts(ctx, in.Body, info.MimeType, sensRoute == sensitiveOfficialImage)
+	alts := s.generateAlts(altCtx, in.Body, info.MimeType, sensRoute == sensitiveOfficialImage)
 	if alts != nil {
 		thumbnail = alts.thumbnail
 		webpublic = alts.webpublic
@@ -902,26 +912,21 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	var thumbnailAccessKey, webpublicAccessKey *string
 	var webpublicType *string
 
-	if thumbnail != nil {
-		tKey, err := newAccessKey()
-		if err == nil {
-			tURL, err := backend.Put(tKey, bytes.NewReader(thumbnail.Data))
-			if err == nil {
-				thumbnailURL = &tURL
-				thumbnailAccessKey = &tKey
-			}
-		}
+	stored, err := waitStoredObjects(backend, originalPut, thumbnail, webpublic)
+	if err != nil {
+		return nil, err
 	}
-	if webpublic != nil {
-		wKey, err := newAccessKey()
-		if err == nil {
-			wURL, err := backend.Put(wKey, bytes.NewReader(webpublic.Data))
-			if err == nil {
-				webpublicURL = &wURL
-				webpublicAccessKey = &wKey
-				webpublicType = &webpublic.MimeType
-			}
-		}
+	if originalPut != nil {
+		url = stored.url
+	}
+	if stored.thumbnailKey != "" {
+		thumbnailURL = &stored.thumbnailURL
+		thumbnailAccessKey = &stored.thumbnailKey
+	}
+	if stored.webpublicKey != "" {
+		webpublicURL = &stored.webpublicURL
+		webpublicAccessKey = &stored.webpublicKey
+		webpublicType = &webpublic.MimeType
 	}
 
 	now := time.Now()
@@ -1233,8 +1238,10 @@ func (s *Service) generateAlts(ctx context.Context, body []byte, mimeType string
 
 	release, ok := s.acquireMediaSlot(ctx)
 	if !ok {
-		// **ctx が切れたときだけここへ来る。** 呼び出し元が諦めている状態なので
-		// 代替画像を作っても捨てられる。best-effort の契約どおり nil を返す。
+		// **ctx が切れたときだけここへ来る。** 呼び出し元が諦めた (要求の取り消し) か、
+		// Upload で原本の書き込みが失敗して代替画像の生成を止めた (#3996) 状態なので、
+		// 代替画像を作っても捨てられる。best-effort の契約どおり nil を返す。後者の
+		// ときは、同じ要求で原本の失敗がエラーとして返る。
 		slog.Warn("drive: メディア処理の枠を待っている間に中断されました", "mimeType", mimeType)
 		return nil
 	}

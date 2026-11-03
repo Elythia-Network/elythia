@@ -1,6 +1,7 @@
 package emojiimport_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -479,27 +480,32 @@ func storedURL(n int) string {
 	return prefix + strings.Repeat("a", n-len(prefix))
 }
 
-// varyingStorage は Put のたびに別の URL を返す (本体 → webpublic の順)。
+// varyingStorage は本体と webpublic とで別の URL を返す (urls[0] = 本体、
+// urls[1] = webpublic)。
 //
 // **既定の構成では webpublic が作られない**ので `publicUrl` に入るのは `url` その
 // もので、publicUrl 側の判定が url 側を包含してしまう。url 側の条件を外した変異を
 // 捕まえるために、長さの違う URL を返す保存先を作る (レビュー M1)。
+//
+// どちらへの書き込みかは本文で見分ける。Upload は本体と webpublic を並行に
+// 書くので (#3996)、呼ばれた順では決まらない。
 type varyingStorage struct {
 	drive.Storage
 	urls []string
-	n    int
 }
 
 func (s *varyingStorage) Put(accessKey string, body io.Reader) (string, error) {
-	if _, err := s.Storage.Put(accessKey, body); err != nil {
+	b, err := io.ReadAll(body)
+	if err != nil {
 		return "", err
 	}
-	u := s.urls[len(s.urls)-1]
-	if s.n < len(s.urls) {
-		u = s.urls[s.n]
+	if _, err := s.Storage.Put(accessKey, bytes.NewReader(b)); err != nil {
+		return "", err
 	}
-	s.n++
-	return u, nil
+	if bytes.HasPrefix(b, webpublicMarker) {
+		return s.urls[1], nil
+	}
+	return s.urls[0], nil
 }
 
 // webpublicOnlyProcessor は webpublic だけを作る (サムネイルは作らない)。
@@ -509,8 +515,12 @@ func (webpublicOnlyProcessor) GenerateThumbnail([]byte, string) (*drive.Processe
 	return nil, nil
 }
 
+// webpublicMarker は webpublic の本文の先頭に付け、本体と見分けられるようにする。
+var webpublicMarker = []byte("webpublic:")
+
 func (webpublicOnlyProcessor) GenerateWebpublic(body []byte, _ string) (*drive.ProcessedImage, error) {
-	return &drive.ProcessedImage{Data: body, MimeType: "image/webp"}, nil
+	data := append(append([]byte(nil), webpublicMarker...), body...)
+	return &drive.ProcessedImage{Data: data, MimeType: "image/webp"}, nil
 }
 
 // 保存先の URL が `emoji.originalUrl` / `publicUrl` に入らないレコードは skip する
@@ -572,7 +582,7 @@ func TestRun_ChecksStoredURLAgainstEmojiColumns(t *testing.T) {
 func TestRun_SkipsWhenEitherStoredURLDoesNotFit(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		// 1 回目の Put = 本体、2 回目 = webpublic。
+		// urls[0] = 本体、urls[1] = webpublic。
 		urls []string
 	}{
 		{"url だけ超過 (webpublic は収まる)", []string{storedURL(urlLimit + 1), storedURL(urlLimit)}},
