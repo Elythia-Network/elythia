@@ -16,8 +16,7 @@ type QueueInspector interface {
 
 // QueueStatsInfo mirrors the relevant fields from queue.InspectorInfo so that
 // this package does not have to import internal/queue. 循環依存防止。
-// Delayed は Bull 用語で、driver の Scheduled (未来実行予定) + Retry
-// (失敗後の再試行待ち) 合計に対応するので両方の field を保持する。
+// Delayed は Bull 用語で、未来実行予定と失敗後の再試行待ちの合計 (#3962)。
 //
 // Completed は「累計の処理完了数」。前 tick との差分で
 // activeSincePrevTick (= tick 間に処理された数) を計算するために保持する
@@ -25,8 +24,7 @@ type QueueInspector interface {
 type QueueStatsInfo struct {
 	Active    int
 	Pending   int
-	Scheduled int
-	Retry     int
+	Delayed   int
 	Completed int
 }
 
@@ -206,8 +204,6 @@ func (p *QueueStatsPublisher) entryForQueue(qname string) queueStatsEntry {
 		ActiveSincePrevTick: processed,
 		Active:              info.Active,
 		Waiting:             info.Pending,
-		// Bull の delayed は Scheduled (未来実行予定) と Retry
-		// (失敗後再試行待ち) の両方を含む。
-		Delayed: info.Scheduled + info.Retry,
+		Delayed:             info.Delayed,
 	}
 }

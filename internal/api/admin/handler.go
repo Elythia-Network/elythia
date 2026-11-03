@@ -656,9 +656,9 @@ type QueueInfoResult struct {
 	Pending   int
 	Completed int
 	Failed    int
-	Scheduled int
-	Retry     int
-	IsPaused  bool
+	// Delayed は未来実行予定と失敗後の再試行待ちの合計 (Bull の delayed、#3962)。
+	Delayed  int
+	IsPaused bool
 	// QualifiedName is BullMQ's `<keyPrefix>:<name>`。空なら Queue で代替する。
 	QualifiedName string
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/elythia-network/mkq"
 
@@ -40,27 +39,14 @@ func (i *Inspector) Queues() ([]string, error) {
 // failed counters for the named queue. InspectorInfo.Pending maps to
 // mkq's wait bucket.
 //
-// Retry / Scheduled semantics: mkq の delayed bucket は scheduled
-// (cron / 初回 delayed enqueue) と retry-backoff 待ち (= 失敗して次の
-// 試行待ち) が **混在** している (BullMQ 同等。mkq#64 close 時の
-// upstream comment で確認)。両者を区別するため driver 側で delayed
-// bucket を `atm` (= attemptsMade、BullMQ HASH field) で filter し、
-// `atm == 0` を Scheduled / `atm > 0` を Retry にマッピングする。
-// `failed` bucket は permanent failure (= dead letter) のみで Retry には
-// 含めない。driver.InspectorInfo の各欄との対応は以下 (#1187):
-//
-//	Scheduled = delayed[atm==0] + repeat ZSET
-//	Retry     = delayed[atm>0]
-//	Failed    = failed bucket size
-//
-// cost: delayed bucket 全件 ListJobs (ZRANGE + N×HGETALL pipeline) が
-// publisher の 3 秒間隔で走る。通常 < 100 件で問題なし、federation 障害
-// 時の数千件でも admin polling として許容。将来必要なら Lua count-only
-// API を mkq に proposal する余地あり。
-//
-// fallback: delayed split が失敗したら保守的に旧挙動 (delayed 全体を
-// Scheduled、Retry=0) に倒す。panel 表示は救う方が優先 (= 全部 error 返し
-// にすると graph が真っ白になる)。
+// Delayed = delayed bucket の件数 + repeat ZSET の件数。mkq の delayed bucket
+// には予定 (cron / 初回の delayed enqueue) と retry-backoff 待ちが混ざっているが、
+// ここでは数え分けない (#3962)。以前は `atm` で数え分けるために delayed を全件
+// 本文まで読んでいた (#1187) が、使う側はどれも合計しか出さず、stream の
+// queueStats が購読者の有無にかかわらず 10 秒ごとにこれを呼ぶので、落ちた
+// サーバーへの再試行がたまるほど CPU と Redis を食っていた。本家の
+// QueueStatsService も getJobCounts() だけを読む。一覧の側 (ListScheduledTasks /
+// ListRetryTasks) は今も atm で分ける。
 func (i *Inspector) GetQueueInfo(qname string) (*driver.InspectorInfo, error) {
 	q := i.driver.queueFor(qname)
 	if q == nil {
@@ -70,32 +56,18 @@ func (i *Inspector) GetQueueInfo(qname string) (*driver.InspectorInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mkqdriver: counts %q: %w", qname, err)
 	}
-	// Repeat ZSET の登録数を Scheduled に加算する (mk-go #455)。
-	// mkq scheduler は次回発火を `bull:<queue>:repeat` ZSET にだけ
-	// 保持し、concrete delayed job を pre-allocate しない。upstream
-	// BullMQ と異なる挙動なので、driver 側で repeat ZCARD を Scheduled
-	// に足して admin UI の Delayed カラムに「予定数」として可視化する。
+	// Repeat ZSET の登録数を Delayed に加算する (mk-go #455)。
+	// admin UI の Delayed カラムに、登録した定期ジョブを「予定数」として
+	// 見せるため。mkq の addJobScheduler は次回発火の実体のジョブも
+	// delayed に積むので、定期ジョブ 1 件は delayed と repeat の両方で
+	// 数えられ、Delayed は 2 になる (以前からの挙動。#3962 のレビューで実測)。
 	// ZCARD 失敗は致命ではないので 0 として扱い、queue 全体を error
 	// 返却にしない (Counts が成功した時点で UI 表示は救う方を優先)。
 	repeatCount, _ := i.driver.rdb.ZCard(inspectorCtx(), i.driver.repeatKey(qname)).Result()
 
-	// delayed bucket を atm で split (#1187、mkq#64 close 時の手法)。
-	scheduledCount, retryCount, err := i.partitionDelayedByAttempts(q)
-	if err != nil {
-		slog.Warn("mkqdriver: failed to split delayed bucket by atm, falling back",
-			"queue", qname, "err", err)
-		scheduledCount = int(counts.Delayed)
-		retryCount = 0
-	}
-
-	// Size は「キューに居るジョブ数」= Pending + Active + Scheduled + Retry +
-	// Failed。**Completed は入れない** (完了済みは retention として保存されて
-	// いるだけでキューの住人ではない)。delayed 全体 + failed bucket + repeat
-	// を入れる。
-	//
-	// #1187 で内訳が変わったが合計値は不変: scheduledCount + retryCount ==
-	// counts.Delayed (= 同じ delayed bucket を partition しただけ) なので、
-	// Size 計算では partition 前の counts.Delayed をそのまま使える。
+	// Size は「キューに居るジョブ数」= Pending + Active + Delayed + Failed。
+	// **Completed は入れない** (完了済みは retention として保存されて
+	// いるだけでキューの住人ではない)。
 	// paused 状態 (meta.paused) は best-effort で取得 (失敗しても info 全体は
 	// 返す、admin panel を真っ白にしない方針)。
 	paused, _ := q.IsPaused(inspectorCtx())
@@ -107,8 +79,7 @@ func (i *Inspector) GetQueueInfo(qname string) (*driver.InspectorInfo, error) {
 		Pending:   int(counts.Wait),
 		Completed: int(counts.Completed),
 		Failed:    int(counts.Failed),
-		Scheduled: scheduledCount + int(repeatCount),
-		Retry:     retryCount,
+		Delayed:   int(counts.Delayed) + int(repeatCount),
 		IsPaused:  paused,
 		// BullMQ の Queue.qualifiedName。prefix は driver の設定なので、
 		// 上位が "bull" を決め打ちしないようここで組む (#2689)。
@@ -171,32 +142,6 @@ func (i *Inspector) UnpauseQueue(qname string) error {
 		return fmt.Errorf("mkqdriver: resume %q: %w", qname, err)
 	}
 	return nil
-}
-
-// partitionDelayedByAttempts inspects mkq's delayed bucket and partitions
-// entries into two counts by `atm` (= attemptsMade):
-//
-//   - atm == 0 → scheduled (cron / 初回 delayed enqueue)
-//   - atm > 0  → retry-backoff (= 失敗して次の試行待ち)
-//
-// 戻り値は (scheduled, retry, err) (#1187)。
-//
-// delayed bucket は ZSET-backed なので 全件取り直しでも score 順に並ぶ。
-// fetch cost は ZRANGE 1 + HGETALL N pipeline で、publisher 3 秒間隔の
-// admin polling として許容範囲。
-func (i *Inspector) partitionDelayedByAttempts(q *mkq.Queue[framedPayload]) (scheduled int, retry int, err error) {
-	listed, err := q.ListJobs(inspectorCtx(), mkq.JobBucketDelayed, 0, -1, true)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, lj := range listed {
-		if lj.Job != nil && lj.Job.AttemptsMade > 0 {
-			retry++
-		} else {
-			scheduled++
-		}
-	}
-	return scheduled, retry, nil
 }
 
 // QueueMetrics returns BullMQ-compatible per-minute completed /
