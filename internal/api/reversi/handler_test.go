@@ -177,6 +177,12 @@ func (m *mockReversiRepo) Delete(id string) error {
 	return nil
 }
 
+func (m *mockReversiRepo) ListOutdatedFederatedGames(string, int) ([]*model.ReversiGame, error) {
+	return nil, nil
+}
+
+func (m *mockReversiRepo) DeleteNotStarted(string) (bool, error) { return false, nil }
+
 func (m *mockReversiRepo) DeleteOutdatedGames(thresholdID string) (int64, error) {
 	var n int64
 	for id, g := range m.games {

@@ -32,6 +32,11 @@ type (
 	OutdatedGamePruner interface {
 		DeleteOutdatedGames(thresholdID string) (int64, error)
 	}
+	// OutdatedFederatedGameCanceler removes abandoned reversi games that have
+	// a remote player and tells the remote side (core/reversi.Service, #3956).
+	OutdatedFederatedGameCanceler interface {
+		CancelOutdatedFederatedGames(ctx context.Context, thresholdID string, limit int) (listed, removed int, err error)
+	}
 	// CleanIDGenerator generates the reversi threshold id (misc/id.Generator).
 	CleanIDGenerator interface {
 		Generate(t time.Time) string
@@ -76,6 +81,19 @@ const (
 	// reversiOutdatedAfter は開始されないまま放置された reversi game を outdated
 	// と見なす猶予。upstream cleanOutdatedGames は now-10min の id を閾値にする。
 	reversiOutdatedAfter = 10 * time.Minute
+	// reversiFederatedCancelBatchは、相手がリモートの対局を1回に読んで知らせる
+	// 件数(#3956)。他の掃除のbatch(100〜200)に合わせる。
+	reversiFederatedCancelBatch = 100
+	// reversiFederatedCancelMaxBatchesは1回の掃除で回すbatchの上限(#3956)。
+	//
+	// **知らせるのは1日あたり最大1000件。** 1件ごとに配送のjobを1つ積む
+	// (DeliverToUser)。招待は同じ相手からの重複を受けない(FindPendingInvitation)
+	// ので、通常の運用で1日に1000対局の連合の招待が放置されることは無い。上限を
+	// 超えるのは招待を大量に流し込まれたときで、そのとき全件に送り返すと、こちらが
+	// 相手のサーバー群へ配送を大量に積むことになる。超えた分は後の一括削除で、これ
+	// までどおり知らせずに消す。翌日まで残しても、相手との対応(FederationIDTTLの
+	// 25時間で切れる)が先に切れて知らせられなくなるので、残す得は無い。
+	reversiFederatedCancelMaxBatches = 10
 	// pendingSignupRetention は期限切れ `user_pending` 行を残す猶予 (#3037)。
 	//
 	// **`signup.PendingSignupTTL` (30 分) より十分長くする。** 掃除は日次なので
@@ -99,6 +117,7 @@ type CleanProcessor struct {
 	userIP           UserIPPruner
 	roleAssign       RoleAssignmentPruner
 	reversi          OutdatedGamePruner
+	reversiFed       OutdatedFederatedGameCanceler
 	idGen            CleanIDGenerator
 	antenna          AntennaDeactivator
 	antennaThreshold time.Duration
@@ -120,6 +139,14 @@ func (p *CleanProcessor) SetBubbleVersusRecordPruner(pr BubbleVersusRecordPruner
 	p.bubbleVersus = pr
 }
 
+// SetOutdatedFederatedGameCanceler wires the notification of the remote side
+// for abandoned federated reversi games (#3956). Like the other setters it
+// keeps the constructor from growing; nil keeps the old behavior of removing
+// those rows without telling anyone.
+func (p *CleanProcessor) SetOutdatedFederatedGameCanceler(c OutdatedFederatedGameCanceler) {
+	p.reversiFed = c
+}
+
 // NewCleanProcessor constructs the processor. Any nil dependency disables its
 // sub-task (no-op) rather than panicking. antennaThreshold <= 0 also disables
 // the antenna deactivate sub-task (matching upstream's `> 0` guard).
@@ -138,7 +165,7 @@ func NewCleanProcessor(userIP UserIPPruner, roleAssign RoleAssignmentPruner, rev
 // Handle implements the driver handler contract. Each sub-task logs and
 // swallows its own error so one failure does not abort the others; the job is
 // always reported as success (MaxRetry(0)).
-func (p *CleanProcessor) Handle(_ context.Context, _ driver.Task) error {
+func (p *CleanProcessor) Handle(ctx context.Context, _ driver.Task) error {
 	now := time.Now()
 
 	if p.userIP != nil {
@@ -159,6 +186,9 @@ func (p *CleanProcessor) Handle(_ context.Context, _ driver.Task) error {
 
 	if p.reversi != nil && p.idGen != nil {
 		threshold := p.idGen.Generate(now.Add(-reversiOutdatedAfter))
+		// 相手がリモートの対局は、一括で消す前に1件ずつ消して相手に知らせる(#3956)。
+		// 残りは下の一括削除が消すので、ここで失敗しても掃除は止めない。
+		p.cancelOutdatedFederatedGames(ctx, threshold)
 		if n, err := p.reversi.DeleteOutdatedGames(threshold); err != nil {
 			slog.Warn("clean: delete outdated reversi games failed", "err", err)
 		} else if n > 0 {
@@ -200,4 +230,31 @@ func (p *CleanProcessor) Handle(_ context.Context, _ driver.Task) error {
 	}
 
 	return nil
+}
+
+// cancelOutdatedFederatedGames removes the abandoned games that have a remote
+// player in batches, telling the remote side, up to the per-run cap (#3956).
+func (p *CleanProcessor) cancelOutdatedFederatedGames(ctx context.Context, threshold string) {
+	if p.reversiFed == nil {
+		return
+	}
+	total := 0
+	defer func() {
+		if total > 0 {
+			slog.Info("clean: canceled outdated federated reversi games", "count", total)
+		}
+	}()
+	for range reversiFederatedCancelMaxBatches {
+		listed, removed, err := p.reversiFed.CancelOutdatedFederatedGames(ctx, threshold, reversiFederatedCancelBatch)
+		total += removed
+		if err != nil {
+			slog.Warn("clean: cancel outdated federated reversi games failed", "err", err)
+			return
+		}
+		if listed < reversiFederatedCancelBatch {
+			return
+		}
+	}
+	slog.Warn("clean: reached the cap of notified outdated federated reversi games; any rest is removed without notice",
+		"notified", total)
 }

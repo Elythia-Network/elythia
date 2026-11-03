@@ -155,6 +155,12 @@ func (r *fedFakeReversiRepo) Delete(id string) error {
 	return nil
 }
 
+func (r *fedFakeReversiRepo) ListOutdatedFederatedGames(string, int) ([]*model.ReversiGame, error) {
+	return nil, nil
+}
+
+func (r *fedFakeReversiRepo) DeleteNotStarted(string) (bool, error) { return false, nil }
+
 func (r *fedFakeReversiRepo) DeleteOutdatedGames(thresholdID string) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
