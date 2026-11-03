@@ -14,7 +14,7 @@
 		"test:e2e": "playwright test --config playwright.config.ts",
 		"test:browser": "vitest --run --globals --config vitest.config.browser.ts",
 		"typecheck": "vue-tsc --noEmit",
-		"eslint": "eslint --quiet \"src/**/*.{ts,vue}\"",
+		"eslint": "eslint --quiet \"src/**/*.{ts,vue}\" \"public/loader/*.js\"",
 		"lint": "pnpm typecheck && pnpm eslint"
 	},
 	"dependencies": {

@@ -83,9 +83,9 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	$(MAKE) frontend-lint
 
 .PHONY: frontend-lint
-frontend-lint: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend を eslint で検査 (CI と同じ範囲)
+frontend-lint: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend と frontend-embed を eslint で検査 (CI と同じ範囲)
 	# CI の `Lint (eslint)` step と同じ。範囲は package.json の script が持つ
-	# (`--quiet "src/**/*.{ts,vue}"`)。**`eslint .` にしないこと** — upstream が
+	# (`--quiet "src/**/*.{ts,vue}" "public/loader/*.js"`)。**`eslint .` にしないこと** — upstream が
 	# lint していない test/ まで拾い、追従のたびに他人の負債で落ちる。
 	#
 	# **`npm run` で script を呼ぶ (引数を書き写さない)。** 書き写すと
@@ -93,7 +93,11 @@ frontend-lint: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend を esl
 	# ずれた)。CI は `pnpm eslint` だが手元に pnpm があるとは限らないので、
 	# 同じ script を呼べる npx/npm 側に寄せる (frontend-check / frontend-test も
 	# npx を使っている)。
+	#
+	# frontend-embed も回す。起動画面のスクリプト (public/loader/boot.js) は 2 つの
+	# package にあり、構文の誤りが 1 つあるだけで起動全体が止まる (#3954)
 	cd frontend/packages/frontend && npm run --silent eslint
+	cd frontend/packages/frontend-embed && npm run --silent eslint
 
 .PHONY: frontend-test
 frontend-test: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ の frontend の vitest を実行

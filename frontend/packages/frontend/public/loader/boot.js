@@ -555,6 +555,7 @@
 		}
 
 		let resizeTimer = null;
+
 		function onResize() {
 			window.clearTimeout(resizeTimer);
 			resizeTimer = window.setTimeout(() => {
