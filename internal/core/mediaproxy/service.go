@@ -252,6 +252,14 @@ type ProxyResult struct {
 	// ものなら `immutable` で 1 年固定してはいけない。status を変えずに
 	// キャッシュだけ変えたいので、error ではなく結果に載せる。
 	CacheControl string
+	// Size is the byte length of Body, or 0 when unknown.
+	//
+	// **handler が Content-Length を付けるために持つ (#3966)。** 本文は
+	// makeResult が []byte から作るので大きさは分かっている。付けないと
+	// 応答が chunked になり、受け手は全体の大きさを知らずに読むことになる。
+	// 0 を「不明」に使うのは、Size を埋めずに作った結果 (テストの stub など)
+	// に Content-Length: 0 を付けて本文を切り捨てないため。
+	Size int64
 }
 
 // DriveFileLookup is the minimal subset of repository.DriveFileRepository
@@ -1275,6 +1283,7 @@ func makeResult(data []byte, contentType string) *ProxyResult {
 	return &ProxyResult{
 		Body:        io.NopCloser(bytes.NewReader(data)),
 		ContentType: contentType,
+		Size:        int64(len(data)),
 	}
 }
 
