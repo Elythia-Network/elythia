@@ -460,7 +460,7 @@ func decodePgTextArray(lit string, raw any) []string {
 // NULL は入らないが、入っていたときに空文字列として濃度に数えてしまうより
 // 無視する方が安全側。
 // 注意: integration test は testutil が PreferSimpleProtocol: true で接続する
-// のに対し、本番は extended protocol + PrepareStmt (internal/db) で走る。
+// のに対し、本番は extended protocol (pgx の文のキャッシュ、internal/db) で走る。
 // varchar[] はどちらでも string で返ってくることを実測で確認しているが、
 // テストが本番の protocol を pin しているわけではない。
 func parsePgTextArray(s string) []string {
