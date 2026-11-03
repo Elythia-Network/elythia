@@ -11,7 +11,8 @@ import (
 // /api/meta for timeline ad exposure; the rest supports the admin CRUD.
 type AdRepository interface {
 	// ListActive returns ads whose window contains `now` (startsAt <= now
-	// < expiresAt). Ordering is by id DESC so newest ads come first.
+	// < expiresAt) and whose dayOfWeek includes the weekday of `now` (0 means
+	// every day). Ordering is by id DESC so newest ads come first.
 	ListActive(now time.Time) ([]*model.Ad, error)
 	Create(a *model.Ad) error
 	FindByID(id string) (*model.Ad, error)
@@ -35,8 +36,12 @@ func NewAdRepository(db *gorm.DB) AdRepository {
 
 func (r *adRepository) ListActive(now time.Time) ([]*model.Ad, error) {
 	var ads []*model.Ad
+	// 曜日はビットの印で、日曜が 1<<0 (#3971)。本家の MetaEntityService と同じく
+	// now の地域時刻の曜日で絞る (本家は new Date().getDay() でサーバーの地域時刻)。
+	// 絞らないと、曜日を指定した広告が毎日出る
 	if err := r.db.
 		Where(`"startsAt" <= ? AND "expiresAt" > ?`, now, now).
+		Where(`("dayOfWeek" & ? > 0 OR "dayOfWeek" = 0)`, 1<<int(now.Weekday())).
 		Order(`id DESC`).
 		Find(&ads).Error; err != nil {
 		return nil, err

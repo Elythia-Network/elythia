@@ -153,3 +153,87 @@ func TestAdRepository_ListFiltered(t *testing.T) {
 		assert.Less(t, a.ID, "adf_future")
 	}
 }
+
+// 曜日を指定した広告は、その曜日にだけ返す (#3971)。dayOfWeek は日曜が 1<<0。
+func TestAdRepository_ListActive_FiltersByDayOfWeek(t *testing.T) {
+	repo := NewAdRepository(testDB)
+	// 2026-11-04 は水曜日 (Weekday 3)
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.Local)
+	require.Equal(t, time.Wednesday, now.Weekday())
+
+	mk := func(id string, dayOfWeek int) *model.Ad {
+		return &model.Ad{
+			ID:        id,
+			URL:       "https://example.com/" + id,
+			ImageURL:  "https://example.com/" + id + ".png",
+			Place:     "square",
+			Priority:  "middle",
+			Ratio:     1,
+			StartsAt:  now.Add(-1 * time.Hour),
+			ExpiresAt: now.Add(1 * time.Hour),
+			DayOfWeek: dayOfWeek,
+		}
+	}
+	ads := []*model.Ad{
+		mk("ad_dow_every", 0),
+		mk("ad_dow_wed", 1<<3),
+		mk("ad_dow_mon_wed", 1<<1|1<<3),
+		mk("ad_dow_sun", 1<<0),
+		mk("ad_dow_sat", 1<<6),
+	}
+	for _, a := range ads {
+		require.NoError(t, testDB.Create(a).Error)
+		id := a.ID
+		t.Cleanup(func() { cleanupAd(t, id) })
+	}
+
+	got, err := repo.ListActive(now)
+	require.NoError(t, err)
+	ids := make(map[string]bool, len(got))
+	for _, a := range got {
+		ids[a.ID] = true
+	}
+	assert.True(t, ids["ad_dow_every"], "dayOfWeek=0 should be returned every day")
+	assert.True(t, ids["ad_dow_wed"], "an ad for Wednesday should be returned on Wednesday")
+	assert.True(t, ids["ad_dow_mon_wed"], "an ad for Monday and Wednesday should be returned on Wednesday")
+	assert.False(t, ids["ad_dow_sun"], "an ad for Sunday should not be returned on Wednesday")
+	assert.False(t, ids["ad_dow_sat"], "an ad for Saturday should not be returned on Wednesday")
+}
+
+// 曜日は now の地域時刻で決める (本家はサーバーの地域時刻の getDay())。
+// UTC の曜日で絞ると、JST の 0:00〜8:59 に前日の曜日の広告が出る (#3971 のレビュー)。
+func TestAdRepository_ListActive_DayOfWeekUsesLocalTimeOfNow(t *testing.T) {
+	repo := NewAdRepository(testDB)
+	// JST の水曜 03:00 は、UTC では火曜 18:00
+	now := time.Date(2026, 11, 4, 3, 0, 0, 0, time.FixedZone("JST", 9*60*60))
+	require.Equal(t, time.Wednesday, now.Weekday())
+	require.Equal(t, time.Tuesday, now.UTC().Weekday())
+
+	mk := func(id string, dayOfWeek int) *model.Ad {
+		return &model.Ad{
+			ID:        id,
+			URL:       "https://example.com/" + id,
+			ImageURL:  "https://example.com/" + id + ".png",
+			Place:     "square",
+			Priority:  "middle",
+			Ratio:     1,
+			StartsAt:  now.Add(-1 * time.Hour),
+			ExpiresAt: now.Add(1 * time.Hour),
+			DayOfWeek: dayOfWeek,
+		}
+	}
+	for _, a := range []*model.Ad{mk("ad_dowtz_wed", 1<<3), mk("ad_dowtz_tue", 1<<2)} {
+		require.NoError(t, testDB.Create(a).Error)
+		id := a.ID
+		t.Cleanup(func() { cleanupAd(t, id) })
+	}
+
+	got, err := repo.ListActive(now)
+	require.NoError(t, err)
+	ids := make(map[string]bool, len(got))
+	for _, a := range got {
+		ids[a.ID] = true
+	}
+	assert.True(t, ids["ad_dowtz_wed"], "the weekday should follow the location of now")
+	assert.False(t, ids["ad_dowtz_tue"], "the UTC weekday should not be used")
+}
