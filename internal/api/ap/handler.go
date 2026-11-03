@@ -620,7 +620,7 @@ func extractLocalAPReferences(v any, urls *activitypub.URLBuilder) (localAPRefer
 	if err != nil {
 		return localAPReferences{}, err
 	}
-	users, notes := activitypub.ExtractLocalAPReferences(urls.BaseURL(), string(data))
+	users, notes := activitypub.ExtractLocalAPReferences(urls.BaseURL(), data)
 	return localAPReferences{users: users, notes: notes}, nil
 }
 

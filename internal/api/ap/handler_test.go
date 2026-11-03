@@ -2079,7 +2079,7 @@ func TestExtractLocalAPReferences(t *testing.T) {
 		"outside": "https://example.com.evil.test/users/not-local",
 	})
 	require.NoError(t, err)
-	users, notes := activitypub.ExtractLocalAPReferences("https://example.com", string(data))
+	users, notes := activitypub.ExtractLocalAPReferences("https://example.com", data)
 	assert.Equal(t, []string{"mentioned"}, users)
 	assert.Equal(t, []string{"own-note"}, notes)
 }

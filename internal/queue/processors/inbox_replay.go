@@ -23,9 +23,10 @@ import (
 // 有限になったが、窓の内側はまだ通る。ここはその内側を塞ぐ。
 //
 // **鍵は activity.id ではなく、署名が覆った Date ヘッダーと本文のダイジェスト**
-// (activityReplayKey)。id を鍵にすると、同じ id で中身の違う活動 (本家 Misskey の
-// Undo(Follow) は `<Follow の id>/undo` で決定的、違うのは `published` だけ) を
-// 2 つ目から捨てる。本文だけを鍵にしても、Elythia 自身の Follow は決定的な id で
+// (digestReplayKey。ダイジェストは受付が本文との一致を確かめた Digest ヘッダーの
+// 値で、使えなければ activityReplayKey で本文から作る)。id を鍵にすると、同じ id で
+// 中身の違う活動 (本家 Misskey の Undo(Follow) は `<Follow の id>/undo` で決定的、
+// 違うのは `published` だけ) を 2 つ目から捨てる。本文だけを鍵にしても、Elythia 自身の Follow は決定的な id で
 // `published` も無いので、解除してから 15 分以内の再フォローが同じバイト列になり
 // 捨てられる。Date は受付が署名の対象として必須にしているので改変できず、捕まえた
 // リクエストの再投函では同じ値、正当な送り直しでは新しい値になる。これが「同じ
@@ -38,13 +39,77 @@ type InboxReplayGuard interface {
 }
 
 // activityReplayKey derives the replay guard's key from the signed Date header
-// and the signed request body.
+// and the signed request body. It is the key for requests without a usable
+// Digest header (digestReplayKey), and the key before #3988.
 func activityReplayKey(date string, body []byte) string {
 	h := sha256.New()
 	h.Write([]byte(date))
 	h.Write([]byte{'\n'})
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// digestReplayKeyDomain separates digestReplayKey's input from
+// activityReplayKey's. HTTP のヘッダーの値に NUL は入らないので、Date で始まる
+// activityReplayKey の入力とは重ならない。
+const digestReplayKeyDomain = "\x00digest\n"
+
+// digestReplayKey derives the replay guard's key from the signed Date header
+// and the signed Digest header.
+//
+// **本文の代わりに Digest を使う (#3988)。** 受付の VerifyInboxAdmission が、
+// Digest が署名の対象であることと、その値が本文の SHA-256 と一致することを
+// 確かめてから積んでいる。署名が覆う値なので書き換えられず、本文が違えば値も
+// 違う。activityReplayKey と同じく「同じリクエストなら同じ鍵、本文か Date が
+// 違えば違う鍵」になり、本文全体の SHA-256 をもう一度計算しなくて済む
+// (63KB の本文で 1 件あたり約 125µs)。値は受付が受けた文字列をそのまま使う
+// (書式の揺れを正規化しない。署名が覆うのはこの文字列なので、同じリクエストは
+// 同じ文字列になる)。
+func digestReplayKey(date, digest string) string {
+	h := sha256.New()
+	h.Write([]byte(digestReplayKeyDomain))
+	h.Write([]byte(date))
+	h.Write([]byte{'\n'})
+	h.Write([]byte(digest))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// replayKeys returns the replay guard keys of a request whose HTTP signature
+// was verified: the first is the key to remember the request by from now on,
+// and every key is checked when looking for a replay.
+//
+// Digest が使えない (無い・署名が覆っていない・SHA-256 ではない) ときは、
+// 今までどおり本文から鍵を作る。受付はそうしたリクエストを積まないが、受付を
+// 通らずに積まれた payload (テストなど) でも、本文が違えば鍵が違う性質を保つ。
+func (p *InboxProcessor) replayKeys(headers map[string]string, body []byte, digestSigned bool) []string {
+	date := headers["Date"]
+	digest := headers["Digest"]
+	if !digestSigned || digest == "" {
+		return []string{activityReplayKey(date, body)}
+	}
+	keys := []string{digestReplayKey(date, digest)}
+	// **鍵の形を変えた直後は、前の形の鍵も見て、覚える。** 切り替える前に処理した
+	// リクエストは前の形の鍵でしか Redis に残っていないので、新しい鍵だけを見ると、
+	// 切り替えの直後 inboxReplayTTL の間はそれらを 1 回ずつ再投函できてしまう。
+	// 前の形の鍵も覚えるのは、入れ替えの途中で古い版のプロセスが同時に動いて
+	// いる間、そちらにも新しい版が処理したリクエストを見せるため。起動から
+	// inboxReplayTTL が過ぎれば、前の形の鍵は全部期限が切れているので計算しない。
+	//
+	// **前提は、新旧の版が並んで動くのが inboxReplayTTL より短いこと。** 古い版の
+	// worker を窓より長く併走させると、窓の後は両方の向きで 1 回ずつ再投函を通す。
+	// 新しい版が処理したリクエストを、古い版は新しい形の鍵で見つけられない。古い版が
+	// 前の形の鍵でだけ覚えたリクエストを、新しい版は窓の後には前の形の鍵を見ないので
+	// 見つけられない。新しい版から古い版へ
+	// 戻した直後も同じで、古い版は新しい形の鍵を見ないので、戻す前の inboxReplayTTL
+	// の間に処理したリクエストを 1 回ずつ通す。
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+	if now().Before(p.legacyReplayKeysUntil) {
+		keys = append(keys, activityReplayKey(date, body))
+	}
+	return keys
 }
 
 // inboxReplayTTL is how long a processed activity is remembered.

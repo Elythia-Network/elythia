@@ -9,7 +9,7 @@ import (
 
 // ExtractLocalAPReferences delegates to the shared semantic ActivityPub reference
 // extractor using this resolver's canonical local origin.
-func (r *Resolver) ExtractLocalAPReferences(serialized string) (userIDs []string, noteIDs []string) {
+func (r *Resolver) ExtractLocalAPReferences(serialized []byte) (userIDs []string, noteIDs []string) {
 	if r == nil || r.urls == nil {
 		return nil, nil
 	}

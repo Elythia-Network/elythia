@@ -456,3 +456,30 @@ func TestVerifyFetchAdmission(t *testing.T) {
 		})
 	}
 }
+
+// #3988: the inbox replay key uses the Digest header only when it has the shape
+// the admission compares with the body and the signature covers it.
+func TestIsSignedSHA256Digest(t *testing.T) {
+	signed := sig("(request-target)", "host", "date", "Digest")
+	unsigned := sig("(request-target)", "host", "date")
+	digest := SHA256Digest([]byte(`{}`))
+	for _, tc := range []struct {
+		name   string
+		parsed *ParsedSignature
+		digest string
+		want   bool
+	}{
+		{"signed", signed, digest, true},
+		{"lower-case algorithm", signed, "sha-256=" + digest[len("SHA-256="):], true},
+		{"not signed", unsigned, digest, false},
+		{"no signature", nil, digest, false},
+		{"empty", signed, "", false},
+		{"empty value", signed, "SHA-256=", false},
+		{"other algorithm", signed, "SHA-512=abcd", false},
+		{"malformed", signed, "garbage", false},
+	} {
+		if got := IsSignedSHA256Digest(tc.parsed, tc.digest); got != tc.want {
+			t.Errorf("%s: IsSignedSHA256Digest = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
