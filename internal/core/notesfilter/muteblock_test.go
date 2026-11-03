@@ -258,12 +258,14 @@ func TestApplyMuteBlockChannel_MutedInstances(t *testing.T) {
 
 // stubRenoteLookup serves renote rows from a map (and can fail).
 type stubRenoteLookup struct {
-	rows map[string]*model.Note
-	err  error
-	got  []string
+	rows  map[string]*model.Note
+	err   error
+	got   []string
+	calls int
 }
 
 func (s *stubRenoteLookup) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
+	s.calls++
 	s.got = append(s.got, ids...)
 	if s.err != nil {
 		return nil, s.err
@@ -340,4 +342,65 @@ func TestApplyMuteBlockChannel_NilLookupSkipsNestedCheck(t *testing.T) {
 	out, err := notesfilter.ApplyMuteBlockChannel(notes, sets, nil)
 	require.NoError(t, err)
 	assert.Len(t, out, 1)
+}
+
+// --- #3965: hydrate 済みの Renote を使い、引き直さない ---
+
+func keptIDs(out []*model.Note) []string {
+	ids := make([]string, 0, len(out))
+	for _, n := range out {
+		ids = append(ids, n.ID)
+	}
+	return ids
+}
+
+func TestApplyMuteBlockChannel_UsesLoadedRenoteWithoutFetch(t *testing.T) {
+	sets := notesfilter.MuteBlockSets{
+		MutedUserIDs:   map[string]struct{}{"muted": {}},
+		BlockerIDs:     map[string]struct{}{"blocker": {}},
+		MutedInstances: map[string]struct{}{"muted.example": {}},
+	}
+	// lookup は何も返さない。読み込み済みの Renote を使わないと、入れ子の判定が
+	// 「renote 先が見つからない」扱いになり、落とすべきノートが残る。
+	renotes := &stubRenoteLookup{rows: map[string]*model.Note{}}
+	notes := []*model.Note{
+		{ID: "renotes-reply-to-muted", UserID: "b", RenoteID: strp("r1"), RenoteUserID: strp("a"),
+			Renote: &model.Note{ID: "r1", UserID: "a", ReplyUserID: strp("muted")}},
+		{ID: "renotes-quote-of-blocker", UserID: "b", RenoteID: strp("r2"), RenoteUserID: strp("a"),
+			Renote: &model.Note{ID: "r2", UserID: "a", RenoteUserID: strp("blocker")}},
+		{ID: "renotes-instance-reply", UserID: "b", RenoteID: strp("r3"), RenoteUserID: strp("a"),
+			Renote: &model.Note{ID: "r3", UserID: "a", ReplyUserHost: strp("muted.example")}},
+		{ID: "renotes-clean", UserID: "b", RenoteID: strp("r4"), RenoteUserID: strp("a"),
+			Renote: &model.Note{ID: "r4", UserID: "a"}},
+		{ID: "plain", UserID: "b"},
+	}
+	out, err := notesfilter.ApplyMuteBlockChannel(notes, sets, renotes)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"renotes-clean", "plain"}, keptIDs(out))
+	assert.Zero(t, renotes.calls, "renote targets already loaded must not be fetched again")
+}
+
+func TestApplyMuteBlockChannel_FetchesOnlyUnloadedRenotes(t *testing.T) {
+	sets := notesfilter.MuteBlockSets{MutedUserIDs: map[string]struct{}{"muted": {}}}
+	renotes := &stubRenoteLookup{rows: map[string]*model.Note{
+		"r1": {ID: "r1", UserID: "a", ReplyUserID: strp("muted")},
+		"r2": {ID: "r2", UserID: "a", ReplyUserID: strp("muted")},
+		"r3": {ID: "r3", UserID: "a"},
+		"r4": {ID: "r4", UserID: "a", ReplyUserID: strp("muted")},
+	}}
+	loadedR1 := &model.Note{ID: "r1", UserID: "a", ReplyUserID: strp("muted")}
+	notes := []*model.Note{
+		{ID: "loaded-r1", UserID: "b", RenoteID: strp("r1"), Renote: loadedR1},
+		// 同じ r1 を指すが読み込んでいないノート。読み込み済みの r1 で足りる。
+		{ID: "unloaded-r1", UserID: "c", RenoteID: strp("r1")},
+		{ID: "unloaded-r2", UserID: "b", RenoteID: strp("r2")},
+		{ID: "unloaded-r3", UserID: "b", RenoteID: strp("r3")},
+		// Renote が RenoteID と食い違うものは信用せずに引く。
+		{ID: "mismatched-r4", UserID: "b", RenoteID: strp("r4"), Renote: &model.Note{ID: "other", UserID: "a"}},
+	}
+	out, err := notesfilter.ApplyMuteBlockChannel(notes, sets, renotes)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"unloaded-r3"}, keptIDs(out))
+	assert.Equal(t, 1, renotes.calls)
+	assert.ElementsMatch(t, []string{"r2", "r3", "r4"}, renotes.got)
 }

@@ -252,7 +252,8 @@ func loadMutedInstances(profiles ProfileLookup, viewerID string) (map[string]str
 //   - its renote target's reply/renote author (or their host) hits the
 //     muted-user / blocked-user / muted-instances sets (#1630、upstream の
 //     noteColumn:'renote' 変種。renotes lookup 非 nil のとき renote 先行を
-//     batch fetch して検査する。channel mute は upstream の renote 変種に
+//     検査する。読み込み済みの n.Renote があればそれを使い、無いものだけを
+//     batch fetch する (#3965)。channel mute は upstream の renote 変種に
 //     含まれないため renote 先には適用しない)
 //
 // renotes が nil の場合は入れ子検査を skip する (未配線 degrade)。renote 先
@@ -270,13 +271,23 @@ func ApplyMuteBlockChannel(notes []*model.Note, sets MuteBlockSets, renotes Reno
 	// renote 入れ子検査用に renote 先行を 1 query で引く (#1630)。muted-user /
 	// blocked-user / muted-instances のいずれかが非空のときだけ必要になる
 	// (channel mute 単独では入れ子検査対象が無い)。
+	//
+	// 呼び出し元のノートは、たいてい repository の hydrate (#3611) で Renote まで
+	// 読み込み済みなので、それを使って引き直さない (#3965)。判定に使うのは
+	// note 行の列 (userId / replyUserId / renoteUserId と各 host) だけで、
+	// hydrate の Renote も同じ行を読んでいる。読み込んでいないものだけを引く。
 	var renoteRefs map[string]*model.Note
 	if renotes != nil &&
 		(len(sets.MutedUserIDs) > 0 || len(sets.BlockerIDs) > 0 || len(sets.MutedInstances) > 0) {
+		renoteRefs = make(map[string]*model.Note)
 		ids := make([]string, 0)
 		seen := make(map[string]struct{})
 		for _, n := range notes {
 			if n == nil || n.RenoteID == nil || *n.RenoteID == "" {
+				continue
+			}
+			if n.Renote != nil && n.Renote.ID == *n.RenoteID {
+				renoteRefs[n.Renote.ID] = n.Renote
 				continue
 			}
 			if _, dup := seen[*n.RenoteID]; dup {
@@ -285,12 +296,19 @@ func ApplyMuteBlockChannel(notes []*model.Note, sets MuteBlockSets, renotes Reno
 			seen[*n.RenoteID] = struct{}{}
 			ids = append(ids, *n.RenoteID)
 		}
-		if len(ids) > 0 {
-			rows, err := renotes.FindManyByIDsWithUser(ids)
+		// 同じ renote 先を、読み込み済みのノートと未読み込みのノートが指すことが
+		// ある。読み込み済みのもので足りるなら引かない。
+		missing := ids[:0]
+		for _, id := range ids {
+			if _, ok := renoteRefs[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) > 0 {
+			rows, err := renotes.FindManyByIDsWithUser(missing)
 			if err != nil {
 				return nil, fmt.Errorf("load renote refs: %w", err)
 			}
-			renoteRefs = make(map[string]*model.Note, len(rows))
 			for _, r := range rows {
 				if r != nil {
 					renoteRefs[r.ID] = r
