@@ -98,16 +98,30 @@ func (s *S3Storage) publicURL(accessKey string) string {
 // "failed to seek body to start, request stream is not seekable" で即 fail し、
 // HTTP リクエストすら送出されず drive/files/create が常に 500 になっていた
 // (#523)。一度 []byte に集めて bytes.Reader (Seeker 実装) を渡すことで解消。
+//
+// 呼び出し側が *bytes.Reader を渡したときは、それをそのまま SDK に渡す
+// (#3996)。drive のアップロードは本文を []byte で持っていて、ここで
+// io.ReadAll すると原本と同じ大きさの確保がもう 1 回増えていた。SDK は
+// 渡された時点の読み位置を始点として覚え、長さもそこから数えるので、
+// 読み位置が先頭でなくても結果は ReadAll してから渡すのと同じになる。
 func (s *S3Storage) Put(accessKey string, body io.Reader) (string, error) {
 	key := s.objectKey(accessKey)
 
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return "", fmt.Errorf("s3 read body for %s: %w", key, err)
+	br, ok := body.(*bytes.Reader)
+	if !ok {
+		data, err := io.ReadAll(body)
+		if err != nil {
+			return "", fmt.Errorf("s3 read body for %s: %w", key, err)
+		}
+		br = bytes.NewReader(data)
 	}
-	sniff := data
-	if len(sniff) > MIMESniffLen {
-		sniff = sniff[:MIMESniffLen]
+	// MIME の判定に要る先頭だけを、読み位置を動かさずに読む。空の本文で
+	// ReadAt を呼ぶと末尾の位置で io.EOF が返るので、空なら読まない。
+	sniff := make([]byte, min(br.Len(), MIMESniffLen))
+	if len(sniff) > 0 {
+		if _, err := br.ReadAt(sniff, br.Size()-int64(br.Len())); err != nil {
+			return "", fmt.Errorf("s3 read body for %s: %w", key, err)
+		}
 	}
 	// #2106 H4: sniff した MIME を browser-safe allowlist に通す。public-read S3/CDN
 	// 直配信では /files ハンドラ・media proxy を両方バイパスして object の Content-Type が
@@ -118,7 +132,7 @@ func (s *S3Storage) Put(accessKey string, body io.Reader) (string, error) {
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-		Body:   bytes.NewReader(data),
+		Body:   br,
 		// octet-stream 矯正と併せ Content-Disposition: inline を付け、active content の
 		// インライン実行をさらに抑止する (upstream FileServerUtils.setFileResponseHeaders 相当)。
 		ContentType:        aws.String(contentType),

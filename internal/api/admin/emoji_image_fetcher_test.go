@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,10 @@ import (
 // recordingStorage implements drive.Storage with deterministic URLs and an
 // in-memory blob store. Used to give Upload a real backing storage in tests
 // without spinning up the LocalStorage filesystem path.
+//
+// Upload は原本と代替画像を並行に書くので (#3996)、Put は同時に呼ばれうる。
 type recordingStorage struct {
+	mu      sync.Mutex
 	objects map[string][]byte
 }
 
@@ -36,11 +40,15 @@ func (r *recordingStorage) Put(accessKey string, body io.Reader) (string, error)
 	if err != nil {
 		return "", err
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.objects[accessKey] = b
 	return fmt.Sprintf("https://drive.local/%s", accessKey), nil
 }
 
 func (r *recordingStorage) Get(accessKey string) (io.ReadCloser, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	b, ok := r.objects[accessKey]
 	if !ok {
 		return nil, drive.ErrObjectNotFound
@@ -49,6 +57,8 @@ func (r *recordingStorage) Get(accessKey string) (io.ReadCloser, error) {
 }
 
 func (r *recordingStorage) Delete(accessKey string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	delete(r.objects, accessKey)
 	return nil
 }
