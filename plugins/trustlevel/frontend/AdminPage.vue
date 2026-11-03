@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <template>
 <div class="_gaps_m" style="padding: 16px;">
-	<div v-if="error" :class="$style.error">{{ error }}</div>
+	<div v-if="error" :class="$style.err">{{ error }}</div>
 
 	<template v-else-if="overview">
 		<div class="_gaps_s">
