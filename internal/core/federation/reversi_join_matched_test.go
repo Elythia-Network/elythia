@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,4 +95,51 @@ func TestReversiInbox_Join_GameGone(t *testing.T) {
 	seedFederatedGame(t, b, "sess-matched-5", false)
 	b.gameRepo.findErr = errors.New("db down")
 	assert.Error(t, b.processor.Process(joinBody("sess-matched-5")))
+}
+
+func inviteBody(sessionID string) []byte {
+	return []byte(`{
+		"type": "Invite",
+		"actor": "https://remote.example/users/alice",
+		"to": "https://example.com/users/bob",
+		"object": {
+			"type": "Game",
+			"game_type_uuid": "1c086295-25e3-4b82-b31e-3e3959906312",
+			"game_state": {"game_session_id": "` + sessionID + `"}
+		}
+	}`)
+}
+
+// 受けてから 3 分を過ぎた対局 (受けた後に招待した人が去って残ったもの) に、改めて
+// 届いた招待を付け替えない (#3949)。付け替えると、受けた印が残ったまま招待一覧から
+// 外れ、受けようとすると逆向きの招待になる。受けてから 3 分の間は使い回す
+// (CherryPick は招待を 5 秒ごとに送り直すので、行を増やさない)。
+func TestReversiInbox_ReinviteAfterAnAcceptedGame(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ago     time.Duration
+		newGame bool
+	}{
+		{"accepted long ago", time.Hour, true},
+		{"accepted just now", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newReversiProcessor(t)
+			registerLocalBob(t, b.userRepo)
+			require.NoError(t, b.processor.Process(inviteBody("sess-old")))
+			old := b.gameRepo.findGameBySession(t, b.fedCache, "sess-old")
+			require.NotNil(t, old)
+			require.NoError(t, fedTestRedis.Client.Set(context.Background(), "reversi:game:accepted:"+old.ID, time.Now().Add(-tc.ago).UnixMilli(), time.Hour).Err())
+
+			require.NoError(t, b.processor.Process(inviteBody("sess-new")))
+			got := b.gameRepo.findGameBySession(t, b.fedCache, "sess-new")
+			require.NotNil(t, got)
+			if tc.newGame {
+				assert.NotEqual(t, old.ID, got.ID, "新しい対局にする")
+				assert.Equal(t, "bob", got.User2ID)
+			} else {
+				assert.Equal(t, old.ID, got.ID, "使い回す")
+			}
+		})
+	}
 }

@@ -130,3 +130,61 @@ func TestService_InvitationAcceptedRecently_CountsFromTheAcceptance(t *testing.T
 	require.NoError(t, reversiTestRedis.Client.Set(ctx, acceptedKey("acc1"), "x", time.Hour).Err())
 	assert.False(t, svc.InvitationAcceptedRecently(ctx, "acc1"))
 }
+
+// 受けられたかの判定 (#3949): 受けた印か、招待された側の準備。
+func TestService_WasInvitationAccepted(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	ctx := context.Background()
+	svc := NewService(newFakeRepo(), nil, reversiTestRedis.Client)
+
+	assert.False(t, svc.WasInvitationAccepted(ctx, pendingGame()))
+	ready := pendingGame()
+	ready.User2Ready = true
+	assert.True(t, svc.WasInvitationAccepted(ctx, ready))
+	// 招待した人の準備は手がかりにしない
+	inviterReady := pendingGame()
+	inviterReady.User1Ready = true
+	assert.False(t, svc.WasInvitationAccepted(ctx, inviterReady))
+
+	svc.AcceptInvitation(ctx, pendingGame())
+	assert.True(t, svc.WasInvitationAccepted(ctx, pendingGame()))
+
+	// 受けてから 3 分を過ぎても、取り消さない判定には使う
+	require.NoError(t, reversiTestRedis.Client.Set(ctx, acceptedKey("acc1"), time.Now().Add(-time.Hour).UnixMilli(), time.Hour).Err())
+	assert.False(t, svc.InvitationAcceptedRecently(ctx, "acc1"))
+	assert.True(t, svc.WasInvitationAccepted(ctx, pendingGame()))
+}
+
+func TestService_WasInvitationAccepted_WithoutRedis(t *testing.T) {
+	down := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 50 * time.Millisecond})
+	t.Cleanup(func() { _ = down.Close() })
+	for name, r := range map[string]redis.Cmdable{"nil": nil, "down": down} {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(newFakeRepo(), nil, r)
+			assert.False(t, svc.WasInvitationAccepted(context.Background(), pendingGame()))
+			ready := pendingGame()
+			ready.User2Ready = true
+			assert.True(t, svc.WasInvitationAccepted(context.Background(), ready))
+		})
+	}
+}
+
+// 招待として扱わなくなるのは、受けた印があり、受けてから 3 分を過ぎたときだけ。準備の
+// 状態だけでは受けた時刻が分からないので、真にしない。
+func TestService_AcceptedLongAgo(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	ctx := context.Background()
+	svc := NewService(newFakeRepo(), nil, reversiTestRedis.Client)
+	set := func(ago time.Duration) {
+		require.NoError(t, reversiTestRedis.Client.Set(ctx, acceptedKey("acc1"), time.Now().Add(-ago).UnixMilli(), time.Hour).Err())
+	}
+
+	ready := pendingGame()
+	ready.User2Ready = true
+	assert.False(t, svc.AcceptedLongAgo(ctx, ready), "準備だけでは真にしない")
+	set(time.Hour)
+	assert.True(t, svc.AcceptedLongAgo(ctx, pendingGame()))
+	set(time.Minute)
+	assert.False(t, svc.AcceptedLongAgo(ctx, pendingGame()))
+	assert.False(t, NewService(newFakeRepo(), nil, nil).AcceptedLongAgo(ctx, ready))
+}

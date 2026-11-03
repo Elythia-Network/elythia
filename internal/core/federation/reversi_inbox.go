@@ -107,7 +107,12 @@ func (p *Processor) handleReversiInvite(act genericActivity) error {
 	// CherryPick は fresh session_id で Invite を 5 秒ごと再送するため、
 	// 同じ (inviter, invitee) の pending game があれば session mapping を
 	// 最新に差し替えて再利用する。これが無いと招待ごとに row が増殖する。
-	if existing := corereversi.FindPendingInvitation(p.reversiRepo, invitee.ID, actor.ID); existing != nil {
+	//
+	// Elythia: 受けてから 3 分を過ぎた対局は使い回さず、新しい対局にする (#3949)。
+	// 受けた後に招待した人が去っても対局は残すので、改めて届いた招待を古い対局に
+	// 付け替えると、受けた印が残ったまま招待一覧から外れ、受けようとすると逆向きの
+	// 招待になる
+	if existing := corereversi.FindPendingInvitation(p.reversiRepo, invitee.ID, actor.ID); existing != nil && !p.reversiSvc.AcceptedLongAgo(ctx, existing) {
 		if oldSession, ok := p.reversiFedCache.GetSessionByGame(ctx, existing.ID); ok && oldSession != state.GameSessionID {
 			p.reversiFedCache.Delete(ctx, oldSession, "")
 		}

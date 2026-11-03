@@ -121,3 +121,48 @@ func (s *Service) InvitationAcceptedRecently(ctx context.Context, gameID string)
 	}
 	return time.Since(time.UnixMilli(v)) < acceptedReturnWindow
 }
+
+// WasInvitationAccepted reports whether the invitee has accepted the pending
+// game at any time (#3949): the accepted mark, or the invitee already being
+// ready.
+//
+// 招待した人の reversi/cancel-match は、受けられた対局を取り消さない。本家の
+// matchSpecificUserCancel は Redis の招待を消すだけで、受けた時点で作られた対局には
+// 触らないため。準備の状態は DB にあるので、Redis が使えないときや受けた印が無い
+// ときの手がかりにする。どちらも無ければ、受けられていない招待として扱う。
+func (s *Service) WasInvitationAccepted(ctx context.Context, game *model.ReversiGame) bool {
+	if game.User2Ready {
+		return true
+	}
+	if s.redis == nil {
+		return false
+	}
+	n, err := s.redis.Exists(ctx, acceptedKey(game.ID)).Result()
+	if err != nil {
+		slog.Warn("reversi: read invitation accepted failed", "gameId", game.ID, "err", err)
+		return false
+	}
+	return n > 0
+}
+
+// AcceptedLongAgo reports whether the game was accepted more than
+// acceptedReturnWindow ago, so it no longer counts as an invitation (#3949).
+//
+// 受けた後に招待した人が去っても対局は残す (cancel-match で消さない)。本家は受けた
+// 時点で招待を消し、作られてから 3 分の対局だけを返すので、それを過ぎた対局を
+// 招待として拾うと、招待された側の逆向きの招待やランダムマッチが、相手のいない
+// 古い対局へ飛ばされる。連合で同じ相手から届いた招待も、この対局を使い回さずに
+// 新しい対局にする。受けてから 3 分の間は、本家と同じく対局を返す
+//
+// 受けた印 (受けた時刻) があるときだけ真にする。準備の状態 (User2Ready) だけでは
+// 受けた時刻が分からないので、取り消さない判定 (WasInvitationAccepted) にだけ使う
+func (s *Service) AcceptedLongAgo(ctx context.Context, game *model.ReversiGame) bool {
+	if s.redis == nil {
+		return false
+	}
+	v, err := s.redis.Get(ctx, acceptedKey(game.ID)).Int64()
+	if err != nil {
+		return false
+	}
+	return time.Since(time.UnixMilli(v)) >= acceptedReturnWindow
+}

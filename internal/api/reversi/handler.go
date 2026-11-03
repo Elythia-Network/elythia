@@ -338,6 +338,12 @@ func (h *Handler) Invitations(c echo.Context) error {
 		if g.User2ID != user.ID {
 			continue
 		}
+		// Elythia: 受けた対局は招待として出さない (#3949)。本家は受けた時点で招待を
+		// 消す。受けた後に招待した人が去っても対局は残すので、ここで除かないと
+		// 招待一覧に出続ける
+		if h.svc != nil && h.svc.WasInvitationAccepted(c.Request().Context(), g) {
+			continue
+		}
 		if g.User1 == nil {
 			continue
 		}
@@ -463,7 +469,7 @@ func (h *Handler) Match(c echo.Context) error {
 	// を流用し、相手に Join を返すだけにする。これをやらないと /match が毎回
 	// 新しいゲーム + 新しい session_id を作って二重招待になり、state 伝播が
 	// 噛み合わなくなる。
-	if existing := h.findPendingInvitationFrom(user.ID, req.UserID); existing != nil {
+	if existing := h.findInvitationFrom(c, user.ID, req.UserID); existing != nil {
 		if err := h.sendJoinForAcceptedInvite(c, user, existing); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
 			return federationDisabledResponse(c)
 		}
@@ -627,6 +633,42 @@ func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User
 	return nil
 }
 
+// findInvitationFrom returns the newest pending invitation from inviterID to
+// viewerID that still counts as an invitation (not staleAccepted, #3949).
+//
+// 最も新しい 1 件だけを見ると、それが受けてから 3 分を過ぎた対局のとき、より古い
+// 受けられていない招待 (招待一覧には出る) があっても逆向きの招待になる。一覧と
+// 同じく、招待として扱える対局を探す
+func (h *Handler) findInvitationFrom(c echo.Context, viewerID, inviterID string) *model.ReversiGame {
+	newest := h.findPendingInvitationFrom(viewerID, inviterID)
+	if newest == nil || !h.staleAccepted(c, newest) {
+		return newest
+	}
+	games, err := h.repo.ListByUser(viewerID, 20)
+	if err != nil {
+		return nil
+	}
+	var found *model.ReversiGame
+	for _, g := range games {
+		if g.IsStarted || g.IsEnded || g.User1ID != inviterID || g.User2ID != viewerID {
+			continue
+		}
+		if h.staleAccepted(c, g) {
+			continue
+		}
+		if found == nil || g.ID > found.ID {
+			found = g
+		}
+	}
+	return found
+}
+
+// staleAccepted reports whether the game no longer counts as an invitation
+// (Service.AcceptedLongAgo, #3949).
+func (h *Handler) staleAccepted(c echo.Context, g *model.ReversiGame) bool {
+	return h.svc != nil && h.svc.AcceptedLongAgo(c.Request().Context(), g)
+}
+
 // acceptInvitation records that the caller (User2) accepted the pending game,
 // so the inviter's screen moves to the game (#3946).
 func (h *Handler) acceptInvitation(c echo.Context, game *model.ReversiGame) {
@@ -696,6 +738,27 @@ func (h *Handler) CancelMatch(c echo.Context) error {
 		// その相手に送った招待 (User1=自分, User2=相手) だけを取り消す。
 		if g.User1ID != user.ID || g.User2ID != req.UserID {
 			continue
+		}
+		// Elythia: 受けられた対局は取り消さない (#3949)。待機画面は離れるとき (リロード・
+		// 移動・タブを閉じる) に必ずここを呼ぶ。本家は招待を Redis にだけ置き、取り消しは
+		// それを消すだけで、受けた時点で作られた対局には触らない。Elythia は招待の時点で
+		// 対局の行を作るので、受けられた後の対局まで消し、連合では相手の対局も Undo(Invite)
+		// で消していた。招待した人は「自分の対局」から開ける
+		// 一覧を取った後に受けられていないかも見るため、取り消す直前に読み直した対局で
+		// 判定する (窓を狭めるだけで、完全には閉じない)
+		if h.svc != nil {
+			fresh, err := h.svc.Get(ctx, g.ID)
+			if err != nil {
+				// 読み直せないときは取り消さない (受けられた対局を壊さない側に倒す)。
+				// 行が消えていれば、取り消すものも無い
+				if !errors.Is(err, corereversi.ErrGameNotFound) {
+					slog.Warn("reversi cancel-match: reload failed", "gameId", g.ID, "userId", user.ID, "err", err)
+				}
+				continue
+			}
+			if h.svc.WasInvitationAccepted(ctx, fresh) {
+				continue
+			}
 		}
 		if h.svc != nil {
 			// ListByUser snapshot 後に相手が ready / start させた場合、
@@ -873,7 +936,7 @@ func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, m
 	// 2. 自分宛ての招待を消費する。mk-go では招待が reversi_game 行なので、
 	//    「自分が User2 の未開始 game」がそれにあたる。specific-match の
 	//    accept 経路と同じ扱いにして、相手に Join を返す。
-	if g := h.findPendingInvitationTo(user.ID); g != nil {
+	if g := h.findPendingInvitationTo(c, user.ID); g != nil {
 		if err := h.sendJoinForAcceptedInvite(c, user, g); errors.Is(err, corelocalfederation.ErrFederationDisabled) {
 			return federationDisabledResponse(c)
 		}
@@ -954,7 +1017,7 @@ func (h *Handler) findPendingGameFor(userID string) *model.ReversiGame {
 //
 // specific-match は相手が分かっているので FindPendingInvitation を使うが、
 // any-match は「誰でもいいから自分宛ての招待」を探す。
-func (h *Handler) findPendingInvitationTo(userID string) *model.ReversiGame {
+func (h *Handler) findPendingInvitationTo(c echo.Context, userID string) *model.ReversiGame {
 	games, err := h.repo.ListByUser(userID, 20)
 	if err != nil {
 		return nil
@@ -963,7 +1026,7 @@ func (h *Handler) findPendingInvitationTo(userID string) *model.ReversiGame {
 		if g.IsStarted || g.IsEnded {
 			continue
 		}
-		if g.User2ID == userID && g.User1ID != userID {
+		if g.User2ID == userID && g.User1ID != userID && !h.staleAccepted(c, g) {
 			return g
 		}
 	}
