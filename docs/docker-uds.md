@@ -293,12 +293,21 @@ Recv-Q、または `total_connections_received` の秒単位の差分) は**測�
 で絞ったもの)。18:42:44 のものが特別だと考える根拠は無い。並べて書くと同じ
 珍しさに見えるので注意。
 
+**#3969 からは `Saving...` はログに出ない。** 同梱の `deploy/uds/valkey/valkey.conf`
+に `save ""` を足し、RDB の定期的な書き出しを止めた。AOF が有効なとき起動時に
+読むのは AOF で、RDB のファイルは使われていなかった。上の件数は変更前の記録。
+fork が無くなったわけではなく、AOF の書き直し (`Background append only file rewriting started`)
+は今のまま fork する。止まるときの RDB の書き出し (`Saving the final RDB snapshot before exiting.`)
+も無くなるので、`/data` に前からある `dump.rdb` は変更前の時点のまま更新されない。
+valkey は設定ファイルを起動時にだけ読むので、既に動いている環境に反映するには
+valkey を作り直すか、`docker exec mk-valkey-1 valkey-cli -s /run/valkey/valkey.sock config set save ""` を流す。
+
 **fsync 遅延も fork も `slowlog` では見えない。** slowlog はコマンドの実行時間
 だけを測るので、AOF flush・fork・serverCron のようなコマンド外のイベントループ
 停止は原理的に載らない。再発時に見るべきものは順に:
 
 ```
-# イベントループ停止。Saving... は定期実行なので fsync だけを見る
+# イベントループ停止。fsync の警告だけを見る (#3969 より前のログにある Saving... は定期実行)
 docker logs mk-valkey-1 | grep -i "fsync is taking too long"
 docker exec mk-valkey-1 valkey-cli -s /run/valkey/valkey.sock info persistence \
   | grep aof_delayed_fsync   # 再起動でリセットされるのでログの件数とは一致しない
