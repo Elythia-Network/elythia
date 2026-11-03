@@ -366,6 +366,8 @@
 (() => {
 	// 星白・淡紫・真珠。白を多めにして、色の付いた星が混ざる程度にする
 	const COLORS = ['253,241,235', '253,241,235', '253,241,235', '204,195,247', '253,221,207'];
+	// canvas の 1 画素 (面積 1) を覆う円の半径
+	const MIN_STAR_RADIUS = 0.57;
 
 	function animationDisabled() {
 		try {
@@ -394,6 +396,8 @@
 
 		let w = 1;
 		let h = 1;
+		// canvas の 1 画素が CSS の何 px か (の逆数)。fit が決める
+		let ratio = 1;
 		let stars = [];
 		let meteors = [];
 		let t0 = performance.now();
@@ -410,9 +414,15 @@
 			const rect = splash.getBoundingClientRect();
 			w = Math.max(1, rect.width);
 			h = Math.max(1, rect.height);
-			// 高精細の画面でも 2 倍まで、広い画面では 1.5 倍までにする。起動処理と
-			// 同じ時間帯に描くので、画素数をそのまま追うと読み込みそのものを遅くする
-			const dpr = Math.min(window.devicePixelRatio || 1, w * h > 1600000 ? 1.5 : 2);
+			// 高精細の画面でも 1 倍までで描く (#3948)。起動処理と同じ時間帯に毎フレーム描く
+			// ので、画素数がそのまま読み込みを遅くする。CPU を 4 倍遅くしたスマートフォン
+			// 相当の計測で、星空があると最初のノートの表示が約 170ms 遅れていた
+			// (約 810ms、星空なしは約 650ms)。2 倍で描いていたのを 1 倍にすると、約 50〜80ms
+			// 縮んだ (計測の巡によって揺れる)。残りの約 90ms は、描かなくても (1 回だけ描いても) canvas を持つだけで
+			// かかる。星は小さな点なので、高精細の画面で少し柔らかくなるだけで済む。縮小表示
+			// (1 倍未満) のときは、以前と同じく画面の倍率に合わせて下げる
+			const dpr = Math.min(window.devicePixelRatio || 1, 1);
+			ratio = dpr;
 			canvas.width = Math.round(w * dpr);
 			canvas.height = Math.round(h * dpr);
 			g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -441,7 +451,8 @@
 
 		function sparkle(x, y, s, a, c) {
 			g.strokeStyle = `rgba(${c},${a * 0.7})`;
-			g.lineWidth = 0.6;
+			// 光芒の線も、canvas の 1 画素より細いとならされて暗く見える (#3948)
+			g.lineWidth = Math.max(0.6, 1 / ratio);
 			g.beginPath();
 			g.moveTo(x - s, y);
 			g.lineTo(x + s, y);
@@ -453,7 +464,9 @@
 		function drawStar(s, a) {
 			g.fillStyle = `rgba(${s.c},${a})`;
 			g.beginPath();
-			g.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+			// 1 倍で描くので、1 画素より小さな星はならされて暗く見える (#3948)。芯は
+			// 少なくとも 1 画素を覆う大きさで描き、2 倍で描いていたときの明るさに近づける
+			g.arc(s.x, s.y, Math.max(s.r, MIN_STAR_RADIUS / ratio), 0, Math.PI * 2);
 			g.fill();
 			if (s.big) {
 				const glow = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 5);
