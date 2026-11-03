@@ -18,10 +18,22 @@ const detectionEdge = 299
 // upstream FileInfoService の sharp パイプライン
 // (resize(299,299) → rotate() → flatten({r:119,g:119,b:119}) → png()) 相当。
 func NormalizeImageForDetection(body []byte, mimeType string) ([]byte, error) {
-	img, err := decodeImage(body, mimeType)
+	img, err := decodeForDetectionFunc(body, mimeType)
 	if err != nil {
 		return nil, err
 	}
+	return normalizeDecodedForDetection(img)
+}
+
+// decodeForDetectionFunc is the decoder NormalizeImageForDetection uses.
+// テストでデコードの回数を数えるために差し替えられる。`ProcessAll` の
+// `decodeForAltsFunc` と同じ `decodeImage` を指す (#3995)。
+var decodeForDetectionFunc = decodeImage
+
+// normalizeDecodedForDetection is NormalizeImageForDetection after the
+// decode. アップロードの経路は `ProcessAll` がデコードした像をここへ渡し、
+// 判定のためにもう一度デコードしない (#3995)。img は書き換えない。
+func normalizeDecodedForDetection(img image.Image) ([]byte, error) {
 	// sharp resize(299,299) の default fit は cover (アスペクト維持 + 中央
 	// crop)。imaging.Fill が同じ挙動。withoutEnlargement:false = 小さい画像は
 	// 拡大するが、Fill は常に指定サイズを出力するのでこれも一致する。

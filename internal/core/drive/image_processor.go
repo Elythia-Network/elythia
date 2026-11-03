@@ -311,6 +311,10 @@ type ImageAlts struct {
 	// Thumbnail / Webpublic are nil when not produced (best-effort).
 	Thumbnail *ProcessedImage
 	Webpublic *ProcessedImage
+	// Detection is the image normalized for the official sensitive
+	// detector (the output of NormalizeImageForDetection). It is set only
+	// by ProcessAllWithDetection, and is nil when normalization failed.
+	Detection []byte
 }
 
 // BatchImageProcessor is an ImageProcessor that can derive all upload
@@ -333,6 +337,21 @@ type BatchImageProcessor interface {
 
 var _ BatchImageProcessor = (*DefaultImageProcessor)(nil)
 
+// DetectionImageProcessor is a BatchImageProcessor that can also produce,
+// from the same decode, the image the official sensitive detector receives.
+//
+// センシティブ判定は、以前は `NormalizeImageForDetection` でもう一度デコード
+// していた (#3995)。判定を有効にしたアップロードだけがこれを使う。
+type DetectionImageProcessor interface {
+	BatchImageProcessor
+	// ProcessAllWithDetection is ProcessAll that also fills
+	// ImageAlts.Detection with NormalizeImageForDetection(body, mimeType),
+	// computed from the same decoded image.
+	ProcessAllWithDetection(body []byte, mimeType string) *ImageAlts
+}
+
+var _ DetectionImageProcessor = (*DefaultImageProcessor)(nil)
+
 // decodeForAltsFunc is the decoder ProcessAll uses. テストで呼ばれた回数と
 // 返したエラー (pixel cap の sentinel) を数えるために差し替えられる。
 var decodeForAltsFunc = decodeImage
@@ -342,6 +361,15 @@ var decodeForAltsFunc = decodeImage
 // サムネイルだけは、webpublic を縮小して作った場合にその縮小から作るので、
 // 寸法と形式は同じで画素がわずかに違う。
 func (p *DefaultImageProcessor) ProcessAll(body []byte, mimeType string) *ImageAlts {
+	return p.processAll(body, mimeType, false)
+}
+
+// ProcessAllWithDetection implements DetectionImageProcessor.
+func (p *DefaultImageProcessor) ProcessAllWithDetection(body []byte, mimeType string) *ImageAlts {
+	return p.processAll(body, mimeType, true)
+}
+
+func (p *DefaultImageProcessor) processAll(body []byte, mimeType string, withDetection bool) *ImageAlts {
 	if !isMimeImage(mimeType) {
 		return nil
 	}
@@ -356,6 +384,16 @@ func (p *DefaultImageProcessor) ProcessAll(body []byte, mimeType string) *ImageA
 	bounds := img.Bounds()
 	srcW, srcH := bounds.Dx(), bounds.Dy()
 	out := &ImageAlts{Width: srcW, Height: srcH}
+
+	// **判定用の縮小はデコードの直後に作る (#3995)。** `NormalizeImageForDetection`
+	// と同じ `decodeImage` の像に同じ処理を掛けるので、判定に渡るバイト列は
+	// 変わらない。webpublic の後で作ると元の像 (12MP で約 18MB) をエンコードの
+	// 間も抱えることになる (下の「元の像を読まない」を参照)。持ち越すのは
+	// 299x299 の PNG だけ。失敗したら nil のままにし、判定の側が従来の経路で
+	// やり直す。
+	if withDetection {
+		out.Detection, _ = normalizeDecodedForDetection(img)
+	}
 
 	// blurhash は元の像から作る。サムネイルから作ると値が変わる。
 	out.Blurhash = blurhashOf(img)

@@ -586,7 +586,7 @@ func (s *Service) checkUploadableType(user *model.User, mime string) error {
 // FinishChunkedUpload completes the multipart upload and creates the DriveFile.
 //
 // 組み上がった実体を storage から読み戻してから既存の Upload 経路に通す。
-// サムネイル生成 (generateAlts) とセンシティブ判定 (detectSensitive) はどちらも
+// サムネイル生成 (generateAlts) とセンシティブ判定 (judgeSensitive) はどちらも
 // ボディ全体を要求するので、読み戻さないと**大きい動画だけサムネイルが出ず、
 // 自動判定も効かない**という機能欠落になる。読み戻しは finish の一瞬だけで、
 // 転送中はサーバー側にバイトを置かないという利点は保たれる。
