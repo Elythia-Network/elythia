@@ -70,6 +70,7 @@ type federationRoutesDeps struct {
 	sigCapBuffer            *coreinstance.CapabilityBuffer
 	rateLimiter             *middleware.RateLimiter
 	setupDetector           *meta.SetupDetector
+	adRepo                  repository.AdRepository
 	chunkedUploadCapability func() (int64, bool)
 	frontend                echo.HandlerFunc
 	streamRevokePublisher   *stream.StreamRevokePublisher
@@ -126,6 +127,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	sigCapBuffer := d.sigCapBuffer
 	rateLimiter := d.rateLimiter
 	setupDetector := d.setupDetector
+	adRepo := d.adRepo
 	chunkedUploadCapability := d.chunkedUploadCapability
 	frontend := d.frontend
 	streamRevokePublisher := d.streamRevokePublisher
@@ -186,7 +188,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	// permalink の SSR meta (#2345 の続き)。AP クライアントは Accept で
 	// 振り分けて従来どおり apHandler に渡す。
 	ssrMeta := newSSRMetaHandler(
-		s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector,
+		s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo,
 		ssrMetaDeps{
 			User:         userRepo,
 			Note:         noteRepo,
@@ -328,7 +330,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		// 本家 OAuth2ProviderService は NODE_ENV === 'test' のとき http の
 		// client_id を許可する (本番は https のみ)。TestMode を同じ用途で使う。
 		s.config.TestMode,
-		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector),
+		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo),
 		// code 再利用で token を revoke したとき、auth cache に残った entry で
 		// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。構築子の必須の引数 (#3823)。
 		s.auth,

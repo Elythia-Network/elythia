@@ -238,7 +238,7 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		"translatorAvailable":       m.DeeplAuthKey != nil && *m.DeeplAuthKey != "",
 		"enableEmail":               m.EnableEmail,
 		"enableUrlPreview":          m.URLPreviewEnabled,
-		"ads":                       h.serializeActiveAds(),
+		"ads":                       ActiveAds(h.adRepo, time.Now()),
 		"notesPerOneAd":             m.NotesPerOneAd,
 		"mediaProxy":                h.config.MediaProxy,
 		"cacheRemoteSensitiveFiles": m.CacheRemoteSensitiveFiles,
@@ -427,15 +427,19 @@ func NoteSearchableScope(fts *config.FulltextSearchOptions, m *config.Meilisearc
 	return "local"
 }
 
-// serializeActiveAds fetches currently-active ads via adRepo and projects
-// them into the Misskey-compatible shape. Returns an empty slice when the
-// repo is unwired (tests) or fetch fails, keeping the response stable.
+// ActiveAds fetches the ads active at now via repo and projects them into the
+// Misskey-compatible shape of the `ads` field. Returns an empty slice when the
+// repo is unwired (tests) or the fetch fails, keeping the response stable.
+//
+// /api/meta と、frontend の shell に埋める meta (internal/server の buildMetaJSON)
+// の両方がこれを使う (#3967)。射影を 1 か所にして、2 つの経路で広告の形が
+// 食い違わないようにする。
 // フロントエンドが notesPerOneAd と組み合わせて timeline に差し込む前提。
-func (h *Handler) serializeActiveAds() []map[string]any {
-	if h.adRepo == nil {
+func ActiveAds(repo repository.AdRepository, now time.Time) []map[string]any {
+	if repo == nil {
 		return []map[string]any{}
 	}
-	ads, err := h.adRepo.ListActive(time.Now())
+	ads, err := repo.ListActive(now)
 	if err != nil || len(ads) == 0 {
 		return []map[string]any{}
 	}

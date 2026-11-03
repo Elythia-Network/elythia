@@ -49,13 +49,14 @@ func sameOriginURL(base, u string) bool {
 // proxyAccountResolver is used to populate the embedded meta JSON's
 // proxyAccountName field; passing nil leaves the value as null (appropriate
 // for pre-setup instances).
-func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) echo.HandlerFunc {
+// adRepo supplies the embedded meta's active ads; passing nil leaves them empty.
+func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository) echo.HandlerFunc {
 	// ビルド済みアセットからCLIENT_ENTRYを取得 (dev モードでは常に dev server を見る)
 	clientEntry := clientEntryFor(cfg)
 	loader := loaderAssetsFor(cfg)
 
 	return func(c echo.Context) error {
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, loader, shellOverrides{})
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, adRepo, clientEntry, loader, shellOverrides{})
 	}
 }
 
@@ -141,7 +142,7 @@ const splashMarkup = `<div id="splash">
 // clientEntry and loader are read at construction (clientEntryFor /
 // loaderAssetsFor) and passed in, so each generation renders the frontend it
 // was built with.
-func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, clientEntry frontendutil.ClientEntryInfo, loader frontendutil.LoaderAssets, ov shellOverrides) error {
+func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository, clientEntry frontendutil.ClientEntryInfo, loader frontendutil.LoaderAssets, ov shellOverrides) error {
 	instanceName := config.DisplayName
 	// og:description の既定値は upstream views/_.ts の defaultDescription。
 	// `<meta name="description">` の方は upstream と同じく meta.description が
@@ -220,7 +221,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 			}
 			prefetchTags += fmt.Sprintf(`<link rel="prefetch" as="image" href="%s">`, stdhtml.EscapeString(*u)) + "\n"
 		}
-		metaJSON = buildMetaJSON(cfg, m, proxyAccountResolver, chunkedUpload, setup)
+		metaJSON = buildMetaJSON(cfg, m, proxyAccountResolver, chunkedUpload, setup, adRepo)
 		// 有効な captcha 業者の origin (#2502)。無いと enforce で captcha の
 		// script が読めずサインアップが壊れる。
 		captchaEx := captchaCSPExtras(m.EnableHcaptcha, m.EnableRecaptcha, m.EnableTurnstile)
@@ -389,7 +390,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 // SPA shell with the misskey:oauth:* meta tags injected, so the frontend's
 // OAuth component can render the authorization prompt (#1899). Values are
 // HTML-escaped (client name/logo are attacker-suppliable via discovery).
-func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) oauth.ConsentRenderer {
+func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository) oauth.ConsentRenderer {
 	clientEntry := clientEntryFor(cfg)
 	loader := loaderAssetsFor(cfg)
 	return func(c echo.Context, m oauth.ConsentMeta) error {
@@ -403,7 +404,7 @@ func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository,
 		// **同意画面は共有キャッシュに載せない。** transaction id を含む HTML が
 		// CDN に載ると別の利用者に配られる。upstream も OAuth 側で no-store を
 		// 出している (OAuth2ProviderService.ts:322)。
-		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, clientEntry, loader, shellOverrides{
+		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, adRepo, clientEntry, loader, shellOverrides{
 			Head:         sb.String(),
 			CacheControl: "no-store",
 		})
@@ -411,9 +412,12 @@ func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository,
 }
 
 // buildMetaJSON constructs the /api/meta equivalent JSON for inline embedding.
-// /api/meta ハンドラ (meta/handler.go) と完全に同じフィールドを返す。
+// adRepo supplies the active ads (`ads`); passing nil leaves the list empty.
+// /api/meta ハンドラ (meta/handler.go) の全フィールドを返す。逆向きには一致しない:
+// app192IconUrl / app512IconUrl / singleUserMode は /api/meta に無く、こちらにだけある
+// (TestSSRMetaCoversAPIMeta が「/api/meta のキーが全部ある」側を固定している)。
 // フロントエンドはこのJSONを先に読んで /api/meta の呼び出しを省略する。
-func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector) string {
+func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository) string {
 	// mascotImageUrl フォールバック
 	mascot := "/assets/ai.png"
 	if m.MascotImageURL != nil && *m.MascotImageURL != "" {
@@ -430,6 +434,13 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 	// cache を上書きし、以後 1 時間 /api/meta を再取得しないため、誤った policies
 	// が恒久的に居座る。
 	mergedPolicies := role.MergeMetaPolicies(m.Policies)
+
+	// 有効な広告。本家も埋め込みの meta に packDetailed を使い、/api/meta と同じ
+	// 広告を入れる (HtmlTemplateService)。以前は常に空で、入口の画面は /api/meta を
+	// 取り直して広告を得ていたが、#3967 で埋め込みを採ったときは取り直さなくなった。
+	// 射影は /api/meta と共有し、取得に失敗したら /api/meta と同じく空にする
+	// (HTML の描画は止めない)。
+	ads := meta.ActiveAds(adRepo, time.Now())
 
 	resp := map[string]any{
 		"maintainerName":  m.MaintainerName,
@@ -497,7 +508,7 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 		"translatorAvailable":       translatorAvailable,
 		"enableEmail":               m.EnableEmail,
 		"enableUrlPreview":          m.URLPreviewEnabled,
-		"ads":                       []any{},
+		"ads":                       ads,
 		"notesPerOneAd":             m.NotesPerOneAd,
 		"mediaProxy":                cfg.MediaProxy,
 		"cacheRemoteSensitiveFiles": m.CacheRemoteSensitiveFiles,
