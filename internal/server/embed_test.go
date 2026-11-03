@@ -163,7 +163,7 @@ func TestShells_VersionIsAJSStringLiteral(t *testing.T) {
 	})
 
 	t.Run("spa", func(t *testing.T) {
-		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil)
+		handler := frontendHTML(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, nil)
 		e := echo.New()
 		rec := httptest.NewRecorder()
 		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
@@ -183,7 +183,7 @@ func TestEmbedShell_IconLinks(t *testing.T) {
 		if m != nil {
 			repo.Meta = m
 		}
-		h := newEmbedHandlers(cfg, repo, nil, nil, nil, EmbedDeps{})
+		h := newEmbedHandlers(cfg, repo, nil, nil, nil, nil, EmbedDeps{})
 
 		e := echo.New()
 		rec := httptest.NewRecorder()
@@ -223,7 +223,7 @@ func TestEmbedShell_InlinesLoaderAssets(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, EmbedDeps{})
+	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, nil, EmbedDeps{})
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -241,7 +241,7 @@ func TestEmbedShell_FallsBackToLoaderReferences(t *testing.T) {
 	t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", t.TempDir())
 
 	cfg := &config.Config{URL: "https://example.test", Version: "0.0.1-test"}
-	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, EmbedDeps{})
+	h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, nil, EmbedDeps{})
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -274,7 +274,7 @@ func TestEmbedShell_CSP(t *testing.T) {
 		if m != nil {
 			repo.Meta = m
 		}
-		h := newEmbedHandlers(cfg, repo, nil, nil, nil, EmbedDeps{})
+		h := newEmbedHandlers(cfg, repo, nil, nil, nil, nil, EmbedDeps{})
 
 		e := echo.New()
 		rec := httptest.NewRecorder()

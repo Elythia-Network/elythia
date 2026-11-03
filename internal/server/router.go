@@ -1499,7 +1499,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Frontend SPA shell — AP resource handlers fall back to this when the
 	// request prefers HTML over application/activity+json, and the final
 	// catch-all route at the bottom of RegisterRoutes uses the same handler.
-	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector)
+	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo)
 
 	// URL preview endpoint
 	//
@@ -2124,6 +2124,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		sigCapBuffer:            sigCapBuffer,
 		rateLimiter:             rateLimiter,
 		setupDetector:           setupDetector,
+		adRepo:                  adRepo,
 		chunkedUploadCapability: chunkedUploadCapability,
 		frontend:                frontend,
 		streamRevokePublisher:   streamRevokePublisher,
@@ -2747,6 +2748,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		proxyAccountResolver:    proxyAccountResolver,
 		localHost:               localHost,
 		setupDetector:           setupDetector,
+		adRepo:                  adRepo,
 		chunkedUploadCapability: chunkedUploadCapability,
 		frontend:                frontend,
 		notesHandler:            notesHandler,

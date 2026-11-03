@@ -8,7 +8,8 @@ import (
 )
 
 // AdRepository provides data access for the `ad` table. ListActive is used by
-// /api/meta for timeline ad exposure; the rest supports the admin CRUD.
+// /api/meta and the meta embedded in the frontend HTML shells for timeline ad
+// exposure; the rest supports the admin CRUD.
 type AdRepository interface {
 	// ListActive returns ads whose window contains `now` (startsAt <= now
 	// < expiresAt) and whose dayOfWeek includes the weekday of `now` (0 means

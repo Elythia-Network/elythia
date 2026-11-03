@@ -28,6 +28,7 @@ type frontendRoutesDeps struct {
 	proxyAccountResolver    meta.ProxyAccountResolver
 	localHost               string
 	setupDetector           *meta.SetupDetector
+	adRepo                  repository.AdRepository
 	chunkedUploadCapability func() (int64, bool)
 	frontend                echo.HandlerFunc
 	notesHandler            *notes.Handler
@@ -52,6 +53,7 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	proxyAccountResolver := d.proxyAccountResolver
 	localHost := d.localHost
 	setupDetector := d.setupDetector
+	adRepo := d.adRepo
 	chunkedUploadCapability := d.chunkedUploadCapability
 	frontend := d.frontend
 	notesHandler := d.notesHandler
@@ -149,7 +151,7 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	// pack は viewer なしで行う。埋め込みは認証を伴わないので、閲覧者依存の
 	// フィールドを解決してはいけない。可視性の判断は各 handler の
 	// PackForEmbed 経由で既存の CanSee / HideEmbeds に委ねる。
-	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, EmbedDeps{
+	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, EmbedDeps{
 		NoteRepo: noteRepo,
 		UserRepo: userRepo,
 		ClipRepo: clipRepo,

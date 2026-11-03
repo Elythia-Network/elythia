@@ -47,52 +47,7 @@ func TestNewServer_WiresTheSetupDetectorToEveryMetaEmbedding(t *testing.T) {
 
 	srv := newServerWithConfig(t, func(*config.Config) {})
 
-	// OAuthの同意画面は、client_idのページからredirect_uriを読めたときだけ出る。
-	client := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = fmt.Fprint(w, `<html><head><link rel="redirect_uri" href="/callback"></head><body></body></html>`)
-	}))
-	t.Cleanup(client.Close)
-	authorize := "/oauth/authorize?" + url.Values{
-		"response_type":         {"code"},
-		"client_id":             {client.URL + "/"},
-		"redirect_uri":          {client.URL + "/callback"},
-		"scope":                 {"read:account"},
-		"code_challenge":        {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
-		"code_challenge_method": {"S256"},
-	}.Encode()
-
-	embedded := regexp.MustCompile(`(?s)id="misskey_meta"[^>]*>(.*?)</script>`)
-	fromHTML := func(t *testing.T, path string) map[string]any {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.Header.Set("Accept", "text/html")
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		m := embedded.FindStringSubmatch(rec.Body.String())
-		require.Len(t, m, 2, "misskey_meta must be embedded: %s", rec.Body.String())
-		var out map[string]any
-		require.NoError(t, json.Unmarshal([]byte(html.UnescapeString(m[1])), &out))
-		return out
-	}
-
-	for _, tt := range []struct {
-		name string
-		meta func(t *testing.T) map[string]any
-	}{
-		{name: "api/meta", meta: func(t *testing.T) map[string]any {
-			rec := postJSON(t, srv, "/api/meta", "", map[string]any{})
-			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			var out map[string]any
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
-			return out
-		}},
-		{name: "SPA shell", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/") }},
-		{name: "permalink SSR", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/@sd_user") }},
-		{name: "embed", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/embed/user-timeline/sd-user") }},
-		{name: "OAuth consent", meta: func(t *testing.T) map[string]any { return fromHTML(t, authorize) }},
-	} {
+	for _, tt := range everyMetaEmbedding(t, srv, "sd_user", "sd-user") {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.meta(t)
 			require.Contains(t, got, "requireSetup")
@@ -144,4 +99,61 @@ func TestNewServer_SetupLatchDoesNotOutliveTheGeneration(t *testing.T) {
 	reset()
 	second := newPluginAccountsHarnessDB(t, db, nil)
 	assert.True(t, requireSetup(second), "前の世代の印を持ち越している")
+}
+
+// metaEmbedding is one route that returns the instance meta: /api/meta itself
+// or an HTML shell that embeds it as `#misskey_meta`.
+type metaEmbedding struct {
+	name string
+	meta func(t *testing.T) map[string]any
+}
+
+// everyMetaEmbedding lists /api/meta and the four shells that embed the meta
+// (SPA, permalink SSR, embed, OAuth consent), served by srv. username / userID
+// name an existing local user for the permalink and embed pages.
+func everyMetaEmbedding(t *testing.T, srv *Server, username, userID string) []metaEmbedding {
+	t.Helper()
+	// OAuthの同意画面は、client_idのページからredirect_uriを読めたときだけ出る。
+	client := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprint(w, `<html><head><link rel="redirect_uri" href="/callback"></head><body></body></html>`)
+	}))
+	t.Cleanup(client.Close)
+	authorize := "/oauth/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.URL + "/"},
+		"redirect_uri":          {client.URL + "/callback"},
+		"scope":                 {"read:account"},
+		"code_challenge":        {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+
+	embedded := regexp.MustCompile(`(?s)id="misskey_meta"[^>]*>(.*?)</script>`)
+	fromHTML := func(t *testing.T, path string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Accept", "text/html")
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		m := embedded.FindStringSubmatch(rec.Body.String())
+		require.Len(t, m, 2, "misskey_meta must be embedded: %s", rec.Body.String())
+		var out map[string]any
+		require.NoError(t, json.Unmarshal([]byte(html.UnescapeString(m[1])), &out))
+		return out
+	}
+
+	return []metaEmbedding{
+		{name: "api/meta", meta: func(t *testing.T) map[string]any {
+			rec := postJSON(t, srv, "/api/meta", "", map[string]any{})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+			return out
+		}},
+		{name: "SPA shell", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/") }},
+		{name: "permalink SSR", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/@"+username) }},
+		{name: "embed", meta: func(t *testing.T) map[string]any { return fromHTML(t, "/embed/user-timeline/"+userID) }},
+		{name: "OAuth consent", meta: func(t *testing.T) map[string]any { return fromHTML(t, authorize) }},
+	}
 }
