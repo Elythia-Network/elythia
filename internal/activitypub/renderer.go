@@ -269,6 +269,15 @@ type MentionResolver interface {
 	ResolveMention(userID string) (name, uri string, err error)
 }
 
+// UserLookupMentionResolver is a MentionResolver that can derive a resolver
+// looking users up through a caller-supplied function (for example one that
+// reuses the rows already read while serving the same request, #3989). The
+// derived resolver must answer exactly like the original for the same rows.
+type UserLookupMentionResolver interface {
+	MentionResolver
+	WithUserLookup(find func(userID string) (*model.User, error)) MentionResolver
+}
+
 // FileResolver loads drive files by ID for rendering Note attachments.
 type FileResolver interface {
 	FindByIDs(ids []string) ([]*model.DriveFile, error)
@@ -429,6 +438,22 @@ func (r *Renderer) RenderOrderedCollectionPage(id string, totalItems int, ordere
 // the `tag` field and additional `to` audience entries. nil で無効化できる。
 func (r *Renderer) SetMentionResolver(mr MentionResolver) {
 	r.mentionResolver = mr
+}
+
+// WithMentionUserLookup returns a renderer that resolves mentioned users
+// through find, when the configured MentionResolver implements
+// UserLookupMentionResolver. Otherwise (no resolver, another implementation
+// or a nil find) it returns r itself. r is not modified, so the shared renderer
+// stays safe for concurrent use.
+func (r *Renderer) WithMentionUserLookup(find func(userID string) (*model.User, error)) *Renderer {
+	mr, ok := r.mentionResolver.(UserLookupMentionResolver)
+	if !ok || find == nil {
+		return r
+	}
+	// 要求ごとの浅いコピー。差し替えるのはメンションの引き方だけで、他の resolver は共有する。
+	cp := *r
+	cp.mentionResolver = mr.WithUserLookup(find)
+	return &cp
 }
 
 // SetFileResolver attaches a FileResolver for Note attachment rendering.

@@ -175,17 +175,57 @@ func (h *Handler) seedAPNote(c echo.Context, note *model.Note) {
 	}
 }
 
-func (h *Handler) resolveAPUser(c echo.Context, userID string) (*model.User, error) {
+// lookupAPUser returns the user row for userID, reusing a row already read
+// while serving this request. Repository errors are returned unchanged.
+func (h *Handler) lookupAPUser(c echo.Context, userID string) (*model.User, error) {
 	memo := h.referenceMemo(c)
 	if user := memo.users[userID]; user != nil {
 		return user, nil
 	}
-	bundle, err := h.userService.ShowByID(userID)
+	// 参照の確認が見るのは利用者の行だけなので、profile は引かない (#3989)。
+	user, err := h.userService.FindByID(userID)
 	if err != nil {
 		return nil, err
 	}
-	memo.users[userID] = bundle.User
-	return bundle.User, nil
+	if user != nil {
+		memo.users[userID] = user
+	}
+	return user, nil
+}
+
+// resolveAPUser is lookupAPUser with a missing user reported as
+// coreuser.ErrUserNotFound, like userService.ShowByID.
+func (h *Handler) resolveAPUser(c echo.Context, userID string) (*model.User, error) {
+	user, err := h.lookupAPUser(c, userID)
+	if err != nil {
+		// **DB 障害を not-found に丸めない** (ShowByID と同じ、#2799)。
+		if repository.IsNotFound(err) {
+			return nil, coreuser.ErrUserNotFound
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+// resolveAPAuthor returns the author of n for the reference check, reusing the
+// author row the note query loaded with n.
+func (h *Handler) resolveAPAuthor(c echo.Context, n *model.Note) (*model.User, error) {
+	// queryService.Show は投稿と同じ読み取りで作者の行も読んでいる (hydrateNoteRelations)。
+	// 同じ要求の中なので、それを使い回して作者をもう一度引かない (#3989)。
+	h.seedAPUser(c, n.User)
+	return h.resolveAPUser(c, n.UserID)
+}
+
+// referenceRenderer returns the renderer for a response whose references are
+// checked. Mentioned users are looked up through the request memo, so the
+// check reuses the rows rendering read instead of reading them again (#3989).
+func (h *Handler) referenceRenderer(c echo.Context) *activitypub.Renderer {
+	if h.localFederationObserver == nil {
+		return h.renderer
+	}
+	return h.renderer.WithMentionUserLookup(func(userID string) (*model.User, error) {
+		return h.lookupAPUser(c, userID)
+	})
 }
 
 func (h *Handler) resolveAPNote(c echo.Context, noteID string) (*model.Note, error) {
@@ -605,7 +645,12 @@ func (h *Handler) UserByAcct(c echo.Context) error {
 // Content-Type before treating a response as an AP document, so a plain
 // application/json would cause them to reject it.
 func writeActivityJSON(c echo.Context, v any) error {
-	return c.Blob(http.StatusOK, `application/activity+json; charset=utf-8`, mustMarshal(v))
+	return writeActivityJSONBytes(c, mustMarshal(v))
+}
+
+// writeActivityJSONBytes writes an already serialized ActivityPub document.
+func writeActivityJSONBytes(c echo.Context, data []byte) error {
+	return c.Blob(http.StatusOK, `application/activity+json; charset=utf-8`, data)
 }
 
 type localAPReferences struct {
@@ -632,6 +677,17 @@ func (h *Handler) validateAPReferences(c echo.Context, v any) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	return h.validateLocalAPReferences(c, refs)
+}
+
+// validateAPReferenceData is validateAPReferences for a document that is
+// already serialized. The caller checks that the observer is wired.
+func (h *Handler) validateAPReferenceData(c echo.Context, data []byte) (bool, error) {
+	users, notes := activitypub.ExtractLocalAPReferences(h.renderer.URLs().BaseURL(), data)
+	return h.validateLocalAPReferences(c, localAPReferences{users: users, notes: notes})
+}
+
+func (h *Handler) validateLocalAPReferences(c echo.Context, refs localAPReferences) (bool, error) {
 	users := make(map[string]*model.User, len(refs.users)+len(refs.notes))
 	reasons := make(map[string]string, len(refs.users)+len(refs.notes))
 	for _, userID := range refs.users {
@@ -694,7 +750,17 @@ func (h *Handler) validateAPReferences(c echo.Context, v any) (bool, error) {
 }
 
 func (h *Handler) writeAPJSON(c echo.Context, v any) error {
-	available, err := h.validateAPReferences(c, v)
+	if h.localFederationObserver == nil {
+		return writeActivityJSON(c, v)
+	}
+	// 参照の確認と応答に、同じ Marshal の結果を使う。以前は確認のためと応答のためで
+	// 2 回 Marshal していた (#3989)。
+	data, err := json.Marshal(v)
+	if err != nil {
+		slog.Error("ap: validate response references", "err", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	available, err := h.validateAPReferenceData(c, data)
 	if err != nil {
 		slog.Error("ap: validate response references", "err", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -702,7 +768,7 @@ func (h *Handler) writeAPJSON(c echo.Context, v any) error {
 	if !available {
 		return c.NoContent(http.StatusNotFound)
 	}
-	return writeActivityJSON(c, v)
+	return writeActivityJSONBytes(c, data)
 }
 
 // wantsActivityJSON reports whether the caller prefers an AP document.
@@ -1110,14 +1176,14 @@ func (h *Handler) Note(c echo.Context) error {
 		return h.redirectAP(c, http.StatusFound, *n.URI)
 	}
 	if h.localFederationObserver != nil {
-		author, err := h.userService.ShowByID(n.UserID)
+		author, err := h.resolveAPAuthor(c, n)
 		if err != nil {
 			if errors.Is(err, coreuser.ErrUserNotFound) {
 				return c.NoContent(http.StatusNotFound)
 			}
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		available, err := h.requireAPUser(c, author.User, "note")
+		available, err := h.requireAPUser(c, author, "note")
 		if err != nil {
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1125,7 +1191,7 @@ func (h *Handler) Note(c echo.Context) error {
 			return c.NoContent(http.StatusNotFound)
 		}
 	}
-	note := h.renderer.RenderNote(n, h.idGen)
+	note := h.referenceRenderer(c).RenderNote(n, h.idGen)
 	return h.writeAPJSON(c, note)
 }
 
@@ -1163,13 +1229,14 @@ func (h *Handler) Featured(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	items := make([]any, 0, len(notes))
+	renderer := h.referenceRenderer(c)
 	for _, n := range notes {
 		h.seedAPNote(c, n)
 		// upstream featured の filter: !localOnly && visibility ∈ {public, home}。
 		if n.LocalOnly || (n.Visibility != model.NoteVisibilityPublic && n.Visibility != model.NoteVisibilityHome) {
 			continue
 		}
-		rn := h.renderer.RenderNote(n, h.idGen)
+		rn := renderer.RenderNote(n, h.idGen)
 		available, err := h.validateAPReferences(c, rn)
 		if err != nil {
 			slog.Error("ap: validate featured note references", "noteId", n.ID, "err", err)
@@ -1489,14 +1556,14 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 		return c.NoContent(http.StatusNotFound)
 	}
 	if h.localFederationObserver != nil {
-		authorBundle, err := h.userService.ShowByID(n.UserID)
+		author, err := h.resolveAPAuthor(c, n)
 		if err != nil {
 			if errors.Is(err, coreuser.ErrUserNotFound) {
 				return c.NoContent(http.StatusNotFound)
 			}
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		available, err := h.requireAPUser(c, authorBundle.User, "note")
+		available, err := h.requireAPUser(c, author, "note")
 		if err != nil {
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1527,7 +1594,7 @@ func (h *Handler) packOutboxActivity(c echo.Context, author *model.User, n *mode
 		}
 		// target を解決できないときは Create にフォールバック (shape は valid のまま)。
 	}
-	create := h.renderer.RenderCreate(n, h.idGen)
+	create := h.referenceRenderer(c).RenderCreate(n, h.idGen)
 	create.Context = nil
 	return create
 }
