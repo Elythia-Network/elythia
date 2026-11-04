@@ -51,6 +51,7 @@ func (m *mockUserRepo) SearchByUsernameAndHost(string, *string, bool, int) ([]*m
 }
 func (m *mockUserRepo) UpdateUser(string, map[string]any) error                   { return nil }
 func (m *mockUserRepo) SetAccountCreatedAtIfNull(string, time.Time) (bool, error) { return false, nil }
+func (m *mockUserRepo) WakeFromHibernation(string) (bool, error)                  { return false, nil }
 func (m *mockUserRepo) CreateProfile(*model.UserProfile) error                    { return nil }
 func (m *mockUserRepo) ListUsers(model.UserListFilter) ([]*model.User, error)     { return nil, nil }
 func (m *mockUserRepo) ListRemoteInboxes() ([]model.RemoteInbox, error)           { return nil, nil }

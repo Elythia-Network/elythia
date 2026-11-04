@@ -418,3 +418,11 @@ GTL が無傷なので、この食い違いは Elythia 側の退行として出�
 - `.br`と`.gz`の分だけ`frontend/built`が大きくなる(2026-10-14の本番のビルドの複製で、`_frontend_vite_`が212MBから368MB)。圧縮は8コアで約51秒(`_frontend_embed_vite_`は約4秒)
 
 `/api/emojis`は、絵文字の一覧の cache(`CachedEmojiRepository`)が同じ一覧を返すあいだ、JSONにしてgzipした本文を使い回す。本文は従来と同じバイト列で、gzipの圧縮の度合いだけが違う(level 9)。
+
+## 5.9. フォロワーを休眠させない (#4019)
+
+本家は投稿のたびに10%の確率で、最終アクティブが50日より前のフォロワーを休眠させ(`NoteCreateService.checkHibernation`。`user.isHibernated`と`following.isFollowerHibernated`を付ける)、休眠したフォロワーにはタイムラインを配らない。Elythiaは休眠させない。
+
+- 読む側は一部が本家と違う。`isFollowerHibernated`の付いたフォロワーをホームタイムラインの一覧に積まないのは本家と同じ。Elythiaはさらに、ストリームの`homeTimeline`への配信もしない(`internal/core/timeline/fanout_hook.go`、#2106)。本家のストリームは、接続ごとに持つフォローの一覧で絞るだけで、休眠を見ない。印が付いているのはTS版から移したDBの行だけで、下のとおり接続したときに外すので、配信が止まるのは外すのに失敗している間だけになる
+- 外す側も本家と同じ。ストリーミングに接続したときに、休眠していれば`user.isHibernated`と、その人がフォロワーである行の`isFollowerHibernated`を外す(`UserRepository.WakeFromHibernation`。本家の`UserService.updateLastActiveDate`)。#4019より前は外さなかったので、TS版で休眠していた人は、戻ってきてもフォローしている人のノートが届かないままだった
+- 休眠させないので、長く使われていない人のホームタイムラインにも配り続ける。本家より、投稿ごとのRedisへの書き込みが多くなりうる。付ける側を入れるかどうかは、配る量の実測を見てから決める

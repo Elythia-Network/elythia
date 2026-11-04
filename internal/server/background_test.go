@@ -15,7 +15,9 @@ import (
 
 	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // signinWriteProbe holds the INSERT of a signin row until the test releases
@@ -187,6 +189,8 @@ func (c *countingUserUpdates) UpdateUser(string, map[string]any) error {
 	return nil
 }
 
+func (c *countingUserUpdates) WakeFromHibernation(string) (bool, error) { return false, nil }
+
 // TestLastActiveRecorder_RunsInTheGenerationGroup checks that the
 // lastActiveDate update of a streaming connection starts in the group of the
 // generation (#3661). 接続の close handler からも呼ばれるので、世代の停止の後に
@@ -203,4 +207,18 @@ func TestLastActiveRecorder_RunsInTheGenerationGroup(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	assert.EqualValues(t, 1, repo.n.Load(), "世代を止めた後に lastActiveDate を書きに行った")
 	assert.EqualValues(t, 1, g.Dropped())
+}
+
+// TestLastActiveRecorder_WakesHibernatedUser checks that a streaming
+// connection wakes a hibernated user, like upstream
+// UserService.updateLastActiveDate (#4019). 外さないと、TS 版から移した DB で
+// 休眠していた人に、フォローしている人のノートが配られないままになる。
+func TestLastActiveRecorder_WakesHibernatedUser(t *testing.T) {
+	repo := testutil.NewMockUserRepository()
+	repo.Users["u4019"] = &model.User{ID: "u4019", IsHibernated: true}
+	g := bgwork.New()
+	a := &lastActiveRecorderAdapter{userRepo: repo, background: g}
+	a.RecordActive("u4019")
+	require.Zero(t, g.Stop(context.Background()))
+	assert.False(t, repo.Users["u4019"].IsHibernated)
 }

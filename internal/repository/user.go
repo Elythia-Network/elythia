@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -70,6 +71,11 @@ type UserRepository interface {
 	// while "accountCreatedAt" is still NULL (#3465). The bool reports whether
 	// the row was updated.
 	SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error)
+	// WakeFromHibernation clears "isHibernated" of a hibernated user and
+	// "isFollowerHibernated" of the follows the user makes, like upstream
+	// UserService.updateLastActiveDate (#4019). The bool reports whether the
+	// user was hibernated. A user who is not hibernated is not written.
+	WakeFromHibernation(userID string) (bool, error)
 	UpdateProfile(userID string, fields map[string]any) error
 	// UpdatePasswordIfCurrent replaces a profile password only when the stored
 	// hash still equals currentHash. The bool reports whether one row changed.
@@ -512,6 +518,30 @@ func (r *userRepository) UpdateUser(userID string, fields map[string]any) error 
 		return nil
 	}
 	return r.db.Model(&model.User{}).Where("id = ?", userID).Updates(fields).Error
+}
+
+// WakeFromHibernation implements UserRepository.
+//
+// 休眠は TS 版から移した DB にだけある (Elythia は休眠させない)。ストリーミングの
+// 接続のたび (接続時と 5 分ごと) に呼ばれるので、1 文にして往復を 1 回にする。休眠して
+// いない利用者では、条件付きの UPDATE が 0 行に当たるだけで何も書かない。フォローの行は、
+// 利用者の印を外したときだけ外す (本家と同じ)。1 文なので、片方だけ外れることは無い。
+func (r *userRepository) WakeFromHibernation(userID string) (bool, error) {
+	var woke int64
+	err := r.db.Raw(`
+		WITH w AS (
+			UPDATE "user" SET "isHibernated" = false
+			WHERE "id" = ? AND "isHibernated"
+			RETURNING "id"
+		), f AS (
+			UPDATE "following" SET "isFollowerHibernated" = false
+			WHERE "followerId" IN (SELECT "id" FROM w) AND "isFollowerHibernated"
+		)
+		SELECT count(*) FROM w`, userID).Scan(&woke).Error
+	if err != nil {
+		return false, fmt.Errorf("wake user %s from hibernation: %w", userID, err)
+	}
+	return woke > 0, nil
 }
 
 // SetAccountCreatedAtIfNull implements UserRepository.

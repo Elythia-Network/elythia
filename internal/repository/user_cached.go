@@ -612,6 +612,18 @@ func (c *CachedUserRepository) UpdateUser(userID string, fields map[string]any) 
 	return nil
 }
 
+// WakeFromHibernation invalidates the cached row when it woke the user (#4019).
+func (c *CachedUserRepository) WakeFromHibernation(userID string) (bool, error) {
+	woke, err := c.UserRepository.WakeFromHibernation(userID)
+	if err != nil {
+		return false, err
+	}
+	if woke {
+		c.invalidate(userID)
+	}
+	return woke, nil
+}
+
 // SetAccountCreatedAtIfNull invalidates the cached row after a write (#3465).
 func (c *CachedUserRepository) SetAccountCreatedAtIfNull(userID string, createdAt time.Time) (bool, error) {
 	set, err := c.UserRepository.SetAccountCreatedAtIfNull(userID, createdAt)
