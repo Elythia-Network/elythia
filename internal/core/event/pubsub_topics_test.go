@@ -448,8 +448,13 @@ func TestPubSubService_RejectedChannelDoesNotBlockOthers(t *testing.T) {
 	// 先の周 (okwarm) を送る前に止め、その間に 2 つを登録する。
 	var got atomic.Int32
 	var together atomic.Bool
+	// okwarm の周に入ったことを知らせる。購読者の登録は周の始まりより先に済むので、
+	// 登録を待つだけでは、okwarm と後の 2 つが同じ周に入ることがある (#4010)。
+	warm := make(chan struct{})
+	var warmOnce sync.Once
 	svc.beforeSync = func(subscribe, _ []string) {
 		if slices.Equal(subscribe, []string{"acl3991:okwarm"}) {
+			warmOnce.Do(func() { close(warm) })
 			assert.Eventually(t, func() bool {
 				return svc.SubscriberCount("bad") == 1 && svc.SubscriberCount("ok1") == 1
 			}, 2*time.Second, time.Millisecond)
@@ -464,7 +469,11 @@ func TestPubSubService_RejectedChannelDoesNotBlockOthers(t *testing.T) {
 		defer wg.Done()
 		_ = svc.Subscribe(ctx, "okwarm", func([]byte) {})
 	}()
-	require.Eventually(t, func() bool { return svc.SubscriberCount("okwarm") == 1 }, time.Second, time.Millisecond)
+	select {
+	case <-warm:
+	case <-time.After(2 * time.Second):
+		t.Fatal("okwarm の周が始まらない")
+	}
 	for _, ch := range []string{"bad", "ok1"} {
 		wg.Add(1)
 		go func() {
