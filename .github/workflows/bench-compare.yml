@@ -45,6 +45,14 @@ on:
         options:
           - prod-like
           - unlimited
+      endpoints:
+        description: "core (今までの 7 つ) か extra (通知・ノートの表示・リアクション・ドライブなどの 5 つ、#4014)"
+        required: true
+        type: choice
+        default: core
+        options:
+          - core
+          - extra
   pull_request:
     branches: [develop]
     paths:
@@ -89,6 +97,7 @@ jobs:
           BASE_INPUT: ${{ inputs.base }}
           HEAD_INPUT: ${{ inputs.head }}
           ROUNDS_INPUT: ${{ inputs.rounds }}
+          ENDPOINTS_INPUT: ${{ inputs.endpoints }}
         run: |
           set -euo pipefail
           # $(...) の中でも set -e を効かせる。無いと resolve の中の fetch が失敗しても
@@ -141,6 +150,7 @@ jobs:
             echo "- base: \`$base_name\` ($base)"
             echo "- head: \`$head_name\` ($head)"
             echo "- rounds: $rounds"
+            echo "- endpoints: ${ENDPOINTS_INPUT:-core}"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -152,12 +162,14 @@ jobs:
           HEAD_SHA: ${{ steps.refs.outputs.head }}
           ROUNDS: ${{ steps.refs.outputs.rounds }}
           SCENARIO: ${{ inputs.scenario || 'prod-like' }}
+          # PR と schedule では core だけを流す (extra は手動で選ぶ)
+          ENDPOINTS: ${{ inputs.endpoints || 'core' }}
           OUT: ${{ runner.temp }}/bench-compare
         run: |
           mkdir -p "$OUT"
           started=$(date +%s)
           status=0
-          tests/bench/ab/run.sh --base "$BASE" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --out "$OUT" || status=$?
+          tests/bench/ab/run.sh --base "$BASE" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --out "$OUT" || status=$?
           echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
           exit "$status"
 

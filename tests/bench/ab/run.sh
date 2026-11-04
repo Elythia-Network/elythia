@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
 #
-#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
-#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--project-name NAME]
+#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
+#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--project-name NAME]
 #
 # --upstream は base を本家 Misskey の公式 image (misskey/misskey:<版>) にする (#3654)。
 # 本家の側の回は compose.upstream.yml を重ね、app だけを本家に替える。seed・k6 の
 # シナリオ・資源の上限・測り方は Elythia どうしの比較と同じ。版に `default` を渡すと
 # UPSTREAM_MISSKEY_VERSION の版を使う。
 # delivery fixture は Elythia の base/head 比較用で、upstream image とは実行しない。
+#
+# --endpoints は流すエンドポイントの組を選ぶ。core (既定) は今までの 7 つ、extra は
+# 通知・ノートの表示・利用者のノート・リアクション・ドライブへのアップロードの 5 つ
+# (#4014)。extra の回だけ、seed が利用者ごとにリアクションを付けて通知を溜める。core の
+# seed のデータは変えない (週 1 回の比較の条件を変えないため)。
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
 # 最後まで通るかを見るためのもので、結果を比較に使わない。
@@ -34,7 +39,7 @@ set -Eeuo pipefail
 trap 'exit 1' ERR
 
 usage() {
-  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]" >&2
+  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]" >&2
   exit 1
 }
 
@@ -42,7 +47,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 . "$here/run_helpers.sh"
 
-base_ref='' head_ref='' rounds=2 scenario=prod-like out='' smoke=0 upstream='' delivery=0
+base_ref='' head_ref='' rounds=2 scenario=prod-like endpoints=core out='' smoke=0 upstream='' delivery=0
 project_name="mk-bench-ab-$(date -u +%s)-$$" delivery_notes=2 delivery_followers=2
 while [ $# -gt 0 ]; do
   case $1 in
@@ -51,6 +56,7 @@ while [ $# -gt 0 ]; do
     --head) head_ref=$2; shift 2 ;;
     --rounds) rounds=$2; shift 2 ;;
     --scenario) scenario=$2; shift 2 ;;
+    --endpoints) endpoints=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --smoke) smoke=1; shift ;;
     --delivery) delivery=1; shift ;;
@@ -80,6 +86,14 @@ case $scenario in
   unlimited) disable_limits=true ;;
   *) usage ;;
 esac
+case $endpoints in
+  # 外で export されていても、core の seed は変えない
+  core) export BENCH_SEED_REACTIONS_PER_USER=0 ;;
+  # 50 人が 10 個ずつ付けると 500 件。通知の一覧の 1 ページ (20 件) が、フォロー・返信・
+  # リアクションの混ざった形になる
+  extra) export BENCH_SEED_REACTIONS_PER_USER=10 ;;
+  *) usage ;;
+esac
 
 if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
   echo "run.sh: cgroup v2 is required (memory.peak and cpu.stat are read directly)" >&2
@@ -105,6 +119,8 @@ fi
 bench_assert_project_available "$project_name"
 head_commit=$(git -C "$repo" rev-parse --verify "$head_ref^{commit}")
 
+# 結果の表と run.json に、どの組を流したかを残す
+if [ "$endpoints" != core ]; then scenario=$scenario-$endpoints; fi
 out=${out:-$here/results/$(date -u +%Y%m%dT%H%M%SZ)-$scenario}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -255,7 +271,7 @@ measure() {
   BENCH_DISABLE_ENDPOINT_RATE_LIMITS=$disable_limits "${compose[@]}" up -d --wait "${services[@]}" >/dev/null 2>&1 \
     || { echo "stack did not restart"; return 1; }
 
-  "${compose[@]}" --profile tools run --rm -e SHORT=1 k6 run -q --no-summary /scripts/ab/scenarios.js > "$dir/warmup.log" 2>&1 \
+  "${compose[@]}" --profile tools run --rm -e SHORT=1 -e WARMUP=1 -e ENDPOINT_SET="$endpoints" k6 run -q --no-summary /scripts/ab/scenarios.js > "$dir/warmup.log" 2>&1 \
     || { echo "warmup failed"; return 1; }
 
   local before after port heap_url ids=() s id k6_id
@@ -279,7 +295,7 @@ measure() {
   local k6_container
   k6_container=$(k6_name "$round" "$side")
   docker rm -f "$k6_container" >/dev/null 2>&1 || true
-  "${compose[@]}" --profile tools run -d --name "$k6_container" -e SHORT="$smoke" -e START_DELAY=3 \
+  "${compose[@]}" --profile tools run -d --name "$k6_container" -e SHORT="$smoke" -e START_DELAY=3 -e ENDPOINT_SET="$endpoints" \
     k6 run -q --summary-export=/out/k6-summary.json /scripts/ab/scenarios.js > "$dir/k6-start.log" 2>&1 \
     || { echo "k6 did not start"; return 1; }
   k6_id=$(docker inspect -f '{{.Id}}' "$k6_container") || { echo "k6 container not found"; return 1; }

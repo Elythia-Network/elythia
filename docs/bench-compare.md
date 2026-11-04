@@ -107,9 +107,11 @@ report の冒頭には、runner の機種 (`run.json`の`runner.cpu_model`) を�
 
 50 人 × 50 ノート。返信 35%、公開範囲は public 80% / home 15% / followers 5%。足りなければ失敗にします (`SEED_STRICT`)。偏った fixture では planner が別の plan を選び、実態と違う結果になるため、分布を実態に寄せています。
 
+`--endpoints extra`の回だけ、さらに各利用者が他人のノートに 10 個ずつリアクションを付けます (50 人で 500 個、`SEED_REACTIONS_PER_USER`)。通知の一覧の 1 ページが、フォロー・返信・リアクションの通知の混ざった形になるようにするためです。付けるのは seed のノートの並び (`noteIds`) で奇数の位置のノートだけで、偶数の位置は計測の`reactions-create`に残します (下の「エンドポイントの組」)。どの利用者のノートも両方の位置にあるので、全員にリアクションの通知が届きます。`core`の回の seed は変えていません。
+
 ### シナリオ
 
-7 つのエンドポイント (`ping` / `meta` / `local-timeline` / `users-show` / `i` / `notes-create` / `home-timeline`) を、1 つずつ順に k6 の`constant-arrival-rate`で 30 秒ずつ流します (#3656)。応答の速さによらず、エンドポイントごとに決めた率 (1 秒あたりの件数) で送ります。率は`tests/bench/http/k6/lib/config.js`の`arrivalRates`に 1 か所で置き、base と head (本家と Elythia) で必ず同じです。タイムラインのキャッシュは、どちらのシナリオでも off です。
+`core`の組 (既定) の 7 つのエンドポイント (`ping` / `meta` / `local-timeline` / `users-show` / `i` / `notes-create` / `home-timeline`) を、1 つずつ順に k6 の`constant-arrival-rate`で 30 秒ずつ流します (#3656)。応答の速さによらず、エンドポイントごとに決めた率 (1 秒あたりの件数) で送ります。率は`tests/bench/http/k6/lib/config.js`の`arrivalRates`に 1 か所で置き、base と head (本家と Elythia) で必ず同じです。タイムラインのキャッシュは、どちらのシナリオでも off です。
 
 | エンドポイント | 率 (件/秒) | 30 秒の件数 |
 |---|---|---|
@@ -127,11 +129,33 @@ report の冒頭には、runner の機種 (`run.json`の`runner.cpu_model`) を�
 - `notes-create`も同じ率で送ります。以前の closed-loop では、速い側ほど多くのノートを作り、後に流す`home-timeline`の DB の中身が両側で違っていました
 - ウォームアップと`--smoke`(`SHORT=1`) は、同じ率で各 5 秒です
 
+#### エンドポイントの組 (`--endpoints`、#4014)
+
+`run.sh --endpoints extra`(workflow の入力は`endpoints`、make の変数は`ENDPOINTS`) で、`core`の代わりに次の 5 つを流します。週 1 回の bench-upstream と PR の A/A は`core`だけで、`extra`は手動で選びます。bench-upstream は`core`の 3 ラウンドで job の上限 (60 分) に近い (bench-compare の上限は 45 分) ので、同じ実行に足さず、別の実行に分けました。結果の`scenario`は`prod-like-extra`のように組の名前が付きます。
+
+| エンドポイント | API | 率 (件/秒) | 30 秒の件数 |
+|---|---|---|---|
+| `notifications` | `i/notifications` (20 件) | 20 | 600 |
+| `notes-show` | `notes/show` | 50 | 1500 |
+| `users-notes` | `users/notes` (20 件) | 30 | 900 |
+| `reactions-create` | `notes/reactions/create` | 20 | 600 |
+| `drive-files-create` | `drive/files/create` (1x1 の PNG) | 5 | 150 |
+
+- どれも認証付きで、`reactions-create`を除き、トークンを 50 人で順に替えます。`notes-show`と`users-notes`は、対象のノートと利用者も iteration ごとに順に替えます。`users-notes`の対象は、要求する利用者の次の人です (同じ人だと、本家の自分を見るときの経路だけを測るため)
+- `prod-like`の上限は、本家と Elythia で同じです。`i/notifications`が利用者ごとに 30 秒で 30 回、`drive/files/create`が 1 時間で 120 回です。50 人に均すと、ウォームアップと計測 (合わせて 35 秒) で 1 人あたり`notifications`は 14 回 (30 秒の枠に入るのは 12 回まで)、`drive-files-create`は 3.5 回で、どちらも届きません。ほかの 3 つにはエンドポイントごとの上限がありません
+- `reactions-create`は、同じ利用者が同じノートに 2 回付けられないので、1 つのノートに持ち主以外の全員が 1 回ずつ付けたら次のノートへ進みます。使うのは偶数の位置のノートで、持ち主を 1 人ずつ順に替えます (通知と、同じ行の更新が 1 人に集まらないように)。ウォームアップは各持ち主のノートの先頭から、計測は真ん中から使い、seed のリアクション (奇数の位置) とも重なりません。ノートが足りなくなったら k6 ごと止め、その回を失敗にします。持ち主は seed の`noteOwners`で分かります。自分のノートには付けません (本家でも Elythia でも通知を作らず、測りたい処理を通らないため)
+- `drive-files-create`は、公式の frontend と同じく`force=true`で上げます。付けないと、同じ内容のファイルは既にあるものが返り、保存の処理を測れません
+- 率は、本家が捌ける量を測る前の初期値です。本家での重さが`core`の`local-timeline` / `home-timeline`に近いと見込むもの (`notifications` / `users-notes`) は、それより低くしてあります。結果を見て見直します
+- 読むときに気を付ける点が 3 つあります。どれも両側で同じ条件です
+  - アップロードする画像は 1x1 の PNG なので、サムネイルの生成などの画像の処理はほとんどかかりません
+  - リアクションは Unicode の絵文字だけで、カスタム絵文字を引く経路は通りません
+  - `i/notifications`は既定で既読にする (`markAsRead`) ので、毎回の読み取りに書き込みが伴います。これは実際の使われ方と同じです
+
 #### 軽い固定の負荷で測ることの意味
 
 - **遅延は、上限より十分軽い負荷のときの応答の時間です。** 速いエンドポイント (`ping` / `meta` / `users-show` / `i`) では、k6 から見た p50 / p95 が数 ms 以下になる見込みです (調査のときの Elythia のサーバー内の時間は、p50 で`users-show` 0.52ms、`i` 1.41ms、`meta` 0.021ms)。判定の絶対値の下限 (遅延 1ms) がその大半を占めるので、たとえば`i`が 1.5ms から 2.4ms (+60%) に悪化しても、差が 1ms 未満なので「差なし」になります。速いエンドポイントの小さな悪化は、遅延では見えません。下限を変えるかは、今のシナリオでの A/A の揺れを見てから別に決めます
 - **サーバーがどれだけ捌けるか (最大の処理量) は、もう測っていません。** どの率も遅い側の上限の半分以下に置いているので、`requests`は率 × 時間でほぼ決まります (判定しない「参考」)。以前のシナリオの`requests`(捌けた件数) に当たるものはありません
-- **両側の仕事の量が同じになったので、`cpu_seconds`(app / postgres) を素直に比べられます。** 以前は速い側ほど多くの件数を捌いていたので、CPU 時間の差には仕事の量の差が混ざっていました。今は同じ件数を同じ間隔で送るので、CPU 時間の差は同じ仕事にかかった CPU の差です。処理の重さの差は、遅延の下限に消える速いエンドポイントでも、app の`cpu_seconds`に出ます (ただし 7 つのエンドポイントの合計です)
+- **両側の仕事の量が同じになったので、`cpu_seconds`(app / postgres) を素直に比べられます。** 以前は速い側ほど多くの件数を捌いていたので、CPU 時間の差には仕事の量の差が混ざっていました。今は同じ件数を同じ間隔で送るので、CPU 時間の差は同じ仕事にかかった CPU の差です。処理の重さの差は、遅延の下限に消える速いエンドポイントでも、app の`cpu_seconds`に出ます (ただし、流したエンドポイントの組の合計です)
 
 #### 以前のシナリオ (#3656 より前)
 

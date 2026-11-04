@@ -49,6 +49,18 @@ export const arrivalRates = {
   // 計測で (5 + 30) 秒 × 30 = 1050 件
   "notes-create": 30,
   "home-timeline": 40,
+  // ここから下は --endpoints extra で流す (#4014)。本家が捌ける量は測っていないので、
+  // 本家での重さが local-timeline / home-timeline に近いと見込むものは同じくらいか
+  // それ以下にして、PR の上で見直す。
+  // notifications は本家と Elythia の両方で利用者ごとに 30 秒で 30 回、drive-files-create は
+  // 1 時間で 120 回の上限がある。50 人に均すと、ウォームアップ (5 秒) と計測 (30 秒) を
+  // 合わせた 35 秒で 1 人あたり notifications は 14 回 (30 秒の枠には 12 回まで)、
+  // drive-files-create は 3.5 回で、どちらも上限に届かない
+  notifications: 20,
+  "notes-show": 50,
+  "users-notes": 30,
+  "reactions-create": 20,
+  "drive-files-create": 5,
 };
 
 // 到着率のシナリオ 1 つの長さ (秒)。シナリオの間隔は SCENARIO_DURATION (31 秒) で、

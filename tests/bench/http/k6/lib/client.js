@@ -55,4 +55,31 @@ export class MisskeyClient {
   i(token) {
     return this.api("i", {}, token);
   }
+
+  notifications(token, limit) {
+    return this.api("i/notifications", { limit: limit || 20 }, token);
+  }
+
+  notesShow(noteId, token) {
+    return this.api("notes/show", { noteId: noteId }, token);
+  }
+
+  usersNotes(userId, token, limit) {
+    return this.api("users/notes", { userId: userId, limit: limit || 20 }, token);
+  }
+
+  createReaction(noteId, reaction, token) {
+    return this.api("notes/reactions/create", { noteId: noteId, reaction: reaction }, token);
+  }
+
+  // uploadFile sends force=true like the official frontend does, so a file
+  // whose hash is already in the drive is stored again instead of being
+  // answered with the existing one.
+  uploadFile(name, bytes, mime, token) {
+    return http.post(`${this.baseUrl}/api/drive/files/create`, {
+      i: token,
+      force: "true",
+      file: http.file(bytes, name, mime),
+    }, { timeout: this.params.timeout });
+  }
 }
