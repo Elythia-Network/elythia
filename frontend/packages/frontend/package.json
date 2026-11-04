@@ -11,7 +11,6 @@
 		"chromatic": "chromatic",
 		"test": "vitest --run --globals --config vitest.config.unit.ts",
 		"test-and-coverage": "vitest --run --coverage --globals --config vitest.config.unit.ts",
-		"test:e2e": "playwright test --config playwright.config.ts",
 		"test:browser": "vitest --run --globals --config vitest.config.browser.ts",
 		"typecheck": "vue-tsc --noEmit",
 		"eslint": "eslint --quiet \"src/**/*.{ts,vue}\" \"public/loader/*.js\"",
