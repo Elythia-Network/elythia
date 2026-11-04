@@ -166,6 +166,7 @@ func TestRenderer_RenderPerson(t *testing.T) {
 	assert.Equal(t, "Alice", p.Name.String())
 	assert.Equal(t, "PUBKEY", p.PublicKey.PublicKeyPEM.String())
 	assert.True(t, p.ManuallyApproves.Bool())
+	require.NotNil(t, p.Discoverable)
 	assert.True(t, p.Discoverable.Bool())
 	require.NotNil(t, p.Icon)
 	assert.Equal(t, avatar, p.Icon.URL.String())

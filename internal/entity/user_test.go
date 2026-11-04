@@ -60,6 +60,24 @@ type stubSilenced struct{ ids map[string]bool }
 
 func (s stubSilenced) IsSilenced(userID string) bool { return s.ids[userID] }
 
+// リモートの猫のユーザーは isCat: true で返る (#4022)。画面はこの値を見て猫耳を
+// 付け、ノートの文章を nyaize する。
+func TestPackUserLite_RemoteCat(t *testing.T) {
+	host := "remote.example"
+	u := &model.User{
+		ID:                "rcat1",
+		Username:          "neko",
+		Host:              &host,
+		AvatarDecorations: datatypes.JSON([]byte("[]")),
+		IsCat:             true,
+	}
+	lite := currentPacker().PackUserLite(u)
+	assert.True(t, lite.IsCat)
+	b, err := json.Marshal(lite)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"isCat":true`)
+}
+
 func TestPackUserLite(t *testing.T) {
 	name := "Test User"
 	avatarURL := "https://example.com/avatar.png"

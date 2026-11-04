@@ -115,6 +115,13 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	// された場合にローカルの判定もずれないように)。
 	fields["isLocked"] = actor.ManuallyApproves.Bool()
 	existing.IsLocked = actor.ManuallyApproves.Bool()
+	// 猫と、探せるかどうかも追従する (#4022)。discoverable が無いときは今の値のまま
+	// (本家の updatePerson は undefined を書かない)
+	fields["isCat"] = actor.IsCat.Bool()
+	existing.IsCat = actor.IsCat.Bool()
+	explorable := remoteExplorable(actor, existing.IsExplorable)
+	fields["isExplorable"] = explorable
+	existing.IsExplorable = explorable
 	// **由来 (#2973) を見て決める。** `local` = モデレーターの判断には触らず、
 	// `remote` = こちらが actor を見て凍結した行だけが発信元の解除に追従する。
 	// 記録が無い行は解除方向では `local` 扱い (安全側)。
