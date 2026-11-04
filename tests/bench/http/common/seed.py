@@ -57,6 +57,17 @@ STRICT = os.environ.get("SEED_STRICT", "") == "1"
 # them off. Used for upstream Misskey, whose limits are only switched off by
 # NODE_ENV (which also logs every SQL query) or by this policy (#3654).
 RATE_LIMIT_FACTOR = os.environ.get("SEED_RATE_LIMIT_FACTOR", "")
+# Number of reactions each user puts on other users' notes (opt-in, default 0).
+# Reactions notify the note's author, so i/notifications has reaction
+# notifications to pack besides follows and replies (#4014). The reactions go
+# only to the notes at odd positions of note_ids: the k6 reactions-create
+# scenario uses the even ones, and a user cannot react to the same note twice.
+# Every author has notes at both parities, so every user gets reaction
+# notifications.
+REACTIONS_PER_USER = int(os.environ.get("SEED_REACTIONS_PER_USER", "0"))
+# The reaction the seed and the k6 scenario put (U+1F44D, written as an escape
+# so the source has no emoji).
+REACTION = "\U0001F44D"
 
 # A minimal valid 1x1 PNG, used for drive uploads when FILES_PER_USER > 0.
 # Embedding the bytes keeps the seeder self-contained (no asset file mount).
@@ -195,6 +206,29 @@ def seed_mutes(http: httpx.Client, tokens: list[str], user_ids: list[str]) -> in
     return edges
 
 
+def seed_reactions(http: httpx.Client, tokens: list[str], note_ids: list[str], note_owners: list[int]) -> int:
+    """Each user reacts to REACTIONS_PER_USER notes of other users, picked
+    from the odd positions of note_ids. Deterministic via the shared seed.
+    Returns the number of reactions created.
+    """
+    if REACTIONS_PER_USER <= 0:
+        return 0
+    rng = random.Random(4014)
+    reactions = 0
+    for i, token in enumerate(tokens):
+        if not token:
+            continue
+        candidates = [k for k in range(1, len(note_ids), 2) if note_owners[k] != i]
+        for k in rng.sample(candidates, min(REACTIONS_PER_USER, len(candidates))):
+            try:
+                resp = http.post("/api/notes/reactions/create", json={"noteId": note_ids[k], "reaction": REACTION, "i": token})
+                resp.raise_for_status()
+                reactions += 1
+            except Exception as exc:
+                print(f"WARN: reaction {i}->{note_ids[k]} failed: {exc}", file=sys.stderr)
+    return reactions
+
+
 def set_rate_limit_factor(http: httpx.Client, admin_token: str, factor: float) -> None:
     """Write the base role's rateLimitFactor policy.
 
@@ -319,6 +353,9 @@ def main() -> None:
     reply_targets: list[str] = []
     replies = 0
     note_ids: list[str] = []
+    # note_ids と同じ並びで、作った利用者の添字 (tokens の並び)。k6 のリアクションの
+    # シナリオが、自分のノートを避けるのに使う
+    note_owners: list[int] = []
     for idx, token in enumerate(tokens):
         files = user_files[idx]
         for j in range(NUM_NOTES_PER_USER):
@@ -345,6 +382,7 @@ def main() -> None:
                 nid = result.get("createdNote", {}).get("id")
                 if nid:
                     note_ids.append(nid)
+                    note_owners.append(idx)
                     if visibility in ("public", "home"):
                         reply_targets.append(nid)
                     if "replyId" in body:
@@ -356,6 +394,11 @@ def main() -> None:
     if REPLY_RATIO > 0:
         print(f"Of which {replies} are replies (SEED_REPLY_RATIO={REPLY_RATIO})")
 
+    reaction_count = seed_reactions(http, tokens, note_ids, note_owners)
+    if REACTIONS_PER_USER > 0:
+        print(f"Created {reaction_count} reactions on {TARGET_NAME} "
+              f"(~{REACTIONS_PER_USER}/user)")
+
     if rate_limit_factor is not None:
         set_rate_limit_factor(http, admin_token, rate_limit_factor)
         print(f"Set rateLimitFactor={rate_limit_factor:g} on {TARGET_NAME}")
@@ -365,6 +408,8 @@ def main() -> None:
     output = {
         "tokens": tokens,
         "noteIds": note_ids,
+        "noteOwners": note_owners,
+        "reaction": REACTION,
         "adminToken": admin_token,
         "username": "benchadmin",
         "usernames": usernames,
@@ -372,6 +417,7 @@ def main() -> None:
         "followEdges": edges,
         "muteEdges": mute_edges,
         "fileCount": total_files,
+        "reactionCount": reaction_count,
     }
     path = os.path.join(OUTPUT_DIR, "seed-data.json")
     with open(path, "w") as f:
@@ -385,6 +431,7 @@ def main() -> None:
             "user ids": (sum(1 for u in user_ids if u), NUM_USERS),
             "follow edges": (edges, NUM_USERS * min(FOLLOWERS_PER_USER, NUM_USERS - 1)),
             "notes": (len(note_ids), NUM_USERS * NUM_NOTES_PER_USER),
+            "reactions": (reaction_count, NUM_USERS * REACTIONS_PER_USER),
         }
         short = [f"{name} {got}/{want}" for name, (got, want) in expected.items() if got < want]
         if short:

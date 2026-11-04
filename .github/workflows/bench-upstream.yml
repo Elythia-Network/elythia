@@ -8,7 +8,8 @@ name: Bench upstream
 # - schedule: 毎週月曜日の 05:40 (日本時間)。ほかの schedule (queue-bench-smoke は
 #   毎日 17:30 UTC、dropin-frontend-e2e は毎日 19:00 UTC、codeql は月曜日 20:30 UTC)
 #   と重ならない日曜日 20:40 UTC にする。develop を、UPSTREAM_MISSKEY_VERSION の版と比べる
-# - workflow_dispatch: Elythia の ref、本家の版、シナリオ、ラウンド数を渡せる。
+# - workflow_dispatch: Elythia の ref、本家の版、シナリオ、エンドポイントの組 (#4014)、
+#   ラウンド数を渡せる。
 #   **secrets は使わず、token は読み取りだけ**なので、fork のコードを流しても書き込みは
 #   できない
 # - pull_request: 本家の版 (UPSTREAM_MISSKEY_VERSION) か、ベンチの仕組み (この workflow、
@@ -54,6 +55,14 @@ on:
         options:
           - prod-like
           - unlimited
+      endpoints:
+        description: "core (今までの 7 つ) か extra (通知・ノートの表示・リアクション・ドライブなどの 5 つ、#4014)"
+        required: true
+        type: choice
+        default: core
+        options:
+          - core
+          - extra
   pull_request:
     branches: [develop]
     paths:
@@ -101,6 +110,7 @@ jobs:
           REF_INPUT: ${{ inputs.ref }}
           UPSTREAM_INPUT: ${{ inputs.upstream }}
           ROUNDS_INPUT: ${{ inputs.rounds }}
+          ENDPOINTS_INPUT: ${{ inputs.endpoints }}
         run: |
           set -euo pipefail
           # $(...) の中でも set -e を効かせる (bench-compare.yml と同じ理由)
@@ -163,6 +173,7 @@ jobs:
             echo "- 本家: \`misskey/misskey:$upstream\`"
             echo "- Elythia: \`$name\` ($head)"
             echo "- rounds: $rounds"
+            echo "- endpoints: ${ENDPOINTS_INPUT:-core}"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -173,12 +184,14 @@ jobs:
           UPSTREAM: ${{ steps.refs.outputs.upstream }}
           ROUNDS: ${{ steps.refs.outputs.rounds }}
           SCENARIO: ${{ inputs.scenario || 'prod-like' }}
+          # PR と schedule では core だけを流す (extra は手動で選ぶ)
+          ENDPOINTS: ${{ inputs.endpoints || 'core' }}
           OUT: ${{ runner.temp }}/bench-upstream
         run: |
           mkdir -p "$OUT"
           started=$(date +%s)
           status=0
-          tests/bench/ab/run.sh --upstream "$UPSTREAM" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --out "$OUT" || status=$?
+          tests/bench/ab/run.sh --upstream "$UPSTREAM" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --out "$OUT" || status=$?
           echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
           exit "$status"
 

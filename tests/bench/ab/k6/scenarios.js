@@ -1,7 +1,9 @@
 // base / head の比較 (#3544) で流す k6 のシナリオ。
 //
-// tests/bench/http と同じ 7 つのエンドポイントを、1 つずつ順に流す。結果は
-// tools/benchcompare が読む。
+// tests/bench/http と同じ 7 つのエンドポイント (ENDPOINT_SET=core、既定) か、それ以外の
+// よく通る 5 つのエンドポイント (ENDPOINT_SET=extra、#4014) を、1 つずつ順に流す。結果は
+// tools/benchcompare が読む。extra は週 1 回の bench-upstream の時間を延ばさないよう、
+// 別の実行に分けてある (run.sh --endpoints extra)。
 //
 // 負荷は constant-arrival-rate (open-loop) で、エンドポイントごとの率 (lib/config.js の
 // arrivalRates) で送る (#3656)。応答が遅れても送る間隔は変わらないので、両側で同じ件数を
@@ -19,6 +21,9 @@
 // SHORT=1 のときは、同じエンドポイントを同じ率で 5 秒ずつ流す。ウォームアップ (結果は
 // 捨てる) と、run.sh --smoke (手順が通るかだけを見る) で使う。
 //
+// WARMUP=1 はウォームアップの実行で付ける。reactions-create が計測の実行と同じ
+// (利用者, ノート) の組を使わないよう、使うノートの範囲を分けるため。
+//
 // START_DELAY (秒) は、最初のシナリオを始めるまでの待ち。run.sh は k6 を起動してから
 // そのコンテナを資源の記録 (sampler) に加えるので、その間に負荷をかけ始めないよう待たせる。
 //
@@ -27,6 +32,7 @@
 // コンテナが CPU の上限で止められた割合を出し、k6 が律速になったエンドポイントを比較不能に
 // する (#3656)。
 import exec from "k6/execution";
+import encoding from "k6/encoding";
 import { check } from "k6";
 import { SharedArray } from "k6/data";
 import { Counter, Gauge } from "k6/metrics";
@@ -34,6 +40,8 @@ import { MisskeyClient } from "../lib/client.js";
 import { arrivalRates, ARRIVAL_DURATION, SCENARIO_DURATION } from "../lib/config.js";
 
 const SHORT = __ENV.SHORT === "1";
+const WARMUP = __ENV.WARMUP === "1";
+const ENDPOINT_SET = __ENV.ENDPOINT_SET || "core";
 const SHORT_DURATION = 5;
 const START_DELAY = Number(__ENV.START_DELAY || 0);
 
@@ -53,8 +61,13 @@ const seed = new SharedArray("seed", function () {
 // 1 回約 4ms) なので、iteration ごとに seed[0] を読むと k6 (CPU 0.75) がそれだけで
 // 飽和し、毎秒約 160 件で頭打ちになっていた (#3656)。使う値は VU の初期化で 1 回だけ
 // 取り出し、iteration の中では SharedArray に触れない
-const tokens = seed[0].tokens;
-const username = seed[0].username;
+const seedData = seed[0];
+const tokens = seedData.tokens;
+const username = seedData.username;
+const userIds = seedData.userIds;
+const noteIds = seedData.noteIds;
+const noteOwners = seedData.noteOwners;
+const reaction = seedData.reaction;
 
 // 認証の要るエンドポイントは、iteration ごとに利用者を順に替える。VU ごとに
 // 固定すると、notes/create の利用者ごとの上限 (1 時間に 300) に数人だけが当たり、
@@ -67,15 +80,32 @@ function token() {
   return tokens[exec.scenario.iterationInTest % tokens.length];
 }
 
-const endpoints = [
-  { name: "ping", exec: "ping" },
-  { name: "meta", exec: "meta" },
-  { name: "local-timeline", exec: "localTimeline" },
-  { name: "users-show", exec: "usersShow" },
-  { name: "i", exec: "i" },
-  { name: "notes-create", exec: "notesCreate" },
-  { name: "home-timeline", exec: "homeTimeline" },
-];
+const endpointSets = {
+  core: [
+    { name: "ping", exec: "ping" },
+    { name: "meta", exec: "meta" },
+    { name: "local-timeline", exec: "localTimeline" },
+    { name: "users-show", exec: "usersShow" },
+    { name: "i", exec: "i" },
+    { name: "notes-create", exec: "notesCreate" },
+    { name: "home-timeline", exec: "homeTimeline" },
+  ],
+  extra: [
+    { name: "notifications", exec: "notifications" },
+    { name: "notes-show", exec: "notesShow" },
+    { name: "users-notes", exec: "usersNotes" },
+    { name: "reactions-create", exec: "reactionsCreate" },
+    { name: "drive-files-create", exec: "driveFilesCreate" },
+  ],
+};
+const endpoints = endpointSets[ENDPOINT_SET];
+if (!endpoints) throw new Error(`unknown ENDPOINT_SET: ${ENDPOINT_SET}`);
+if (ENDPOINT_SET === "extra" && !(Array.isArray(noteOwners) && noteOwners.length === noteIds.length)) {
+  // 持ち主が分からないと、自分のノートへのリアクションを避けられない。自分のノートへの
+  // リアクションは、本家でも Elythia でも通知を作らない (本家は注目のランキングの更新も
+  // 飛ばす) ので、測りたい処理を通らない
+  throw new Error("seed-data.json has no noteOwners matching noteIds");
+}
 
 // 1 つのシナリオの長さ (秒)。区間の gauge にも使う
 const duration = SHORT ? SHORT_DURATION : ARRIVAL_DURATION;
@@ -132,7 +162,8 @@ function record(endpoint, res) {
   if (res.status === 429) rateLimited.add(1, { endpoint });
   // 1050 は k6 の request timeout
   if (res.error_code === 1050) timeouts.add(1, { endpoint });
-  check(res, { [`${endpoint} 200`]: (r) => r.status === 200 });
+  // notes/reactions/create は 204 を返す
+  check(res, { [`${endpoint} 2xx`]: (r) => r.status >= 200 && r.status < 300 });
 }
 
 export function ping() {
@@ -162,4 +193,73 @@ export function notesCreate() {
 
 export function homeTimeline() {
   record("home-timeline", client.homeTimeline(token(), 20));
+}
+
+export function notifications() {
+  record("notifications", client.notifications(token(), 20));
+}
+
+// ノートと利用者は iteration ごとに順に替える。同じものだけを引くと、DB のキャッシュに
+// 載った 1 件を測ることになる
+export function notesShow() {
+  const id = noteIds[exec.scenario.iterationInTest % noteIds.length];
+  record("notes-show", client.notesShow(id, token()));
+}
+
+// 対象の利用者は、要求する利用者 (token()) の次の人にする。同じ人だと、本家の
+// users/notes の自分を見るときの経路 (isSelf) だけを測ることになる
+export function usersNotes() {
+  const i = exec.scenario.iterationInTest;
+  record("users-notes", client.usersNotes(userIds[(i + 1) % userIds.length], token(), 20));
+}
+
+// 同じ利用者は同じノートに 2 回リアクションできない。seed は note_ids の奇数の位置の
+// ノートにしか付けない (seed.py) ので、ここでは偶数の位置のノートを持ち主ごとに並べて
+// 使う。p 番目に使うノートは、持ち主 p % 人数 の slot 番目 (slot = floor(p / 人数)) で、
+// 持ち主を順に替えて 1 人に通知と同じ行の更新が集まらないようにする。1 つのノートに
+// 持ち主以外の全員が 1 回ずつ付けたら次のノートへ進む。
+//
+// ウォームアップは slot 0 から、計測は slot の半分の位置から使うので、両者の組は
+// 重ならない。50 人 × 50 ノート (偶数の位置は 1 人 25 個) では、ウォームアップが
+// 100 件 ÷ 49 で 3 個 (slot 0)、計測が毎秒 20 件・30 秒の 600 件 ÷ 49 で 13 個 (slot 12)。
+// --smoke の 10 人 × 10 ノート (1 人 5 個) では、どちらも 5 秒の 100 件 ÷ 9 で 12 個で、
+// ウォームアップが slot 0〜1、計測が slot 2〜3
+const reactionNotes = (() => {
+  if (ENDPOINT_SET !== "extra") return [];
+  const byOwner = tokens.map(() => []);
+  for (let k = 0; k < noteIds.length; k += 2) byOwner[noteOwners[k]].push(k);
+  return byOwner;
+})();
+const reactionSlots = Math.min(...reactionNotes.map((n) => n.length));
+const reactionStart = WARMUP ? 0 : Math.floor(reactionSlots / 2) * tokens.length;
+const reactionEnd = WARMUP ? Math.floor(reactionSlots / 2) * tokens.length : reactionSlots * tokens.length;
+
+function reactionPair(iteration) {
+  const others = tokens.length - 1;
+  const p = reactionStart + Math.floor(iteration / others);
+  if (p >= reactionEnd) {
+    // 例外で iteration を落とすだけでは、要求の数が減るだけで benchcompare が気付かない。
+    // k6 ごと止めて、その回を失敗にする (run.sh が「k6 exited with」として残す)
+    exec.test.abort(`reactions-create ran out of notes at iteration ${iteration}`);
+  }
+  const owner = p % tokens.length;
+  const note = reactionNotes[owner][Math.floor(p / tokens.length)];
+  const user = (owner + 1 + (iteration % others)) % tokens.length;
+  return { noteId: noteIds[note], token: tokens[user] };
+}
+
+export function reactionsCreate() {
+  const p = reactionPair(exec.scenario.iterationInTest);
+  record("reactions-create", client.createReaction(p.noteId, reaction, p.token));
+}
+
+// 1x1 の PNG。本家も Elythia も、公式の frontend と同じく force=true で上げるので、
+// 同じ内容でも毎回保存する (client.js の uploadFile)
+const png = encoding.b64decode(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HBgTAAAAC0lEQVR42mNk+M8AAAMCAQDJQ2ozAAAAAElFTkSuQmCC",
+);
+
+export function driveFilesCreate() {
+  const name = `bench-${exec.scenario.iterationInTest}.png`;
+  record("drive-files-create", client.uploadFile(name, png, "image/png", token()));
 }

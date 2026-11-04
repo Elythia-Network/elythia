@@ -136,6 +136,8 @@ services:
       SEED_STRICT: "1"
       # 本家の側の回でだけ run.sh が渡す (本家の利用者ごとの制限を基本ロールで決める)
       SEED_RATE_LIMIT_FACTOR: "${BENCH_SEED_RATE_LIMIT_FACTOR:-}"
+      # run.sh --endpoints extra のときだけ付ける (通知を溜める、#4014)
+      SEED_REACTIONS_PER_USER: "${BENCH_SEED_REACTIONS_PER_USER:-0}"
       OUTPUT_DIR: /seed
     volumes:
       - seed:/seed
