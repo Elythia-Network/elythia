@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # base と head の 2 つの commit を、同じスタックで交互に流して比べる (#3544)。
 #
-#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
-#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--project-name NAME]
+#   run.sh --base <ref> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--data small|medium] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]
+#   run.sh --upstream <version> --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--data small|medium] [--out DIR] [--smoke] [--project-name NAME]
 #
 # --upstream は base を本家 Misskey の公式 image (misskey/misskey:<版>) にする (#3654)。
 # 本家の側の回は compose.upstream.yml を重ね、app だけを本家に替える。seed・k6 の
@@ -14,6 +14,12 @@
 # 通知・ノートの表示・利用者のノート・リアクション・ドライブへのアップロードの 5 つ
 # (#4014)。extra の回だけ、seed が利用者ごとにリアクションを付けて通知を溜める。core の
 # seed のデータは変えない (週 1 回の比較の条件を変えないため)。
+#
+# --data は DB と Redis に入れておくデータを選ぶ (#4016)。small (既定) は今までの seed
+# (API で 50 人 × 50 ノート)、medium は中規模のサーバーを想定したデータ (3,000 人、
+# ノート 130 万件など。tests/bench/data/gen.py) を最初に 1 回作り、回ごとに SQL の COPY と
+# redis-cli --pipe で流し込む。両側に同じデータが入る (Elythia は本家の DB の形を保つ)。
+# --smoke と一緒に使うと、同じ形の小さなデータ (tiny) にする。
 #
 # --smoke は seed を 10 人 × 10 ノートにし、各エンドポイントを 5 秒だけ流す。手順が
 # 最後まで通るかを見るためのもので、結果を比較に使わない。
@@ -39,7 +45,7 @@ set -Eeuo pipefail
 trap 'exit 1' ERR
 
 usage() {
-  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]" >&2
+  echo "usage: $0 (--base <ref> | --upstream <version>) --head <ref> [--rounds N] [--scenario prod-like|unlimited] [--endpoints core|extra] [--data small|medium] [--out DIR] [--smoke] [--delivery] [--delivery-notes N] [--delivery-followers N] [--project-name NAME]" >&2
   exit 1
 }
 
@@ -47,7 +53,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 . "$here/run_helpers.sh"
 
-base_ref='' head_ref='' rounds=2 scenario=prod-like endpoints=core out='' smoke=0 upstream='' delivery=0
+base_ref='' head_ref='' rounds=2 scenario=prod-like endpoints=core data=small out='' smoke=0 upstream='' delivery=0
 project_name="mk-bench-ab-$(date -u +%s)-$$" delivery_notes=2 delivery_followers=2
 while [ $# -gt 0 ]; do
   case $1 in
@@ -57,6 +63,7 @@ while [ $# -gt 0 ]; do
     --rounds) rounds=$2; shift 2 ;;
     --scenario) scenario=$2; shift 2 ;;
     --endpoints) endpoints=$2; shift 2 ;;
+    --data) data=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --smoke) smoke=1; shift ;;
     --delivery) delivery=1; shift ;;
@@ -94,6 +101,8 @@ case $endpoints in
   extra) export BENCH_SEED_REACTIONS_PER_USER=10 ;;
   *) usage ;;
 esac
+case $data in small | medium) ;; *) usage ;; esac
+if [ "$data" != small ] && [ "$delivery" -eq 1 ]; then echo "run.sh: --delivery uses its own fixture; use it with --data small" >&2; exit 1; fi
 
 if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
   echo "run.sh: cgroup v2 is required (memory.peak and cpu.stat are read directly)" >&2
@@ -121,6 +130,7 @@ head_commit=$(git -C "$repo" rev-parse --verify "$head_ref^{commit}")
 
 # 結果の表と run.json に、どの組を流したかを残す
 if [ "$endpoints" != core ]; then scenario=$scenario-$endpoints; fi
+if [ "$data" != small ]; then scenario=$scenario-$data; fi
 out=${out:-$here/results/$(date -u +%Y%m%dT%H%M%SZ)-$scenario}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -208,6 +218,19 @@ fi
 "${compose[@]}" --profile tools build -q seed
 "${compose[@]}" --profile tools pull -q k6 postgres redis web
 
+# medium のデータは 1 回だけ作り、すべての回で同じものを流し込む。ローカルの利用者の
+# 鍵は 1 つを全員で共有する (秘密鍵をリポジトリに置かないよう、ここで作る)
+if [ "$data" != small ]; then
+  profile=$data
+  if [ "$smoke" -eq 1 ]; then profile=tiny; fi
+  log "generating the $profile data"
+  mkdir -p "$work/keys"
+  openssl genrsa -out "$work/keys/private.pem" 2048 2>/dev/null
+  openssl rsa -in "$work/keys/private.pem" -pubout -out "$work/keys/public.pem" 2>/dev/null
+  python3 -I "$repo/tests/bench/data/gen.py" --profile "$profile" --out "$work/data" --host web \
+    --public-key "$work/keys/public.pem" --private-key "$work/keys/private.pem" > "$out/data-stats.json"
+fi
+
 # ref は利用者が渡す文字列なので、JSON は python で組み立てる
 python3 - "$out/run.json" "$base_ref" "$base_commit" "$head_ref" "$head_commit" "$scenario" "$rounds" \
   "$delivery" "$delivery_notes" "$delivery_followers" \
@@ -262,14 +285,37 @@ measure() {
   "${compose[@]}" --profile tools down -v --remove-orphans >/dev/null 2>&1 || { echo "could not tear down the previous stack"; return 1; }
   BENCH_DISABLE_ENDPOINT_RATE_LIMITS=true "${compose[@]}" up -d --wait "${services[@]}" >/dev/null 2>&1 \
     || { echo "stack did not start"; return 1; }
-  # SEED_STRICT により、作れなかったものがあれば seed は非 0 で終わる
-  "${compose[@]}" --profile tools run --rm seed > "$dir/seed.log" 2>&1 || { echo "seed failed"; return 1; }
+  if [ "$data" = small ]; then
+    # SEED_STRICT により、作れなかったものがあれば seed は非 0 で終わる
+    "${compose[@]}" --profile tools run --rm seed > "$dir/seed.log" 2>&1 || { echo "seed failed"; return 1; }
+  else
+    # app が migration を流し終えた (healthy になった) ところで止め、裏で行を入れる。
+    # 動いている app の後ろで入れると、app のキャッシュとずれる
+    "${compose[@]}" stop app >/dev/null 2>&1 || { echo "app did not stop before the data load"; return 1; }
+    "$repo/tests/bench/data/load.sh" load "$work/data" "${compose[@]}" > "$dir/seed.log" 2>&1 || { echo "data load failed"; return 1; }
+    # 本家の利用者ごとの制限は基本ロールの rateLimitFactor で決まる (small では seed が
+    # API で決める)。unlimited のときだけ 0 にする。既定は 1 (制限あり)
+    if [ "$BENCH_SEED_RATE_LIMIT_FACTOR" = 0 ]; then
+      local updated
+      updated=$("${compose[@]}" exec -T postgres psql -U misskey -d misskey -v ON_ERROR_STOP=1 -qAtc \
+        "UPDATE meta SET policies = policies || '{\"rateLimitFactor\": 0}'::jsonb RETURNING 1" 2>> "$dir/seed.log") || updated=''
+      [ "$updated" = 1 ] || { echo "could not turn off the upstream rate limits"; return 1; }
+    fi
+    # k6 は seed の volume の seed-data.json を読む
+    "${compose[@]}" --profile tools run --rm --no-deps --entrypoint sh -v "$work/data:/data:ro" seed \
+      -c 'cp /data/seed-data.json /seed/seed-data.json' >> "$dir/seed.log" 2>&1 || { echo "could not copy seed-data.json"; return 1; }
+  fi
 
   "${compose[@]}" stop "${services[@]}" >/dev/null 2>&1 || { echo "stack did not stop"; return 1; }
   # 止めてから起動するので、どのコンテナも cgroup が新しくなる (prod-like では制限の
   # 設定が変わるので app は作り直される)
   BENCH_DISABLE_ENDPOINT_RATE_LIMITS=$disable_limits "${compose[@]}" up -d --wait "${services[@]}" >/dev/null 2>&1 \
     || { echo "stack did not restart"; return 1; }
+  # Redis のキーは、止めるときの保存で起動し直した後に残る。残っていなければ止める
+  if [ "$data" != small ]; then
+    "$repo/tests/bench/data/load.sh" check-redis "$work/data" "${compose[@]}" >> "$dir/seed.log" 2>&1 \
+      || { echo "the loaded Redis keys did not survive the restart"; return 1; }
+  fi
 
   "${compose[@]}" --profile tools run --rm -e SHORT=1 -e WARMUP=1 -e ENDPOINT_SET="$endpoints" k6 run -q --no-summary /scripts/ab/scenarios.js > "$dir/warmup.log" 2>&1 \
     || { echo "warmup failed"; return 1; }
