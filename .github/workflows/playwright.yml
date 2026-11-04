@@ -264,10 +264,10 @@ jobs:
 
       - name: Run Playwright
         # spec は 1 スタックあたり直列でしか回せない。共有の root アカウント
-        # を 299 ファイル中 179 がブラウザからサインインして使い (数え方は
+        # を 300 ファイル中 179 がブラウザからサインインして使い (数え方は
         # `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
-        # さらに 32 がサインインせず root の token で API を叩く
-        # (`root.json` を読むのが 211 で、その差分)。このアカウントと instance meta を全 spec が
+        # さらに 33 がサインインせず root の token で API を叩く
+        # (`root.json` を読むのが 212 で、その差分)。このアカウントと instance meta を全 spec が
         # 共有しており、Playwright のファイル並列だと `profile_iscat_toggle`
         # と `profile_isbot_toggle` が同じ alice を、`admin_branding_save` と
         # `about_page_render` が同じ meta を取り合う。並列度はスタックごと

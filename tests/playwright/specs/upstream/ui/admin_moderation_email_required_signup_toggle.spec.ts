@@ -26,7 +26,9 @@ import { clickSwitchByLabel } from '../../../fixtures/ui_click';
 
 // i18n.ts.emailRequiredForSignup の en-US 値。playwright.config.ts で
 // locale を en-US に固定しているのでこの表記で引ける。
-const EMAIL_REQUIRED_LABEL = 'Require email address for sign-up';
+// ラベルは「(Recommended)」まで含めた全体で引く (#4025。switch はラベルの完全一致で
+// 引く。以前の「含む」での一致は、この後ろの文字を気にせずに通っていた)
+const EMAIL_REQUIRED_LABEL = 'Require email address for sign-up (Recommended)';
 
 test.describe('UI: /admin/moderation emailRequiredForSignup toggle flow', () => {
   let root: RootFixture;

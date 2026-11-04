@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 299 ファイル
+`tests/playwright/specs/` にあり、現在 300 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -46,10 +46,10 @@ upstream と食い違っていても気付けない**。
 **4 シャード並列** (`--shard=i/4`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/4)` 〜 `4/4`。
 
-**1 スタックあたりは直列でしか回せない。** 299 spec のうち 179 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 300 spec のうち 179 が共有の root (alice) で
 **ブラウザからサインイン**し (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
 `uiSigninAsRoot` helper が 178 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 32 がサインインせず root の token で API を叩く (`root.json` を読むのが 211 で、その差分)。
+さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 212 で、その差分)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
@@ -188,6 +188,28 @@ issue #2788 の主目的 (shell に hash 無しの inline script が入る) は�
 
 vite の hash class を selector に使わない (`[class*="_button_"]` 等)。production
 ビルドで hash が変わると落ちる。`data-testid` か role / text で取る。
+
+**ルートを開いたら、not-found のページでないことを確かめる。** router は見つからない
+パスを not-found のページに回すので、status (常に 200) やナビの有無では区別できない。
+`fixtures/ui_route.ts` の `expectRoutedPage` を使う (起動画面が消え、通信が止むのを
+待ってから、not-found のページの title かどうかで判定する。title の形だけを待つと、サーバーが
+title を描くルート (`/@:acct`、`/notes/:id` など) では mount の前に通ってしまう)。
+`page.goto` で開いた直後に呼ぶ (SPA の中の遷移では、前のページの状態が残る)。#4025 までは
+18 パスが存在しないパスを開いて緑になっていた。判定そのものは
+`specs/elythia/ui/route_not_found_guard.spec.ts` が、存在しないパスで落ち・実在するパスで
+通ることを確かめている。
+
+**要素は文字で、完全一致かつちょうど 1 つで取る。** スイッチは `clickSwitchByLabel`
+(`fixtures/ui_click.ts`)、MkFolder の中の要素は `openFolderByLabel` / `fillFolderTextarea` /
+`clickFolderButton` (`fixtures/ui_folder.ts`)、MkInput は `fillInputByLabel`
+(`fixtures/ui_input.ts`)。「含む」で最初のものを取ると、「Prohibited words」と
+「Prohibited words for usernames」のように前方が同じものを取り違える。ラベルは画面に
+出る文字の全体を渡す (`(Recommended)` のような後ろの文字も含める)。
+
+**保存の spec は、値を変えて、読み直して確かめる。** 保存の応答が返るのを待つだけだと、
+値を変えずに押しても、別の項目を書いても緑になる。`meta` を書き換える spec は、始める
+前の値を覚えておき `finally` で戻す (他の spec と共有しているため。空の値に戻すと既定値を
+消す)。
 
 **同種の要素が複数あるとき、DOM 上の位置（先頭・末尾）で取らない。**
 `document.querySelector('textarea')` や `querySelectorAll(...)[length - 1]` は、

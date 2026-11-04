@@ -11,12 +11,15 @@
 // は別 spec (= signin / post_note / authenticated_routes 等) に集約し、本 spec
 // は wide-coverage の route mounts smoke として位置付ける。
 //
-// 完了判定: navbar の data-cy-open-post-form (= authenticated home) が visible。
-// SPA hydration 完了 + auth state 維持 を 1 condition で確認できる。
+// 完了判定: navbar の open-post-form (= authenticated home) が visible で、かつ
+// not-found のページでないこと (#4025)。以前は navbar だけを見ていて、存在しない
+// 11 パス (/timeline/home、/settings/general、/games/reversi など) を開いても
+// not-found のページで緑になっていた。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { expectRoutedPage } from '../../../fixtures/ui_route';
 
 interface RouteCase {
   path: string;
@@ -24,10 +27,8 @@ interface RouteCase {
 }
 
 const AUTH_ROUTES: RouteCase[] = [
-  // timeline 系
-  { path: '/timeline/home', label: 'timeline/home' },
-  { path: '/timeline/global', label: 'timeline/global' },
-  { path: '/timeline/hybrid', label: 'timeline/hybrid' },
+  // timeline (home / local / global などは画面の中のタブで切り替える。URL は 1 つ)
+  { path: '/timeline', label: 'timeline' },
   // discovery / explore
   // /explore は単体 route。tab は initialTab prop に hash 経由で渡されるが、
   // 連続 page.goto で hash だけ変えると Playwright は null response を返す
@@ -43,18 +44,18 @@ const AUTH_ROUTES: RouteCase[] = [
   { path: '/my/drive', label: 'my/drive' },
   // settings
   { path: '/settings', label: 'settings (root)' },
-  { path: '/settings/general', label: 'settings/general' },
+  { path: '/settings/preferences', label: 'settings/preferences' },
   { path: '/settings/privacy', label: 'settings/privacy' },
+  // 二要素認証はセキュリティの設定の中にある
   { path: '/settings/security', label: 'settings/security' },
-  { path: '/settings/2fa', label: 'settings/2fa' },
-  { path: '/settings/account', label: 'settings/account' },
-  { path: '/settings/api', label: 'settings/api' },
-  { path: '/settings/import-export', label: 'settings/import-export' },
-  { path: '/settings/word-mute', label: 'settings/word-mute' },
-  { path: '/settings/instance-mute', label: 'settings/instance-mute' },
+  { path: '/settings/accounts', label: 'settings/accounts' },
+  { path: '/settings/apps', label: 'settings/apps' },
+  { path: '/settings/account-data', label: 'settings/account-data (import / export)' },
+  // ワードミュートとインスタンスミュートは mute-block の中にある
+  { path: '/settings/mute-block', label: 'settings/mute-block' },
   // games / fun
   { path: '/games', label: 'games' },
-  { path: '/games/reversi', label: 'games/reversi' },
+  { path: '/reversi', label: 'reversi' },
   // misc
   { path: '/announcements', label: 'announcements' },
   { path: '/scratchpad', label: 'scratchpad' },
@@ -79,9 +80,10 @@ test.describe('UI: authenticated SPA route matrix', () => {
     root = JSON.parse(readFileSync('.auth/root.json', 'utf-8'));
   });
 
-  // 36 route × signin の全 chain が serial 実行される想定。default 30s では
+  // 約 30 route × signin の全 chain が serial 実行される想定。default 30s では
   // 足りないので spec 単位で延長する。各 case の navigation は最大 15-20s。
-  test.setTimeout(180_000);
+  // #4025 で各 route に起動画面と通信の静止の待ちが加わったので、180s から延ばした。
+  test.setTimeout(300_000);
 
   // signin を全 case で 1 回だけ走らせて時間効率を取る。各 route navigation
   // は test.step() で wrap して Playwright の HTML report 上で個別 step
@@ -102,6 +104,7 @@ test.describe('UI: authenticated SPA route matrix', () => {
           page.locator('[data-testid="open-post-form"]').first(),
           `${route.label} should hydrate with authenticated navbar`,
         ).toBeVisible({ timeout: 20_000 });
+        await expectRoutedPage(page, route.path);
       });
     }
   });

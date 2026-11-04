@@ -3,19 +3,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /admin/moderation の "Prohibited words" MkFolder を expand → MkTextarea
-// を編集 → primary Save click → /api/admin/update-meta が round-trip
-// する write-flow spec。
+// /admin/moderation の「Prohibited words」のフォルダを開き、textarea を書き換えて保存すると、
+// admin/meta の prohibitedWords が変わることを確かめる。
 //
-// admin_moderation_preserved_usernames_save の sister。同 page の
-// 7 folder のうち別 section (prohibitedWords) で folder + textarea +
-// save pattern が機能することを担保する。
+// textarea と「Save」は、フォルダの見出しで決めたフォルダの中から取る (#4025)。
+// 以前は画面の「1 つ目の textarea」を取り、保存の応答を待つだけで値を見ていなかった。
+// 始める前の値を覚えておき、終わったら戻す (他の spec と meta を共有するため)。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { clickWhenReady } from '../../../fixtures/ui_click';
+import { clickFolderButton, fillFolderTextarea, openFolderByLabel } from '../../../fixtures/ui_folder';
+
+const FOLDER = 'Prohibited words';
 
 test.describe('UI: /admin/moderation prohibitedWords save flow', () => {
   let root: RootFixture;
@@ -24,79 +25,38 @@ test.describe('UI: /admin/moderation prohibitedWords save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('expand Prohibited words folder → edit textarea → Save → /api/admin/update-meta', async ({
-    page,
-    baseURL,
-    request,
-  }) => {
-    // setup: 既知 state (空 list) に reset。
-    await callApi(request, 'admin/update-meta', {
-      i: root.token,
-      prohibitedWords: [],
-    });
+  test('edit the Prohibited words folder → Save → admin/meta has the new list', async ({ page, baseURL, request }) => {
+    const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
+    // 読めなかったまま進むと、元の値が undefined になり、片付けが何も戻さない
+    expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);
+    const before = await beforeResp.json();
+    const original: string[] = before.prohibitedWords;
+    expect(Array.isArray(original)).toBe(true);
+
+    const stamp = Date.now().toString().slice(-9);
+    const lines = [`bad-word-${stamp}`, 'offensive', 'spam'];
 
     try {
       await uiSigninAsRoot(page, baseURL, root);
-      await page.goto(`${baseURL}/admin/moderation`, {
-        waitUntil: 'domcontentloaded',
-      });
+      await page.goto(`${baseURL}/admin/moderation`, { waitUntil: 'domcontentloaded' });
 
-      await page.waitForFunction(
-        () => document.querySelectorAll('[data-testid="folder-header"]').length >= 5,
-        { timeout: 20_000 },
-      );
-
-      // "Prohibited words" folder を expand。"Prohibited words" は
-      // "Prohibited words for username" と prefix が被るので、textContent が
-      // "Prohibited words" で始まり "username" を含まないものを選ぶ。
-      await clickWhenReady(page, '「Prohibited words」の folder-header', () => {
-        const headers = Array.from(
-          document.querySelectorAll('[data-testid="folder-header"]'),
-        ) as HTMLElement[];
-        const target = headers.find((h) => {
-          const t = (h.textContent ?? '').trim();
-          return t.startsWith('Prohibited words') && !t.toLowerCase().includes('username');
-        });
-        return target;
-      });
-
-      await page.waitForFunction(
-        () => document.querySelectorAll('textarea').length >= 1,
-        { timeout: 10_000 },
-      );
-
-      const newValue = `bad-word-${Date.now()}\noffensive\nspam`;
-      await page.evaluate((v) => {
-        const tas = Array.from(document.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-        const target = tas[0];
-        if (!target) return;
-        target.focus();
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLTextAreaElement.prototype,
-          'value',
-        )?.set;
-        setter?.call(target, v);
-        target.dispatchEvent(new Event('input', { bubbles: true }));
-      }, newValue);
+      await openFolderByLabel(page, FOLDER, { timeout: 30_000 });
+      await fillFolderTextarea(page, FOLDER, lines.join('\n'));
 
       const updateResp = page.waitForResponse(
         (r) => r.url().includes('/api/admin/update-meta') && r.status() < 300,
         { timeout: 15_000 },
       );
-      await clickWhenReady(page, '「Save」のボタン', () =>
-        Array.from(document.querySelectorAll('button')).find(
-          (b) => !b.disabled && (b.textContent ?? '').includes('Save'),
-        ),
-      );
+      await clickFolderButton(page, FOLDER, 'Save');
       await updateResp;
+
+      // 応答を待つだけでなく、保存された値を読み直す
+      const after = await (await callApi(request, 'admin/meta', { i: root.token })).json();
+      expect(after.prohibitedWords).toEqual(lines);
     } finally {
-      // cleanup: prohibitedWords が残ると以降の note 投稿 spec が "Note
-      // contains prohibited words" で fail する isolation 破壊を引き起こす
-      // ため、必ず空に戻す。pass / fail どちらでも cleanup を実行。
-      await callApi(request, 'admin/update-meta', {
-        i: root.token,
-        prohibitedWords: [],
-      });
+      const restored = await callApi(request, 'admin/update-meta', { i: root.token, prohibitedWords: original });
+      // 戻せなかったことは記録するが、元の失敗は隠さない (soft)
+      expect.soft(restored.ok(), '元の値に戻せなかった').toBe(true);
     }
   });
 });

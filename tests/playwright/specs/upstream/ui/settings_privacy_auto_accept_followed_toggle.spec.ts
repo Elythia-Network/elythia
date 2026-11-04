@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /settings/privacy で autoAcceptFollowed switch (2nd) を click → /api/i/update
-// が round-trip する write-flow spec。
+// /settings/privacy の autoAcceptFollowed のスイッチを押すと、/api/i/update で保存され、
+// 読み直しても変わっていることを確かめる。
 //
-// privacy.vue の MkSwitch 順は isLocked / autoAcceptFollowed / publicReactions
-// / hideOnlineStatus / noCrawle / preventAiLearning / isExplorable。本 spec は
-// 2 番目の switch を click することで、最初の switch だけ動作する偽陽性を排除。
+// スイッチはラベルの文字で取る (#4025)。以前は「n 番目の checkbox」で取っていて、
+// 項目が 1 つ増えると別のスイッチを押していた。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { clickWhenReady } from '../../../fixtures/ui_click';
+import { clickSwitchByLabel } from '../../../fixtures/ui_click';
+
+const LABEL = "Automatically approve follow requests from users you're following";
 
 test.describe('UI: /settings/privacy autoAcceptFollowed toggle flow', () => {
   let root: RootFixture;
@@ -23,41 +24,31 @@ test.describe('UI: /settings/privacy autoAcceptFollowed toggle flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('toggle autoAcceptFollowed switch (2nd) → /api/i/update round-trips', async ({
-    page,
-    baseURL,
-    request,
-  }) => {
-    // 値 strict assertion のため初期 state を false (= DB default) に reset。
-    // #972 (PR #973) で i/update が autoAcceptFollowed を accept するように
-    // 修正されたので strict 化が機能する。
+  test('toggle the autoAcceptFollowed switch → saved and read back', async ({ page, baseURL, request }) => {
+    // 押した後の値を決め打ちで確かめるため、既知の値 (false) から始める
     await callApi(request, 'i/update', { i: root.token, autoAcceptFollowed: false });
 
-    await uiSigninAsRoot(page, baseURL, root);
-    await page.goto(`${baseURL}/settings/privacy`, { waitUntil: 'domcontentloaded' });
+    try {
+      await uiSigninAsRoot(page, baseURL, root);
+      await page.goto(`${baseURL}/settings/privacy`, { waitUntil: 'domcontentloaded' });
 
-    await page.waitForFunction(
-      () => document.querySelectorAll('input[type="checkbox"]').length >= 7,
-      { timeout: 20_000 },
-    );
+      const updateResp = page.waitForResponse(
+        (r) => r.url().includes('/api/i/update') && r.status() === 200,
+        { timeout: 15_000 },
+      );
+      await clickSwitchByLabel(page, LABEL);
+      const body = await (await updateResp).json();
+      // i/update は MeDetailed の形を返す (#968)
+      expect(body.username).toBe(root.username);
+      expect(body.autoAcceptFollowed).toBe(true);
 
-    const updateResp = page.waitForResponse(
-      (r) => r.url().includes('/api/i/update') && r.status() === 200,
-      { timeout: 15_000 },
-    );
-    await clickWhenReady(page, '2 番目の checkbox', () => {
-      const cbs = Array.from(
-        document.querySelectorAll('input[type="checkbox"]'),
-      ) as HTMLInputElement[];
-      // index 1 = 2 番目 = autoAcceptFollowed
-      return cbs[1];
-    });
-    const update = await updateResp;
-    const body = await update.json();
-    expect(body.id).toBeTruthy();
-    // beforeAll の API reset で false から始まるので、click 後は必ず true
-    // (#972 / PR #973 で i/update accept + #969 PackMeDetailed で response
-    // 含む、両 layer 揃って strict round-trip が機能)。
-    expect(body.autoAcceptFollowed).toBe(true);
+      // 応答だけでなく、保存された値を読み直す
+      const me = await (await callApi(request, 'i', { i: root.token })).json();
+      expect(me.autoAcceptFollowed).toBe(true);
+    } finally {
+      // root は他の spec と共有なので、押す前の値に戻す
+      const restored = await callApi(request, 'i/update', { i: root.token, autoAcceptFollowed: false });
+      expect.soft(restored.ok(), '元の値に戻せなかった').toBe(true);
+    }
   });
 });

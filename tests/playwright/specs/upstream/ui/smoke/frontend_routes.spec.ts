@@ -16,11 +16,14 @@
 // - SPA は SSR を持たないため最初は loader だけが render され、後続で Vue
 //   が mount される。ここでは waitUntil: 'domcontentloaded' で loader が
 //   見える状態までで OK
-// - 未知 route も SPA fallback で index.html が返る (= status 200)。これは
-//   Vue Router 側でまた別の "not found" 表示にする想定なので status は 200
-//   でも問題なし
+// - 未知 route も SPA fallback で index.html が返る (= status 200)。router が
+//   not-found のページを出すので、status だけでは区別できない。
+//   not-found のページでないことを確かめる (#4025。以前は存在しない /login、
+//   /signup、/explore/featured、/featured を開いて緑になっていた。サインインと
+//   登録は `/` のダイアログで行う)
 
 import { expect, test } from '@playwright/test';
+import { expectRoutedPage } from '../../../../fixtures/ui_route';
 
 const PUBLIC_ROUTES = [
   { path: '/', label: 'home (logged-out fallback)' },
@@ -28,10 +31,6 @@ const PUBLIC_ROUTES = [
   { path: '/about-misskey', label: 'about-misskey (intro)' },
   { path: '/contact', label: 'contact' },
   { path: '/explore', label: 'explore' },
-  { path: '/explore/featured', label: 'explore/featured' },
-  { path: '/featured', label: 'featured timeline' },
-  { path: '/login', label: 'login form' },
-  { path: '/signup', label: 'signup form' },
 ];
 
 test.describe('smoke: SPA public route navigation', () => {
@@ -64,6 +63,8 @@ test.describe('smoke: SPA public route navigation', () => {
       // body 内 DOM が hydrate 済 content を含むことを再確認。
       const bodyHTML = await page.evaluate(() => document.body.innerHTML);
       expect(bodyHTML.length, `${path} body should be > 50 chars (hydrated)`).toBeGreaterThan(50);
+
+      await expectRoutedPage(page, path);
     });
   }
 });

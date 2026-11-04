@@ -3,20 +3,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /settings/privacy で isExplorable switch を click → /api/i/update が
-// {isExplorable: ...} で round-trip する **真の write-flow** spec。
+// /settings/privacy の isExplorable のスイッチを押すと、/api/i/update で保存され、
+// 読み直しても変わっていることを確かめる。
 //
-// privacy.vue では isLocked / autoAcceptFollowed / publicReactions /
-// hideOnlineStatus / noCrawle / preventAiLearning / isExplorable の順で
-// MkSwitch が並んでいる (line 14, 22, 29, 48, 55, 62, 69)。本 spec は
-// 7 番目の switch (isExplorable) を click することで、最初の switch だけ
-// が動作する偽陽性を排除する。
+// スイッチはラベルの文字で取る (#4025)。以前は「n 番目の checkbox」で取っていて、
+// 項目が 1 つ増えると別のスイッチを押していた。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { clickWhenReady } from '../../../fixtures/ui_click';
+import { clickSwitchByLabel } from '../../../fixtures/ui_click';
+
+const LABEL = 'Make account visible in "Explore"';
 
 test.describe('UI: /settings/privacy isExplorable toggle flow', () => {
   let root: RootFixture;
@@ -25,43 +24,31 @@ test.describe('UI: /settings/privacy isExplorable toggle flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('toggle isExplorable switch (7th) → /api/i/update round-trips', async ({
-    page,
-    baseURL,
-    request,
-  }) => {
-    // 値 strict assertion を効かせるため、初期 state を true (= DB default)
-    // に reset。prior run 累積で false のまま残っていると click で true に
-    // 反転して期待と逆になるので、明示的に既知 state から始める。
+  test('toggle the isExplorable switch → saved and read back', async ({ page, baseURL, request }) => {
+    // 押した後の値を決め打ちで確かめるため、既知の値 (true) から始める
     await callApi(request, 'i/update', { i: root.token, isExplorable: true });
 
-    await uiSigninAsRoot(page, baseURL, root);
-    await page.goto(`${baseURL}/settings/privacy`, { waitUntil: 'domcontentloaded' });
+    try {
+      await uiSigninAsRoot(page, baseURL, root);
+      await page.goto(`${baseURL}/settings/privacy`, { waitUntil: 'domcontentloaded' });
 
-    // 7 個以上の checkbox が hydrate するまで待つ
-    await page.waitForFunction(
-      () => document.querySelectorAll('input[type="checkbox"]').length >= 7,
-      { timeout: 20_000 },
-    );
+      const updateResp = page.waitForResponse(
+        (r) => r.url().includes('/api/i/update') && r.status() === 200,
+        { timeout: 15_000 },
+      );
+      await clickSwitchByLabel(page, LABEL);
+      const body = await (await updateResp).json();
+      // i/update は MeDetailed の形を返す (#968)
+      expect(body.username).toBe(root.username);
+      expect(body.isExplorable).toBe(false);
 
-    const updateResp = page.waitForResponse(
-      (r) => r.url().includes('/api/i/update') && r.status() === 200,
-      { timeout: 15_000 },
-    );
-    await clickWhenReady(page, '7 番目の checkbox', () => {
-      // 7 番目 (index 6) = isExplorable switch (privacy.vue:69)
-      const cbs = Array.from(
-        document.querySelectorAll('input[type="checkbox"]'),
-      ) as HTMLInputElement[];
-      return cbs[6];
-    });
-    // beforeAll の API reset で isExplorable=true から始まるので、click
-    // 後は必ず false が返る strict assertion。i/update が MeDetailed
-    // shape (#968 / PR #969) を返すことも併せて verify。
-    const update = await updateResp;
-    const body = await update.json();
-    expect(body.id).toBeTruthy();
-    expect(body.username).toBe(root.username);
-    expect(body.isExplorable).toBe(false);
+      // 応答だけでなく、保存された値を読み直す
+      const me = await (await callApi(request, 'i', { i: root.token })).json();
+      expect(me.isExplorable).toBe(false);
+    } finally {
+      // root は他の spec と共有なので、押す前の値に戻す
+      const restored = await callApi(request, 'i/update', { i: root.token, isExplorable: true });
+      expect.soft(restored.ok(), '元の値に戻せなかった').toBe(true);
+    }
   });
 });

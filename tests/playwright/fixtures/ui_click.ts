@@ -173,31 +173,42 @@ export function clickButtonWithIcon(
 }
 
 /**
- * Clicks the `MkSwitch` whose label contains `label`.
+ * Toggles the `MkSwitch` whose label is exactly `label`.
  *
- * MkSwitch renders its `<input type="checkbox">` and its label inside the same
- * root element, so the input's parent carries the label text.
+ * Fails (times out) unless exactly one switch on the page has that label, so a
+ * renamed or duplicated label is caught instead of toggling some other switch.
  */
 // **index で switch を引かない。** 画面に switch が 1 つ足されるだけでずれる。
 // `admin_moderation_email_required_signup_toggle` は独自の switch (#2570) が
 // 2 番目に入ったせいで別の設定を切り替えており、それでも spec は緑だった
 // (#2620)。ラベルで引けばこの壊れ方はしない。
 //
-// ラベルが同じ switch が同居する画面 (admin/security の "Enable" など) では
-// 引けないので、そこは folder などに scope した finder を clickWhenReady へ
-// 直接渡すこと。
-export function clickSwitchByLabel(
-  page: Page,
-  label: string,
-  options?: ClickOptions,
-): Promise<void> {
+// ラベルは完全一致で、ちょうど 1 つでなければ落とす (#4025。以前は「含む」で
+// 最初のものを押していて、前方が同じ別のラベルを押しえた)。ラベルが同じ
+// switch が同居する画面 (admin/security の "Enable" など) では引けないので、
+// そこは folder などに scope した finder を clickWhenReady へ直接渡すこと。
+export function clickSwitchByLabel(page: Page, label: string, options?: ClickOptions): Promise<void> {
   return clickWhenReady(
     page,
-    `「${label}」のスイッチ`,
-    (l: string) =>
-      Array.from(document.querySelectorAll('input[type="checkbox"]')).find((cb) =>
-        (cb.parentElement?.textContent ?? '').includes(l),
-      ),
+    `ラベルが「${label}」のスイッチ (ちょうど 1 つ)`,
+    (l: string) => {
+      // MkSwitch は checkbox と同じ親の中にラベルの span を持つ。checkbox に
+      // ラベルが結び付いていないので、ラベルの文字で探す
+      const roots = Array.from(document.querySelectorAll('input[type="checkbox"]'))
+        .map((input) => input.parentElement)
+        .filter((root): root is HTMLElement => root !== null);
+      const matches = (root: HTMLElement) =>
+        Array.from(root.querySelectorAll('span')).filter((s) => (s.textContent ?? '').trim() === l);
+      const hits = roots.filter((root) => matches(root).length > 0);
+      if (hits.length !== 1) return null;
+      // 無効なスイッチはラベルを押しても toggle が何もしない。checkbox の方を返し、
+      // clickWhenReady の disabled の検査で落とす (黙って押したことにしない)
+      const input = hits[0].querySelector('input[type="checkbox"]');
+      if (input instanceof HTMLInputElement && input.disabled) return input;
+      // 外側の .label の span も同じ文字を持つが、toggle は内側の span に付いている。
+      // いちばん内側 (文書順で最後) を押し、click を toggle まで浮かび上がらせる
+      return matches(hits[0]).pop() ?? null;
+    },
     label,
     options,
   );

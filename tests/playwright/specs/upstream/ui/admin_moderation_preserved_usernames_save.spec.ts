@@ -3,21 +3,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /admin/moderation の "Preserved usernames" MkFolder を expand →
-// MkTextarea を編集 → Save click → /api/admin/update-meta が round-trip
-// する write-flow spec。
+// /admin/moderation の「Reserved usernames」のフォルダを開き、textarea を書き換えて保存すると、
+// admin/meta の preservedUsernames が変わることを確かめる。
 //
-// admin/moderation.vue:40-50 の同 folder は MkTextarea + Save MkButton primary
-// の組。同 page には preservedUsernames / sensitiveWords / prohibitedWords
-// 等 7 つの folder が並ぶが、それぞれ 1 textarea + 1 Save なので folder
-// 単位で expand すれば識別可能。本 spec は preservedUsernames を代表として
-// 取り、folder + textarea + save pattern を担保する。
+// textarea と「Save」は、フォルダの見出しで決めたフォルダの中から取る (#4025)。
+// 以前は画面の「1 つ目の textarea」を取り、保存の応答を待つだけで値を見ていなかった。
+// 始める前の値を覚えておき、終わったら戻す (他の spec と meta を共有するため)。
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { clickWhenReady } from '../../../fixtures/ui_click';
+import { clickFolderButton, fillFolderTextarea, openFolderByLabel } from '../../../fixtures/ui_folder';
+
+const FOLDER = 'Reserved usernames';
 
 test.describe('UI: /admin/moderation preservedUsernames save flow', () => {
   let root: RootFixture;
@@ -26,88 +25,38 @@ test.describe('UI: /admin/moderation preservedUsernames save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('expand folder → edit textarea → Save → /api/admin/update-meta', async ({
-    page,
-    baseURL,
-    request,
-  }) => {
-    // setup: 既知 state (空 list) に reset。
-    await callApi(request, 'admin/update-meta', {
-      i: root.token,
-      preservedUsernames: [],
-    });
+  test('edit the Reserved usernames folder → Save → admin/meta has the new list', async ({ page, baseURL, request }) => {
+    const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
+    // 読めなかったまま進むと、元の値が undefined になり、片付けが何も戻さない
+    expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);
+    const before = await beforeResp.json();
+    const original: string[] = before.preservedUsernames;
+    expect(Array.isArray(original)).toBe(true);
+
+    const stamp = Date.now().toString().slice(-9);
+    const lines = [`pwreserved${stamp}`, 'pwadmin', 'pwsystem'];
 
     try {
       await uiSigninAsRoot(page, baseURL, root);
-      await page.goto(`${baseURL}/admin/moderation`, {
-        waitUntil: 'domcontentloaded',
-      });
+      await page.goto(`${baseURL}/admin/moderation`, { waitUntil: 'domcontentloaded' });
 
-      // count 条件 (>= 5) ではなく target text を含む header の存在を直接
-      // 待つ。folder hydrate 遅延で 60s test timeout する flake を回避。
-      // 詳細は admin_moderation_blocked_hosts_save の同コメント参照。
-      await page.waitForFunction(
-        () => {
-          const headers = Array.from(
-            document.querySelectorAll('[data-testid="folder-header"]'),
-          ) as HTMLElement[];
-          return headers.some((h) =>
-            (h.textContent ?? '').includes('Reserved usernames'),
-          );
-        },
-        { timeout: 30_000 },
-      );
+      await openFolderByLabel(page, FOLDER, { timeout: 30_000 });
+      await fillFolderTextarea(page, FOLDER, lines.join('\n'));
 
-      // "Preserved usernames" folder を expand
-      await clickWhenReady(page, '「Reserved usernames」の folder-header', () => {
-        const headers = Array.from(
-          document.querySelectorAll('[data-testid="folder-header"]'),
-        ) as HTMLElement[];
-        const target = headers.find((h) =>
-          (h.textContent ?? '').includes('Reserved usernames'),
-        );
-        return target;
-      });
-
-      // textarea が DOM に出るまで待つ
-      await page.waitForFunction(
-        () => document.querySelectorAll('textarea').length >= 1,
-        { timeout: 10_000 },
-      );
-
-      // textarea の値を変更 (= modified=true → Save が effective)
-      const newValue = `pwadmin\nadmin\nroot\nsystem\n${Date.now()}`;
-      await page.evaluate((v) => {
-        const tas = Array.from(document.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-        const target = tas[0];
-        if (!target) return;
-        target.focus();
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLTextAreaElement.prototype,
-          'value',
-        )?.set;
-        setter?.call(target, v);
-        target.dispatchEvent(new Event('input', { bubbles: true }));
-      }, newValue);
-
-      // Save button click → admin/update-meta
       const updateResp = page.waitForResponse(
         (r) => r.url().includes('/api/admin/update-meta') && r.status() < 300,
         { timeout: 15_000 },
       );
-      await clickWhenReady(page, '「Save」のボタン', () =>
-        Array.from(document.querySelectorAll('button')).find(
-          (b) => !b.disabled && (b.textContent ?? '').includes('Save'),
-        ),
-      );
+      await clickFolderButton(page, FOLDER, 'Save');
       await updateResp;
+
+      // 応答を待つだけでなく、保存された値を読み直す
+      const after = await (await callApi(request, 'admin/meta', { i: root.token })).json();
+      expect(after.preservedUsernames).toEqual(lines);
     } finally {
-      // cleanup: preservedUsernames に "admin"/"root" 等が残ると以降の
-      // signup spec で偶然 collision して失敗する可能性があるため空に戻す。
-      await callApi(request, 'admin/update-meta', {
-        i: root.token,
-        preservedUsernames: [],
-      });
+      const restored = await callApi(request, 'admin/update-meta', { i: root.token, preservedUsernames: original });
+      // 戻せなかったことは記録するが、元の失敗は隠さない (soft)
+      expect.soft(restored.ok(), '元の値に戻せなかった').toBe(true);
     }
   });
 });

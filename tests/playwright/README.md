@@ -145,11 +145,11 @@ tests/playwright/
 
 ## 並列度
 
-**1 スタックに対しては直列で回すしかない** (`workers: 1`)。299 spec のうち 179 が
+**1 スタックに対しては直列で回すしかない** (`workers: 1`)。300 spec のうち 179 が
 共有の root (alice) で**ブラウザからサインイン**し (数え方は
 `grep -rlE 'uiSigninAsRoot|signin-username' specs --include='*.spec.ts' | wc -l`。
 helper 経由が 178 で、`upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 32 がサインインせず root の token で API を叩く (`root.json` を読むのが 211 で、
+さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 212 で、
 その差分)。instance meta は全 spec が共有する。Playwright は
 ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
 `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
