@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture } from '../../../fixtures/ui_auth';
-import { expectRoutedPage } from '../../../fixtures/ui_route';
+import { expectRoutedPage, gotoRoute } from '../../../fixtures/ui_route';
 
 test.describe('UI: not-found guard for route specs', () => {
   test.setTimeout(60_000);
@@ -29,6 +29,22 @@ test.describe('UI: not-found guard for route specs', () => {
   test('/admin while signed out fails expectRoutedPage', async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
     await expect(expectRoutedPage(page, '/admin')).rejects.toThrow(/not-found/);
+  });
+
+  // ルートを開く spec は gotoRoute を通す。gotoRoute が判定を呼び忘れると、
+  // 上の 2 本は緑のまま、ルートの spec だけが素通りになる (#4026)
+  test('a path with no route fails gotoRoute', async ({ page, baseURL }) => {
+    await expect(gotoRoute(page, baseURL!, '/no-such-route-4026')).rejects.toThrow(/not-found/);
+  });
+
+  // SPA の外のパス (ドライブのファイル配信) は 404 を返す。gotoRoute が status を
+  // 見なくなると、ここが通ってしまう
+  test('a path served with a non-200 status fails gotoRoute', async ({ page, baseURL }) => {
+    await expect(gotoRoute(page, baseURL!, '/files/no-such-file-4026')).rejects.toThrow(/should return 200/);
+  });
+
+  test('a real route passes gotoRoute', async ({ page, baseURL }) => {
+    await gotoRoute(page, baseURL!, '/about');
   });
 
   test('a real route passes expectRoutedPage', async ({ page, baseURL }) => {

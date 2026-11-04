@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { expectRoutedPage } from '../../../fixtures/ui_route';
+import { gotoRoute } from '../../../fixtures/ui_route';
 
 interface RouteCase {
   path: string;
@@ -94,9 +94,7 @@ test.describe('UI: authenticated SPA route matrix', () => {
 
     for (const route of AUTH_ROUTES) {
       await test.step(`navigate ${route.path} (${route.label})`, async () => {
-        const resp = await page.goto(`${baseURL}${route.path}`, { waitUntil: 'domcontentloaded' });
-        expect(resp, `goto ${route.path} returned null response`).not.toBeNull();
-        expect(resp!.status(), `${route.label} should return 200 (SPA fallback)`).toBe(200);
+        await gotoRoute(page, baseURL!, route.path);
 
         // hydration 完了確認: navbar の post button が visible (= authenticated
         // state 維持 + Vue mount 成功)
@@ -104,7 +102,6 @@ test.describe('UI: authenticated SPA route matrix', () => {
           page.locator('[data-testid="open-post-form"]').first(),
           `${route.label} should hydrate with authenticated navbar`,
         ).toBeVisible({ timeout: 20_000 });
-        await expectRoutedPage(page, route.path);
       });
     }
   });

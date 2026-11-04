@@ -71,13 +71,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
+      sha: ${{ steps.head.outputs.sha }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      # ここで解決した commit を、すべての spec の job が checkout する (#4026)。
+      # shard の割り振りは spec の一覧と所要時間の記録から決まるので、shard ごとに
+      # 違う commit を見ると、spec が漏れたり 2 回流れたりする。`workflow_dispatch`
+      # では `inputs.ref` にブランチ名 (既定は develop) が来るので、各 job が
+      # 別々に解決すると、待ち時間の間に進んだブランチで食い違う。
+      - id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # shard の割り振り (tests/playwright/shard-plan.mjs) のテスト。所要時間の
+      # 記録に、消えた spec が残っていないことも見る (#4026)。spec の job より
+      # 先に落とし、割り振りが壊れたまま全 shard を回さない。
+      - name: Test shard plan
+        run: node --test tests/playwright/shard-plan.test.mjs
+
       - id: pick
         shell: bash
         env:
           # シャード数。spec は 1 スタックあたり直列でしか回せない
           # (共有 root アカウント / instance meta のため) ので、並列度は
-          # 「スタックごと分ける」= シャード数でしか稼げない。
+          # 「スタックごと分ける」= シャード数でしか稼げない。shard への
+          # 割り振りは所要時間で均す (PLAYWRIGHT_SHARD、#4026)。
           SHARD_TOTAL: "4"
         # backend 固有の make target / compose 引数 / prepull / timeout を
         # ここで一元定義する (= matrix.include の単一の情報源)。
@@ -178,7 +199,11 @@ jobs:
           # pull_request では github.ref が refs/pull/<n>/merge になるので
           # PR の内容が checkout される。'develop' 固定のままだと PR の変更を
           # 一切見ずに develop をテストして常に緑になる (#2291)。
-          ref: ${{ inputs.ref || github.ref }}
+          #
+          # plan job が解決した commit を取る (plan の `head` step を参照、#4026)。
+          # pull_request でも `github.ref` (refs/pull/<n>/merge) は使わない。merge の
+          # ref は base が進むと作り直されるので、shard ごとに違う commit を見る。
+          ref: ${{ needs.plan.outputs.sha }}
 
       # mk-go backend は Dockerfile.mkgo で frontend/built/
       # _frontend_vite_ / _frontend_dist_ / _sw_dist_ を COPY する。これらは
@@ -264,15 +289,20 @@ jobs:
 
       - name: Run Playwright
         # spec は 1 スタックあたり直列でしか回せない。共有の root アカウント
-        # を 300 ファイル中 179 がブラウザからサインインして使い (数え方は
+        # を 301 ファイル中 180 がブラウザでサインインした状態で使い (数え方は
         # `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
         # さらに 33 がサインインせず root の token で API を叩く
-        # (`root.json` を読むのが 212 で、その差分)。このアカウントと instance meta を全 spec が
+        # (`root.json` を読むのが 213 で、その差分)。このアカウントと instance meta を全 spec が
         # 共有しており、Playwright のファイル並列だと `profile_iscat_toggle`
         # と `profile_isbot_toggle` が同じ alice を、`admin_branding_save` と
         # `about_page_render` が同じ meta を取り合う。並列度はスタックごと
         # 分ける = シャードでしか稼げない (#2609)。
-        run: make ${{ matrix.test_target }} PLAYWRIGHT_ARGS="--shard=${{ matrix.shard }}/${{ matrix.shard_total }}"
+        #
+        # `--shard` ではなく PLAYWRIGHT_SHARD で切る。`--shard` はファイルの
+        # 並び順で切るので、軽い api の spec が前半に、重い ui の spec が後半に
+        # 集まる (1/4 が約 100 秒、4/4 が約 430 秒だった)。PLAYWRIGHT_SHARD は
+        # 所要時間の記録から割り振る (tests/playwright/shard-plan.mjs、#4026)。
+        run: make ${{ matrix.test_target }} PLAYWRIGHT_SHARD="${{ matrix.shard }}/${{ matrix.shard_total }}"
 
       # spec が 1 件も実行されないまま "成功" になる状態を検知する。
       #
@@ -314,6 +344,21 @@ jobs:
           path: tests/playwright/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+      # 成功した run でも results.json を残す。所要時間の記録
+      # (tests/playwright/shard-durations.json) を CI の実測から更新するため
+      # (`node tests/playwright/shard-plan.mjs update <results.json>...`、#4026)。
+      # 数百 KB なので保持は短くする。
+      - name: Upload results.json
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-json-${{ matrix.backend }}-${{ matrix.shard }}
+          path: tests/playwright/results.json
+          if-no-files-found: ignore
+          retention-days: 7
+          # 失敗した job だけを再実行すると、同じ名前の artifact が既にある
+          overwrite: true
 
       # 失敗時のみ docker compose logs を artifact 化して原因調査できる
       # ようにする。

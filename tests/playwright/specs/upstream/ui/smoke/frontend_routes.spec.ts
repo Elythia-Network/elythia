@@ -23,7 +23,7 @@
 //   登録は `/` のダイアログで行う)
 
 import { expect, test } from '@playwright/test';
-import { expectRoutedPage } from '../../../../fixtures/ui_route';
+import { gotoRoute } from '../../../../fixtures/ui_route';
 
 const PUBLIC_ROUTES = [
   { path: '/', label: 'home (logged-out fallback)' },
@@ -36,10 +36,9 @@ const PUBLIC_ROUTES = [
 test.describe('smoke: SPA public route navigation', () => {
   for (const { path, label } of PUBLIC_ROUTES) {
     test(`navigate ${path} (${label})`, async ({ page, baseURL }) => {
-      const resp = await page.goto(`${baseURL}${path}`, { waitUntil: 'domcontentloaded' });
-      expect(resp, `goto ${path} returned null response`).not.toBeNull();
-      // SPA は index.html を返すので 200 (= mk-go の frontend.go fallback も同じ挙動)
-      expect(resp!.status(), `${path} should return 200 (SPA fallback)`).toBe(200);
+      // SPA は index.html を返すので 200 (= mk-go の frontend.go fallback も同じ挙動)。
+      // not-found のページでないことも gotoRoute が確かめる
+      await gotoRoute(page, baseURL!, path);
 
       // Vue mount 完了まで待つ。domcontentloaded の時点では loader spinner
       // しか出ていないので、それを pass 条件にすると動画上は真っ白の
@@ -63,8 +62,6 @@ test.describe('smoke: SPA public route navigation', () => {
       // body 内 DOM が hydrate 済 content を含むことを再確認。
       const bodyHTML = await page.evaluate(() => document.body.innerHTML);
       expect(bodyHTML.length, `${path} body should be > 50 chars (hydrated)`).toBeGreaterThan(50);
-
-      await expectRoutedPage(page, path);
     });
   }
 });

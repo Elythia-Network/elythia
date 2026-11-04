@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 300 ファイル
+`tests/playwright/specs/` にあり、現在 301 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -43,17 +43,70 @@ upstream と食い違っていても気付けない**。
 `.github/workflows/playwright.yml` が `pull_request` (paths フィルタ) と
 `workflow_dispatch` で発火する。nightly から PR トリガーへ移行済み (#2291)。
 
-**4 シャード並列** (`--shard=i/4`、`fail-fast: false`)。check 名は
+**4 シャード並列** (`PLAYWRIGHT_SHARD=i/4`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/4)` 〜 `4/4`。
 
-**1 スタックあたりは直列でしか回せない。** 300 spec のうち 179 が共有の root (alice) で
-**ブラウザからサインイン**し (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
-`uiSigninAsRoot` helper が 178 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 212 で、その差分)。
+**1 スタックあたりは直列でしか回せない。** 301 spec のうち 180 が共有の root (alice) で
+**ブラウザでサインインした状態**を使い (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
+`uiSigninAsRoot` helper が 179 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
+さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 213 で、その差分)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
 **並列度はスタックごと分ける = シャードでしか稼げない** (#2609)。
+
+### shard の割り振り
+
+**shard は所要時間で割り振る** (#4026)。`--shard=i/N` はファイルの並び順で切る
+だけなので、軽い `upstream/api` が前半の shard に、重い `upstream/ui` が後半の
+shard に集まっていた (直近 3 回で、1/4 が約 100 秒、3/4 と 4/4 が約 430 秒)。
+Playwright には時間で割り振る機能が無いので、`tests/playwright/shard-plan.mjs` が
+ファイルごとの所要時間 (`tests/playwright/shard-durations.json`) から、合計が揃う
+ように割り振る。`playwright.config.ts` は `PLAYWRIGHT_SHARD=i/N` を受け取ると、
+自分の shard のファイルだけを流す。手元では `make playwright-test PLAYWRIGHT_SHARD=2/4`。
+
+- 記録の無い新しい spec は、記録の平均の時間として割り振られる。記録の無い spec が
+  全体の 2 割を超えるか、消えた spec の記録が残っていると、`shard-plan.test.mjs`
+  (playwright workflow の `plan` job) が落ちる
+- 記録の作り直し: 全件を流した後の `results.json` から作る。複数の shard の結果を
+  まとめて渡してもよい
+
+```bash
+make playwright-up
+make playwright-test
+node tests/playwright/shard-plan.mjs update tests/playwright/results.json
+node tests/playwright/shard-plan.mjs show 4   # 各 shard の見込み時間
+```
+
+記録は手元で測った時間でよい。CI の時間とは倍率が違うが、割り振りに要るのは
+spec の間の比だけ。CI の結果から更新するときは、各 shard の `playwright-json-<backend>-<shard>`
+artifact (7 日保持) の `results.json` を渡す。渡した report に無い spec の記録は残る
+ので、shard の一部だけを渡してもよい。spec を消したり名前を変えたりしたときは、
+report を渡さずに `node tests/playwright/shard-plan.mjs update` を流すと、消えた spec の
+記録だけを落とす。
+
+`plan` job は `shard-plan.test.mjs` を流すので、これが無い ref (#4026 より前) は
+`workflow_dispatch` で流すと `plan` で落ちる。古い ref を手で流したいときは、その
+ref の版の workflow を使う。
+
+### project (`main` と `meta`)
+
+instance meta を書き換える spec (`admin/update-meta` か `admin/roles/update-default-policies`
+を呼ぶもの。今は 16) は、
+`meta` の project に分けてある。判定は `shard-plan.mjs` の `writesMeta` が自動で
+行うので、spec を書く側で振り分ける必要は無い。数え方 (リポジトリの root で):
+
+```bash
+node -e "import('./tests/playwright/shard-plan.mjs').then((m) => { const fs = require('fs'); console.log(m.listSpecFiles('tests/playwright').filter((f) => m.writesMeta(fs.readFileSync('tests/playwright/' + f, 'utf-8'))).length); })"
+```
+
+`meta` は `main` の後に流れる。workers が 1 なら、project は config に書いた順に
+流れる。これは Playwright の文書が保証する挙動ではなく、実装 (test group の並び) に
+よるもので、1.62.1 で、順を入れ替えると流れる順も入れ替わることを確かめた。
+Playwright の版を上げたら、`PLAYWRIGHT_SHARD` を付けて流し、`[meta]` が最後に並ぶ
+ことを見る。meta を戻し損ねた spec があっても、後に走る別の spec を巻き込まない
+ようにするため。`meta` を `main` に依存させる (`dependencies`) 形にはしない。
+`main` が 1 件でも落ちると、`meta` が丸ごと skip されて見えなくなる。
 
 PR の required check には**含めない**。TS image の pull と spec 増加で実行時間が
 伸びるうえ、外部 image 由来の flaky 要素があるため。
@@ -191,13 +244,29 @@ vite の hash class を selector に使わない (`[class*="_button_"]` 等)。p
 
 **ルートを開いたら、not-found のページでないことを確かめる。** router は見つからない
 パスを not-found のページに回すので、status (常に 200) やナビの有無では区別できない。
-`fixtures/ui_route.ts` の `expectRoutedPage` を使う (起動画面が消え、通信が止むのを
-待ってから、not-found のページの title かどうかで判定する。title の形だけを待つと、サーバーが
-title を描くルート (`/@:acct`、`/notes/:id` など) では mount の前に通ってしまう)。
-`page.goto` で開いた直後に呼ぶ (SPA の中の遷移では、前のページの状態が残る)。#4025 までは
-18 パスが存在しないパスを開いて緑になっていた。判定そのものは
-`specs/elythia/ui/route_not_found_guard.spec.ts` が、存在しないパスで落ち・実在するパスで
-通ることを確かめている。
+ルートは `fixtures/ui_route.ts` の `gotoRoute(page, baseURL, path)` で開く (#4026)。開いて、
+応答が 200 であることと、not-found のページでないこと (`expectRoutedPage`) を確かめる。
+`expectRoutedPage` は、起動画面が消え、通信が止むのを待ってから、not-found のページの title
+かどうかで判定する。title の形だけを待つと、サーバーが title を描くルート (`/@:acct`、
+`/notes/:id` など) では mount の前に通ってしまう。`page.goto` で開いた直後に呼ぶ (SPA の中の
+遷移では、前のページの状態が残る)。#4025 までは 18 パスが存在しないパスを開いて緑になって
+いた。判定そのものは `specs/elythia/ui/route_not_found_guard.spec.ts` が、存在しないパスで
+落ち・実在するパスで通ることを確かめている。
+
+**サインインは helper を通す。** root なら `uiSigninAsRoot` (`fixtures/ui_auth.ts`)。フォームは
+通さず、globalSetup が 1 回だけフォームでサインインして保存した state
+(`.auth/root-state.json`) を `context.setStorageState()` で読み込む (#4026)。root の
+アカウントの状態 (プロフィール、設定) を変える spec や、他の spec と同じ値を取り合う spec は、
+`signupUser` で利用者を作って `uiSigninAs(page, request, baseURL, user)` でサインインする
+(初回のウィザードも抑止する)。登録のレート制限は両方の backend で切ってある
+(`instance.yml` の `disableEndpointRateLimits`、TS は `NODE_ENV`) ので、利用者を作る数は
+気にしなくてよい。helper が本当にその利用者になるかは
+`specs/elythia/ui/signin_state_guard.spec.ts` が、ページの token でサーバーに問い合わせて
+確かめている。
+
+**見た目の差分の基準画像は runner の container で作る。** `toHaveScreenshot` の基準画像は
+`make playwright-update-snapshots PLAYWRIGHT_ARGS=<spec>` で作り直す。手元の OS で作ると
+文字の描画が違い、CI で必ず差分になる。
 
 **要素は文字で、完全一致かつちょうど 1 つで取る。** スイッチは `clickSwitchByLabel`
 (`fixtures/ui_click.ts`)、MkFolder の中の要素は `openFolderByLabel` / `fillFolderTextarea` /

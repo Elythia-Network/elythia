@@ -1204,19 +1204,30 @@ PLAYWRIGHT_COMPOSE=tests/playwright/compose.yml
 playwright-up: ## Playwright スタック (Elythia backend) を起動
 	docker compose -f $(PLAYWRIGHT_COMPOSE) up -d --build
 
-# PLAYWRIGHT_ARGS は runner の `playwright` に素通しする追加引数。CI が
-# `--shard=i/N` を渡してシャード分割するために使う (#2609)。ローカルで
-# 動画が欲しいときは `PLAYWRIGHT_ARGS=--video=on` を渡す。
+# PLAYWRIGHT_ARGS は runner の `playwright` に素通しする追加引数。spec を絞る
+# ときや、動画が欲しいとき (`PLAYWRIGHT_ARGS=--video=on`) に渡す。shard の
+# 分割は下の PLAYWRIGHT_SHARD で行う (#2609、#4026)。
 #
 # runner の ENTRYPOINT は `playwright` で CMD が `test`。引数を足すと CMD が
 # 丸ごと置き換わるので、`test` を明示してから追加する。
 PLAYWRIGHT_ARGS ?=
 
+# PLAYWRIGHT_SHARD は `i/N`。所要時間で割り振った N 個のうち i 番目だけを流す
+# (playwright.config.ts、tests/playwright/shard-plan.mjs、#4026)。CI は
+# `--shard` ではなくこちらを使う。`--shard` はファイルの並び順で切るので偏る。
+PLAYWRIGHT_SHARD ?=
+PLAYWRIGHT_SHARD_ENV = $(if $(PLAYWRIGHT_SHARD),-e PLAYWRIGHT_SHARD=$(PLAYWRIGHT_SHARD))
+
 playwright-test: ## Playwright spec を実行 (Elythia backend、PLAYWRIGHT_ARGS で引数追加)
 	# `--build` を付けて runner image を rebuild check させる。package.json
 	# 更新時に node_modules が古いままにならないよう、毎回 build context を
 	# 確認する (cache hit なら ms 単位で済むので overhead 無視可)。
-	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build playwright-runner test $(PLAYWRIGHT_ARGS)
+	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build $(PLAYWRIGHT_SHARD_ENV) playwright-runner test $(PLAYWRIGHT_ARGS)
+
+playwright-update-snapshots: ## Playwright の見た目の差分の基準画像を作り直す (PLAYWRIGHT_ARGS で spec を絞る)
+	# toHaveScreenshot の基準画像は runner の container (Linux の chromium) で
+	# 作る。手元の OS で作ると、文字の描画が違って CI で必ず差分になる (#4026)。
+	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build playwright-runner test --update-snapshots $(PLAYWRIGHT_ARGS)
 
 playwright-down: ## Playwright スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test down -v
@@ -1240,7 +1251,7 @@ playwright-ts-test: ## Playwright spec を実行 (TS backend、upstream 追従�
 	# **`specs/upstream` に絞る。** `specs/elythia` は Elythia 独自機能の spec で、
 	# 公式 image に対しては通らない (README の「境界」を参照)。絞らないと
 	# TS backend 実行が elythia 側の spec で落ちる。
-	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) --profile test run --rm --build playwright-runner test specs/upstream $(PLAYWRIGHT_ARGS)
+	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) --profile test run --rm --build $(PLAYWRIGHT_SHARD_ENV) playwright-runner test specs/upstream $(PLAYWRIGHT_ARGS)
 
 playwright-ts-down: ## Playwright TS スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) --profile test down -v

@@ -6,7 +6,7 @@
 // #744 Phase 1 PR-2: Playwright globalSetup.
 //
 // 全 spec が start する前に 1 度だけ実行される。本 globalSetup は instance
-// を test runnable な状態に整える 3 つの仕事を行う:
+// を test runnable な状態に整える次の仕事を行う:
 //
 //   1. Redis FLUSHDB — mk-go の signup endpoint は IP base 1h 5 回の rate
 //      limit が hardcoded (internal/server/middleware/ratelimit_defs.go)
@@ -17,20 +17,26 @@
 //      の default は true で、initial state の signup endpoint は invitation
 //      コード必須。Phase 1 spec は signup-flow で fresh user を作るので
 //      registration を open にしておく
-//   4. root の per-user quota を purge — antenna / webhook / clip / user list
+//   4. root の初回のウィザード (accountSetupWizard) を抑止する — 出ると
+//      modal が後続の click を奪う
+//   5. root の per-user quota を purge — antenna / webhook / clip / user list
 //      は role policy に上限があり (antennaLimit 5 / webhookLimit 3 /
 //      clipLimit 10 / avatarDecorationLimit 1)、spec が後始末しない分が
 //      DB に残る。同じ stack へ 2 回目を流すと枠を使い切って**無関係な
 //      spec** が setup の create で落ちる (#2264)。run の先頭で空にする
+//   6. root でフォームから 1 回だけサインインし、storage state を
+//      `.auth/root-state.json` に保存する。`uiSigninAsRoot` はこれを読み込む
+//      だけで、spec ごとにフォームを通さない (#4026)
 //
 // root の credentials は `.auth/root.json` に書き出して spec から読める
 // ようにする。複数 spec で root token を再利用するための fixture。
 
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { type APIRequestContext, request as createRequest } from '@playwright/test';
+import { type APIRequestContext, chromium, request as createRequest } from '@playwright/test';
 import { DEFAULT_TEST_PASSWORD } from './fixtures/auth';
 import { isTsBackend } from './fixtures/backend';
 import { resetRateLimit } from './fixtures/rate_limit';
+import { ROOT_STATE_PATH, uiSigninViaForm } from './fixtures/ui_auth';
 
 const baseURL = process.env.MK_BASE_URL ?? 'http://mkgo:3000';
 
@@ -163,6 +169,22 @@ async function purgeRootQuotas(ctx: APIRequestContext, token: string): Promise<v
   }
 }
 
+// spec の `use` と同じ条件 (playwright.config.ts) でブラウザを開く。
+const browserBaseURL = process.env.MK_BASE_URL ?? 'https://mkgo.local';
+
+async function saveRootState(): Promise<void> {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'en-US' });
+    const page = await context.newPage();
+    await uiSigninViaForm(page, browserBaseURL, ROOT_USERNAME, ROOT_PASSWORD);
+    // pizzax の device 側の値 (accountTokens など) は IndexedDB にある
+    await context.storageState({ path: ROOT_STATE_PATH, indexedDB: true });
+  } finally {
+    await browser.close();
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   // 1. Redis flush (#744 PR-2). 失敗は throw して fail-fast にする —
   // silent warn だと後段の signup spec が 429 で fail して原因が見えない。
@@ -231,6 +253,11 @@ export default async function globalSetup(): Promise<void> {
     // root credentials を spec から読めるように file 出力
     mkdirSync('.auth', { recursive: true });
     writeFileSync('.auth/root.json', JSON.stringify(root));
+
+    // 6. root の storage state を保存する。ブラウザの origin は spec と同じ
+    // (playwright.config.ts の baseURL) にする。localStorage は origin ごと
+    // なので、API を叩く baseURL (既定は `http://mkgo:3000`) とは揃えない
+    await saveRootState();
     // eslint-disable-next-line no-console
     console.log('[globalSetup] root account ready, registration opened');
   } finally {

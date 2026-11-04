@@ -23,7 +23,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { expectRoutedPage } from '../../../fixtures/ui_route';
+import { gotoRoute } from '../../../fixtures/ui_route';
 
 test.describe('UI: authenticated route navigation', () => {
   let root: RootFixture;
@@ -39,19 +39,16 @@ test.describe('UI: authenticated route navigation', () => {
 
     // 通知は authenticated state でのみ accessible。SPA は full
     // page reload になるので splash → component mount の遷移を待つ。
-    const resp = await page.goto(`${baseURL}/my/notifications`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/my/notifications');
     // SPA hydration 完了 = splash が消えて navbar が visible になる
     // (= authenticated state が維持されている確認も兼ねる)
     await expect(page.locator('[data-testid="open-post-form"]').first()).toBeVisible({ timeout: 20_000 });
-    await expectRoutedPage(page, '/my/notifications');
   });
 
   test('navigate to /settings/profile after signin', async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
 
-    const resp = await page.goto(`${baseURL}/settings/profile`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/settings/profile');
 
     // settings page は input field を多数持つ。少なくとも 1 つ <input> が
     // render されることで authenticated state + settings component mount を確認。
@@ -59,28 +56,24 @@ test.describe('UI: authenticated route navigation', () => {
       () => document.querySelectorAll('input').length > 0,
       { timeout: 20_000 },
     );
-    await expectRoutedPage(page, '/settings/profile');
   });
 
   test('navigate to /timeline after signin', async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
 
     // local / home などは画面の中のタブで切り替える。URL は /timeline の 1 つ
-    const resp = await page.goto(`${baseURL}/timeline`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/timeline');
 
     // local timeline は WebSocket + initial GET を経由するため hydration
     // 完了まで時間がかかる。最低限 navbar (= [data-testid="open-post-form"]) が
     // 維持されていれば authenticated state が維持されている確認になる。
     await expect(page.locator('[data-testid="open-post-form"]').first()).toBeVisible({ timeout: 15_000 });
-    await expectRoutedPage(page, '/timeline');
   });
 
   test('navigate to /@alice (own profile by username)', async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
 
-    const resp = await page.goto(`${baseURL}/@${root.username}`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, `/@${root.username}`);
 
     // user profile page には username が必ず render される。
     await page.waitForFunction(
@@ -88,6 +81,5 @@ test.describe('UI: authenticated route navigation', () => {
       root.username,
       { timeout: 20_000 },
     );
-    await expectRoutedPage(page, `/@${root.username}`);
   });
 });
