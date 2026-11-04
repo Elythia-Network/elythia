@@ -201,6 +201,18 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 本体のfrontendは、tokenを付けずに呼ぶ(`misskeyApiGet('clear-browser-cache', {})`)ので、この違いを踏まない。踏むのは、失効したtokenを付けたまま呼ぶ他のクライアントだけなので、全体の認証にこのパスの例外を足すことはしていない。
 
+## ロールのメンバー一覧と`usersCount`から、凍結中と削除済みを外す (#3999)
+
+`roles/users`は、モデレーターでない人(匿名を含む)には、凍結中の利用者とローカルの削除済みの利用者を返さない。`users/show`がこの人たちを`NO_SUCH_USER`にしているので、それに揃える。本家の`roles/users.ts`は、期限の切れていない割り当てをすべて返す。
+
+| 項目 | 本家 | Elythia |
+|---|---|---|
+| `roles/users`のメンバー | 凍結中・削除済みを含めて返す | モデレーターでない人には、凍結中(ローカル・リモートとも)とローカルの削除済みを返さない。リモートの削除済みは、`users/show`と同じく返す。モデレーターには全員を返す |
+| `roles/list`・`roles/show`の`usersCount` | 期限の切れていない割り当ての数 | 見る人に`roles/users`が返す人数。モデレーターには本家と同じ数 |
+| `roleAssigned`の通知に載るロールの`usersCount` | 期限の切れていない割り当ての数 | 受け取る人を問わず、モデレーターでない人に見せる人数 |
+
+本家では、ローカルの利用者は退会すると削除のジョブで行ごと消え、割り当ても消えるので、一覧に残るのは管理者が凍結した利用者と、ジョブが終わるまでの間に限られる。Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると行を残す(#3207)ので、絞らないとずっと一覧に出る。`admin/roles/users`と`admin/roles/show`は、本家と同じく絞らない。
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。

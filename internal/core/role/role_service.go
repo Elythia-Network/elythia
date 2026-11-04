@@ -2070,6 +2070,16 @@ func (s *Service) ListByRole(roleID, untilID, sinceID string, limit int) ([]*mod
 	return s.assignmentRepo.ListByRole(roleID, untilID, sinceID, limit)
 }
 
+// ListVisibleByRole is ListByRole restricted to the assignees non-moderators
+// may see (not suspended, not a deleted local user). roles/users uses it for
+// non-moderator viewers (#3999).
+func (s *Service) ListVisibleByRole(roleID, untilID, sinceID string, limit int) ([]*model.RoleAssignment, error) {
+	if _, err := s.findRoleByID(roleID); err != nil {
+		return nil, err
+	}
+	return s.assignmentRepo.ListVisibleByRole(roleID, untilID, sinceID, limit)
+}
+
 // CountAssignedUsers returns the number of users currently assigned to a role
 // (non-expired assignments). Used by the Role packer's usersCount field. On
 // repository error it returns 0 so packing never fails the whole response.
@@ -2080,6 +2090,19 @@ func (s *Service) CountAssignedUsers(roleID string) int {
 		// best-effort で 0 を返す)。ただし silent に 0 を返すと corrupt/transient
 		// DB error が usersCount:0 として隠れるため warn で観測可能にする。
 		slog.Warn("role: CountActiveByRole failed; usersCount falls back to 0", "roleId", roleID, "err", err)
+		return 0
+	}
+	return n
+}
+
+// CountVisibleAssignedUsers is CountAssignedUsers restricted to the assignees
+// ListVisibleByRole returns, so the usersCount a non-moderator sees matches
+// the members roles/users shows them (#3999). Errors fall back to 0 like
+// CountAssignedUsers.
+func (s *Service) CountVisibleAssignedUsers(roleID string) int {
+	n, err := s.assignmentRepo.CountVisibleByRole(roleID)
+	if err != nil {
+		slog.Warn("role: CountVisibleByRole failed; usersCount falls back to 0", "roleId", roleID, "err", err)
 		return 0
 	}
 	return n

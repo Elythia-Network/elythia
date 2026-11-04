@@ -677,13 +677,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// roleAssigned 通知 (#1559): local public role 割当時に発火し、entity 側で
 	// read 時に packed role へ解決する。lookup は role 削除済なら (nil,false)。
 	roleService.SetRoleAssignNotifier(notificationHook)
-	roleNotifLookup := func(roleID string) (map[string]any, bool) {
-		r, err := roleRepo.FindByID(roleID)
-		if err != nil || r == nil {
-			return nil, false
-		}
-		return entity.PackRole(r, roleService.CountAssignedUsers(roleID), idGen, corerole.DefaultPolicies()), true
-	}
+	roleNotifLookup := newRoleNotifLookup(roleRepo, roleService, idGen)
 	// abuseReport 通知の現在の状態を read 時に引く (#2868)。通知は作成時点しか
 	// 持たないので、他のモデレーターが対処しても通知欄は「未対応」のまま残る。
 	// 通報が消えていれば通知ごと drop する (roleAssigned と同じ形)。
