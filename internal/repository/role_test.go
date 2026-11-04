@@ -307,6 +307,85 @@ func TestRoleAssignmentRepository_CountActiveByRole(t *testing.T) {
 	assert.Equal(t, 1, n)
 }
 
+// #3999: モデレーターでない人向けの一覧と件数は、凍結中とローカルの削除済みを
+// 外し、リモートの削除済みは残す。外すのは SQL の側なので、limit どおりの件数が返る。
+func TestRoleAssignmentRepository_VisibleByRole(t *testing.T) {
+	roleRepo := NewRoleRepository(testDB)
+	assignRepo := NewRoleAssignmentRepository(testDB)
+
+	now := time.Now()
+	role := &model.Role{
+		ID: "role_vis_test", UpdatedAt: now, LastUsedAt: now, Name: "Vis",
+		Target: model.RoleTargetManual, Policies: datatypes.JSON([]byte("{}")),
+		CondFormula: datatypes.JSON([]byte("{}")),
+	}
+	require.NoError(t, roleRepo.Create(role))
+	defer cleanupRole(t, role.ID)
+
+	// ID の降順 (一覧の既定の並び) で、隠すメンバーが先頭に来るように置く。
+	// host が空文字の行は model.User.IsLocal と同じくローカルとして扱う。
+	for _, u := range []struct {
+		id, set string
+	}{
+		{"vis_u1", ``},
+		{"vis_u2", `host = 'remote.example', "isDeleted" = true`},
+		{"vis_u3", ``},
+		{"vis_u4", `"isSuspended" = true`},
+		{"vis_u5", `"isDeleted" = true`},
+		{"vis_u6", `host = 'remote.example', "isSuspended" = true`},
+		{"vis_u7", `host = '', "isDeleted" = true`},
+	} {
+		createTestUser(t, u.id)
+		if u.set != "" {
+			require.NoError(t, testDB.Exec(`UPDATE "user" SET `+u.set+` WHERE id = ?`, u.id).Error)
+		}
+		require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "vis_a" + u.id[len(u.id)-1:], UserID: u.id, RoleID: role.ID}))
+	}
+
+	ids := func(as []*model.RoleAssignment) []string {
+		out := make([]string, 0, len(as))
+		for _, a := range as {
+			out = append(out, a.UserID)
+		}
+		return out
+	}
+
+	all, err := assignRepo.ListByRole(role.ID, "", "", 10)
+	require.NoError(t, err)
+	assert.Len(t, all, 7, "ListByRole は絞らない")
+
+	visible, err := assignRepo.ListVisibleByRole(role.ID, "", "", 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"vis_u3", "vis_u2", "vis_u1"}, ids(visible))
+	require.NotNil(t, visible[0].User, "User は preload される")
+
+	page, err := assignRepo.ListVisibleByRole(role.ID, "", "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"vis_u3", "vis_u2"}, ids(page), "隠すメンバーがあっても limit どおりに返す")
+
+	page, err = assignRepo.ListVisibleByRole(role.ID, "vis_a2", "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"vis_u1"}, ids(page))
+
+	// sinceID だけのときは ASC で進む。vis_a3 の後ろは隠すメンバーなので、
+	// 絞らないと vis_u4 が入る。
+	page, err = assignRepo.ListVisibleByRole(role.ID, "", "vis_a2", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"vis_u3"}, ids(page))
+
+	n, err := assignRepo.CountActiveByRole(role.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 7, n)
+	n, err = assignRepo.CountVisibleByRole(role.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+}
+
+func TestRoleAssignmentRepository_CountVisibleByRole_Error(t *testing.T) {
+	_, err := NewRoleAssignmentRepository(cancelledDB(t)).CountVisibleByRole("x")
+	assert.Error(t, err)
+}
+
 func TestRoleAssignmentRepository_ListByRole_Error(t *testing.T) {
 	db := cancelledDB(t)
 	repo := NewRoleAssignmentRepository(db)

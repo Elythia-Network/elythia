@@ -1041,6 +1041,10 @@ func (f *failingAssignRepo) CountActiveByRole(_ string) (int, error) {
 	return 0, assert.AnError
 }
 
+func (f *failingAssignRepo) CountVisibleByRole(_ string) (int, error) {
+	return 0, assert.AnError
+}
+
 // CountAssignedUsers は active assignment 数を返す。
 func TestCountAssignedUsers_Counts(t *testing.T) {
 	svc, roleRepo, assignRepo, _ := newTestService(t)
@@ -1058,6 +1062,26 @@ func TestCountAssignedUsers_FailOpen(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	assert.Equal(t, 0, svc.CountAssignedUsers("r1"))
+	assert.Equal(t, 0, svc.CountVisibleAssignedUsers("r1"))
+}
+
+// #3999: CountVisibleAssignedUsers は凍結中とローカルの削除済みを数えない。
+func TestCountVisibleAssignedUsers_SkipsHiddenMembers(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "R"}
+	userRepo := testutil.NewMockUserRepository()
+	require.NoError(t, userRepo.Create(&model.User{ID: "u1", Username: "u1"}))
+	require.NoError(t, userRepo.Create(&model.User{ID: "u2", Username: "u2", IsSuspended: true}))
+	require.NoError(t, userRepo.Create(&model.User{ID: "u3", Username: "u3", IsDeleted: true}))
+	// host が空文字の行もローカルとして扱う (model.User.IsLocal)。
+	empty := ""
+	require.NoError(t, userRepo.Create(&model.User{ID: "u4", Username: "u4", Host: &empty, IsDeleted: true}))
+	assignRepo.UserRepo = userRepo
+	for _, uid := range []string{"u1", "u2", "u3", "u4"} {
+		assignRepo.Assignments[uid+":r1"] = &model.RoleAssignment{ID: "a" + uid, UserID: uid, RoleID: "r1"}
+	}
+	assert.Equal(t, 4, svc.CountAssignedUsers("r1"))
+	assert.Equal(t, 1, svc.CountVisibleAssignedUsers("r1"))
 }
 
 type failingRoleRepo struct {
@@ -1776,6 +1800,8 @@ func TestAssign_FailedDoesNotInvalidate(t *testing.T) {
 func TestListByRole_RoleNotFound(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	_, err := svc.ListByRole("ghost", "", "", 10)
+	assert.ErrorIs(t, err, role.ErrRoleNotFound)
+	_, err = svc.ListVisibleByRole("ghost", "", "", 10)
 	assert.ErrorIs(t, err, role.ErrRoleNotFound)
 }
 

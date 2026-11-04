@@ -490,6 +490,29 @@ func (m *MockRoleAssignmentRepository) ListByUser(userID string) ([]*model.RoleA
 }
 
 func (m *MockRoleAssignmentRepository) ListByRole(roleID string, untilID, sinceID string, limit int) ([]*model.RoleAssignment, error) {
+	return m.listByRole(roleID, untilID, sinceID, limit, false)
+}
+
+// ListVisibleByRole mirrors the production visibleAssigneeCond: assignees
+// known to UserRepo that are suspended or deleted local users are dropped.
+func (m *MockRoleAssignmentRepository) ListVisibleByRole(roleID string, untilID, sinceID string, limit int) ([]*model.RoleAssignment, error) {
+	return m.listByRole(roleID, untilID, sinceID, limit, true)
+}
+
+// hiddenAssignee reports whether the assignee is one the production
+// visibleAssigneeCond excludes. Users missing from UserRepo are kept.
+func (m *MockRoleAssignmentRepository) hiddenAssignee(userID string) bool {
+	if m.UserRepo == nil {
+		return false
+	}
+	u, ok := m.UserRepo.Users[userID]
+	if !ok {
+		return false
+	}
+	return u.IsSuspended || (u.IsLocal() && u.IsDeleted)
+}
+
+func (m *MockRoleAssignmentRepository) listByRole(roleID string, untilID, sinceID string, limit int, visibleOnly bool) ([]*model.RoleAssignment, error) {
 	m.LastListByRoleLimit = limit
 	var result []*model.RoleAssignment
 	now := time.Now()
@@ -504,6 +527,9 @@ func (m *MockRoleAssignmentRepository) ListByRole(roleID string, untilID, sinceI
 			continue
 		}
 		if sinceID != "" && a.ID <= sinceID {
+			continue
+		}
+		if visibleOnly && m.hiddenAssignee(a.UserID) {
 			continue
 		}
 		// User をプロダクションの Preload("User") と同様に紐付ける
@@ -535,6 +561,15 @@ func (m *MockRoleAssignmentRepository) Exists(userID, roleID string) (bool, erro
 }
 
 func (m *MockRoleAssignmentRepository) CountActiveByRole(roleID string) (int, error) {
+	return m.countByRole(roleID, false)
+}
+
+// CountVisibleByRole counts the assignments ListVisibleByRole returns.
+func (m *MockRoleAssignmentRepository) CountVisibleByRole(roleID string) (int, error) {
+	return m.countByRole(roleID, true)
+}
+
+func (m *MockRoleAssignmentRepository) countByRole(roleID string, visibleOnly bool) (int, error) {
 	now := time.Now()
 	count := 0
 	for _, a := range m.Assignments {
@@ -544,6 +579,9 @@ func (m *MockRoleAssignmentRepository) CountActiveByRole(roleID string) (int, er
 		// production SQL は `expiresAt IS NULL OR expiresAt > now` (厳密 >) なので
 		// expiresAt <= now (== now 含む) は非 active。!After(now) で境界を揃える。
 		if a.ExpiresAt != nil && !a.ExpiresAt.After(now) {
+			continue
+		}
+		if visibleOnly && m.hiddenAssignee(a.UserID) {
 			continue
 		}
 		count++

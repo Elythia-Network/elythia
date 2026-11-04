@@ -169,6 +169,7 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 
 // List handles POST /api/roles/list.
 func (h *Handler) List(c echo.Context) error {
+	showAll := h.viewerIsModerator(c)
 	roles, err := h.roleService.List()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -177,7 +178,7 @@ func (h *Handler) List(c echo.Context) error {
 	for _, r := range roles {
 		// upstream roles/list は isPublic AND isExplorable の 2 条件で絞る。
 		if r.IsPublic && r.IsExplorable {
-			result = append(result, h.packRole(r))
+			result = append(result, h.packRole(r, showAll))
 		}
 	}
 	if result == nil {
@@ -204,7 +205,7 @@ func (h *Handler) Show(c echo.Context) error {
 	if !r.IsPublic {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROLE", "No such role.", "de5502bf-009a-4639-86c1-fec349e46dcb"))
 	}
-	return c.JSON(http.StatusOK, h.packRole(r))
+	return c.JSON(http.StatusOK, h.packRole(r, h.viewerIsModerator(c)))
 }
 
 // Users handles POST /api/roles/users.
@@ -254,7 +255,13 @@ func (h *Handler) Users(c echo.Context) error {
 	if !cursorOK {
 		return apierr.JSONInvalidParam(c)
 	}
-	assigns, err := h.roleService.ListByRole(req.RoleID, untilID, sinceID, limit)
+	// 本家は凍結中も削除済みも出すが、Elythia はモデレーターでない人には
+	// users/show と同じく隠す (#3999)。
+	listAssigns := h.roleService.ListVisibleByRole
+	if h.viewerIsModerator(c) {
+		listAssigns = h.roleService.ListByRole
+	}
+	assigns, err := listAssigns(req.RoleID, untilID, sinceID, limit)
 	if err != nil {
 		if errors.Is(err, role.ErrRoleNotFound) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ROLE", "No such role.", "30aaaee3-4792-48dc-ab0d-cf501a575ac5"))
@@ -434,8 +441,20 @@ func (h *Handler) Notes(c echo.Context) error {
 // (entity.PackRole) に統一する。旧実装は target / condFormula / policies /
 // preserveAssignmentOnMoveAccount を欠き usersCount を 0 固定していた。
 // usersCount は active assignment 数 (role は少数なので per-role count)。
-func (h *Handler) packRole(r *model.Role) map[string]any {
-	return entity.PackRole(r, h.roleService.CountAssignedUsers(r.ID), h.idGen, role.DefaultPolicies())
+func (h *Handler) packRole(r *model.Role, showAll bool) map[string]any {
+	// usersCount は roles/users が返す人数に揃える (#3999)。
+	count := h.roleService.CountVisibleAssignedUsers
+	if showAll {
+		count = h.roleService.CountAssignedUsers
+	}
+	return entity.PackRole(r, count(r.ID), h.idGen, role.DefaultPolicies())
+}
+
+// viewerIsModerator reports whether the caller may see suspended and deleted
+// role members. Anonymous callers are not moderators.
+func (h *Handler) viewerIsModerator(c echo.Context) bool {
+	viewer := middleware.GetUser(c)
+	return viewer != nil && h.roleService.IsModerator(viewer.ID)
 }
 
 // SetRelationCache wires the per-user relation cache used by the mute / block
