@@ -53,6 +53,23 @@
 	}
 	//#endregion
 
+	//#region Preload
+	// Elythia: entry と、entry・ui.vue が静的に import する chunk (動的に import する ui.vue の
+	// chunk 自体を含む) を、DOMContentLoaded を待たずに modulepreload で並べて取りに行く
+	// (#3992、通常の画面の #3613 と同じ)。これが
+	// 無いと entry → 静的 import → ui.vue と、読み終わるたびに次の段が分かる直列の取得になる。
+	// 一覧はサーバーが CLIENT_PRELOADS として埋め込む (ビルドが書く preloads.json)。chunk は
+	// ロケールごとのディレクトリにあるので、ここで決めた lang を当てはめる。無い HTML では何もしない。
+	if (CLIENT_ENTRY && typeof CLIENT_PRELOADS !== 'undefined' && Array.isArray(CLIENT_PRELOADS)) {
+		for (const file of [CLIENT_ENTRY, ...CLIENT_PRELOADS]) {
+			const link = document.createElement('link');
+			link.rel = 'modulepreload';
+			link.href = `/embed_vite/${file.replace('scripts', lang)}`;
+			document.head.appendChild(link);
+		}
+	}
+	//#endregion
+
 	//#region Script
 	async function importAppScript() {
 		await import(CLIENT_ENTRY ? `/embed_vite/${CLIENT_ENTRY.replace('scripts', lang)}` : '/embed_vite/src/boot.ts')

@@ -20,7 +20,7 @@ import defaultDarkTheme from '@@/themes/d-elythia.json5';
 import { MediaProxy } from '@@/js/media-proxy.js';
 import { storeBootloaderErrors } from '@@/js/store-boot-errors';
 import { applyTheme, assertIsTheme } from '@/theme.js';
-import { fetchCustomEmojis } from '@/custom-emojis.js';
+import { refreshCustomEmojisOnBoot } from '@/custom-emojis.js';
 import { DI } from '@/di.js';
 import { serverMetadata } from '@/server-metadata.js';
 import { url, version, lang } from '@@/js/config.js';
@@ -97,9 +97,7 @@ function setIframeIdHandler(event: MessageEvent) {
 
 window.addEventListener('message', setIframeIdHandler);
 
-try {
-	await fetchCustomEmojis();
-} catch (err) { /* empty */ }
+await refreshCustomEmojisOnBoot();
 
 const app = createApp(
 	defineAsyncComponent(() => import('@/ui.vue')),

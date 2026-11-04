@@ -236,6 +236,21 @@ func (h *embedHandlers) buildHTML(instanceName, iconURL, appleTouchIconURL, them
 	for _, css := range h.entry.CSS {
 		head.WriteString(fmt.Sprintf(`<link rel="stylesheet" href="/embed_vite/%s">`, html.EscapeString(css)) + "\n")
 	}
+	// entry が動き出してから読む CSS (アイコンの CSS の `await import` と、
+	// `defineAsyncComponent` で読む ui.vue の CSS) を先に取りに行かせる (#3992)。
+	// これが無いと entry → 静的 import → アイコンの CSS → ui.vue と、読み終わる
+	// たびに次が分かる直列の取得になる。CSS はロケールに依らない (`assets/`) ので
+	// HTML に直接出せる。chunk はロケールごとのディレクトリにあり、ロケールは boot.js が
+	// localStorage と navigator.language から決めるので、こちらは CLIENT_PRELOADS で
+	// 渡して boot.js に並べさせる。`as="style"` の preload は適用されないので、
+	// 先に読むだけで描画は変わらない。
+	//
+	// **`crossorigin` を付ける。** vite が動的 import の CSS を差し込むときは
+	// `<link rel="stylesheet" crossorigin="">` (CORS) で要求するので、付けないと
+	// preload (no-cors) の応答と一致せず、同じ CSS をもう一度取りに行く (実測)。
+	for _, css := range h.entry.PreloadStyles {
+		head.WriteString(fmt.Sprintf(`<link rel="preload" as="style" href="/embed_vite/%s" crossorigin>`, html.EscapeString(css)) + "\n")
+	}
 
 	// CLIENT_ENTRY は **manifest の値をそのまま** 渡す。embed の loader は
 	//
@@ -280,9 +295,12 @@ func (h *embedHandlers) buildHTML(instanceName, iconURL, appleTouchIconURL, them
 	loaderCSSTag := inlineOrLinkCSS(loader.CSS, "/embed_vite/loader/style.css")
 	loaderJSTag := inlineOrLinkJS(loader.JS, "/embed_vite/loader/boot.js")
 
+	// CLIENT_PRELOADS は、entry と ui.vue が静的に import する chunk と、動的に import
+	// する ui.vue の chunk 自体の一覧 (#3992)。
+	// 通常シェル (#3613) と同じく `scripts` のままで渡し、boot.js がロケールを当てはめる。
 	bootGlobals := fmt.Sprintf(
-		"\nconst VERSION = %s;\nconst CLIENT_ENTRY = %s;\nconst LANGS = [\"ja-JP\",\"en-US\"];\n",
-		jsStringLiteral(h.cfg.Version), clientEntry)
+		"\nconst VERSION = %s;\nconst CLIENT_ENTRY = %s;\nconst CLIENT_PRELOADS = %s;\nconst LANGS = [\"ja-JP\",\"en-US\"];\n",
+		jsStringLiteral(h.cfg.Version), clientEntry, clientPreloadsJS(h.entry))
 
 	// loader は inline のときだけ hash が要る (外部参照なら 'self' で通る)。
 	inlineScripts := []string{bootGlobals, loader.JS}

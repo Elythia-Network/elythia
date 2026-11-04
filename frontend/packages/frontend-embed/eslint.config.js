@@ -182,6 +182,7 @@ export default [
 	loaderScriptConfig({
 		VERSION: 'readonly',
 		CLIENT_ENTRY: 'readonly',
+		CLIENT_PRELOADS: 'readonly',
 		LANGS: 'readonly',
 	}),
 ];

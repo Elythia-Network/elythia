@@ -463,3 +463,53 @@ func TestDetectClientEntry_Preloads(t *testing.T) {
 		assert.Nil(t, info.Preloads)
 	})
 }
+
+// embed のビルドは、entry が動き出してすぐ読む CSS も preloads.json に並べる (#3992)。
+// chunk と CSS を分けて返し、entry の CSS として既に link するものは落とす。
+func TestDetectEmbedEntry_PreloadStyles(t *testing.T) {
+	manifest := `{"src/boot.ts":{"file":"scripts/entry-AAAAAAAA.js","isEntry":true,"css":["assets/entry-AAAAAAAA.css"]}}`
+	setup := func(t *testing.T, preloads string) ClientEntryInfo {
+		t.Helper()
+		dir := t.TempDir()
+		t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644))
+		if preloads != "" {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "preloads.json"), []byte(preloads), 0644))
+		}
+		return DetectEmbedEntry()
+	}
+
+	t.Run("splits chunks and stylesheets", func(t *testing.T) {
+		info := setup(t, `{"src/boot.ts":[
+			"scripts/a-BBBBBBBB.js",
+			"assets/icons-DDDDDDDD.css",
+			"scripts/ui-UUUUUUUU.js",
+			"assets/ui-UUUUUUUU.css"
+		]}`)
+		assert.Equal(t, []string{"scripts/a-BBBBBBBB.js", "scripts/ui-UUUUUUUU.js"}, info.Preloads)
+		assert.Equal(t, []string{"assets/icons-DDDDDDDD.css", "assets/ui-UUUUUUUU.css"}, info.PreloadStyles)
+	})
+
+	t.Run("drops the entry's own stylesheets, duplicates and unexpected names", func(t *testing.T) {
+		info := setup(t, `{"src/boot.ts":[
+			"assets/entry-AAAAAAAA.css",
+			"assets/ui-UUUUUUUU.css",
+			"assets/ui-UUUUUUUU.css",
+			"assets/../manifest.css",
+			"assets/x.css\"><script>",
+			"/assets/y.css",
+			"assets/sub/z.css",
+			"scripts/w.css",
+			"assets/v.woff2"
+		]}`)
+		assert.Equal(t, []string{"assets/ui-UUUUUUUU.css"}, info.PreloadStyles)
+		assert.Nil(t, info.Preloads)
+	})
+
+	t.Run("nil without the file", func(t *testing.T) {
+		info := setup(t, "")
+		assert.Equal(t, "scripts/entry-AAAAAAAA.js", info.Script)
+		assert.Nil(t, info.Preloads)
+		assert.Nil(t, info.PreloadStyles)
+	})
+}
