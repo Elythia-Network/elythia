@@ -569,6 +569,17 @@ func (m *MockUserRepository) SetAccountCreatedAtIfNull(userID string, createdAt 
 	return true, nil
 }
 
+// WakeFromHibernation clears IsHibernated of a hibernated user. The mock keeps
+// no following rows, so only the user flag changes.
+func (m *MockUserRepository) WakeFromHibernation(userID string) (bool, error) {
+	u, ok := m.Users[userID]
+	if !ok || !u.IsHibernated {
+		return false, nil
+	}
+	u.IsHibernated = false
+	return true, nil
+}
+
 func (m *MockUserRepository) HardDeleteUser(userID string) error {
 	delete(m.Users, userID)
 	delete(m.Profiles, userID)

@@ -59,6 +59,7 @@ func (s *stubUserRepo) SearchByUsernameAndHost(string, *string, bool, int) ([]*m
 }
 func (s *stubUserRepo) UpdateUser(string, map[string]any) error                   { return nil }
 func (s *stubUserRepo) SetAccountCreatedAtIfNull(string, time.Time) (bool, error) { return false, nil }
+func (s *stubUserRepo) WakeFromHibernation(string) (bool, error)                  { return false, nil }
 func (s *stubUserRepo) UpdateProfile(string, map[string]any) error                { return nil }
 func (s *stubUserRepo) RemoveBackupCode(_, _ string) error                        { return nil }
 

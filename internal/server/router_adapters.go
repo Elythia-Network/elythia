@@ -68,6 +68,13 @@ func (a *lastActiveRecorderAdapter) RecordActive(userID string) {
 		if err := a.userRepo.UpdateUser(userID, map[string]any{"lastActiveDate": time.Now()}); err != nil {
 			slog.Debug("streaming: lastActiveDate update failed", "userId", userID, "err", err)
 		}
+		// 本家と同じく、戻ってきた休眠中の利用者の印を外す (#4019)。外さないと、
+		// フォローしている人のノートがホームタイムラインに配られないままになる。
+		// lastActiveDate の失敗 (Debug) と違い、失敗すると配信が止まったままになるので
+		// Warn にする
+		if _, err := a.userRepo.WakeFromHibernation(userID); err != nil {
+			slog.Warn("streaming: waking a hibernated user failed", "userId", userID, "err", err)
+		}
 	})
 }
 
