@@ -63,6 +63,14 @@ on:
         options:
           - core
           - extra
+      data:
+        description: "small (50 人 × 50 ノート) か medium (中規模のサーバーを想定したデータ、#4016)"
+        required: true
+        type: choice
+        default: small
+        options:
+          - small
+          - medium
   pull_request:
     branches: [develop]
     paths:
@@ -89,7 +97,8 @@ jobs:
     # 1 回は bench-compare と同じく約 5 分半 (本家の側は migration の分だけ十数秒長い)。
     # 3 ラウンド (6 回) とビルド・pull・burn-in で約 40 分の見込み。4 ラウンドは約 50 分に
     # なり余裕が 10 分を切るので、rounds は 3 までにする。所要時間は docs/bench-compare.md
-    timeout-minutes: 60
+    # medium は回ごとにデータを流し込むので長くなる (docs/bench-compare.md の「データ」)
+    timeout-minutes: ${{ inputs.data == 'medium' && 90 || 60 }}
     steps:
       # Elythia の ref を worktree に出すので、履歴をすべて取る。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -111,6 +120,7 @@ jobs:
           UPSTREAM_INPUT: ${{ inputs.upstream }}
           ROUNDS_INPUT: ${{ inputs.rounds }}
           ENDPOINTS_INPUT: ${{ inputs.endpoints }}
+          DATA_INPUT: ${{ inputs.data }}
         run: |
           set -euo pipefail
           # $(...) の中でも set -e を効かせる (bench-compare.yml と同じ理由)
@@ -174,6 +184,7 @@ jobs:
             echo "- Elythia: \`$name\` ($head)"
             echo "- rounds: $rounds"
             echo "- endpoints: ${ENDPOINTS_INPUT:-core}"
+            echo "- data: ${DATA_INPUT:-small}"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -186,12 +197,13 @@ jobs:
           SCENARIO: ${{ inputs.scenario || 'prod-like' }}
           # PR と schedule では core だけを流す (extra は手動で選ぶ)
           ENDPOINTS: ${{ inputs.endpoints || 'core' }}
+          DATA: ${{ inputs.data || 'small' }}
           OUT: ${{ runner.temp }}/bench-upstream
         run: |
           mkdir -p "$OUT"
           started=$(date +%s)
           status=0
-          tests/bench/ab/run.sh --upstream "$UPSTREAM" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --out "$OUT" || status=$?
+          tests/bench/ab/run.sh --upstream "$UPSTREAM" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --data "$DATA" --out "$OUT" || status=$?
           echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
           exit "$status"
 

@@ -1050,9 +1050,11 @@ ROUNDS ?= 2
 SCENARIO ?= prod-like
 # core (今までの 7 つ) か extra (通知・リアクション・ドライブなど、#4014)
 ENDPOINTS ?= core
+# small (50 人 × 50 ノート) か medium (中規模のサーバーを想定したデータ、#4016)
+DATA ?= small
 
-bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= ENDPOINTS= BENCH_OUT= SMOKE=1)
-	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' --endpoints '$(ENDPOINTS)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
+bench-compare: ## base と head の commit の性能を比べる (BASE= HEAD= ROUNDS= SCENARIO= ENDPOINTS= DATA= BENCH_OUT= SMOKE=1)
+	tests/bench/ab/run.sh --base '$(BASE)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' --endpoints '$(ENDPOINTS)' --data '$(DATA)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
 
 bench-compare-down: ## bench-compare / bench-upstream のスタックを撤去
 	docker compose -f $(BENCH_AB_COMPOSE) --profile tools down -v --remove-orphans
@@ -1062,8 +1064,8 @@ bench-compare-down: ## bench-compare / bench-upstream のスタックを撤去
 # bench-compare-down。負荷をかけるので、本番が動いているホストでは SMOKE=1 だけにする。
 UPSTREAM_VERSION ?= default
 
-bench-upstream: ## 本家 Misskey と Elythia の性能を比べる (UPSTREAM_VERSION= HEAD= ROUNDS= SCENARIO= ENDPOINTS= BENCH_OUT= SMOKE=1)
-	tests/bench/ab/run.sh --upstream '$(UPSTREAM_VERSION)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' --endpoints '$(ENDPOINTS)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
+bench-upstream: ## 本家 Misskey と Elythia の性能を比べる (UPSTREAM_VERSION= HEAD= ROUNDS= SCENARIO= ENDPOINTS= DATA= BENCH_OUT= SMOKE=1)
+	tests/bench/ab/run.sh --upstream '$(UPSTREAM_VERSION)' --head '$(HEAD)' --rounds '$(ROUNDS)' --scenario '$(SCENARIO)' --endpoints '$(ENDPOINTS)' --data '$(DATA)' $(if $(BENCH_OUT),--out '$(BENCH_OUT)') $(if $(filter 1,$(SMOKE)),--smoke)
 
 # Queue bench (#563): deliver/inbox throughput comparison between
 # Misskey TS (BullMQ) and mk-go (mkq). asynq driver は #2985 で削除。

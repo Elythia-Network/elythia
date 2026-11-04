@@ -260,6 +260,11 @@ jobs:
       - name: Test A/B benchmark helper safety
         run: bash tests/bench/ab/test_run_helpers.sh
 
+      # 中規模のデータの生成器 (#4016)。PR で流れるベンチは small のデータしか使わないので、
+      # 生成器を CI で動かすのはここだけ
+      - name: Test benchmark data generator
+        run: python3 -m unittest discover -s tests/bench/data -p 'test_*.py' -v
+
   # ブランチ保護で必要な `test` check を満たす集約 job。全 shard と bench-helpers の
   # 結果を集約する。依存先の失敗後も実行するため `if: always()` が必要。
   test:

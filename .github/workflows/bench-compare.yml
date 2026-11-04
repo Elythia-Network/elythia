@@ -53,6 +53,14 @@ on:
         options:
           - core
           - extra
+      data:
+        description: "small (50 人 × 50 ノート) か medium (中規模のサーバーを想定したデータ、#4016)"
+        required: true
+        type: choice
+        default: small
+        options:
+          - small
+          - medium
   pull_request:
     branches: [develop]
     paths:
@@ -76,7 +84,8 @@ concurrency:
 jobs:
   compare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # medium は回ごとにデータを流し込むので長くなる (docs/bench-compare.md の「データ」)
+    timeout-minutes: ${{ inputs.data == 'medium' && 75 || 45 }}
     steps:
       # base と head の両方を worktree に出すので、履歴をすべて取る。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,6 +107,7 @@ jobs:
           HEAD_INPUT: ${{ inputs.head }}
           ROUNDS_INPUT: ${{ inputs.rounds }}
           ENDPOINTS_INPUT: ${{ inputs.endpoints }}
+          DATA_INPUT: ${{ inputs.data }}
         run: |
           set -euo pipefail
           # $(...) の中でも set -e を効かせる。無いと resolve の中の fetch が失敗しても
@@ -151,6 +161,7 @@ jobs:
             echo "- head: \`$head_name\` ($head)"
             echo "- rounds: $rounds"
             echo "- endpoints: ${ENDPOINTS_INPUT:-core}"
+            echo "- data: ${DATA_INPUT:-small}"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -164,12 +175,13 @@ jobs:
           SCENARIO: ${{ inputs.scenario || 'prod-like' }}
           # PR と schedule では core だけを流す (extra は手動で選ぶ)
           ENDPOINTS: ${{ inputs.endpoints || 'core' }}
+          DATA: ${{ inputs.data || 'small' }}
           OUT: ${{ runner.temp }}/bench-compare
         run: |
           mkdir -p "$OUT"
           started=$(date +%s)
           status=0
-          tests/bench/ab/run.sh --base "$BASE" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --out "$OUT" || status=$?
+          tests/bench/ab/run.sh --base "$BASE" --head "$HEAD_SHA" --rounds "$ROUNDS" --scenario "$SCENARIO" --endpoints "$ENDPOINTS" --data "$DATA" --out "$OUT" || status=$?
           echo "elapsed: $(( $(date +%s) - started ))s (exit $status)" | tee "$OUT/elapsed.txt"
           exit "$status"
 
