@@ -33,7 +33,7 @@ specs/
 ├── upstream/       # upstream Misskey にも存在する機能の検証
 │   ├── ui/         # ブラウザを駆動する (194 spec)
 │   └── api/        # API の shape / 挙動 (96 spec)
-└── elythia/        # Elythia 独自機能の検証 (9 件)
+└── elythia/        # Elythia 独自機能の検証と、helper のガード (11 件)
 ```
 
 ### ui と api の境界
@@ -67,12 +67,12 @@ shape や挙動を検証する spec。
 この境界は「どちらが上等か」ではない。API の shape 検証は drop-in 互換の regression
 検出に不可欠で、UI 操作より速く安定する。両方を別々に育てる。
 
-**290 spec が `upstream/`、9 spec が `elythia/`。** 分割時に全 spec を確認したが、Elythia 独自
+**290 spec が `upstream/`、11 spec が `elythia/`。** 分割時に全 spec を確認したが、Elythia 独自
 機能 (cherrypick 由来の chat 拡張、`mkGoVersion` 等の additive field) を検証するものは
 1 件も無かった。むしろ `i/profile_extra.spec.ts` のように **Elythia 拡張を明示的に scope
 外としている** spec もある。
 
-`elythia/` の 9 件はいずれも公式 image では通らない。`ui/about_elythia.spec.ts` (#2700)
+`elythia/` の 11 件のうち 9 件は、公式 image では通らない。`ui/about_elythia.spec.ts` (#2700)
 は Elythia 固有ページ `/about-elythia` を開く。`ui/boot_error_reload.spec.ts`
 (#2786) は fork の `2026.7.0-mk.22c` で足した `#mkBootReload` を見る。
 `ui/csp_enforce.spec.ts` (#2788) は Elythia 独自キー
@@ -90,8 +90,12 @@ endpoint 自体が無い。`ui/profile_avatar_lightbox.spec.ts` (#3124) は fork
 **純正のアイコンは押せない素の画像**なので公式 image では何も開かない。
 `ui/embed_iframe_id.spec.ts` (#3892) は埋め込みページが親ウィンドウ以外から届いた
 `iframeId` を受けないことを見るが、**純正は送り元を確かめない**ので公式 image では落ちる。
-**`make playwright-ts-test` は `specs/upstream` に絞ってある**ので、TS backend 実行が
-これで落ちることはない。
+残る 2 件は Elythia の機能ではなく、spec の helper そのもののガードで、
+`ui/route_not_found_guard.spec.ts` (#4025) は `gotoRoute` / `expectRoutedPage` が
+not-found のページを落とすことを、`ui/signin_state_guard.spec.ts` (#4026) はサインインの
+helper が本当にその利用者になることを見る。helper は backend に依らないので、1 つの
+backend で見れば足りる。**`make playwright-ts-test` は `specs/upstream` に絞ってある**
+ので、TS backend 実行がこれらで落ちることはない。
 
 この境界には 2 つの意味がある。
 
@@ -134,30 +138,32 @@ tests/playwright/
 ├── specs/
 │   ├── upstream/ui/            # ブラウザを駆動する (194 spec)
 │   ├── upstream/api/           # API の shape / 挙動 (96 spec)
-│   └── elythia/                # Elythia 独自 (9 件)
-└── fixtures/                   # 14 ファイル
+│   └── elythia/                # Elythia 独自と helper のガード (11 件)
+└── fixtures/                   # 17 ファイル
     ├── api.ts                  # POST /api/<endpoint> ラッパ
     ├── auth.ts                 # signup / signin helper
-    ├── ui_auth.ts              # ブラウザからのサインイン
+    ├── ui_auth.ts              # ブラウザのサインイン (root は保存した state を読み込む)
+    ├── ui_route.ts             # gotoRoute / expectRoutedPage (not-found を落とす)
     ├── quota.ts                # role policy 上限の後始末
-    └── ...                     # abuse_report / backend / chat / files / notes / notifications / rate_limit / streaming / timeline / ui_click
+    └── ...                     # abuse_report / backend / chat / files / notes / notifications / rate_limit / streaming / timeline / ui_click / ui_folder / ui_input
 ```
 
 ## 並列度
 
-**1 スタックに対しては直列で回すしかない** (`workers: 1`)。300 spec のうち 179 が
-共有の root (alice) で**ブラウザからサインイン**し (数え方は
+**1 スタックに対しては直列で回すしかない** (`workers: 1`)。301 spec のうち 180 が
+共有の root (alice) で**ブラウザでサインインした状態**を使い (数え方は
 `grep -rlE 'uiSigninAsRoot|signin-username' specs --include='*.spec.ts' | wc -l`。
-helper 経由が 178 で、`upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 212 で、
+helper 経由が 179 で、`upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する)、
+さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 213 で、
 その差分)。instance meta は全 spec が共有する。Playwright は
 ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
 `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
 `about_page_render` が同じ meta を取り合う。root の quota
 (antenna 5 / webhook 3 / clip 10) を消費する spec も 18 ある。
 
-**並列度はスタックごと分けることでしか稼げない。** CI は `--shard=i/4` を 4 job に
-分けて、それぞれ独立した stack を立てる (#2609)。
+**並列度はスタックごと分けることでしか稼げない。** CI は `PLAYWRIGHT_SHARD=i/4` で 4 job に
+分けて、それぞれ独立した stack を立てる (#2609)。割り振りは所要時間で均す
+(`shard-plan.mjs` と `shard-durations.json`、#4026。[docs/playwright.md](../../docs/playwright.md#shard-の割り振り))。
 
 ## design 原則
 

@@ -22,7 +22,7 @@
 // 文 (`notFoundDescription`) では判定しない — 管理画面の branding が同じ文を
 // 入力欄のラベルに使っている。
 
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
 
 export const NOT_FOUND_TITLE = 'Not found';
 
@@ -40,4 +40,19 @@ export async function expectRoutedPage(page: Page, path: string, timeout = 20_00
   });
   const title = await page.title();
   expect(title.startsWith(`${NOT_FOUND_TITLE} | `) || title === NOT_FOUND_TITLE, `${path} は not-found のページになった (title: ${title})`).toBe(false);
+}
+
+/**
+ * Opens `path` and fails unless it is served (200) and routed to a real page.
+ * Route specs open pages through this so that the not-found check cannot be
+ * forgotten (#4026). Returns the navigation response.
+ */
+export async function gotoRoute(page: Page, baseURL: string, path: string, timeout = 20_000): Promise<Response> {
+  const resp = await page.goto(`${baseURL}${path}`, { waitUntil: 'domcontentloaded' });
+  expect(resp, `goto ${path} returned null response`).not.toBeNull();
+  // SPA は見つからないパスでも index.html を返すので、200 だけでは区別できない。
+  // 区別は expectRoutedPage が受け持つ
+  expect(resp!.status(), `${path} should return 200`).toBe(200);
+  await expectRoutedPage(page, path, timeout);
+  return resp!;
 }

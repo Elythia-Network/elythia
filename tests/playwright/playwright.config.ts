@@ -3,11 +3,35 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
+import { listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from './shard-plan.mjs';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
-// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 9 ファイル。CI では `--shard=i/4` を 4 job に
-// 分けて回す (docs/playwright.md)。
+// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 11 ファイル。CI では
+// `PLAYWRIGHT_SHARD=i/N` で N 個の job に分けて回す (docs/playwright.md)。
+//
+// **shard は `PLAYWRIGHT_SHARD=i/N` で切る (#4026)。** `--shard` はファイルの
+// 並び順で切るだけで、軽い api の spec と重い ui の spec が別の shard に偏る。
+// 所要時間の記録 (shard-durations.json) から割り振る (shard-plan.mjs)。
+// 指定が無ければ全部を流す。
+const allSpecs = listSpecFiles(__dirname);
+const shardEnv = process.env.PLAYWRIGHT_SHARD;
+const selected = (() => {
+  if (shardEnv === undefined || shardEnv === '') return allSpecs;
+  const { current, total } = parseShard(shardEnv);
+  return planShards(allSpecs, loadDurations(__dirname), total)[current - 1];
+})();
+
+// instance meta を書き換える spec は `meta` の project に分け、他の spec の
+// 後に流す。戻し損ねた meta (instance 名・登録の可否など) が、後に走る別の
+// spec を巻き込まないようにするため。判定は `admin/update-meta` を呼んでいるか
+// (shard-plan.mjs の writesMeta)。
+const metaSpecs = new Set(allSpecs.filter((f) => writesMeta(readFileSync(join(__dirname, f), 'utf-8'))));
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const matchFiles = (files: string[]) => files.map((f) => new RegExp(`/${escapeRegExp(f)}$`));
+
 export default defineConfig({
   testDir: './specs',
   // globalSetup: Redis を flush して rate limit counter をゼロから始める
@@ -27,9 +51,10 @@ export default defineConfig({
   // 両者を変えるときは必ず揃えること (#2276: reporter だけ入れ忘れて
   // guard が恒常 fail していた)。
   reporter: [['list'], ['json', { outputFile: 'results.json' }]],
-  // chromium のみで 1 回ずつ実行する。`projects` は定義していない。検証対象は
-  // mk-go backend の API 互換であってブラウザ差ではないので、multi-browser 化は
-  // spec 数 x ブラウザ数だけ CI 時間を増やす割に得るものが少ない。
+  // chromium のみで 1 回ずつ実行する。検証対象は mk-go backend の API 互換で
+  // あってブラウザ差ではないので、multi-browser 化は spec 数 x ブラウザ数だけ
+  // CI 時間を増やす割に得るものが少ない。project は流す順のために 2 つに分ける
+  // (下の `projects`)。
   use: {
     baseURL: process.env.MK_BASE_URL ?? 'https://mkgo.local',
     // 失敗の調査にしか使わないので、成功 run では取らない。
@@ -62,17 +87,17 @@ export default defineConfig({
     // i18n key 解決に使うので、これで全 spec の text 前提が安定する。
     locale: 'en-US',
   },
-  // **1 スタックに対しては直列で回すしかない。** 300 spec のうち 179 が共有の
-  // root (alice) でブラウザからサインインし (数え方は
+  // **1 スタックに対しては直列で回すしかない。** 301 spec のうち 180 が共有の
+  // root (alice) でブラウザでサインインした状態を使い (数え方は
   // `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
   // さらに 33 がサインインせず root の token で API を叩く
-  // (`root.json` を読むのが 212 で、その差分)。
+  // (`root.json` を読むのが 213 で、その差分)。
   // instance meta は全 spec が共有する。Playwright は
   // ファイル単位で並列化するので、workers を上げると `profile_iscat_toggle` と
   // `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
   // `about_page_render` が同じ meta を取り合う。root の quota
   // (antenna 5 / webhook 3 / clip 10) を消費する spec も 18 ある。
-  // 並列度は CI 側で `--shard=i/4` を 4 job に分けて稼ぐ (#2609)。
+  // 並列度は CI 側で `PLAYWRIGHT_SHARD=i/4` の 4 job に分けて稼ぐ (#2609)。
   workers: 1,
   // 1 度だけ retry を許可する。Chromium headless が稀に SIGSEGV (= signal 11
   // / GPF) で即死する infrastructure flake (= profile_iscat_toggle 1ms 即死
@@ -81,4 +106,13 @@ export default defineConfig({
   // に絞る。fail/pass 切替の flaky を許容するわけではなく、`Test results:`
   // summary で `flaky` が出たら spec 側を直す対象とする。
   retries: 1,
+  // workers が 1 なら、project は書いた順に流れる。Playwright の文書が保証する
+  // ものではなく実装の挙動で、1.62.1 で入れ替えると順も入れ替わることを確かめた
+  // (#4026。版を上げたら docs/playwright.md の手順で確かめ直す)。`meta` を `main` に
+  // 依存させる (`dependencies`) と、`main` が 1 件でも落ちたときに `meta` が
+  // 丸ごと skip されて見えなくなるので、順番だけで分ける。
+  projects: [
+    { name: 'main', testMatch: matchFiles(selected.filter((f) => !metaSpecs.has(f))) },
+    { name: 'meta', testMatch: matchFiles(selected.filter((f) => metaSpecs.has(f))), workers: 1 },
+  ],
 });
