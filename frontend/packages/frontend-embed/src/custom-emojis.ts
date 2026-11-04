@@ -45,6 +45,19 @@ export async function fetchCustomEmojis(force = false) {
 	set('lastEmojisFetchedAt', now);
 }
 
+/**
+ * Refreshes the custom emoji list while the embed boots.
+ * Waits for the request only when there is no cached list.
+ */
+export async function refreshCustomEmojisOnBoot(): Promise<void> {
+	// Elythia: 手元 (localStorage) に一覧があるときは、/api/emojis の応答を待たずに描く
+	// (#3992、通常の画面の #3613 と同じ)。取得は裏で続け、返ってきたら customEmojis を
+	// 差し替える。描いてある絵文字 (EmCustomEmoji) は customEmojis を読んでいるので追従する。
+	// 一覧が空 (その埋め込み先での初回や消去の後) のときだけ、絵文字が名前のまま出ないよう待つ。
+	const pending = fetchCustomEmojis().catch(() => { /* empty */ });
+	if (customEmojis.value.length === 0) await pending;
+}
+
 let cachedTags: string[] | null = null;
 export function getCustomEmojiTags() {
 	if (cachedTags) return cachedTags;

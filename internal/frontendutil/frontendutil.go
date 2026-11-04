@@ -133,14 +133,21 @@ func RepoAssetsDir() string {
 // module preloads collected from the manifest by walking the entry's import chain.
 //
 // Preloads is every chunk the entry imports statically once the locale has
-// been inlined (`preloads.json`, written by the frontend build). Unlike
-// ModulePreloads it covers all depths and leaves out the i18n chunk, which
-// the localized build never fetches.
+// been inlined (`preloads.json`, written by the frontend build), plus, for the
+// embed build, the chunks named as dynamic imports (ui.vue) and their static
+// imports. Unlike ModulePreloads it covers all depths and leaves out the i18n
+// chunk, which the localized build never fetches.
+//
+// PreloadStyles is the stylesheets listed in `preloads.json` that the entry
+// loads only after it has started (CSS imported dynamically, or the CSS of a
+// dynamically imported chunk), leaving out the ones already in CSS. Only the
+// embed build lists them.
 type ClientEntryInfo struct {
 	Script         string
 	CSS            []string
 	ModulePreloads []string
 	Preloads       []string
+	PreloadStyles  []string
 }
 
 // DetectClientEntry reads the Vite manifest to find the entry script and all
@@ -226,11 +233,13 @@ func detectEntry(dir, entryKey string) ClientEntryInfo {
 	}
 	walk(entry.Imports, false)
 
+	preloads, preloadStyles := readPreloads(dir, entryKey, entry.File, cssFiles)
 	return ClientEntryInfo{
 		Script:         entry.File,
 		CSS:            cssFiles,
 		ModulePreloads: modulePreloads,
-		Preloads:       readPreloads(dir, entryKey, entry.File),
+		Preloads:       preloads,
+		PreloadStyles:  preloadStyles,
 	}
 }
 
@@ -238,34 +247,50 @@ func detectEntry(dir, entryKey string) ClientEntryInfo {
 // an inline script of the HTML shell, so anything else is dropped.
 var preloadFileRe = regexp.MustCompile(`^scripts/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$`)
 
-// readPreloads returns the chunks listed for entryKey in dir/preloads.json.
+// preloadStyleRe is the shape of a stylesheet entry in preloads.json. The
+// names are written into a `<link href>` of the HTML shell.
+var preloadStyleRe = regexp.MustCompile(`^assets/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.css$`)
+
+// readPreloads returns the chunks and the stylesheets listed for entryKey in
+// dir/preloads.json.
 //
 // 一覧はビルドの locale inliner が書く (#3613)。manifest.json の imports は
 // inline 化の前の形で、ブラウザが取りに行かない i18n の chunk を含むので使わない。
 // ファイルが無い (古いビルド) か読めないときは nil を返し、modulepreload を出さない
 // だけにする。entry 自身と、形の合わない名前は落とす。
-func readPreloads(dir, entryKey, entryFile string) []string {
+//
+// CSS (`assets/*.css`) は embed のビルドだけが書く (#3992)。chunk はロケールごとの
+// ディレクトリに分かれるが、CSS はロケールに依らないので別に返す。entry の CSS として
+// 既に `<link rel="stylesheet">` で出すものは落とす。
+func readPreloads(dir, entryKey, entryFile string, entryCSS []string) ([]string, []string) {
 	data, err := os.ReadFile(filepath.Join(dir, "preloads.json"))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var all map[string][]string
 	if err := json.Unmarshal(data, &all); err != nil {
-		return nil
+		return nil, nil
 	}
-	var out []string
+	var scripts, styles []string
 	seen := map[string]struct{}{entryFile: {}}
+	for _, f := range entryCSS {
+		seen[f] = struct{}{}
+	}
 	for _, f := range all[entryKey] {
-		if !preloadFileRe.MatchString(f) {
-			continue
-		}
 		if _, dup := seen[f]; dup {
 			continue
 		}
+		switch {
+		case preloadFileRe.MatchString(f):
+			scripts = append(scripts, f)
+		case preloadStyleRe.MatchString(f):
+			styles = append(styles, f)
+		default:
+			continue
+		}
 		seen[f] = struct{}{}
-		out = append(out, f)
 	}
-	return out
+	return scripts, styles
 }
 
 // AssetsHandler returns a handler that tries to serve files from primary dir

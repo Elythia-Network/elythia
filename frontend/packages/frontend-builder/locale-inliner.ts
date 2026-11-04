@@ -23,6 +23,7 @@ export class LocaleInliner {
 	i18nSymbol: string;
 	logger: Logger;
 	chunks: ScriptChunk[];
+	manifest: ViteManifest;
 
 	static async create(options: {
 		outputDir: string,
@@ -47,6 +48,7 @@ export class LocaleInliner {
 		this.i18nFileName = this.stripScriptDir(options.manifest[this.i18nFile].file);
 		this.logger = options.logger;
 		this.i18nSymbol = 'i18n';
+		this.manifest = options.manifest;
 		this.chunks = Object.values(options.manifest).filter(chunk => this.isScriptFile(chunk.file)).map(chunk => ({
 			fileName: this.stripScriptDir(chunk.file),
 			src: chunk.src,
@@ -128,12 +130,18 @@ export class LocaleInliner {
 	/**
 	 * Writes `preloads.json`: for each entry chunk, the chunks it imports
 	 * statically after inlining (`{ "<src>": ["scripts/<file>", ...] }`).
+	 *
+	 * `dynamicImports` maps an entry to the modules it imports dynamically as
+	 * soon as it starts, named by their manifest key or by a path the key ends
+	 * with (for files outside the package, such as `icons-subsetter/built/...`).
+	 * Their chunks and static imports, and their stylesheets
+	 * (`assets/<file>.css`), are appended to the entry's list.
 	 */
-	async savePreloads() {
-		await fs.writeFile(path.join(this.outputDir, 'preloads.json'), JSON.stringify(this.collectPreloads()));
+	async savePreloads(options: { dynamicImports?: Record<string, string[]> } = {}) {
+		await fs.writeFile(path.join(this.outputDir, 'preloads.json'), JSON.stringify(this.collectPreloads(options)));
 	}
 
-	collectPreloads(): Record<string, string[]> {
+	collectPreloads(options: { dynamicImports?: Record<string, string[]> } = {}): Record<string, string[]> {
 		// Elythia: 起動の HTML から entry の静的 import を modulepreload で並べるための一覧 (#3613)。
 		// manifest.json の imports は inline 化の前の形で、ブラウザが取りに行かない i18n の chunk
 		// (ロケールの全文、ja-JP で約 290KB) を含む。inline 化で消した import を除いて数える。
@@ -145,13 +153,61 @@ export class LocaleInliner {
 			const removed = chunk.modifications.filter(x => x.type === 'delete');
 			importsByFile.set(chunk.fileName, collectStaticImports(chunk.sourceCode, removed));
 		}
+		const closureOf = (fileName: string) => staticImportClosure(fileName, f => importsByFile.get(f));
 		const preloads: Record<string, string[]> = {};
 		for (const chunk of this.chunks) {
 			if (!chunk.isEntry || chunk.src == null) continue;
-			preloads[chunk.src] = staticImportClosure(chunk.fileName, f => importsByFile.get(f))
-				.map(f => `${this.scriptsDir}/${f}`);
+			const files = closureOf(chunk.fileName).map(f => `${this.scriptsDir}/${f}`);
+			// Elythia: entry が動き出してすぐ動的に読むもの (embed のアイコンの CSS と ui.vue) も
+			// 並べる (#3992)。動的 import は manifest にも chunk の中にも静的な形で残らないので、
+			// 呼び出し側が manifest のキー (か、その末尾のパス) で名指しする。名指しが外れたらビルドを落とす
+			// (黙って一覧が短くなると、先読みが消えたことに気付けない)。
+			for (const key of options.dynamicImports?.[chunk.src] ?? []) {
+				for (const file of this.#dynamicImportFiles(key, closureOf)) {
+					if (!files.includes(file)) files.push(file);
+				}
+			}
+			preloads[chunk.src] = files;
+		}
+		for (const src of Object.keys(options.dynamicImports ?? {})) {
+			if (!Object.hasOwn(preloads, src)) throw new Error(`preloads: entry '${src}' not found`);
 		}
 		return preloads;
+	}
+
+	#resolveManifestKey(name: string): string {
+		if (Object.hasOwn(this.manifest, name)) return name;
+		// パッケージの外のファイル (アイコンの CSS など) のキーは、vite の root からの相対パスで、
+		// 依存の置き方 (symlink の解決先) で変わる。末尾のパスで 1 つに決まるときだけ採る。
+		const matches = Object.keys(this.manifest).filter(k => k.endsWith('/' + name));
+		if (matches.length === 1) return matches[0];
+		if (matches.length === 0) throw new Error(`preloads: '${name}' not found in manifest.json`);
+		throw new Error(`preloads: '${name}' matches more than one manifest key: ${matches.join(', ')}`);
+	}
+
+	#dynamicImportFiles(name: string, closureOf: (fileName: string) => string[]): string[] {
+		const key = this.#resolveManifestKey(name);
+		const target = this.manifest[key];
+		if (target.file.endsWith('.css')) return [target.file];
+		if (!this.isScriptFile(target.file)) throw new Error(`preloads: '${key}' is neither a script chunk nor a stylesheet (${target.file})`);
+
+		const fileName = this.stripScriptDir(target.file);
+		const files = [fileName, ...closureOf(fileName)].map(f => `${this.scriptsDir}/${f}`);
+		// CSS は manifest の imports を辿って集める (vite は chunk ごとに CSS を切り出す)。
+		// 辿る先には inline 化で消える i18n の chunk も入るが、CSS を持たないので影響しない。
+		const seen = new Set<string>();
+		const walk = (k: string) => {
+			if (seen.has(k)) return;
+			seen.add(k);
+			const chunk = this.manifest[k] as ViteManifest[string] | undefined;
+			if (chunk == null) return;
+			for (const css of chunk.css ?? []) {
+				if (!files.includes(css)) files.push(css);
+			}
+			for (const next of chunk.imports ?? []) walk(next);
+		};
+		walk(key);
+		return files;
 	}
 
 	isScriptFile(fileName: string) {

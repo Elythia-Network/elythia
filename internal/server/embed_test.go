@@ -423,3 +423,81 @@ func cspDirective(t *testing.T, csp, name string) string {
 	t.Fatalf("directive %q が CSP に無い: %s", name, csp)
 	return ""
 }
+
+// 埋め込みの HTML から、entry が動き出してから読むものを先に取りに行かせる (#3992)。
+//
+//   - chunk (entry の静的 import の閉包と ui.vue) はロケールごとのディレクトリにあり、
+//     ロケールは boot.js が決めるので、`scripts/...` のまま CLIENT_PRELOADS で渡す
+//   - CSS (アイコンの CSS と ui.vue の CSS) はロケールに依らないので、HTML に
+//     `<link rel="preload" as="style">` で出す
+func TestEmbedShell_Preloads(t *testing.T) {
+	const manifest = `{
+		"src/boot.ts":{"file":"scripts/entry-AAAAAAAA.js","isEntry":true,"imports":["_a.js"],"dynamicImports":["src/ui.vue"],"css":["assets/entry-AAAAAAAA.css"]},
+		"_a.js":{"file":"scripts/a-BBBBBBBB.js"},
+		"src/ui.vue":{"file":"scripts/ui-UUUUUUUU.js","isDynamicEntry":true,"imports":["_a.js"],"css":["assets/ui-UUUUUUUU.css"]}
+	}`
+	const preloads = `{"src/boot.ts":["scripts/a-BBBBBBBB.js","assets/icons-DDDDDDDD.css","scripts/ui-UUUUUUUU.js","assets/ui-UUUUUUUU.css"]}`
+
+	render := func(t *testing.T, cfg *config.Config, files map[string]string) (string, string) {
+		t.Helper()
+		dir := t.TempDir()
+		// loader も inline させ、CSP の hash を 2 つとも通す (TestEmbedShell_CSP と同じ)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "loader"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "loader", "boot.js"), []byte("window.__markerEmbedBootJs = 1;"), 0o644))
+		for name, body := range files {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
+		}
+		t.Setenv("MISSKEY_FRONTEND_EMBED_DIR", dir)
+		h := newEmbedHandlers(cfg, testutil.NewMockMetaRepository(), nil, nil, nil, nil, EmbedDeps{})
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/embed/notes/x", nil), rec)
+		require.NoError(t, h.render(c, nil))
+		return rec.Body.String(), rec.Header().Get("Content-Security-Policy")
+	}
+	base := func() *config.Config {
+		return &config.Config{URL: "https://example.test", Version: "0.0.1-test", FrontendContentSecurityPolicy: CSPModeEnforce}
+	}
+
+	t.Run("lists the chunks for boot.js and preloads the stylesheets", func(t *testing.T) {
+		body, csp := render(t, base(), map[string]string{"manifest.json": manifest, "preloads.json": preloads})
+
+		assert.Contains(t, body, "const CLIENT_ENTRY = \"scripts/entry-AAAAAAAA.js\";\nconst CLIENT_PRELOADS = [\"scripts/a-BBBBBBBB.js\",\"scripts/ui-UUUUUUUU.js\"];\n")
+		// crossorigin が無いと、vite が CORS で差し込む stylesheet と一致せず二重に取りに行く
+		icons := `<link rel="preload" as="style" href="/embed_vite/assets/icons-DDDDDDDD.css" crossorigin>`
+		ui := `<link rel="preload" as="style" href="/embed_vite/assets/ui-UUUUUUUU.css" crossorigin>`
+		assert.Contains(t, body, icons)
+		assert.Contains(t, body, ui)
+		// entry の CSS は今までどおり stylesheet で 1 回だけ出す
+		assert.Equal(t, 1, strings.Count(body, "assets/entry-AAAAAAAA.css"))
+		assert.Contains(t, body, `<link rel="stylesheet" href="/embed_vite/assets/entry-AAAAAAAA.css">`)
+
+		// ロケールは boot.js が決める。サーバーがロケールの付いた chunk を出すと、
+		// 閲覧者のロケールと違う chunk を取りに行ってしまう。
+		assert.NotContains(t, body, "modulepreload")
+		assert.NotRegexp(t, `/embed_vite/[a-z]{2,3}-[A-Z]{2,3}/`, body)
+
+		// 一覧の入った inline script も CSP の hash に載る (載らないと enforce で起動しない)
+		for _, script := range inlineScriptBodies(t, body) {
+			sum := sha256.Sum256([]byte(script))
+			assert.Contains(t, csp, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		}
+	})
+
+	t.Run("a build without preloads.json still boots", func(t *testing.T) {
+		body, _ := render(t, base(), map[string]string{"manifest.json": manifest})
+
+		assert.Contains(t, body, "const CLIENT_ENTRY = \"scripts/entry-AAAAAAAA.js\";\nconst CLIENT_PRELOADS = [];\n")
+		assert.Contains(t, body, `<link rel="stylesheet" href="/embed_vite/assets/entry-AAAAAAAA.css">`)
+		assert.NotContains(t, body, `rel="preload"`)
+	})
+
+	t.Run("dev mode preloads nothing", func(t *testing.T) {
+		cfg := base()
+		cfg.Dev = true
+		body, _ := render(t, cfg, map[string]string{"manifest.json": manifest, "preloads.json": preloads})
+
+		assert.Contains(t, body, "const CLIENT_ENTRY = null;\nconst CLIENT_PRELOADS = [];\n")
+		assert.NotContains(t, body, `rel="preload"`)
+	})
+}
