@@ -89,6 +89,27 @@ report を渡さずに `node tests/playwright/shard-plan.mjs update` を流す�
 `workflow_dispatch` で流すと `plan` で落ちる。古い ref を手で流したいときは、その
 ref の版の workflow を使う。
 
+### shard の数
+
+**今は 4。** 所要時間で割り振った後の CI の実測 (#4026、PR #4031 の run):
+
+| | 1/4 | 2/4 | 3/4 | 4/4 |
+|---|---|---|---|---|
+| spec の実行 (`Run Playwright` の step) | 182 秒 | 162 秒 | 181 秒 | 148 秒 |
+| job 全体 | 335 秒 | 291 秒 | 323 秒 | 258 秒 |
+
+割り振る前の直近 3 回は、spec の実行が shard ごとに約 100〜440 秒、いちばん遅い job が
+584〜651 秒だった。
+
+6 にしても、いちばん遅い job は約 260 秒の見込みで、縮むのは約 75 秒だけ。spec の実行の
+合計 (673 秒) を 6 で割った約 112 秒に、job 1 つの固定の時間 (約 130〜150 秒。環境の
+起動と後片付け) が足されるため。一方で job が 2 つ増え、PR 1 件で動く job (約 30) は
+すでに GitHub の同時実行の上限 (Free で組織全体 20) を超えているので、待ち行列が伸びる。
+
+**いちばん遅い shard の spec の実行が 300 秒を超えたら、数を見直す。** spec を増やす
+段階 (#4024) で届く見込み。見直すときは、`playwright.yml` の `SHARD_TOTAL` を変えた
+PR の run で、上の表と同じ値を測って書き換える。
+
 ### project (`main` と `meta`)
 
 instance meta を書き換える spec (`admin/update-meta` か `admin/roles/update-default-policies`
