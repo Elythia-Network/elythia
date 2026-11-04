@@ -907,10 +907,35 @@ func TestPerson_LenientBooleans(t *testing.T) {
 	}
 
 	// wire 形式は従来どおり素の boolean。omitempty 無しなので false でも出る。
-	b, err := json.Marshal(Person{})
+	// discoverable は pointer (#4022) で、RenderPerson と同じく値を入れて出す
+	b, err := json.Marshal(Person{Discoverable: new(APLenientBool(false))})
 	require.NoError(t, err)
 	for _, want := range []string{`"manuallyApprovesFollowers":false`, `"discoverable":false`, `"isCat":false`} {
 		assert.Contains(t, string(b), want)
+	}
+}
+
+// discoverable は、無いときと null を「指定なし」(nil) として区別する (#4022)。
+// 本家は無いときに isExplorable を書かない (作るときは既定値の true、更新では今の値)。
+func TestPerson_DiscoverableKeepsAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want *bool
+	}{
+		{``, nil},
+		{`,"discoverable":null`, nil},
+		{`,"discoverable":false`, new(false)},
+		{`,"discoverable":true`, new(true)},
+		{`,"discoverable":"false"`, new(false)},
+	} {
+		var p Person
+		require.NoError(t, json.Unmarshal([]byte(`{"type":"Person"`+tc.in+`}`), &p), tc.in)
+		if tc.want == nil {
+			assert.Nil(t, p.Discoverable, tc.in)
+			continue
+		}
+		require.NotNil(t, p.Discoverable, tc.in)
+		assert.Equal(t, *tc.want, p.Discoverable.Bool(), tc.in)
 	}
 }
 

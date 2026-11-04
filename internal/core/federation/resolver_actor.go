@@ -249,7 +249,11 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 		// 取り込む。これが false だとリモートの承認制ユーザに対するフォロー
 		// が非 locked として処理されて即 Following が成立し、ボタン挙動と
 		// AP仕様が崩れる。
-		IsLocked:      actor.ManuallyApproves.Bool(),
+		IsLocked: actor.ManuallyApproves.Bool(),
+		// 本家と同じく、`isCat` が true のときだけ猫にする (#4022)。猫耳と、ノートの
+		// 文章の nyaize は、画面の側がこの値を見て行う
+		IsCat:         actor.IsCat.Bool(),
+		IsExplorable:  remoteExplorable(actor, true),
 		LastFetchedAt: &now,
 		// **発信元が凍結を明示しているなら、作る時点で凍結しておく** (#2951)。
 		// Mastodon 系は凍結しても `Delete` を送らず actor に `suspended` を
@@ -350,6 +354,8 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 	// user 行を作る前に取る。後にすると、取得の間 profile の無い user 行が残り、
 	// その間は一覧の公開範囲が未設定 (= public 扱い) になる。
 	followingVis, followersVis := r.followVisibilitiesOnCreate(actor.ID, actor.FollowingRaw, actor.FollowersRaw)
+	// Create の後には読めない (下の isExplorable の書き込みを参照)
+	explorable := user.IsExplorable
 	if err := r.userRepo.Create(user); err != nil {
 		// **同じ actor を別の経路が先に作っていたら、その行を使う** (#3299)。
 		// singleflight の鍵は経路ごとに分かれる (allowCrossHost / skipFeatured)
@@ -375,6 +381,16 @@ func (r *Resolver) resolveActorOnceWithID(uri string, allowCrossHost bool, preas
 			}
 		}
 		return nil, err
+	}
+	// **探せないことは作った後に書く** (#4022)。isExplorable は既定値 (true) を
+	// 持つ列で、GORM は既定値のある列の false を INSERT から外し、RETURNING で
+	// 読み戻した true を struct に書き戻す。そのため Create の前に覚えた値で決める
+	if !explorable {
+		if uerr := r.userRepo.UpdateUser(user.ID, map[string]any{"isExplorable": false}); uerr != nil {
+			slog.Warn("federation: failed to store isExplorable=false", "userId", user.ID, "err", uerr)
+		} else {
+			user.IsExplorable = false
+		}
 	}
 	// **凍結して作ったなら由来も刻む** (#2973)。刻まないと、この行は次の
 	// refresh で「由来不明 = 解除方向では local 扱い」になり、**発信元が
@@ -459,6 +475,16 @@ const (
 	maxRemoteAvatarURLLen = 1024
 	maxRemoteBannerURLLen = 512
 )
+
+// remoteExplorable maps the actor's `discoverable` to isExplorable (#4022).
+// Without a value it returns fallback: the column default (true) on create and
+// the current value on refresh, as upstream does for an absent value.
+func remoteExplorable(actor *activitypub.Person, fallback bool) bool {
+	if actor.Discoverable == nil {
+		return fallback
+	}
+	return actor.Discoverable.Bool()
+}
 
 // remoteMediaURL returns the URL when it fits the target column, or "" when it
 // does not (the actor is still imported, just without that image).

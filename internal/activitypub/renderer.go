@@ -516,7 +516,7 @@ func (r *Renderer) RenderPerson(u *model.User, profile *model.UserProfile, publi
 			PublicKeyPEM: APLenientString(publicKeyPEM),
 		},
 		ManuallyApproves: APTruthyBool(u.IsLocked),
-		Discoverable:     APLenientBool(u.IsExplorable),
+		Discoverable:     new(APLenientBool(u.IsExplorable)),
 		IsCat:            APLenientBool(u.IsCat),
 	}
 	// アカウントの作成日時を `published` として載せる (#3465)。upstream の

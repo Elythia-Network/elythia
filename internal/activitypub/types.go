@@ -980,8 +980,14 @@ type Person struct {
 	//
 	// **`APLenientBool` を使う** (読めない形は false)。`APTruthyBool` だと
 	// 壊れた値で誤って凍結してしまう。
-	Suspended    APLenientBool   `json:"suspended,omitempty"`
-	Discoverable APLenientBool   `json:"discoverable"`
+	Suspended APLenientBool `json:"suspended,omitempty"`
+	// Discoverable は、無いときと null を「指定なし」(nil) として区別するため pointer で
+	// 持つ (#4022)。本家は `isExplorable: person.discoverable` を代入するだけなので、
+	// 無いときは作るときは列の既定値 (true)、更新するときは今の値のまま。null は、本家
+	// では NOT NULL の列に NULL を書こうとして取り込みに失敗する (TypeORM が既定値を
+	// 使うのは undefined のときだけ) が、こちらは無いときと同じに扱う (緩い方向)。
+	// RenderPerson は常に値を入れるので、こちらから出す形は変わらない
+	Discoverable *APLenientBool  `json:"discoverable"`
 	IsCat        APLenientBool   `json:"isCat"`
 	VcardBday    APLenientString `json:"vcard:bday,omitempty"`
 	VcardAddress APLenientString `json:"vcard:Address,omitempty"`
