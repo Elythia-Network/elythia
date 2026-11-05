@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 308 ファイル
+`tests/playwright/specs/` にあり、現在 332 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -43,13 +43,13 @@ upstream と食い違っていても気付けない**。
 `.github/workflows/playwright.yml` が `pull_request` (paths フィルタ) と
 `workflow_dispatch` で発火する。nightly から PR トリガーへ移行済み (#2291)。
 
-**4 シャード並列** (`PLAYWRIGHT_SHARD=i/4`、`fail-fast: false`)。check 名は
-`spec (Elythia 1/4)` 〜 `4/4`。
+**6 シャード並列** (`PLAYWRIGHT_SHARD=i/6`、`fail-fast: false`)。check 名は
+`spec (Elythia 1/6)` 〜 `6/6`。
 
-**1 スタックあたりは直列でしか回せない。** 308 spec のうち 185 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 332 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
 `uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 35 がサインインせず root の token で API を叩く (`root.json` を読むのが 220 で、その差分)。
+さらに 36 がサインインせず root の token で API を叩く (`root.json` を読むのが 221 で、その差分)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
@@ -96,29 +96,28 @@ commit を見て、spec が漏れたり 2 回流れたりする。pull_request �
 
 ### shard の数
 
-**今は 4。** 所要時間で割り振った後の CI の実測 (#4026、PR #4031 の run):
+**今は 6** (#4043 で 4 から上げた)。目安は「いちばん遅い shard の spec の実行が 300 秒を超えたら、数を見直す」。
 
-| | 1/4 | 2/4 | 3/4 | 4/4 |
-|---|---|---|---|---|
-| spec の実行 (`Run Playwright` の step) | 182 秒 | 162 秒 | 181 秒 | 148 秒 |
-| job 全体 | 335 秒 | 291 秒 | 323 秒 | 258 秒 |
+経緯:
 
-割り振る前の直近 3 回は、spec の実行が shard ごとに約 100〜440 秒、いちばん遅い job が
-584〜651 秒だった。
+- #4026 (PR #4031) で所要時間で割り振るようにした時点は 4 で、spec の実行は shard ごとに 148〜182 秒、
+  job 全体は 258〜335 秒だった。6 にしても、いちばん遅い job は約 75 秒しか縮まない見込みだった (job 1 つに
+  環境の起動と後片付けの固定の時間が約 130〜150 秒かかるため)。PR 1 件で動く job (約 30) はすでに GitHub の
+  同時実行の上限 (Free で組織全体 20) を超えているので、増やすと待ち行列が伸びる
+- #4041 (PR #4042) で全ルートの表 (7 ファイル、手元で計 658 秒) を足すと、4 shard の spec の実行は
+  327・331・266・284 秒になり、目安を超えた。#4043 でさらに 24 ファイル (手元で計 116 秒) を足すので、
+  6 にした
 
-6 にしても、いちばん遅い job は約 260 秒の見込みで、縮むのは約 75 秒だけ。spec の実行の
-合計 (673 秒) を 6 で割った約 112 秒に、job 1 つの固定の時間 (約 130〜150 秒。環境の
-起動と後片付け) が足されるため。一方で job が 2 つ増え、PR 1 件で動く job (約 30) は
-すでに GitHub の同時実行の上限 (Free で組織全体 20) を超えているので、待ち行列が伸びる。
+6 にした後の実測 (#4043 の PR の run):
 
-**いちばん遅い shard の spec の実行が 300 秒を超えたら、数を見直す。** spec を増やす
-段階 (#4024) で届く見込み。見直すときは、`playwright.yml` の `SHARD_TOTAL` を変えた
-PR の run で、上の表と同じ値を測って書き換える。
+<!-- route-shard-6-measurement -->
+
+数を見直すときは、`playwright.yml` の `SHARD_TOTAL` を変えた PR の run で、上の表と同じ値を測って書き換える。
 
 ### project (`main` と `meta`)
 
 instance meta を書き換える spec (`admin/update-meta` か `admin/roles/update-default-policies`
-を呼ぶもの。今は 16) は、
+を呼ぶもの。今は 17) は、
 `meta` の project に分けてある。判定は `shard-plan.mjs` の `writesMeta` が自動で
 行うので、spec を書く側で振り分ける必要は無い。数え方 (リポジトリの root で):
 
