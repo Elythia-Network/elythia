@@ -1270,7 +1270,8 @@ playwright-logs: ## Playwright スタックのログを表示
 #
 # 同 spec を upstream Misskey TS image (= 真の互換挙動の baseline) に対しても
 # 走らせる。両方で pass = drop-in 互換が確認される、片方のみ pass = drift /
-# spec 誤りとして調査対象。
+# spec 誤りとして調査対象。例外は、Elythia で足した data-testid で要素を
+# 取る spec で、公式 image では要素が無いので落ちる (docs/playwright.md)。
 PLAYWRIGHT_TS_OVERLAY=tests/playwright/compose.ts.yml
 
 playwright-ts-up: ## Playwright スタック (Misskey TS backend) を起動

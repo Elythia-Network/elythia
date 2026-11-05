@@ -38,6 +38,40 @@ upstream と食い違っていても気付けない**。
 **upstream が変わらない限り答えも変わらない**ので、常時回す意味が薄いため。追従する本家の版を
 上げたときに回す (`docs/upstream-catch-up.md`)。
 
+### Elythia で足した `data-testid` を使う spec は、公式 image では落ちる
+
+公式 image は本家の frontend を配るので、Elythia の frontend で足した `data-testid` が無い。
+`specs/upstream/ui/` の spec のうち、本家にもある要素を、Elythia で足した `data-testid` で
+取っているものは、**TS backend の実行では要素が見つからずに落ちる。既知の例外として扱い、
+spec を `elythia/` へ移したり、文言で取り直したりはしない。**
+
+2026-11-06 の時点で 35 ファイルあり、すべて #4024 の拡充で足した spec (#4043 が 20、#4046 が 7、
+#4049 が 8)。ノートの操作 (メニュー・リアクション・画像・投票)、投稿フォーム、タイムラインと
+通知のタブ、通知の行、絵文字ピッカー、ドライブ、設定の検索、ダイアログのボタンなどが該当する。
+
+数え方: 本家 (`.cache/misskey/<版>/packages/frontend/src`) と Elythia
+(`frontend/packages/frontend/src`) の `data-testid="…"` の差を取り (67 種)、その名前を
+引用符付きで含む `specs/upstream` の spec と、`fixtures/ui_drive.ts` を使う spec を数える。
+テンプレートで作る名前 (通知の行の `notification-<種類>`、公開範囲の `visibility-<範囲>`) と、
+ページの見出しのタブの `testId` (`timeline-tab-*` / `notifications-tab-*`。#4046 で足した
+仕組みで、本家には無い) を使う spec も足す。増やしたら、この数を直す。
+
+- 置き場所は、検証する機能が本家にもあるかで決める (README の「境界」)。取り方の都合で
+  `elythia/` へ移すと、本家にもある機能の spec が Elythia 独自に見えてしまう
+- 文言で取る形へ切り替えないのは、文言は locale と本家の版で変わり、同じ文言の別の要素も
+  拾いやすいため
+- **例外にできるのは、本家にもある要素に `data-testid` だけを足したものに限る。** Elythia
+  独自の要素 (独自機能のボタンなど) を取る spec は、例外ではなく `elythia/` に置く
+- **この 35 ファイルは、`data-testid` より後ろの期待値も本家と照合されない。** TS backend では
+  要素を取る段で落ちるため。たとえば `note_poll_vote` は TS のときだけ本家の正しい
+  `isVoted` (#4044 の修正後の形) を確かめる分岐を持つが、その前の `poll-choice` で落ちるので、
+  分岐はどの経路でも実行されない。画面の振る舞いだけでなく、UI の spec の中で叩いている
+  API の期待値も照合されない (`isVoted` は、ほかの層に検査が無い)
+- TS backend の実行で落ちたら、落ちた locator の `data-testid` が本家の frontend にあるかを
+  見る。fixture の中で取っているもの (`ui_drive.ts` の `drive-file` など) や、テンプレートで
+  作る名前は、落ちた行を見ただけでは名前が分からないので、呼び出し元まで辿る。本家に無ければ
+  この例外で、あれば期待値と本家の挙動の食い違いとして調べる
+
 ## CI での扱い
 
 `.github/workflows/playwright.yml` が `pull_request` (paths フィルタ) と
