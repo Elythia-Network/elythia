@@ -62,7 +62,7 @@ make dev
 | `make check` | `fmt` → `lint` → `actionlint` → `golangci-lint` → `test`。コミット前に必須 |
 | `make gates` | 静的 parity ゲートを一括実行 (内訳は下の「静的 parity ゲート」表) |
 | `make version` | Elythia / 互換 Misskey / 追従している本家 (`UPSTREAM_MISSKEY_VERSION`) のバージョンを表示 |
-| `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、`emoji-regex-check` (#3324)、Elythia のファイルが `misskey-js` を直接 import していないかの検査 (#4028)、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`)。CI に同名の job はもう無く、CI では `frontend` workflow (`.github/workflows/frontend.yml`) が型・eslint・vitest・`emoji-regex-check` などを回す。同梱サンプル入りの統合バイナリの build は required の `build` job にある (#3379) |
+| `make frontend-check` | `frontend/` の型チェック (`vue-tsc --noEmit`)、**`frontend/` のソースを読むゲート**、`emoji-regex-check` (#3324)、Elythia のファイルが `misskey-js` を直接 import していないかの検査 (#4028)、全ルートの Playwright の spec への対応付け (`playwright-route-check`、#4035)、**eslint** (#2906)。ビルド成果物を作らないので安全。ゲートは `frontend/` を本体で追跡するようになった (#3379) ので skip せず `make test` でも走るが、frontend を触ったときに手元でまとめて回せるよう、ここにも残している。**vitest は入っていない** (`make frontend-test`)。CI に同名の job はもう無く、CI では `frontend` workflow (`.github/workflows/frontend.yml`) が型・eslint・vitest・`emoji-regex-check` などを回す。同梱サンプル入りの統合バイナリの build は required の `build` job にある (#3379) |
 | `make diff-check` | 差分比較ハーネスを作り直して実行 (クリーン DB 前提のため) |
 | `make playwright-check` | Playwright を作り直して実行 (同上) |
 | `make e2e-down-all` | 検証用スタックを一括撤去。**本番 project `mk` は対象外** |
@@ -143,6 +143,7 @@ cd mk && docker compose up -d
 | `make plugin-test` | 同梱プラグインのテスト (別 module なので `./...` に含まれない) |
 | `make plugin-doc-check` | `docs/plugins/authoring.md` の Go スニペットが実際にコンパイルできるか |
 | `make emoji-regex-check` | `make emoji-regex` の生成物と snapshot (正規表現と mfm-js / emoji-data の版) が、`frontend/` の `@elythia-network/mfm` から作り直したものと一致するか。node_modules が要るので `make gates` には入れず、手元では `make frontend-check` から、CI では `frontend` workflow の `frontend-lint` job から呼ばれる (#3324) |
+| `make playwright-route-check` | frontend の全ルート (`router.definition.ts` の `ROUTE_DEF`) が、Playwright の spec の宣言 (`coversRoutes`) か、許可リスト・保留のリストのどれかに載っているか。`tests/playwright` の node_modules が要るので `make gates` には入れず、手元では `make frontend-check` から、CI では `frontend` workflow の `frontend-lint` job から呼ばれる (#4035)。書き方は [playwright.md](playwright.md#ルートと-spec-の対応付け-4035) |
 | `make frontend-lint` | fork frontend の eslint。CI `frontend` workflow の `frontend-lint` job の eslint step のうち frontend と frontend-embed の分と同じで、範囲は `package.json` の script が持つ (`--quiet "src/**/*.{ts,vue}" "public/loader/*.js"`。起動画面のスクリプトを含める、#3954)。`make frontend-check` から呼ばれる (#2906)。実測 70 秒 (#3954 で frontend-embed を足す前は 55 秒) |
 | `make frontend-test` | fork frontend の vitest (`test/unit/**/*.test.ts`)。CI `frontend` workflow の `frontend-test` job の frontend unit tests step と同じ |
 | `make plugin-dev` | プラグインを編集しながら動かす (`PLUGIN=plugins/status`) |
@@ -332,7 +333,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 - **golangci-lint** (`make golangci-lint`) — errcheck / govet / ineffassign / staticcheck
 
 #### frontendジョブ (`.github/workflows/frontend.yml`)
-- `ci.yml`ではなく別のworkflowにあり、pathsで絞らずに毎回起動する。`changes`ジョブが差分からfrontendに関係する変更か (`frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・`tools/emojiregex/`・workflow自身・`Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る) を判定し、関係なければ`frontend-lint` / `frontend-test`をskipする
+- `ci.yml`ではなく別のworkflowにあり、pathsで絞らずに毎回起動する。`changes`ジョブが差分からfrontendに関係する変更か (`frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・`tools/emojiregex/`・`tests/playwright/`・workflow自身・`Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る) を判定し、関係なければ`frontend-lint` / `frontend-test`をskipする
 - `frontend`ジョブは`if: always()`で両者を束ねる集約ジョブ。関係しない差分では成功し、関係する差分では両方の成功を要求する。`changes`が落ちたら失敗する
 - 中身と手元での再現は[ci.md](ci.md)にある。手元用の`make frontend-check`は残っているが、CIの同名ジョブは#3379で無くなった
 

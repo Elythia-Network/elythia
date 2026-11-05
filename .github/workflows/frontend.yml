@@ -5,7 +5,8 @@
 # 本家の運用向けのもの (docker / release / labeler など) は持ってこない。
 #
 # - frontend-lint: 10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js)、
-#   check-dts、SPDX ヘッダー、Elythia のファイルの import (#4028)、locale の検証、misskey-js の API レポート
+#   check-dts、SPDX ヘッダー、Elythia のファイルの import (#4028)、ルートと Playwright の spec の対応付け (#4035)、
+#   locale の検証、misskey-js の API レポート
 # - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
 # - frontend: 上の 2 つを集約する。**required check はこの名前だけ** (`test` と
 #   同じ形。job を足しても branch protection を触らずに済む、#3379)
@@ -78,6 +79,7 @@ jobs:
           # frontend のビルドが import する生成物は plugins/ から pluginbuild が作り、
           # job は make plugins-all (Makefile / go.mod) を通す。絵文字の正規表現は
           # tools/emojiregex が生成し、frontend/ の MFM の解析器と突き合わせる。
+          # tests/playwright/ は、spec の宣言と frontend のルートを突き合わせる (#4035)。
           #
           # **パイプで grep -q に渡さない。** grep -q は最初の一致で抜けるので、
           # 一覧がパイプのバッファ (約 64KiB) を超えると書き手が SIGPIPE で落ち、
@@ -89,7 +91,7 @@ jobs:
           # 切るのは、日本語などのパスが "frontend/\346..." と引用されて ^frontend/ に
           # 一致しなくなるため。
           files=$(git -c core.quotePath=false diff --no-renames --name-only "$base" HEAD)
-          if grep -qE '^(frontend/|plugins/|plugin/|tools/pluginbuild/|tools/emojiregex/|\.github/workflows/frontend\.yml$|Makefile$|go\.(mod|sum)$)' <<< "$files"; then
+          if grep -qE '^(frontend/|plugins/|plugin/|tools/pluginbuild/|tools/emojiregex/|tests/playwright/|\.github/workflows/frontend\.yml$|Makefile$|go\.(mod|sum)$)' <<< "$files"; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
@@ -162,6 +164,18 @@ jobs:
       # Elythia が書いたファイルは misskey-js を直接 import しない (#4028)
       - name: Elythia imports
         run: node scripts/check-elythia-imports.mjs
+
+      # frontend の全ルートが、どこかの Playwright spec に対応付いているか (#4035)。
+      # spec の一覧は playwright の `test --list` に解かせるので、tests/playwright の
+      # 依存を入れる (ブラウザは要らない)。frontend だけを変えた PR でも spec の書き
+      # 忘れを拾うため、playwright.yml ではなく required のこの job で回す。
+      - name: Install Playwright spec dependencies
+        working-directory: tests/playwright
+        run: npm ci --no-audit --no-fund
+
+      - name: Route coverage
+        working-directory: .
+        run: make playwright-route-check
 
       - name: Verify locales
         run: pnpm --filter i18n run verify

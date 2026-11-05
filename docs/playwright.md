@@ -261,6 +261,62 @@ mount 後に遅延ロードされる chunk (route 単位の code splitting、shi
 `https://esm.sh` 動的 import) やサインイン後の画面で起きる違反は数えない。
 issue #2788 の主目的 (shell に hash 無しの inline script が入る) はこれで足りる。
 
+## ルートと spec の対応付け (#4035)
+
+frontend のルートを足したのに spec を書かないと、`make playwright-route-check` が落ちる。CI では
+required の `frontend` (`frontend-lint` job) で回り、手元では `make frontend-check` からも呼ばれる。
+spec の一覧を playwright に解かせるので、`tests/playwright` で `npm ci` しておく (サーバーと
+ブラウザは要らない)。
+
+**spec の側で宣言する。** `test()` の第 2 引数に `coversRoutes(...)` (`fixtures/ui_route.ts`) を渡す。
+
+```ts
+test('the note page shows the reply', coversRoutes('/notes/:noteId/:initialTab?'), async ({ page, baseURL }) => {
+```
+
+- パスは `router.definition.ts` の `path` と同じ文字列で書く。子のルートは親と連結する
+  (`/settings/profile`、`/admin/roles/:id`)。子の `/` は親と同じなので、親のパスで書く
+- **宣言してよいのは、そのルートを開いて、そのページに固有のものを確かめるテストだけ。**
+  見出しや `data-testid`、seed した中身、そのページが呼ぶ API、そのページでの操作の結果を
+  見ていること。ナビが見える、本文が何文字ある、not-found でない (`gotoRoute` だけ)、では
+  宣言しない。ゲートは宣言の有無しか見ないので、ここはレビューで受ける
+- **どのページにも出るもので判定しない。** サインイン中は navbar に自分の名前が、画面が広いと右の
+  ウィジェット列に通知 (フォローした人の名前、フォローリクエストの承認・拒否のボタンまで) が出る。
+  未サインインで幅が広いと、左のダッシュボードにインスタンス名 (未設定なら host) とローカル
+  タイムラインが出る。これらと同じ名前・本文・ボタンで判定すると、not-found のページでも通る。
+  #4035 で既存の spec に宣言を付けたとき、この形のテストが 11 本あり、宣言を外した (ほかに、管理画面の
+  メニューと同じ見出しの文言だけで判定していた 4 本も外した)
+- `test.only` が残っていると、ゲートは exit 2 で落ちる (`--forbid-only`)
+- 1 つのテストで複数のルートを確かめるなら並べる (`coversRoutes('/a', '/b')`)
+- 既に別のオプションを渡しているなら混ぜる (`{ ...coversRoutes('/a'), tag: '@x' }`)。既に `annotation` を渡しているテストでは、
+  そのまま混ぜると後に書いた方が上書きする。配列をつなぐ (`annotation: [...coversRoutes('/a').annotation, ...]`)
+- `test.skip` / `test.fixme` / `test.describe.skip` のテストの宣言は数えない (一覧で skipped になるもの)。
+  実行時の `test.skip(条件)` は一覧からは見えないので、宣言するテストでは使わない
+
+**宣言できないルートは、2 つのリストのどちらかに載せる。** どちらも `<ルート>\t<2 列目>` の TSV。
+
+| リスト | 載せるもの | 2 列目 |
+|---|---|---|
+| `tests/playwright/route-coverage-allowlist.tsv` | ずっと spec を付けないルート | どの経路でそうなるか (例: `redirect` だけで描画しない) |
+| `tests/playwright/route-coverage-pending.tsv` | これから spec を付けるルート | 付ける予定の issue の番号 (`#4024(15)` のように親と段階でもよい) |
+
+ゲート (`tests/playwright/route-coverage.mjs`) が落とすのは次のとき。
+
+- 宣言も無く、どちらのリストにも無いルートがある
+- 宣言やリストの行が、`router.definition.ts` に無いルートを指している (ルートの改名で古くなった)
+- 宣言のあるルートがリストにも載っている。spec を付けたら、リストの行を消す
+- 同じルートが 2 つのリストの両方にある
+- git が追跡していない spec の宣言 (数えない。手元でだけ緑になるのを防ぐ)
+- skip / fixme のテストの宣言 (数えない)
+- `tests/playwright` に、git が無視する `.js` が残っている (exit 2)。`.ts` の spec や fixture より先に読まれ、
+  手元と CI で一覧が食い違うため (下の「spec を書くときの注意」)
+- 何も拾えなかった (exit 2)。ルートが 150 未満のとき、目印の 4 つ (`/notes/:noteId/:initialTab?`
+  `/settings/profile` `/admin/roles/:id` `/:(*)`) を拾えなかったとき、宣言が 1 件も無いとき
+
+ルートの一覧は `ROUTE_DEF` を TypeScript の構文木で辿って作る。`path` を式で組み立てたときと、
+ルートの中に `{ children }` や `...rest` を書いたときは、読めないので落とす。プラグインのルート (`router.ts` の `routeDefsWithPlugins`) は対象にしない。
+どのプラグインを入れるかが運営者ごとに違い、`ROUTE_DEF` に現れないため。
+
 ## spec を書くときの注意
 
 `_spec.ts` は silent skip される。ファイル名は必ず `.spec.ts`。
