@@ -1,0 +1,22 @@
+-- #4021: 投稿をフォロワーのホームタイムラインへ配るときに読む行だけを入れた部分 index を張る。
+--
+-- 配信 (`ListHomeTimelineFollowers`) は `"followeeId" = ? AND "followerHost" IS NULL
+-- AND NOT "isFollowerHibernated" ORDER BY id DESC` を 200 件ずつ OFFSET で読む。
+-- `IDX_following_followeeId` だけだと、どのページでもその利用者のフォロワー全員の
+-- 行を heap から読んでから filter で捨てる (使い捨ての schema、フォロワー 1,200 人の
+-- うち配る相手 240 人で、2 ページ目が 1,171 buffer → この index で 243 buffer。
+-- PostgreSQL 18、キャッシュに載った状態)。リモートと休眠したフォロワーを入れない
+-- ので、index も小さい。
+--
+-- 本家はこの絞り込みに `IDX_ce62b50d882d4e9dee10ad0d2f` ("followeeId", "followerHost",
+-- "isFollowerHibernated") を持つが、id の順を持たないので、id の降順で OFFSET を進める
+-- この読み方では並べ替えが要る (Elythia はこの index を作っていない)。列の組が違うので、
+-- Elythia 独自の名前で足す。本家のどの index とも列が違うので、
+-- internal/entitycompat/testdata/intended_partial_indexes.json には載せない。
+-- TS 版から移した DB では、本家の index と並んで残る。
+-- 述語は internal/repository/following.go の SQL と同じ形で書く。bind 変数を使わないので、
+-- prepared statement の generic plan でも、この index の述語を満たすと判定できる。
+--
+-- `following` は大きくなりうるので CONCURRENTLY で書き込みを止めずに作る。
+-- 失敗したときの回復は docs/deployment.md の「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_following_followeeId_id_home" ON "following" ("followeeId", "id") WHERE "followerHost" IS NULL AND NOT "isFollowerHibernated";

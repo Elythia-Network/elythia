@@ -127,6 +127,18 @@ func (m *MockFollowingRepository) ListFollowers(userID string, limit, offset int
 	return paginate(sortFollowingsByIDDesc(m.followingsWhere(userID, true)), limit, offset), nil
 }
 
+// ListHomeTimelineFollowers mirrors the production repository: local and
+// non-hibernated followers only, ORDER BY id DESC, then LIMIT/OFFSET.
+func (m *MockFollowingRepository) ListHomeTimelineFollowers(followeeID string, limit, offset int) ([]*model.Following, error) {
+	var rows []*model.Following
+	for _, f := range m.followingsWhere(followeeID, true) {
+		if f.FollowerHost == nil && !f.IsFollowerHibernated {
+			rows = append(rows, f)
+		}
+	}
+	return paginate(sortFollowingsByIDDesc(rows), limit, offset), nil
+}
+
 // ListFollowersWithCursor mirrors the production repository: followeeId match,
 // sinceId/untilId in the query, paginationOrder.
 //

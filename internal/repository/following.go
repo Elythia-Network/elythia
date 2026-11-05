@@ -36,6 +36,13 @@ type FollowingRepository interface {
 	// 足すと呼び出しが空文字だらけになる。**上限も違う** (fanout 200 / CSV 500)
 	// ので、cursor 版の clamp を共有 body に置いてはいけない。
 	ListFollowersWithCursor(followeeID, sinceID, untilID string, limit, offset int) ([]*model.Following, error)
+	// ListHomeTimelineFollowers is ListFollowers narrowed to the followers whose
+	// home timeline receives the followee's notes: local (followerHost IS NULL)
+	// and not hibernated. Used by the note fanout (`core/timeline`).
+	//
+	// 本家 NoteCreateService.pushToTl と同じ条件で、配らない行を DB から読まない (#4021)。
+	// 部分 index `IDX_following_followeeId_id_home` (000141) が同じ述語を持つ。
+	ListHomeTimelineFollowers(followeeID string, limit, offset int) ([]*model.Following, error)
 	// ListFollowersToNotify returns Following rows where followeeId matches and
 	// notify='normal'. Used by note.CreateService to fan out 'note'
 	// notifications to followers who opted into post notifications (upstream
@@ -433,6 +440,12 @@ func (r *followingRepository) listRelationPage(cond, anchorID, sinceID, untilID 
 // (`paginationOrder("", "", "id")` == `id DESC` なので生成 SQL は変わらない)。
 func (r *followingRepository) ListFollowers(userID string, limit, offset int) ([]*model.Following, error) {
 	return r.listRelationPage(`"followeeId" = ?`, userID, "", "", limit, offset)
+}
+
+func (r *followingRepository) ListHomeTimelineFollowers(followeeID string, limit, offset int) ([]*model.Following, error) {
+	// 述語は 000141 の部分 index と同じ形で書く。bind 変数を使わないので、prepared
+	// statement の generic plan でも index の述語を満たすと判定できる
+	return r.listRelationPage(`"followeeId" = ? AND "followerHost" IS NULL AND NOT "isFollowerHibernated"`, followeeID, "", "", limit, offset)
 }
 
 // ListFollowersToNotify returns Following rows where followeeId matches and
