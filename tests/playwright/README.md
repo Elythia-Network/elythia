@@ -101,12 +101,16 @@ backend で見れば足りる。**`make playwright-ts-test` は `specs/upstream`
 
   - **`upstream/` の spec は Misskey TS backend に対しても通る**。`make playwright-ts-test`
     と CI の `workflow_dispatch` 実行がそれを担保している。期待値そのものが upstream の
-    実挙動と一致していることの検証になる
+    実挙動と一致していることの検証になる。例外は、Elythia の frontend で足した `data-testid` で
+    要素を取る spec で、公式 image には要素が無いので落ちる (既知の例外。
+    [docs/playwright.md](../../docs/playwright.md#elythia-で足した-data-testid-を使う-spec-は公式-image-では落ちる))
   - **本家へ還元しやすい**。`upstream/` の spec は本家にも存在する機能を検証しているので、
-    本家の Playwright スイートへ持っていける
+    本家の Playwright スイートへ持っていける (Elythia で足した `data-testid` で要素を取るものは、
+    本家に `data-testid` を足さないと持っていけない)
 
 Elythia 独自機能の spec を書くときは `elythia/` に置く。そちらは TS backend では通らないので、
-`upstream/` に混ぜると `playwright-ts-test` が壊れる。
+`upstream/` に混ぜると `playwright-ts-test` が壊れる。本家にもある要素に `data-testid` だけを
+足して取る spec は、例外として `upstream/` に置く (上の例外)。
 
 ## ライセンスヘッダ
 
@@ -168,7 +172,7 @@ tests/playwright/
 
 ## design 原則
 
-- spec は backend-agnostic (= TS / Elythia 両方で同 spec が pass するべき)
+- spec は backend-agnostic (= TS / Elythia 両方で同 spec が pass するべき)。例外は Elythia で足した `data-testid` を使う spec (上の「境界」)
 - 失敗 = 非互換 / regression として issue 化する運用
 - pytest 版の drop-in e2e (`tests/dropin/`) / cypress 版 (`tests/dropin-frontend/`) は
   別系統として並走する。前者は TS ↔ Elythia の切替、後者は 3 TS インスタンスでの

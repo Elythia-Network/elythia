@@ -426,6 +426,9 @@ Elythia 側の挙動に引きずられていた箇所が 19 件見つかり、�
   `updatedAt > now-5d` で絞るが、upstream が local user の `updatedAt` を
   更新するのは note 投稿時だけなので、signup 直後の user は一覧に出ない)。
   この種は spec の前提条件を直す
+- `specs/upstream/ui/` の一部は、Elythia で足した `data-testid` で要素を取るので、
+  公式 image では要素が見つからずに落ちる。既知の例外で、見分け方は
+  [docs/playwright.md](playwright.md#elythia-で足した-data-testid-を使う-spec-は公式-image-では落ちる)
 
 ### Elythia 側の migration を書くときの必須ルール
 
