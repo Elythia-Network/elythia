@@ -111,7 +111,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
-| `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (301 spec ファイル) | 4-6 min (#4026 の実測。spec の実行は shard ごとに 148-182 秒) | `make playwright-check` |
+| `spec (Elythia 1/4)` 〜 `4/4` | Playwright | ブラウザからの統合互換 (308 spec ファイル) | 4-6 min (#4026 の実測。spec の実行は shard ごとに 148-182 秒。#4041 で全ルートの表の 7 ファイル、手元の実測で計 658 秒を足し、割り振りの見込みは shard ごとに約 274 秒) | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
@@ -666,10 +666,10 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   PR トリガーへ移行済み (#2291)。
 - **4 シャード並列** (`PLAYWRIGHT_SHARD=i/4`。所要時間で割り振る、#4026)。`fail-fast: false` で 1 つが落ちても
   他は完走する。
-- **1 スタックあたりは直列でしか回せない。** 301 spec ファイル中 180 が共有の
+- **1 スタックあたりは直列でしか回せない。** 308 spec ファイル中 185 が共有の
   root (alice) で**ブラウザでサインインした状態**を使い (数え方は
-  `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、さらに 33 が
-  サインインせず root の token で API を叩く (`root.json` を読むのが 213 で、その差分)。
+  `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、さらに 35 が
+  サインインせず root の token で API を叩く (`root.json` を読むのが 220 で、その差分)。
   instance meta も全 spec が共有する。Playwright は
   ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
   `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と

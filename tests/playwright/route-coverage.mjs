@@ -44,6 +44,13 @@ export const ALLOWLIST = 'tests/playwright/route-coverage-allowlist.tsv';
 export const PENDING = 'tests/playwright/route-coverage-pending.tsv';
 
 /**
+ * The spec files of the route table (fixtures/route_table.ts, #4041). Every route
+ * not in the two lists must be declared by one of them as well, so that a route
+ * is not left out of the table because another spec happens to declare it.
+ */
+export const TABLE_SPEC_PREFIX = 'tests/playwright/specs/elythia/ui/route_table_open_';
+
+/**
  * Lower bounds, so that a renamed `ROUTE_DEF` or a changed listing format does not
  * turn the check into one that finds nothing and passes.
  *
@@ -197,10 +204,10 @@ export function parseList(text, name) {
 /**
  * Compares the routes with the declarations and the two lists.
  *
- * @param {{ routes: string[], declarations: Declaration[], tracked: Set<string>, allowlist: string, pending: string }} input
+ * @param {{ routes: string[], declarations: Declaration[], tracked: Set<string>, allowlist: string, pending: string, tablePrefix?: string }} input
  * @returns {{ problems: string[], untrusted: string[], covered: number, allowed: number, pending: number }}
  */
-export function check({ routes, declarations, tracked, allowlist, pending }) {
+export function check({ routes, declarations, tracked, allowlist, pending, tablePrefix }) {
   /** @type {string[]} */
   const problems = [];
   /** @type {string[]} */
@@ -266,6 +273,8 @@ export function check({ routes, declarations, tracked, allowlist, pending }) {
   for (const r of routes) {
     if (!byRoute.has(r) && !listed.has(r)) {
       problems.push(`${r}: どの spec も宣言していない。spec に coversRoutes('${r}') を付けるか、${PENDING} か ${ALLOWLIST} に載せる`);
+    } else if (tablePrefix !== undefined && !listed.has(r) && !(byRoute.get(r) ?? []).some((d) => d.file.startsWith(tablePrefix))) {
+      problems.push(`${r}: 全ルートの表 (fixtures/route_table.ts) に行が無い (表の spec ${tablePrefix}*.spec.ts が宣言していない)`);
     }
   }
 
@@ -368,6 +377,7 @@ export function run(out) {
       tracked: trackedSpecs(),
       allowlist: readFileSync(join(repoRoot, ALLOWLIST), 'utf-8'),
       pending: readFileSync(join(repoRoot, PENDING), 'utf-8'),
+      tablePrefix: TABLE_SPEC_PREFIX,
     });
   } catch (err) {
     out(`route-coverage: 検査できなかった: ${err instanceof Error ? err.message : String(err)}`);

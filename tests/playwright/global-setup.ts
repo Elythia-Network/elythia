@@ -31,11 +31,13 @@
 // root の credentials は `.auth/root.json` に書き出して spec から読める
 // ようにする。複数 spec で root token を再利用するための fixture。
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { type APIRequestContext, chromium, request as createRequest } from '@playwright/test';
 import { DEFAULT_TEST_PASSWORD } from './fixtures/auth';
 import { isTsBackend } from './fixtures/backend';
 import { resetRateLimit } from './fixtures/rate_limit';
+import { FAIL_COUNT_DIR } from './fixtures/route_check';
+import { ROUTE_SEED_FAILED_PATH, ROUTE_SEED_PATH } from './fixtures/route_seed';
 import { ROOT_STATE_PATH, uiSigninViaForm } from './fixtures/ui_auth';
 
 const baseURL = process.env.MK_BASE_URL ?? 'http://mkgo:3000';
@@ -249,6 +251,12 @@ export default async function globalSetup(): Promise<void> {
 
     // 5. 前回 run の残骸で per-user quota を使い切らないよう purge (#2264)
     await purgeRootQuotas(ctx, root.token);
+    // 全ルートの表の seed (#4041) は、いま消したアンテナ・webhook・クリップ・リストを含む。
+    // 前の実行のものを使い回すと消えたものを開くので、実行ごとに作り直させる
+    rmSync(ROUTE_SEED_PATH, { force: true });
+    rmSync(ROUTE_SEED_FAILED_PATH, { force: true });
+    // 全ルートの表の spec が、落ちた数を実行ごとに数え直すように (route_check.ts)
+    rmSync(FAIL_COUNT_DIR, { recursive: true, force: true });
 
     // root credentials を spec から読めるように file 出力
     mkdirSync('.auth', { recursive: true });
