@@ -10,6 +10,7 @@ package routecoverage
 
 import (
 	"bufio"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -379,3 +380,139 @@ func list(b *strings.Builder, title string, names []string) {
 	}
 	b.WriteString("\n</details>\n\n")
 }
+
+// uncoveredTSV is uncovered.tsv: the endpoints that no test layer passes
+// through yet, each with the issue that will cover it (#4039).
+//
+//go:embed uncovered.tsv
+var uncoveredTSV string
+
+// UncoveredList returns the embedded uncovered.tsv.
+func UncoveredList() string {
+	return uncoveredTSV
+}
+
+// UncoveredRow is a row of uncovered.tsv.
+type UncoveredRow struct {
+	Endpoint string
+	Issue    string
+	Line     int
+}
+
+// issueRef is the start of the second column: the issue that will cover the
+// endpoint ("#4024(18)", "#4024").
+var issueRef = regexp.MustCompile(`^#\d+`)
+
+// ParseUncovered parses uncovered.tsv: "<endpoint>\t<issue>" per line, with
+// blank lines and lines starting with "#" skipped. It returns the rows and
+// the malformed lines.
+func ParseUncovered(text string) ([]UncoveredRow, []string) {
+	var rows []UncoveredRow
+	var problems []string
+	for i, line := range strings.Split(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		cols := strings.Split(line, "\t")
+		if len(cols) != 2 || cols[0] == "" || !issueRef.MatchString(cols[1]) {
+			problems = append(problems, fmt.Sprintf("uncovered.tsv:%d: not \"<endpoint>\\t#<issue>\": %q", i+1, line))
+			continue
+		}
+		rows = append(rows, UncoveredRow{Endpoint: cols[0], Issue: cols[1], Line: i + 1})
+	}
+	return rows, problems
+}
+
+// CheckRows returns the rows that name no endpoint or name one twice. It
+// needs no hits, so the required test runs it on every PR.
+func CheckRows(endpoints map[string]Origin, rows []UncoveredRow) []string {
+	var out []string
+	seen := map[string]int{}
+	for _, r := range rows {
+		if _, ok := endpoints[r.Endpoint]; !ok {
+			out = append(out, fmt.Sprintf("uncovered.tsv:%d: %s is no endpoint (renamed or removed?)", r.Line, r.Endpoint))
+		}
+		if first, dup := seen[r.Endpoint]; dup {
+			out = append(out, fmt.Sprintf("uncovered.tsv:%d: %s is listed on line %d too", r.Line, r.Endpoint, first))
+			continue
+		}
+		seen[r.Endpoint] = r.Line
+	}
+	return out
+}
+
+// CheckUncovered compares the hits of every layer with uncovered.tsv: an
+// endpoint no layer passed through (2xx or 3xx) must be listed, and a listed
+// endpoint must not be passed through. A 4xx alone is not passing through.
+//
+// 一覧に無いのに通っていないものは、新しいAPIがテスト無しで入ったか、既存の
+// テストが叩かなくなったもの。一覧にあるのに通っているものは、テストが付いた
+// ので行を消させる (使われない行を残さない)。
+func (h *Hits) CheckUncovered(endpoints map[string]Origin, rows []UncoveredRow) []string {
+	out := CheckRows(endpoints, rows)
+	listed := map[string]bool{}
+	for _, r := range rows {
+		listed[r.Endpoint] = true
+		if c := h.Endpoints[r.Endpoint]; c != nil && c.OK > 0 {
+			out = append(out, fmt.Sprintf("uncovered.tsv:%d: %s is passed through now; remove the row", r.Line, r.Endpoint))
+		}
+	}
+	names := make([]string, 0, len(endpoints))
+	for name := range endpoints {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if c := h.Endpoints[name]; (c == nil || c.OK == 0) && !listed[name] {
+			out = append(out, fmt.Sprintf("%s (%s) is passed through by no layer and is not in uncovered.tsv", name, endpoints[name]))
+		}
+	}
+	return out
+}
+
+// MissingLayers returns the layers of want that the hits do not come from.
+func (h *Hits) MissingLayers(want []string) []string {
+	var out []string
+	for _, l := range want {
+		if !containsString(h.Layers, l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// WriteUncovered writes uncovered.tsv for the hits: every endpoint no layer
+// passed through, keeping the issue of the rows already listed and giving
+// the others defaultIssue of their origin.
+func (h *Hits) WriteUncovered(w io.Writer, endpoints map[string]Origin, rows []UncoveredRow, defaultIssue map[Origin]string) error {
+	issue := map[string]string{}
+	for _, r := range rows {
+		issue[r.Endpoint] = r.Issue
+	}
+	names := make([]string, 0, len(endpoints))
+	for name := range endpoints {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString(uncoveredHeader)
+	for _, name := range names {
+		if c := h.Endpoints[name]; c != nil && c.OK > 0 {
+			continue
+		}
+		is := issue[name]
+		if is == "" {
+			is = defaultIssue[endpoints[name]]
+		}
+		fmt.Fprintf(&b, "%s\t%s\n", name, is)
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+const uncoveredHeader = `# どのテストの層 (upstream-backend-e2e・playwright・diff-e2e) でも 2xx・3xx で通っていない
+# /api のエンドポイント (#4039)。` + "`<エンドポイント>\\t<付ける予定の issue>`" + `。4xx だけのものも載せる。
+# テストを付けたら行を消す (残すと週次の api-coverage が落とす)。作り直し方は docs/ci.md の
+# 「API の通過の集計」。
+`
