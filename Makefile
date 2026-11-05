@@ -76,6 +76,8 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# Elythia が書いたファイルは misskey-js を直接 import しない (#4028)。frontend の
 	# eslint は src/ と public/loader/ しか見ないので、test/ も含めて別の script で検査する
 	cd frontend && node --test scripts/check-elythia-imports.test.mjs && node scripts/check-elythia-imports.mjs
+	# 足したルートに spec の宣言があるか (#4035)。tests/playwright の node_modules が要る
+	$(MAKE) playwright-route-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
 	# ここに無いと**手元で緑でも CI が落ちる**。#2903 で実際に踏んだ (デッドコードを
 	# 消したときの空行が @stylistic/no-multiple-empty-lines で落ちた)。個別ファイルに
@@ -1231,6 +1233,16 @@ playwright-update-snapshots: ## Playwright の見た目の差分の基準画像�
 	# toHaveScreenshot の基準画像は runner の container (Linux の chromium) で
 	# 作る。手元の OS で作ると、文字の描画が違って CI で必ず差分になる (#4026)。
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build playwright-runner test --update-snapshots $(PLAYWRIGHT_ARGS)
+
+.PHONY: playwright-route-check
+playwright-route-check: ## frontend の全ルートが、どこかの Playwright spec に対応付いているか検査 (#4035)
+	# spec の一覧は playwright 自身 (`test --list`) に解かせるので、tests/playwright の
+	# node_modules が要る。無ければ skip せずに落とす (`cd tests/playwright && npm ci`)。
+	# サーバーとブラウザは要らない。make gates は Go だけで回る前提なので入れず、
+	# frontend-check と CI の frontend job から呼ぶ。
+	@test -f tests/playwright/node_modules/@playwright/test/cli.js || { echo "tests/playwright の node_modules が無い: cd tests/playwright && npm ci" >&2; exit 1; }
+	node --test tests/playwright/route-coverage.test.mjs
+	node tests/playwright/route-coverage.mjs
 
 playwright-down: ## Playwright スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test down -v

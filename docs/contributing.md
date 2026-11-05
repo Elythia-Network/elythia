@@ -86,9 +86,9 @@ commit する手順は無い。
 
 ### 手元での確認（CI `frontend` workflow 相当）
 
-CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
+CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、ルートと Playwright の spec の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
 
-手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + Elythia のファイルの import の検査 (`check-elythia-imports.mjs` とその self test) + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324 / #4028)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
+手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + Elythia のファイルの import の検査 (`check-elythia-imports.mjs` とその self test) + 全ルートの Playwright の spec への対応付け (`make playwright-route-check`。`tests/playwright` で `npm ci` 済みであること) + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324 / #4028 / #4035)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
 `make plugins-all` は workspace のビルドより先に回す。生成物の
 `server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと

@@ -20,7 +20,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard、Python delivery artifact test、A/B harness helper test、ベンチのデータの生成器のテストの集約。どれか 1 つでも落ちれば赤 | `make test` / `python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v` / `bash tests/bench/ab/test_run_helpers.sh` / `python3 -m unittest discover -s tests/bench/data -p 'test_*.py' -v` |
-| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
+| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、ルートと Playwright の spec の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -277,6 +277,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 
 - `frontend-lint`: 10 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js / elythia-js)、
   check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
+  全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035。`tests/playwright` で `npm ci` してから回す)、
   locale の検証、misskey-js の API レポート、`emoji-regex-check` (#3324) のいずれか
 - `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
 
@@ -689,7 +690,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - job は 4 つ。
   - `changes`: 毎回動き、`git diff --name-only <base> HEAD` で frontend に関係する変更が
     あるかを判定する。対象は `frontend/`・`plugins/`・`plugin/`・`tools/pluginbuild/`・
-    `tools/emojiregex/`・workflow 自身・
+    `tools/emojiregex/`・`tests/playwright/` (#4035)・workflow 自身・
     `Makefile`・`go.mod` / `go.sum`。リネームは移動元と移動先の両方を見る
     (`--no-renames`)。手動実行と、比べる先が無い push (ブランチの作成など) は
     関係ありとして扱う。**迷ったら関係ありに倒す** — 誤って
@@ -698,6 +699,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   - `frontend-lint`: `make plugins-all` → `pnpm i --frozen-lockfile` → `pnpm build` →
     10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js。frontend は `vue-tsc --noEmit`)、
     check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
+    `tests/playwright` の `npm ci` → 全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035)、
     locale の検証、misskey-js の API レポート、`make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
     `cmd/elythia` 側の配線が崩れても拾えるように)
