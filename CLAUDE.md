@@ -259,6 +259,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `queue-bench-smoke` | 毎日(schedule) | | queue driverがジョブを落としていないか |
 | `bench-compare` | PR(paths限定) | | baseとheadの2つのcommitを同じスタックで交互に流し、性能を比べる。主に手動で使う。PRでは、ベンチの仕組みを変えたときだけhead同士を流す |
 | `bench-compare-comment` | `bench-compare`の完了(`workflow_run`) | | `bench-compare`の結果を、対象のPRにコメントで出す。headのコードは動かさない。default branchにある版で動く |
+| `api-coverage` | 毎週火曜日(schedule)、PR(paths限定) | | どの層でも通っていないAPIが一覧(`internal/routecoverage/uncovered.tsv`)と一致しているか。層ごとの集計はdevelopにマージ済みのPRのrunから取る |
 | `bench-upstream` | 毎週月曜日(schedule)、PR(paths限定) | | 本家Misskeyの公式imageとElythiaを`bench-compare`と同じスタックで交互に流し、性能を比べる。PRでは、本家の版(`UPSTREAM_MISSKEY_VERSION`)かベンチの仕組みを変えたときだけ流す |
 
 `ci.yml` / `dependency-review` / `build-with-plugins` / `bench-compare-comment`以外は、手動(`workflow_dispatch`)でも起動できます。scheduleのものはPRでは回らないので、失敗はActions上で確認して別のPRで直します。各workflowの設計理由と、落ちたときの対処は[docs/ci.md](docs/ci.md)にあります。
@@ -304,6 +305,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-05: どの層でも通っていないAPIを一覧と突き合わせる`api-coverage` workflowを足したので、Section 8の表に1行を足した (#4039) → [docs/ci.md](docs/ci.md#通っていない-api-の一覧と週次のゲート-4039)
 - 2026-11-05: `playwright` / `upstream-backend-e2e` / `diff-e2e`が、叩いたAPIをアクセスログから集計してSummaryに出すようにしたので、Section 8の3行に足した (#4037) → [docs/ci.md](docs/ci.md#api-の通過の集計-4037)
 - 2026-11-05: `make frontend-check`とCIの`frontend`に、frontendの全ルートがPlaywrightのspecに対応付いているかの検査を足したので、Section 3とSection 8の行に足した (#4035) → [docs/playwright.md](docs/playwright.md#ルートと-spec-の対応付け-4035)
 - 2026-11-05: `make frontend-check`とCIの`frontend`に、Elythiaのファイルが`misskey-js`を直接importしていないかの検査を足したので、Section 3とSection 8の行に足した (#4028) → [docs/contributing.md](docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js)

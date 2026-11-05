@@ -1,0 +1,104 @@
+name: API coverage
+
+# どのテストの層でも通っていない /api のエンドポイントが、一覧
+# (internal/routecoverage/uncovered.tsv) と一致しているかを確かめる (#4039)。
+# 使い方と落ちたときの直し方は docs/ci.md の「API の通過の集計」。
+#
+# - 層ごとの集計 (route-hits-<層>) は、upstream-backend-e2e・playwright・diff-e2e の
+#   API coverage job が作る (#4037)。3 つは PR と手動実行でしか動かないので、それぞれ
+#   **develop にマージ済みの PR** の最新の完了した run (成功したかは問わない) の集計を使う。マージされていない
+#   PR の集計は、develop に入らないコードの結果なので使わない。手動実行の run も使わない
+#   (head_sha が起動したブランチの先頭で、試したコードを指すとは限らない)
+# - 集計はこの repository から出た PR の run だけを読む。中身は JSON として読むだけで、
+#   実行はしない
+# - 3 層の集計が揃うのは、それぞれの workflow が終わった後なので、PR の中では判定しない
+#   (PR の required な test は、一覧の書式と各行が実在するかだけを静的に見る)
+
+on:
+  schedule:
+    # 毎週火曜日 03:30 UTC。bench-upstream (日曜日 20:40 UTC) と重ならないようにする
+    - cron: "30 3 * * 2"
+  # PR では道具と workflow を変えたときだけ回す。一覧 (uncovered.tsv) だけを直した PR
+  # では回さない: 使う集計は develop にマージ済みの過去の run のもので、その PR が
+  # 足したテストを含まないので、テストを付けて行を消した正しい PR が必ず赤になる。
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "internal/routecoverage/*.go"
+      - "tools/routecoverage/**"
+      - ".github/workflows/api-coverage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # ほかの workflow の run の artifact を読む
+      actions: read
+      # commit から PR を引き、マージ済みかを見る
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # 層ごとに、develop にマージ済みの PR の最新の run の集計を落とす。
+      # - 成功したかは問わない (必須でない workflow は、落ちたままマージできる)。成功に
+      #   絞ると、落ちた最新の run を飛ばして古い run の集計を使い、その後に消えた
+      #   テストがまだ通っているように見える
+      # - 最新の run の集計が取れなければ、古い run に戻らずに落とす (同じ理由)
+      # - マージ済みの PR の run が 1 つも無い層は落とさずに進め、-gate の「集計が
+      #   欠けた層」で落とす (どの層が欠けたかを Summary に出すため)
+      - name: Download the latest hits of each layer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p route-inputs
+          {
+            echo "## 使った集計"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          for pair in upstream-backend-e2e:upstream-backend-e2e.yml playwright:playwright.yml diff-e2e:diff-e2e.yml; do
+            layer=${pair%%:*}
+            wf=${pair#*:}
+            found=
+            # 一覧の取得の失敗を「run が無い」と取り違えないよう、先に受ける (process
+            # substitution の中の失敗は set -e で止まらない)。取り消された run は飛ばす
+            # (push で取り消された run は集計を出さず、後の run が同じ PR を試している)
+            runs=$(gh api "repos/$REPO/actions/workflows/$wf/runs?event=pull_request&status=completed&per_page=50" \
+              --jq '.workflow_runs[] | select(.conclusion != "cancelled") | "\(.id) \(.head_sha) \(.head_repository.full_name // "")"')
+            while read -r id sha head_repo; do
+              [ -n "$id" ] || continue
+              [ "$head_repo" = "$REPO" ] || continue
+              pr=$(gh api "repos/$REPO/commits/$sha/pulls" \
+                --jq '[.[] | select(.base.ref == "develop" and .merged_at != null)][0] // empty | "#\(.number) (\(.merged_at) にマージ)"')
+              [ -n "$pr" ] || continue
+              if ! gh run download "$id" -R "$REPO" -n "route-hits-$layer" -D route-inputs; then
+                echo "::error::$layer: マージ済みの PR $pr の最新の run $id から route-hits-$layer を取れなかった"
+                exit 1
+              fi
+              found="run $id、PR $pr"
+              break
+            done <<< "$runs"
+            if [ -n "$found" ]; then
+              echo "- $layer: $found" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- $layer: 見つからない (直近 50 件の run に、develop にマージ済みの PR のものが無い)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo >> "$GITHUB_STEP_SUMMARY"
+          ls -l route-inputs
+
+      - name: Compare with uncovered.tsv
+        run: make route-coverage ROUTE_INPUTS='route-inputs/*.json' ROUTE_FLAGS='-gate -layers upstream-backend-e2e,playwright,diff-e2e' >> "$GITHUB_STEP_SUMMARY"
