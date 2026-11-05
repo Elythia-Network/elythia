@@ -206,3 +206,97 @@ func TestInputsAreRecorded(t *testing.T) {
 	assert.Contains(t, b.String(), "アクセスログの /api の行: 6 (ログ 2 本)")
 	assert.Contains(t, b.String(), "<details><summary>読んだログと /api の行 (2)</summary>\n\n- `shard-1.log (6)`\n- `shard-2.log (0)`\n")
 }
+
+// TestUncoveredListIsWellFormed is the check the required test runs on every
+// PR: uncovered.tsv parses and every row names an endpoint once (#4039).
+func TestUncoveredListIsWellFormed(t *testing.T) {
+	eps, err := Endpoints()
+	require.NoError(t, err)
+	rows, malformed := ParseUncovered(UncoveredList())
+	assert.Empty(t, malformed)
+	assert.Empty(t, CheckRows(eps, rows))
+	// 読み口が空振りしていないことを、件数と、本家互換・Elythia独自の両方の行があることで確かめる
+	assert.Greater(t, len(rows), 50)
+	origins := map[Origin]bool{}
+	for _, r := range rows {
+		origins[eps[r.Endpoint]] = true
+	}
+	assert.True(t, origins[Upstream] && origins[Elythia], "uncovered.tsv has rows of one origin only")
+}
+
+func TestParseUncovered(t *testing.T) {
+	rows, problems := ParseUncovered("# comment\n\nnotes/create\t#4024\r\nadmin/x\t#4024(18) later\nbad\nno-issue\tsoon\n\t#1\na\tb\tc\n")
+	assert.Equal(t, []UncoveredRow{
+		{Endpoint: "notes/create", Issue: "#4024", Line: 3},
+		{Endpoint: "admin/x", Issue: "#4024(18) later", Line: 4},
+	}, rows)
+	assert.Len(t, problems, 4)
+	assert.Contains(t, problems[0], "uncovered.tsv:5:")
+}
+
+var gateEndpoints = map[string]Origin{
+	"notes/create":      Upstream,
+	"notes/show":        Upstream,
+	"notes/delete":      Upstream,
+	"admin/backup/list": Elythia,
+}
+
+func gateHits(t *testing.T) *Hits {
+	t.Helper()
+	h := NewHits("x")
+	// notes/create・notes/showは通り、admin/backup/listは5xxだけ、notes/deleteは叩かれていない
+	require.NoError(t, h.ReadLog("x.log", strings.NewReader(sampleLog), NewMatcher(gateEndpoints)))
+	return h
+}
+
+func TestCheckUncovered(t *testing.T) {
+	h := gateHits(t)
+	ok := []UncoveredRow{{Endpoint: "notes/delete", Issue: "#1", Line: 1}, {Endpoint: "admin/backup/list", Issue: "#1", Line: 2}}
+	assert.Empty(t, h.CheckUncovered(gateEndpoints, ok))
+
+	// 一覧に無い、通っていないAPI (新しいAPIか、叩かなくなったもの)
+	assert.Equal(t, []string{"notes/delete (upstream) is passed through by no layer and is not in uncovered.tsv"},
+		h.CheckUncovered(gateEndpoints, ok[1:]))
+	// 4xxだけ・5xxだけも、通っていないものとして扱う
+	h.Endpoints["notes/delete"] = &Count{ClientError: 3}
+	assert.Equal(t, []string{"admin/backup/list (elythia) is passed through by no layer and is not in uncovered.tsv"},
+		h.CheckUncovered(gateEndpoints, ok[:1]))
+	// 実在しない行 (改名か削除)
+	assert.Equal(t, []string{"uncovered.tsv:9: notes/gone is no endpoint (renamed or removed?)"},
+		h.CheckUncovered(gateEndpoints, append(ok, UncoveredRow{Endpoint: "notes/gone", Issue: "#1", Line: 9})))
+	// 一覧にあるのに通っている行
+	assert.Equal(t, []string{"uncovered.tsv:3: notes/create is passed through now; remove the row"},
+		h.CheckUncovered(gateEndpoints, append(ok, UncoveredRow{Endpoint: "notes/create", Issue: "#1", Line: 3})))
+}
+
+func TestCheckRows(t *testing.T) {
+	rows := []UncoveredRow{
+		{Endpoint: "notes/delete", Issue: "#1", Line: 1},
+		{Endpoint: "notes/gone", Issue: "#1", Line: 2},
+		{Endpoint: "notes/delete", Issue: "#1", Line: 3},
+	}
+	assert.Equal(t, []string{
+		"uncovered.tsv:2: notes/gone is no endpoint (renamed or removed?)",
+		"uncovered.tsv:3: notes/delete is listed on line 1 too",
+	}, CheckRows(gateEndpoints, rows))
+}
+
+func TestMissingLayers(t *testing.T) {
+	h := NewHits("a")
+	h.Merge(NewHits("b"))
+	assert.Empty(t, h.MissingLayers([]string{"a", "b"}))
+	assert.Equal(t, []string{"c"}, h.MissingLayers([]string{"a", "c", "b"}))
+}
+
+func TestWriteUncovered(t *testing.T) {
+	h := gateHits(t)
+	var b bytes.Buffer
+	rows := []UncoveredRow{{Endpoint: "admin/backup/list", Issue: "#99", Line: 1}, {Endpoint: "notes/create", Issue: "#98", Line: 2}}
+	require.NoError(t, h.WriteUncovered(&b, gateEndpoints, rows, map[Origin]string{Upstream: "#1", Elythia: "#2"}))
+	// 通ったものは消え、既にある行は issue を保ち、新しい行には既定の issue が付く
+	assert.Equal(t, uncoveredHeader+"admin/backup/list\t#99\nnotes/delete\t#1\n", b.String())
+	written, problems := ParseUncovered(b.String())
+	assert.Empty(t, problems)
+	assert.Empty(t, h.CheckUncovered(gateEndpoints, written), "what it writes passes the gate")
+	assert.Error(t, h.WriteUncovered(errWriter{}, gateEndpoints, nil, nil))
+}

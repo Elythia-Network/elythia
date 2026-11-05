@@ -387,13 +387,17 @@ test-fast: ## 全テストを -race 抜きで実行 (反復用。コミット前
 # コマンドも echo しない (@)。入力のうち .json は route-hits.json (ROUTE_OUT で
 # 書いたもの) として足し合わせる。何も拾えないか、ROUTE_REQUIRE のエンドポイントが
 # 2xx・3xx で通っていなければ exit 1 (書式が変わって全部が「叩かれていない」に
-# なるのを防ぐ)。使い方は docs/ci.md の「API の通過の集計」。
+# なるのを防ぐ)。ROUTE_FLAGS には -gate -layers <層,...> (uncovered.tsv との突き合わせ、
+# #4039) か -layers <層,...> -write-uncovered <パス> (uncovered.tsv を作り直す。リダイレクトで
+# 書くと、ビルドの前に空にされて既存の行の issue が消える) を渡す。使い方は docs/ci.md の
+# 「API の通過の集計」。
 .PHONY: route-coverage
 ROUTE_LAYER ?=
 ROUTE_OUT ?=
 ROUTE_REQUIRE ?= notes/create
-route-coverage: ## テストの層のアクセスログか route-hits.json を集計し、API の通過を Markdown で出す (#4037。ROUTE_INPUTS 必須、ROUTE_LAYER / ROUTE_OUT / ROUTE_REQUIRE)
-	@GOWORK=off go run ./tools/routecoverage -layer "$(ROUTE_LAYER)" -o "$(ROUTE_OUT)" -require "$(ROUTE_REQUIRE)" $(ROUTE_INPUTS)
+ROUTE_FLAGS ?=
+route-coverage: ## テストの層のアクセスログか route-hits.json を集計し、API の通過を Markdown で出す (#4037。ROUTE_INPUTS 必須、ROUTE_LAYER / ROUTE_OUT / ROUTE_REQUIRE / ROUTE_FLAGS)
+	@GOWORK=off go run ./tools/routecoverage -layer "$(ROUTE_LAYER)" -o "$(ROUTE_OUT)" -require "$(ROUTE_REQUIRE)" $(ROUTE_FLAGS) $(ROUTE_INPUTS)
 
 .PHONY: emoji-regex emoji-regex-check
 emoji-regex: ## frontend の MFM の解析器が持つ絵文字の正規表現を snapshot に書き写す (#3324)
