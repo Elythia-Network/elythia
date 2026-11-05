@@ -48,7 +48,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch / tag / SHA to test"
+        description: "Branch / tag / SHA to test (pass a SHA so every shard checks out the same commit)"
         required: false
         default: "develop"
 
@@ -71,20 +71,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
-      sha: ${{ steps.head.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
-
-      # ここで解決した commit を、すべての spec の job が checkout する (#4026)。
-      # shard の割り振りは spec の一覧と所要時間の記録から決まるので、shard ごとに
-      # 違う commit を見ると、spec が漏れたり 2 回流れたりする。`workflow_dispatch`
-      # では `inputs.ref` にブランチ名 (既定は develop) が来るので、各 job が
-      # 別々に解決すると、待ち時間の間に進んだブランチで食い違う。
-      - id: head
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # shard の割り振り (tests/playwright/shard-plan.mjs) のテスト。所要時間の
       # 記録に、消えた spec が残っていないことも見る (#4026)。spec の job より
@@ -204,10 +195,17 @@ jobs:
           # PR の内容が checkout される。'develop' 固定のままだと PR の変更を
           # 一切見ずに develop をテストして常に緑になる (#2291)。
           #
-          # plan job が解決した commit を取る (plan の `head` step を参照、#4026)。
-          # pull_request でも `github.ref` (refs/pull/<n>/merge) は使わない。merge の
-          # ref は base が進むと作り直されるので、shard ごとに違う commit を見る。
-          ref: ${{ needs.plan.outputs.sha }}
+          # `github.ref` (refs/pull/<n>/merge) ではなく `github.sha` を取る (#4026)。
+          # merge の ref は base が進むと作り直されるので、job ごとに取る時刻が
+          # ずれると shard ごとに違う commit を見る。shard の割り振りは spec の
+          # 一覧と所要時間の記録から決まるので、commit がずれると spec が漏れたり
+          # 2 回流れたりする。
+          #
+          # **`workflow_dispatch` でブランチ名を渡すと、この保証は無い** (各 job が
+          # 別々にブランチを解決する)。手で流すときは `ref` に SHA を渡す。plan job で
+          # 解決した SHA を output で渡す形は、CodeQL が別の job の出力の checkout を
+          # cache poisoning として落とすので採らない (PR #4031 で実際に落ちた)。
+          ref: ${{ inputs.ref || github.sha }}
 
       # mk-go backend は Dockerfile.mkgo で frontend/built/
       # _frontend_vite_ / _frontend_dist_ / _sw_dist_ を COPY する。これらは
