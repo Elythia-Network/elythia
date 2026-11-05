@@ -50,7 +50,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { computed, onMounted, ref, shallowRef, triggerRef } from 'vue';
-import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { definePage } from '@/page.js';
 import MkButton from '@/components/MkButton.vue';
 import MkInfo from '@/components/MkInfo.vue';
@@ -77,7 +77,7 @@ const PAGE_SIZE = 20;
 const router = useRouter();
 const targetId = computed(() => props.userId ?? $i?.id ?? null);
 const isMe = computed(() => targetId.value != null && targetId.value === $i?.id);
-const targetUser = shallowRef<Misskey.entities.UserDetailed | null>(null);
+const targetUser = shallowRef<Elythia.entities.UserDetailed | null>(null);
 const records = shallowRef<VersusRecord[] | null>(null);
 const loadFailed = ref<'notFound' | 'error' | null>(null);
 const hasMore = ref(false);
@@ -87,7 +87,7 @@ function idOf(r: VersusRecord, i: number): string {
 	return i === 0 ? r.user1Id : r.user2Id;
 }
 
-function userOf(r: VersusRecord, i: number): Misskey.entities.UserLite | null {
+function userOf(r: VersusRecord, i: number): Elythia.entities.UserLite | null {
 	return i === 0 ? r.user1 : r.user2;
 }
 

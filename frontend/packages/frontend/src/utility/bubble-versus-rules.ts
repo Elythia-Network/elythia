@@ -6,7 +6,7 @@
 // mk-go (#3231): バブルゲームの対戦の、画面から切り離せる判断。API やストリームを
 // import しないので単体テストから読める。
 
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import type { VersusMatch } from '@/utility/bubble-versus.js';
 
 // 報告を送れるかの目安。サーバーは制限時間の 5 秒前から時間切れの報告を受ける。
@@ -72,7 +72,7 @@ export function sideOf(match: Pick<VersusMatch, 'user1Id' | 'user2Id'>, userId: 
 }
 
 /** Returns the opponent of userId in the match. */
-export function opponentOf(match: VersusMatch, userId: string | null | undefined): Misskey.entities.UserLite | null {
+export function opponentOf(match: VersusMatch, userId: string | null | undefined): Elythia.entities.UserLite | null {
 	const side = sideOf(match, userId);
 	if (side === 0) return match.user2;
 	if (side === 1) return match.user1;

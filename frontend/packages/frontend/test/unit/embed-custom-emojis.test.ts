@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { render, cleanup } from '@testing-library/vue';
 import type { Component, InjectionKey, ShallowRef } from 'vue';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 
 // frontend-embed のモジュールを、この package の vitest で動かす (embed の中の `@/` は
 // vitest.config.unit.ts が embed の src に解決する)。型の検査 (vue-tsc) は frontend の
@@ -20,13 +20,13 @@ vi.mock('../../../frontend-embed/src/misskey-api.js', () => api);
 
 const embedSrc = join(__dirname, '../../../frontend-embed/src');
 const { customEmojis, refreshCustomEmojisOnBoot } = await import(/* @vite-ignore */ `${embedSrc}/custom-emojis.ts`) as {
-	customEmojis: ShallowRef<Misskey.entities.EmojiSimple[]>;
+	customEmojis: ShallowRef<Elythia.entities.EmojiSimple[]>;
 	refreshCustomEmojisOnBoot: () => Promise<void>;
 };
 const { DI } = await import(/* @vite-ignore */ `${embedSrc}/di.ts`) as { DI: { mediaProxy: InjectionKey<unknown> } };
 const { default: EmCustomEmoji } = await import(/* @vite-ignore */ `${embedSrc}/components/EmCustomEmoji.vue`) as { default: Component };
 
-function emoji(name: string, url: string): Misskey.entities.EmojiSimple {
+function emoji(name: string, url: string): Elythia.entities.EmojiSimple {
 	return { name, url, category: null, aliases: [] };
 }
 
@@ -51,7 +51,7 @@ afterEach(() => {
 describe('embed refreshCustomEmojisOnBoot', () => {
 	test('does not wait for the request when a cached list exists', async () => {
 		customEmojis.value = [emoji('cached', 'https://example.test/cached.png')];
-		const res = deferred<{ emojis: Misskey.entities.EmojiSimple[] }>();
+		const res = deferred<{ emojis: Elythia.entities.EmojiSimple[] }>();
 		api.misskeyApiGet.mockReturnValue(res.promise);
 
 		let done = false;
@@ -69,7 +69,7 @@ describe('embed refreshCustomEmojisOnBoot', () => {
 	});
 
 	test('waits for the request when there is no cached list', async () => {
-		const res = deferred<{ emojis: Misskey.entities.EmojiSimple[] }>();
+		const res = deferred<{ emojis: Elythia.entities.EmojiSimple[] }>();
 		api.misskeyApiGet.mockReturnValue(res.promise);
 
 		let done = false;

@@ -8,6 +8,10 @@ import type * as Misskey from 'misskey-js';
 import type { ElythiaEndpoints } from './endpoints.js';
 import type { ElythiaRequestExtensions, ResponseOverrides } from './extensions.js';
 
+// Elythia が書くコードは misskey-js を直接 import せず、ここから読む (#4028)。
+// 下で定義する Endpoints は misskey-js の同名の型より優先される (ESM の規則で、
+// 自分で export した名前は `export *` で来た名前を隠す)
+export * from 'misskey-js';
 export type { ElythiaEndpoints } from './endpoints.js';
 export type { ElythiaRequestExtensions, ResponseOverrides } from './extensions.js';
 export type {

@@ -2,6 +2,8 @@
 
 Elythia 独自の API の型を、本家の [misskey-js](../misskey-js) の型に重ねて出すパッケージ (#3417)。frontend の中だけで使い、npm には公開しない (公開できる形にはしてある)。
 
+**Elythia が書くコードは、`misskey-js` ではなくこのパッケージを import する** (#4028)。`misskey-js` の中身を型も値もすべて再公開しているので、`Elythia.entities.Note` や `Elythia.acct` のように同じ形で使える。ただし `UserDetailed` などいくつかの型は、最上位 (`Elythia.UserDetailed`) が Elythia の項目を重ねた版で、`Elythia.entities.UserDetailed` は本家の版のまま。役割の分け方と検査は [docs/contributing.md](../../../docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js) にある。
+
 - 本家の misskey-js には手を入れない。本家への追従 (`make upstream-sync`) とぶつからないように、独自の分はここに書く
 - `Endpoints` は `misskey-js` の `Endpoints` に、次の 3 つを重ねたもの。frontend の `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` はこれを使う
   - `ElythiaEndpoints` (`src/endpoints.ts`): Elythia 独自のエンドポイント

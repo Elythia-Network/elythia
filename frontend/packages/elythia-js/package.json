@@ -3,12 +3,13 @@
 	"name": "elythia-js",
 	"version": "0.0.0",
 	"private": true,
-	"description": "Types for the Elythia-specific APIs, layered on top of misskey-js",
+	"description": "The single entry point for Elythia code: re-exports misskey-js and layers the Elythia-specific API types on top",
 	"license": "AGPL-3.0-only",
 	"types": "./src/index.ts",
 	"exports": {
 		".": {
-			"types": "./src/index.ts"
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
 		}
 	},
 	"scripts": {
