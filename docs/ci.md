@@ -20,7 +20,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard、Python delivery artifact test、A/B harness helper test、ベンチのデータの生成器のテストの集約。どれか 1 つでも落ちれば赤 | `make test` / `python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v` / `bash tests/bench/ab/test_run_helpers.sh` / `python3 -m unittest discover -s tests/bench/data -p 'test_*.py' -v` |
-| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
+| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -276,8 +276,8 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
 `changes` が落ちたときも赤になる (判定できないまま緑にしないため)。
 
 - `frontend-lint`: 10 workspace の eslint、typecheck (frontend は `vue-tsc --noEmit`、ほかに sw / misskey-js / elythia-js)、
-  check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、locale の検証、misskey-js の API レポート、
-  `emoji-regex-check` (#3324) のいずれか
+  check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
+  locale の検証、misskey-js の API レポート、`emoji-regex-check` (#3324) のいずれか
 - `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
 
 `frontend/` のソースを読むゲート (`internal/server/*_gate_test.go`、#2892) はこの workflow ではなく
@@ -288,7 +288,7 @@ required の `test` で走る。
 `make plugins-all` を workspace のビルドより先に回す。frontend が import する
 `frontend/packages/frontend/src/server-plugins.generated.ts` は追跡しておらず (#3379)、
 無いとビルドが import で落ちる。`make frontend-check` は frontend の型・ゲート・
-`emoji-regex-check`・frontend と frontend-embed の eslint までを手元でまとめて回す target (CI の job ではない)。
+`emoji-regex-check`・Elythia のファイルの import の検査・frontend と frontend-embed の eslint までを手元でまとめて回す target (CI の job ではない)。
 **vitest はそこに入っていない** (`make frontend-test`)。ほかの workspace の eslint や check-dts などは
 `.github/workflows/frontend.yml` の各 step をそのまま叩く。
 
@@ -697,8 +697,8 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     `internal/entitycompat` の `frontend_changes_test` が実際の git の差分で確かめている
   - `frontend-lint`: `make plugins-all` → `pnpm i --frozen-lockfile` → `pnpm build` →
     10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js。frontend は `vue-tsc --noEmit`)、
-    check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、locale の検証、misskey-js の API レポート、
-    `make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
+    check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
+    locale の検証、misskey-js の API レポート、`make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
     `cmd/elythia` 側の配線が崩れても拾えるように)
   - `frontend-test`: `make plugins-all` → `pnpm i --frozen-lockfile` → 本番設定のビルド →

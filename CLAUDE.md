@@ -94,7 +94,7 @@ make test-fast               # -race抜き。反復用で、コミット前の�
 make gates                   # 静的なparityゲートを一括(サーバー・Docker不要)
 make plugin-test             # 同梱プラグインのテスト(別moduleなので./...に入らない)
 make migrate-up / migrate-down   # downは本体の系列を1段だけ戻す(forkの系列はmake migrate-down-local、docs/fork-migrations.md)
-make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + eslint
+make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + importの検査 + eslint
 make frontend-lint / frontend-test   # frontend/のeslint / vitest
 ```
 
@@ -242,7 +242,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
-| `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
+| `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、Elythiaのファイルのimport、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
@@ -304,6 +304,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-05: `make frontend-check`とCIの`frontend`に、Elythiaのファイルが`misskey-js`を直接importしていないかの検査を足したので、Section 3とSection 8の行に足した (#4028) → [docs/contributing.md](docs/contributing.md#elythia-独自の-api-の型-frontendpackageselythia-js)
 - 2026-10-24: 組み立てが書き換えるグローバルが無くなり`restoreProcessGlobals`を消したので、Section 4の`TestProcessGlobalsAreRestored`の案内を`TestConstructionSetsNoProcessGlobals`に直した (#3803) → [docs/testing.md](docs/testing.md)
 - 2026-10-17: 本家Misskeyとの性能比較の`bench-upstream` workflowを足したので、Section 8の表に1行を足した (#3654) → [docs/bench-compare.md](docs/bench-compare.md#本家-misskey-との比較-bench-upstream)
 - 2026-10-16: システムカタログの`indexdef`をWHEREに書かないことを、`catalog-check`が検査するようにしたので、Section 4の行に注意を足した (#3369) → [docs/testing.md](docs/testing.md)

@@ -63,6 +63,21 @@ commit する手順は無い。
 
 本家の misskey-js の型には Elythia 独自のエンドポイントと、`/api/meta` などの独自の項目が無い。これらの型は `frontend/packages/elythia-js` に手で書く (#3417)。misskey-js には手を入れない (本家への追従とぶつからないように)。
 
+**2 つのパッケージの役割** (#4028):
+
+| パッケージ | 中身 | 誰が import するか |
+|---|---|---|
+| `misskey-js` | 本家の API の型 (本家の定義から生成したもの) と、`Stream` / `acct` などの実装。本家への追従のたびに入れ替える | 本家から来たファイル |
+| `elythia-js` | `misskey-js` の中身をすべて (型も値も) 再公開し、その上に Elythia 独自の API の型を重ねたもの | **Elythia が書いたファイル** |
+
+- **Elythia が書いたファイルは `elythia-js` だけを import する。** `misskey-js` を直接 import すると、`frontend/scripts/check-elythia-imports.mjs` が落とす (CI の `frontend` と `make frontend-check`)。検査の範囲は `frontend/` の git が追跡するファイル全体で、`packages/elythia-js/` だけを外す。`misskey-js` と同じ形で使える。型だけなら `import type * as Elythia from 'elythia-js'` で読んで `Elythia.entities.Note` のように使い、値 (`Elythia.acct` など) も使うなら `import * as Elythia from 'elythia-js'` で読む。型しか使わないのに値として import しない (frontend は `verbatimModuleSyntax` なので、値の import は実行時にも残る)
+- **同じ名前で中身が違う型がある。** 最上位の `Endpoints` / `SwitchCaseResponseType` と、`UserDetailed` / `MeDetailed` / `MetaDetailed` / `Page` / `FederationInstance` の 5 つは、`Elythia.X` が Elythia の分を重ねた版で、`Elythia.entities.X` と `Elythia.api.SwitchCaseResponseType` は本家の版のまま。Elythia 独自の項目を読むなら `Elythia.UserDetailed` のように最上位の名前を使う
+- Elythia が書いたファイルの見分け方は、SPDX の著作権の行が `Elythia-Network` だけであること。本家の行 (`syuilo and misskey-project`) が残っているファイルは本家から来たものとして扱い、import を書き換えない (書き換えると本家への追従で衝突する)
+- `vi.mock('misskey-js')` と `vi.importActual('misskey-js')` は検査しない。本家のコードが import する先を差し替えるためのもので、テストが `misskey-js` を使うわけではない。ただし `vi.importActual<typeof import('misskey-js')>()` のように型引数に書いた `import('misskey-js')` は、型の位置の import として落ちる
+- 見出しは、最初のコードより前のコメントから読む (`// @ts-check` を前に置いてもよい)。見出しの著作権の行に `Elythia` を含むのに `Elythia-Network` と完全には一致しない (大文字小文字も見る) ファイルと、Elythia の著作権の行がコードより後にしか無いファイル (`'use strict'` の後や、.vue で `<template>` の後) があると、検査は落ちる。表記や位置の揺れで、黙って対象から外れないようにするため
+- 2 つを 1 つにまとめないのは、本家から来た数百のファイルの import を書き換えることになり、追従のたびに衝突するため。`misskey-js` に手書きの型を混ぜないためでもある
+- `frontend-embed` などは `elythia-js` に依存していない。そこで Elythia のファイルが `misskey-js` の型を要るようになったら、そのパッケージの依存に `elythia-js` を足す
+
 - frontend の `misskeyApi` / `misskeyApiGet` / `os.apiWithDialog` と `instance` は `elythia-js` の型を使う。独自のエンドポイントを型を外して (`as never` で) 呼ばず、`elythia-js/src/endpoints.ts` の `ElythiaEndpoints` に型を書く
 - **本家のエンドポイントに Elythia が引数を足したら、`elythia-js/src/extensions.ts` の `ElythiaRequestExtensions` に型を書く** (#3439)。こちらはゲートの対象ではない。misskey-js の応答の型が実際と違うものは、同じファイルの `ResponseOverrides` で差し替える
 - `misskeyApi` などは、引数の型に無いキーを型エラーにし、応答の型を代入先から推論しない (#3439)。新しく型エラーが出たら、キーを打ち間違えていないか、サーバーが読まないキーを送っていないかを先に疑う。応答の型を明示する (`misskeyApi<T>(...)`) と引数の型の検査が効かなくなるので、汎用の呼び出し (`paginator.ts`) 以外では使わない。逆に、エンドポイントを型引数のまま受け渡す包み関数は、明示しないとコンパイルできない。引数の検査を残したいなら、`os.apiWithDialog` のように `P & ExcessKeys<E, P>` で受けて `misskeyApi<void, E, P>(...)` と渡す
@@ -71,9 +86,9 @@ commit する手順は無い。
 
 ### 手元での確認（CI `frontend` workflow 相当）
 
-CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
+CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
 
-手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
+手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + Elythia のファイルの import の検査 (`check-elythia-imports.mjs` とその self test) + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324 / #4028)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
 `make plugins-all` は workspace のビルドより先に回す。生成物の
 `server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと
