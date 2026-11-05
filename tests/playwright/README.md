@@ -31,9 +31,9 @@ self-signed cert で TLS を終端する (spec 側は `ignoreHTTPSErrors` で受
 ```
 specs/
 ├── upstream/       # upstream Misskey にも存在する機能の検証
-│   ├── ui/         # ブラウザを駆動する (194 spec)
+│   ├── ui/         # ブラウザを駆動する (218 spec)
 │   └── api/        # API の shape / 挙動 (96 spec)
-└── elythia/        # Elythia 独自機能の検証と、helper のガード (11 件)
+└── elythia/        # Elythia 独自機能の検証と、helper のガード (18 件)
 ```
 
 ### ui と api の境界
@@ -136,10 +136,10 @@ tests/playwright/
 ├── instance.yml                # Elythia config
 ├── nginx/                      # self-signed TLS を終端する reverse proxy
 ├── specs/
-│   ├── upstream/ui/            # ブラウザを駆動する (194 spec)
+│   ├── upstream/ui/            # ブラウザを駆動する (218 spec)
 │   ├── upstream/api/           # API の shape / 挙動 (96 spec)
-│   └── elythia/                # Elythia 独自と helper のガード (11 件)
-└── fixtures/                   # 17 ファイル
+│   └── elythia/                # Elythia 独自と helper のガード (18 件)
+└── fixtures/                   # 21 ファイル
     ├── api.ts                  # POST /api/<endpoint> ラッパ
     ├── auth.ts                 # signup / signin helper
     ├── ui_auth.ts              # ブラウザのサインイン (root は保存した state を読み込む)
@@ -150,18 +150,18 @@ tests/playwright/
 
 ## 並列度
 
-**1 スタックに対しては直列で回すしかない** (`workers: 1`)。308 spec のうち 185 が
+**1 スタックに対しては直列で回すしかない** (`workers: 1`)。332 spec のうち 185 が
 共有の root (alice) で**ブラウザでサインインした状態**を使い (数え方は
 `grep -rlE 'uiSigninAsRoot|signin-username' specs --include='*.spec.ts' | wc -l`。
 helper 経由が 184 で、`upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 35 がサインインせず root の token で API を叩く (`root.json` を読むのが 220 で、
+さらに 36 がサインインせず root の token で API を叩く (`root.json` を読むのが 221 で、
 その差分)。instance meta は全 spec が共有する。Playwright は
 ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
 `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
 `about_page_render` が同じ meta を取り合う。root の quota
 (antenna 5 / webhook 3 / clip 10) を消費する spec も 18 ある。
 
-**並列度はスタックごと分けることでしか稼げない。** CI は `PLAYWRIGHT_SHARD=i/4` で 4 job に
+**並列度はスタックごと分けることでしか稼げない。** CI は `PLAYWRIGHT_SHARD=i/6` で 6 job に
 分けて、それぞれ独立した stack を立てる (#2609)。割り振りは所要時間で均す
 (`shard-plan.mjs` と `shard-durations.json`、#4026。[docs/playwright.md](../../docs/playwright.md#shard-の割り振り))。
 

@@ -247,7 +247,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
 | `dropin-e2e` | PR(paths限定) | | TS→mkの切替(往路)、TSへ戻す復路の測定、実Misskey / Mastodonとの連合など5シナリオ |
-| `playwright` | PR(paths限定) | | ブラウザのe2e(4 shard)、叩いたAPIの集計 |
+| `playwright` | PR(paths限定) | | ブラウザのe2e(6 shard)、叩いたAPIの集計 |
 | `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard)、叩いたAPIの集計 |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分、叩いたAPIの集計 |
 | `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
@@ -305,6 +305,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-05: `playwright`のshardを4から6にしたので、Section 8の行を直した (#4043) → [docs/playwright.md](docs/playwright.md#shard-の数)
 - 2026-11-05: どの層でも通っていないAPIを一覧と突き合わせる`api-coverage` workflowを足したので、Section 8の表に1行を足した (#4039) → [docs/ci.md](docs/ci.md#通っていない-api-の一覧と週次のゲート-4039)
 - 2026-11-05: `playwright` / `upstream-backend-e2e` / `diff-e2e`が、叩いたAPIをアクセスログから集計してSummaryに出すようにしたので、Section 8の3行に足した (#4037) → [docs/ci.md](docs/ci.md#api-の通過の集計-4037)
 - 2026-11-05: `make frontend-check`とCIの`frontend`に、frontendの全ルートがPlaywrightのspecに対応付いているかの検査を足したので、Section 3とSection 8の行に足した (#4035) → [docs/playwright.md](docs/playwright.md#ルートと-spec-の対応付け-4035)
