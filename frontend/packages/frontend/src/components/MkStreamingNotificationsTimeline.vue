@@ -48,7 +48,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			:css="!quietTransitions()"
 			tag="div"
 		>
-			<div v-for="(notification, i) in paginator.items.value" :key="notification.id" :data-scroll-anchor="notification.id" :class="$style.item">
+			<div v-for="(notification, i) in paginator.items.value" :key="notification.id" :data-scroll-anchor="notification.id" :data-testid="`notification-${notification.type}`" :class="$style.item">
 				<div v-if="i > 0 && isSeparatorNeeded(paginator.items.value[i -1].createdAt, notification.createdAt)" :class="$style.date">
 					<span><i class="ti ti-chevron-up"></i> {{ getSeparatorInfo(paginator.items.value[i -1].createdAt, notification.createdAt)?.prevText }}</span>
 					<span style="height: 1em; width: 1px; background: var(--MI_THEME-divider);"></span>

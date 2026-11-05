@@ -278,20 +278,24 @@ const headerTabs = computed(() => [...(prefer.r.pinnedUserLists.value.map(l => (
 	title: i18n.ts._timelines[tl],
 	icon: basicTimelineIconClass(tl),
 	iconOnly: true,
+	testId: `timeline-tab-${tl}`,
 })), {
 	icon: 'ti ti-list',
 	title: i18n.ts.lists,
 	iconOnly: true,
+	testId: 'timeline-tab-lists',
 	onClick: chooseList,
 }, {
 	icon: 'ti ti-antenna',
 	title: i18n.ts.antennas,
 	iconOnly: true,
+	testId: 'timeline-tab-antennas',
 	onClick: chooseAntenna,
 }, {
 	icon: 'ti ti-device-tv',
 	title: i18n.ts.channel,
 	iconOnly: true,
+	testId: 'timeline-tab-channels',
 	onClick: chooseChannel,
 }] as Tab[]);
 
@@ -300,6 +304,7 @@ const headerTabsWhenNotLogin = computed(() => [...availableBasicTimelines().map(
 	title: i18n.ts._timelines[tl],
 	icon: basicTimelineIconClass(tl),
 	iconOnly: true,
+	testId: `timeline-tab-${tl}`,
 }))] as Tab[]);
 
 definePage(() => ({
