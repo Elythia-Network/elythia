@@ -383,6 +383,18 @@ test-fast: ## 全テストを -race 抜きで実行 (反復用。コミット前
 	# 返すようになるため。
 	go test ./... -count=1 -shuffle=3
 
+# 出力は $GITHUB_STEP_SUMMARY にそのまま足すので、recipe にコメントを書かず、
+# コマンドも echo しない (@)。入力のうち .json は route-hits.json (ROUTE_OUT で
+# 書いたもの) として足し合わせる。何も拾えないか、ROUTE_REQUIRE のエンドポイントが
+# 2xx・3xx で通っていなければ exit 1 (書式が変わって全部が「叩かれていない」に
+# なるのを防ぐ)。使い方は docs/ci.md の「API の通過の集計」。
+.PHONY: route-coverage
+ROUTE_LAYER ?=
+ROUTE_OUT ?=
+ROUTE_REQUIRE ?= notes/create
+route-coverage: ## テストの層のアクセスログか route-hits.json を集計し、API の通過を Markdown で出す (#4037。ROUTE_INPUTS 必須、ROUTE_LAYER / ROUTE_OUT / ROUTE_REQUIRE)
+	@GOWORK=off go run ./tools/routecoverage -layer "$(ROUTE_LAYER)" -o "$(ROUTE_OUT)" -require "$(ROUTE_REQUIRE)" $(ROUTE_INPUTS)
+
 .PHONY: emoji-regex emoji-regex-check
 emoji-regex: ## frontend の MFM の解析器が持つ絵文字の正規表現を snapshot に書き写す (#3324)
 	# frontend/ に pnpm install 済みであること。正規表現は @elythia-network/mfm の
