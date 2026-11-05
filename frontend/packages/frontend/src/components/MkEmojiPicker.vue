@@ -10,6 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		:value="q"
 		class="search"
 		data-prevent-emoji-insert
+		data-testid="emoji-picker-search"
 		:class="{ filled: q != null && q != '' }"
 		:placeholder="i18n.ts.search"
 		type="search"
@@ -29,6 +30,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					:disabled="!canReact(emoji)"
 					:title="emoji.name"
 					tabindex="0"
+					data-testid="emoji-picker-search-result"
 					@click="chosen(emoji, $event)"
 				>
 					<MkCustomEmoji class="emoji" :name="emoji.name" :fallbackToImage="true"/>
@@ -41,6 +43,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					class="_button item"
 					:title="emoji.name"
 					tabindex="0"
+					data-testid="emoji-picker-search-result"
 					@click="chosen(emoji, $event)"
 				>
 					<MkEmoji class="emoji" :emoji="emoji.char"/>
@@ -70,7 +73,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<section>
 				<header class="_acrylic"><i class="ti ti-clock ti-fw"></i> {{ i18n.ts.recentUsed }}</header>
-				<div class="body">
+				<div class="body" data-testid="emoji-picker-recent">
 					<button
 						v-for="emoji in recentlyUsedEmojisDef"
 						:key="getKey(emoji)"

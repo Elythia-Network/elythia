@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<div v-adaptive-border class="rfqxtzch _panel">
 			<div class="toggle">
 				<div class="toggleWrapper">
-					<div class="toggle" :class="store.r.darkMode.value ? 'checked' : null" @click="toggleDarkMode()">
+					<div class="toggle" :class="store.r.darkMode.value ? 'checked' : null" data-testid="theme-dark-mode-toggle" @click="toggleDarkMode()">
 						<span class="before">{{ i18n.ts.light }}</span>
 						<span class="after">{{ i18n.ts.dark }}</span>
 						<span class="toggle__handler">

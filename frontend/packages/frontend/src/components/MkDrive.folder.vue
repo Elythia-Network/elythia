@@ -8,6 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	:class="[$style.root, { [$style.draghover]: draghover }]"
 	draggable="true"
 	:title="title"
+	data-testid="drive-folder"
 	@contextmenu.stop="onContextmenu"
 	@mouseover="onMouseover"
 	@mouseout="onMouseout"

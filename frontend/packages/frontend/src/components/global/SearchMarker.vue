@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div ref="root" :class="[$style.root, { [$style.highlighted]: highlighted }]">
+<div ref="root" :class="[$style.root, { [$style.highlighted]: highlighted }]" :data-testid="highlighted ? 'search-marker-highlighted' : undefined">
 	<slot :isParentOfTarget="isParentOfTarget"></slot>
 </div>
 </template>
