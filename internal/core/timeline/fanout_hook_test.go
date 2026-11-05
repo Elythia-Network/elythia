@@ -613,12 +613,18 @@ func TestFanoutHook_NonReplyFanoutsToAllFollowers(t *testing.T) {
 	}
 }
 
-// failingFollowingRepo errors out on ListFollowers to exercise the warning path.
+// failingFollowingRepo errors out on listing followers to exercise the warning
+// path: ListHomeTimelineFollowers for the create fanout, ListFollowers for the
+// delete path.
 type failingFollowingRepo struct {
 	*testutil.MockFollowingRepository
 }
 
 func (f *failingFollowingRepo) ListFollowers(_ string, _, _ int) ([]*model.Following, error) {
+	return nil, assertError{}
+}
+
+func (f *failingFollowingRepo) ListHomeTimelineFollowers(_ string, _, _ int) ([]*model.Following, error) {
 	return nil, assertError{}
 }
 
@@ -886,15 +892,15 @@ func TestFanoutHook_StreamingFanoutAcrossPages(t *testing.T) {
 // candidates は distinct owner」を assert する。
 type countingFollowingRepo struct {
 	*testutil.MockFollowingRepository
-	listFollowersCalls  atomic.Int64
+	homeFollowersCalls  atomic.Int64
 	existsCalls         int
 	filterToAnchorCalls int
 	lastCandidates      []string
 }
 
-func (c *countingFollowingRepo) ListFollowers(userID string, limit, offset int) ([]*model.Following, error) {
-	c.listFollowersCalls.Add(1)
-	return c.MockFollowingRepository.ListFollowers(userID, limit, offset)
+func (c *countingFollowingRepo) ListHomeTimelineFollowers(followeeID string, limit, offset int) ([]*model.Following, error) {
+	c.homeFollowersCalls.Add(1)
+	return c.MockFollowingRepository.ListHomeTimelineFollowers(followeeID, limit, offset)
 }
 
 func (c *countingFollowingRepo) Exists(followerID, followeeID string) (bool, error) {
@@ -949,7 +955,7 @@ func TestFanoutHook_FollowersFanoutSinglePassListsFollowersOnce(t *testing.T) {
 
 	// 3 followers, pageSize=200 なので 1 page で読み切る → 1 call が期待値。
 	// 旧実装は Redis push 用 + streaming publish 用で 2 page をフェッチ。
-	assert.Equal(t, int64(1), following.listFollowersCalls.Load(),
+	assert.Equal(t, int64(1), following.homeFollowersCalls.Load(),
 		"merged loop must list followers exactly once per page (perf #300 2-4)")
 	// Redis push と streaming publish が両方届く。
 	for fid := range mock.Followings {
@@ -984,7 +990,7 @@ func TestFanoutHook_FollowersFanoutSinglePassAcrossPages(t *testing.T) {
 
 	// 250 followers / pageSize=200 = 2 pages → 2 calls (新実装)。
 	// 旧実装なら 4 calls。
-	assert.Equal(t, int64(2), following.listFollowersCalls.Load(),
+	assert.Equal(t, int64(2), following.homeFollowersCalls.Load(),
 		"merged loop on 250 followers must take 2 page calls (was 4 before #300 2-4)")
 }
 

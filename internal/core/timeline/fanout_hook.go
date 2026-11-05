@@ -428,7 +428,10 @@ func (h *FanoutHook) fanoutToFollowersAndStream(ctx context.Context, authorID st
 	topics := make([]string, 0, pageSize)
 	offset := 0
 	for {
-		rows, err := h.followingRepo.ListFollowers(authorID, pageSize, offset)
+		// #2106 L34 / #4021: 本家 pushToTl と同じく、home TL へ配るのはローカルの休眠して
+		// いないフォロワーだけ。リモートのフォロワーはこのインスタンスの home TL を読まず、
+		// 休眠した人は使っていない。その行は SQL の段階で除き、読んでから捨てない。
+		rows, err := h.followingRepo.ListHomeTimelineFollowers(authorID, pageSize, offset)
 		if err != nil {
 			slog.Warn("fanoutToFollowersAndStream: list followers failed", "err", err, "author", authorID)
 			return
@@ -454,12 +457,6 @@ func (h *FanoutHook) fanoutToFollowersAndStream(ctx context.Context, authorID st
 			}
 		}
 		for _, f := range rows {
-			// #2106 L34: upstream pushToTl は local かつ非 hibernated follower のみ home TL へ
-			// push する。remote follower はこのインスタンスの home TL を読まず、hibernated user は
-			// inactive なので、不要な Redis 書き込み・stream publish を避ける。
-			if f.FollowerHost != nil || f.IsFollowerHibernated {
-				continue
-			}
 			// specified は宛先の follower にだけ届ける (upstream pushToTl と同じ)。
 			if n.Visibility == model.NoteVisibilitySpecified &&
 				!slices.Contains([]string(n.VisibleUserIDs), f.FollowerID) {
@@ -852,6 +849,9 @@ func (h *FanoutHook) removeBestEffort(ctx context.Context, name Name, noteID str
 
 // removeFromFollowerHomes mirrors fanoutToFollowersAndStream: page through
 // followers and LREM the note ID from each follower's home timeline list.
+//
+// 配るとき (ListHomeTimelineFollowers) と違い、休眠したフォロワーも読む (#4021)。
+// TS 版の時代に積まれた一覧には、休眠する前に届いたノートが残っていることがある。
 func (h *FanoutHook) removeFromFollowerHomes(ctx context.Context, authorID, noteID string) {
 	const pageSize = 200
 	offset := 0
