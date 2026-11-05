@@ -28,6 +28,8 @@ on:
       - "internal/**"
       - "cmd/**"
       - "migration/**"
+      # API の通過の集計 (#4037)。internal/routecoverage は internal/** に入る
+      - "tools/routecoverage/**"
       - "tests/diff/**"
       - "frontend/**"
       - "Makefile"
@@ -122,6 +124,22 @@ jobs:
       - name: Run make diff-check
         run: make diff-check
 
+      # Elythia のアクセスログを、成功したときも残す (#4037)。集計は api-coverage
+      # job が行う (この job の Go は cache が外れたときしか入らない)。
+      - name: Save Elythia access log
+        if: ${{ !cancelled() }}
+        run: docker compose -f tests/diff/compose.yml logs --no-log-prefix --no-color mkgo > /tmp/mkgo-access-diff-e2e.log || true
+
+      - name: Upload Elythia access log
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mkgo-access-diff-e2e
+          path: /tmp/mkgo-access-diff-e2e.log
+          if-no-files-found: ignore
+          retention-days: 3
+          overwrite: true
+
       - name: Capture docker compose logs on failure
         if: failure()
         run: |
@@ -141,3 +159,48 @@ jobs:
       - name: Final teardown
         if: always()
         run: docker compose -f tests/diff/compose.yml down -v >/dev/null 2>&1 || true
+
+  # 各 job が残した集計を足し合わせ、この層で叩かれた API を Summary に出す (#4037)。
+  # diff job が残した Elythia のアクセスログ (mkgo-access-diff-e2e) を読む。
+  # 落ちた job があっても集計は出す (cancelled のときだけ止める)。notes/create を
+  # 2xx で通っていなければ落とす (ログの書式が変わって何も拾えなくなるのを防ぐ下限)。
+  api-coverage:
+    name: API coverage
+    needs: diff
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # イベントの時点の commit に固定する。pull_request の github.ref は merge ref で、
+          # job の開始のたびに解決し直すので、run の途中で base が進むと別の commit を指す
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mkgo-access-diff-e2e
+          path: route-inputs
+          # artifact が 1 つだけのときは、名前のディレクトリを作らずに直下へ展開する
+          # (download-artifact の仕様)。数によって置き場所が変わらないよう、常に
+          # 直下へまとめる。そのため、ファイル名は artifact ごとに変えておく
+          merge-multiple: true
+
+      - name: Summarize API hits
+        run: make route-coverage ROUTE_LAYER=diff-e2e ROUTE_OUT=route-hits-diff-e2e.json ROUTE_INPUTS='route-inputs/*.log' >> "$GITHUB_STEP_SUMMARY"
+
+      # 全層を合わせるときの材料 (make route-coverage ROUTE_INPUTS='*.json'、docs/ci.md)
+      - name: Upload API hits
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: route-hits-diff-e2e
+          path: route-hits-diff-e2e.json
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
