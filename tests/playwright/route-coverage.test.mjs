@@ -127,6 +127,7 @@ function baseline() {
     tracked: TRACKED,
     allowlist: `# comment\n${ROUTES.at(-2)}\tredirect だけで描画しない\n`,
     pending: `\n${ROUTES.at(-1)}\t#4024(8)\n`,
+    tablePrefix: 'tests/playwright/specs/ui/a',
   };
 }
 
@@ -267,4 +268,13 @@ test('shadowingFiles picks stray .js files but not dependencies or reports', () 
     'tests/playwright/test-results/a.js',
     'tests/playwright/results.json',
   ]), ['tests/playwright/fixtures/ui_route.js', 'tests/playwright/specs/upstream/ui/a.spec.js']);
+});
+
+test('a route that the route table spec does not declare fails, even if another spec does', () => {
+  const input = baseline();
+  input.declarations = input.declarations.map((d) => (d.route === '/r7' ? { ...d, file: 'tests/playwright/specs/ui/other.spec.ts' } : d));
+  input.tracked = new Set([...TRACKED, 'tests/playwright/specs/ui/other.spec.ts']);
+  assert.match(check(input).problems.join('\n'), /\/r7: 全ルートの表 .* に行が無い/);
+  // 2 つのリストに載ったルートは、表に無くてよい
+  assert.deepEqual(check(baseline()).problems, []);
 });

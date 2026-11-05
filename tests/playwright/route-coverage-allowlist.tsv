@@ -1,7 +1,3 @@
 # ずっと spec を付けないルート (#4035)。`<ルート>\t<どの経路でそうなるか>`。
 # 書き方は docs/playwright.md の「ルートと spec の対応付け」。
-/authorize-follow	router.definition.ts の redirect: '/lookup' だけで描画しない (本家の旧 URL)。行き先の /lookup は lookup_render が宣言している
-/authorize_interaction	router.definition.ts の redirect: '/lookup' だけで描画しない (Mastodon の URL)。行き先の /lookup は lookup_render が宣言している
-/install-extentions	router.definition.ts の redirect: '/install-extensions' だけで描画しない (綴りの誤った旧 URL)。行き先は admin_misc_pages が宣言している
-/admin/ip-lookup-log	router.definition.ts の redirect: ipLookupLogRedirect だけで描画しない (#3276 の旧 URL。モデレーションログの IP 監査タブへ移す)
-/redirect-test	router.definition.ts の redirect だけで描画しない (本家の router の試験用。サインイン中の自分のプロフィールへ移す)
+/oauth/authorize	GET /oauth/authorize はサーバー (internal/api/oauth/provider.go の Authorize) が受け、client_id の URL から取ったクライアントの情報が正しいときだけ frontend の shell を返して、このルートを描く。test の stack からは外のクライアントの情報を取れないので開けない

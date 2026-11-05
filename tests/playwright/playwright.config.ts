@@ -9,7 +9,7 @@ import { defineConfig } from '@playwright/test';
 import { listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from './shard-plan.mjs';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
-// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 11 ファイル。CI では
+// `specs/upstream/` に 290 ファイル、`specs/elythia/` に 18 ファイル。CI では
 // `PLAYWRIGHT_SHARD=i/N` で N 個の job に分けて回す (docs/playwright.md)。
 //
 // **shard は `PLAYWRIGHT_SHARD=i/N` で切る (#4026)。** `--shard` はファイルの
@@ -87,11 +87,11 @@ export default defineConfig({
     // i18n key 解決に使うので、これで全 spec の text 前提が安定する。
     locale: 'en-US',
   },
-  // **1 スタックに対しては直列で回すしかない。** 301 spec のうち 180 が共有の
+  // **1 スタックに対しては直列で回すしかない。** 308 spec のうち 185 が共有の
   // root (alice) でブラウザでサインインした状態を使い (数え方は
   // `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`)、
-  // さらに 33 がサインインせず root の token で API を叩く
-  // (`root.json` を読むのが 213 で、その差分)。
+  // さらに 35 がサインインせず root の token で API を叩く
+  // (`root.json` を読むのが 220 で、その差分)。
   // instance meta は全 spec が共有する。Playwright は
   // ファイル単位で並列化するので、workers を上げると `profile_iscat_toggle` と
   // `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と

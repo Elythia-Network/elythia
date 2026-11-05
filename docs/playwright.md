@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 301 ファイル
+`tests/playwright/specs/` にあり、現在 308 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -46,10 +46,10 @@ upstream と食い違っていても気付けない**。
 **4 シャード並列** (`PLAYWRIGHT_SHARD=i/4`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/4)` 〜 `4/4`。
 
-**1 スタックあたりは直列でしか回せない。** 301 spec のうち 180 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 308 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
-`uiSigninAsRoot` helper が 179 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 33 がサインインせず root の token で API を叩く (`root.json` を読むのが 213 で、その差分)。
+`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
+さらに 35 がサインインせず root の token で API を叩く (`root.json` を読むのが 220 で、その差分)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
@@ -297,7 +297,7 @@ test('the note page shows the reply', coversRoutes('/notes/:noteId/:initialTab?'
 
 | リスト | 載せるもの | 2 列目 |
 |---|---|---|
-| `tests/playwright/route-coverage-allowlist.tsv` | ずっと spec を付けないルート | どの経路でそうなるか (例: `redirect` だけで描画しない) |
+| `tests/playwright/route-coverage-allowlist.tsv` | ずっと spec を付けないルート | どの経路でそうなるか (例: `/oauth/authorize` はサーバーが受け、外のクライアントの情報を取れたときだけ描く) |
 | `tests/playwright/route-coverage-pending.tsv` | これから spec を付けるルート | 付ける予定の issue の番号 (`#4024(15)` のように親と段階でもよい) |
 
 ゲート (`tests/playwright/route-coverage.mjs`) が落とすのは次のとき。
@@ -307,6 +307,8 @@ test('the note page shows the reply', coversRoutes('/notes/:noteId/:initialTab?'
 - 宣言のあるルートがリストにも載っている。spec を付けたら、リストの行を消す
 - 同じルートが 2 つのリストの両方にある
 - git が追跡していない spec の宣言 (数えない。手元でだけ緑になるのを防ぐ)
+- 2 つのリストに無いルートを、全ルートの表 (下の節) の spec が宣言していない。ほかの spec が宣言
+  していても落ちる (表に行を足し忘れたルートを拾う)
 - skip / fixme のテストの宣言 (数えない)
 - `tests/playwright` に、git が無視する `.js` が残っている (exit 2)。`.ts` の spec や fixture より先に読まれ、
   手元と CI で一覧が食い違うため (下の「spec を書くときの注意」)
@@ -316,6 +318,54 @@ test('the note page shows the reply', coversRoutes('/notes/:noteId/:initialTab?'
 ルートの一覧は `ROUTE_DEF` を TypeScript の構文木で辿って作る。`path` を式で組み立てたときと、
 ルートの中に `{ children }` や `...rest` を書いたときは、読めないので落とす。プラグインのルート (`router.ts` の `routeDefsWithPlugins`) は対象にしない。
 どのプラグインを入れるかが運営者ごとに違い、`ROUTE_DEF` に現れないため。
+
+## 全ルートの表 (#4041)
+
+frontend の全ルートを、表 (`fixtures/route_table.ts`) 1 つで次の 2 点について確かめる。ルートを足したら
+表にも 1 行足す (足さないと、上の対応付けのゲートが落とす。表の spec の宣言を、ほかの spec の宣言とは
+別に数えている)。
+
+- **開ける** (`specs/elythia/ui/route_table_open_<領域>.spec.ts`): root で開き、not-found でないこと、
+  開いたパスに留まること、そのページの目印 (marker) が出ること、page error が無いことを見る。
+  1 つのファイルで 5 件落ちたら、残りは開かずに落とす (stack が壊れているときに、時間切れの積み重ねで
+  CI の job の時間を超えないように)。数は `.auth/route-table-failures/` に置く (Playwright はテストが落ちる
+  たびに worker を作り直すので、変数では数えられない)。globalSetup が実行ごとに消す
+  リダイレクトだけのルートは、行き先へ移ることを見る
+- **権限の無い人の扱い**: 未ログイン (`route_table_permission_signed_out.spec.ts`) で、公開のルートは
+  開け、ログイン必須のルートは not-found とサインインのダイアログになり、モデレーターのルートは
+  not-found になること。ロールの無い利用者で `/admin*` が、チャットを使えないロールの利用者で
+  `/chat*` が not-found になること (`route_table_permission_users.spec.ts`)。本当の防御はサーバーの
+  認可で、ここで見るのは「画面が出てしまわない」ことだけ
+
+表の書き方:
+
+- **kind は `router.definition.ts` から作らず、手で書く。** 作ると `loginRequired` や `iAmModerator` の
+  書き忘れを表も同じく忘れて、拾えない。実際、表を書いたときに 6 ルート (`/registry` など) を
+  ログイン必須と思い込んでいて、未ログインの spec で食い違いが見つかった (どれもルートの側が公開で、
+  ページが自分でサインインを促す)
+- **marker は、そのページが mount したときにだけ出るもので書く。** `title` (ページが `definePage` で
+  付ける title)、`text` (ページの本体 = RouterView の `._pageContainer` の最も内側の innerText)、
+  `api` (開くときに呼び、2xx が返る API)、`testId` の組み合わせで、書いたものは全部を満たす必要がある。
+  設定と管理画面の子ページは title が親 (`Settings` / `Control Panel`) と共通なので、本文で見分ける。上の
+  「どのページにも出るもので判定しない」の罠に加えて、次に注意する
+  - 親が呼ぶ API は子の目印にならない (管理画面は、どの子を開いても `admin/abuse-user-reports` を呼ぶ)
+  - 設定の子ページの本体には、設定のメニューと案内も入る (`settings/index.vue` が自分の `._pageContainer`
+    を持たない)。メニューと同じ文言 (Profile、Privacy など) を子の `text` にすると、どの子でも通る
+  - パラメータの先が無いときに「見つかりません」を出すページは、title と API の呼び出しだけでは中身を
+    見ていない。先があるときにだけ出るもの (相手の名前など) を `text` に足す。テストの stack に作れない
+    もの (`/instance-info/:host` の連合先) は、表のコメントに「mount と照会まで」と書いてある
+- パラメータは `fixtures/route_seed.ts` が作ったもので埋める。seed は実行ごとに 1 回だけ作って
+  `.auth/route-seed.json` に残し、spec のファイルの間で使い回す (ファイルごとに作ると webhook などの
+  上限に当たる)。globalSetup は実行の始めに root のアンテナ・webhook・クリップ・リストを消すので、
+  同じ所で seed も消す
+- `/settings` と `/admin` は、広い画面だと最初の子へ移るので、狭い画面で開く (`narrow`)
+- 未ログインで開くと中身が変わる公開のルートは、違いを `signedOut` に理由と一緒に書く (`noTitle`: title を
+  付けない、`pageError`: 出る page error の文面の正規表現)。書いた違いは実際に起きることも見るので、直ったら
+  行から消す。`pageError` を書いた行でも、正規表現に合わない page error が出たら落ちる。
+  今は `/registry` (3 つ)・`/invite`・`/reversi` が、未ログインでもログインの要る API を呼んで失敗を
+  受けない (本家から来たページ)
+- page error のうち、どのページでも起きるもの (stack の自己署名の証明書で Service Worker の登録が
+  失敗する) は `fixtures/route_check.ts` の `KNOWN_PAGE_ERRORS` で除く
 
 ## spec を書くときの注意
 
