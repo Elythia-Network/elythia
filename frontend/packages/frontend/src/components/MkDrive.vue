@@ -27,7 +27,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<span v-if="folder != null" :class="[$style.navPathItem, $style.navSeparator]"><i class="ti ti-chevron-right"></i></span>
 				<span v-if="folder != null" :class="[$style.navPathItem, $style.navCurrent]">{{ folder.name }}</span>
 			</div>
-			<button class="_button" :class="$style.navMenu" @click="showMenu"><i class="ti ti-dots"></i></button>
+			<button class="_button" :class="$style.navMenu" data-testid="drive-menu" @click="showMenu"><i class="ti ti-dots"></i></button>
 		</nav>
 	</template>
 
@@ -53,6 +53,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 		<div
 			ref="main"
+			data-testid="drive-main"
 			:class="[$style.main, { [$style.fetching]: fetching }]"
 			@dragover.prevent.stop="onDragover"
 			@dragenter="onDragenter"

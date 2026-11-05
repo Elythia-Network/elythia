@@ -11,6 +11,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		:placeholder="i18n.ts.search"
 		type="search"
 		style="margin-bottom: 16px;"
+		data-testid="super-menu-search"
 		@input.passive="searchOnInput"
 		@keydown="searchOnKeyDown"
 	>
@@ -44,6 +45,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkA
 				:to="item.path + '#' + item.id"
 				class="_button searchResultItem"
+				data-testid="super-menu-search-result"
 				:class="{ selected: searchSelectedIndex !== null && searchSelectedIndex === index }"
 			>
 				<span v-if="item.icon" class="icon"><i :class="item.icon" class="ti-fw"></i></span>

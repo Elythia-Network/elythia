@@ -8,6 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	:class="[$style.root, { [$style.isSelected]: isSelected, [$style.isDisabled]: isDisabled }]"
 	draggable="true"
 	:title="title"
+	data-testid="drive-file"
 	@contextmenu.stop="onContextmenu"
 	@dragstart="onDragstart"
 	@dragend="onDragend"
