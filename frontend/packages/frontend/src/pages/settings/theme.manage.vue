@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div class="_gaps_m">
+<div class="_gaps_m" data-testid="settings-theme-manage">
 	<MkSelect v-model="selectedThemeId" :items="selectedThemeIdDef">
 		<template #label>{{ i18n.ts.theme }}</template>
 	</MkSelect>

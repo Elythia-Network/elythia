@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <template>
 <PageWithAnimBg>
 	<div :class="$style.formContainer">
-		<form :class="$style.form" class="_panel" @submit.prevent="submit()">
+		<form :class="$style.form" class="_panel" data-testid="signup-complete" @submit.prevent="submit()">
 			<div :class="$style.banner">
 				<i class="ti ti-user-check"></i>
 			</div>
