@@ -22,6 +22,7 @@ import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /explore/users renders recently-registered users', () => {
   let root: RootFixture;
@@ -33,7 +34,7 @@ test.describe('UI: /explore/users renders recently-registered users', () => {
 
   test.setTimeout(60_000);
 
-  test('newly signed-up user appears in /explore#users', async ({ page, baseURL, request }) => {
+  test('newly signed-up user appears in /explore#users', coversRoutes('/explore'), async ({ page, baseURL, request }) => {
     const newUserName = `expnew${Date.now().toString().slice(-9)}`;
     const newUser = await signupUser(request, newUserName, DEFAULT_TEST_PASSWORD);
     // /explore#users の "recently registered" は users(state:'alive') を引く。

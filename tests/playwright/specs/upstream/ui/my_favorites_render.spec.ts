@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/favorites renders favorited notes', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /my/favorites renders favorited notes', () => {
 
   test.setTimeout(60_000);
 
-  test('a favorited note appears in /my/favorites', async ({ page, baseURL, request }) => {
+  test('a favorited note appears in /my/favorites', coversRoutes('/my/favorites'), async ({ page, baseURL, request }) => {
     // 自分の note を favorite する (= 一番シンプルに /my/favorites に乗る)
     const noteText = `pwfav-${Date.now().toString().slice(-9)}`;
     const noteResp = await callApi(request, 'notes/create', {

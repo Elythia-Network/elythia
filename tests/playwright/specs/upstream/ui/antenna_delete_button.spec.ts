@@ -18,6 +18,7 @@ import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { NOT_FOUND_STATUS } from '../../../fixtures/backend';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/antennas/:id delete button flow', () => {
   let root: RootFixture;
@@ -26,7 +27,7 @@ test.describe('UI: /my/antennas/:id delete button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('Delete button → confirm OK → /api/antennas/delete', async ({
+  test('Delete button → confirm OK → /api/antennas/delete', coversRoutes('/my/antennas/:antennaId'), async ({
     page,
     baseURL,
     request,

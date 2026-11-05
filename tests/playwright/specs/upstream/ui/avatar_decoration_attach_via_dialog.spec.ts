@@ -22,6 +22,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/avatar-decoration attach via dialog flow', () => {
   let root: RootFixture;
@@ -30,7 +31,7 @@ test.describe('UI: /settings/avatar-decoration attach via dialog flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('click decoration → XDialog → Attach → /api/i/update with avatarDecorations', async ({
+  test('click decoration → XDialog → Attach → /api/i/update with avatarDecorations', coversRoutes('/settings/avatar-decoration'), async ({
     page,
     baseURL,
     request,

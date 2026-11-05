@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive folder rename via context menu flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /my/drive folder rename via context menu flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('contextmenu folder → Rename → inputText OK → /api/drive/folders/update', async ({
+  test('contextmenu folder → Rename → inputText OK → /api/drive/folders/update', coversRoutes('/my/drive'), async ({
     page,
     baseURL,
     request,

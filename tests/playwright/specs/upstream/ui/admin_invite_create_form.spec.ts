@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/invites create form flow', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /admin/invites create form flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('expand folder → click Create → /api/admin/invite/create round-trips', async ({
+  test('expand folder → click Create → /api/admin/invite/create round-trips', coversRoutes('/admin/invites'), async ({
     page,
     baseURL,
   }) => {

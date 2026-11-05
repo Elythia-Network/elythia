@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/announcements delete button flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /admin/announcements delete button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('create via API → expand folder → click Delete → confirm OK → admin/announcements/delete', async ({
+  test('create via API → expand folder → click Delete → confirm OK → admin/announcements/delete', coversRoutes('/admin/announcements'), async ({
     page,
     baseURL,
     request,

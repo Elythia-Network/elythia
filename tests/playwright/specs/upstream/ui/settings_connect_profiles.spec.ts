@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: 設定・管理の未カバーページ', () => {
   let root: RootFixture;
@@ -35,7 +36,7 @@ test.describe('UI: 設定・管理の未カバーページ', () => {
 
   test.setTimeout(60_000);
 
-  test('/settings/connect がトークン発行の入口を出す', async ({ page, baseURL }) => {
+  test('/settings/connect がトークン発行の入口を出す', coversRoutes('/settings/connect'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/settings/connect`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
@@ -49,7 +50,7 @@ test.describe('UI: 設定・管理の未カバーページ', () => {
     });
   });
 
-  test('通報の通知先が一覧に表示され、追加ボタンが出る', async ({ page, baseURL, request }) => {
+  test('通報の通知先が一覧に表示され、追加ボタンが出る', coversRoutes('/admin/abuse-report-notification-recipient'), async ({ page, baseURL, request }) => {
     // 事前に 1 件登録しておく。一覧が空だと「描画されている」のか
     // 「取得に失敗して空」なのか区別できない。
     //

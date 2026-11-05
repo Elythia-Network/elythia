@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /chat/messages/:messageId', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /chat/messages/:messageId', () => {
 
   test.setTimeout(60_000);
 
-  test('単一メッセージのページに本文が表示される', async ({ page, baseURL, request }) => {
+  test('単一メッセージのページに本文が表示される', coversRoutes('/chat/messages/:messageId'), async ({ page, baseURL, request }) => {
     const peer = await signupUser(request, randomUsername('msgpeer'), DEFAULT_TEST_PASSWORD);
     expect((await callApi(request, 'following/create', { i: root.token, userId: peer.id })).status()).toBe(200);
     expect((await callApi(request, 'following/create', { i: peer.token, userId: root.id })).status()).toBe(200);

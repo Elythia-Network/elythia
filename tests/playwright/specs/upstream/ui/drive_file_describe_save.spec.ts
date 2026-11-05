@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive/file/:fileId describe save flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /my/drive/file/:fileId describe save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('describe button → caption textarea → OK → /api/drive/files/update', async ({
+  test('describe button → caption textarea → OK → /api/drive/files/update', coversRoutes('/my/drive/file/:fileId'), async ({
     page,
     baseURL,
     request,

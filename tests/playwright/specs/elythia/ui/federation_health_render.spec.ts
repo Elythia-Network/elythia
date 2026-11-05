@@ -29,6 +29,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const UNAVAILABLE = 'Could not load delivery health';
 
@@ -48,7 +49,7 @@ test.describe('UI: /admin/federation delivery health tabs', () => {
 
   test.setTimeout(90_000);
 
-  test('Deliver / Inbox tabs fetch and render the mk-go health endpoints', async ({
+  test('Deliver / Inbox tabs fetch and render the mk-go health endpoints', coversRoutes('/admin/federation'), async ({
     page,
     baseURL,
   }) => {

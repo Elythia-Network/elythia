@@ -19,6 +19,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: user 3-dot menu unmute flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: user 3-dot menu unmute flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('signup target → root mutes via API → /@target menu → Unmute → /api/mute/delete', async ({
+  test('signup target → root mutes via API → /@target menu → Unmute → /api/mute/delete', coversRoutes('/@:acct/:page?'), async ({
     page,
     baseURL,
     request,

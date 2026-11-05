@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/system-webhook create flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /admin/system-webhook create flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('Create button → editor dialog → admin/system-webhook/create', async ({
+  test('Create button → editor dialog → admin/system-webhook/create', coversRoutes('/admin/system-webhook'), async ({
     page,
     baseURL,
   }) => {

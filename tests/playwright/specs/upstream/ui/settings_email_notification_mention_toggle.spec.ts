@@ -24,6 +24,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickSwitchByLabel } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 // i18n.ts._notification._types.mention の en-US 値。
 const MENTION_LABEL = 'Mentions';
@@ -38,7 +39,7 @@ test.describe('UI: /settings/email emailNotification_mention toggle flow', () =>
   });
   test.setTimeout(60_000);
 
-  test('toggle emailNotification_mention switch → /api/i/update', async ({
+  test('toggle emailNotification_mention switch → /api/i/update', coversRoutes('/settings/email'), async ({
     page,
     baseURL,
     request,

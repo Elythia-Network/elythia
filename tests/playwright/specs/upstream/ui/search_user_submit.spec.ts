@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /search user submit flow', () => {
   let root: RootFixture;
@@ -22,7 +23,7 @@ test.describe('UI: /search user submit flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('navigate /search?type=user → fill query → Search → users/search round-trips', async ({
+  test('navigate /search?type=user → fill query → Search → users/search round-trips', coversRoutes('/search'), async ({
     page,
     baseURL,
   }) => {

@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/overview page hydrates dashboard sections', () => {
   let root: RootFixture;
@@ -20,7 +21,7 @@ test.describe('UI: /admin/overview page hydrates dashboard sections', () => {
 
   test.setTimeout(60_000);
 
-  test('overview sections (Stats / Active users / Moderators) appear', async ({
+  test('overview sections (Stats / Active users / Moderators) appear', coversRoutes('/admin/overview'), async ({
     page,
     baseURL,
   }) => {

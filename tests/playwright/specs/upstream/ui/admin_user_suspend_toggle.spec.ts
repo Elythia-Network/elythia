@@ -18,6 +18,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/user suspend toggle flow', () => {
   let root: RootFixture;
@@ -26,7 +27,7 @@ test.describe('UI: /admin/user suspend toggle flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('toggle suspend switch + confirm OK → /api/admin/suspend-user', async ({
+  test('toggle suspend switch + confirm OK → /api/admin/suspend-user', coversRoutes('/admin/user/:userId'), async ({
     page,
     baseURL,
     request,

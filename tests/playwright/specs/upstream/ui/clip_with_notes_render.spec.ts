@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import type { RootFixture } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /clips/:id renders notes added to the clip', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /clips/:id renders notes added to the clip', () => {
 
   test.setTimeout(30_000);
 
-  test('clip detail page renders an added note', async ({ page, baseURL, request }) => {
+  test('clip detail page renders an added note', coversRoutes('/clips/:clipId'), async ({ page, baseURL, request }) => {
     // note + clip を作成
     const noteText = `pwclipnote-${Date.now().toString().slice(-9)}`;
     const noteResp = await callApi(request, 'notes/create', {

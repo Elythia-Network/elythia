@@ -13,6 +13,7 @@ import { fillAbuseReportWindow, submitAbuseReportWindow } from '../../../fixture
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /@target abuse report flow', () => {
   let root: RootFixture;
@@ -21,7 +22,7 @@ test.describe('UI: /@target abuse report flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('open menu → Report abuse → structured form + Send → /api/users/report-abuse', async ({
+  test('open menu → Report abuse → structured form + Send → /api/users/report-abuse', coversRoutes('/@:acct/:page?'), async ({
     page,
     baseURL,
     request,

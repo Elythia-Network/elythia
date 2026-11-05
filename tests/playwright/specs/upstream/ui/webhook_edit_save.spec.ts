@@ -12,6 +12,7 @@ import { callApi } from '../../../fixtures/api';
 import { deleteWebhooksNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/webhook/edit/:id update flow', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: /settings/webhook/edit/:id update flow', () => {
     createdWebhooks.length = 0;
   });
 
-  test('create webhook via API → edit name → Save → /api/i/webhooks/update', async ({
+  test('create webhook via API → edit name → Save → /api/i/webhooks/update', coversRoutes('/settings/webhook/edit/:webhookId'), async ({
     page,
     baseURL,
     request,

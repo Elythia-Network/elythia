@@ -16,6 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /**
  * Scope to the accounts pane.
@@ -42,7 +43,7 @@ test.describe('UI: /settings/accounts', () => {
 
   test.setTimeout(60_000);
 
-  test('ログイン中のアカウントが一覧に出る', async ({ page, baseURL }) => {
+  test('ログイン中のアカウントが一覧に出る', coversRoutes('/settings/accounts'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     await page.goto(`${baseURL}/settings/accounts`, { waitUntil: 'domcontentloaded' });
 
@@ -58,7 +59,7 @@ test.describe('UI: /settings/accounts', () => {
     });
   });
 
-  test('カードを押すと切替メニューが出る', async ({ page, baseURL }) => {
+  test('カードを押すと切替メニューが出る', coversRoutes('/settings/accounts'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     await page.goto(`${baseURL}/settings/accounts`, { waitUntil: 'domcontentloaded' });
 

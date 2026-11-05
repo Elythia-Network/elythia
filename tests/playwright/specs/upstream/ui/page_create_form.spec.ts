@@ -12,6 +12,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /pages/new form flow', () => {
   let root: RootFixture;
@@ -20,7 +21,7 @@ test.describe('UI: /pages/new form flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('navigate /pages/new → fill title + name → save → /api/pages/create persists', async ({
+  test('navigate /pages/new → fill title + name → save → /api/pages/create persists', coversRoutes('/pages/new'), async ({
     page,
     baseURL,
     request,

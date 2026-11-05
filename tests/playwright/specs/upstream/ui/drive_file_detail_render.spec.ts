@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive/file/:fileId hydrates file metadata', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /my/drive/file/:fileId hydrates file metadata', () => {
 
   test.setTimeout(60_000);
 
-  test('drive file detail page renders the file name', async ({ page, baseURL, request }) => {
+  test('drive file detail page renders the file name', coversRoutes('/my/drive/file/:fileId'), async ({ page, baseURL, request }) => {
     // 同 SHA256 の buffer を upload しても mk-go drive/files/create は
     // dedupe で既存 entry を返してくることがある (= test 累積で 1x1 PNG が
     // 既に登録済 + 同 hash で hit)。そのため API が返した file の name で

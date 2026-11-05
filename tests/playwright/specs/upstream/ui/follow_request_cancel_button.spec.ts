@@ -22,6 +22,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/follow-requests cancel button flow', () => {
   let root: RootFixture;
@@ -30,7 +31,7 @@ test.describe('UI: /my/follow-requests cancel button flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('signup locked target + send follow request → Cancel click → /api/following/requests/cancel', async ({
+  test('signup locked target + send follow request → Cancel click → /api/following/requests/cancel', coversRoutes('/my/follow-requests'), async ({
     page,
     baseURL,
     request,

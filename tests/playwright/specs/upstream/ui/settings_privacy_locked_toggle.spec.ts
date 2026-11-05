@@ -14,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickSwitchByLabel } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const LABEL = 'Follow requests require approval';
 
@@ -24,7 +25,7 @@ test.describe('UI: /settings/privacy isLocked toggle flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('toggle the isLocked switch → saved and read back', async ({ page, baseURL, request }) => {
+  test('toggle the isLocked switch → saved and read back', coversRoutes('/settings/privacy'), async ({ page, baseURL, request }) => {
     // 押した後の値を決め打ちで確かめるため、既知の値 (false) から始める
     await callApi(request, 'i/update', { i: root.token, isLocked: false });
 

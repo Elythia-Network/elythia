@@ -18,6 +18,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /@:user renders profile description / fields', () => {
   test.beforeAll(() => {
@@ -26,7 +27,7 @@ test.describe('UI: /@:user renders profile description / fields', () => {
 
   test.setTimeout(60_000);
 
-  test('/@<user> shows i/update-applied description', async ({ page, baseURL, request }) => {
+  test('/@<user> shows i/update-applied description', coversRoutes('/@:acct/:page?'), async ({ page, baseURL, request }) => {
     const userName = `profrnd${Date.now().toString().slice(-9)}`;
     const user = await signupUser(request, userName, DEFAULT_TEST_PASSWORD);
 

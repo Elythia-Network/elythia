@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /** MiAuth の session id。UUID である必要は無く、アプリ側が生成する任意の文字列。 */
 function newSession(): string {
@@ -70,7 +71,7 @@ test.describe('UI: MiAuth authorization', () => {
 
   test.setTimeout(60_000);
 
-  test('Accept を押すと token が発行され API に使える', async ({ page, request, baseURL }) => {
+  test('Accept を押すと token が発行され API に使える', coversRoutes('/miauth/:session'), async ({ page, request, baseURL }) => {
     const session = newSession();
 
     // 承認前に token は取れない。**これを先に置くことで、後段の成功が
@@ -103,7 +104,7 @@ test.describe('UI: MiAuth authorization', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test('Reject を押すと token が発行されない', async ({ page, request, baseURL }) => {
+  test('Reject を押すと token が発行されない', coversRoutes('/miauth/:session'), async ({ page, request, baseURL }) => {
     const session = newSession();
 
     await uiSigninAsRoot(page, baseURL, root);
@@ -124,7 +125,7 @@ test.describe('UI: MiAuth authorization', () => {
     expect((await check.json()).ok).toBe(false);
   });
 
-  test('要求された permission が画面に表示される', async ({ page, baseURL }) => {
+  test('要求された permission が画面に表示される', coversRoutes('/miauth/:session'), async ({ page, baseURL }) => {
     const session = newSession();
 
     await uiSigninAsRoot(page, baseURL, root);

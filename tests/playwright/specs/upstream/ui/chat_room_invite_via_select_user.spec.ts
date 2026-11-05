@@ -20,6 +20,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /chat/room invite via selectUser flow', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: /chat/room invite via selectUser flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('Invite user → username search → select + OK → /api/chat/rooms/invitations/create', async ({
+  test('Invite user → username search → select + OK → /api/chat/rooms/invitations/create', coversRoutes('/chat/room/:roomId'), async ({
     page,
     baseURL,
     request,

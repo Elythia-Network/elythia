@@ -19,6 +19,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 interface RoleFixture {
   id: string;
@@ -73,7 +74,7 @@ test.describe('UI: /admin/roles/:id role detail', () => {
 
   test.setTimeout(60_000);
 
-  test('ロール名と付与されているユーザーが表示される', async ({ page, baseURL, request }) => {
+  test('ロール名と付与されているユーザーが表示される', coversRoutes('/admin/roles/:id'), async ({ page, baseURL, request }) => {
     const role = await createRoleWithMember(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);
@@ -88,7 +89,7 @@ test.describe('UI: /admin/roles/:id role detail', () => {
     });
   });
 
-  test('× から付与を解除できる', async ({ page, baseURL, request }) => {
+  test('× から付与を解除できる', coversRoutes('/admin/roles/:id'), async ({ page, baseURL, request }) => {
     const role = await createRoleWithMember(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);

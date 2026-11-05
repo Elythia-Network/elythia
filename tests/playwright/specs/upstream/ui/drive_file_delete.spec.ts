@@ -17,6 +17,7 @@ import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { NOT_FOUND_STATUS } from '../../../fixtures/backend';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive/file/:fileId delete flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /my/drive/file/:fileId delete flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('trash button → confirm OK → /api/drive/files/delete', async ({
+  test('trash button → confirm OK → /api/drive/files/delete', coversRoutes('/my/drive/file/:fileId'), async ({
     page,
     baseURL,
     request,

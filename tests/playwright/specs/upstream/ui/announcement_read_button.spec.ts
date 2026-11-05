@@ -19,6 +19,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /announcements read button flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /announcements read button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('admin creates → user reads via "Got it!" → /api/i/read-announcement', async ({
+  test('admin creates → user reads via "Got it!" → /api/i/read-announcement', coversRoutes('/announcements'), async ({
     page,
     baseURL,
     request,

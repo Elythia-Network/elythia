@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /pages page renders user pages list', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /pages page renders user pages list', () => {
 
   test.setTimeout(60_000);
 
-  test('/pages renders all 3 tabs (Popular / My Pages / Liked Pages)', async ({
+  test('/pages renders all 3 tabs (Popular / My Pages / Liked Pages)', coversRoutes('/pages'), async ({
     page,
     baseURL,
   }) => {

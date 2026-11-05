@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/account-data page hydrates', () => {
   let root: RootFixture;
@@ -17,7 +18,7 @@ test.describe('UI: /settings/account-data page hydrates', () => {
   });
   test.setTimeout(60_000);
 
-  test('account-data renders export/import sections', async ({ page, baseURL }) => {
+  test('account-data renders export/import sections', coversRoutes('/settings/account-data'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/settings/account-data`, {
       waitUntil: 'domcontentloaded',

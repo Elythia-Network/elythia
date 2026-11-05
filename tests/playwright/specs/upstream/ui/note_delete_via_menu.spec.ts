@@ -25,6 +25,7 @@ import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { NOT_FOUND_STATUS } from '../../../fixtures/backend';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: note 3-dot menu delete flow', () => {
   let root: RootFixture;
@@ -33,7 +34,7 @@ test.describe('UI: note 3-dot menu delete flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('open menu → click Delete → confirm OK → /api/notes/delete', async ({
+  test('open menu → click Delete → confirm OK → /api/notes/delete', coversRoutes('/notes/:noteId/:initialTab?'), async ({
     page,
     baseURL,
     request,

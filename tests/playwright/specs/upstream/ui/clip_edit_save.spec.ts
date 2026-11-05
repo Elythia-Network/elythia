@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /clips/:id edit name round-trip', () => {
   let root: RootFixture;
@@ -26,7 +27,7 @@ test.describe('UI: /clips/:id edit name round-trip', () => {
 
   test.setTimeout(60_000);
 
-  test('header pencil → MkFormDialog rename → /api/clips/update', async ({
+  test('header pencil → MkFormDialog rename → /api/clips/update', coversRoutes('/clips/:clipId'), async ({
     page,
     baseURL,
     request,

@@ -36,6 +36,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const AVATAR = '.ftskorzw .avatar';
 
@@ -90,7 +91,7 @@ test.describe('UI: /@user のアイコンを押すと拡大表示される', () 
   });
   test.setTimeout(90_000);
 
-  test('クリックと Enter でライトボックスが開き、Esc で閉じる', async ({ page, baseURL }) => {
+  test('クリックと Enter でライトボックスが開き、Esc で閉じる', coversRoutes('/@:acct/:page?'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     await page.goto(`${baseURL}/@${root.username}`, { waitUntil: 'domcontentloaded' });
 

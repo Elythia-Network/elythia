@@ -7,11 +7,12 @@
 // ことを smoke する spec。token 付きで navigate すると input が見える。
 
 import { expect, test } from '@playwright/test';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /reset-password/:token page hydrates form', () => {
   test.setTimeout(30_000);
 
-  test('reset-password page with dummy token renders new password input', async ({
+  test('reset-password page with dummy token renders new password input', coversRoutes('/reset-password/:token?'), async ({
     page,
     baseURL,
   }) => {

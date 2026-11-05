@@ -18,6 +18,7 @@ import { expect, test } from '@playwright/test';
 import { deleteWebhooksNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/webhook/new form flow', () => {
   let root: RootFixture;
@@ -34,7 +35,7 @@ test.describe('UI: /settings/webhook/new form flow', () => {
     createdWebhooks.length = 0;
   });
 
-  test('navigate /settings/webhook/new → fill name+url+secret → Create → i/webhooks/create round-trips', async ({
+  test('navigate /settings/webhook/new → fill name+url+secret → Create → i/webhooks/create round-trips', coversRoutes('/settings/webhook/new'), async ({
     page,
     baseURL,
   }) => {

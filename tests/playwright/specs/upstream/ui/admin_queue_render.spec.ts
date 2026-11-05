@@ -19,6 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/job-queue page hydrates queue tab list', () => {
   let root: RootFixture;
@@ -29,7 +30,7 @@ test.describe('UI: /admin/job-queue page hydrates queue tab list', () => {
 
   test.setTimeout(60_000);
 
-  test('queue type tabs (deliver / inbox) appear on /admin/job-queue', async ({ page, baseURL }) => {
+  test('queue type tabs (deliver / inbox) appear on /admin/job-queue', coversRoutes('/admin/job-queue'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/admin/job-queue`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);

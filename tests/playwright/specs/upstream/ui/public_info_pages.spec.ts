@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: 公開情報ページ', () => {
   let root: RootFixture;
@@ -41,7 +42,7 @@ test.describe('UI: 公開情報ページ', () => {
     });
   });
 
-  test('/avatar-decorations がデコレーション一覧を出す', async ({ page, baseURL, request }) => {
+  test('/avatar-decorations がデコレーション一覧を出す', coversRoutes('/avatar-decorations'), async ({ page, baseURL, request }) => {
     // 1 件登録しておく。空一覧だと「描画できている」のか「取得に失敗して空」
     // なのか区別できない。
     const name = `pwdeco${Date.now().toString().slice(-9)}`;
@@ -74,7 +75,7 @@ test.describe('UI: 公開情報ページ', () => {
     });
   });
 
-  test('/roles/:roleId が公開ロールを出す', async ({ page, baseURL, request }) => {
+  test('/roles/:roleId が公開ロールを出す', coversRoutes('/roles/:roleId'), async ({ page, baseURL, request }) => {
     const name = `pw-public-role-${Date.now().toString().slice(-9)}`;
     const created = await callApi(request, 'admin/roles/create', {
       i: root.token,

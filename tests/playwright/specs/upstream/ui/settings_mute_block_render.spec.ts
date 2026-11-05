@@ -21,6 +21,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /**
  * Open the collapsed MkFolder whose header label matches exactly.
@@ -46,7 +47,7 @@ test.describe('UI: /settings/mute-block', () => {
 
   test.setTimeout(60_000);
 
-  test('ミュートしたユーザーが一覧に表示される', async ({ page, baseURL, request }) => {
+  test('ミュートしたユーザーが一覧に表示される', coversRoutes('/settings/mute-block'), async ({ page, baseURL, request }) => {
     const target = await signupUser(request, randomUsername('mutetgt'), DEFAULT_TEST_PASSWORD);
     const created = await callApi(request, 'mute/create', { i: root.token, userId: target.id });
     expect(created.status()).toBe(204);
@@ -63,7 +64,7 @@ test.describe('UI: /settings/mute-block', () => {
     });
   });
 
-  test('ブロックしたユーザーが一覧に表示され、× で解除できる', async ({
+  test('ブロックしたユーザーが一覧に表示され、× で解除できる', coversRoutes('/settings/mute-block'), async ({
     page,
     baseURL,
     request,
@@ -108,7 +109,7 @@ test.describe('UI: /settings/mute-block', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test('ワードミュートの設定欄が表示される', async ({ page, baseURL }) => {
+  test('ワードミュートの設定欄が表示される', coversRoutes('/settings/mute-block'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     await page.goto(`${baseURL}/settings/mute-block`, { waitUntil: 'domcontentloaded' });
 

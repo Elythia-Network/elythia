@@ -12,6 +12,7 @@ import { callApi } from '../../../fixtures/api';
 import { deleteAntennasNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/antennas/:id update flow', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: /my/antennas/:id update flow', () => {
     createdAntennas.length = 0;
   });
 
-  test('create antenna via API → edit name → Save → /api/antennas/update', async ({
+  test('create antenna via API → edit name → Save → /api/antennas/update', coversRoutes('/my/antennas/:antennaId'), async ({
     page,
     baseURL,
     request,

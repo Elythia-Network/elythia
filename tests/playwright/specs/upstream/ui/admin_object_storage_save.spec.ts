@@ -17,6 +17,7 @@ import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText } from '../../../fixtures/ui_click';
 import { fillInputByLabel } from '../../../fixtures/ui_input';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/object-storage save flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /admin/object-storage save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('edit Prefix → Save → admin/meta has it', async ({ page, baseURL, request }) => {
+  test('edit Prefix → Save → admin/meta has it', coversRoutes('/admin/object-storage'), async ({ page, baseURL, request }) => {
     const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
     // 読めなかったまま進むと、元の値が undefined になり、片付けが何も戻さない
     expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);

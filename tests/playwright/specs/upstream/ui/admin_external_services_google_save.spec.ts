@@ -17,6 +17,7 @@ import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickFolderButton, openFolderByLabel } from '../../../fixtures/ui_folder';
 import { fillInputByLabel } from '../../../fixtures/ui_input';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const FOLDER = 'Google Analytics';
 
@@ -27,7 +28,7 @@ test.describe('UI: /admin/external-services Google Analytics save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('edit Measurement ID → Save → admin/meta has it', async ({ page, baseURL, request }) => {
+  test('edit Measurement ID → Save → admin/meta has it', coversRoutes('/admin/external-services'), async ({ page, baseURL, request }) => {
     const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
     // 読めなかったまま進むと、元の値が undefined になり、片付けが何も戻さない
     expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);

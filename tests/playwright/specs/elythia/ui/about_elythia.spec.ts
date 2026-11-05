@@ -26,6 +26,7 @@
 
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const MKGO_REPOSITORY_URL = 'https://github.com/Elythia-Network/elythia';
 // #3379 で frontend を本体へ取り込む前に、frontend のソースとして案内していた fork。
@@ -50,7 +51,7 @@ test.describe('UI: /about-elythia', () => {
     expect(meta.providesTarball, 'providesTarball が true。mk-go に /tarball/ は無い').toBe(false);
   });
 
-  test('renders the Elythia page with source, license and Misskey attribution', async ({ page, baseURL }) => {
+  test('renders the Elythia page with source, license and Misskey attribution', coversRoutes('/about-elythia'), async ({ page, baseURL }) => {
     const resp = await page.goto(`${baseURL}/about-elythia`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
 
@@ -79,7 +80,7 @@ test.describe('UI: /about-elythia', () => {
   // **tarball リンクを見るのは /about-misskey と /about。** `about-elythia.vue` は
   // tarball の分岐を持たないので、そこで数えても常に 0 で空振りする。この 2 つが
   // `instance.providesTarball` を読む唯一の場所 (fork 全体を grep して確認)。
-  test('no tarball link is rendered even though the config enables it', async ({ page, baseURL }) => {
+  test('no tarball link is rendered even though the config enables it', coversRoutes('/about-misskey', '/about'), async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/about-misskey`, { waitUntil: 'domcontentloaded' });
     // ページの mount を待ってから数える (mount 前は何も無いので必ず 0 になる)。
     await expect(page.locator('a[href="/about-elythia"]')).toBeVisible({ timeout: 20_000 });
@@ -96,7 +97,7 @@ test.describe('UI: /about-elythia', () => {
   //
   // `isRoot` は `mainRouter.currentRoute.value.name === 'index'` なので
   // **`/` でしか描画されない** (`/about-misskey` などでは出ない)。
-  test('the entrance ribbon points at the mk-go source page', async ({ page, baseURL }) => {
+  test('the entrance ribbon points at the mk-go source page', coversRoutes('/'), async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
 
     // **`<a>` に `toBeVisible()` は使えない。** 中の `<svg>` が

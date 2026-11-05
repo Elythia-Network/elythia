@@ -23,6 +23,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/security IP logging form save flow', () => {
   let root: RootFixture;
@@ -31,7 +32,7 @@ test.describe('UI: /admin/security IP logging form save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('expand Log IP address folder → toggle switch → Save → /api/admin/update-meta', async ({
+  test('expand Log IP address folder → toggle switch → Save → /api/admin/update-meta', coversRoutes('/admin/security'), async ({
     page,
     baseURL,
     request,

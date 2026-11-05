@@ -20,6 +20,7 @@ import { resetRateLimit } from '../../../fixtures/rate_limit';
 import { pollForTimelineNote } from '../../../fixtures/timeline';
 import { deleteAntennasNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /timeline/antenna/:id renders matching notes', () => {
   let root: RootFixture;
@@ -39,7 +40,7 @@ test.describe('UI: /timeline/antenna/:id renders matching notes', () => {
     createdAntennas.length = 0;
   });
 
-  test('antenna timeline renders a note that matches keyword', async ({
+  test('antenna timeline renders a note that matches keyword', coversRoutes('/timeline/antenna/:antennaId'), async ({
     page,
     baseURL,
     request,

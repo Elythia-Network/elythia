@@ -16,6 +16,7 @@ import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { NOT_FOUND_STATUS } from '../../../fixtures/backend';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /clips/:id delete button flow', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /clips/:id delete button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('header trash button → confirm OK → /api/clips/delete', async ({
+  test('header trash button → confirm OK → /api/clips/delete', coversRoutes('/clips/:clipId'), async ({
     page,
     baseURL,
     request,

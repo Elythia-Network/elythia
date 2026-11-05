@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 interface AuthorizedApp {
   name: string;
@@ -70,7 +71,7 @@ test.describe('UI: /settings/apps authorized applications', () => {
 
   test.setTimeout(60_000);
 
-  test('認可したアプリが一覧に表示される', async ({ page, baseURL, request }) => {
+  test('認可したアプリが一覧に表示される', coversRoutes('/settings/apps'), async ({ page, baseURL, request }) => {
     const app = await authorizeApp(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);
@@ -82,7 +83,7 @@ test.describe('UI: /settings/apps authorized applications', () => {
     });
   });
 
-  test('削除を押すとトークンが失効する', async ({ page, baseURL, request }) => {
+  test('削除を押すとトークンが失効する', coversRoutes('/settings/apps'), async ({ page, baseURL, request }) => {
     const app = await authorizeApp(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);

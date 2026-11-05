@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/security page hydrates', () => {
   let root: RootFixture;
@@ -19,7 +20,7 @@ test.describe('UI: /settings/security page hydrates', () => {
 
   test.setTimeout(60_000);
 
-  test('settings/security renders Password / Sign-in history sections', async ({
+  test('settings/security renders Password / Sign-in history sections', coversRoutes('/settings/security'), async ({
     page,
     baseURL,
   }) => {

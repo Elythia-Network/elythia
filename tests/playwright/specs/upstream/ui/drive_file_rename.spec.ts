@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive/file/:fileId rename round-trip', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /my/drive/file/:fileId rename round-trip', () => {
 
   test.setTimeout(60_000);
 
-  test('rename button → inputText dialog → drive/files/update', async ({
+  test('rename button → inputText dialog → drive/files/update', coversRoutes('/my/drive/file/:fileId'), async ({
     page,
     baseURL,
     request,

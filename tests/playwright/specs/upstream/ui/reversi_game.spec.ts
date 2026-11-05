@@ -25,6 +25,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /reversi/g/:gameId', () => {
   let root: RootFixture;
@@ -35,7 +36,7 @@ test.describe('UI: /reversi/g/:gameId', () => {
 
   test.setTimeout(90_000);
 
-  test('マッチングした対局の設定画面が表示される', async ({ page, baseURL, request }) => {
+  test('マッチングした対局の設定画面が表示される', coversRoutes('/reversi/g/:gameId'), async ({ page, baseURL, request }) => {
     const peer = await signupUser(request, randomUsername('rvsi'), DEFAULT_TEST_PASSWORD);
 
     // root から招待 (204)。ここで 200 が返るなら二段構えの前提が崩れている。
