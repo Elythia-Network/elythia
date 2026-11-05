@@ -123,9 +123,9 @@ mirror (`.cache/misskey/mirror.git`、無ければ作る) に今の版 (`UPSTREA
 | 取り込む | `packages/` (`packages/backend` を除く)、`packages-private/`、`locales/`、`scripts/`、`patches/`、直下の `package.json` など | `frontend/` の下の同じパスへ当てる |
 | 付け替える | `packages/backend/assets/` / 直下の `assets/` | `frontend/assets/` / `frontend/repo-assets/` へ当てる (D3) |
 | 作り直す | `pnpm-lock.yaml` | 当てない。手順 4 で作り直す |
-| 取り込まない | `packages/backend` (アセットを除く)、`.github/`、`.config/`、`Dockerfile`、文書類など | 当てない |
+| 取り込まない | `packages/backend` (アセットを除く)、`.github/`、`.config/`、`Dockerfile`、文書類など。Elythia が `frontend/` から外したもの (Storybook の `packages/frontend/.storybook/`・`*.stories.impl.ts`・`*.stories.meta.ts`・`src/index.mdx` (#4027)、本家の frontend の e2e の `packages/frontend/test/e2e/` (`shared.ts` を除く)・`playwright.config.ts` (#4025)) | 当てない。外したものへの本家の変更を当てようとすると、当てる先が無くて止まるため。Storybook の依存の版上げなど `package.json` への変更は「取り込む」の側で衝突するので、足し戻さずに消す側で解く |
 
-**どの区分にも当たらないパスがあると、何も当てずに止まる。** 本家が直下に新しく足したファイルや、submodule の gitlink の変更が該当する。「取り込む」で絞るだけだと新しいパスが黙って落ちるため。止まったら、そのパスの区分を決めて `tools/upstreamsync/main.go` の表 (`importFiles` / `importDirs` / `skipFiles` / `skipDirs`) と設計 D1 の表の両方に足し、`go test ./tools/upstreamsync/` を通してからやり直す。
+**どの区分にも当たらないパスがあると、何も当てずに止まる。** 本家が直下に新しく足したファイルや、submodule の gitlink の変更が該当する。「取り込む」で絞るだけだと新しいパスが黙って落ちるため。止まったら、そのパスの区分を決めて `tools/upstreamsync/main.go` の表 (`importFiles` / `importDirs` / `skipFiles` / `skipDirs`。Elythia が `frontend/` から外したパスなら `removedDirs` / `removedFiles` / `removedSuffixes`、外したディレクトリの中で残すものは `keptInRemovedDirs`) と設計 D1 の表の両方に足し、`go test ./tools/upstreamsync/` を通してからやり直す。
 
 **2. 当てる。**
 

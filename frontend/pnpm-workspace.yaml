@@ -26,7 +26,6 @@ allowBuilds:
   core-js: true
   esbuild: true
   msgpackr-extract: true
-  msw: true
   nice-napi: true
   re2: true
   sharp: true
