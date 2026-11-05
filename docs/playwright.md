@@ -89,6 +89,11 @@ report を渡さずに `node tests/playwright/shard-plan.mjs update` を流す�
 `workflow_dispatch` で流すと `plan` で落ちる。古い ref を手で流したいときは、その
 ref の版の workflow を使う。
 
+**`workflow_dispatch` の `ref` には SHA を渡す。** shard の job はそれぞれ `ref` を checkout
+するので、ブランチ名を渡すと、job の待ち時間の間にブランチが進んだとき、shard ごとに違う
+commit を見て、spec が漏れたり 2 回流れたりする。pull_request では `github.sha` (event の
+時点の merge commit) を取るので起きない。
+
 ### shard の数
 
 **今は 4。** 所要時間で割り振った後の CI の実測 (#4026、PR #4031 の run):
