@@ -18,7 +18,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	>
 		<div :class="$style.itemInner">
 			<div :class="$style.itemActionWrapper">
-				<MkButton :iconOnly="true" rounded @click="emit('showMenu', displayItem.item, $event)"><i class="ti ti-dots"></i></MkButton>
+				<MkButton :iconOnly="true" rounded data-testid="uploader-item-menu" @click="emit('showMenu', displayItem.item, $event)"><i class="ti ti-dots"></i></MkButton>
 			</div>
 			<div :class="$style.itemThumbnail" :style="{ backgroundImage: `url(${ displayItem.item.thumbnail })` }" @click="onThumbnailClick(displayItem.item, $event)"></div>
 			<div :class="$style.itemBody">

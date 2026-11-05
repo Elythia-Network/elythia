@@ -9,6 +9,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	v-ripple="canReact"
 	class="_button"
 	:class="[$style.root, { [$style.reacted]: myReaction == reaction, [$style.canToggle]: canReact, [$style.small]: prefer.s.reactionsDisplaySize === 'small', [$style.large]: prefer.s.reactionsDisplaySize === 'large' }]"
+	data-testid="note-reaction"
 	@click="toggleReaction()"
 	@contextmenu.prevent.stop="menu"
 >

@@ -15,7 +15,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	@afterLeave="onAfterLeave"
 >
 	<!-- v-ifを使うとfalseになったとき(transitionが行われている間)子コンポーネントの更新が停止するのか子コンポーネントがアニメーションされなくなる -->
-	<div v-show="showing" ref="rootEl" v-hotkey.global="keymap" :class="$style.root" :style="{ zIndex }">
+	<div v-show="showing" ref="rootEl" v-hotkey.global="keymap" :class="$style.root" :style="{ zIndex }" data-testid="lightbox">
 		<div :class="[$style.bg]" class="_modalBg"></div>
 		<div ref="mainEl" :class="$style.main">
 			<div
@@ -25,7 +25,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				@transitionend.self="onSlideTransitionFinished"
 				@transitioncancel.self="onSlideTransitionFinished"
 			>
-				<div v-for="(content, i) in contents" :key="content.url" ref="itemEl" :class="$style.item">
+				<div v-for="(content, i) in contents" :key="content.url" ref="itemEl" :class="$style.item" data-testid="lightbox-item">
 					<XItem
 						:ref="(comp) => { items.set(i, comp as InstanceType<typeof XItem>); }"
 						v-model:pixelatedZoom="pixelatedZoom"
@@ -42,8 +42,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</div>
 			</div>
 
-			<button v-if="!isTouchUsing && currentIndex > 0" class="_button" :class="[$style.prevButton]" @click="onPrev"><div :class="$style.buttonIcon"><i class="ti ti-arrow-left"></i></div></button>
-			<button v-if="!isTouchUsing && currentIndex < contents.length - 1" class="_button" :class="[$style.nextButton]" @click="onNext"><div :class="$style.buttonIcon"><i class="ti ti-arrow-right"></i></div></button>
+			<button v-if="!isTouchUsing && currentIndex > 0" class="_button" :class="[$style.prevButton]" data-testid="lightbox-prev" @click="onPrev"><div :class="$style.buttonIcon"><i class="ti ti-arrow-left"></i></div></button>
+			<button v-if="!isTouchUsing && currentIndex < contents.length - 1" class="_button" :class="[$style.nextButton]" data-testid="lightbox-next" @click="onNext"><div :class="$style.buttonIcon"><i class="ti ti-arrow-right"></i></div></button>
 		</div>
 	</div>
 </Transition>
