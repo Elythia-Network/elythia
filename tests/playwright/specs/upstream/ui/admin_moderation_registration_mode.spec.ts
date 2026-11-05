@@ -19,6 +19,7 @@ import { callApi } from '../../../fixtures/api';
 import { isTsBackend } from '../../../fixtures/backend';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 // mk-go 独自の文言は ja-JP にしか無く、en-US の frontend でも ja-JP が補う。
 const LABELS = {
@@ -87,7 +88,7 @@ test.describe('UI: /admin/moderation registration mode', () => {
     { from: { registrationClosed: true, approvalRequiredForSignup: false, disableRegistration: true }, to: 'open', confirm: true,
       want: { registrationClosed: false, approvalRequiredForSignup: false, disableRegistration: false } },
   ] as const) {
-    test(`${Object.entries(c.from).filter(([, v]) => v).map(([k]) => k).join('+') || 'open'} → ${c.to}`, async ({ page, baseURL, request }) => {
+    test(`${Object.entries(c.from).filter(([, v]) => v).map(([k]) => k).join('+') || 'open'} → ${c.to}`, coversRoutes('/admin/moderation'), async ({ page, baseURL, request }) => {
       await setMeta(request, c.from);
       await openModeration(page, baseURL);
       await choose(page, LABELS[c.to], c.confirm);
@@ -101,7 +102,7 @@ test.describe('UI: /admin/moderation registration mode', () => {
     });
   }
 
-  test('受け付けないの確認でキャンセルすると何も送らない', async ({ page, baseURL, request }) => {
+  test('受け付けないの確認でキャンセルすると何も送らない', coversRoutes('/admin/moderation'), async ({ page, baseURL, request }) => {
     await setMeta(request, { registrationClosed: false, approvalRequiredForSignup: false, disableRegistration: true });
     await openModeration(page, baseURL);
 

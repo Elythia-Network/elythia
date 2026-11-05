@@ -22,6 +22,7 @@ import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { NOT_FOUND_STATUS } from '../../../fixtures/backend';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive folder delete via context menu flow', () => {
   let root: RootFixture;
@@ -32,7 +33,7 @@ test.describe('UI: /my/drive folder delete via context menu flow', () => {
 
   // #977 drift fix で endpoint 別の upstream-canonical UUID を返すように
   // 修正済み (drive/folders/show: `d74ab9eb-...`)。
-  test('contextmenu folder → Delete → /api/drive/folders/delete', async ({
+  test('contextmenu folder → Delete → /api/drive/folders/delete', coversRoutes('/my/drive'), async ({
     page,
     baseURL,
     request,

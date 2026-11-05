@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /bubble-game page hydrates', () => {
   let root: RootFixture;
@@ -19,7 +20,7 @@ test.describe('UI: /bubble-game page hydrates', () => {
 
   test.setTimeout(60_000);
 
-  test('Bubble Game page renders Start button + How to play', async ({ page, baseURL }) => {
+  test('Bubble Game page renders Start button + How to play', coversRoutes('/bubble-game'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/bubble-game`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);

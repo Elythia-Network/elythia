@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 interface CreatedList {
   id: string;
@@ -62,7 +63,7 @@ test.describe('UI: /list/:listId public list page', () => {
 
   test.setTimeout(60_000);
 
-  test('公開リストの名前とメンバーが表示される', async ({ page, baseURL, request }) => {
+  test('公開リストの名前とメンバーが表示される', coversRoutes('/list/:listId'), async ({ page, baseURL, request }) => {
     const list = await createPublicList(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);
@@ -77,7 +78,7 @@ test.describe('UI: /list/:listId public list page', () => {
     });
   });
 
-  test('いいねを押すと users/lists/favorite が呼ばれる', async ({ page, baseURL, request }) => {
+  test('いいねを押すと users/lists/favorite が呼ばれる', coversRoutes('/list/:listId'), async ({ page, baseURL, request }) => {
     const list = await createPublicList(request, root);
 
     await uiSigninAsRoot(page, baseURL, root);

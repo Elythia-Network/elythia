@@ -11,6 +11,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/lists/:listId update flow', () => {
   let root: RootFixture;
@@ -19,7 +20,7 @@ test.describe('UI: /my/lists/:listId update flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('create list via API → edit name → Save → /api/users/lists/update', async ({
+  test('create list via API → edit name → Save → /api/users/lists/update', coversRoutes('/my/lists/:listId'), async ({
     page,
     baseURL,
     request,

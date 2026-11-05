@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /games page renders game links', () => {
   let root: RootFixture;
@@ -22,7 +23,7 @@ test.describe('UI: /games page renders game links', () => {
 
   test.setTimeout(60_000);
 
-  test('games index renders both bubble-game and reversi links', async ({ page, baseURL }) => {
+  test('games index renders both bubble-game and reversi links', coversRoutes('/games'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/games`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);

@@ -21,6 +21,7 @@
 // ボタンが出ること + 押すとエラーが出ること の 2 段で確認する。
 
 import { expect, test } from '@playwright/test';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /** Click the primary "Got it!" button these pages gate their API call behind. */
 async function clickGotIt(page: import('@playwright/test').Page): Promise<void> {
@@ -32,7 +33,7 @@ async function clickGotIt(page: import('@playwright/test').Page): Promise<void> 
 test.describe('UI: account recovery / confirmation links', () => {
   test.setTimeout(60_000);
 
-  test('/verify-email/:code は無効なコードでエラーを出す', async ({ page, baseURL }) => {
+  test('/verify-email/:code は無効なコードでエラーを出す', coversRoutes('/verify-email/:code'), async ({ page, baseURL }) => {
     const resp = await page.goto(`${baseURL}/verify-email/pw-invalid-code`, {
       waitUntil: 'domcontentloaded',
     });
@@ -46,7 +47,7 @@ test.describe('UI: account recovery / confirmation links', () => {
     });
   });
 
-  test('/signup-complete/:code は無効なコードでエラーを出す', async ({ page, baseURL }) => {
+  test('/signup-complete/:code は無効なコードでエラーを出す', coversRoutes('/signup-complete/:code'), async ({ page, baseURL }) => {
     const resp = await page.goto(`${baseURL}/signup-complete/pw-invalid-code`, {
       waitUntil: 'domcontentloaded',
     });
@@ -59,7 +60,7 @@ test.describe('UI: account recovery / confirmation links', () => {
     });
   });
 
-  test('/reset-password/:token はパスワード入力欄を出す', async ({ page, baseURL }) => {
+  test('/reset-password/:token はパスワード入力欄を出す', coversRoutes('/reset-password/:token?'), async ({ page, baseURL }) => {
     const resp = await page.goto(`${baseURL}/reset-password/pw-invalid-token`, {
       waitUntil: 'domcontentloaded',
     });
@@ -73,7 +74,7 @@ test.describe('UI: account recovery / confirmation links', () => {
     await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 20_000 });
   });
 
-  test('/reset-password/:token は無効なトークンで再設定できない', async ({ page, baseURL }) => {
+  test('/reset-password/:token は無効なトークンで再設定できない', coversRoutes('/reset-password/:token?'), async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/reset-password/pw-invalid-token`, {
       waitUntil: 'domcontentloaded',
     });

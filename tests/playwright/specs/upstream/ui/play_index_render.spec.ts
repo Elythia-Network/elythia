@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /play page hydrates flash index', () => {
   let root: RootFixture;
@@ -17,7 +18,7 @@ test.describe('UI: /play page hydrates flash index', () => {
   });
   test.setTimeout(60_000);
 
-  test('flash index renders Popular + My Plays + Liked Plays tabs', async ({
+  test('flash index renders Popular + My Plays + Liked Plays tabs', coversRoutes('/play'), async ({
     page,
     baseURL,
   }) => {

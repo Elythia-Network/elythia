@@ -56,3 +56,13 @@ export async function gotoRoute(page: Page, baseURL: string, path: string, timeo
   await expectRoutedPage(page, path, timeout);
   return resp!;
 }
+
+/**
+ * Declares the routes a test covers, as the second argument of `test()`.
+ * `paths` are the `path`s of router.definition.ts as written there, with a child
+ * joined to its parent (`/settings/profile`). route-coverage.mjs checks that every
+ * route is declared by some spec (#4035).
+ */
+export function coversRoutes(...paths: [string, ...string[]]): { annotation: { type: 'route'; description: string }[] } {
+  return { annotation: paths.map((description) => ({ type: 'route', description })) };
+}

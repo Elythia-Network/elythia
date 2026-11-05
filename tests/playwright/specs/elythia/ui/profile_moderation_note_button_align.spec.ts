@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 // 対象要素の box を測る。`.moderationNote` は margin だけで padding /
 // border を持たないので、border box の中心がそのまま「中央」になる。
@@ -78,7 +79,7 @@ test.describe('UI: /@user のモデレーションノート追加ボタンの位
   });
   test.setTimeout(90_000);
 
-  test('コンテナ幅で中央揃え / 左寄せが切り替わり、編集中の textarea は幅いっぱいのまま', async ({
+  test('コンテナ幅で中央揃え / 左寄せが切り替わり、編集中の textarea は幅いっぱいのまま', coversRoutes('/@:acct/:page?'), async ({
     page,
     baseURL,
     request,

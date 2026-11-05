@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /timeline renders a recent note from the viewer', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /timeline renders a recent note from the viewer', () => {
 
   test.setTimeout(60_000);
 
-  test('a fresh public note from root appears in /timeline default tab', async ({
+  test('a fresh public note from root appears in /timeline default tab', coversRoutes('/timeline'), async ({
     page,
     baseURL,
     request,

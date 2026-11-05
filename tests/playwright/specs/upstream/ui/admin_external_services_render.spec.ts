@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/external-services page hydrates form', () => {
   let root: RootFixture;
@@ -19,7 +20,7 @@ test.describe('UI: /admin/external-services page hydrates form', () => {
 
   test.setTimeout(60_000);
 
-  test('external services form hydrates with Google Analytics input', async ({
+  test('external services form hydrates with Google Analytics input', coversRoutes('/admin/external-services'), async ({
     page,
     baseURL,
   }) => {

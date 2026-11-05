@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickFolderButton, fillFolderTextarea, openFolderByLabel } from '../../../fixtures/ui_folder';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 const FOLDER = 'Sensitive words';
 
@@ -25,7 +26,7 @@ test.describe('UI: /admin/moderation sensitiveWords save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('edit the Sensitive words folder → Save → admin/meta has the new list', async ({ page, baseURL, request }) => {
+  test('edit the Sensitive words folder → Save → admin/meta has the new list', coversRoutes('/admin/moderation'), async ({ page, baseURL, request }) => {
     const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
     // 読めなかったまま進むと、元の値が undefined になり、片付けが何も戻さない
     expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);

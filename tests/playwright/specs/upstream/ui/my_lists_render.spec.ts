@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/lists renders user-list names', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /my/lists renders user-list names', () => {
 
   test.setTimeout(60_000);
 
-  test('users/lists/create + /my/lists renders list name', async ({ page, baseURL, request }) => {
+  test('users/lists/create + /my/lists renders list name', coversRoutes('/my/lists'), async ({ page, baseURL, request }) => {
     const listName = `pwlist-${Date.now().toString().slice(-9)}`;
     const createResp = await callApi(request, 'users/lists/create', {
       i: root.token,

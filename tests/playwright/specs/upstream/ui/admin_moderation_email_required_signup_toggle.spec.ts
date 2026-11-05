@@ -23,6 +23,7 @@ import { callApi } from '../../../fixtures/api';
 import { isTsBackend } from '../../../fixtures/backend';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickSwitchByLabel } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 // i18n.ts.emailRequiredForSignup の en-US 値。playwright.config.ts で
 // locale を en-US に固定しているのでこの表記で引ける。
@@ -37,7 +38,7 @@ test.describe('UI: /admin/moderation emailRequiredForSignup toggle flow', () => 
   });
   test.setTimeout(60_000);
 
-  test('toggle emailRequiredForSignup switch → /api/admin/update-meta', async ({
+  test('toggle emailRequiredForSignup switch → /api/admin/update-meta', coversRoutes('/admin/moderation'), async ({
     page,
     baseURL,
     request,

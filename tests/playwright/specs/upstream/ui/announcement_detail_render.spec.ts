@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import type { RootFixture } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /announcements/:id renders single announcement', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /announcements/:id renders single announcement', () => {
 
   test.setTimeout(60_000);
 
-  test('admin/announcements/create + /announcements/:id renders title', async ({
+  test('admin/announcements/create + /announcements/:id renders title', coversRoutes('/announcements/:announcementId'), async ({
     page,
     baseURL,
     request,

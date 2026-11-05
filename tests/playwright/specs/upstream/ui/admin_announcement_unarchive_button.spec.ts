@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText, clickButtonContainingText, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/announcements unarchive button flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /admin/announcements unarchive button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('create + archive via API → expand folder → click Unarchive → admin/announcements/update', async ({
+  test('create + archive via API → expand folder → click Unarchive → admin/announcements/update', coversRoutes('/admin/announcements'), async ({
     page,
     baseURL,
     request,

@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /gallery page hydrates gallery index', () => {
   let root: RootFixture;
@@ -17,7 +18,7 @@ test.describe('UI: /gallery page hydrates gallery index', () => {
   });
   test.setTimeout(60_000);
 
-  test('gallery index renders Popular + My Gallery + Liked Posts tabs', async ({
+  test('gallery index renders Popular + My Gallery + Liked Posts tabs', coversRoutes('/gallery'), async ({
     page,
     baseURL,
   }) => {

@@ -19,6 +19,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/profile isCat toggle flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /settings/profile isCat toggle flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('expand advancedSettings folder → toggle isCat → /api/i/update', async ({
+  test('expand advancedSettings folder → toggle isCat → /api/i/update', coversRoutes('/settings/profile'), async ({
     page,
     baseURL,
     request,

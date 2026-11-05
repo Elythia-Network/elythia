@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /chat room create via menu flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /chat room create via menu flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('Start chat → Room chat parent → Create room → inputText OK → /api/chat/rooms/create', async ({
+  test('Start chat → Room chat parent → Create room → inputText OK → /api/chat/rooms/create', coversRoutes('/chat'), async ({
     page,
     baseURL,
   }) => {

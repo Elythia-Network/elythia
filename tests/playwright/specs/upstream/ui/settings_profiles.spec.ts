@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/profiles', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: /settings/profiles', () => {
 
   test.setTimeout(60_000);
 
-  test('保存済みプロファイルが一覧に表示される', async ({ page, baseURL, request }) => {
+  test('保存済みプロファイルが一覧に表示される', coversRoutes('/settings/profiles'), async ({ page, baseURL, request }) => {
     const name = `pwprofile${Date.now().toString().slice(-9)}`;
     const set = await callApi(request, 'i/registry/set', {
       i: root.token,

@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: 単発ページ', () => {
   let root: RootFixture;
@@ -26,7 +27,7 @@ test.describe('UI: 単発ページ', () => {
 
   test.setTimeout(60_000);
 
-  test('/my/achievements が実績一覧を出す', async ({ page, baseURL }) => {
+  test('/my/achievements が実績一覧を出す', coversRoutes('/my/achievements'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/my/achievements`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
@@ -36,7 +37,7 @@ test.describe('UI: 単発ページ', () => {
     });
   });
 
-  test('/admin/file/:fileId がファイルの詳細を出す', async ({ page, baseURL, request }) => {
+  test('/admin/file/:fileId がファイルの詳細を出す', coversRoutes('/admin/file/:fileId'), async ({ page, baseURL, request }) => {
     // **ドライブは同一内容のファイルを MD5 で重複排除する。** 他の spec が同じ
     // tinyPNG を上げていると、渡した名前ではなく既存ファイルがそのまま返る。
     // 照合は「渡した名前」ではなく **レスポンスが返した名前**で行うこと。
@@ -61,7 +62,7 @@ test.describe('UI: 単発ページ', () => {
     });
   });
 
-  test('存在しない URL は not-found を出す', async ({ page, baseURL }) => {
+  test('存在しない URL は not-found を出す', coversRoutes('/:(*)'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/pw-no-such-page-${Date.now()}`, {
       waitUntil: 'domcontentloaded',

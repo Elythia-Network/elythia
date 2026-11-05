@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import type { RootFixture } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: content detail pages render after API-side create', () => {
   let root: RootFixture;
@@ -29,7 +30,7 @@ test.describe('UI: content detail pages render after API-side create', () => {
 
   test.setTimeout(30_000);
 
-  test('navigate to /channels/:id after creating a channel via API', async ({ page, baseURL, request }) => {
+  test('navigate to /channels/:id after creating a channel via API', coversRoutes('/channels/:channelId'), async ({ page, baseURL, request }) => {
     const channelName = `playwright-channel ${Date.now()}`;
     const create = await callApi(request, 'channels/create', {
       i: root.token,
@@ -51,7 +52,7 @@ test.describe('UI: content detail pages render after API-side create', () => {
     );
   });
 
-  test('navigate to /clips/:id after creating a clip via API', async ({ page, baseURL, request }) => {
+  test('navigate to /clips/:id after creating a clip via API', coversRoutes('/clips/:clipId'), async ({ page, baseURL, request }) => {
     const clipName = `playwright-clip ${Date.now()}`;
     const create = await callApi(request, 'clips/create', {
       i: root.token,
@@ -74,7 +75,7 @@ test.describe('UI: content detail pages render after API-side create', () => {
     );
   });
 
-  test('navigate to /gallery/post/:id after creating a gallery post via API', async ({ page, baseURL, request }) => {
+  test('navigate to /gallery/post/:id after creating a gallery post via API', coversRoutes('/gallery/:postId'), async ({ page, baseURL, request }) => {
     // gallery post は drive file 必須なので、先に drive file を upload する。
     // 簡単化のため既存 file を持たない fresh DB では skip 相当の早期 return
     // にして、本 spec では drive 作成からスタート。

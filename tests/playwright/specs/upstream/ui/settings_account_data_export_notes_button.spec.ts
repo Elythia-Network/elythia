@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/account-data export notes button flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /settings/account-data export notes button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('first Export button → /api/i/export-notes', async ({
+  test('first Export button → /api/i/export-notes', coversRoutes('/settings/account-data'), async ({
     page,
     baseURL,
   }) => {

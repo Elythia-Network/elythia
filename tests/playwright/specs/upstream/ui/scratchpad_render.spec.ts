@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /scratchpad page hydrates AiScript playground', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /scratchpad page hydrates AiScript playground', () => {
 
   test.setTimeout(60_000);
 
-  test('scratchpad editor + output container appear on /scratchpad', async ({
+  test('scratchpad editor + output container appear on /scratchpad', coversRoutes('/scratchpad'), async ({
     page,
     baseURL,
   }) => {

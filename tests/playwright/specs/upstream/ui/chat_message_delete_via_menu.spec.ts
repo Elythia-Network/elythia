@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /chat/room message delete via menu flow', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /chat/room message delete via menu flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('open message menu → Delete → /api/chat/messages/delete', async ({
+  test('open message menu → Delete → /api/chat/messages/delete', coversRoutes('/chat/room/:roomId'), async ({
     page,
     baseURL,
     request,

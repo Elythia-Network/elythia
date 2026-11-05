@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/webhook/edit/:id delete button flow', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /settings/webhook/edit/:id delete button flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('Delete button → confirm OK → /api/i/webhooks/delete', async ({
+  test('Delete button → confirm OK → /api/i/webhooks/delete', coversRoutes('/settings/webhook/edit/:webhookId'), async ({
     page,
     baseURL,
     request,

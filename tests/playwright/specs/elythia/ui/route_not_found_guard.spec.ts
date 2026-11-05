@@ -13,12 +13,12 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture } from '../../../fixtures/ui_auth';
-import { expectRoutedPage, gotoRoute } from '../../../fixtures/ui_route';
+import { coversRoutes, expectRoutedPage, gotoRoute } from '../../../fixtures/ui_route';
 
 test.describe('UI: not-found guard for route specs', () => {
   test.setTimeout(60_000);
 
-  test('a path with no route fails expectRoutedPage', async ({ page, baseURL }) => {
+  test('a path with no route fails expectRoutedPage', coversRoutes('/:(*)'), async ({ page, baseURL }) => {
     const path = '/no-such-route-4025';
     await page.goto(`${baseURL}${path}`, { waitUntil: 'domcontentloaded' });
     await expect(expectRoutedPage(page, path)).rejects.toThrow(/not-found/);

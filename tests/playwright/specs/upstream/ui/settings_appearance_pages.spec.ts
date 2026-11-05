@@ -21,6 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 interface PageCase {
   path: string;
@@ -58,7 +59,7 @@ test.describe('UI: 外観・拡張の設定画面', () => {
   test.setTimeout(60_000);
 
   for (const { path, marker } of PAGES) {
-    test(`${path} が固有の内容を描画する`, async ({ page, baseURL }) => {
+    test(`${path} が固有の内容を描画する`, coversRoutes(path), async ({ page, baseURL }) => {
       await uiSigninAsRoot(page, baseURL, root);
       const resp = await page.goto(`${baseURL}${path}`, { waitUntil: 'domcontentloaded' });
       expect(resp!.status()).toBe(200);

@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: note detail page with reply chain', () => {
   let root: RootFixture;
@@ -29,7 +30,7 @@ test.describe('UI: note detail page with reply chain', () => {
 
   test.setTimeout(90_000);
 
-  test('open note detail → API-side create reply → /notes/:id renders + API confirms chain', async ({ page, baseURL, request }) => {
+  test('open note detail → API-side create reply → /notes/:id renders + API confirms chain', coversRoutes('/notes/:noteId/:initialTab?'), async ({ page, baseURL, request }) => {
     // 親 note を API で作成 (= UI 経由の post_note は別 spec で cover、本 spec
     // は reply chain の形成に focus)
     const parentText = `playwright-reply-parent ${Date.now()}`;

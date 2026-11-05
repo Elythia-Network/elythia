@@ -20,6 +20,7 @@ import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /**
  * Create a peer that root is allowed to chat with.
@@ -78,7 +79,7 @@ test.describe('UI: /chat/user/:userId direct message', () => {
 
   test.setTimeout(60_000);
 
-  test('相手の名前と過去のメッセージが表示される', async ({ page, baseURL, request }) => {
+  test('相手の名前と過去のメッセージが表示される', coversRoutes('/chat/user/:userId'), async ({ page, baseURL, request }) => {
     const peer = await createChattablePeer(request, root, 'dmpeer');
     const text = `pwdm-${Date.now().toString().slice(-9)}`;
     const sent = await callApi(request, 'chat/messages/create-to-user', {
@@ -99,7 +100,7 @@ test.describe('UI: /chat/user/:userId direct message', () => {
     await expect(page.getByText(text, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
   });
 
-  test('画面から送信すると chat/messages/create-to-user が呼ばれる', async ({
+  test('画面から送信すると chat/messages/create-to-user が呼ばれる', coversRoutes('/chat/user/:userId'), async ({
     page,
     baseURL,
     request,

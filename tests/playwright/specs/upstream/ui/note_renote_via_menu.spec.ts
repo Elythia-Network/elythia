@@ -19,6 +19,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: note renote via menu flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: note renote via menu flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('open renote menu → click Renote → /api/notes/create with renoteId', async ({
+  test('open renote menu → click Renote → /api/notes/create with renoteId', coversRoutes('/notes/:noteId/:initialTab?'), async ({
     page,
     baseURL,
     request,

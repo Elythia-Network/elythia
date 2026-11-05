@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/notifications mark-all-as-read flow', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /my/notifications mark-all-as-read flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('click mark-all-as-read header → /api/notifications/mark-all-as-read', async ({
+  test('click mark-all-as-read header → /api/notifications/mark-all-as-read', coversRoutes('/my/notifications'), async ({
     page,
     baseURL,
   }) => {

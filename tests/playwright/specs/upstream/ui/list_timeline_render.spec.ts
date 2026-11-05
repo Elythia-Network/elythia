@@ -18,6 +18,7 @@ import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
 import { pollForTimelineNote } from '../../../fixtures/timeline';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /timeline/list/:id renders user-list-timeline notes', () => {
   let root: RootFixture;
@@ -29,7 +30,7 @@ test.describe('UI: /timeline/list/:id renders user-list-timeline notes', () => {
 
   test.setTimeout(60_000);
 
-  test('owner sees member note in /timeline/list/:id after pushing member + posting note', async ({ page, baseURL, request }) => {
+  test('owner sees member note in /timeline/list/:id after pushing member + posting note', coversRoutes('/timeline/list/:listId'), async ({ page, baseURL, request }) => {
     const memberName = `lstmem${Date.now().toString().slice(-9)}`;
     const member = await signupUser(request, memberName, DEFAULT_TEST_PASSWORD);
 

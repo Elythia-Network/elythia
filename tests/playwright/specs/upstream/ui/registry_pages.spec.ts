@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: registry', () => {
   let root: RootFixture;
@@ -32,7 +33,7 @@ test.describe('UI: registry', () => {
 
   test.setTimeout(60_000);
 
-  test('スコープ・キー・値の 3 画面が辿れる', async ({ page, baseURL, request }) => {
+  test('スコープ・キー・値の 3 画面が辿れる', coversRoutes('/registry', '/registry/keys/:domain/:path(*)?', '/registry/value/:domain/:path(*)?'), async ({ page, baseURL, request }) => {
     const value = `pwvalue-${Date.now().toString().slice(-9)}`;
     const set = await callApi(request, 'i/registry/set', {
       i: root.token,

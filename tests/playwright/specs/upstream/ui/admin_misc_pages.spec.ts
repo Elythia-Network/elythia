@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: 管理・ユーティリティの未カバーページ', () => {
   let root: RootFixture;
@@ -42,7 +43,7 @@ test.describe('UI: 管理・ユーティリティの未カバーページ', () =
     }
   });
 
-  test('/admin/emojis2 が絵文字管理を出す', async ({ page, baseURL }) => {
+  test('/admin/emojis2 が絵文字管理を出す', coversRoutes('/admin/emojis2'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/admin/emojis2`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
@@ -52,7 +53,7 @@ test.describe('UI: 管理・ユーティリティの未カバーページ', () =
     });
   });
 
-  test('/admin/federation-job-queue が連合キューを出す', async ({ page, baseURL }) => {
+  test('/admin/federation-job-queue が連合キューを出す', coversRoutes('/admin/federation-job-queue'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/admin/federation-job-queue`, {
       waitUntil: 'domcontentloaded',
@@ -66,7 +67,7 @@ test.describe('UI: 管理・ユーティリティの未カバーページ', () =
     });
   });
 
-  test('/install-extensions は情報不足を明示する', async ({ page, baseURL }) => {
+  test('/install-extensions は情報不足を明示する', coversRoutes('/install-extensions'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/install-extensions`, {
       waitUntil: 'domcontentloaded',
@@ -84,7 +85,7 @@ test.describe('UI: 管理・ユーティリティの未カバーページ', () =
     ).toBeVisible({ timeout: 20_000 });
   });
 
-  test('/user-tags/:tag がタグのユーザー一覧を出す', async ({ page, baseURL }) => {
+  test('/user-tags/:tag がタグのユーザー一覧を出す', coversRoutes('/user-tags/:tag'), async ({ page, baseURL }) => {
     const tag = `pwtag${Date.now().toString().slice(-9)}`;
 
     await uiSigninAsRoot(page, baseURL, root);

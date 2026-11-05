@@ -12,6 +12,7 @@ import { expect, test } from '@playwright/test';
 import { deleteAntennasNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/antennas/create form flow', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: /my/antennas/create form flow', () => {
     createdAntennas.length = 0;
   });
 
-  test('navigate /my/antennas/create → fill name → save → list shows new antenna', async ({
+  test('navigate /my/antennas/create → fill name → save → list shows new antenna', coversRoutes('/my/antennas/create'), async ({
     page,
     baseURL,
   }) => {

@@ -18,6 +18,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /settings/profile location save flow', () => {
   let root: RootFixture;
@@ -26,7 +27,7 @@ test.describe('UI: /settings/profile location save flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('edit location → save → i/update + /api/i both reflect', async ({
+  test('edit location → save → i/update + /api/i both reflect', coversRoutes('/settings/profile'), async ({
     page,
     baseURL,
     request,

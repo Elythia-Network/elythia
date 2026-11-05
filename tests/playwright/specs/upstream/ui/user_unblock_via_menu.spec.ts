@@ -16,6 +16,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: user 3-dot menu unblock flow', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: user 3-dot menu unblock flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('signup target → root blocks via API → /@target menu → Unblock → /api/blocking/delete', async ({
+  test('signup target → root blocks via API → /@target menu → Unblock → /api/blocking/delete', coversRoutes('/@:acct/:page?'), async ({
     page,
     baseURL,
     request,

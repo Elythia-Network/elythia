@@ -19,6 +19,7 @@ import { callApi } from '../../../fixtures/api';
 import { signupUser } from '../../../fixtures/auth';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/user moderationNote save flow', () => {
   let root: RootFixture;
@@ -27,7 +28,7 @@ test.describe('UI: /admin/user moderationNote save flow', () => {
   });
   test.setTimeout(90_000);
 
-  test('edit moderationNote → save → /api/admin/update-user-note', async ({
+  test('edit moderationNote → save → /api/admin/update-user-note', coversRoutes('/admin/user/:userId'), async ({
     page,
     baseURL,
     request,

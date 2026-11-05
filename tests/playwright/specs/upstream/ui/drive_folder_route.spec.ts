@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/drive/folder/:folder', () => {
   let root: RootFixture;
@@ -31,7 +32,7 @@ test.describe('UI: /my/drive/folder/:folder', () => {
 
   test.setTimeout(60_000);
 
-  test('フォルダ ID 付きで開いてもドライブ UI が描画される', async ({
+  test('フォルダ ID 付きで開いてもドライブ UI が描画される', coversRoutes('/my/drive/folder/:folder'), async ({
     page,
     baseURL,
     request,

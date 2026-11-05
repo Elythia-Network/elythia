@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 type App = { id: string; secret: string };
 type Session = { token: string; url: string };
@@ -58,7 +59,7 @@ test.describe('UI: external app authorization', () => {
 
   test.setTimeout(60_000);
 
-  test('Accept を押すと session が承認され userkey が発行される', async ({
+  test('Accept を押すと session が承認され userkey が発行される', coversRoutes('/auth/:token'), async ({
     page,
     request,
     baseURL,
@@ -100,7 +101,7 @@ test.describe('UI: external app authorization', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test('Cancel を押すと承認されない', async ({ page, request, baseURL }) => {
+  test('Cancel を押すと承認されない', coversRoutes('/auth/:token'), async ({ page, request, baseURL }) => {
     const { app, session } = await startAuthSession(request);
 
     await uiSigninAsRoot(page, baseURL, root);
@@ -119,7 +120,7 @@ test.describe('UI: external app authorization', () => {
     expect(userkeyResp.status()).not.toBe(200);
   });
 
-  test('要求された permission が画面に表示される', async ({ page, request, baseURL }) => {
+  test('要求された permission が画面に表示される', coversRoutes('/auth/:token'), async ({ page, request, baseURL }) => {
     // 利用者が「何を許可するのか」を判断する材料。出ていなければ承認画面の
     // 意味が無いので、表示そのものを検証する。
     const { session } = await startAuthSession(request, ['read:account', 'write:notes']);

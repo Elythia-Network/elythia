@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: note 3-dot menu mute thread flow', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: note 3-dot menu mute thread flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('open menu → click Mute thread → /api/notes/thread-muting/create', async ({
+  test('open menu → click Mute thread → /api/notes/thread-muting/create', coversRoutes('/notes/:noteId/:initialTab?'), async ({
     page,
     baseURL,
     request,

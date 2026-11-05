@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /reversi lobby page hydrates', () => {
   let root: RootFixture;
@@ -19,7 +20,7 @@ test.describe('UI: /reversi lobby page hydrates', () => {
 
   test.setTimeout(60_000);
 
-  test('Reversi lobby renders match buttons', async ({ page, baseURL }) => {
+  test('Reversi lobby renders match buttons', coversRoutes('/reversi'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/reversi`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);

@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /lookup resolves local acct and redirects to profile', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /lookup resolves local acct and redirects to profile', () => 
 
   test.setTimeout(60_000);
 
-  test('/lookup?uri=<root.username> redirects to /@<root.username>', async ({ page, baseURL }) => {
+  test('/lookup?uri=<root.username> redirects to /@<root.username>', coversRoutes('/lookup'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
 
     // /lookup?uri=<acct> を navigate。/lookup は initial load 時 fetching

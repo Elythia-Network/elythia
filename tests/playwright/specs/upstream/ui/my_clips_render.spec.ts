@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/clips renders the user clip list', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /my/clips renders the user clip list', () => {
 
   test.setTimeout(60_000);
 
-  test('clips/create + /my/clips renders clip name', async ({ page, baseURL, request }) => {
+  test('clips/create + /my/clips renders clip name', coversRoutes('/my/clips'), async ({ page, baseURL, request }) => {
     const clipName = `pwclip-${Date.now().toString().slice(-9)}`;
     const createResp = await callApi(request, 'clips/create', {
       i: root.token,

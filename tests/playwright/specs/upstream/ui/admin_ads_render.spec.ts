@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/ads page renders created ad', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /admin/ads page renders created ad', () => {
 
   test.setTimeout(60_000);
 
-  test('admin/ad/create + /admin/ads renders ad URL', async ({ page, baseURL, request }) => {
+  test('admin/ad/create + /admin/ads renders ad URL', coversRoutes('/admin/ads'), async ({ page, baseURL, request }) => {
     // 一意 host 名 (URL は MkInput type=url で render され、value 属性に
     // そのまま入るので body の textContent には出ない可能性がある。代わりに
     // memo で識別する。memo は Ad の任意メタデータ field で MkInput には

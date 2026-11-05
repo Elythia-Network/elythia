@@ -14,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonWithIcon } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /chat/room/:id send message flow', () => {
   let root: RootFixture;
@@ -22,7 +23,7 @@ test.describe('UI: /chat/room/:id send message flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('create room via API → type → send → /api/chat/messages/create-to-room', async ({
+  test('create room via API → type → send → /api/chat/messages/create-to-room', coversRoutes('/chat/room/:roomId'), async ({
     page,
     baseURL,
     request,

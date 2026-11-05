@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/roles page renders created role', () => {
   let root: RootFixture;
@@ -25,7 +26,7 @@ test.describe('UI: /admin/roles page renders created role', () => {
 
   test.setTimeout(60_000);
 
-  test('admin/roles/create + /admin/roles renders role name', async ({ page, baseURL, request }) => {
+  test('admin/roles/create + /admin/roles renders role name', coversRoutes('/admin/roles'), async ({ page, baseURL, request }) => {
     const roleName = `pwrole-${Date.now().toString().slice(-9)}`;
     const createResp = await callApi(request, 'admin/roles/create', {
       i: root.token,

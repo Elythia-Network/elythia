@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 /** Fill a Vue-bound input/textarea the way v-model actually observes. */
 async function setFieldValue(
@@ -39,7 +40,7 @@ test.describe('UI: gallery post create / edit', () => {
 
   test.setTimeout(90_000);
 
-  test('/gallery/new は投稿フォームを出す', async ({ page, baseURL }) => {
+  test('/gallery/new は投稿フォームを出す', coversRoutes('/gallery/new'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
     const resp = await page.goto(`${baseURL}/gallery/new`, { waitUntil: 'domcontentloaded' });
     expect(resp!.status()).toBe(200);
@@ -52,7 +53,7 @@ test.describe('UI: gallery post create / edit', () => {
     });
   });
 
-  test('/gallery/:postId/edit は既存の内容を読み込み、保存できる', async ({
+  test('/gallery/:postId/edit は既存の内容を読み込み、保存できる', coversRoutes('/gallery/:postId/edit'), async ({
     page,
     baseURL,
     request,

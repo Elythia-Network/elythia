@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import type { RootFixture } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /play/:id flash detail page hydrates', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: /play/:id flash detail page hydrates', () => {
 
   test.setTimeout(60_000);
 
-  test('flash/create + /play/:id renders title and summary', async ({ page, baseURL, request }) => {
+  test('flash/create + /play/:id renders title and summary', coversRoutes('/play/:id'), async ({ page, baseURL, request }) => {
     const title = `pwflash-${Date.now().toString().slice(-9)}`;
     const summary = `pwflash-summary-${Date.now().toString().slice(-9)}`;
 

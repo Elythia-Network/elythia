@@ -13,6 +13,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /share submit creates note via form', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /share submit creates note via form', () => {
 
   test.setTimeout(60_000);
 
-  test('/share?text=<msg> → click submit → /api/notes/create round-trips', async ({
+  test('/share?text=<msg> → click submit → /api/notes/create round-trips', coversRoutes('/share'), async ({
     page,
     baseURL,
     request,

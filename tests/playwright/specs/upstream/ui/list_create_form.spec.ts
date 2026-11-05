@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonContainingText, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /my/lists "Create list" form flow', () => {
   let root: RootFixture;
@@ -22,7 +23,7 @@ test.describe('UI: /my/lists "Create list" form flow', () => {
   });
   test.setTimeout(60_000);
 
-  test('click create → fill name → click OK → users/lists/create round-trips', async ({
+  test('click create → fill name → click OK → users/lists/create round-trips', coversRoutes('/my/lists'), async ({
     page,
     baseURL,
   }) => {

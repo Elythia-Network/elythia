@@ -13,6 +13,7 @@ import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { deleteAntennasNamed } from '../../../fixtures/quota';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: extra content pages render after API-side create', () => {
   let root: RootFixture;
@@ -24,7 +25,7 @@ test.describe('UI: extra content pages render after API-side create', () => {
   // signin chain を含む test は 60s 余裕が必要
   test.setTimeout(60_000);
 
-  test('navigate to /announcements after admin creates an announcement', async ({ page, baseURL, request }) => {
+  test('navigate to /announcements after admin creates an announcement', coversRoutes('/announcements'), async ({ page, baseURL, request }) => {
     const title = `playwright-announce ${Date.now()}`;
     const create = await callApi(request, 'admin/announcements/create', {
       i: root.token,
@@ -50,7 +51,7 @@ test.describe('UI: extra content pages render after API-side create', () => {
   // pages/show に { username, name } を投げる。mk-go の ShowRequest は #955
   // で username パラメータも accept するよう拡張済 (= ShowByUsername で
   // host=NULL の local user を引いて user.id + name で page lookup)。
-  test('navigate to /@alice/pages/:slug after creating a user page via API', async ({ page, baseURL, request }) => {
+  test('navigate to /@alice/pages/:slug after creating a user page via API', coversRoutes('/@:username/pages/:pageName(*)'), async ({ page, baseURL, request }) => {
     const title = `playwright-page ${Date.now()}`;
     const slug = `pw${Date.now()}`;
     const create = await callApi(request, 'pages/create', {
@@ -89,7 +90,7 @@ test.describe('UI: extra content pages render after API-side create', () => {
     createdAntennas.length = 0;
   });
 
-  test('navigate to /my/antennas after creating an antenna via API', async ({ page, baseURL, request }) => {
+  test('navigate to /my/antennas after creating an antenna via API', coversRoutes('/my/antennas'), async ({ page, baseURL, request }) => {
     const name = `playwright-antenna ${Date.now()}`;
     createdAntennas.push(name);
     const create = await callApi(request, 'antennas/create', {
@@ -118,7 +119,7 @@ test.describe('UI: extra content pages render after API-side create', () => {
     );
   });
 
-  test('navigate to /my/drive after creating a drive folder via API', async ({ page, baseURL, request }) => {
+  test('navigate to /my/drive after creating a drive folder via API', coversRoutes('/my/drive'), async ({ page, baseURL, request }) => {
     const folderName = `pw-folder-${Date.now()}`;
     const create = await callApi(request, 'drive/folders/create', {
       i: root.token,

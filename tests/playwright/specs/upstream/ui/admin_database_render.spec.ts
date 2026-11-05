@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/database page renders table stats', () => {
   let root: RootFixture;
@@ -23,7 +24,7 @@ test.describe('UI: /admin/database page renders table stats', () => {
 
   test.setTimeout(60_000);
 
-  test('admin/get-table-stats hydrates table list on /admin/database', async ({
+  test('admin/get-table-stats hydrates table list on /admin/database', coversRoutes('/admin/database'), async ({
     page,
     baseURL,
   }) => {

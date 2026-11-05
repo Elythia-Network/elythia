@@ -17,6 +17,7 @@ import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText, clickByTestId } from '../../../fixtures/ui_click';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: follow button click toggles following relation', () => {
   let root: RootFixture;
@@ -28,7 +29,7 @@ test.describe('UI: follow button click toggles following relation', () => {
 
   test.setTimeout(60_000);
 
-  test('navigate /@other → click Follow → users/show.isFollowing=true', async ({
+  test('navigate /@other → click Follow → users/show.isFollowing=true', coversRoutes('/@:acct/:page?'), async ({
     page,
     baseURL,
     request,

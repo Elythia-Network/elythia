@@ -21,6 +21,7 @@ import { callApi } from '../../../fixtures/api';
 import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes } from '../../../fixtures/ui_route';
 
 test.describe('UI: /admin/abuses renders abuse reports', () => {
   let root: RootFixture;
@@ -32,7 +33,7 @@ test.describe('UI: /admin/abuses renders abuse reports', () => {
 
   test.setTimeout(60_000);
 
-  test('a fresh abuse report appears in /admin/abuses', async ({ page, baseURL, request }) => {
+  test('a fresh abuse report appears in /admin/abuses', coversRoutes('/admin/abuses'), async ({ page, baseURL, request }) => {
     // reporter と、通報対象の一般 user を作る
     const reporterName = `rep${Date.now().toString().slice(-9)}`;
     const reporter = await signupUser(request, reporterName, DEFAULT_TEST_PASSWORD);
