@@ -82,7 +82,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	:enterFromClass="$style.transition_notification_enterFrom"
 	:leaveToClass="$style.transition_notification_leaveTo"
 >
-	<div v-for="notification in notifications" :key="notification.id" :class="$style.notification">
+	<div v-for="notification in notifications" :key="notification.id" :class="$style.notification" data-testid="toast-notification">
 		<XNotification :notification="notification"/>
 	</div>
 </component>

@@ -10,6 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			v-for="t in tabs"
 			:ref="(el) => tabRefs[t.key] = (el as HTMLElement)"
 			v-tooltip.noDelay="t.title"
+			:data-testid="t.testId"
 			class="_button"
 			:class="[$style.tab, {
 				[$style.active]: t.key != null && t.key === props.tab,
@@ -50,6 +51,8 @@ export type Tab = {
 	iconOnly?: boolean;
 	title: string;
 	icon?: string;
+	/** Elythia: `data-testid` of the tab button for e2e, since icon-only tabs have no text to select by (#4046). */
+	testId?: string;
 };
 </script>
 

@@ -80,14 +80,17 @@ const headerTabs = computed(() => [{
 	key: 'all',
 	title: i18n.ts.all,
 	icon: 'ti ti-point',
+	testId: 'notifications-tab-all',
 }, {
 	key: 'mentions',
 	title: i18n.ts.mentions,
 	icon: 'ti ti-at',
+	testId: 'notifications-tab-mentions',
 }, {
 	key: 'directNotes',
 	title: i18n.ts.directNotes,
 	icon: 'ti ti-mail',
+	testId: 'notifications-tab-directNotes',
 }]);
 
 definePage(() => ({
