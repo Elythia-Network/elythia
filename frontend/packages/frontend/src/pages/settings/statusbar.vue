@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div class="_gaps_m">
+<div class="_gaps_m" data-testid="settings-statusbar">
 	<MkFolder v-for="x in statusbars" :key="x.id">
 		<template #label>{{ x.type ?? i18n.ts.notSet }}</template>
 		<template #suffix>{{ x.name }}</template>

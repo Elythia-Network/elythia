@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <template>
 <SearchMarker path="/settings/profiles" :label="i18n.ts._preferencesProfile.manageProfiles" :keywords="['profile', 'settings', 'preferences', 'manage']" icon="ti ti-settings-cog">
-	<div class="_gaps">
+	<div class="_gaps" data-testid="settings-profiles">
 		<MkFolder v-for="backup in backups">
 			<template #label>{{ backup.name }}</template>
 			<MkButton danger @click="del(backup)">{{ i18n.ts.delete }}</MkButton>
