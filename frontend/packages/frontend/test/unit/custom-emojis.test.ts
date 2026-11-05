@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 
 const h = vi.hoisted(() => ({
 	get: vi.fn(async () => []),
@@ -17,7 +17,7 @@ vi.mock('@/utility/misskey-api.js', () => ({ misskeyApi: vi.fn(), misskeyApiGet:
 import { customEmojis, refreshCustomEmojisOnBoot, removeCustomEmojis, updateCustomEmojis } from '@/custom-emojis.js';
 import { misskeyApiGet } from '@/utility/misskey-api.js';
 
-function emoji(name: string, url: string): Misskey.entities.EmojiSimple {
+function emoji(name: string, url: string): Elythia.entities.EmojiSimple {
 	return { name, url, category: null, aliases: [] };
 }
 
@@ -77,7 +77,7 @@ describe('updateCustomEmojis', () => {
 				eventNameReads++;
 				return `event-${index}`;
 			},
-		} satisfies Misskey.entities.EmojiSimple));
+		} satisfies Elythia.entities.EmojiSimple));
 		customEmojis.value = Array.from({ length: 100 }, (_, index) => emoji(`catalog-${index}`, `/catalog-${index}.png`));
 
 		updateCustomEmojis(events);
@@ -133,7 +133,7 @@ describe('removeCustomEmojis', () => {
 				eventNameReads++;
 				return `event-${index}`;
 			},
-		} satisfies Misskey.entities.EmojiSimple));
+		} satisfies Elythia.entities.EmojiSimple));
 		customEmojis.value = Array.from({ length: 100 }, (_, index) => emoji(`catalog-${index}`, `/catalog-${index}.png`));
 
 		removeCustomEmojis(events);
@@ -145,9 +145,9 @@ describe('removeCustomEmojis', () => {
 // 手元に一覧があるときは、起動を /api/emojis の応答で待たせない (#3613)。
 describe('refreshCustomEmojisOnBoot', () => {
 	function deferred() {
-		let resolve!: (v: { emojis: Misskey.entities.EmojiSimple[] }) => void;
+		let resolve!: (v: { emojis: Elythia.entities.EmojiSimple[] }) => void;
 		let reject!: (e: unknown) => void;
-		const promise = new Promise<{ emojis: Misskey.entities.EmojiSimple[] }>((res, rej) => { resolve = res; reject = rej; });
+		const promise = new Promise<{ emojis: Elythia.entities.EmojiSimple[] }>((res, rej) => { resolve = res; reject = rej; });
 		return { promise, resolve, reject };
 	}
 	async function settled(p: Promise<void>) {
@@ -207,7 +207,7 @@ describe('refreshCustomEmojisOnBoot with the boot.js prefetch', () => {
 	});
 
 	test('waits for and uses the prefetched list without another request', async () => {
-		let resolve!: (v: { emojis: Misskey.entities.EmojiSimple[] } | null) => void;
+		let resolve!: (v: { emojis: Elythia.entities.EmojiSimple[] } | null) => void;
 		window.__elythia_emojis_prefetch__ = new Promise(r => { resolve = r; });
 
 		const boot = refreshCustomEmojisOnBoot();

@@ -14,7 +14,7 @@
 
 import { afterAll, afterEach, assert, beforeAll, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, type RenderResult } from '@testing-library/vue';
-import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { directives } from '@/directives/index.js';
 import { components } from '@/components/index.js';
 import XHome from '@/pages/user/home.vue';
@@ -114,7 +114,7 @@ describe('プロフィールのアイコンを押すと拡大表示が開く', (
 					pinnedNotes: [],
 					avatarUrl: AVATAR_URL,
 					avatarDecorations: [],
-				} as unknown as Misskey.entities.UserDetailed,
+				} as unknown as Elythia.entities.UserDetailed,
 				disableNotes: true,
 			},
 			global: { directives, components },

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { version } from '@@/js/config.js';
 import { languages } from 'i18n/const';
 import type { Locale } from 'i18n';
@@ -118,7 +118,7 @@ export function formatAbuseReportWhen(date: Date, langCode = resolveInstanceLang
 	}
 }
 
-export function buildContextFromProfile(user: Misskey.entities.UserLite, baseUrl: string): AbuseReportContext {
+export function buildContextFromProfile(user: Elythia.entities.UserLite, baseUrl: string): AbuseReportContext {
 	// **acct で組む。** username だけだとリモート利用者の該当 URL が自インスタンスの
 	// 同名ユーザー (別人) を指すか 404 になり、対象ユーザー欄もどのインスタンスの
 	// 誰か判別できない。
@@ -128,7 +128,7 @@ export function buildContextFromProfile(user: Misskey.entities.UserLite, baseUrl
 	};
 }
 
-function buildNoteWhere(note: Misskey.entities.Note, baseUrl: string): string {
+function buildNoteWhere(note: Elythia.entities.Note, baseUrl: string): string {
 	const localUrl = `${baseUrl}/notes/${note.id}`;
 	const remoteUrl = note.url ?? note.uri;
 	if (remoteUrl == null) return localUrl;
@@ -138,12 +138,12 @@ function buildNoteWhere(note: Misskey.entities.Note, baseUrl: string): string {
 	return `${remoteUrl} (local: ${localUrl})`;
 }
 
-function noteHasOwnContent(note: Misskey.entities.Note): boolean {
+function noteHasOwnContent(note: Elythia.entities.Note): boolean {
 	if (note.text != null && note.text !== '') return true;
 	return (note.fileIds?.length ?? 0) > 0 || (note.files?.length ?? 0) > 0;
 }
 
-export function buildContextFromNote(note: Misskey.entities.Note, baseUrl: string): AbuseReportContext {
+export function buildContextFromNote(note: Elythia.entities.Note, baseUrl: string): AbuseReportContext {
 	const ctx: AbuseReportContext = {
 		targetUsername: acct(note.user),
 		where: buildNoteWhere(note, baseUrl),

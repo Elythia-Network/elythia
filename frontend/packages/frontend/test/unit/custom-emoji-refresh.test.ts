@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { render, cleanup } from '@testing-library/vue';
-import type * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { preferState } from '../setup.unit.js';
 
 vi.mock('@/i.js', () => ({
@@ -24,7 +24,7 @@ import { customEmojis } from '@/custom-emojis.js';
 import MkCustomEmoji from '@/components/global/MkCustomEmoji.vue';
 import MkReactionsViewer from '@/components/MkReactionsViewer.vue';
 
-function emoji(name: string, url: string): Misskey.entities.EmojiSimple {
+function emoji(name: string, url: string): Elythia.entities.EmojiSimple {
 	return { name, url, category: null, aliases: [] };
 }
 

@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render } from '@testing-library/vue';
-import * as Misskey from 'misskey-js';
+import type * as Elythia from 'elythia-js';
 import { directives } from '@/directives/index.js';
 import { components } from '@/components/index.js';
 import XHome from '@/pages/user/home.vue';
@@ -115,7 +115,7 @@ describe('unanswered API requests in unit tests', () => {
 					pinnedNotes: [],
 					avatarUrl: 'https://example.com/avatar.png',
 					avatarDecorations: [],
-				} as unknown as Misskey.entities.UserDetailed,
+				} as unknown as Elythia.entities.UserDetailed,
 				disableNotes: true,
 			},
 			global: { directives, components },
