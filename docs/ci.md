@@ -163,6 +163,44 @@ enum・index 名・default のどれかが TypeORM の期待とずれていれ�
 ([dropin-e2e.md の「復路は測る対象」](dropin-e2e.md#復路は測る対象-3191))。実際この経路の初回実行で、RSA 秘密鍵が
 PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかっている (#2380)。
 
+### API の通過の集計 (#4037)
+
+`upstream-backend-e2e`・`playwright`・`diff-e2e` は、Elythia のアクセスログから、その層が実際に
+叩いた `/api` のエンドポイントを集計し、`API coverage` job の Summary に出す。成功したときも出す。
+数はコードから静的に拾ったものではなく実測なので、UI の spec が frontend 経由で叩いた API も入る。
+
+- **数え方**: アクセスログの 1 行 (`<RFC3339> <METHOD> <URI> <STATUS> <latency>`、
+  `internal/server` の `accessLogConfig`) を、エンドポイントごとに「2xx・3xx で通った」「4xx だけ」
+  「5xx が出た」に分けて数える。400 や 401 だけのものは handler の中身を通っていないので、
+  通ったことにしない。`miauth/:session/check` のようなパラメータ付きのパスはルートの形に直す
+- **分母**: 本家の paramDef の golden (`upstream_paramdefs.json`。直接のルートを含む) と Elythia の
+  宣言 (`elythia_paramdefs.json`) に、宣言を持たない 2 つ (`signin`、`drive/files/create-chunked/append`)
+  を足したもの (`internal/routecoverage` の `Endpoints`)。組み立てたサーバーのルートと一致することを
+  `internal/server` の `TestRouteCoverageEndpointsMatchRoutes` が確かめる。`reset-db` は testMode でだけ
+  登録されるが、分母には入る。プラグインのパスと catch-all (`*`) は「エンドポイントでないパス」に出る
+- **集め方**: `upstream-backend-e2e` は shard ごとに集計した `route-hits-upstream-backend-e2e-<shard>`
+  を、`playwright` (Elythia の backend だけ) と `diff-e2e` は Elythia の生のログ
+  (`mkgo-access-<層>[-<shard>]`、保持 3 日) を残し、`API coverage` job が足し合わせる。合計は
+  `route-hits-<層>` (保持 30 日) に残る。artifact は `merge-multiple` で 1 か所に落とすので、
+  ファイル名は artifact ごとに変えてある (同じ名前だと上書きされる)
+- **表の読み方**: 列のうち「5xx が出た」は、ほかの列と重なる (2xx でも通り、5xx も出たものは両方に
+  数える)。「4xx だけ」は 2xx・3xx も 5xx も無いもの。テスト以外の要求も数える。たとえば
+  `upstream-backend-e2e` の harness は、起動を待つあいだと再起動のたびに `meta` を叩くので、`meta` は
+  常に通った扱いになる。healthcheck (`/healthz`) は `/api` の外なので数えない
+- **落ちるとき**: `API coverage` job は、`/api` の行を 1 行も拾えなかったとき、読んだログのうち 1 本でも
+  `/api` の行が 0 だったとき (shard の 1 つで stack が起動しなかったなど。ほかの shard で下限は満たされ、
+  数だけが減って緑になるのを防ぐ)、`notes/create` を 2xx・3xx で通っていないときに落ちる。読んだログと
+  その行数は Summary に出る。どちらも、ログの書式が変わったか、ログを取り損ねた
+  (stack が先に片付けられたなど) 合図。テストの失敗とは別に見る。入力のファイルが 1 つも無いとき
+  (どの job もログを残せなかった) も落ちる。`upstream-backend-e2e` は shard ごとの `Collect API hits` も、
+  `/api` の行を 1 行も拾えなければ落ちる (テストが通っていても、その shard の job が赤になる)
+- **全層を合わせる**: 各 run の `route-hits-<層>` を手元に落として
+  `make route-coverage ROUTE_INPUTS='route-hits-*.json'` とすると、全層を足した表と、どの層でも
+  叩かれていないエンドポイントの一覧が出る (`gh run download <run-id> -n route-hits-playwright` など)
+- **対象にしない層**: Go の e2e (`tests/e2e`) はプロセスの中でサーバーを動かしていて、アクセスログが
+  `go test` の出力に混ざる。`dropin-e2e` は 5 つのシナリオがそれぞれの script の中で stack を片付け、
+  残すログを `--tail=2000` で切り詰めている。どちらも、取るための手間に見合わないので入れていない
+
 ### `e2e` (本家 backend e2e) が落ちたとき
 
 まず **意図的な乖離かどうか**を判断する。Elythia では『通らないことが正しい』テストが
