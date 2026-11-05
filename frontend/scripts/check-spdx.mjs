@@ -37,7 +37,6 @@ const TARGET_DIRECTORIES = [
 	'packages/frontend-shared/@types',
 	'packages/frontend-shared/js',
 	'packages/frontend-builder',
-	'packages/frontend/.storybook',
 	'packages/frontend/@types',
 	'packages/frontend/lib',
 	'packages/frontend/public',

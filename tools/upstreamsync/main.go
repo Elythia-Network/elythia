@@ -82,6 +82,17 @@ var (
 	skipDirs = []string{".github/", ".config/", ".agents/", ".claude/", ".vscode/", ".devcontainer/", "idea/"}
 	// compose.local-db.yml / compose_example.yml のような直下の compose。
 	skipComposeRe = regexp.MustCompile(`^compose[^/]*\.ya?ml$`)
+	// Elythia が frontend/ から外したもの (docs/divergence/frontend.md の #4025 / #4027)。
+	// 本家がこれらを変えると、当てる先が無いので pass ごと止まる。本家はコンポーネントを
+	// 変えるたびに stories も変えるので、外したままだと追従のたびに止まる。
+	removedDirs  = []string{"packages/frontend/.storybook/", "packages/frontend/test/e2e/"}
+	removedFiles = map[string]bool{
+		"packages/frontend/playwright.config.ts": true,
+		"packages/frontend/src/index.mdx":        true,
+	}
+	removedSuffixes = []string{".stories.impl.ts", ".stories.meta.ts"}
+	// removedDirs の中でも残しているもの。diagnostics-frontend が import している。
+	keptInRemovedDirs = map[string]bool{"packages/frontend/test/e2e/shared.ts": true}
 	// 版は tag 名としてそのまま git に渡すので、オプションや refspec として
 	// 解釈されうる文字を通さない。
 	versionRe = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]*$`)
@@ -107,12 +118,34 @@ func classify(p string) class {
 		return classRepoAssets
 	case p == "pnpm-lock.yaml":
 		return classLock
+	case removedFromFrontend(p):
+		return classSkip
 	case importFiles[p], hasAnyPrefix(p, importDirs):
 		return classImport
 	case skipFiles[p], hasAnyPrefix(p, skipDirs), skipComposeRe.MatchString(p):
 		return classSkip
 	}
 	return classUnknown
+}
+
+// removedFromFrontend reports whether p is a path Elythia removed from
+// frontend/ on purpose, so upstream changes to it are not applied.
+func removedFromFrontend(p string) bool {
+	if keptInRemovedDirs[p] {
+		return false
+	}
+	if removedFiles[p] || hasAnyPrefix(p, removedDirs) {
+		return true
+	}
+	if !strings.HasPrefix(p, "packages/") {
+		return false
+	}
+	for _, suf := range removedSuffixes {
+		if strings.HasSuffix(p, suf) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAnyPrefix(p string, prefixes []string) bool {

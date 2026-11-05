@@ -44,6 +44,19 @@ func TestClassify(t *testing.T) {
 		// 本体の .gitignore が深さに関係なく外しているので追跡していない。
 		{"packages/frontend/.vscode/settings.json", classSkip},
 		{".vscode/settings.json", classSkip},
+		// Elythia が frontend/ から外したもの (#4025 / #4027)。
+		{"packages/frontend/.storybook/main.ts", classSkip},
+		{"packages/frontend/src/components/MkButton.stories.impl.ts", classSkip},
+		{"packages/frontend/src/components/global/MkError.stories.meta.ts", classSkip},
+		{"packages/frontend/src/index.mdx", classSkip},
+		{"packages/frontend/test/e2e/basic.spec.ts", classSkip},
+		{"packages/frontend/test/e2e/new-upstream.spec.ts", classSkip},
+		{"packages/frontend/playwright.config.ts", classSkip},
+		// 外したディレクトリの中でも、残しているものは取り込む。
+		{"packages/frontend/test/e2e/shared.ts", classImport},
+		{"packages/frontend/test/unit/foo.test.ts", classImport},
+		// packages/ の外の同じ名前は区分を変えない。
+		{"MkButton.stories.impl.ts", classUnknown},
 		// 本家が直下に新しく足したものは、黙って落とさずに止める。
 		{"newtool.config.ts", classUnknown},
 		{"cypress/e2e/basic.cy.ts", classUnknown},
@@ -56,6 +69,22 @@ func TestClassify(t *testing.T) {
 		t.Run(tt.path, func(t *testing.T) {
 			assert.Equal(t, tt.want, classify(tt.path))
 		})
+	}
+}
+
+// 外したパスに当たるファイルが frontend/ に実在するなら、外す扱いが間違っている
+// (本家の変更が黙って落ちる)。区分を足すときにファイルを消し忘れたり、後から同じ
+// 名前のファイルを足したりすると落ちる。
+func TestRemovedPathsAreAbsentFromFrontend(t *testing.T) {
+	out, err := exec.Command("git", "-C", "../..", "ls-files", "--", "frontend").Output()
+	require.NoError(t, err)
+	files := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// 一覧の取り方が壊れて空になっても緑にならないよう、実在するものを要求する
+	require.Contains(t, files, "frontend/packages/frontend/test/e2e/shared.ts")
+	require.Greater(t, len(files), 1000)
+	for _, f := range files {
+		p := strings.TrimPrefix(f, "frontend/")
+		assert.False(t, removedFromFrontend(p), "%s exists in frontend/ but is classified as removed", f)
 	}
 }
 
