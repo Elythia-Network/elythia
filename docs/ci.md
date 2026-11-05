@@ -115,6 +115,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
+| `gate` | API coverage | **集計の道具か workflow を変えた PR でだけ**、どの層でも通っていない API が一覧 (`uncovered.tsv`) と一致しているかを、develop にマージ済みの PR の集計で確かめる。一覧だけを直した PR では回らない (下の「通っていない API の一覧と週次のゲート」)。毎週火曜日の schedule と手動でも流れる | 1 min | 下の「一覧を作り直す」の手順で集計を落とし、`make route-coverage ROUTE_INPUTS='route-hits-*.json' ROUTE_FLAGS='-gate -layers upstream-backend-e2e,playwright,diff-e2e'` |
 | `build / build` | Build with plugins (selftest) | 運営者向けの reusable workflow が通るか。外部プラグインを実際に clone し、frontend を持つので `Dockerfile.bundled` の中でプラグインの .vue を含めた SPA のビルドまで走る。**`docker build --check` では見えない範囲** (pluginbuild / go build / frontend のビルドが通るか、生成物とプラグインの frontend が frontend stage に届くか) を確認できるのはこの check だけ | 6 min | paths に該当する PR で自動発火する。手動なら `gh workflow run build-with-plugins-selftest.yml --ref <branch>` (default branch にある場合のみ) |
 
 ### e2e 系が「何を守っているか」の違い
@@ -200,6 +201,41 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 - **対象にしない層**: Go の e2e (`tests/e2e`) はプロセスの中でサーバーを動かしていて、アクセスログが
   `go test` の出力に混ざる。`dropin-e2e` は 5 つのシナリオがそれぞれの script の中で stack を片付け、
   残すログを `--tail=2000` で切り詰めている。どちらも、取るための手間に見合わないので入れていない
+
+#### 通っていない API の一覧と週次のゲート (#4039)
+
+どの層でも 2xx・3xx で通っていないエンドポイントは、`internal/routecoverage/uncovered.tsv` に
+`<エンドポイント>\t<付ける予定の issue>` の形で載せる (4xx だけのものも載せる)。Elythia 独自のものは
+`#4024(18)`、本家互換のものは `#4024` (段階 C か (19) で見直す) にしてある。
+
+- **週次のゲート** (`api-coverage` workflow。毎週火曜日と手動実行、必須ではない): 3 つの層について、
+  **develop にマージ済みの PR** の最新の run の `route-hits-<層>` を取ってきて合わせ、一覧と突き合わせる。
+  3 つの workflow は schedule を持たず、手動実行の run は起動したブランチの先頭を指すので試したコードと
+  対応しない。そこでマージ済みの PR の run を使う。成功したかは問わない (必須でないので、落ちたまま
+  マージできる。成功に絞ると古い run の集計を使ってしまう)。使った run と PR の番号・マージの日時は
+  Summary に出る。落ちるのは次のとき
+  - 通っていないのに一覧に無いエンドポイントがある。新しいエンドポイントがテスト無しで入ったか、
+    既存のテストがそれを叩かなくなった。テストを足すか、付ける予定の issue と一緒に一覧へ足す
+  - 一覧にあるのに通っている行がある。テストが付いたので、行を消す
+  - 一覧の行が、実在しないエンドポイントを指している (改名か削除)
+  - 3 層のどれかの集計が見つからない、または `notes/create` が通っていない (下限)
+  - マージ済みの PR の最新の run から集計を取れなかった (古い run には戻らない)。その run が集計を出す前に
+    落ちた (`notes/create` の下限など) か、集計の artifact が期限 (30 日) で消えたときに起きる。取り消された
+    run は飛ばす。対処は、次に 3 つの workflow が走る PR のマージを待つ。develop で手動実行しても直らない
+    (手動実行の run は使わない)。その PR の run の再実行は、30 日以内なら試せるが、マージ後は
+    `refs/pull/<番号>/merge` が消えているので、merge ref を checkout する `diff-e2e` は落ちる見込みが高い
+- **PR で回るとき**: 集計の道具か workflow を変えた PR でだけ、同じ判定を回す。使う集計は develop に
+  マージ済みの過去の run のものなので、テストを付けて一覧の行を消す PR では回さない (回すと、その PR の
+  テストを含まない集計で判定し、正しい PR が必ず赤になる)。その PR の判定は、マージ後の週次のゲートで行う
+- **PR の中で見るもの**: required の `test` で、一覧の書式と、各行が実在するエンドポイントを 1 回だけ
+  指していることを確かめる (`TestUncoveredListIsWellFormed`)。3 層の集計が揃うのはそれぞれの
+  workflow が終わった後なので、通っているかどうかは PR の中では判定しない
+- **一覧を作り直す**: 3 層の `route-hits-<層>` を落として
+  `make route-coverage ROUTE_INPUTS='route-hits-*.json' ROUTE_FLAGS='-layers upstream-backend-e2e,playwright,diff-e2e -write-uncovered internal/routecoverage/uncovered.tsv'`
+  とする。既にある行の issue は保ち、新しい行には上の既定の issue を付ける。3 層のどれかが欠けていると
+  書かずに落ちる。**シェルのリダイレクト (`> uncovered.tsv`) で書かない。** ビルドの前にファイルが空に
+  され、空の一覧が埋め込まれて、既存の行の issue が全部既定に戻る。週次のゲートの run の Summary に、
+  使った run の番号が出ているので、`gh run download <run-id> -n route-hits-<層>` で同じものを落とせる
 
 ### `e2e` (本家 backend e2e) が落ちたとき
 
@@ -828,6 +864,7 @@ PR では回らないので、失敗は Actions 上で確認して別 PR で対�
 | `dropin-frontend-e2e.yml` | 3 TS インスタンス + cypress で frontend 視点の drop-in 互換 | 19:00 UTC |
 | `queue-bench-smoke.yml` | queue driver がジョブを落としていないか (`ok == sent`) | 17:30 UTC |
 | `bench-upstream.yml` | 本家 Misskey との性能比較 (develop と`UPSTREAM_MISSKEY_VERSION`の版) | 日曜日 20:40 UTC (月曜日 05:40 日本時間) |
+| `api-coverage.yml` | どの層でも通っていない API が一覧 (`internal/routecoverage/uncovered.tsv`) と一致しているか (#4039)。PR でも、集計の道具 (`internal/routecoverage/*.go`、`tools/routecoverage/`) か workflow を変えたときは回る | 火曜日 03:30 UTC (火曜日 12:30 日本時間) |
 
 #### CI失敗時の対応
 
