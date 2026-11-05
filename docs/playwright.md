@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 332 ファイル
+`tests/playwright/specs/` にあり、現在 346 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -46,10 +46,10 @@ upstream と食い違っていても気付けない**。
 **6 シャード並列** (`PLAYWRIGHT_SHARD=i/6`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/6)` 〜 `6/6`。
 
-**1 スタックあたりは直列でしか回せない。** 332 spec のうち 185 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 346 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (数え方は `grep -rlE 'uiSigninAsRoot|signin-username' tests/playwright/specs --include='*.spec.ts' | wc -l`。
 `uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接駆動する)、
-さらに 36 がサインインせず root の token で API を叩く (`root.json` を読むのが 221 で、その差分)。
+さらに 37 がサインインせず root の token で API を叩く (`root.json` を読むのが 222 で、その差分)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
