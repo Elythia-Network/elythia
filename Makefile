@@ -73,6 +73,9 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# MFM の Unicode 絵文字の正規表現と記録した版が、frontend の MFM の解析器
 	# (@elythia-network/mfm) が持つものと一致するか (#3324)。node_modules が無いと落ちる (skip しない)。
 	$(MAKE) emoji-regex-check
+	# Elythia が書いたファイルは misskey-js を直接 import しない (#4028)。frontend の
+	# eslint は src/ と public/loader/ しか見ないので、test/ も含めて別の script で検査する
+	cd frontend && node --test scripts/check-elythia-imports.test.mjs && node scripts/check-elythia-imports.mjs
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
 	# ここに無いと**手元で緑でも CI が落ちる**。#2903 で実際に踏んだ (デッドコードを
 	# 消したときの空行が @stylistic/no-multiple-empty-lines で落ちた)。個別ファイルに

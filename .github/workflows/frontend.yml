@@ -5,7 +5,7 @@
 # 本家の運用向けのもの (docker / release / labeler など) は持ってこない。
 #
 # - frontend-lint: 10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js)、
-#   check-dts、SPDX ヘッダー、locale の検証、misskey-js の API レポート
+#   check-dts、SPDX ヘッダー、Elythia のファイルの import (#4028)、locale の検証、misskey-js の API レポート
 # - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
 # - frontend: 上の 2 つを集約する。**required check はこの名前だけ** (`test` と
 #   同じ形。job を足しても branch protection を触らずに済む、#3379)
@@ -155,6 +155,13 @@ jobs:
 
       - name: SPDX headers
         run: node scripts/check-spdx.mjs --ci
+
+      - name: check-elythia-imports self test
+        run: node --test scripts/check-elythia-imports.test.mjs
+
+      # Elythia が書いたファイルは misskey-js を直接 import しない (#4028)
+      - name: Elythia imports
+        run: node scripts/check-elythia-imports.mjs
 
       - name: Verify locales
         run: pnpm --filter i18n run verify
