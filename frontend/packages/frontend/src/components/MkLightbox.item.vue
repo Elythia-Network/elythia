@@ -133,7 +133,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div :class="$style.titleText">
 				<MkCondensedLine :minScale="0.5">{{ content.filename }}</MkCondensedLine>
 			</div>
-			<button class="_button" :class="$style.titleButton" @click="closeThis"><i class="ti ti-x"></i></button>
+			<button class="_button" :class="$style.titleButton" data-testid="lightbox-close" @click="closeThis"><i class="ti ti-x"></i></button>
 		</div>
 	</div>
 

@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div :class="[hide ? $style.hidden : $style.visible, (image.isSensitive && prefer.s.highlightSensitiveMedia) && $style.sensitive]" @click="onClick" @contextmenu.stop="onContextmenu">
+<div :class="[hide ? $style.hidden : $style.visible, (image.isSensitive && prefer.s.highlightSensitiveMedia) && $style.sensitive]" data-testid="media-image" @click="onClick" @contextmenu.stop="onContextmenu">
 	<component
 		:is="disableImageLink ? 'div' : 'a'"
 		v-bind="disableImageLink ? {
@@ -47,7 +47,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		/>
 	</component>
 	<template v-if="hide">
-		<div :class="$style.hiddenText">
+		<div :class="$style.hiddenText" data-testid="media-image-hidden">
 			<div :class="$style.hiddenTextWrapper">
 				<b v-if="image.isSensitive" style="display: block;"><i class="ti ti-eye-exclamation"></i> {{ i18n.ts.sensitive }}{{ prefer.s.dataSaver.media ? ` (${i18n.ts.image}${image.size ? ' ' + bytes(image.size) : ''})` : '' }}</b>
 				<b v-else style="display: block;"><i class="ti ti-photo"></i> {{ prefer.s.dataSaver.media && image.size ? bytes(image.size) : i18n.ts.image }}</b>

@@ -61,9 +61,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 						:enableEmojiMenu="true"
 						:enableEmojiMenuReaction="true"
 					/>
-					<MkCwButton v-model="showContent" :text="appearNote.text" :renote="appearNote.renote" :files="appearNote.files" :poll="appearNote.poll" style="margin: 4px 0;"/>
+					<MkCwButton v-model="showContent" :text="appearNote.text" :renote="appearNote.renote" :files="appearNote.files" :poll="appearNote.poll" style="margin: 4px 0;" data-testid="note-cw-toggle"/>
 				</p>
-				<div v-show="appearNote.cw == null || showContent" :class="[{ [$style.contentCollapsed]: collapsed }]">
+				<div v-show="appearNote.cw == null || showContent" :class="[{ [$style.contentCollapsed]: collapsed }]" data-testid="note-content">
 					<div :class="$style.text">
 						<span v-if="appearNote.isHidden" style="opacity: 0.5">({{ i18n.ts.private }})</span>
 						<MkA v-if="appearNote.replyId" :class="$style.replyIcon" :to="`/notes/${appearNote.replyId}`"><i class="ti ti-arrow-back-up"></i></MkA>
@@ -112,10 +112,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 						/>
 					</div>
 					<div v-if="appearNote.renoteId" :class="$style.quote"><MkNoteSimple :note="appearNote?.renote ?? null" :class="$style.quoteNote"/></div>
-					<button v-if="isLong && collapsed" :class="$style.collapsed" class="_button" @click="collapsed = false">
+					<button v-if="isLong && collapsed" :class="$style.collapsed" class="_button" data-testid="note-show-more" @click="collapsed = false">
 						<span :class="$style.collapsedLabel">{{ i18n.ts.showMore }}</span>
 					</button>
-					<button v-else-if="isLong && !collapsed" :class="$style.showLess" class="_button" @click="collapsed = true">
+					<button v-else-if="isLong && !collapsed" :class="$style.showLess" class="_button" data-testid="note-show-less" @click="collapsed = true">
 						<span :class="$style.showLessLabel">{{ i18n.ts.showLess }}</span>
 					</button>
 				</div>
@@ -136,7 +136,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</template>
 			</MkReactionsViewer>
 			<footer :class="$style.footer">
-				<button :class="$style.footerButton" class="_button" @click="reply()">
+				<button :class="$style.footerButton" class="_button" data-testid="note-reply" @click="reply()">
 					<i class="ti ti-arrow-back-up"></i>
 					<p v-if="appearNote.repliesCount > 0" :class="$style.footerButtonCount">{{ number(appearNote.repliesCount) }}</p>
 				</button>
@@ -145,6 +145,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					ref="renoteButton"
 					:class="$style.footerButton"
 					class="_button"
+					data-testid="note-renote"
 					@mousedown.prevent="renote()"
 				>
 					<i class="ti ti-repeat"></i>
@@ -153,7 +154,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<button v-else :class="$style.footerButton" class="_button" disabled>
 					<i class="ti ti-ban"></i>
 				</button>
-				<button ref="reactButton" :class="$style.footerButton" class="_button" @click="handleToggleReact()">
+				<button ref="reactButton" :class="$style.footerButton" class="_button" data-testid="note-react" @click="handleToggleReact()">
 					<i v-if="appearNote.reactionAcceptance === 'likeOnly' && $appearNote.myReaction != null" class="ti ti-heart-filled" style="color: var(--MI_THEME-love);"></i>
 					<i v-else-if="$appearNote.myReaction != null" class="ti ti-minus" style="color: var(--MI_THEME-accent);"></i>
 					<i v-else-if="appearNote.reactionAcceptance === 'likeOnly'" class="ti ti-heart"></i>
@@ -163,7 +164,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<button v-if="prefer.s.showClipButtonInNoteFooter" ref="clipButton" :class="$style.footerButton" class="_button" @mousedown.prevent="clip()">
 					<i class="ti ti-paperclip"></i>
 				</button>
-				<button ref="menuButton" :class="$style.footerButton" class="_button" @mousedown.prevent="showMenu()">
+				<button ref="menuButton" :class="$style.footerButton" class="_button" data-testid="note-menu" @mousedown.prevent="showMenu()">
 					<i class="ti ti-dots"></i>
 				</button>
 			</footer>

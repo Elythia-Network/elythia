@@ -52,6 +52,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							:key="draft.id"
 							v-panel
 							:class="[$style.draft]"
+							data-testid="note-draft"
 						>
 							<div :class="$style.draftBody" class="_gaps_s">
 								<MkInfo v-if="draft.scheduledAt != null && draft.isActuallyScheduled">
@@ -135,6 +136,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 								<MkButton
 									v-else
 									small
+									data-testid="note-draft-restore"
 									@click="restoreDraft(draft)"
 								>
 									<i class="ti ti-corner-up-left"></i> {{ i18n.ts._drafts.restore }}
@@ -145,6 +147,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 									small
 									:iconOnly="true"
 									style="margin-left: auto;"
+									data-testid="note-draft-delete"
 									@click="deleteDraft(draft)"
 								>
 									<i class="ti ti-trash"></i>
