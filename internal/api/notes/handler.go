@@ -51,18 +51,22 @@ type Handler struct {
 	// 失敗する。favorite には core service が無く、この handler が FK 行を
 	// 書いているためここが差し込み口になる。
 	materializer NoteMaterializer
-	// driveFileRepo は添付ファイルの解決と、下書きの添付の所有権検査に使う。nil だと
-	// 下書きの添付で他人の drive ファイル ID を指定でき (`handler_drafts.go` の
-	// 所有権検査が nil で true を返す)、加えて `fieldResolver()` が drive を引けなく
-	// なるので **全 note の files が空配列**になる。下書きから note への昇格は
+	// driveFileRepo は下書きの添付の所有権検査と、下書きの応答の添付の解決に使う。nil だと
+	// 下書きの添付で他人の drive ファイル ID を指定でき (`handler_drafts.go` の所有権検査が
+	// nil で true を返す)、下書きの files も空になる。投稿の添付の解決は noteFieldResolver が
+	// 行う (#4044)。下書きから note への昇格は
 	// `note.CreateService` の driveFileRepo の checkFileIDs を通るので、他人の
 	// ファイルの実体までは出ない (#2708)。
-	driveFileRepo    repository.DriveFileRepository
-	draftRepo        repository.NoteDraftRepository
-	pollRepo         repository.PollRepository
-	threadMutingRepo repository.NoteThreadMutingRepository
-	noteReactionRepo repository.NoteReactionRepository
-	channelRepo      repository.ChannelRepository
+	driveFileRepo repository.DriveFileRepository
+	// noteFieldResolver は、包んだ投稿の添付ファイル・閲覧者のリアクション・投票・
+	// チャンネルを埋める。router が作る共通の resolver を受け取り、自前では作らない。
+	// 以前はここで repository から作り直しており、共通の resolver にだけ付けた投票の
+	// lookup が抜けて、notes/show などが投票した本人にも isVoted: false を返した (#4044)。
+	noteFieldResolver *entity.NoteFieldResolver
+	draftRepo         repository.NoteDraftRepository
+	pollRepo          repository.PollRepository
+	threadMutingRepo  repository.NoteThreadMutingRepository
+	channelRepo       repository.ChannelRepository
 	// channelMutingRepo は閲覧者がミュートしたチャンネルの投稿を除く。nil だと
 	// チャンネルミュートが**一切**効かない。別ソースが無いので in-memory・SQL
 	// (`TimelineFilter.MutedChannelIDs`)・user-list timeline・HTL の followed-channel
@@ -107,7 +111,6 @@ type Handler struct {
 	// 引数にした。
 	metaRepo                repository.MetaRepository
 	emojiRepo               repository.EmojiRepository
-	driveFolderRepo         repository.DriveFolderRepository
 	userRepo                repository.UserRepository
 	localFederationObserver activitypub.LocalFederationObserver
 	userListRepo            repository.UserListRepository
@@ -349,12 +352,8 @@ func (h *Handler) SetPollRepo(r repository.PollRepository) {
 	h.pollRepo = r
 }
 
-// SetNoteReactionRepo attaches a NoteReactionRepository for myReaction resolution.
-func (h *Handler) SetNoteReactionRepo(r repository.NoteReactionRepository) {
-	h.noteReactionRepo = r
-}
-
-// SetChannelRepo attaches a ChannelRepository for channel resolution.
+// SetChannelRepo attaches a ChannelRepository for the channel checks and the
+// channel summary of note drafts.
 func (h *Handler) SetChannelRepo(r repository.ChannelRepository) {
 	h.channelRepo = r
 }
@@ -382,14 +381,9 @@ func (h *Handler) reactionReader() entity.BufferedReactionsReader {
 	return h.bufReader
 }
 
-// SetDriveFolderRepo attaches a DriveFolderRepository so attached DriveFiles
-// in note responses can embed the owning folder (#317).
-func (h *Handler) SetDriveFolderRepo(r repository.DriveFolderRepository) {
-	h.driveFolderRepo = r
-}
-
-// SetUserRepo attaches a UserRepository so attached DriveFiles in note
-// responses can embed the owning user (#317).
+// SetUserRepo attaches a UserRepository for the viewer's mute settings
+// (hardMutedWords and the mute / block sets) and for looking up clip owners and
+// note authors.
 func (h *Handler) SetUserRepo(r repository.UserRepository) {
 	h.userRepo = r
 }
@@ -425,10 +419,13 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 //
 // noteHider, entityPacker, policyProvider and ugcVisibility gate what a
 // viewer may see. ugcVisibility is called on every request, so a change in
-// the admin panel takes effect without a restart. The repositories from
-// driveFileRepo to userFollowingRepo back the per-viewer filters (blocked
-// hosts, blocks, mutes, renote mutes, channel mutes and the followers-only
-// reply guard) and attached-file resolution.
+// the admin panel takes effect without a restart. noteFieldResolver fills the
+// attached files, the viewer's reaction and poll votes, and the channel of the
+// packed notes; pass the resolver shared by the other handlers. The
+// repositories from driveFileRepo to userFollowingRepo back the per-viewer
+// filters (blocked hosts, blocks, mutes, renote mutes, channel mutes and the
+// followers-only reply guard) and the draft attachments (their ownership check
+// and their files in draft responses).
 func NewHandler(
 	noteRepo repository.NoteRepository,
 	createService *note.CreateService,
@@ -441,6 +438,7 @@ func NewHandler(
 	idGen id.Generator,
 	noteHider *notehide.Hider,
 	entityPacker *entity.Packer,
+	noteFieldResolver *entity.NoteFieldResolver,
 	policyProvider role.PolicyProvider,
 	ugcVisibility func() string,
 	driveFileRepo repository.DriveFileRepository,
@@ -469,6 +467,8 @@ func NewHandler(
 		entityPacker:    entityPacker,
 		policyProvider:  policyProvider,
 		ugcVisibilityFn: ugcVisibility,
+
+		noteFieldResolver: noteFieldResolver,
 
 		driveFileRepo:     driveFileRepo,
 		metaRepo:          metaRepo,
@@ -1430,10 +1430,10 @@ func (h *Handler) packReferencedNote(ctx context.Context, n *model.Note, viewer 
 }
 
 // packMany serializes a list of notes into NoteEntity objects.
-// driveFileRepoが設定されている場合、ファイル情報を解決してFilesに含める。
-// viewerがnon-nilの場合、myReactionなどのviewer依存フィールドも解決する。
+// noteFieldResolver がファイル情報を解決して Files に含める。viewer が non-nil
+// の場合、myReaction などの viewer 依存フィールドも解決する。
 //
-// Files / MyReaction / Channel の解決は entity.NoteFieldResolver に切り出して
+// Files / MyReaction / Poll の isVoted / Channel の解決は entity.NoteFieldResolver に切り出して
 // あり、他の PackNotes 利用 handler (antennas / users / pinned 等) と共通化
 // している (#426)。
 //
@@ -1466,53 +1466,10 @@ func (h *Handler) packManyWithoutHardMute(ctx context.Context, notes []*model.No
 	return out
 }
 
-// fieldResolver assembles the per-handler NoteFieldResolver from already-wired
-// repositories. Returns nil-safe (Apply is no-op when none of the repos are
-// configured)。
+// fieldResolver returns the shared NoteFieldResolver the handler was built
+// with. A nil resolver is a no-op (its methods accept a nil receiver).
 func (h *Handler) fieldResolver() *entity.NoteFieldResolver {
-	return entity.NewNoteFieldResolver(
-		h.entityPacker,
-		nilOrDriveFile(h.driveFileRepo),
-		nilOrDriveFolder(h.driveFolderRepo),
-		nilOrUser(h.userRepo),
-		nilOrNoteReaction(h.noteReactionRepo),
-		nilOrChannel(h.channelRepo),
-		h.idGen,
-	)
-}
-
-// nilOr* helpers preserve the「未配線時は interface も nil で渡す」契約。
-// 直接代入だと typed-nil が non-nil interface になり resolver の lookup nil
-// チェックを擦り抜けてしまうため。
-func nilOrDriveFile(r repository.DriveFileRepository) entity.DriveFileLookup {
-	if r == nil {
-		return nil
-	}
-	return r
-}
-func nilOrDriveFolder(r repository.DriveFolderRepository) entity.DriveFolderLookup {
-	if r == nil {
-		return nil
-	}
-	return r
-}
-func nilOrUser(r repository.UserRepository) entity.FileOwnerLookup {
-	if r == nil {
-		return nil
-	}
-	return r
-}
-func nilOrNoteReaction(r repository.NoteReactionRepository) entity.NoteReactionLookup {
-	if r == nil {
-		return nil
-	}
-	return r
-}
-func nilOrChannel(r repository.ChannelRepository) entity.ChannelLookup {
-	if r == nil {
-		return nil
-	}
-	return r
+	return h.noteFieldResolver
 }
 
 // PackForEmbed packs a note for the anonymous embed page (#2389).

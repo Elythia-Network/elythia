@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	corechannel "github.com/elythia-network/elythia/internal/core/channel"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -218,9 +219,7 @@ func TestShow_AttachmentEmbedsFolderAndUser(t *testing.T) {
 		AvatarDecorations: datatypes.JSON([]byte("[]")),
 	}
 
-	h.driveFileRepo = fileRepo
-	h.SetDriveFolderRepo(folderRepo)
-	h.SetUserRepo(userRepo)
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, folderRepo, userRepo, nil, nil, h.idGen)
 
 	text := "note with attachment"
 	noteRepo.Notes["n1"] = &model.Note{
@@ -276,7 +275,7 @@ func TestShow_AttachmentWithoutRepos_OmitsFolderUser(t *testing.T) {
 		URL:    fileURL,
 		Name:   "pic.png",
 	}
-	h.driveFileRepo = fileRepo
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, nil, nil, nil, nil, h.idGen)
 
 	text := "note with attachment"
 	noteRepo.Notes["n1"] = &model.Note{
@@ -392,7 +391,7 @@ func TestShow_MyReaction(t *testing.T) {
 
 	// リアクションリポジトリをセット
 	reactionRepo := testutil.NewMockNoteReactionRepository()
-	h.SetNoteReactionRepo(reactionRepo)
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, nil, nil, nil, reactionRepo, nil, h.idGen)
 
 	text := "test note"
 	noteRepo.Notes["note1"] = &model.Note{
@@ -441,7 +440,7 @@ func TestShow_Channel(t *testing.T) {
 
 	// チャンネルリポジトリをセット
 	channelRepo := testutil.NewMockChannelRepository()
-	h.SetChannelRepo(channelRepo)
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, nil, nil, nil, nil, channelRepo, h.idGen)
 
 	channelRepo.Channels["ch1"] = &model.Channel{
 		ID:                    "ch1",

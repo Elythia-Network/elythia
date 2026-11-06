@@ -346,6 +346,8 @@ var requiredDepChecks = []string{
 	"notes.noteHider", "notes.entityPacker", "notes.policyProvider", "notes.ugcVisibilityFn",
 	"notes.driveFileRepo", "notes.metaRepo", "notes.blockingRepo", "notes.mutingRepo",
 	"notes.renoteMutingRepo", "notes.channelMutingRepo", "notes.userFollowingRepo",
+	// #4044 (notes の handler が共通の resolver を受け取る)。
+	"notes.noteFieldResolver",
 	// ここから #3833 (連合の部品)。
 	"metadataFetcher.fetcher",
 	"deliverService.hostBlocker", "noteDeleteHook.userRepo", "noteDeleteHook.noteRepo",
@@ -488,7 +490,7 @@ var sharedComponentAllowed = map[string]string{
 // なく、実在する対象を名指しで要求する (docs/gates.md)。
 var requiredSharedChecks = []string{
 	"proxyService.allowlist",
-	"i.fieldRes", "chat.lites", "notifications.noteFieldResolver",
+	"i.fieldRes", "chat.lites", "notifications.noteFieldResolver", "notes.noteFieldResolver",
 	"followingService.userPacker", "pages.userPacker", "webPushNotePacker.files",
 }
 

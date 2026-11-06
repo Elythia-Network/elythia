@@ -23,8 +23,8 @@ import (
 // NoteFieldResolver に Packer が渡らないと、閲覧者のブラウザがリモートの
 // ファイルを直接取りに行く。ここでは渡した Packer で proxy が付くことを確かめる。
 //
-// 見る経路は notes/show (notes の handler と、その handler が作る resolver) と
-// users/notes (users の handler と、router が作る共有の resolver)。どちらも
+// 見る経路は notes/show (notes の handler) と users/notes (users の handler)。
+// resolver はどちらも router が作る共有のもの (#4044)。どちらも
 // 作者の avatarUrl (投稿の本体を包む側) と、引用した投稿の添付 (resolver の側) まで見る。
 func TestNewServer_NotePackersUseTheWiredPacker(t *testing.T) {
 	db := serverIntegrationDB
