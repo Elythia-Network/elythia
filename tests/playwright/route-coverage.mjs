@@ -141,12 +141,15 @@ function walkRoutes(array, prefix, out) {
  */
 
 /**
- * Collects the route declarations from the JSON report of `playwright test --list`.
+ * Collects the declarations from the JSON report of `playwright test --list`.
+ * The settings check (settings-coverage.mjs, #4056) passes its own annotation
+ * type; `route` then holds the declared preference key.
  *
  * @param {any} report the parsed JSON report
+ * @param {string} [type] the annotation type to collect
  * @returns {Declaration[]}
  */
-export function collectDeclarations(report) {
+export function collectDeclarations(report, type = ANNOTATION_TYPE) {
   if (report == null || !Array.isArray(report.suites)) throw new Error('the listing has no suites');
   /** @type {Map<string, Declaration>} */
   const seen = new Map();
@@ -156,7 +159,7 @@ export function collectDeclarations(report) {
       for (const t of spec.tests ?? []) {
         if (!Array.isArray(t.annotations)) throw new Error(`a test has no annotations field: ${spec.file}:${spec.line}`);
         for (const a of t.annotations) {
-          if (a.type !== ANNOTATION_TYPE) continue;
+          if (a.type !== type) continue;
           const d = {
             file: `tests/playwright/specs/${spec.file}`,
             line: spec.line,
@@ -323,7 +326,7 @@ export function report(result, out) {
  *
  * @returns {string[]}
  */
-function ignoredFiles() {
+export function ignoredFiles() {
   const out = execFileSync('git', ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', 'tests/playwright'], { cwd: repoRoot, encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 });
   return out.split('\0').filter((f) => f !== '');
 }
@@ -333,13 +336,13 @@ function ignoredFiles() {
  *
  * @returns {Set<string>}
  */
-function trackedSpecs() {
+export function trackedSpecs() {
   const out = execFileSync('git', ['ls-files', '-z', '--', 'tests/playwright/specs'], { cwd: repoRoot, encoding: 'utf-8' });
   return new Set(out.split('\0').filter((f) => f !== ''));
 }
 
 /** Runs `playwright test --list --reporter=json` over every spec and parses the report. */
-function listTests() {
+export function listTests() {
   const env = { ...process.env };
   // shard で絞った一覧にしない。`--list` は test.only があっても全テストを並べるが、実行では
   // only の 1 本しか流れない。--forbid-only で一覧ごと落とす (exit 2)

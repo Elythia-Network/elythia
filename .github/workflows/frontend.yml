@@ -184,6 +184,10 @@ jobs:
         working-directory: .
         run: make playwright-route-check
 
+      - name: Settings coverage
+        working-directory: .
+        run: make playwright-settings-check
+
       - name: Verify locales
         run: pnpm --filter i18n run verify
 

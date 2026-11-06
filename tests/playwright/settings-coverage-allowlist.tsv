@@ -1,0 +1,3 @@
+# 設定の表に行を作らない端末の設定のキー (#4056)。`<キー>\t<どの経路でそうなるか>`。
+# 書き方は docs/playwright.md の「設定の表」。
+reportError	other.vue の部品 (MkSwitch) がコメントアウトされていて画面に無く、frontend のどこからも値を読まない。prefer.model の宣言だけが残っている

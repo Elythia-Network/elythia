@@ -20,7 +20,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard、Python delivery artifact test、A/B harness helper test、ベンチのデータの生成器のテストの集約。どれか 1 つでも落ちれば赤 | `make test` / `python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v` / `bash tests/bench/ab/test_run_helpers.sh` / `python3 -m unittest discover -s tests/bench/data -p 'test_*.py' -v` |
-| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、ルートと Playwright の spec の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
+| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、ルートと Playwright の spec の対応付け、設定のページの `prefer.model` のキーと Playwright の設定の表の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -111,7 +111,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
-| `spec (Elythia 1/7)` 〜 `7/7` | Playwright | ブラウザからの統合互換 (370 spec ファイル) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
+| `spec (Elythia 1/7)` 〜 `7/7` | Playwright | ブラウザからの統合互換 (388 spec ファイル) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
@@ -353,6 +353,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
   check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
   ja-JP の語が en-US にもあるかの検査とその self test (#4047)、
   全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035。`tests/playwright` で `npm ci` してから回す)、
+  設定のページが `prefer.model` で扱う端末の設定のキーが、Playwright の設定の表で確かめられているかの検査とその self test (`make playwright-settings-check`、#4056)、
   locale の検証、misskey-js の API レポート、`emoji-regex-check` (#3324) のいずれか
 - `frontend-test`: 本番設定のビルド、frontend の vitest、misskey-js のテストのいずれか
 
@@ -667,10 +668,10 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
   PR トリガーへ移行済み (#2291)。
 - **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`。所要時間で割り振る、#4026。#4043 で 4 から 6 に、#4049 で 7 にした)。`fail-fast: false` で 1 つが落ちても
   他は完走する。
-- **1 スタックあたりは直列でしか回せない。** 370 spec ファイル中 185 が共有の
+- **1 スタックあたりは直列でしか回せない。** 388 spec ファイル中 185 が共有の
   root (alice) で**ブラウザでサインインした状態**を使い (`uiSigninAsRoot` を呼ぶ 184 と、フォームから入る
-  `signin.spec.ts`。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す)、さらに 40 が
-  サインインせず root の token で API を叩く (`root.json` を読み、root でサインインしないもの。数え方は
+  `signin.spec.ts`。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す)、さらに 45 が
+  root ではサインインせずに root の token で API を叩く (`root.json` を読み、root でサインインしないもの。数え方は
   `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。
   instance meta も全 spec が共有する。Playwright は
   ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
@@ -777,6 +778,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
     ja-JP の語が en-US にもあるかの検査とその self test (#4047)、
     `tests/playwright` の `npm ci` → 全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035)、
+    設定のページの `prefer.model` のキーが Playwright の設定の表で確かめられているかの検査とその self test (`make playwright-settings-check`、#4056)、
     locale の検証、misskey-js の API レポート、`make emoji-regex-check` (#3324)。同梱サンプル入りの統合バイナリの build (#2495) は、
     Node が要らないので毎回走る required の `build` job に置いた (Go だけの変更で
     `cmd/elythia` 側の配線が崩れても拾えるように)

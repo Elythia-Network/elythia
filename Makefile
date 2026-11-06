@@ -81,6 +81,8 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	cd frontend && node --test scripts/check-locale-coverage.test.mjs && node scripts/check-locale-coverage.mjs
 	# 足したルートに spec の宣言があるか (#4035)。tests/playwright の node_modules が要る
 	$(MAKE) playwright-route-check
+	# 設定のページが prefer.model で扱う端末の設定のキーに、設定の表の行があるか (#4056)
+	$(MAKE) playwright-settings-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
 	# ここに無いと**手元で緑でも CI が落ちる**。#2903 で実際に踏んだ (デッドコードを
 	# 消したときの空行が @stylistic/no-multiple-empty-lines で落ちた)。個別ファイルに
@@ -1241,12 +1243,16 @@ PLAYWRIGHT_ARGS ?=
 # `--shard` ではなくこちらを使う。`--shard` はファイルの並び順で切るので偏る。
 PLAYWRIGHT_SHARD ?=
 PLAYWRIGHT_SHARD_ENV = $(if $(PLAYWRIGHT_SHARD),-e PLAYWRIGHT_SHARD=$(PLAYWRIGHT_SHARD))
+# PW_SETTINGS_MUTATION=1 で、設定の表の各行を、設定を変えずに効き目だけ確かめる
+# (効き目の確かめが落ちることを期待する変異の確かめ。fixtures/settings_table.ts、#4056)
+PW_SETTINGS_MUTATION ?=
+PLAYWRIGHT_MUTATION_ENV = $(if $(PW_SETTINGS_MUTATION),-e PW_SETTINGS_MUTATION=$(PW_SETTINGS_MUTATION))
 
 playwright-test: ## Playwright spec を実行 (Elythia backend、PLAYWRIGHT_ARGS で引数追加)
 	# `--build` を付けて runner image を rebuild check させる。package.json
 	# 更新時に node_modules が古いままにならないよう、毎回 build context を
 	# 確認する (cache hit なら ms 単位で済むので overhead 無視可)。
-	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build $(PLAYWRIGHT_SHARD_ENV) playwright-runner test $(PLAYWRIGHT_ARGS)
+	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build $(PLAYWRIGHT_SHARD_ENV) $(PLAYWRIGHT_MUTATION_ENV) playwright-runner test $(PLAYWRIGHT_ARGS)
 
 playwright-update-snapshots: ## Playwright の見た目の差分の基準画像を作り直す (PLAYWRIGHT_ARGS で spec を絞る)
 	# toHaveScreenshot の基準画像は runner の container (Linux の chromium) で
@@ -1264,6 +1270,13 @@ playwright-route-check: ## frontend の全ルートが、どこかの Playwright
 	@test -f tests/playwright/node_modules/@playwright/test/cli.js || { echo "tests/playwright の node_modules が無い: cd tests/playwright && npm ci" >&2; exit 1; }
 	node --test tests/playwright/route-coverage.test.mjs
 	node tests/playwright/route-coverage.mjs
+
+.PHONY: playwright-settings-check
+playwright-settings-check: ## 設定のページが prefer.model で扱う端末の設定のキーが、どれも設定の表 (Playwright) の行で確かめられているか検査 (#4056)
+	# playwright-route-check と同じく、spec の一覧は playwright 自身に解かせる
+	@test -f tests/playwright/node_modules/@playwright/test/cli.js || { echo "tests/playwright の node_modules が無い: cd tests/playwright && npm ci" >&2; exit 1; }
+	node --test tests/playwright/settings-coverage.test.mjs
+	node tests/playwright/settings-coverage.mjs
 
 playwright-down: ## Playwright スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test down -v
