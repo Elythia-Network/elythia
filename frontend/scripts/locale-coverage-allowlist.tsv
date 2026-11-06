@@ -1,0 +1,11 @@
+# ja-JP にあって en-US に無くてよい語 (#4047)。<キー>\t<理由> の形で書く。
+# 本家の語で、本家の en-US にもまだ無いもの (Crowdin の翻訳待ち) だけを入れる。
+# 書き直すときは frontend/ で次を流す (手で足さない):
+#   node scripts/check-locale-coverage.mjs --write-allowlist <本家の locales/>
+selectClip	本家の en-US に無い (Crowdin の翻訳待ち)
+cannotSelectSensitiveMedia	本家の en-US に無い (Crowdin の翻訳待ち)
+cannotSelectSensitiveMediaDescription	本家の en-US に無い (Crowdin の翻訳待ち)
+_announcement.autoArchiveAt	本家の en-US に無い (Crowdin の翻訳待ち)
+_announcement.autoArchiveAtDescription	本家の en-US に無い (Crowdin の翻訳待ち)
+_announcement.autoArchiveAtMustBeInFuture	本家の en-US に無い (Crowdin の翻訳待ち)
+_deck.showHowToUse	本家の en-US に無い (Crowdin の翻訳待ち)
