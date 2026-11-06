@@ -11,7 +11,7 @@ import (
 
 // resolveFiles は内部ヘルパーで package 内テストから直接叩けるので、
 // 各分岐を個別にカバーする:
-//  1. driveFileRepo == nil → 早期 return
+//  1. resolver が nil → 何もしない
 //  2. ノート群に fileIDs が無い → 早期 return
 //  3. 正常経路: DriveFile が見つかって packed に入る
 func TestResolveFiles_NilRepo(t *testing.T) {
@@ -20,13 +20,13 @@ func TestResolveFiles_NilRepo(t *testing.T) {
 		{FileIDs: model.StringArray{"f1"}},
 	}
 	h.fieldResolver().ResolveFiles(notes)
-	// driveFileRepo 未設定なので Files は埋まらない
+	// resolver が渡されていないので Files は埋まらない
 	assert.Nil(t, notes[0].Files)
 }
 
 func TestResolveFiles_NoFileIDs(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.driveFileRepo = testutil.NewMockDriveFileRepository()
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, testutil.NewMockDriveFileRepository(), nil, nil, nil, nil, h.idGen)
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{}},
 	}
@@ -40,7 +40,7 @@ func TestResolveFiles_Populates(t *testing.T) {
 	alice := "alice"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "hello.png", Type: "image/png", URL: "https://example.com/f1"}
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "world.png", Type: "image/png", URL: "https://example.com/f2"}
-	h.driveFileRepo = fileRepo
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, nil, nil, nil, nil, h.idGen)
 
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{"f1", "f2"}},
@@ -62,7 +62,7 @@ func TestResolveFiles_EmbeddedRenoteAndReply(t *testing.T) {
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "outer.png", Type: "image/png", URL: "https://example.com/f1"}
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "renote.png", Type: "image/png", URL: "https://example.com/f2"}
 	fileRepo.Files["f3"] = &model.DriveFile{ID: "f3", UserID: &alice, Name: "reply.png", Type: "image/png", URL: "https://example.com/f3"}
-	h.driveFileRepo = fileRepo
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, nil, nil, nil, nil, h.idGen)
 
 	notes := []entity.NoteEntity{{
 		FileIDs: model.StringArray{"f1"},
@@ -83,7 +83,7 @@ func TestResolveFiles_EmbeddedRenoteOnly(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	alice := "alice"
 	fileRepo.Files["f2"] = &model.DriveFile{ID: "f2", UserID: &alice, Name: "renote.png", Type: "image/png", URL: "https://example.com/f2"}
-	h.driveFileRepo = fileRepo
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, nil, nil, nil, nil, h.idGen)
 
 	notes := []entity.NoteEntity{{
 		Renote: &entity.NoteEntity{FileIDs: model.StringArray{"f2"}},
@@ -98,7 +98,7 @@ func TestResolveFiles_UnknownFileIDsIgnored(t *testing.T) {
 	fileRepo := testutil.NewMockDriveFileRepository()
 	alice := "alice"
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &alice, Name: "hello.png", Type: "image/png", URL: "https://example.com/f1"}
-	h.driveFileRepo = fileRepo
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, fileRepo, nil, nil, nil, nil, h.idGen)
 
 	notes := []entity.NoteEntity{
 		{FileIDs: model.StringArray{"f1", "missing"}},

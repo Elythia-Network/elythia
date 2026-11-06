@@ -1718,6 +1718,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 下で setter を呼び、recordCriticalWiring が起動時に入れ忘れを見ていた。
 	//   - noteHider と entityPacker: 投稿を返すときに、閲覧者の見てはいけない中身を
 	//     隠し、メディアの URL をプロキシへ書き換える (#3786 / #3790)
+	//   - noteFieldResolver: 上で作った共通の resolver。添付ファイル・リアクション・
+	//     投票・チャンネルを埋める。handler の中で作り直すと、ここで付けた lookup が
+	//     抜ける (#4044)
 	//   - roleService: LocalTimeline / GlobalTimeline / HybridTimeline で
 	//     ltlAvailable / gtlAvailable role policy を gate する (#1026)。匿名 viewer に
 	//     対しては GetUserPolicies("") が base policies を返すので、admin が
@@ -1740,7 +1743,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	//   - followingRepo: HTL の「返信先が followers 限定の投稿」ガード (upstream
 	//     timeline.ts の noteFilter)
 	notesHandler := notes.NewHandler(noteRepo, noteCreateService, noteDeleteService, noteQueryService, timelineService, reactionService, pollService, searchService, idGen,
-		noteHider, entityPacker, roleService, func() string { return metaUGCVisibility(metaRepo) },
+		noteHider, entityPacker, noteFieldResolver, roleService, func() string { return metaUGCVisibility(metaRepo) },
 		driveFileRepo, metaRepo, blockingRepo, mutingRepo, renoteMutingRepo, channelMutingRepo, followingRepo)
 	notesHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	notesHandler.SetPiningRepo(piningRepo)
@@ -1757,7 +1760,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	}
 	notesHandler.SetPollRepo(pollRepo)                     // #1538: polls/recommendation
 	notesHandler.SetThreadMutingRepo(noteThreadMutingRepo) // #1538: thread-muting write
-	notesHandler.SetNoteReactionRepo(reactionRepo)
 	notesHandler.SetChannelRepo(channelRepo)
 	// home timeline で follow 中 channel の note を含める (#1686)。
 	notesHandler.SetChannelFollowingRepo(channelFollowingRepo)
@@ -1766,7 +1768,6 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetInstanceRepo(instanceRepo)
 	notesHandler.SetEmojiRepo(emojiRepo)
 	notesHandler.SetReactionReader(reactionCountWriter)
-	notesHandler.SetDriveFolderRepo(driveFolderRepo)
 	notesHandler.SetUserRepo(userRepo)
 	notesHandler.SetModeratorChecker(roleService) // #1538: moderator note delete
 	notesHandler.SetUserListRepo(userListRepo)

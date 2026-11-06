@@ -7,14 +7,12 @@
 // 結果が出て、再読み込みの後も投票済みであることを確かめる (#4043)。
 //
 // 再読み込みの後の表示は、ノートの詳細が notes/show で取り直した poll の isVoted
-// から決まる (MkPoll)。Elythia の notes/show は今これを埋めない (notes の handler の
-// fieldResolver が投票の lookup を付けていない) ので、その部分だけを別のテストに
-// 分け、Elythia では既知のバグの形 (#4044) だけを確かめて抜ける。直したらその分岐を消す。
+// から決まる (MkPoll)。Elythia の notes/show は以前これを埋めなかった (#4044) ので、
+// 画面を開く前に API の値も確かめる。
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { type Principal, randomUsername, signupUser } from '../../../fixtures/auth';
-import { isTsBackend } from '../../../fixtures/backend';
 import { showNoteRaw } from '../../../fixtures/notes';
 import { uiSigninAs } from '../../../fixtures/ui_auth';
 import { clickByTestId, clickWhenReady } from '../../../fixtures/ui_click';
@@ -73,16 +71,7 @@ test.describe('UI: note poll vote', () => {
     expect(vote.status()).toBe(204);
 
     const shown = await (await showNoteRaw(request, user.token, noteId)).json();
-    const isVoted = shown.poll.choices.map((c: { isVoted: boolean }) => c.isVoted);
-    if (!isTsBackend) {
-      // Elythia の notes/show は poll の isVoted を埋めない (#4044)。test.fail にすると
-      // どこで落ちても合格になり、前の段 (投票の 204 など) の回帰を見逃すので、既知の
-      // 形だけを確かめて抜ける。直ったらここで落ちるので、この分岐を消す
-      expect(isVoted, 'the known bug of #4044; remove this branch when it is fixed').toEqual([false, false]);
-      test.info().annotations.push({ type: 'known-bug', description: '#4044' });
-      return;
-    }
-    expect(isVoted).toEqual([false, true]);
+    expect(shown.poll.choices.map((c: { isVoted: boolean }) => c.isVoted)).toEqual([false, true]);
 
     await uiSigninAs(page, request, baseURL!, user);
     await gotoRoute(page, baseURL!, `/notes/${noteId}`);

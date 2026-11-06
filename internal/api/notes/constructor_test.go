@@ -38,7 +38,7 @@ func newHandlerNilDeps(
 ) *Handler {
 	return NewHandler(noteRepo, createService, deleteService, queryService, timelineService,
 		reactionService, pollService, searchService, idGen,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil)
 }
 
@@ -48,6 +48,7 @@ func newHandlerNilDeps(
 func TestNewHandlerKeepsDependencies(t *testing.T) {
 	hider := notehide.NewHider(nil, nil)
 	packer := entity.NewPacker(nil, entity.PackerDeps{})
+	resolver := entity.NewNoteFieldResolver(packer, nil, nil, nil, nil, nil, nil)
 	policies := &draftStubPolicyProvider{}
 	files := testutil.NewMockDriveFileRepository()
 	meta := testutil.NewMockMetaRepository()
@@ -58,11 +59,15 @@ func TestNewHandlerKeepsDependencies(t *testing.T) {
 	following := testutil.NewMockFollowingRepository()
 
 	h := NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		hider, packer, policies, func() string { return "local" },
+		hider, packer, resolver, policies, func() string { return "local" },
 		files, meta, blocking, muting, renoteMuting, channelMuting, following)
 
 	assert.Same(t, hider, h.noteHider)
 	assert.Same(t, packer, h.entityPacker)
+	// 投稿を包んだ後に使う resolver も、受け取ったものそのもの。作り直すと、router が
+	// 共通の resolver にだけ付けた lookup (投票など) が抜ける (#4044)。
+	assert.Same(t, resolver, h.noteFieldResolver)
+	assert.Same(t, resolver, h.fieldResolver())
 	assert.Same(t, policies, h.policyProvider)
 	require.NotNil(t, h.ugcVisibilityFn)
 	assert.Equal(t, "local", h.ugcVisibilityNow())

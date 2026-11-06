@@ -16,7 +16,7 @@ import (
 func TestResolveViewerFields_MyReactionEmbedded(t *testing.T) {
 	h, _ := newTestHandler(t)
 	reactionRepo := testutil.NewMockNoteReactionRepository()
-	h.SetNoteReactionRepo(reactionRepo)
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, nil, nil, nil, reactionRepo, nil, h.idGen)
 
 	// 外側 / renote / reply それぞれに別の id を付け、全てにリアクションを登録
 	reactionRepo.Reactions["outer"] = &model.NoteReaction{ID: "outer", UserID: "v1", NoteID: "n1", Reaction: "👍"}
@@ -47,7 +47,7 @@ func TestResolveViewerFields_MyReactionEmbedded(t *testing.T) {
 func TestResolveViewerFields_ChannelEmbedded(t *testing.T) {
 	h, _ := newTestHandler(t)
 	channelRepo := testutil.NewMockChannelRepository()
-	h.SetChannelRepo(channelRepo)
+	h.noteFieldResolver = entity.NewNoteFieldResolver(h.entityPacker, nil, nil, nil, nil, channelRepo, h.idGen)
 	channelRepo.Channels["ch1"] = &model.Channel{ID: "ch1", Name: "outer-ch"}
 	channelRepo.Channels["ch2"] = &model.Channel{ID: "ch2", Name: "renote-ch"}
 
