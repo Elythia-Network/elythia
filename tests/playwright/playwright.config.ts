@@ -87,7 +87,7 @@ export default defineConfig({
     // i18n key 解決に使うので、これで全 spec の text 前提が安定する。
     locale: 'en-US',
   },
-  // **1 スタックに対しては直列で回すしかない。** 364 spec のうち 185 が共有の
+  // **1 スタックに対しては直列で回すしかない。** 365 spec のうち 185 が共有の
   // root (alice) でブラウザでサインインした状態を使い (`uiSigninAsRoot` を呼ぶ 184 と
   // signin.spec.ts。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す)、
   // さらに 39 がサインインせず root の token で API を叩く (`root.json` を読み、

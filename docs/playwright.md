@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 364 ファイル
+`tests/playwright/specs/` にあり、現在 365 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -80,7 +80,7 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/7)` 〜 `7/7`。
 
-**1 スタックあたりは直列でしか回せない。** 364 spec のうち 185 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 365 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接
 駆動する。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す。フォームから入る spec はほかにもあるが、
 自分で作った利用者で入るので数えない)、さらに 39 がサインインせず root の token で API を叩く (`root.json` を

@@ -33,7 +33,7 @@ specs/
 ├── upstream/       # upstream Misskey にも存在する機能の検証
 │   ├── ui/         # ブラウザを駆動する (243 spec)
 │   └── api/        # API の shape / 挙動 (96 spec)
-└── elythia/        # Elythia 独自機能の検証と、helper のガード (25 件)
+└── elythia/        # Elythia 独自機能の検証と、helper のガード (26 件)
 ```
 
 ### ui と api の境界
@@ -142,8 +142,8 @@ tests/playwright/
 ├── specs/
 │   ├── upstream/ui/            # ブラウザを駆動する (243 spec)
 │   ├── upstream/api/           # API の shape / 挙動 (96 spec)
-│   └── elythia/                # Elythia 独自と helper のガード (25 件)
-└── fixtures/                   # 23 ファイル
+│   └── elythia/                # Elythia 独自と helper のガード (26 件)
+└── fixtures/                   # 24 ファイル
     ├── api.ts                  # POST /api/<endpoint> ラッパ
     ├── auth.ts                 # signup / signin helper
     ├── ui_auth.ts              # ブラウザのサインイン (root は保存した state を読み込む)
@@ -154,7 +154,7 @@ tests/playwright/
 
 ## 並列度
 
-**1 スタックに対しては直列で回すしかない** (`workers: 1`)。364 spec のうち 185 が
+**1 スタックに対しては直列で回すしかない** (`workers: 1`)。365 spec のうち 185 が
 共有の root (alice) で**ブラウザでサインインした状態**を使い (helper 経由が 184 で、
 `upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する。数え方は
 `grep -rl 'uiSigninAsRoot' specs --include='*.spec.ts' | wc -l` に 1 を足す)、
