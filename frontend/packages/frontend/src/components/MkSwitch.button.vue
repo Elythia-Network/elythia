@@ -12,6 +12,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		[$style.buttonDisabled]: props.disabled
 	}"
 	data-testid="switch-toggle"
+	:data-checked="isChecked"
 	@click.prevent.stop="toggle"
 >
 	<div :class="{ [$style.knob]: true, [$style.knobChecked]: checked }"></div>
@@ -19,7 +20,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { toRefs } from 'vue';
+import { computed, toRefs, unref } from 'vue';
 import type { Ref } from 'vue';
 import { i18n } from '@/i18n.js';
 
@@ -35,6 +36,11 @@ const emit = defineEmits<{
 }>();
 
 const checked = toRefs(props).checked;
+// オンかオフかを、ハッシュでない属性で出す (Playwright の設定の表が読む、#4056)。
+// role="switch" と aria-checked は使わない。MkMenu の menuitemcheckbox の中に入れ子になり、
+// 隣の非表示の checkbox と合わせて、支援技術から部品が 2 つに見えるため。
+// checked は値か Ref のどちらでも来るので、真偽値にそろえる
+const isChecked = computed(() => unref(checked.value) === true);
 const toggle = () => {
 	emit('toggle');
 };

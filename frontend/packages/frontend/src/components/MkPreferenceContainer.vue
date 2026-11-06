@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div :class="$style.root" @contextmenu.prevent.stop="showMenu($event, true)">
+<div :class="$style.root" :data-pref-key="k" @contextmenu.prevent.stop="showMenu($event, true)">
 	<div :class="$style.body">
 		<slot></slot>
 	</div>
