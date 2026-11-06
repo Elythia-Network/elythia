@@ -76,6 +76,9 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# Elythia が書いたファイルは misskey-js を直接 import しない (#4028)。frontend の
 	# eslint は src/ と public/loader/ しか見ないので、test/ も含めて別の script で検査する
 	cd frontend && node --test scripts/check-elythia-imports.test.mjs && node scripts/check-elythia-imports.mjs
+	# ja-JP の語は en-US にもある (#4047)。無い語は英語の UI でも日本語のまま出る。
+	# 例外は scripts/locale-coverage-allowlist.tsv (本家の翻訳待ちの語だけ)
+	cd frontend && node --test scripts/check-locale-coverage.test.mjs && node scripts/check-locale-coverage.mjs
 	# 足したルートに spec の宣言があるか (#4035)。tests/playwright の node_modules が要る
 	$(MAKE) playwright-route-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、

@@ -86,9 +86,9 @@ commit する手順は無い。
 
 ### 手元での確認（CI `frontend` workflow 相当）
 
-CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、ルートと Playwright の spec の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
+CI では `.github/workflows/frontend.yml` の集約 job `frontend` が required check になっている。中身は `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、en-US の語の抜け、ルートと Playwright の spec の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) で、詳細は [ci.md](ci.md) にある。
 
-手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + Elythia のファイルの import の検査 (`check-elythia-imports.mjs` とその self test) + 全ルートの Playwright の spec への対応付け (`make playwright-route-check`。`tests/playwright` で `npm ci` 済みであること) + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324 / #4028 / #4035)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
+手元では `make frontend-check` (target。CI の job ではない) が**型 (`vue-tsc`) + `frontend/` のソースを読むゲート + `emoji-regex-check` + Elythia のファイルの import の検査 (`check-elythia-imports.mjs` とその self test) + en-US の語の抜けの検査 (`check-locale-coverage.mjs` とその self test) + 全ルートの Playwright の spec への対応付け (`make playwright-route-check`。`tests/playwright` で `npm ci` 済みであること) + frontend と frontend-embed の eslint** までをまとめて回す (#2892 / #2906 / #3324 / #4028 / #4035 / #4047)。vitest は `make frontend-test`。frontend と frontend-embed 以外の workspace の eslint や check-dts などは、`frontend.yml` の各 step を `frontend/` で叩く。
 
 `make plugins-all` は workspace のビルドより先に回す。生成物の
 `server-plugins.generated.ts` は git で追跡していない (#3379) ので、無いと
@@ -111,6 +111,7 @@ make frontend-test
 | 規約 | 詳細 |
 |---|---|
 | i18n | パラメータ付き文字列は `i18n.tsx._key.func({ n })`。`i18n.t()` は `@deprecated`（`ts` / `tsx` 直接参照のほうが Vue のキャッシュ効率が良い） |
+| ロケール | 文言を `locales/ja-JP.yml` に足したら、`locales/en-US.yml` にも英訳を足す。ロケールは ja-JP を土台に重ねるので、en-US に無い語は英語の UI でも日本語のまま出る。`frontend/scripts/check-locale-coverage.mjs` が落とす (#4047)。例外の `scripts/locale-coverage-allowlist.tsv` は本家の翻訳待ちの語だけで、本家への追従で増えたら `node scripts/check-locale-coverage.mjs --write-allowlist <本家の locales/>` で書き直す (Elythia の語が抜けているときと、Elythia 自身の `locales/` を渡したときは、書かずに落ちる)。`_mkgo` で始まる語と、検査が目印にしている Elythia の語を許可リストに書くと、検査が落ちる |
 | import | 型は top-level の `import type { Foo } from '...'`。値 import 内の `type Foo` は eslint `import/consistent-type-specifier-style` で落ちる |
 | vitest | `vitest.config.unit.ts` の include は `test/unit/**/*.test.ts` のみ。**`src/` 直下の `.test.ts` は CI でも手元でも実行されない** |
 

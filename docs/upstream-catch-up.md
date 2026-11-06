@@ -299,6 +299,17 @@ emoji-data か mfm-js の版が変わったときの mfm-js の期待値の作�
 
 検査ツールは、解析器の書き出す形 (`emojiDataVersion` / `emojiMfmJsVersion` / `emojiRegex` の宣言が 1 つずつ、`emojiRegex` は `u` を付けない sticky (`y`) の `RegExp`) と、正規表現が使う構文 (`?` だけの量指定・サロゲートペア・決まった位置の否定の先読み) を前提にしている。前提が崩れると変換の時点で落ちるので、その場合は検査ツールを直す。
 
+### 本家の版を上げた後に必須: en-US の語の抜けの許可リスト
+
+`frontend/scripts/check-locale-coverage.mjs` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check`) は、ja-JP の語がすべて en-US にもあることを求める (#4047)。例外の `frontend/scripts/locale-coverage-allowlist.tsv` には、本家の語で、本家の en-US にもまだ無いもの (Crowdin の翻訳待ち) だけを入れている。`locales/` を取り込むと、本家の翻訳待ちの語が増えて落ちることと、本家で英訳された語が許可リストに残って落ちることがある。どちらも許可リストを書き直す。
+
+```bash
+make upstream-fetch   # .cache/misskey/<版> が無ければ
+cd frontend && node scripts/check-locale-coverage.mjs --write-allowlist ../.cache/misskey/$(cat ../UPSTREAM_MISSKEY_VERSION)/locales
+```
+
+本家の ja-JP に無い語 (Elythia の語) と、本家の en-US にある語が抜けていると、許可リストを書かずに落ちる。前者は en-US に英訳を足し、後者は本家の en-US から写す。
+
 ### 本家の版を上げた後に必須: divergence doc の件数
 
 `golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「Elythia 独自カラム」に転じる**ので `docs/divergence/db.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。

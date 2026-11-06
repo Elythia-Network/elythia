@@ -6,7 +6,7 @@
 #
 # - frontend-lint: 10 workspace の eslint、typecheck (frontend / sw / misskey-js / elythia-js)、
 #   check-dts、SPDX ヘッダー、Elythia のファイルの import (#4028)、ルートと Playwright の spec の対応付け (#4035)、
-#   locale の検証、misskey-js の API レポート
+#   en-US の語の抜け (#4047)、locale の検証、misskey-js の API レポート
 # - frontend-test: 本番設定でのビルド、frontend の vitest、misskey-js のテスト
 # - frontend: 上の 2 つを集約する。**required check はこの名前だけ** (`test` と
 #   同じ形。job を足しても branch protection を触らずに済む、#3379)
@@ -164,6 +164,13 @@ jobs:
       # Elythia が書いたファイルは misskey-js を直接 import しない (#4028)
       - name: Elythia imports
         run: node scripts/check-elythia-imports.mjs
+
+      - name: check-locale-coverage self test
+        run: node --test scripts/check-locale-coverage.test.mjs
+
+      # ja-JP の語は en-US にもある (#4047)。無い語は英語の UI でも日本語のまま出る
+      - name: en-US locale coverage
+        run: node scripts/check-locale-coverage.mjs
 
       # frontend の全ルートが、どこかの Playwright spec に対応付いているか (#4035)。
       # spec の一覧は playwright の `test --list` に解かせるので、tests/playwright の
