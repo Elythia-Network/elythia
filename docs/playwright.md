@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 370 ファイル
+`tests/playwright/specs/` にあり、現在 388 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -80,10 +80,10 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/7)` 〜 `7/7`。
 
-**1 スタックあたりは直列でしか回せない。** 370 spec のうち 185 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 388 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接
 駆動する。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す。フォームから入る spec はほかにもあるが、
-自分で作った利用者で入るので数えない)、さらに 40 がサインインせず root の token で API を叩く (`root.json` を
+自分で作った利用者で入るので数えない)、さらに 45 が root ではサインインせずに root の token で API を叩く (`root.json` を
 読み、root でサインインしないもの。数え方は `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
@@ -478,6 +478,64 @@ frontend の全ルートを、表 (`fixtures/route_table.ts`) 1 つで次の 2 �
   落ちなかった。0.02 では落ちる (#4054 で変異させて確かめた)
 
 **揺れたら、しきい値を上げて黙らせない。** 何が変わったかを差分の画像で見て、上の決まりに足す。
+
+## 設定の表 (#4056)
+
+設定の画面で変えた値が、保存され、再読み込みの後も残り、実際に効くことを、1 行 1 設定の表で確かめる。
+spec は `specs/elythia/ui/settings/`、helper は `fixtures/settings_table.ts`。端末の設定 (prefer) は
+`prefs_*.spec.ts`、アカウントの設定 (`i/update`) は `account_*.spec.ts`。
+
+1 行は次の 4 段を確かめる (`runPrefRow` / `runAccountRow`)。
+
+1. 設定の画面で部品を操作して値を変える。端末の設定の部品は、`MkPreferenceContainer` の `data-pref-key` で取る
+   (#4056 で足した)。容器の外にあるものは文言で取る (`labeledSwitch` など)
+2. 保存: 端末の設定は localStorage の `preferences` を、アプリと同じ順 (アカウント・サーバー・端末) で読む。
+   アカウントの設定は `i` で読み直す
+3. 再読み込みの後も、部品がその値を出している (スイッチは `data-checked`。#4056 で `MkSwitch` に足した)。
+   範囲の部品 (MkRange) は値を出さないので、保存された値で見る (`numberOfPageCache`・`deck.columnGap`・
+   `sound.masterVolume`・`pollingInterval`)
+4. 効き目。多くは `prefer.s` (リアクティブでない) で読まれ、次に描画したときに値を拾うので、再読み込みの後に見る
+
+**行ごとに新しい利用者と、空の端末の設定から始める。** サインインはフォームを通さず、globalSetup が保存した
+root の状態の `account` を差し替えて読み込む (`signinWithState`)。root の端末の設定と IndexedDB は持ち込まない。
+アカウントの設定も行ごとの利用者に残るので、片付けは要らない。
+
+**効き目を確かめられない設定は、理由を書いて省く** (`effect: { skip: '<理由>' }`)。音・触覚・タッチ操作・時刻・
+ブラウザの API・連合の相手に依存するもの。保存と再読み込みまでは確かめる。
+
+**既知の不具合の行は、効き目が落ちることを期待する** (`knownBug: '#<issue>'`)。保存・再読み込み・表示までは
+普通に確かめ、効き目だけが、不具合を示す主張で落ちることを求める。その主張のメッセージには issue の番号を
+入れ (`'#4057: ...'`)、番号を含まない失敗 (前提の API の失敗、要素の待ちの時間切れ) は、そのまま行を落とす
+(行全体を `test.fail()` にすると、別の理由の失敗まで飲み込む)。直すと効き目が通り、「knownBug を外す」と言って落ちる。
+
+**TS の backend の run では流さない。** 部品を Elythia の frontend で足した `data-pref-key` と `data-checked` で
+取るため (本家の frontend には無い)。
+
+**効き目の確かめが空振りしていないかを、変異で確かめる。** `PW_SETTINGS_MUTATION=1` で流すと、設定を変える操作
+だけを省き (ページの移動と再読み込みは同じ順で行う)、効き目の確かめが落ちることを期待する。通ってしまう行は、
+既定の値でも通る (何も確かめていない) ことになる。操作の時間切れ (`TimeoutError`) で落ちたものは数えない
+(どんな理由でも落ちうるので、確かめている違いで落ちたことにならない)。要素を待つ主張の時間切れ
+(`toBeVisible` など) は主張の失敗として数えるので、効き目の手前の前提は、通常の流れで確かめられていることを
+頼りにしている。要求やページを待つ確かめは `expectHappens` で主張の失敗にする。前提の操作 (データを作る、別の設定を
+変える) は行の `setup` に置き、変異でも省かれないようにする。既知の不具合の行は、変異では流さない。
+**変異の確かめは CI では回していない。** 行を足したときと、効き目の確かめが頼る frontend の部品を変えたときに、
+手元で流す。
+
+```bash
+make playwright-test PW_SETTINGS_MUTATION=1 PLAYWRIGHT_ARGS="specs/elythia/ui/settings/ --retries=0"
+```
+
+#4056 で、これで見つけた空振りは 4 行あった (投稿フォームを閉じても公開範囲は下書きとして残る、
+ノートの描画の省略が付く要素を取り違えていた、登録した利用者は `autoAcceptFollowed` がオンから始まるのに
+オンにする行にしていた、時計を進めたときのストリーミングのつなぎ直しの穴埋めで、取得の頻度の違いを
+見分けられなかった)。最後のものは、効き目を省く行にした。
+
+**抜けを落とすゲート** (`make playwright-settings-check`、frontend-check と CI の `frontend`): 設定のページ
+(`pages/settings/*.vue`) の `<script setup>` の `prefer.model('<キー>')` を TypeScript の構文木で集め、どのキーにも
+`coversPrefs('<キー>')` を付けた行があるかを見る。`prefer.commit` で変えるキー (テーマ、メニュー、ステータスバー、
+パレットの一覧など) は対象にしていない。行を作らないキーは `settings-coverage-allowlist.tsv` に理由を書く。
+宣言は `playwright test --list` に解かせる (ルートの対応付けと同じ)。拾えたキーの下限と、4 つのページの目印の
+キーを置いている。
 
 ## spec を書くときの注意
 
