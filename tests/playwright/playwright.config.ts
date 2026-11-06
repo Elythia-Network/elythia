@@ -98,7 +98,7 @@ export default defineConfig({
   // `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
   // `about_page_render` が同じ meta を取り合う。root の quota
   // (antenna 5 / webhook 3 / clip 10) を消費する spec も 18 ある。
-  // 並列度は CI 側で `PLAYWRIGHT_SHARD=i/6` の 6 job に分けて稼ぐ (#2609、#4043 で 6 に)。
+  // 並列度は CI 側で `PLAYWRIGHT_SHARD=i/7` の 7 job に分けて稼ぐ (#2609、#4043 で 6 に、#4049 で 7 に)。
   workers: 1,
   // 1 度だけ retry を許可する。Chromium headless が稀に SIGSEGV (= signal 11
   // / GPF) で即死する infrastructure flake (= profile_iscat_toggle 1ms 即死
