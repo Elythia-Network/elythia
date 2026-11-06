@@ -111,7 +111,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
-| `spec (Elythia 1/6)` 〜 `6/6` | Playwright | ブラウザからの統合互換 (364 spec ファイル) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
+| `spec (Elythia 1/7)` 〜 `7/7` | Playwright | ブラウザからの統合互換 (364 spec ファイル) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
@@ -405,7 +405,7 @@ PR では回らない。失敗は Actions 上で確認して別 PR で対処す�
 
 | workflow | 内容 | 実行方法 |
 |---|---|---|
-| Playwright (`spec (ts 1/6)` 〜 `6/6`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が Elythia の挙動に引きずられていないかを検証 | upstream 追従で本家の版を上げたとき |
+| Playwright (`spec (ts 1/7)` 〜 `7/7`) | 同じ spec を **Misskey TS backend** に対して実行し、spec が Elythia の挙動に引きずられていないかを検証 | upstream 追従で本家の版を上げたとき |
 | Docker (`workflow_dispatch`) | 過去のリリースタグから image を publish し直す | `gh workflow run docker.yml -f tag=1.1.1` |
 
 `spec (ts …)` を常時回さないのは、upstream が変わらない限り答えが変わらないため。詳細は
@@ -664,7 +664,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 - `.github/workflows/playwright.yml` で Playwright spec を実行する。
   `pull_request` (paths フィルタ) と `workflow_dispatch` で発火。nightly から
   PR トリガーへ移行済み (#2291)。
-- **6 シャード並列** (`PLAYWRIGHT_SHARD=i/6`。所要時間で割り振る、#4026。#4043 で 4 から 6 にした)。`fail-fast: false` で 1 つが落ちても
+- **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`。所要時間で割り振る、#4026。#4043 で 4 から 6 に、#4049 で 7 にした)。`fail-fast: false` で 1 つが落ちても
   他は完走する。
 - **1 スタックあたりは直列でしか回せない。** 364 spec ファイル中 185 が共有の
   root (alice) で**ブラウザでサインインした状態**を使い (`uiSigninAsRoot` を呼ぶ 184 と、フォームから入る

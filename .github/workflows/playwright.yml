@@ -93,11 +93,11 @@ jobs:
           # 「スタックごと分ける」= シャード数でしか稼げない。shard への
           # 割り振りは所要時間で均す (PLAYWRIGHT_SHARD、#4026)。
           #
-          # 6 にした理由と、見直す目安は docs/playwright.md の「shard の数」。
+          # 7 にした理由と、見直す目安は docs/playwright.md の「shard の数」。
           # job 1 つに固定で 130-150 秒かかり、PR 1 件で動く job はすでに GitHub の
           # 同時実行の上限 (Free で組織全体 20) を超えているので、増やすのは
           # spec の実行の時間が目安を超えたときだけにする。
-          SHARD_TOTAL: "6"
+          SHARD_TOTAL: "7"
         # backend 固有の make target / compose 引数 / prepull / timeout を
         # ここで一元定義する (= matrix.include の単一の情報源)。
         run: |
