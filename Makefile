@@ -1251,7 +1251,9 @@ playwright-test: ## Playwright spec を実行 (Elythia backend、PLAYWRIGHT_ARGS
 playwright-update-snapshots: ## Playwright の見た目の差分の基準画像を作り直す (PLAYWRIGHT_ARGS で spec を絞る)
 	# toHaveScreenshot の基準画像は runner の container (Linux の chromium) で
 	# 作る。手元の OS で作ると、文字の描画が違って CI で必ず差分になる (#4026)。
-	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build playwright-runner test --update-snapshots $(PLAYWRIGHT_ARGS)
+	# モードは `=` で付ける。空けると、続く spec のパスがモードとして読まれて落ちる。
+	# changed は、基準と違うものと無いものだけを書き直す (#4054)
+	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test run --rm --build playwright-runner test --update-snapshots=changed $(PLAYWRIGHT_ARGS)
 
 .PHONY: playwright-route-check
 playwright-route-check: ## frontend の全ルートが、どこかの Playwright spec に対応付いているか検査 (#4035)
