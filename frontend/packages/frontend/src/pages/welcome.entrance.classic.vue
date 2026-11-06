@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <template>
 <div v-if="meta" :class="$style.root" :style="themeVars">
 	<XBackdrop/>
-	<XTimeline :class="$style.tl"/>
+	<XTimeline :class="$style.tl" data-testid="entrance-timeline"/>
 	<div :class="$style.logoWrapper">
 		<div :class="$style.poweredBy">Powered by</div>
 		<div :class="$style.elythia"><img :src="elythiaIcon" alt="" :class="$style.elythiaIcon"/>Elythia</div>
@@ -14,7 +14,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<div :class="$style.contents">
 		<MkVisitorDashboard/>
 	</div>
-	<div v-if="instances && instances.length > 0" :class="$style.federation">
+	<div v-if="instances && instances.length > 0" :class="$style.federation" data-testid="entrance-federation">
 		<MkMarqueeText :duration="40">
 			<MkA v-for="instance in instances" :key="instance.id" :class="$style.federationInstance" :to="`/instance-info/${instance.host}`" behavior="window">
 				<!--<MkInstanceCardMini :instance="instance"/>-->
