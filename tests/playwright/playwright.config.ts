@@ -9,7 +9,7 @@ import { defineConfig } from '@playwright/test';
 import { listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from './shard-plan.mjs';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
-// `specs/upstream/` に 339 ファイル、`specs/elythia/` に 31 ファイル。CI では
+// `specs/upstream/` に 339 ファイル、`specs/elythia/` に 49 ファイル。CI では
 // `PLAYWRIGHT_SHARD=i/N` で N 個の job に分けて回す (docs/playwright.md)。
 //
 // **shard は `PLAYWRIGHT_SHARD=i/N` で切る (#4026)。** `--shard` はファイルの
@@ -91,10 +91,10 @@ export default defineConfig({
     // i18n key 解決に使うので、これで全 spec の text 前提が安定する。
     locale: 'en-US',
   },
-  // **1 スタックに対しては直列で回すしかない。** 370 spec のうち 185 が共有の
+  // **1 スタックに対しては直列で回すしかない。** 388 spec のうち 185 が共有の
   // root (alice) でブラウザでサインインした状態を使い (`uiSigninAsRoot` を呼ぶ 184 と
   // signin.spec.ts。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す)、
-  // さらに 40 がサインインせず root の token で API を叩く (`root.json` を読み、
+  // さらに 45 が root ではサインインせずに root の token で API を叩く (`root.json` を読み、
   // root でサインインしないもの。数え方は
   // `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。
   // instance meta は全 spec が共有する。Playwright は
