@@ -37,8 +37,27 @@ test.describe('UI: post form file attachment', () => {
     const fileName = `pw-attach-${Date.now()}.png`;
     await (await chooser).setFiles({ name: fileName, mimeType: 'image/png', buffer: tinyPNG });
 
-    // 上げる前の項目のメニューで、センシティブを付けてから説明を書く
-    await clickOnlyTestId(page, 'uploader-item-menu');
+    // 上げる前の項目のメニューで、センシティブを付けてから説明を書く。
+    // 画像の前処理 (use-uploader の preprocess) の間はメニューが空 (None) で開き、開いた後に
+    // 前処理が終わっても中身は変わらない (#4049 の 7 shard の run で、CI の負荷で踏んだ)。
+    // 項目が出るまで、閉じて開き直す。
+    const sensitiveItem = page
+      .locator('[role="menu"] [role^="menuitem"]')
+      .filter({ has: page.getByText('Sensitive', { exact: true }) });
+    await expect(async () => {
+      await clickOnlyTestId(page, 'uploader-item-menu');
+      try {
+        await expect(sensitiveItem).toHaveCount(1, { timeout: 3_000 });
+      } catch (err) {
+        // メニューが開いていないときに Esc を押すと、投稿フォームの側が閉じようとする
+        const menus = page.locator('[role="menu"]');
+        if ((await menus.count()) > 0) {
+          await page.keyboard.press('Escape');
+          await expect(menus).toHaveCount(0, { timeout: 5_000 });
+        }
+        throw err;
+      }
+    }, 'メニューに「Sensitive」が出ない').toPass({ timeout: 30_000 });
     await clickMenuItem(page, 'Sensitive');
     await clickMenuItem(page, 'Add alt text');
     const caption = `pw-caption-${Date.now()}`;
