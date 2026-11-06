@@ -13,6 +13,7 @@
 //
 // 通報の行には通報した人の名前と、その通報を開くボタン (`reportId` 付きの
 // /admin/abuses) が出る。申請の行には絵文字の名前と、審査の画面へのボタンが出る。
+// 通報の行は、英語の UI で日本語の文言が混ざらないことも見る (#4047)。
 // 作ったロール・通報・申請は finally で片付ける。
 
 import { expect, test } from '@playwright/test';
@@ -21,6 +22,7 @@ import { isTsBackend } from '../../../fixtures/backend';
 import { uploadTinyPNG } from '../../../fixtures/files';
 import { pollForNotification } from '../../../fixtures/notifications';
 import { type RootFixture, uiSigninAs } from '../../../fixtures/ui_auth';
+import { JAPANESE } from '../../../fixtures/ui_locale';
 import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 import { apiOk, freshUser, pageBody, runTag } from '../../../fixtures/ui_timeline';
 
@@ -83,6 +85,10 @@ test.describe('UI: abuse report and emoji request notifications', () => {
       await expect(report.locator(`a[href="/admin/abuses?reportId=${reportId}"]`), '通報を開くボタンがこの通報を指していない').toHaveCount(1);
       // 通報の本文は通知に出さない (#2868)
       await expect(report).not.toContainText(`${tag}-report`);
+      // 英語の UI で、通報の通知の文言が日本語のまま出ない (#4047)。en-US に無い語は ja-JP に戻る
+      await expect(report).toContainText('submitted a report');
+      await expect(report).toContainText('Review the report');
+      await expect(report).not.toContainText(JAPANESE);
 
       const emoji = body.locator('[data-testid="notification-emojiApplicationReceived"]');
       await expect(emoji).toHaveCount(1);
