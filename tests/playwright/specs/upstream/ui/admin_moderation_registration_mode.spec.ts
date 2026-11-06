@@ -21,12 +21,12 @@ import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
 import { clickButtonByText } from '../../../fixtures/ui_click';
 import { coversRoutes } from '../../../fixtures/ui_route';
 
-// mk-go 独自の文言は ja-JP にしか無く、en-US の frontend でも ja-JP が補う。
+// 4 択の文言は Elythia 独自の語で、en-US の英訳 (#4047) が出る。
 const LABELS = {
-  open: '誰でも登録できる',
-  invite: '招待制',
-  approval: '承認制',
-  closed: '受け付けない',
+  open: 'Anyone can register',
+  invite: 'Invite only',
+  approval: 'Approval required',
+  closed: 'Closed',
 } as const;
 
 test.describe('UI: /admin/moderation registration mode', () => {
