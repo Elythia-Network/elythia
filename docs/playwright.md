@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 365 ファイル
+`tests/playwright/specs/` にあり、現在 370 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -80,10 +80,10 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/7)` 〜 `7/7`。
 
-**1 スタックあたりは直列でしか回せない。** 365 spec のうち 185 が共有の root (alice) で
+**1 スタックあたりは直列でしか回せない。** 370 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接
 駆動する。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す。フォームから入る spec はほかにもあるが、
-自分で作った利用者で入るので数えない)、さらに 39 がサインインせず root の token で API を叩く (`root.json` を
+自分で作った利用者で入るので数えない)、さらに 40 がサインインせず root の token で API を叩く (`root.json` を
 読み、root でサインインしないもの。数え方は `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
@@ -416,6 +416,69 @@ frontend の全ルートを、表 (`fixtures/route_table.ts`) 1 つで次の 2 �
 - page error のうち、どのページでも起きるもの (stack の自己署名の証明書で Service Worker の登録が
   失敗する) は `fixtures/route_check.ts` の `KNOWN_PAGE_ERRORS` で除く
 
+## 見た目の差分 (#4054)
+
+主な画面を、ライトとダークで撮って基準画像と比べる (`toHaveScreenshot`)。CSS の崩れは操作の spec では
+落ちないため。撮る画面は #4054 に挙げた 22 項目で、1 項目を何枚かに分けて撮るものがあるので、基準画像は
+62 枚 (`find tests/playwright/specs/elythia/ui/visual -name '*.png' | wc -l`)。spec は
+`specs/elythia/ui/visual/` の 5 ファイル、helper は `fixtures/visual.ts`。基準画像は各 spec の隣の
+`<spec のファイル名>-snapshots/` に置き、git で追跡する。TS backend の run では流さない
+(frontend が同じなので)。
+
+### 基準画像を作り直す
+
+- **意図して見た目を変えた PR では、基準画像も作り直して同じ PR に入れる。** `make playwright-up` の後に
+  `make playwright-update-snapshots PLAYWRIGHT_ARGS=specs/elythia/ui/visual/` を流し、書き直された画像を
+  見てからコミットする。モードは `changed` で、基準としきい値の中で一致するものは書き直さない
+- 手元の OS で作らない (下の「spec を書くときの注意」)。runner の container で作った印として、名前の
+  末尾に `-linux` が付く
+- 同梱しないプラグインを入れたチェックアウトで作らない。`server-plugins.generated.ts` がプラグインを
+  import していると、CI (プラグイン無し) と画面が変わりうる。プラグインの無い worktree で作る
+- Playwright の版を上げると Chromium の描画が変わるので、全部作り直す
+- CI で落ちたときの画像 (`*-expected.png` / `*-actual.png` / `*-diff.png`) は、`playwright-results-*` の
+  artifact に入る
+- 名前に project を入れない (`playwright.config.ts` の `snapshotPathTemplate`)。spec が meta を書くように
+  なると、project が `main` から `meta` に変わり、基準画像を見失うため
+
+### 毎回同じ絵にするための決まり
+
+- **撮るのは固定の利用者 (`vr_alice` / `vr_bob` / `vr_carol` / `vr_dave`) と、その人たちだけが作った
+  データ。** 種まきは 1 つの DB で 1 回だけ (alice の自己紹介が印)。ホームのタイムラインに他の spec の
+  ノートが混ざらないよう、3 人は互いにだけフォローする。名前は固定なので、同じスタックで 2 回目を流すと
+  利用者を作り直さずに使う
+- **Redis にしか無いものを絵に入れない。** globalSetup は流すたびに Redis を空にするので、同じスタックの
+  2 回目で消える。該当するのは次の 2 つ
+  - 通知: ふだんは空にしておき、通知の画面のテストが作ってから撮り、撮った後に消す
+  - ホームのタイムラインの「自分への返信」: Redis の記録からは出るが、記録が無いときの DB からの
+    組み立てでは出ない (本家も同じ)。種まきに作らない
+- 撮るたびに変わる文字は場所ごと消す (`display: none`)。`<time>` と、`<time>` の外に出る en-US の
+  書式の日時 (ノートの見出し、登録日)、ドライブの作った月の見出し (`2026/11`)、about の版 (`2.1.0`)。場所を保って見えなくすると、文字の長さ (`3m ago` と `10m ago`) で幅が
+  変わって隣がずれる。mask (四角で塗る) は、要素がダイアログやツールチップの背後にあっても一番上に
+  描かれ、手前のものを隠すので使わない
+- 他の spec のデータで変わる部分も隠す。入口の流れるタイムライン・人数・連合先は、登録のダイアログの
+  背後に回るので、場所を保ったまま見えなくする (`visibility: hidden`。`data-testid` で取る。クラス名は本番のビルドでハッシュになるので使えない)。
+  about の統計と管理画面のダッシュボードは、上に何も重ならないので mask で塗る。絵文字ピッカーは
+  「Custom Emoji」の見出しより上だけを撮る
+- 撮る前に起動の準備をする (`prepareVisualPage`): ウィジェットの既定 (カレンダー・トレンド) の差し替え、
+  ソースコードの案内を出さない、`Math.random` の固定。サインインの後に「Tips & Tricks」を全部閉じる。
+  ログインと実績の通知は受け取らない (サインインと画面を開いた順で増える)
+- アニメーションは、OS の「動きを減らす」(prefer の `animation` の既定がこれに従う) と
+  `animations: 'disabled'` で止める
+- ページを開いた直後は、通信が静まるのを待つ。同じページで操作した後は、出てくる要素を spec で待ち、
+  `toHaveScreenshot` が 2 枚続けて同じになるまで撮り直すのに任せる (`networkidle` は、一度静まった
+  文書ではすぐに返る)。画面の中の画像の読み込みも待つ (画面の外の遅延読み込みの画像は待たない)
+- 管理画面のトップは、未解決の通報の警告を出さない (`admin/abuse-user-reports` を空で返す)。通報を作って
+  解決しない spec が、同じ shard の前に流れるかで変わるため
+- しきい値は、1 画素の色の許容 `threshold: 0.02` と、許容を超えた画素の数 `maxDiffPixels: 8`。
+  8 は、同じスタックでもときどき出る描画の揺れ (プロフィールの大きなアイコンの縁で 5 画素) より大きく、
+  文字 1 つの変化 (所在地の `Tokyo` を `Tokyp` にして 12〜19 画素) より小さい値。割合で認めると
+  (`maxDiffPixelRatio: 0.01` で約 1 万画素)、件数の数字や時刻の文字が変わっても通る。
+  色の許容を既定 (0.2) のままにすると、テーマの色を少し変えたぐらい (ダークのパネルを `#0e1433` から
+  `#162048` へ) は同じ色とみなされ、ノートの写らないダークの画面 (設定・チャットなど) は 1 つも
+  落ちなかった。0.02 では落ちる (#4054 で変異させて確かめた)
+
+**揺れたら、しきい値を上げて黙らせない。** 何が変わったかを差分の画像で見て、上の決まりに足す。
+
 ## spec を書くときの注意
 
 `_spec.ts` は silent skip される。ファイル名は必ず `.spec.ts`。
@@ -447,7 +510,8 @@ vite の hash class を selector に使わない (`[class*="_button_"]` 等)。p
 
 **見た目の差分の基準画像は runner の container で作る。** `toHaveScreenshot` の基準画像は
 `make playwright-update-snapshots PLAYWRIGHT_ARGS=<spec>` で作り直す。手元の OS で作ると
-文字の描画が違い、CI で必ず差分になる。
+文字の描画が違い、CI で必ず差分になる。撮る画面を同じ絵にする決まりは、上の
+「[見た目の差分](#見た目の差分-4054)」にある。
 
 **要素は文字で、完全一致かつちょうど 1 つで取る。** スイッチは `clickSwitchByLabel`
 (`fixtures/ui_click.ts`)、MkFolder の中の要素は `openFolderByLabel` / `fillFolderTextarea` /
