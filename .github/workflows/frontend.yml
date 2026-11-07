@@ -188,6 +188,10 @@ jobs:
         working-directory: .
         run: make playwright-settings-check
 
+      - name: Admin settings coverage
+        working-directory: .
+        run: make playwright-admin-settings-check
+
       - name: Verify locales
         run: pnpm --filter i18n run verify
 
