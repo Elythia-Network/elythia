@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<MkLoading v-if="record == null && loadFailed == null"/>
 	<MkResult v-else-if="loadFailed === 'notFound'" type="notFound" :text="i18n.ts._mkgoBubbleGame._versus.notFound"/>
 	<MkResult v-else-if="loadFailed != null" type="error"/>
-	<div v-else-if="record != null" class="_gaps">
+	<div v-else-if="record != null" class="_gaps" data-testid="versus-replay" :data-match-id="record.id">
 		<div class="_woodenFrame">
 			<div class="_woodenFrameInner" style="text-align: center;">
 				<b>{{ i18n.ts._mkgoBubbleGame._versus.replayTitle }}</b>

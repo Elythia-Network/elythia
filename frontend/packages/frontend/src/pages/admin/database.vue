@@ -40,6 +40,7 @@ const headerTabs = computed(() => [{
 }, {
 	key: 'health',
 	title: i18n.ts._databaseHealth.tabHealth,
+	testId: 'database-tab-health',
 }]);
 
 definePage(() => ({

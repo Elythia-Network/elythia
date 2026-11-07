@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<div :class="$style.caption">{{ i18n.ts._goneInstances.description }}</div>
 	<MkInfo v-if="unavailable" warn>{{ i18n.ts._goneInstances.unavailable }}</MkInfo>
 	<MkLoading v-else-if="loading"/>
-	<div v-else-if="items.length === 0" :class="$style.caption">{{ i18n.ts._goneInstances.none }}</div>
+	<div v-else-if="items.length === 0" :class="$style.caption" data-testid="gone-instances-none">{{ i18n.ts._goneInstances.none }}</div>
 	<template v-else>
 		<div v-for="g in items" :key="g.host" :class="$style.item">
 			<MkA class="_monospace" :class="$style.host" :to="`/instance-info/${g.host}`">{{ g.host }}</MkA>

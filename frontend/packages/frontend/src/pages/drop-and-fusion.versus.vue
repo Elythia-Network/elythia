@@ -48,7 +48,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		@end="onGameEnd"
 	/>
 </div>
-<div v-else class="_spacer" style="--MI_SPACER-w: 600px;">
+<div v-else class="_spacer" style="--MI_SPACER-w: 600px;" data-testid="versus-lobby" :data-status="match.status">
 	<div :class="$style.root" class="_gaps">
 		<div class="_woodenFrame">
 			<div class="_woodenFrameInner" style="text-align: center;">
@@ -81,7 +81,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<template v-if="mySide === 0">
 							<div>{{ i18n.ts._mkgoBubbleGame._versus.waitingForAnswer }}<MkEllipsis/></div>
 							<div class="_buttonsCenter">
-								<MkButton rounded @click="cancel">{{ i18n.ts.cancel }}</MkButton>
+								<MkButton rounded data-testid="versus-cancel" @click="cancel">{{ i18n.ts.cancel }}</MkButton>
 							</div>
 						</template>
 						<template v-else>
@@ -95,9 +95,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template v-else-if="match.status === 'accepted'">
 						<div>{{ i18n.ts._mkgoBubbleGame._versus.readyDescription }}</div>
 						<div class="_buttonsCenter">
-							<MkButton v-if="!myReady" primary gradate rounded @click="setReady(true)">{{ i18n.ts._mkgoBubbleGame._versus.ready }}</MkButton>
-							<MkButton v-else rounded @click="setReady(false)">{{ i18n.ts._mkgoBubbleGame._versus.notReady }}</MkButton>
-							<MkButton rounded danger @click="cancel">{{ i18n.ts._mkgoBubbleGame._versus.leave }}</MkButton>
+							<MkButton v-if="!myReady" primary gradate rounded data-testid="versus-ready" @click="setReady(true)">{{ i18n.ts._mkgoBubbleGame._versus.ready }}</MkButton>
+							<MkButton v-else rounded data-testid="versus-not-ready" @click="setReady(false)">{{ i18n.ts._mkgoBubbleGame._versus.notReady }}</MkButton>
+							<MkButton rounded danger data-testid="versus-leave" @click="cancel">{{ i18n.ts._mkgoBubbleGame._versus.leave }}</MkButton>
 						</div>
 						<MkSwitch v-model="mute">
 							<template #label>{{ i18n.ts.mute }}</template>
@@ -110,7 +110,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<!-- 読み込み直した・別の端末で開いた。盤面は端末にしか無いので再開できない。 -->
 						<div>{{ i18n.ts._mkgoBubbleGame._versus.cannotResume }}</div>
 						<div class="_buttonsCenter">
-							<MkButton rounded danger @click="surrenderFromLobby">{{ i18n.ts.surrender }}</MkButton>
+							<MkButton rounded danger data-testid="versus-surrender" @click="surrenderFromLobby">{{ i18n.ts.surrender }}</MkButton>
 						</div>
 					</template>
 					<template v-else-if="match.status === 'ended'">

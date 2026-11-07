@@ -9,7 +9,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 <template>
 <div class="_gaps_m">
-	<MkInput v-model="name" :disabled="readOnly">
+	<MkInput v-model="name" :disabled="readOnly" data-testid="federation-rule-name">
 		<template #label>{{ i18n.ts._federationRules.name }}</template>
 	</MkInput>
 	<FormSplit>
@@ -37,7 +37,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</MkSwitch>
 		</div>
 	</div>
-	<MkTextarea v-model="hosts" :disabled="readOnly">
+	<MkTextarea v-model="hosts" :disabled="readOnly" data-testid="federation-rule-hosts">
 		<template #label>{{ i18n.ts._federationRules.hosts }}</template>
 		<template #caption>{{ i18n.ts._federationRules.hostsCaption }}</template>
 	</MkTextarea>
@@ -83,8 +83,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 	</template>
 
 	<div v-if="!readOnly" class="_buttons">
-		<MkButton primary :disabled="saving" @click="save"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
-		<MkButton v-if="rule.id" danger :disabled="saving" @click="del"><i class="ti ti-trash"></i> {{ i18n.ts.delete }}</MkButton>
+		<MkButton primary :disabled="saving" data-testid="federation-rule-save" @click="save"><i class="ti ti-check"></i> {{ i18n.ts.save }}</MkButton>
+		<MkButton v-if="rule.id" danger :disabled="saving" data-testid="federation-rule-delete" @click="del"><i class="ti ti-trash"></i> {{ i18n.ts.delete }}</MkButton>
 	</div>
 	<div v-if="!readOnly && rule.id" :class="$style.caption">{{ i18n.ts._federationRules.conditionsResetNote }}</div>
 </div>

@@ -115,7 +115,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				あとに「最後のリセット」を確認できなくなる (issue が非表示を
 				求めたのはボタン)。
 			-->
-			<MkButton v-if="canResetQuota(windows)" :disabled="resetting" danger @click="resetQuota">{{ i18n.ts._emojiApplication.resetQuota }}</MkButton>
+			<MkButton v-if="canResetQuota(windows)" :disabled="resetting" danger data-testid="emoji-application-reset-quota" @click="resetQuota">{{ i18n.ts._emojiApplication.resetQuota }}</MkButton>
 		</div>
 	</FormSection>
 

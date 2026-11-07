@@ -21,7 +21,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div :class="$style.totalValue">{{ bytes(usage.total.size) }}</div>
 				<div :class="$style.totalSub">{{ i18n.tsx._driveUsage.files({ n: number(usage.total.count) }) }}</div>
 			</div>
-			<div :class="$style.total">
+			<div :class="$style.total" data-testid="drive-usage-local" :data-count="usage.local.count">
 				<div :class="$style.totalLabel">{{ i18n.ts.local }}</div>
 				<div :class="$style.totalValue">{{ bytes(usage.local.size) }}</div>
 				<div :class="$style.totalSub">{{ i18n.tsx._driveUsage.files({ n: number(usage.local.count) }) }}</div>
@@ -82,7 +82,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 		<div :class="$style.footer">
 			<span>{{ i18n.tsx._driveUsage.calculatedAt({ at: calculatedAtLabel, ms: number(usage.elapsedMs) }) }}</span>
-			<MkButton small :disabled="refreshing" @click="refresh">{{ i18n.ts.reload }}</MkButton>
+			<MkButton small :disabled="refreshing" data-testid="drive-usage-refresh" @click="refresh">{{ i18n.ts.reload }}</MkButton>
 		</div>
 	</template>
 

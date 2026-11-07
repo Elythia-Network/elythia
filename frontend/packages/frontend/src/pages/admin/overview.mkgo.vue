@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <template>
-<div v-if="metrics" :class="$style.root">
+<div v-if="metrics" :class="$style.root" data-testid="server-metrics" :data-goroutines="metrics.go.goroutines">
 	<div class="_table status">
 		<div class="_row">
 			<div class="_cell"><div class="_label">Goroutines</div>{{ number(metrics.go.goroutines) }}</div>

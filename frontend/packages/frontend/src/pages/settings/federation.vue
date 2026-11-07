@@ -19,8 +19,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 		</MkInfo>
 		<MkInfo v-else-if="state?.federationStatus === 'on'" warn>{{ i18n.ts._localOnlyAccount.enableWarning }}</MkInfo>
 		<div class="_buttons">
-			<MkButton v-if="state?.federationStatus !== 'on'" primary :disabled="state?.isSystemAccount || loading" @click="setStatus('on')">{{ i18n.ts._localOnlyAccount.turnOn }}</MkButton>
-			<MkButton v-if="state?.federationStatus !== 'off'" danger :disabled="state?.isSystemAccount || loading || (state?.federationStatus === 'on' && !canDisableFederation(state))" @click="setStatus('off')">{{ i18n.ts._localOnlyAccount.turnOff }}</MkButton>
+			<MkButton v-if="state?.federationStatus !== 'on'" data-testid="local-only-turn-on" primary :disabled="state?.isSystemAccount || loading" @click="setStatus('on')">{{ i18n.ts._localOnlyAccount.turnOn }}</MkButton>
+			<MkButton v-if="state?.federationStatus !== 'off'" data-testid="local-only-turn-off" danger :disabled="state?.isSystemAccount || loading || (state?.federationStatus === 'on' && !canDisableFederation(state))" @click="setStatus('off')">{{ i18n.ts._localOnlyAccount.turnOff }}</MkButton>
 		</div>
 	</div>
 </div>

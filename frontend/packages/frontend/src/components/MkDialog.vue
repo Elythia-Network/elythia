@@ -22,7 +22,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		</div>
 		<header v-if="title" :class="$style.title" class="_selectable"><Mfm :text="title"/></header>
 		<div v-if="text" :class="$style.text" class="_selectable"><Mfm :text="text"/></div>
-		<MkInput v-if="input" v-model="inputValue" autofocus :type="input.type || 'text'" :placeholder="input.placeholder || undefined" :autocomplete="input.autocomplete" @keydown="onInputKeydown">
+		<MkInput v-if="input" v-model="inputValue" autofocus :type="input.type || 'text'" :placeholder="input.placeholder || undefined" :autocomplete="input.autocomplete" data-testid="modal-dialog-input" @keydown="onInputKeydown">
 			<template v-if="input.type === 'password'" #prefix><i class="ti ti-lock"></i></template>
 			<template #caption>
 				<span v-if="okButtonDisabledReason === 'charactersExceeded'" v-text="i18n.tsx._dialog.charactersExceeded({ current: (inputValue as string)?.length ?? 0, max: input.maxLength ?? 'NaN' })"></span>

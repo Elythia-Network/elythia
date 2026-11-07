@@ -70,7 +70,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</SearchMarker>
 
 			<SearchMarker :keywords="['account', 'federation', 'local-only']">
-				<MkFolder>
+				<MkFolder data-testid="local-only-folder">
 					<template #icon><SearchIcon><i class="ti ti-world"></i></SearchIcon></template>
 					<template #label><SearchLabel>{{ i18n.ts._localOnlyAccount.settingsTitle }}</SearchLabel></template>
 					<XFederation/>

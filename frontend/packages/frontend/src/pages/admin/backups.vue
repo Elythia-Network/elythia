@@ -15,7 +15,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<div class="_gaps_m">
 			<div :class="$style.caption">{{ i18n.ts._backups.description }}</div>
 
-			<MkInfo v-if="!hasSecondFactor" warn>
+			<MkInfo v-if="!hasSecondFactor" warn data-testid="backups-two-factor-required">
 				{{ i18n.ts._backups.twoFactorRequired }}
 				<MkA to="/settings/security" class="_link">{{ i18n.ts._backups.openSecuritySettings }}</MkA>
 				<!-- mk-go: 戻した DB に 2FA が無いと、画面からは退避した DB へ戻せない (#3463 (6d))。 -->
@@ -24,7 +24,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<template v-else>
 				<MkSwitch v-if="hasPasskey" v-model="usePasskey">{{ i18n.ts._backups.usePasskey }}</MkSwitch>
 				<div class="_buttons">
-					<MkButton primary :disabled="busy" @click="load"><i class="ti ti-lock-open"></i> {{ overview ? i18n.ts._backups.reload : i18n.ts._backups.show }}</MkButton>
+					<MkButton primary :disabled="busy" data-testid="backups-show" @click="load"><i class="ti ti-lock-open"></i> {{ overview ? i18n.ts._backups.reload : i18n.ts._backups.show }}</MkButton>
 					<MkButton v-if="overview && overview.service.configured" :disabled="busy" @click="take"><i class="ti ti-database-export"></i> {{ i18n.ts._backups.takeNow }}</MkButton>
 				</div>
 			</template>
@@ -61,7 +61,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</div>
 
 			<template v-if="overview">
-				<MkInfo v-if="!overview.service.configured">{{ i18n.ts._backups.serviceNotConfigured }}</MkInfo>
+				<MkInfo v-if="!overview.service.configured" data-testid="backups-service-not-configured">{{ i18n.ts._backups.serviceNotConfigured }}</MkInfo>
 				<MkInfo v-else-if="!overview.service.reachable" warn>{{ i18n.ts._backups.serviceUnreachable }}</MkInfo>
 				<template v-else>
 					<MkInfo v-if="overview.service.running">{{ i18n.ts._backups.serviceRunning }} ({{ overview.service.running.kind }}<template v-if="overview.service.running.generationId"> {{ overview.service.running.generationId }}</template>)</MkInfo>
@@ -109,7 +109,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</MkKeyValue>
 				</div>
 
-				<div v-if="overview.generations.length === 0" :class="$style.caption">{{ i18n.ts._backups.empty }}</div>
+				<div v-if="overview.generations.length === 0" :class="$style.caption" data-testid="backups-empty">{{ i18n.ts._backups.empty }}</div>
 				<MkFolder v-for="g in overview.generations" :key="g.id">
 					<template #icon><i :class="statusIcon(g)"></i></template>
 					<template #label><span class="_monospace">{{ g.id }}</span></template>
