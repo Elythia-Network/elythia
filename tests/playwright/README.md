@@ -168,7 +168,7 @@ tests/playwright/
 `about_page_render` が同じ meta を取り合う。root の quota
 (antenna 5 / webhook 3 / clip 10) を消費する spec も 18 ある。
 
-**並列度はスタックごと分けることでしか稼げない。** CI は `PLAYWRIGHT_SHARD=i/7` で 7 job に
+**並列度はスタックごと分けることでしか稼げない。** CI は `PLAYWRIGHT_SHARD=i/11` で 11 job に
 分けて、それぞれ独立した stack を立てる (#2609)。割り振りは所要時間で均す
 (`shard-plan.mjs` と `shard-durations.json`、#4026。[docs/playwright.md](../../docs/playwright.md#shard-の割り振り))。
 

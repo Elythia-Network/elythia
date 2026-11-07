@@ -278,7 +278,7 @@ make federation-misskey-down
 
 - 範囲: 388 spec ファイル (upstream 339 = ui 243 / api 96、elythia 49) / 42 directory (spec を直接含むもの。`find ... -printf '%h\n' | sort -u | wc -l`)
 - トリガー: `pull_request` (paths フィルタ) + `workflow_dispatch`。**nightly ではない** (#2291 で移行)。`.github/workflows/playwright.yml`
-- **7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`、所要時間で割り振る。`fail-fast: false`)。1 スタックに対しては直列でしか回せない (共有の root と instance meta を spec が取り合う) ので、並列度はシャードごとに独立した stack を立てて稼ぐ (#2609)
+- **11 シャード並列** (`PLAYWRIGHT_SHARD=i/11`、所要時間で割り振る。`fail-fast: false`)。1 スタックに対しては直列でしか回せない (共有の root と instance meta を spec が取り合う) ので、並列度はシャードごとに独立した stack を立てて稼ぐ (#2609)
 - **TS backend は `workflow_dispatch` 専用**で PR では回らない。upstream が変わらない限り答えも変わらないため、追従する本家の版を上げたタイミングだけ回す
 - spec は原則 **backend-agnostic** (= URL 切替だけで両 backend で動く)、spec 失敗 = drop-in 互換 regression として issue 化。例外は `specs/elythia/` の 25 件 (16 件は Elythia 独自機能を見るので公式 image では通らない。7 件は全ルートの表 (#4041) で、Elythia 独自のルートを含む。残る 2 件は spec の helper のガードで、1 つの backend で見れば足りる)。`make playwright-ts-test` が `specs/upstream` に絞ることで除外している。`specs/upstream/ui/` にも、Elythia で足した `data-testid` で要素を取るために公式 image では落ちる spec がある ([docs/playwright.md](playwright.md#elythia-で足した-data-testid-を使う-spec-は公式-image-では落ちる))
 
