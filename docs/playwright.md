@@ -77,8 +77,8 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 `.github/workflows/playwright.yml` が `pull_request` (paths フィルタ) と
 `workflow_dispatch` で発火する。nightly から PR トリガーへ移行済み (#2291)。
 
-**7 シャード並列** (`PLAYWRIGHT_SHARD=i/7`、`fail-fast: false`)。check 名は
-`spec (Elythia 1/7)` 〜 `7/7`。
+**11 シャード並列** (`PLAYWRIGHT_SHARD=i/11`、`fail-fast: false`)。check 名は
+`spec (Elythia 1/11)` 〜 `11/11`。
 
 **1 スタックあたりは直列でしか回せない。** 388 spec のうち 185 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接
@@ -131,7 +131,7 @@ commit を見て、spec が漏れたり 2 回流れたりする。pull_request �
 
 ### shard の数
 
-**今は 7** (#4043 で 4 から 6 に、#4049 で 7 に上げた)。目安は「いちばん遅い shard の spec の実行が 300 秒を超えたら、数を見直す」。
+**今は 11** (#4043 で 4 から 6 に、#4049 で 7 に、#4056 で 11 に上げた)。目安は「いちばん遅い shard の spec の実行が 300 秒を超えたら、数を見直す」。
 
 経緯:
 
@@ -146,10 +146,14 @@ commit を見て、spec が漏れたり 2 回流れたりする。pull_request �
   CI の値で取り直すと見込みは各 shard 約 298 秒で、次の run でも 238〜333 秒と目安を超えた。1 回ごとに
   振れる spec がある (`notification_types_render` は 1 回目の run で 52 秒、2 回目で 25 秒) ので、見込みが
   目安に張り付くと毎回超える。7 にした (見込みは最大約 262 秒、ほかの shard は約 255 秒)
-- **7 より増やしても、いちばん遅い shard は約 262 秒より縮まない。** `route_table_permission_signed_out`
-  (全ルートの表の未ログインの権限) が 1 ファイルで約 262 秒かかり、7 では 1 つの shard をこれだけが占める。
-  ほかの shard が目安を超えたときは、shard を増やせば効く。この spec だけの shard が目安に近づいたら、
-  shard を増やしても縮まないので、この spec を分ける
+- #4056 (PR #4060) で設定の表 (18 ファイル、手元で計 12.0 分) を足すと、7 shard の spec の実行は
+  265〜482 秒になった (足したファイルは所要時間の記録が無く、平均の値で割り振られたため偏った)。
+  所要時間の記録をその run の値で取り直すと、見込みは 7 で各約 400 秒、10 で約 280 秒、11 で約 254 秒。
+  10 では上の振れで目安を超えるので、11 にした
+- **ファイル 1 つより短くはならない。** いちばん長い `route_table_permission_signed_out`
+  (全ルートの表の未ログインの権限) は、PR #4060 の run で約 228 秒かかった。ほかの shard が目安を超えたときは、
+  shard を増やせば効く。この spec を含む shard が目安に近づいたら、shard を増やしても縮まないので、
+  この spec を分ける
 
 7 にした後の実測 (#4049 の PR #4050 の run):
 
