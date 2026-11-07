@@ -4241,6 +4241,7 @@ _driveUsage:
     other: "Other"
 _mkgoUnsupported:
   remoteMediaCache: "Elythia is designed not to cache remote media locally, so this setting has no effect. It favors not keeping copies of media the other server has deleted, and not storing content from other servers in this server's storage. The value is saved in case you switch back to Misskey."
+  signToActivityPubGet: "Elythia signs ActivityPub fetches first and retries without a signature only when the other server refuses, so this setting has no effect. This lets it federate both with servers that require signatures (such as Mastodon in secure mode) and with servers that have trouble with them. The value is saved in case you switch back to Misskey."
 _mkgoCleanRemoteFiles:
   noTarget: "Nothing to delete"
   target: "There are {n} remote files with a stored copy."

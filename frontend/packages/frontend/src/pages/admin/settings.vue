@@ -359,10 +359,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 								</MkFolder>
 							</SearchMarker>
 
+							<!-- Elythia の取得はまず署名し、拒否されたときだけ署名なしで取り直すので、
+							     このスイッチは効かない。操作できないようにしてある (#4067)。
+							     消さずに残す理由は下の cacheRemoteFiles と同じ。 -->
 							<SearchMarker :keywords="['sign', 'get']">
-								<MkSwitch v-model="federationForm.state.signToActivityPubGet">
-									<template #label><SearchLabel>{{ i18n.ts._serverSettings.signToActivityPubGet }}</SearchLabel><span v-if="federationForm.modifiedStates.signToActivityPubGet" class="_modified">{{ i18n.ts.modified }}</span></template>
-									<template #caption><SearchText>{{ i18n.ts._serverSettings.signToActivityPubGet_description }}</SearchText></template>
+								<MkSwitch v-model="federationForm.state.signToActivityPubGet" disabled>
+									<template #label><SearchLabel>{{ i18n.ts._serverSettings.signToActivityPubGet }}</SearchLabel></template>
+									<template #caption><SearchText>{{ i18n.ts._mkgoUnsupported.signToActivityPubGet }}</SearchText></template>
 								</MkSwitch>
 							</SearchMarker>
 
