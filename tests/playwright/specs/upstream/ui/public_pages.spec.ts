@@ -29,26 +29,34 @@ test.describe('UI: public SPA pages with API hydration', () => {
     // instance.policies.canSearchNotes) が false だと input の代わりに
     // "Note search is unavailable." を出す。canSearchNotes は upstream の
     // DEFAULT_POLICIES でも false なので、default policy を立ててから開く。
-    await callApi(request, 'admin/roles/update-default-policies', {
-      i: root.token,
-      policies: { canSearchNotes: true },
-    });
+    // update-default-policies は既定のポリシーを丸ごと置き換えるので、今の値に
+    // canSearchNotes だけを足して送り、終わったら控えた値に戻す (#4066。以前は
+    // `{ canSearchNotes: false }` だけを送り、他の既定のポリシーを消していた)
+    const before = await callApi(request, 'admin/meta', { i: root.token });
+    expect(before.ok(), 'admin/meta を読めなかった').toBe(true);
+    const original = (await before.json()).policies as Record<string, unknown>;
+    expect(original, '既定のポリシー').toBeTruthy();
+    try {
+      const updated = await callApi(request, 'admin/roles/update-default-policies', {
+        i: root.token,
+        policies: { ...original, canSearchNotes: true },
+      });
+      expect(updated.ok(), '既定のポリシーを変えられない').toBe(true);
 
-    await page.setViewportSize({ width: 1600, height: 900 });
-    const resp = await page.goto(`${baseURL}/search`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+      await page.setViewportSize({ width: 1600, height: 900 });
+      const resp = await page.goto(`${baseURL}/search`, { waitUntil: 'domcontentloaded' });
+      expect(resp!.status()).toBe(200);
 
-    // search page には input field が必ず render される
-    await page.waitForFunction(
-      () => document.querySelectorAll('input').length > 0,
-      { timeout: 20_000 },
-    );
-
-    // 他 spec に policy を持ち越さない
-    await callApi(request, 'admin/roles/update-default-policies', {
-      i: root.token,
-      policies: { canSearchNotes: false },
-    });
+      // search page には input field が必ず render される
+      await page.waitForFunction(
+        () => document.querySelectorAll('input').length > 0,
+        { timeout: 20_000 },
+      );
+    } finally {
+      // 他 spec に policy を持ち越さない
+      const restored = await callApi(request, 'admin/roles/update-default-policies', { i: root.token, policies: original });
+      expect.soft(restored.ok(), '既定のポリシーを元に戻せなかった').toBe(true);
+    }
   });
 
   test('navigate to /channels (public channel list)', async ({ page, baseURL }) => {
