@@ -51,6 +51,9 @@ services:
       TZ: Asia/Tokyo
     volumes:
       - ./instance.yml:/app/.config/default.yml:ro
+      # 管理画面のバックアップの一覧を出すための保存先 (#4072)。目印のファイルだけがあり、
+      # 世代は無い。取得・検証・復元は別のサービス (backup-daemon) が要り、このスタックには無い
+      - ./backup-fixture:/backup:ro
     healthcheck:
       test: ["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]
       interval: 5s

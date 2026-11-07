@@ -505,15 +505,20 @@ export async function expectApiOk(request: APIRequestContext, endpoint: string, 
 }
 
 /** Makes a manual role with `policies` (priority high) and assigns it to `userId`. Returns the role id. */
-export async function assignRole(request: APIRequestContext, root: RootFixture, userId: string, extra: { isModerator?: boolean; policies?: Record<string, unknown> }): Promise<string> {
+export async function assignRole(request: APIRequestContext, root: RootFixture, userId: string, extra: { isModerator?: boolean; isAdministrator?: boolean; policies?: Record<string, unknown> }): Promise<string> {
   const policies: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(extra.policies ?? {})) policies[k] = { useDefault: false, priority: 2, value: v };
   const role = await apiOk(request, 'admin/roles/create', {
     i: root.token, name: 'pw helper', description: '', color: null, iconUrl: null, target: 'manual', condFormula: {},
-    isPublic: false, isModerator: extra.isModerator ?? false, isAdministrator: false, isExplorable: false, asBadge: false,
+    isPublic: false, isModerator: extra.isModerator ?? false, isAdministrator: extra.isAdministrator ?? false, isExplorable: false, asBadge: false,
     canEditMembersByModerator: false, displayOrder: 0, policies,
   }) as { id: string };
-  await apiOk(request, 'admin/roles/assign', { i: root.token, roleId: role.id, userId });
+  // 割り当てに失敗すると呼び出し元は id を受け取れず、ロールが残る
+  const assigned = await callApi(request, 'admin/roles/assign', { i: root.token, roleId: role.id, userId });
+  if (!assigned.ok()) {
+    await callApi(request, 'admin/roles/delete', { i: root.token, roleId: role.id });
+    throw new Error(`admin/roles/assign failed: ${assigned.status()} ${await assigned.text()}`);
+  }
   return role.id;
 }
 
