@@ -4251,6 +4251,7 @@ _driveUsage:
 
 _mkgoUnsupported:
   remoteMediaCache: "Elythiaはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。"
+  signToActivityPubGet: "Elythiaは、ActivityPubの取得にまず署名を付け、相手が拒否したときだけ署名なしで取り直すため、この設定は動作しません。署名を求めるサーバー(Mastodonのsecure modeなど)とも、署名で不調になるサーバーとも連合できるようにしています。値はMisskeyへ戻したときのために保存されます。"
 
 _mkgoCleanRemoteFiles:
   noTarget: "削除対象なし"
