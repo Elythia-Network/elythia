@@ -53,6 +53,13 @@ export function listSpecFiles(root) {
 export const META_WRITERS = ['admin/update-meta', 'admin/roles/update-default-policies'];
 
 /**
+ * Helpers that write the instance meta for the spec (fixtures/admin_table.ts).
+ * A spec that calls one writes the meta even when its own source has no
+ * endpoint name.
+ */
+export const META_WRITING_HELPERS = ['runMetaRow'];
+
+/**
  * Reports whether a spec file writes the instance meta. Such specs run in the
  * `meta` project after every other spec (playwright.config.ts).
  *
@@ -63,6 +70,9 @@ export function writesMeta(content) {
   // 直前の引用符は要求しない。`callApi(request, 'admin/update-meta')` だけでなく、
   // `r.url().includes('/api/admin/update-meta')` のように URL の一部として書いた
   // 形も拾う。後ろは引用符で切り、`admin/update-meta-foo` のような別の名前は拾わない
+  // helper を呼ぶ spec は、本文に endpoint の名前が無くても meta を書く (#4066)。
+  // endpoint の名前で拾うだけだと、説明のコメントの書き方しだいで main に入ってしまう
+  if (META_WRITING_HELPERS.some((h) => new RegExp(`\\b${h}\\(`).test(content))) return true;
   return META_WRITERS.some((ep) => new RegExp(`${ep.replace(/\//g, '\\/')}['"\`]`).test(content));
 }
 

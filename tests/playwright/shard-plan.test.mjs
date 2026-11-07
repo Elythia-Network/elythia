@@ -91,6 +91,9 @@ test('writesMeta detects the endpoints that write the meta', () => {
   assert.equal(writesMeta('await callApi(request, `admin/roles/update-default-policies`, {})'), true);
   assert.equal(writesMeta("await callApi(request, 'admin/meta', { i })"), false);
   assert.equal(writesMeta("await callApi(request, 'admin/update-meta-secrets', { i })"), false);
+  // meta を書く helper (fixtures/admin_table.ts) を呼ぶ spec も meta を書く
+  assert.equal(writesMeta('({ page }) => runMetaRow({ page }, row)'), true);
+  assert.equal(writesMeta('import { runMetaRowLike } from x; runMetaRowLike(a)'), false);
 });
 
 test('durationsFromReports sums every attempt per file', () => {
