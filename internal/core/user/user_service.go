@@ -107,6 +107,9 @@ type Service struct {
 	// (search 側 per-call の ToLower を省くためと、whitespace のみ入力で
 	// remap が無意味に有効化される edge case の防御)。
 	selfHostname string
+	// moveTargetResolver は、meUpdated の movedTo / alsoKnownAs の URI を利用者の ID に
+	// 解決する (/api/i と同じ形にする、#4059)。nil なら解決しない
+	moveTargetResolver entity.MoveTargetResolver
 	// usertagHook は profile description 由来の user.tags が変わった時に
 	// hashtag 集計 (attachedUsersCount) を更新する hook。未配線なら集計を
 	// skip (= populate のみ、旧挙動)。実装は core/hashtag.Service。
@@ -191,6 +194,39 @@ func (s *Service) SetRemoteUserResolver(r RemoteUserResolver) {
 // a user's profile-derived tags change (#1362).
 func (s *Service) SetUsertagHook(h UsertagHook) {
 	s.usertagHook = h
+}
+
+// SetMoveTargetResolver wires the resolver that turns the account-migration
+// URIs (movedTo / alsoKnownAs) of a `meUpdated` event into user IDs, the same
+// as /api/i (#4059). Without it the event carries no resolved IDs.
+func (s *Service) SetMoveTargetResolver(r entity.MoveTargetResolver) {
+	s.moveTargetResolver = r
+}
+
+// NewMoveTargetResolver returns a resolver that finds a user ID for an actor
+// URI: a local user by the ID in the URI (localUserIDFromURI returns "" for a
+// URI of another server), otherwise a remote user by the stored URI. It does
+// not fetch anything remote.
+func NewMoveTargetResolver(userRepo repository.UserRepository, localUserIDFromURI func(uri string) string) entity.MoveTargetResolver {
+	return func(uri string) (string, bool) {
+		if userRepo == nil {
+			return "", false
+		}
+		if localUserIDFromURI != nil {
+			if id := localUserIDFromURI(uri); id != "" {
+				u, err := userRepo.FindByID(id)
+				if err != nil || u == nil {
+					return "", false
+				}
+				return u.ID, true
+			}
+		}
+		u, err := userRepo.FindByURI(uri)
+		if err != nil || u == nil {
+			return "", false
+		}
+		return u.ID, true
+	}
 }
 
 func (s *Service) SetSelfHostname(hostname string) {
@@ -980,6 +1016,10 @@ func (s *Service) publishMeUpdated(bundle *UserWithProfile) {
 	// profile update / pin / unpin は頻度が低く hot path ではないため
 	// full pack する (UserLite ではなく UserDetailed)。
 	body := s.entityPacker.PackUserDetailed(bundle.User, bundle.Profile, s.idGen)
+	// packer は movedTo / alsoKnownAs を null のまま残すので、/api/i と同じく利用者の ID に
+	// 解決して入れる。frontend はこの event で `$i` を上書きするので、解決しないと、引越しの
+	// 設定を保存した直後の `$i` が null になり、/api/i と食い違う (#4059)
+	body.ResolveMoveTargets(bundle.User, s.moveTargetResolver)
 	// **本人にはカウントを見せる。** packer は `followersVisibility` /
 	// `followingVisibility` が public でないカウントを既定で伏せるので、
 	// self event でゲートを通さないと 0 が流れる。fork frontend は
