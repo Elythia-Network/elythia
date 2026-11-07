@@ -291,7 +291,19 @@ type Service struct {
 	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3796)。組み立てで渡す。
 	entityPacker *entity.Packer
+	// uploaderProfiles はアップロードした利用者のプロフィールの
+	// alwaysMarkNsfw / autoSensitive を読む (#4057)。nil なら読まない。
+	uploaderProfiles UploaderProfileLookup
 }
+
+// UploaderProfileLookup reads the uploader's profile for the drive settings
+// that affect new files (alwaysMarkNsfw / autoSensitive).
+type UploaderProfileLookup interface {
+	FindProfileByUserID(userID string) (*model.UserProfile, error)
+}
+
+// SetUploaderProfiles wires the profile lookup used by Upload.
+func (s *Service) SetUploaderProfiles(p UploaderProfileLookup) { s.uploaderProfiles = p }
 
 // defaultMediaProcessingConcurrency is how many uploads may decode at once.
 //
@@ -810,6 +822,29 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		}
 	}
 
+	// プロフィールの「常にセンシティブにする」と「自動でセンシティブにする」(#4057)。
+	// 本家 `DriveService.addFile` と同じく、前者はローカルの利用者だけに効く。
+	// 後者はサーバーの判定の結果を採るかどうかなので、管理者が
+	// setSensitiveFlagAutomatically を切っていても判定を走らせる。本家と同じく
+	// 同じ中身のファイルを返す分岐 (FindByMD5) の後で読む。
+	profileAutoSensitive := false
+	if in.User != nil && in.User.IsLocal() && s.uploaderProfiles != nil {
+		profile, err := s.uploaderProfiles.FindProfileByUserID(in.User.ID)
+		switch {
+		case err == nil:
+			if profile != nil {
+				in.IsSensitive = in.IsSensitive || profile.AlwaysMarkNsfw
+				profileAutoSensitive = profile.AutoSensitive
+			}
+		case repository.IsNotFound(err):
+			// プロフィールの行が無い利用者は、設定を入れていないのと同じに扱う。
+		default:
+			// **DB 障害で設定を飛ばさない。** 続けると「常にセンシティブにする」を入れた
+			// 利用者のファイルが、センシティブなしで公開される。
+			return nil, fmt.Errorf("load uploader profile: %w", err)
+		}
+	}
+
 	// backend は meta から動的に解決される (#2315)。本体・サムネイル・
 	// webpublic の書き込みと storedInternal の決定が途中の設定変更で
 	// ちぐはぐにならないよう、ここで一度だけ固定する。
@@ -894,7 +929,7 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 	var sensRoute sensitiveRoute
 	if detect {
 		sensSettings = s.currentSensitiveSettings()
-		sensRoute = s.sensitiveRouteFor(in.User, info.MimeType, sensSettings)
+		sensRoute = s.sensitiveRouteFor(in.User, info.MimeType, sensSettings, profileAutoSensitive)
 	}
 
 	var detectionImage []byte
@@ -1032,10 +1067,13 @@ func (s *Service) currentSensitiveSettings() SensitiveSettings {
 }
 
 // sensitiveRouteFor decides how an upload of mime by user is judged.
+// autoSensitive is the uploader's profile setting, which adopts the
+// detection result even when the instance does not set the flag
+// automatically.
 //
 // 判定の前にデコード済みの像を使い回せるかを決めるため、`judgeSensitive` から
 // 分けてある (#3995)。どの経路でも判定は best-effort で、失敗は非センシティブ。
-func (s *Service) sensitiveRouteFor(user *model.User, mime string, settings SensitiveSettings) sensitiveRoute {
+func (s *Service) sensitiveRouteFor(user *model.User, mime string, settings SensitiveSettings, autoSensitive bool) sensitiveRoute {
 	cfg := settings.Config
 
 	// mediaSilencedHosts: リモートユーザーのホストが silenced ならば無条件 sensitive
@@ -1046,7 +1084,7 @@ func (s *Service) sensitiveRouteFor(user *model.User, mime string, settings Sens
 	// 公式 sensitive-detector (2026.7.0) は meta の API URL 設定時のみ有効。
 	officialEnabled := s.officialSensitiveDetector != nil && strings.TrimSpace(settings.Official.APIURL) != ""
 
-	if !cfg.SetFlagAutomatically || (s.sensitiveDetector == nil && !officialEnabled) {
+	if !(cfg.SetFlagAutomatically || autoSensitive) || (s.sensitiveDetector == nil && !officialEnabled) {
 		return sensitiveSkip
 	}
 
@@ -1083,11 +1121,14 @@ func (s *Service) sensitiveRouteFor(user *model.User, mime string, settings Sens
 // detectSensitive runs sensitive media detection based on meta config.
 // ベストエフォート: detector 未設定やエラー時は false を返す。
 //
+// **プロフィールの autoSensitive は見ない** (常に false を渡す)。アップロードの経路は
+// `Upload` が `sensitiveRouteFor` へプロフィールの値を渡すので、ここを通さない (#4057)。
+//
 // ctx は upload リクエストの context を伝播する (#749)。client が早期に
 // 切断したら detector 呼び出しもキャンセルされる。
 func (s *Service) detectSensitive(ctx context.Context, user *model.User, body []byte, mime string) bool {
 	settings := s.currentSensitiveSettings()
-	return s.judgeSensitive(ctx, s.sensitiveRouteFor(user, mime, settings), body, mime, settings, nil)
+	return s.judgeSensitive(ctx, s.sensitiveRouteFor(user, mime, settings, false), body, mime, settings, nil)
 }
 
 // judgeSensitive runs the detection chosen by sensitiveRouteFor.
