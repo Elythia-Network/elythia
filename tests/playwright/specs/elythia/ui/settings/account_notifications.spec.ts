@@ -114,13 +114,13 @@ test.describe('settings: account (notifications)', () => {
       await expectNoNotification(request, user, (n) => n.type === 'reaction' && n.userId === b.id);
     }),
     neverRow('pollEnded', 'Polls ending', {
-      skip: '投票の締切を待つワーカー (internal/core/poll/expiry_worker.go、60 秒周期) から届く。行の時間内に締切を迎えられない。#4058 で、この経路は受信の設定を通らない (never でも届く) ことが分かっている',
+      skip: '投票の締切を待つワーカー (internal/core/poll/expiry_worker.go、60 秒周期) から届く。行の時間内に締切を迎えられない。受信の設定は、通知を作る側 (notification.Service) が見る (#4058)',
     }),
     neverRow('scheduledNotePosted', 'Scheduled note was successful', {
-      skip: '予約投稿のジョブ (internal/queue/processors/post_scheduled_note.go) から届き、予約の時刻を待つ必要がある。#4058 で、この経路は受信の設定を通らない (never でも届く) ことが分かっている',
+      skip: '予約投稿のジョブ (internal/queue/processors/post_scheduled_note.go) から届き、予約の時刻を待つ必要がある。受信の設定は、通知を作る側 (notification.Service) が見る (#4058)',
     }),
     neverRow('scheduledNotePostFailed', 'Scheduled note failed', {
-      skip: '予約投稿のジョブが失敗したときに届く (post_scheduled_note.go)。失敗を起こす手段が無い。#4058 で、成功側と同じくこの経路は受信の設定を通らない疑いがある',
+      skip: '予約投稿のジョブが失敗したときに届く (post_scheduled_note.go)。失敗を起こす手段が無い。受信の設定は、通知を作る側 (notification.Service) が見る (#4058)',
     }),
     neverRow('receiveFollowRequest', 'Received follow requests', async ({ request, user }) => {
       // フォローがリクエストになるよう、承認制にしておく
@@ -131,8 +131,8 @@ test.describe('settings: account (notifications)', () => {
     }),
     neverRow('app', 'Notifications from linked apps', async ({ request, user }) => {
       await apiOk(request, 'notifications/create', { i: user.token, body: runTag('pwapp'), header: 'pw' });
-      await expectNoNotification(request, user, (n) => n.type === 'app', '#4058: never にしてもアプリの通知が届く');
-    }, '#4058'),
+      await expectNoNotification(request, user, (n) => n.type === 'app');
+    }),
     neverRow('chatRoomInvitationReceived', 'Invited to chat room', async ({ request, user }) => {
       const b = await other(request);
       const room = await apiOk(request, 'chat/rooms/create', { i: b.token, name: runTag('pwroom') });
@@ -142,8 +142,8 @@ test.describe('settings: account (notifications)', () => {
     neverRow('achievementEarned', 'Achievement unlocked', async ({ request, user }) => {
       // 画面が自分で取る実績もあるので、この行で取る実績の名前で絞る
       await apiOk(request, 'i/claim-achievement', { i: user.token, name: 'clickedClickHere' });
-      await expectNoNotification(request, user, (n) => n.type === 'achievementEarned' && n.achievement === 'clickedClickHere', '#4058: never にしても実績の通知が届く');
-    }, '#4058'),
+      await expectNoNotification(request, user, (n) => n.type === 'achievementEarned' && n.achievement === 'clickedClickHere');
+    }),
     neverRow('login', 'Sign In', async ({ request, user }) => {
       await signin(request, user.username, DEFAULT_TEST_PASSWORD);
       await expectNoNotification(request, user, (n) => n.type === 'login');
