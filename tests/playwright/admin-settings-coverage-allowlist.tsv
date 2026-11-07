@@ -1,0 +1,6 @@
+# 管理画面の設定とロールのポリシーの表に行を作らないキー (#4066)。`meta:<キー>` か `policy:<キー>` と、どの経路でそうなるか。
+# 書き方は docs/playwright.md の「管理画面の設定とロールのポリシーの表」。
+meta:cacheRemoteFiles	settings.vue のスイッチは disabled で操作できない (Elythia はリモートのファイルを保存しない、docs/divergence/operations.md §5.5)。保存は読み込んだ値の送り返しだけ
+meta:cacheRemoteSensitiveFiles	cacheRemoteFiles と同じ。settings.vue のスイッチは disabled
+meta:signToActivityPubGet	settings.vue のスイッチは disabled で操作できない (取得はまず署名し、拒否されたときだけ署名なしで取り直す、#4067)
+meta:objectStoragePort	object-storage.vue に入力欄が無く、admin/meta で読んだ値をそのまま admin/update-meta に送り返している

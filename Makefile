@@ -83,6 +83,8 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	$(MAKE) playwright-route-check
 	# 設定のページが prefer.model で扱う端末の設定のキーに、設定の表の行があるか (#4056)
 	$(MAKE) playwright-settings-check
+	# 管理画面の admin/update-meta のキーとロールのポリシーのキーに、表の行があるか (#4066)
+	$(MAKE) playwright-admin-settings-check
 	# **eslint も回す (#2906)。** CI は別 step で `pnpm eslint` を回しており、
 	# ここに無いと**手元で緑でも CI が落ちる**。#2903 で実際に踏んだ (デッドコードを
 	# 消したときの空行が @stylistic/no-multiple-empty-lines で落ちた)。個別ファイルに
@@ -1277,6 +1279,14 @@ playwright-settings-check: ## 設定のページが prefer.model で扱う端末
 	@test -f tests/playwright/node_modules/@playwright/test/cli.js || { echo "tests/playwright の node_modules が無い: cd tests/playwright && npm ci" >&2; exit 1; }
 	node --test tests/playwright/settings-coverage.test.mjs
 	node tests/playwright/settings-coverage.mjs
+
+.PHONY: playwright-admin-settings-check
+playwright-admin-settings-check: ## 管理画面が admin/update-meta で書くキーとロールのポリシーのキーが、どれも管理画面の表 (Playwright) の行で確かめられているか検査 (#4066)
+	# spec の一覧は playwright 自身に解かせ、ポリシーの編集画面の template は frontend の
+	# vue/compiler-sfc に解かせるので、tests/playwright と frontend の node_modules が要る
+	@test -f tests/playwright/node_modules/@playwright/test/cli.js || { echo "tests/playwright の node_modules が無い: cd tests/playwright && npm ci" >&2; exit 1; }
+	node --test tests/playwright/admin-settings-coverage.test.mjs
+	node tests/playwright/admin-settings-coverage.mjs
 
 playwright-down: ## Playwright スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test down -v

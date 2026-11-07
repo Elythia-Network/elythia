@@ -1,7 +1,7 @@
 # Playwright e2e
 
 Elythia のフロントエンド / API を実ブラウザから検証する e2e。spec は
-`tests/playwright/specs/` にあり、現在 388 ファイル
+`tests/playwright/specs/` にあり、現在 397 ファイル
 (`find tests/playwright/specs -name '*.spec.ts' | wc -l`)。
 
 Cypress からの移行完了に伴い、frontend e2e はこちらに一本化した (#2437)。本家も
@@ -80,11 +80,12 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 **11 シャード並列** (`PLAYWRIGHT_SHARD=i/11`、`fail-fast: false`)。check 名は
 `spec (Elythia 1/11)` 〜 `11/11`。
 
-**1 スタックあたりは直列でしか回せない。** 388 spec のうち 185 が共有の root (alice) で
-**ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184 で、`signin.spec.ts` だけ signin フォームを直接
-駆動する。数え方は `grep -rl 'uiSigninAsRoot' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す。フォームから入る spec はほかにもあるが、
+**1 スタックあたりは直列でしか回せない。** 397 spec のうち 194 が共有の root (alice) で
+**ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184、管理画面の表の helper (`fixtures/admin_table.ts` の
+`signinAdmin`) を通るものが 9 で、`signin.spec.ts` だけ signin フォームを直接
+駆動する。数え方は `grep -rlE 'uiSigninAsRoot|signinAdmin|runMetaRow|runPolicyRow' tests/playwright/specs --include='*.spec.ts' | wc -l` に 1 を足す。フォームから入る spec はほかにもあるが、
 自分で作った利用者で入るので数えない)、さらに 45 が root ではサインインせずに root の token で API を叩く (`root.json` を
-読み、root でサインインしないもの。数え方は `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。
+読み、root でサインインしないもの。数え方は `grep -rl 'root.json' tests/playwright/specs --include='*.spec.ts' | xargs grep -LE 'uiSigninAsRoot|signinAdmin|runMetaRow|runPolicyRow' | grep -v '/signin.spec.ts$' | wc -l`)。
 instance meta は全 spec が共有する。Playwright はファイル単位で並列化する
 ので `workers` を上げると `profile_iscat_toggle` と `profile_isbot_toggle` が同じ
 アカウントを、`admin_branding_save` と `about_page_render` が同じ meta を取り合う。
@@ -171,7 +172,7 @@ PR では、その PR の run の値で取り直す。
 ### project (`main` と `meta`)
 
 instance meta を書き換える spec (`admin/update-meta` か `admin/roles/update-default-policies`
-を呼ぶもの。今は 18) は、
+を呼ぶもの、管理画面の表の `runMetaRow` を呼ぶもの。今は 27) は、
 `meta` の project に分けてある。判定は `shard-plan.mjs` の `writesMeta` が自動で
 行うので、spec を書く側で振り分ける必要は無い。数え方 (リポジトリの root で):
 
@@ -540,6 +541,59 @@ make playwright-test PW_SETTINGS_MUTATION=1 PLAYWRIGHT_ARGS="specs/elythia/ui/se
 パレットの一覧など) は対象にしていない。行を作らないキーは `settings-coverage-allowlist.tsv` に理由を書く。
 宣言は `playwright test --list` に解かせる (ルートの対応付けと同じ)。拾えたキーの下限と、4 つのページの目印の
 キーを置いている。
+
+## 管理画面の設定とロールのポリシーの表 (#4066)
+
+管理画面で変えた設定とロールのポリシーが、保存され、再読み込みの後も残り、実際に効くことを表で確かめる。
+流れと変異の確かめ (`PW_SETTINGS_MUTATION=1`)、既知の不具合の印 (`knownBug`) は設定の表と同じ。
+spec は `specs/elythia/ui/admin_settings/`、helper は `fixtures/admin_table.ts`。
+
+- **meta の行** (`meta_*.spec.ts`、`runMetaRow`): root で管理画面を操作し、`admin/meta` で保存を確かめる。
+  管理画面の保存の単位 (フォームの枠、または画面の下の Save) ごとに 1 行にまとめ、その保存で変わる
+  `admin/update-meta` のキーを宣言する (`coversMeta`)。効き目は、利用者の側から読める出力
+  (`/api/meta`、`manifest.json`、各 API の振る舞い) で、キーごとに見る。行の前に `restore` のキーを控え、
+  終わったら `admin/update-meta` で戻す。値は今の値と違うものにする (変わらないとフォームの保存の帯が
+  出ない)。`admin/meta` が別の名前で返すキーは `[書く名前, 読む名前]` の組で書く (`swPublicKey` と
+  `swPublickey`)。`admin/meta` が返さないキーは `restorePublic` で `/api/meta` から控える (`serverRules`、
+  本家も返さない)。秘密の値は伏せ字で返り、伏せ字を送り返すと「変えない」と読まれるので、設定済みだと戻せない。
+  このスタックでは未設定 (`null`) で、設定済みなら行の前に落とす
+- **ポリシーの行** (`policy_*.spec.ts`、`runPolicyRow`): 行ごとに手動のロールを API で作って新しい利用者に
+  割り当て、root でロールの編集画面から「基本の値を使う」を切って値と優先度を保存し、`admin/roles/show` で
+  確かめる。効き目はその利用者で見る。値は既定値と逆にし、優先度は「高」にする。真偽値はどれかのロールが
+  真なら真、上限は大きい方が採られるので、優先度が低いと既定値より厳しくできない。部品は
+  `roles.policy-editor.vue` の各 `XFolder` に足した `data-policy-key` で取る (#4066)。行が作ったものは
+  `cleanup` で消す (ロール、広告、絵文字、アバターの飾り)
+- **基本ロール** (`meta_base_role.spec.ts`): `/admin/roles` の「Role template」で既定のポリシーを変える経路を
+  2 行で確かめる。既定のポリシーは丸ごと置き換わるので、行の前の値を控えて戻す
+
+**meta の project に入る spec。** `admin/update-meta` を名前で呼ばない spec も、`runMetaRow` を呼べば
+`writesMeta` が meta を書く spec として扱う (`shard-plan.mjs` の `META_WRITING_HELPERS`)。ポリシーの行は
+meta を書かないので main で流れる。
+
+**効き目を確かめられない行は、理由を書いて省く。** 外部のサービス (S3、SMTP、センシティブの判定、メールの検証、
+DeepL)、リモートのサーバー (連合の相手、リレー)、時間の経過、手元の設定 (`disableEndpointRateLimits` があるので
+`rateLimitFactor`)、外から見えない内部の経路 (FTT、RBT) が要るもの。保存と表示までは確かめる。
+
+```bash
+make playwright-test PLAYWRIGHT_ARGS="specs/elythia/ui/admin_settings/ --retries=0"
+make playwright-test PW_SETTINGS_MUTATION=1 PLAYWRIGHT_ARGS="specs/elythia/ui/admin_settings/ --retries=0"
+```
+
+**抜けを落とすゲート** (`make playwright-admin-settings-check`、frontend-check と CI の `frontend`):
+
+- meta のキーは、管理画面 (`pages/admin/*.vue` と `pages/instance-info.vue`) が `admin/update-meta` に渡す
+  オブジェクトのキーを TypeScript の構文木で集める。spread と条件式の中のオブジェクトもたどる。字面でない
+  引数 (`registrationModePatch[mode]`) は、定義のファイルを `RESOLVED_ARGS` で名指しして、そこから集める。
+  読めない引数があれば「信用できない」で落とす
+- ポリシーのキーは、`roles.policy-editor.vue` の template を Vue のコンパイラ (`vue/compiler-sfc`) で読み、
+  `XFolder` の `data-policy-key` を集める。編集するポリシー (`v-model:policyMeta`) と合わないものは落とす
+  (`matchQuery` の検索の語がキーと違う枠がある。`canImportUserLists` の枠の検索の語は `canImportUserList`)
+- 宣言は `coversMeta` / `coversPolicies`。行を作らないキーは `admin-settings-coverage-allowlist.tsv` に
+  `meta:<キー>` / `policy:<キー>` と理由を書く (画面から変えられないキー。操作できないスイッチと、入力欄の無い
+  `objectStoragePort`)。拾えたキーの下限と目印のキーを、meta とポリシーのそれぞれに置いている
+- **見る範囲は `admin/update-meta` だけ。** 別の endpoint で書く管理画面の設定 (bot 対策の `admin/captcha/save` など) と、
+  初期設定のウィザード (`MkServerSetupWizard`。書くキーは管理画面の各ページにもある) は対象外。endpoint の名前を
+  文字列の字面で書かない呼び出し (変数に入れる、`as const` を付ける) も拾わない (今は無い)
 
 ## spec を書くときの注意
 

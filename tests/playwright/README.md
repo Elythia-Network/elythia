@@ -156,13 +156,13 @@ tests/playwright/
 
 ## 並列度
 
-**1 スタックに対しては直列で回すしかない** (`workers: 1`)。388 spec のうち 185 が
-共有の root (alice) で**ブラウザでサインインした状態**を使い (helper 経由が 184 で、
+**1 スタックに対しては直列で回すしかない** (`workers: 1`)。397 spec のうち 194 が
+共有の root (alice) で**ブラウザでサインインした状態**を使い (helper 経由が 193 で、
 `upstream/ui/signin.spec.ts` だけ signin フォームを直接駆動する。数え方は
-`grep -rl 'uiSigninAsRoot' specs --include='*.spec.ts' | wc -l` に 1 を足す)、
+`grep -rlE 'uiSigninAsRoot|signinAdmin|runMetaRow|runPolicyRow' specs --include='*.spec.ts' | wc -l` に 1 を足す)、
 さらに 45 が root ではサインインせずに root の token で API を叩く (`root.json` を読み、root で
 サインインしないもの。数え方は
-`grep -rl 'root.json' specs --include='*.spec.ts' | xargs grep -L 'uiSigninAsRoot' | grep -v '/signin.spec.ts$' | wc -l`)。instance meta は全 spec が共有する。Playwright は
+`grep -rl 'root.json' specs --include='*.spec.ts' | xargs grep -LE 'uiSigninAsRoot|signinAdmin|runMetaRow|runPolicyRow' | grep -v '/signin.spec.ts$' | wc -l`)。instance meta は全 spec が共有する。Playwright は
 ファイル単位で並列化するので、`workers` を上げると `profile_iscat_toggle` と
 `profile_isbot_toggle` が同じアカウントを、`admin_branding_save` と
 `about_page_render` が同じ meta を取り合う。root の quota
