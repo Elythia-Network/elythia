@@ -305,6 +305,8 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	// 監査ログ (#3678)。
 	driveService := coredrive.NewService(driveFileRepo, driveFolderRepo, driveStorage, idGen,
 		entityPacker, roleService, modLogService, userRepo)
+	// プロフィールの alwaysMarkNsfw / autoSensitive をアップロードに効かせる (#4057)。
+	driveService.SetUploaderProfiles(userRepo)
 	imgProcessor := coredrive.NewDefaultImageProcessor()
 	driveReader := coretransfer.NewRepoBackedDriveReader(driveFileRepo, driveStorage)
 	importer := coretransfer.NewImporter(coretransfer.ImporterDeps{

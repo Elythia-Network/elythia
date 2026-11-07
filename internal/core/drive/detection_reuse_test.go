@@ -380,7 +380,7 @@ func TestSensitiveRouteFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.s.sensitiveRouteFor(tc.user, tc.mime, tc.settings))
+			assert.Equal(t, tc.want, tc.s.sensitiveRouteFor(tc.user, tc.mime, tc.settings, false))
 		})
 	}
 }
