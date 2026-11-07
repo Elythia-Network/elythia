@@ -44,16 +44,15 @@ test.describe('settings: account (drive, mute-block)', () => {
       effect: async ({ request, baseURL, user }) => {
         // 本家はプロフィールの alwaysMarkNsfw を見て、上げたファイルをセンシティブにする (DriveService)
         const file = await uploadPNG(request, baseURL, user.token, `${runTag('pwnsfw')}.png`, distinctPNG()) as { isSensitive?: boolean };
-        expect(file.isSensitive, '#4057: 常にセンシティブにしても、アップロードしたファイルがセンシティブにならない').toBe(true);
+        expect(file.isSensitive, '常にセンシティブにしても、アップロードしたファイルがセンシティブにならない').toBe(true);
       },
-      knownBug: '#4057',
     },
     {
       name: 'autoSensitive → true', route: '/settings/drive',
       set: async ({ page }) => (await labeledSwitch(page, AUTO_SENSITIVE)).click(),
       read: (me) => me.autoSensitive, expected: true,
       shows: ({ page }) => expectSwitch(page, AUTO_SENSITIVE, true),
-      effect: { skip: 'NSFW の判定 (サーバーの設定とモデル) に掛かったファイルだけに効き、この spec のスタックでは判定が動かない。#4057 で、backend がプロフィールのこの値を読んでいない疑いもある' },
+      effect: { skip: 'NSFW の判定 (サーバーの設定とモデル) に掛かったファイルだけに効き、この spec のスタックでは判定が動かない。判定の結果を採ることは、Go のテスト (internal/core/drive の TestUpload_ProfileAutoSensitive) が確かめる (#4057)' },
     },
     {
       name: `mutedWords → [[${SOFT_WORD}]]`, route: '/settings/mute-block',
