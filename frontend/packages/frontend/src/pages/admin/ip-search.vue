@@ -28,7 +28,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div :class="$style.status" aria-live="polite">{{ status }}</div>
 
 			<form class="_gaps_s" @submit.prevent="search(0)">
-				<MkInput v-model="ip" type="search" :spellcheck="false" :placeholder="i18n.ts._mkgoIpSearch.ipPlaceholder">
+				<MkInput v-model="ip" type="search" :spellcheck="false" :placeholder="i18n.ts._mkgoIpSearch.ipPlaceholder" data-testid="ip-search-input">
 					<template #label>{{ i18n.ts._mkgoIpSearch.ipAddress }}</template>
 				</MkInput>
 				<MkSelect v-model="sinceDays" :items="periodDef">
@@ -44,7 +44,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<template v-if="retentionDays != null">{{ i18n.tsx._mkgoIpSearch.retentionNote({ n: retentionDays }) }}</template>
 					</template>
 				</MkSelect>
-				<MkButton primary type="submit" :disabled="loading || ip.trim() === ''"><i class="ti ti-search"></i> {{ i18n.ts.search }}</MkButton>
+				<MkButton primary type="submit" :disabled="loading || ip.trim() === ''" data-testid="ip-search-submit"><i class="ti ti-search"></i> {{ i18n.ts.search }}</MkButton>
 			</form>
 
 			<!--
@@ -92,7 +92,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<MkInfo v-else-if="outcome === 'noMatchInPeriod'">{{ i18n.ts._mkgoIpSearch.noMatchInPeriod }}</MkInfo>
 
 				<div v-if="accounts.length > 0" class="_gaps_s">
-					<div v-for="a in accounts" :key="a.user.id" :class="$style.row">
+					<div v-for="a in accounts" :key="a.user.id" :class="$style.row" data-testid="ip-search-account" :data-user-id="a.user.id">
 						<MkA :to="`/admin/user/${a.user.id}`" :class="$style.card">
 							<MkUserCardMini :user="a.user" :withChart="false"/>
 						</MkA>

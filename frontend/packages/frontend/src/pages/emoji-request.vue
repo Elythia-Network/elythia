@@ -37,7 +37,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				@drop="onDrop"
 			>
 				<div :class="$style.previewBox">
-					<img v-if="file" :src="file.url" :alt="name" :class="$style.previewImg"/>
+					<img v-if="file" :src="file.url" :alt="name" :class="$style.previewImg" data-testid="emoji-application-preview"/>
 					<i v-else class="ti ti-photo" :class="$style.previewPlaceholder"></i>
 				</div>
 				<div :class="$style.previewMeta">
@@ -48,7 +48,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						遅れて届いたドロップの結果に上書きされることも、
 						`canSubmit` が false のままになることも無い。
 					-->
-					<MkButton @click="chooseFile">{{ i18n.ts._emojiApplication.chooseImage }}</MkButton>
+					<MkButton data-testid="emoji-application-choose-file" @click="chooseFile">{{ i18n.ts._emojiApplication.chooseImage }}</MkButton>
 					<div v-if="uploading" :class="$style.previewLabel">
 						<MkLoading :em="true"/> {{ i18n.ts._emojiApplication.dropUploading }}
 					</div>
@@ -74,7 +74,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</div>
 			</div>
 
-			<MkInput v-model="name" :spellcheck="false">
+			<MkInput v-model="name" :spellcheck="false" data-testid="emoji-application-name">
 				<template #label>{{ i18n.ts.name }}</template>
 				<template #caption>{{ i18n.ts._emojiApplication.nameCaption }}</template>
 			</MkInput>
@@ -87,7 +87,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<template #label>{{ i18n.ts.tags }}</template>
 				<template #caption>{{ i18n.ts._emojiApplication.aliasesCaption }}</template>
 			</MkInput>
-			<MkTextarea v-model="license">
+			<MkTextarea v-model="license" data-testid="emoji-application-license">
 				<template #label>{{ i18n.ts.license }}</template>
 				<template #caption>{{ i18n.ts._emojiApplication.licenseCaption }}</template>
 			</MkTextarea>
@@ -99,7 +99,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<template #caption>{{ i18n.ts._emojiApplication.commentCaption }}</template>
 			</MkTextarea>
 
-			<MkButton primary :disabled="!canSubmit" @click="submit">
+			<MkButton primary :disabled="!canSubmit" data-testid="emoji-application-submit" @click="submit">
 				{{ i18n.ts._emojiApplication.submit }}
 			</MkButton>
 		</div>
@@ -109,7 +109,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkLoading v-if="fetching"/>
 			<MkInfo v-else-if="mine.length === 0">{{ i18n.ts._emojiApplication.noneOfMine }}</MkInfo>
 			<div v-else class="_gaps_s">
-				<MkFolder v-for="app in mine" :key="app.id" :defaultOpen="app.status === 'rejected'">
+				<MkFolder v-for="app in mine" :key="app.id" :defaultOpen="app.status === 'rejected'" data-testid="emoji-application-mine" :data-application-id="app.id" :data-status="app.status">
 					<!--
 						**折りたたんだ状態でも画像で見分けられるようにする (#2989)。**
 						名前だけだと、似た名前の申請・再申請・リモート申請を見比べた
@@ -157,7 +157,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							{{ i18n.tsx._emojiApplication.approvedNote({ name: app.name }) }}
 						</MkInfo>
 
-						<MkButton v-if="app.status === 'pending'" danger @click="cancel(app)">
+						<MkButton v-if="app.status === 'pending'" danger data-testid="emoji-application-cancel" @click="cancel(app)">
 							{{ i18n.ts._emojiApplication.cancel }}
 						</MkButton>
 					</div>
@@ -204,6 +204,7 @@ const headerTabs = computed(() => [{
 }, {
 	key: 'mine',
 	title: i18n.ts._emojiApplication.tabMine,
+	testId: 'emoji-request-tab-mine',
 }]);
 
 const file = ref<{ id: string; url: string } | null>(null);

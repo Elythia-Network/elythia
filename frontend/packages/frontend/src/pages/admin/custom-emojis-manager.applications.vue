@@ -14,7 +14,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<MkInfo v-else-if="applications.length === 0">{{ i18n.ts._emojiApplication.noApplications }}</MkInfo>
 
 		<div v-else class="_gaps_s">
-			<MkFolder v-for="app in applications" :key="app.id" :defaultOpen="filter === 'pending'">
+			<MkFolder v-for="app in applications" :key="app.id" :defaultOpen="filter === 'pending'" data-testid="emoji-application-item" :data-application-id="app.id">
 				<template #icon><i :class="app.remoteHost ? 'ti ti-world-download' : 'ti ti-mood-smile'"></i></template>
 				<template #label><span class="_monospace">:{{ app.name }}:</span></template>
 				<template #suffix>
@@ -124,15 +124,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<XRelated :applicationId="app.id"/>
 
 					<template v-if="app.status === 'pending'">
-						<MkTextarea v-model="reasons[app.id]">
+						<MkTextarea v-model="reasons[app.id]" data-testid="emoji-application-reject-reason">
 							<template #label>{{ i18n.ts._emojiApplication.rejectReason }}</template>
 							<template #caption>{{ i18n.ts._emojiApplication.rejectReasonCaption }}</template>
 						</MkTextarea>
 						<div :class="$style.actions">
-							<MkButton primary :disabled="busy === app.id" @click="approve(app)">
+							<MkButton primary :disabled="busy === app.id" data-testid="emoji-application-approve" @click="approve(app)">
 								{{ i18n.ts._emojiApplication.approve }}
 							</MkButton>
-							<MkButton danger :disabled="busy === app.id" @click="reject(app)">
+							<MkButton danger :disabled="busy === app.id" data-testid="emoji-application-reject" @click="reject(app)">
 								{{ i18n.ts._emojiApplication.reject }}
 							</MkButton>
 						</div>

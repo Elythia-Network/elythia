@@ -638,10 +638,12 @@ const headerTabs = computed(() => isSystem.value ? [{
 	key: 'relatedAccounts',
 	title: i18n.ts._mkgoIpRelated.tab,
 	icon: 'ti ti-users-group',
+	testId: 'admin-user-tab-related-accounts',
 }] : []), ...(canSeeEmojiApplications.value ? [{
 	key: 'emojiApplication',
 	title: i18n.ts._emojiApplication.tabUserApplications,
 	icon: 'ti ti-icons',
+	testId: 'admin-user-tab-emoji-applications',
 }] : []), {
 	key: 'chart',
 	title: i18n.ts.charts,

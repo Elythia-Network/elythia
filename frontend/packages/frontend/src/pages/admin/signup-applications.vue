@@ -25,7 +25,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</MkInfo>
 
 			<div v-else class="_gaps_s">
-				<MkFolder v-for="app in applications" :key="app.id" :defaultOpen="filter === 'pending'">
+				<MkFolder v-for="app in applications" :key="app.id" :defaultOpen="filter === 'pending'" data-testid="signup-application-item" :data-application-id="app.id">
 					<template #icon><i class="ti ti-user-plus"></i></template>
 					<template #label><MkTime :time="app.createdAt" mode="detail"/></template>
 					<template #suffix>{{ statusLabel(app.status) }}</template>
@@ -49,8 +49,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 						</MkKeyValue>
 
 						<div v-if="app.status === 'pending'" :class="$style.actions">
-							<MkButton primary inline @click="approve(app)"><i class="ti ti-check"></i> 承認</MkButton>
-							<MkButton danger inline @click="reject(app)"><i class="ti ti-x"></i> 却下</MkButton>
+							<MkButton primary inline data-testid="signup-application-approve" @click="approve(app)"><i class="ti ti-check"></i> 承認</MkButton>
+							<MkButton danger inline data-testid="signup-application-reject" @click="reject(app)"><i class="ti ti-x"></i> 却下</MkButton>
 						</div>
 					</div>
 				</MkFolder>

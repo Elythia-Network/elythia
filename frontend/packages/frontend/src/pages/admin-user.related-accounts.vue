@@ -24,7 +24,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<template v-if="retentionDays != null">{{ i18n.tsx._mkgoIpSearch.retentionNote({ n: retentionDays }) }}</template>
 			</template>
 		</MkSelect>
-		<MkButton primary :disabled="loading" @click="search(0)"><i class="ti ti-search"></i> {{ i18n.ts._mkgoIpRelated.run }}</MkButton>
+		<MkButton primary :disabled="loading" data-testid="ip-related-run" @click="search(0)"><i class="ti ti-search"></i> {{ i18n.ts._mkgoIpRelated.run }}</MkButton>
 	</div>
 
 	<!-- 読み上げ用。常設しないと初回の結果が読まれない。 -->
@@ -79,7 +79,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<MkInfo v-else-if="outcome === 'noMatchInPeriod'">{{ i18n.ts._mkgoIpRelated.noMatchInPeriod }}</MkInfo>
 
 		<div v-if="candidates.length > 0" class="_gaps_s">
-			<div v-for="(c, i) in candidates" :key="c.user.id" :class="$style.row">
+			<div v-for="(c, i) in candidates" :key="c.user.id" :class="$style.row" data-testid="ip-related-account" :data-user-id="c.user.id">
 				<!--
 					**順位は出すが、スコアは出さない。** 重みの単純和なので上限は 1 では
 					なく、パーセントとして読めない。ここで数値を出すと「関連度 87%」の

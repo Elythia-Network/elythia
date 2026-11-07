@@ -126,6 +126,7 @@ const headerTabs = computed(() => [{
 	key: 'ipLookup',
 	title: i18n.ts._mkgoIpLookupLog.title,
 	icon: 'ti ti-file-search',
+	testId: 'modlog-tab-ip-lookup',
 }] : [])]);
 
 definePage(() => ({

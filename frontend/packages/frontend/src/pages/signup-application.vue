@@ -23,10 +23,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<div><b>このコードを控えてください。</b>二度と表示されません。</div>
 					<div>登録の状況を確認したり、承認後に登録したりするのに必要です。失くした場合は申請し直してください。</div>
 				</MkInfo>
-				<MkInput v-model="issuedCode" readonly>
+				<MkInput v-model="issuedCode" readonly data-testid="signup-application-issued-code">
 					<template #label>クレームコード</template>
 				</MkInput>
-				<MkButton primary rounded @click="beginLookup">
+				<MkButton primary rounded data-testid="signup-application-ack" @click="beginLookup">
 					<i class="ti ti-check"></i> 控えました
 				</MkButton>
 			</template>
@@ -45,7 +45,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<!-- 申請の状態を表示 -->
 			<template v-else-if="application">
 				<template v-if="application.status === 'pending'">
-					<MkInfo>申請を受け付けました。審査までしばらくお待ちください。</MkInfo>
+					<MkInfo data-testid="signup-application-status" data-status="pending">申請を受け付けました。審査までしばらくお待ちください。</MkInfo>
 					<div :class="$style.note">
 						結果はこのページでコードを入力すると確認できます。
 						<template v-if="application.expiresAt">
@@ -58,9 +58,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</template>
 
 				<template v-else-if="application.status === 'approved'">
-					<MkInfo>申請が承認されました。アカウントを作成してください。</MkInfo>
+					<MkInfo data-testid="signup-application-status" data-status="approved">申請が承認されました。アカウントを作成してください。</MkInfo>
 
-					<MkInput v-model="username" :disabled="busy" pattern="^[a-zA-Z0-9_]+$">
+					<MkInput v-model="username" :disabled="busy" pattern="^[a-zA-Z0-9_]+$" data-testid="signup-application-username">
 						<template #label>{{ i18n.ts.username }}</template>
 						<template #prefix>@</template>
 						<template v-if="usernameError" #caption>
@@ -71,7 +71,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							</span>
 						</template>
 					</MkInput>
-					<MkInput v-model="password" type="password" :disabled="busy">
+					<MkInput v-model="password" type="password" :disabled="busy" data-testid="signup-application-password">
 						<template #label>{{ i18n.ts.password }}</template>
 						<template #prefix><i class="ti ti-lock"></i></template>
 					</MkInput>
@@ -81,23 +81,23 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<template #caption>確認メールを送ります。リンクを開くと登録が完了します。</template>
 					</MkInput>
 
-					<MkButton primary rounded :disabled="busy || username === '' || usernameError != null || password === '' || (emailRequired && emailAddress === '')" @click="register">
+					<MkButton primary rounded :disabled="busy || username === '' || usernameError != null || password === '' || (emailRequired && emailAddress === '')" data-testid="signup-application-register" @click="register">
 						<i class="ti ti-user-plus"></i> {{ i18n.ts.signup }}
 					</MkButton>
 				</template>
 
 				<template v-else-if="application.status === 'rejected'">
-					<MkInfo warn>この申請は承認されませんでした。</MkInfo>
+					<MkInfo warn data-testid="signup-application-status" data-status="rejected">この申請は承認されませんでした。</MkInfo>
 					<MkButton rounded @click="restart">もう一度申請する</MkButton>
 				</template>
 
 				<template v-else-if="application.status === 'expired'">
-					<MkInfo warn>申請の期限が切れました。</MkInfo>
+					<MkInfo warn data-testid="signup-application-status" data-status="expired">申請の期限が切れました。</MkInfo>
 					<MkButton rounded @click="restart">もう一度申請する</MkButton>
 				</template>
 
 				<template v-else-if="application.status === 'completed'">
-					<MkInfo>この申請では既に登録が完了しています。</MkInfo>
+					<MkInfo data-testid="signup-application-status" data-status="completed">この申請では既に登録が完了しています。</MkInfo>
 				</template>
 			</template>
 
@@ -136,7 +136,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<MkCaptcha v-if="instance.enableRecaptcha" ref="recaptcha" v-model="reCaptchaResponse" provider="recaptcha" :sitekey="instance.recaptchaSiteKey"/>
 						<MkCaptcha v-if="instance.enableTurnstile" ref="turnstile" v-model="turnstileResponse" provider="turnstile" :sitekey="instance.turnstileSiteKey"/>
 						<MkCaptcha v-if="instance.enableTestcaptcha" ref="testcaptcha" v-model="testcaptchaResponse" provider="testcaptcha" :sitekey="null"/>
-						<MkButton primary rounded :disabled="busy || waitingForForm || captchaIncomplete" @click="apply">
+						<MkButton primary rounded :disabled="busy || waitingForForm || captchaIncomplete" data-testid="signup-application-apply" @click="apply">
 							<i class="ti ti-send"></i> 申請する
 						</MkButton>
 						<div v-if="waitingForForm" style="font-size: 0.9em; opacity: 0.8;">
@@ -153,15 +153,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 					</div>
 				</MkFolder>
 
-				<MkFolder :defaultOpen="false">
+				<MkFolder :defaultOpen="false" data-testid="signup-application-lookup-folder">
 					<template #icon><i class="ti ti-key"></i></template>
 					<template #label>コードで状況を確認する</template>
 
 					<div class="_gaps_m">
-						<MkInput v-model="claimCode" :disabled="busy" @enter="refresh">
+						<MkInput v-model="claimCode" :disabled="busy" data-testid="signup-application-lookup-code" @enter="refresh">
 							<template #label>クレームコード</template>
 						</MkInput>
-						<MkButton rounded :disabled="busy || claimCode === ''" @click="refresh">
+						<MkButton rounded :disabled="busy || claimCode === ''" data-testid="signup-application-lookup" @click="refresh">
 							<i class="ti ti-search"></i> 確認する
 						</MkButton>
 					</div>

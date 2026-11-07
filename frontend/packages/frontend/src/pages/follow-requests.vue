@@ -33,7 +33,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkInfo>{{ i18n.ts._followApproval.silentFollowsDescription }}</MkInfo>
 			<MkResult v-if="silentLoaded && silentItems.length === 0" type="empty" :text="i18n.ts._followApproval.noSilentFollows"/>
 			<div class="mk-follow-requests _gaps">
-				<div v-for="item in silentItems" :key="item.id" class="user _panel">
+				<div v-for="item in silentItems" :key="item.id" class="user _panel" data-testid="silent-follow" :data-user-id="item.follower.id">
 					<MkAvatar class="avatar" :user="item.follower" indicator link preview/>
 					<div class="body">
 						<div class="name">
@@ -204,6 +204,7 @@ const headerTabs = computed(() => [
 		key: 'silent',
 		title: i18n.ts._followApproval.silentFollows,
 		icon: 'ti ti-bell-off',
+		testId: 'follow-requests-tab-silent',
 	},
 ]);
 

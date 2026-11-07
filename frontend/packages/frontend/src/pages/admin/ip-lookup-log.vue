@@ -46,7 +46,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<i v-else class="ti ti-user-off"></i>
 				</template>
 				<template #right="{ event: e }">
-					<MkFolder :key="e.id">
+					<MkFolder :key="e.id" data-testid="ip-lookup-log-entry" :data-entry-id="e.id">
 						<template #label>{{ kindLabel(e.kind) }}</template>
 						<template #caption><MkTime :time="e.createdAt" mode="detail"/></template>
 

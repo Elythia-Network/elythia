@@ -392,6 +392,7 @@ const headerTabs = computed(() => [{
 	// 既存の絵文字と見比べる場面が多いため。
 	key: 'applications',
 	title: i18n.ts._emojiApplication.tabTitle,
+	testId: 'custom-emojis-tab-applications',
 }]);
 
 definePage(() => ({

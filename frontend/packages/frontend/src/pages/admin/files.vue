@@ -151,6 +151,7 @@ const headerTabs = computed(() => [{
 	key: 'usage',
 	title: i18n.ts._driveUsage.tab,
 	icon: 'ti ti-chart-pie',
+	testId: 'files-tab-usage',
 }]);
 
 definePage(() => ({

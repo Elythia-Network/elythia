@@ -163,15 +163,18 @@ const headerTabs = computed(() => [{
 	// 覚えることにならないようにする。
 	key: 'deliver',
 	title: 'Deliver',
+	testId: 'federation-tab-deliver',
 }, {
 	key: 'inbox',
 	title: 'Inbox',
 }, {
 	key: 'gone',
 	title: i18n.ts._goneInstances.tab,
+	testId: 'federation-tab-gone',
 }, {
 	key: 'rules',
 	title: i18n.ts._federationRules.tab,
+	testId: 'federation-tab-rules',
 }]);
 
 definePage(() => ({

@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<MkInfo v-if="error !== null" warn>{{ i18n.ts._databaseHealth.unavailable }} {{ error }}</MkInfo>
 	<MkLoading v-else-if="report === null"/>
 	<template v-else>
-		<div :class="$style.caption">
+		<div :class="$style.caption" data-testid="database-health-report">
 			<div>{{ i18n.ts._databaseHealth.generatedAt }}: <MkTime :time="report.generatedAt" mode="detail"/></div>
 			<div>
 				{{ i18n.ts._databaseHealth.statsReset }}:

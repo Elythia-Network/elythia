@@ -16,14 +16,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<template v-else>
 		<MkInfo v-if="!iAmAdmin">{{ i18n.ts._federationRules.readOnly }}</MkInfo>
 		<div v-else-if="draft === null">
-			<MkButton primary @click="addDraft"><i class="ti ti-plus"></i> {{ i18n.ts._federationRules.add }}</MkButton>
+			<MkButton primary data-testid="federation-rule-add" @click="addDraft"><i class="ti ti-plus"></i> {{ i18n.ts._federationRules.add }}</MkButton>
 		</div>
-		<MkFolder v-if="draft !== null" :defaultOpen="true">
+		<MkFolder v-if="draft !== null" :defaultOpen="true" data-testid="federation-rule-draft">
 			<template #label>{{ i18n.ts._federationRules.add }}</template>
 			<XRuleEditor :rule="draft" :readOnly="false" @saved="onSaved" @deleted="onSaved"/>
 		</MkFolder>
 		<div v-if="items.length === 0 && draft === null" :class="$style.caption">{{ i18n.ts._federationRules.none }}</div>
-		<MkFolder v-for="r in items" :key="r.id ?? ''">
+		<MkFolder v-for="r in items" :key="r.id ?? ''" data-testid="federation-rule" :data-rule-id="r.id">
 			<template #label>{{ r.name || i18n.ts._federationRules.untitled }}</template>
 			<template #caption>{{ modeLabel(r) }} · {{ i18n.tsx._federationRules.hits({ n: number(r.hits ?? 0) }) }}</template>
 			<template #suffix><span :class="[$style.mode, $style[r.mode]]">{{ modeLabel(r) }}</span></template>

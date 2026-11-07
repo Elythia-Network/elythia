@@ -22,7 +22,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<br>不要なら手動で削除してください。
 				</MkInfo>
 
-				<MkInfo v-if="result.plugins.length === 0">
+				<MkInfo v-if="result.plugins.length === 0" data-testid="server-plugins-empty">
 					組み込まれているサーバープラグインはありません。プラグインはビルド時に組み込まれます。
 				</MkInfo>
 

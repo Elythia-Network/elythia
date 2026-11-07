@@ -23,18 +23,18 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div class="_woodenFrame" style="text-align: center;">
 					<div class="_woodenFrameInner">
 						<div class="_gaps" style="padding: 16px;">
-							<MkSelect v-model="baseMode" :items="baseModeDef">
+							<MkSelect v-model="baseMode" :items="baseModeDef" data-testid="bubble-game-mode">
 								<template #label>{{ i18n.ts._mkgoBubbleGame.mode }}</template>
 							</MkSelect>
 							<!--
 								mk-go (#3216): 物理は形と別に選ぶ。SPACE は重力がほぼ無いこと自体が
 								物理の違いなので選ばせない。
 							-->
-							<MkSelect v-if="baseMode !== 'space'" v-model="physics" :items="physicsDef">
+							<MkSelect v-if="baseMode !== 'space'" v-model="physics" :items="physicsDef" data-testid="bubble-game-physics">
 								<template #label>{{ i18n.ts._mkgoBubbleGame.physics }}</template>
 								<template #caption>{{ physicsCaption }}</template>
 							</MkSelect>
-							<MkButton primary gradate large rounded inline @click="start">{{ i18n.ts.start }}</MkButton>
+							<MkButton primary gradate large rounded inline data-testid="bubble-game-start" @click="start">{{ i18n.ts.start }}</MkButton>
 						</div>
 					</div>
 					<div class="_woodenFrameInner">
@@ -54,20 +54,20 @@ SPDX-License-Identifier: AGPL-3.0-only
 							<div style="font-size: 90%;">{{ i18n.ts._mkgoBubbleGame._versus.description }}</div>
 							<div style="font-size: 90%; opacity: 0.8;">{{ i18n.tsx._mkgoBubbleGame._versus.inviteHint({ mode: dropAndFusionModeLabel(gameMode) }) }}</div>
 							<div class="_buttonsCenter">
-								<MkButton primary rounded @click="inviteVersus">{{ i18n.ts._mkgoBubbleGame._versus.inviteButton }}</MkButton>
+								<MkButton primary rounded data-testid="versus-invite" @click="inviteVersus">{{ i18n.ts._mkgoBubbleGame._versus.inviteButton }}</MkButton>
 								<MkButton rounded @click="openVersusHistory"><i class="ti ti-history"></i> {{ i18n.ts._mkgoBubbleGame._versus.history }}</MkButton>
 							</div>
 							<template v-if="versusInvitations.length > 0">
 								<div><b>{{ i18n.ts._mkgoBubbleGame._versus.invitations }}</b></div>
-								<div v-for="inv in versusInvitations" :key="inv.id" :class="$style.invitation">
+								<div v-for="inv in versusInvitations" :key="inv.id" :class="$style.invitation" data-testid="versus-invitation" :data-match-id="inv.id">
 									<MkAvatar v-if="inv.user1" :user="inv.user1" style="width: 28px; height: 28px; margin-right: 8px;"/>
 									<div style="min-width: 0;">
 										<div v-if="inv.user1"><MkUserName :user="inv.user1" :nowrap="true"/></div>
 										<div style="font-size: 85%; opacity: 0.8;">{{ dropAndFusionModeLabel(inv.gameMode) }}</div>
 									</div>
 									<div style="margin-left: auto;" class="_buttons">
-										<MkButton primary small rounded @click="acceptVersus(inv)">{{ i18n.ts._mkgoBubbleGame._versus.acceptInvitation }}</MkButton>
-										<MkButton small rounded @click="declineVersus(inv)">{{ i18n.ts._mkgoBubbleGame._versus.declineInvitation }}</MkButton>
+										<MkButton primary small rounded data-testid="versus-invitation-accept" @click="acceptVersus(inv)">{{ i18n.ts._mkgoBubbleGame._versus.acceptInvitation }}</MkButton>
+										<MkButton small rounded data-testid="versus-invitation-decline" @click="declineVersus(inv)">{{ i18n.ts._mkgoBubbleGame._versus.declineInvitation }}</MkButton>
 									</div>
 								</div>
 							</template>
@@ -113,7 +113,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</div>
 		</div>
 	</div>
-	<XGame v-else :gameMode="gameMode" :mute="mute" :resume="resume" @end="onGameEnd"/>
+	<XGame v-else :gameMode="gameMode" :mute="mute" :resume="resume" data-testid="bubble-game-playing" :data-game-mode="gameMode" @end="onGameEnd"/>
 </Transition>
 </template>
 

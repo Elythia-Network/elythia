@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<MkInfo v-if="unavailable" warn>{{ i18n.ts._federationHealth.unavailable }}</MkInfo>
 
 	<template v-else>
-		<div :class="$style.summary">
+		<div :class="$style.summary" data-testid="federation-health-summary" :data-fetching="fetching">
 			<div :class="$style.summaryItem">
 				<div :class="$style.summaryLabel">{{ i18n.ts._federationHealth.successRate }}</div>
 				<div :class="$style.summaryValue">{{ overallRate }}</div>
