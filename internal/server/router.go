@@ -70,6 +70,7 @@ import (
 	coretranslate "github.com/elythia-network/elythia/internal/core/translate"
 	coretwofactor "github.com/elythia-network/elythia/internal/core/twofactor"
 	coreurlpreview "github.com/elythia-network/elythia/internal/core/urlpreview"
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	corewebhook "github.com/elythia-network/elythia/internal/core/webhook"
 	corewebpush "github.com/elythia-network/elythia/internal/core/webpush"
@@ -576,6 +577,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// local 限定にする upstream 互換 remap (#1064) のため、自 hostname を
 	// Service に渡す。空文字なら remap は "." 一致のみになる。
 	userService.SetSelfHostname(s.config.Hostname)
+	// meUpdated の movedTo / alsoKnownAs を /api/i と同じく利用者の ID に解決する (#4059)
+	userService.SetMoveTargetResolver(coreuser.NewMoveTargetResolver(userRepo, activitypub.NewURLBuilder(s.config.URL).LocalUserIDFromURI))
 	followingService.SetRelationReloadPublisher(relationReloadPublisher)
 	followingService.SetMainStreamPublisher(mainStreamPublisher)
 	followingService.SetChartHook(chartHooks)

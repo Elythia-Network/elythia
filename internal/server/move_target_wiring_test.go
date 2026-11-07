@@ -14,6 +14,8 @@ func TestMoveTargetLocalURIResolutionIsWired(t *testing.T) {
 	}{
 		{"usersHandler.SetServerURL(s.config.URL)", "users/show"},
 		{"iHandler.SetServerURL(s.config.URL)", "/api/i"},
+		// i/update の応答と同じく、meUpdated も ID に解決して流す (#4059)
+		{"userService.SetMoveTargetResolver(coreuser.NewMoveTargetResolver(userRepo, activitypub.NewURLBuilder(s.config.URL).LocalUserIDFromURI))", "meUpdated"},
 	} {
 		if !strings.Contains(src, wiring.call) {
 			t.Errorf("%s must receive the canonical server URL used to resolve local move targets", wiring.endpoint)

@@ -358,3 +358,18 @@ func TestUpdate_AlsoKnownAs_ClearingIsAllowedWhileFederationIsOff(t *testing.T) 
 	got := repoOf(h).get("me")
 	assert.Nil(t, got.AlsoKnownAs, "解除が保存されていない")
 }
+
+// i/update の応答の alsoKnownAs は、/api/i と同じく利用者の ID に解決して返す (#4059)。
+// frontend はこの応答で `$i` を上書きするので、URI のままだと /api/i と食い違う。
+func TestUpdate_AlsoKnownAs_ResponseResolvesToIDs(t *testing.T) {
+	h, me := akaHandler(t)
+	repoOf(h).addLocal("alias1", "aliasuser")
+	remote := &model.User{ID: "rem1", Username: "remoteu", UsernameLower: "remoteu", Host: strPtr("other.example"), URI: strPtr("https://other.example/users/rem1")}
+	repoOf(h).put(remote)
+
+	rec := post(h.Update, `{"alsoKnownAs":["@aliasuser","https://other.example/users/rem1"]}`, me)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, []any{"alias1", "rem1"}, body["alsoKnownAs"])
+}

@@ -255,6 +255,10 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 // those fields correct on every path (the same shape /api/i returns).
 func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profile *model.UserProfile) map[string]any {
 	me := h.entityPacker.PackMeDetailed(u, profile, h.idGen)
+	// packer は movedTo / alsoKnownAs を null のまま残すので、/api/i (Me) と同じく利用者の ID に
+	// 解決して入れる。i/update の応答と meUpdated は frontend が `$i` にそのまま merge するので、
+	// 解決しないと null で上書きされ、/api/i と食い違う (#4059)
+	me.ResolveMoveTargets(u, h.resolveUserIDByURI)
 	b, _ := json.Marshal(me)
 	resp := map[string]any{}
 	_ = json.Unmarshal(b, &resp)
