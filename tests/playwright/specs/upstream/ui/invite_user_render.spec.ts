@@ -8,8 +8,9 @@
 // page で /admin/invites とは別 (user 自身の発行枠)。
 
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 
 test.describe('UI: /invite (user) page hydrates', () => {
   let root: RootFixture;
@@ -20,15 +21,14 @@ test.describe('UI: /invite (user) page hydrates', () => {
 
   test.setTimeout(60_000);
 
-  test('invite page renders Create invite button', async ({ page, baseURL }) => {
+  // 招待制でないときは空の表示になる。招待コードの作成は invite_create.spec.ts (招待制にする
+  // ので meta の project で流れる)
+  test('invite page renders the empty state when registration is open', coversRoutes('/invite'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/invite`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/invite');
 
-    // i18n.ts.invite → "Invite" (page title)。Generate invite button は
-    // policies.inviteLimit が 0 の role で非表示になることがあるので、
-    // page header "Invite" + empty state ("There's nothing to see here")
-    // の AND で固有性確保。
+    // invite.vue は招待制 (disableRegistration) でなければ空の表示 (MkResult) だけを出す。
+    // ページの見出し "Invite" と空の表示の文言の両方で、この画面であることを見る。
     await page.waitForFunction(
       () => {
         const text = document.body.textContent ?? '';

@@ -3,90 +3,63 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /admin/emojis page で admin/emoji/add 経由で登録した custom emoji が
-// 一覧 render されることを verify する spec。
+// /admin/emojis (カスタム絵文字の管理) で、API で登録した絵文字を探して編集する。
 //
-// upstream Misskey は admin の emoji 一覧を MkPagination で表示し pageSize
-// 単位で fetch するので、累積 test 実行で emoji 数が多くなると最新 emoji が
-// 初回 page に乗らない。よって本 spec は 2 段で smoke する:
-//   1. 新規 emoji 登録 → admin/emoji/list で API 上に存在することを直接 verify
-//   2. /admin/emojis を navigate して MkPagination が hydrate (= 既存 emoji
-//      button が 1 つ以上 mount される) ことを verify
-// この組み合わせで「register API」「emoji 一覧 API → MkPagination 描画」の
-// 両 path を carve out できる。
+// 検索欄で名前を入れて絞り、出た 1 つを押して編集のウィンドウでカテゴリを変えて保存する (#4072)。
+// 一覧は新しい順なので、対象より後に対照の絵文字を登録し、検索の後に対照が消えて対象だけが残ることを
+// 見る (検索の前から対象は 1 ページ目に出ているので、対象が出ることだけでは検索を確かめられない)。ウィンドウは pageBody の
+// 外に開き、MkInput はどれも datalist の属性を持つので、カテゴリの欄は名前の欄の次の入力欄で取る。同じ画面は
+// /custom-emojis-manager にも割り当てられている。
 
-import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { callApi } from '../../../fixtures/api';
-import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { cleanupApi, expectApiOk, fillField, rootFixture, signinAdmin } from '../../../fixtures/admin_table';
+import { uploadTinyPNG } from '../../../fixtures/files';
+import { pageBody } from '../../../fixtures/route_check';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 
-test.describe('UI: /admin/emojis page renders admin-side emoji list', () => {
-  let root: RootFixture;
+type Emoji = { id: string; name: string; category: string | null };
 
-  test.beforeAll(() => {
-    root = JSON.parse(readFileSync('.auth/root.json', 'utf-8'));
+for (const route of ['/admin/emojis', '/custom-emojis-manager'] as const) {
+  test.describe(`UI: ${route}`, () => {
+    test.setTimeout(60_000);
+
+    test('search an emoji by name and change its category', coversRoutes(route), async ({ page, baseURL, request }) => {
+      const root = rootFixture();
+      const file = await uploadTinyPNG(request, baseURL!, root.token, 'pw-emoji.png');
+      const name = `pwemo${Date.now().toString(36)}`;
+      const control = `pwctl${Date.now().toString(36)}`;
+      const add = async (n: string) => (await expectApiOk(request, 'admin/emoji/add', {
+        i: root.token, name: n, fileId: file.id, category: null, aliases: [], license: null,
+        isSensitive: false, localOnly: false, roleIdsThatCanBeUsedThisEmojiAsReaction: [],
+      }) as { id: string }).id;
+      const ids: string[] = [];
+      const find = async () => (await expectApiOk(request, 'admin/emoji/list', { i: root.token, query: name, limit: 10 }) as Emoji[]).find((e) => e.name === name);
+      try {
+        ids.push(await add(name));
+        ids.push(await add(control));
+        await signinAdmin(page, baseURL!, root);
+        await gotoRoute(page, baseURL!, route);
+        const button = pageBody(page).locator('button.emoji').filter({ has: page.locator(`img[alt="${name}"]`) });
+        const controlButton = pageBody(page).locator('button.emoji').filter({ has: page.locator(`img[alt="${control}"]`) });
+        await expect(controlButton, '検索の前は対照の絵文字が出る (対照)').toHaveCount(1, { timeout: 15_000 });
+        const searched = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/admin/emoji/list' && r.request().postDataJSON()?.query === name, { timeout: 15_000 });
+        await fillField(page, 'Search', name);
+        expect((await searched).ok(), 'admin/emoji/list が失敗した').toBe(true);
+        await expect.poll(async () => [await button.count(), await controlButton.count()], { message: '検索で対象の絵文字だけにならない' }).toEqual([1, 0]);
+
+        await button.click();
+        const category = `pwcat${Date.now().toString(36)}`;
+        // 名前の欄 (pattern で一意) の次の入力欄がカテゴリ
+        const nameInput = page.locator('input[pattern="[a-z0-9_]"]');
+        await expect(nameInput, '編集のウィンドウが開かない').toHaveValue(name);
+        await nameInput.locator('xpath=following::input[1]').fill(category);
+        const updated = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/admin/emoji/update', { timeout: 15_000 });
+        await page.locator('button:has(i.ti-check)').filter({ hasText: 'Update' }).click();
+        expect((await updated).ok(), 'admin/emoji/update が失敗した').toBe(true);
+        expect((await find())?.category, 'カテゴリの変更が保存されない').toBe(category);
+      } finally {
+        for (const id of ids) await cleanupApi(request, 'admin/emoji/delete', { i: root.token, id });
+      }
+    });
   });
-
-  test.setTimeout(60_000);
-
-  test('admin/emoji/add registers an emoji and /admin/emojis hydrates the list', async ({ page, baseURL, request }) => {
-    // drive に dummy png を upload (emoji image source)
-    const driveResp = await request.post(`${baseURL}/api/drive/files/create`, {
-      ignoreHTTPSErrors: true,
-      multipart: {
-        i: root.token,
-        file: {
-          name: 'pw-emoji.png',
-          mimeType: 'image/png',
-          buffer: Buffer.from(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-            'base64',
-          ),
-        },
-      },
-    });
-    expect(driveResp.status()).toBe(200);
-    const driveFile = await driveResp.json();
-    expect(driveFile.id).toBeTruthy();
-
-    // 一意 emoji name (アルファベット小文字 + 数字)。timestamp 後方 9 桁。
-    const emojiName = `pwemo${Date.now().toString().slice(-9)}`;
-    const addResp = await callApi(request, 'admin/emoji/add', {
-      i: root.token,
-      name: emojiName,
-      fileId: driveFile.id,
-      category: null,
-      aliases: [],
-      license: null,
-      isSensitive: false,
-      localOnly: false,
-      roleIdsThatCanBeUsedThisEmojiAsReaction: [],
-    });
-    expect(addResp.status()).toBe(200);
-
-    // API 上に新 emoji が存在すること (= admin/emoji/list で query して name match)
-    const listResp = await callApi(request, 'admin/emoji/list', {
-      i: root.token,
-      query: emojiName,
-      limit: 10,
-    });
-    expect(listResp.status()).toBe(200);
-    const listed = await listResp.json();
-    expect(Array.isArray(listed)).toBe(true);
-    expect(listed.some((e: { name: string }) => e.name === emojiName)).toBe(true);
-
-    await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/admin/emojis`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
-
-    // MkPagination が hydrate して emoji button が 1 つ以上 mount される
-    // (= 一覧 fetch の API 経路 + button 描画 chain が壊れていない)。
-    // 各 emoji は `<button><img alt=name /><span>name</span></button>` で
-    // mount されるので、img を child に持つ button が 1 つ以上あれば OK。
-    // 個別 emoji の検出は API 側で済ませている。
-    await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('button')).some((b) => b.querySelector('img') !== null),
-      { timeout: 20_000 },
-    );
-  });
-});
+}

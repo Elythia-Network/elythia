@@ -19,9 +19,10 @@
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { cleanupApi } from '../../../fixtures/admin_table';
 import { callApi } from '../../../fixtures/api';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { coversRoutes } from '../../../fixtures/ui_route';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 
 test.describe('UI: 公開情報ページ', () => {
   let root: RootFixture;
@@ -32,14 +33,26 @@ test.describe('UI: 公開情報ページ', () => {
 
   test.setTimeout(60_000);
 
-  test('/ads が広告ページを出す', async ({ page, baseURL }) => {
-    await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/ads`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+  // 有効な広告はタイムラインなどにも出るので、テストが時間切れで終わっても afterEach で消す
+  let adId: string | undefined;
+  test.afterEach(async ({ request }) => {
+    if (adId === undefined) return;
+    await cleanupApi(request, 'admin/ad/delete', { i: root.token, id: adId });
+    adId = undefined;
+  });
 
-    await expect(page.getByText('Advertisements', { exact: false }).first()).toBeVisible({
-      timeout: 20_000,
+  test('/ads shows an active ad', coversRoutes('/ads'), async ({ page, baseURL, request }) => {
+    // 有効な広告を 1 つ作る。見出しの文言だけでは、一覧が空でも通ってしまう (#4072)
+    const imageUrl = `https://remote.example/pw-ads-${Date.now().toString(36)}.png`;
+    const created = await callApi(request, 'admin/ad/create', {
+      i: root.token, url: 'https://remote.example/pw-ads', memo: 'pw /ads', place: 'square', priority: 'middle', ratio: 1,
+      startsAt: Date.now() - 60_000, expiresAt: Date.now() + 3_600_000, imageUrl, dayOfWeek: 0,
     });
+    expect(created.status()).toBe(200);
+    adId = ((await created.json()) as { id: string }).id;
+    await uiSigninAsRoot(page, baseURL, root);
+    await gotoRoute(page, baseURL!, '/ads');
+    await expect(page.locator(`img[src="${imageUrl}"]`).first(), '作った広告が出ない').toBeVisible({ timeout: 20_000 });
   });
 
   test('/avatar-decorations がデコレーション一覧を出す', coversRoutes('/avatar-decorations'), async ({ page, baseURL, request }) => {
@@ -63,12 +76,9 @@ test.describe('UI: 公開情報ページ', () => {
     await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
   });
 
-  test('/custom-emojis-manager が絵文字管理を出す', async ({ page, baseURL }) => {
+  test('/custom-emojis-manager が絵文字管理を出す', coversRoutes('/custom-emojis-manager'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/custom-emojis-manager`, {
-      waitUntil: 'domcontentloaded',
-    });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/custom-emojis-manager');
 
     await expect(page.getByText('Custom Emoji', { exact: false }).first()).toBeVisible({
       timeout: 20_000,
