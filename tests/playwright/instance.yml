@@ -36,6 +36,15 @@ id: aidx
 # overlay) では BullMQ 固定で、本キーは TS 側に渡されても無視されるので副作用なし。
 jobQueueDriver: mkq
 
+# 管理画面のバックアップの一覧を出すための保存先 (#4072)。compose.yml が目印のファイル
+# (.elythia-backup) だけを入れたディレクトリを /backup に読み取り専用で mount する。
+# TS image は backup キーを読まない。
+backup:
+  storage:
+    type: dir
+    dir:
+      path: /backup
+
 # Playwright env で全 endpoint の rate limit を無効化する。signin (1s 間隔) /
 # notes/create (per-min 上限) / signup (per-IP) などで spec が cascade fail
 # するのを防ぐため。`disableEndpointRateLimits` は mk-go 独自拡張で TS image

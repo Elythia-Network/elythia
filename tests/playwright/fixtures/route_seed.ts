@@ -84,12 +84,27 @@ async function ok<T>(resp: Promise<import('@playwright/test').APIResponse>, what
 
 /**
  * Plays a bubble game match between root and peer to its end and returns its id:
- * root invites, peer accepts, both say ready on the match channel (the REST API
- * has no ready), then root reports game over and peer reports the end.
+ * starts it (startVersus), then root reports game over and peer reports the end.
  */
-async function playVersusToEnd(request: APIRequestContext, root: RootFixture, peer: Principal): Promise<string> {
-  const invited = await ok<{ id: string }>(callApi(request, 'bubble-game/versus/invite', { i: root.token, userId: peer.id, gameMode: 'normal' }), 'bubble-game/versus/invite (to end)');
-  await ok(callApi(request, 'bubble-game/versus/accept', { i: peer.token, matchId: invited.id }), 'bubble-game/versus/accept (to end)');
+export async function playVersusToEnd(request: APIRequestContext, root: Pick<RootFixture, 'token'>, peer: Principal): Promise<string> {
+  const id = await startVersus(request, root, peer);
+  await ok(callApi(request, 'bubble-game/versus/report', {
+    i: root.token, matchId: id, score: 0, frame: 0, reason: 'gameOver', logs: [],
+  }), 'bubble-game/versus/report (game over)');
+  await ok(callApi(request, 'bubble-game/versus/report', {
+    i: peer.token, matchId: id, score: 0, frame: 0, reason: 'opponentEnded', logs: [],
+  }), 'bubble-game/versus/report (opponent ended)');
+  return id;
+}
+
+/**
+ * Starts a bubble game match between root and peer and returns its id, while
+ * it is still playing: root invites, peer accepts, both say ready on the match
+ * channel (the REST API has no ready).
+ */
+export async function startVersus(request: APIRequestContext, root: Pick<RootFixture, 'token'>, peer: Principal): Promise<string> {
+  const invited = await ok<{ id: string }>(callApi(request, 'bubble-game/versus/invite', { i: root.token, userId: peer.id, gameMode: 'normal' }), 'bubble-game/versus/invite (start)');
+  await ok(callApi(request, 'bubble-game/versus/accept', { i: peer.token, matchId: invited.id }), 'bubble-game/versus/accept (start)');
   const sockets = await Promise.all([openStream(root.token), openStream(peer.token)]);
   try {
     const subs = sockets.map((ws) => subscribeChannel(ws, 'bubbleVersusMatch', { matchId: invited.id }));
@@ -102,12 +117,6 @@ async function playVersusToEnd(request: APIRequestContext, root: RootFixture, pe
   } finally {
     for (const ws of sockets) ws.close();
   }
-  await ok(callApi(request, 'bubble-game/versus/report', {
-    i: root.token, matchId: invited.id, score: 0, frame: 0, reason: 'gameOver', logs: [],
-  }), 'bubble-game/versus/report (game over)');
-  await ok(callApi(request, 'bubble-game/versus/report', {
-    i: peer.token, matchId: invited.id, score: 0, frame: 0, reason: 'opponentEnded', logs: [],
-  }), 'bubble-game/versus/report (opponent ended)');
   return invited.id;
 }
 
