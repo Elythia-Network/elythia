@@ -203,11 +203,9 @@ test.describe('settings: account (avatar decoration, migration)', () => {
         // 別名に入れた利用者は、この利用者へ移行できる。別名が無ければ 400 DESTINATION_ACCOUNT_FORBIDS
         // (internal/api/i/move.go)。移行は戻せないので、移行元は行ごとに作った使い捨ての利用者
         await apiOk(request, 'i/move', { i: d.alias.token, moveToAccount: `@${user.username}` });
-        // #4059: i/update の応答の alsoKnownAs は ID へ解決されずに返る。画面はこの応答で $i を
-        // 書き換えるので、/api/i (ID に解決して返す) と食い違う
-        expect(d.response, '#4059: i/update の応答の alsoKnownAs が利用者の ID に解決されない').toEqual([d.alias.id]);
+        // 画面は i/update の応答で $i を書き換えるので、応答も /api/i と同じく ID に解決して返す (#4059)
+        expect(d.response, 'i/update の応答の alsoKnownAs が利用者の ID に解決されない').toEqual([d.alias.id]);
       },
-      knownBug: '#4059',
     },
   ];
   for (const row of ROWS) test(row.name, coversRoutes(row.route), ({ page, request, baseURL }) => runAccountRow({ page, request, baseURL }, row));
