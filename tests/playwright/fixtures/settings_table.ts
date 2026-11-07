@@ -237,13 +237,13 @@ export function prefTitle(row: PrefRow): string {
  * the step that changes the setting and expects the effect check to fail. A
  * row whose effect check still passes checks nothing.
  */
-const MUTATION = process.env.PW_SETTINGS_MUTATION === '1';
+export const MUTATION = process.env.PW_SETTINGS_MUTATION === '1';
 
 /**
  * Skips the rows that the mutation check cannot judge: rows that do not check
  * the effect, and rows with a known bug (their effect fails because of the bug).
  */
-function skipForMutation(effect: unknown, knownBug: string | undefined): void {
+export function skipForMutation(effect: unknown, knownBug: string | undefined): void {
   if (!MUTATION) return;
   if (typeof effect === 'object' && effect != null && 'skip' in effect) test.skip(true, (effect as { skip: string }).skip);
   test.skip(knownBug != null, `${knownBug} の不具合で効き目が落ちるので、変異の確かめにならない`);
@@ -255,7 +255,7 @@ function skipForMutation(effect: unknown, knownBug: string | undefined): void {
  * number (`'#4057: ...'`); any other failure (a broken prerequisite, a timeout)
  * fails the row. Once the effect passes, it says to remove `knownBug`.
  */
-async function checkEffect(name: string, effect: ((ctx: RowContext) => Promise<void>) | { skip: string }, knownBug: string | undefined, ctx: RowContext): Promise<void> {
+export async function checkEffect<C extends RowContext>(name: string, effect: ((ctx: C) => Promise<void>) | { skip: string }, knownBug: string | undefined, ctx: C): Promise<void> {
   if ('skip' in effect) {
     test.info().annotations.push({ type: 'effect-skipped', description: effect.skip });
     return;
@@ -282,7 +282,7 @@ async function checkEffect(name: string, effect: ((ctx: RowContext) => Promise<v
  * which Elythia added to the frontend (#4056). The TS backend run serves the
  * upstream frontend without them, so the rows do not run there.
  */
-function skipOnTsBackend(): void {
+export function skipOnTsBackend(): void {
   test.skip(isTsBackend, '設定の表は Elythia の frontend で足した data-pref-key / data-checked で部品を取る');
 }
 
@@ -330,7 +330,7 @@ export async function runPrefRow({ page, request, baseURL }: { page: Page; reque
  * fails for any reason (a slow page, a renamed button) rather than for the
  * difference the effect checks.
  */
-async function expectEffectFails(name: string, effect: ((ctx: RowContext) => Promise<void>) | { skip: string }, ctx: RowContext): Promise<void> {
+export async function expectEffectFails<C extends RowContext>(name: string, effect: ((ctx: C) => Promise<void>) | { skip: string }, ctx: C): Promise<void> {
   if ('skip' in effect) return;
   // 効き目の確かめの待ちが長いと、全行で時間切れを待つことになるので短くする
   ctx.page.setDefaultTimeout(5_000);
