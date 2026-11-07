@@ -702,6 +702,8 @@ func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in Create
 			}
 		}
 	}
+	// 受け取りの設定は上で判定した。Service で二重に判定しない印 (#4058)
+	in.receiveConfigChecked = true
 	n, err := h.svc.CreateWithPush(ctx, in, pushFn)
 	if err != nil {
 		slog.Warn("notification create failed", "type", in.Type, "notifiee", notifieeID, "err", err)
@@ -763,6 +765,11 @@ func (h *Hook) passesReceiveConfig(notifieeID string, in CreateInput) bool {
 		return h.listContains(notifieeID, entry.UserListID, in.NotifierID)
 	}
 	return true
+}
+
+// PassesReceiveConfig is passesReceiveConfig for Service (ReceiveConfigChecker, #4058).
+func (h *Hook) PassesReceiveConfig(notifieeID string, in CreateInput) bool {
+	return h.passesReceiveConfig(notifieeID, in)
 }
 
 // followingExists reports whether followerID follows followeeID. dep 未配線 /

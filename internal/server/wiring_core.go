@@ -278,6 +278,9 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	notificationService := corenotification.NewService(s.redis.Default, idGen, s.config.Redis.KeyPrefix(),
 		s.background) // #3661: 世代の停止で送り切る
 	notificationHook := corenotification.NewHook(notificationService, userRepo)
+	// 実績・投票の終了・アプリ・予約投稿の通知は Service を直接呼ぶので、受け取りの設定の
+	// 判定を Service にも渡す (#4058)
+	notificationService.SetReceiveConfigChecker(notificationHook)
 	webhookService := corewebhook.NewService(s.queueClient, webhookRepo, systemWebhookRepo, s.config.URL)
 	// payload の投稿を包む Packer (#3790)。follow / unfollow の Webhook は main stream と
 	// 同じ共有の userpack の Packer で包む (#3269、#3330)。
