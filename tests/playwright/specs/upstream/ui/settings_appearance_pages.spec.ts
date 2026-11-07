@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
-import { coversRoutes } from '../../../fixtures/ui_route';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 
 interface PageCase {
   path: string;
@@ -70,12 +70,10 @@ test.describe('UI: 外観・拡張の設定画面', () => {
     });
   }
 
-  test('/settings/statusbar が追加ボタンを出す', async ({ page, baseURL }) => {
+  // 追加と種類の選択の操作は route_ops_misc.spec.ts
+  test('/settings/statusbar が追加ボタンを出す', coversRoutes('/settings/statusbar'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/settings/statusbar`, {
-      waitUntil: 'domcontentloaded',
-    });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/settings/statusbar');
 
     // ステータスバー未設定だと一覧は空で、この画面固有の要素は追加ボタンだけ。
     await expect(page.getByRole('button', { name: 'Add' }).first()).toBeVisible({
@@ -83,10 +81,9 @@ test.describe('UI: 外観・拡張の設定画面', () => {
     });
   });
 
-  test('/settings が設定メニューを出す', async ({ page, baseURL }) => {
+  test('/settings が設定メニューを出す', coversRoutes('/settings'), async ({ page, baseURL }) => {
     await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/settings`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+    await gotoRoute(page, baseURL!, '/settings');
 
     // index の中身はメニューそのもの。ルートが壊れれば not-found になるので、
     // メニューが出ること自体が意味を持つ。

@@ -3,36 +3,46 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /admin/files page で host filter / user ID / MIME type input + 行政
-// 用 file list paginator が hydrate されることを smoke する spec。
+// /admin/files の絞り込み (#4072)。2 人の利用者にファイルを上げ、User ID で絞ると片方のファイルだけが
+// 残り、さらに MIME type で別の種類に絞ると消えることを確かめる。一覧はサムネイルだけで、各ファイルは
+// /admin/file/<id> へのリンクなので、リンクで探す。
 //
-// /admin/files は admin/drive/files paginator + MkSelect (origin) +
-// MkInput x3 (host / userId / type) を mount する。filter UI が必ず存在する
-// ので、input が 3 つ以上 visible になることを hydration sign にする。
+// 絞り込みを変えると、古い一覧がフェードで残り、次にローディング (リンク 0 件)、新しい一覧の順に
+// 移る。どちらの途中でも成り立たない組 (片方だけが残る / 空の表示が出る) で見る。
 
-import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { fillField, rootFixture, signinAdmin } from '../../../fixtures/admin_table';
+import { uploadTinyPNG } from '../../../fixtures/files';
+import { pageBody } from '../../../fixtures/route_check';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
+import { freshUser } from '../../../fixtures/ui_timeline';
 
-test.describe('UI: /admin/files page hydrates filter inputs', () => {
-  let root: RootFixture;
-
-  test.beforeAll(() => {
-    root = JSON.parse(readFileSync('.auth/root.json', 'utf-8'));
-  });
-
+test.describe('UI: /admin/files', () => {
   test.setTimeout(60_000);
 
-  test('host / userId / MIME type inputs appear on /admin/files', async ({ page, baseURL }) => {
-    await uiSigninAsRoot(page, baseURL, root);
-    const resp = await page.goto(`${baseURL}/admin/files`, { waitUntil: 'domcontentloaded' });
-    expect(resp!.status()).toBe(200);
+  test('filter files by user and MIME type', coversRoutes('/admin/files'), async ({ page, baseURL, request }) => {
+    const a = await freshUser(request, 'pwafa');
+    const b = await freshUser(request, 'pwafb');
+    const fileA = await uploadTinyPNG(request, baseURL!, a.token, 'pw-a.png');
+    // いちばん新しいので、絞る前の 1 ページ目に必ず出る
+    const fileB = await uploadTinyPNG(request, baseURL!, b.token, 'pw-b.png');
 
-    // host / userId / type filter は MkInput (= <input>) なので、
-    // input 数 >= 3 で「filter UI が hydrate された」と判定。
-    await page.waitForFunction(
-      () => document.querySelectorAll('input').length >= 3,
-      { timeout: 20_000 },
-    );
+    await signinAdmin(page, baseURL!, rootFixture());
+    await gotoRoute(page, baseURL!, '/admin/files');
+    const linkA = pageBody(page).locator(`a[href="/admin/file/${fileA.id}"]`);
+    const linkB = pageBody(page).locator(`a[href="/admin/file/${fileB.id}"]`);
+    await expect(linkB, '絞る前は新しいファイルが出る (対照)').toHaveCount(1, { timeout: 20_000 });
+
+    const byUser = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/admin/drive/files' && r.request().postDataJSON()?.userId === a.id, { timeout: 15_000 });
+    await fillField(page, 'User ID', a.id);
+    expect((await byUser).ok(), 'admin/drive/files が失敗した').toBe(true);
+    await expect.poll(async () => [await linkA.count(), await linkB.count()], { message: '絞った利用者のファイルだけにならない' }).toEqual([1, 0]);
+
+    const byType = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/admin/drive/files' && r.request().postDataJSON()?.type === 'text/plain', { timeout: 15_000 });
+    await fillField(page, 'MIME type', 'text/plain');
+    expect((await byType).ok(), 'admin/drive/files が失敗した').toBe(true);
+    // ローディング中もリンクは 0 件なので、空の表示 (MkResult) が出たことまで見る
+    const empty = pageBody(page).getByText("There's nothing to see here");
+    await expect.poll(async () => [await linkA.count(), await empty.count() > 0], { message: '別の種類のファイルが残る' }).toEqual([0, true]);
   });
 });

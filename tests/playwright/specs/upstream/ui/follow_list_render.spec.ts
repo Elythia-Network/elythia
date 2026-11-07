@@ -3,62 +3,70 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// /@:acct/followers と /@:acct/following が API hydration 経由で関係 user
-// を render することを verify する spec。
+// /@:acct/followers と /@:acct/following が、API から取った関係の利用者を出すことと、
+// 一覧の各行のフォローボタン (MkFollowButton の mini) でフォローとその解除ができることを
+// 確かめる (#4072)。
 //
-// users/followers / users/following endpoint は API spec で個別に cover
-// されているが、frontend 側の MkPagination + MkUserInfo + Paginator の
-// chain が壊れていないことは別 layer なので本 spec で smoke する。
+// 行には testid が無く、ボタンは文字の無いアイコンだけなので、対象の利用者の acct を含む行に
+// 絞って、行の中のアイコンで押す。フォローとその解除は既定で確認を挟む (alwaysConfirmFollow)。
 
-import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { callApi } from '../../../fixtures/api';
-import { DEFAULT_TEST_PASSWORD, signupUser } from '../../../fixtures/auth';
+import { expect, type Page, test } from '@playwright/test';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
-import { type RootFixture, uiSigninAsRoot } from '../../../fixtures/ui_auth';
+import { uiSigninAs } from '../../../fixtures/ui_auth';
+import { clickWhenReady } from '../../../fixtures/ui_click';
+import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
+import { apiOk, follow, freshUser } from '../../../fixtures/ui_timeline';
 
-test.describe('UI: /@:acct/followers and /@:acct/following render relations', () => {
-  let root: RootFixture;
+/** Clicks the follow button (`icon`) in the row of the list that shows `@username`. */
+async function clickRowFollowButton(page: Page, username: string, icon: 'ti-plus' | 'ti-minus'): Promise<void> {
+  await clickWhenReady(page, `@${username} の行の ${icon} のボタン`, ([u, i]: [string, string]) => {
+    // 枠が入れ子なら外側も当たるので、いちばん内側 (文書順で最後) の枠を行とする
+    const row = Array.from(document.querySelectorAll('._panel')).filter((p) => (p.textContent ?? '').includes(`@${u}`)).at(-1);
+    return Array.from(row?.querySelectorAll('button') ?? []).find((b) => b.querySelector(`i.${i}`) !== null);
+  }, [username, icon] as [string, string]);
+}
 
+test.describe('UI: /@:acct/followers and /@:acct/following', () => {
   test.beforeAll(() => {
     resetRateLimit();
-    root = JSON.parse(readFileSync('.auth/root.json', 'utf-8'));
   });
 
   test.setTimeout(60_000);
 
-  test('follower username appears in /@alice/followers and /@<follower>/following', async ({ page, baseURL, request }) => {
-    const followerName = `flwlist${Date.now().toString().slice(-9)}`;
-    const follower = await signupUser(request, followerName, DEFAULT_TEST_PASSWORD);
+  test('follow a user from the followers list', coversRoutes('/@:acct/followers'), async ({ page, baseURL, request }) => {
+    const me = await freshUser(request, 'pwflme');
+    const target = await freshUser(request, 'pwflt');
+    const listed = await freshUser(request, 'pwfll');
+    await follow(request, listed, target);
 
-    const followResp = await callApi(request, 'following/create', {
-      i: follower.token,
-      userId: root.id,
-    });
-    expect(followResp.status()).toBe(200);
+    await uiSigninAs(page, request, baseURL!, me);
+    await gotoRoute(page, baseURL!, `/@${target.username}/followers`);
+    await expect(page.getByText(`@${listed.username}`).first(), 'フォロワーが一覧に出ない').toBeVisible({ timeout: 20_000 });
 
-    await uiSigninAsRoot(page, baseURL, root);
+    const followed = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/following/create', { timeout: 15_000 });
+    await clickRowFollowButton(page, listed.username, 'ti-plus');
+    await page.getByTestId('modal-dialog-ok').click();
+    expect((await followed).ok(), 'following/create が失敗した').toBe(true);
+    const [rel] = await apiOk(request, 'users/relation', { i: me.token, userId: [listed.id] }) as { isFollowing: boolean }[];
+    expect(rel.isFollowing, 'フォローが成立しない').toBe(true);
+  });
 
-    // /@alice/followers — root の followers に follower username が出る
-    {
-      const resp = await page.goto(`${baseURL}/@${root.username}/followers`, { waitUntil: 'domcontentloaded' });
-      expect(resp!.status()).toBe(200);
-      await page.waitForFunction(
-        (n) => document.body.textContent?.includes(n) ?? false,
-        followerName,
-        { timeout: 20_000 },
-      );
-    }
+  test('unfollow a user from the following list', coversRoutes('/@:acct/following'), async ({ page, baseURL, request }) => {
+    const me = await freshUser(request, 'pwflme');
+    const owner = await freshUser(request, 'pwflo');
+    const listed = await freshUser(request, 'pwfll');
+    await follow(request, owner, listed);
+    await follow(request, me, listed);
 
-    // /@<follower>/following — follower の following に root.username が出る
-    {
-      const resp = await page.goto(`${baseURL}/@${followerName}/following`, { waitUntil: 'domcontentloaded' });
-      expect(resp!.status()).toBe(200);
-      await page.waitForFunction(
-        (n) => document.body.textContent?.includes(n) ?? false,
-        root.username,
-        { timeout: 20_000 },
-      );
-    }
+    await uiSigninAs(page, request, baseURL!, me);
+    await gotoRoute(page, baseURL!, `/@${owner.username}/following`);
+    await expect(page.getByText(`@${listed.username}`).first(), 'フォロー中の利用者が一覧に出ない').toBeVisible({ timeout: 20_000 });
+
+    const unfollowed = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/following/delete', { timeout: 15_000 });
+    await clickRowFollowButton(page, listed.username, 'ti-minus');
+    await page.getByTestId('modal-dialog-ok').click();
+    expect((await unfollowed).ok(), 'following/delete が失敗した').toBe(true);
+    const [rel] = await apiOk(request, 'users/relation', { i: me.token, userId: [listed.id] }) as { isFollowing: boolean }[];
+    expect(rel.isFollowing, 'フォローを解除できない').toBe(false);
   });
 });
