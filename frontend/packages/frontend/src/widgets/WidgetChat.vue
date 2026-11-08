@@ -7,7 +7,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <MkContainer :showHeader="widgetProps.showHeader" class="mkw-chat">
 	<template #icon><i class="ti ti-users"></i></template>
 	<template #header>{{ i18n.ts._widgets.chat }}</template>
-	<template #func="{ buttonStyleClass }"><button class="_button" :class="buttonStyleClass" @click="configure()"><i class="ti ti-settings"></i></button></template>
+	<template #func="{ buttonStyleClass }"><button class="_button" :class="buttonStyleClass" :aria-label="i18n.ts.settings" @click="configure()"><i class="ti ti-settings"></i></button></template>
 
 	<div>
 		<MkChatHistories/>

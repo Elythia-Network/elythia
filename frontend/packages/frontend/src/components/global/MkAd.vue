@@ -25,8 +25,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 				target: '_blank',
 			}"
 		>
-			<img :src="chosen.imageUrl" :class="$style.img">
-			<button class="_button" :class="$style.i" @click.prevent.stop="toggleMenu"><i :class="$style.iIcon" class="ti ti-info-circle"></i></button>
+			<!-- mk-go (#4082): 広告には代わりの文字の欄が無いので、広告であることを読ませる -->
+			<img :src="chosen.imageUrl" :class="$style.img" :alt="i18n.ts.ads">
+			<button class="_button" :class="$style.i" :aria-label="i18n.ts.info" @click.prevent.stop="toggleMenu"><i :class="$style.iIcon" class="ti ti-info-circle"></i></button>
 		</component>
 	</div>
 	<div v-else :class="$style.menu">
