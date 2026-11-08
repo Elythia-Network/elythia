@@ -252,21 +252,9 @@ func (h *Handler) SetServerURL(u string) {
 // FindByURI. Used by UserDetailed.ResolveMoveTargets to fill movedTo /
 // alsoKnownAs. Returns ("", false) when unwired or unknown.
 func (h *Handler) resolveUserIDByURI(uri string) (string, bool) {
-	if h.userRepo == nil {
-		return "", false
-	}
-	if id := activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI(uri); id != "" {
-		u, err := h.userRepo.FindByID(id)
-		if err != nil || u == nil {
-			return "", false
-		}
-		return u.ID, true
-	}
-	u, err := h.userRepo.FindByURI(uri)
-	if err != nil || u == nil {
-		return "", false
-	}
-	return u.ID, true
+	// 解決の実装は meUpdated と同じ user.NewMoveTargetResolver に寄せる。片方だけを直すと、
+	// /api/i・users/show・meUpdated の結果が食い違う (#4064)
+	return user.NewMoveTargetResolver(h.userRepo, activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI)(uri)
 }
 
 // SetNoteReactionRepo wires the NoteReactionRepository for users/reactions
