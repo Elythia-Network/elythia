@@ -205,6 +205,14 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "write:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "AdminEmojiApplication"
+				}
 			}
 		},
 		"admin/emoji-application/list": {
@@ -212,6 +220,19 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "read:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "AdminEmojiApplication"
+					}
+				}
 			}
 		},
 		"admin/emoji-application/list-by-user": {
@@ -219,6 +240,26 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "read:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"items": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "object",
+								"optional": false,
+								"nullable": false,
+								"ref": "AdminEmojiApplication"
+							}
+						}
+					}
+				}
 			}
 		},
 		"admin/emoji-application/reject": {
@@ -226,6 +267,14 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "write:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "AdminEmojiApplication"
+				}
 			}
 		},
 		"admin/emoji-application/related": {
@@ -233,6 +282,32 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "read:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"counts": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "EmojiApplicationStatusCounts"
+						},
+						"items": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "object",
+								"optional": false,
+								"nullable": false,
+								"ref": "RelatedEmojiApplication"
+							}
+						}
+					}
+				}
 			}
 		},
 		"admin/emoji-application/reset-user-quota": {
@@ -240,6 +315,21 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "write:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"lastReset": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "EmojiApplicationQuotaReset"
+						}
+					}
+				}
 			}
 		},
 		"admin/emoji-application/user-summary": {
@@ -247,6 +337,60 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "read:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"counts": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "EmojiApplicationStatusCounts"
+						},
+						"windows": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "object",
+								"optional": false,
+								"nullable": false,
+								"ref": "EmojiApplicationQuotaWindow"
+							}
+						},
+						"pending": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"properties": {
+								"used": {
+									"type": "integer",
+									"optional": false,
+									"nullable": false
+								},
+								"limit": {
+									"type": "integer",
+									"optional": false,
+									"nullable": false
+								},
+								"unlimited": {
+									"type": "boolean",
+									"optional": false,
+									"nullable": false
+								}
+							}
+						},
+						"lastReset": {
+							"type": "object",
+							"optional": false,
+							"nullable": true,
+							"ref": "EmojiApplicationQuotaReset"
+						}
+					}
+				}
 			}
 		},
 		"admin/emoji/fetch-remote-meta": {
@@ -254,6 +398,14 @@
 				"requireCredential": true,
 				"requiredRolePolicy": "canManageCustomEmojis",
 				"kind": "read:admin:emoji"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "RemoteEmojiMeta"
+				}
 			}
 		},
 		"admin/federation/check-host": {
@@ -479,6 +631,20 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "write:admin:invite-codes"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"ok": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
 			}
 		},
 		"admin/signup-application/list": {
@@ -486,6 +652,31 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:invite-codes"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"applications": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "object",
+								"optional": false,
+								"nullable": false,
+								"ref": "AdminSignupApplication"
+							}
+						},
+						"count": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
 			}
 		},
 		"admin/signup-application/reject": {
@@ -493,6 +684,20 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "write:admin:invite-codes"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"ok": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
 			}
 		},
 		"bubble-game/versus/accept": {
@@ -798,17 +1003,39 @@
 		"emoji-application/cancel": {
 			"meta": {
 				"requireCredential": true
-			}
+			},
+			"doc": {}
 		},
 		"emoji-application/create": {
 			"meta": {
 				"requireCredential": true,
 				"requiredRolePolicy": "canRequestCustomEmojis"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "EmojiApplication"
+				}
 			}
 		},
 		"emoji-application/list-mine": {
 			"meta": {
 				"requireCredential": true
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "EmojiApplication"
+					}
+				}
 			}
 		},
 		"following/silent/list": {
@@ -870,16 +1097,95 @@
 			}
 		},
 		"signup-application/apply": {
-			"meta": {}
+			"meta": {},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"claimCode": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"application": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "SignupApplicationView"
+						}
+					}
+				}
+			}
 		},
 		"signup-application/form-token": {
-			"meta": {}
+			"meta": {},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"token": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"minWaitSeconds": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
+			}
 		},
 		"signup-application/register": {
-			"meta": {}
+			"meta": {},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": true,
+					"nullable": false,
+					"allOf": [
+						{
+							"type": "object",
+							"ref": "MeDetailed"
+						},
+						{
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"properties": {
+								"token": {
+									"type": "string",
+									"optional": false,
+									"nullable": false
+								}
+							}
+						}
+					]
+				}
+			}
 		},
 		"signup-application/status": {
-			"meta": {}
+			"meta": {},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"application": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "SignupApplicationView"
+						}
+					}
+				}
+			}
 		}
 	},
 	"refs": {
@@ -2529,6 +2835,640 @@
 					"optional": false,
 					"nullable": false,
 					"format": "date-time"
+				}
+			}
+		},
+		"EmojiApplication": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"own",
+						"remote"
+					]
+				},
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"pending",
+						"approved",
+						"rejected",
+						"canceled"
+					]
+				},
+				"name": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"category": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"aliases": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"license": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"isSensitive": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"comment": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"processedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"rejectReason": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"emojiId": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"format": "id"
+				},
+				"remoteHost": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"remoteName": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"preview": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "EmojiApplicationPreview"
+				}
+			}
+		},
+		"EmojiApplicationPreview": {
+			"type": "object",
+			"properties": {
+				"url": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"source": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"applicationFile",
+						"remoteEmoji",
+						"approvedEmoji"
+					]
+				},
+				"state": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"available",
+						"sourceGone",
+						"approvedEmojiGone",
+						"unknown"
+					]
+				}
+			}
+		},
+		"AdminEmojiApplication": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"userId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"own",
+						"remote"
+					]
+				},
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"pending",
+						"approved",
+						"rejected",
+						"canceled"
+					]
+				},
+				"name": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"category": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"aliases": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"license": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"isSensitive": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"comment": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"processedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"rejectReason": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"emojiId": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"format": "id"
+				},
+				"remoteHost": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"remoteName": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"url": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"fileType": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"remoteGone": {
+					"type": "boolean",
+					"optional": true,
+					"nullable": true
+				},
+				"nameConflict": {
+					"optional": true,
+					"nullable": true,
+					"oneOf": [
+						{
+							"type": "object",
+							"properties": {
+								"emojiId": {
+									"type": "string",
+									"optional": false,
+									"nullable": false,
+									"format": "id"
+								},
+								"createdAt": {
+									"type": "string",
+									"optional": false,
+									"nullable": true,
+									"format": "date-time"
+								}
+							}
+						},
+						{
+							"type": "boolean",
+							"enum": [
+								false
+							]
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			}
+		},
+		"RelatedEmojiApplication": {
+			"type": "object",
+			"allOf": [
+				{
+					"type": "object",
+					"ref": "AdminEmojiApplication"
+				},
+				{
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"matchedBy": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "string",
+								"optional": false,
+								"nullable": false,
+								"enum": [
+									"name",
+									"remoteSource",
+									"fileHash"
+								]
+							}
+						}
+					}
+				}
+			]
+		},
+		"EmojiApplicationStatusCounts": {
+			"type": "object",
+			"properties": {
+				"total": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"pending": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"approved": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"rejected": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"canceled": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"EmojiApplicationQuotaWindow": {
+			"type": "object",
+			"properties": {
+				"period": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"day",
+						"week",
+						"month"
+					]
+				},
+				"used": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"limit": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"unlimited": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"retryAt": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"format": "date-time"
+				}
+			}
+		},
+		"EmojiApplicationQuotaReset": {
+			"type": "object",
+			"properties": {
+				"at": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"byId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"RemoteEmojiMeta": {
+			"type": "object",
+			"oneOf": [
+				{
+					"type": "object",
+					"properties": {
+						"fetched": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false,
+							"enum": [
+								true
+							]
+						},
+						"emojiId": {
+							"type": "string",
+							"optional": false,
+							"nullable": false,
+							"format": "id"
+						},
+						"name": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"host": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"originalUrl": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"category": {
+							"type": "string",
+							"optional": true,
+							"nullable": false
+						},
+						"aliases": {
+							"type": "array",
+							"optional": true,
+							"nullable": false,
+							"items": {
+								"type": "string",
+								"optional": false,
+								"nullable": false
+							}
+						},
+						"license": {
+							"type": "string",
+							"optional": true,
+							"nullable": false
+						},
+						"isSensitive": {
+							"type": "boolean",
+							"optional": true,
+							"nullable": false
+						}
+					}
+				},
+				{
+					"type": "object",
+					"properties": {
+						"fetched": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false,
+							"enum": [
+								false
+							]
+						},
+						"reason": {
+							"type": "string",
+							"optional": false,
+							"nullable": false,
+							"enum": [
+								"unsupported",
+								"notFound",
+								"error"
+							]
+						},
+						"emojiId": {
+							"type": "string",
+							"optional": false,
+							"nullable": false,
+							"format": "id"
+						},
+						"name": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"host": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"originalUrl": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"license": {
+							"type": "string",
+							"optional": true,
+							"nullable": false
+						}
+					}
+				}
+			]
+		},
+		"SignupApplicationView": {
+			"type": "object",
+			"properties": {
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"pending",
+						"approved",
+						"rejected",
+						"expired",
+						"completed"
+					]
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"expiresAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				}
+			}
+		},
+		"SignupApplicationAnswer": {
+			"type": "object",
+			"properties": {
+				"label": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"value": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"AdminSignupApplication": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"pending",
+						"approved",
+						"rejected",
+						"expired",
+						"completed"
+					]
+				},
+				"answers": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "SignupApplicationAnswer"
+					}
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"updatedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"expiresAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"processedById": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "id"
+				},
+				"processedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"usedById": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "id"
 				}
 			}
 		}
