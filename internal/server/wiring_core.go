@@ -288,6 +288,8 @@ func (s *Server) buildCore(w *wiring, idGen id.Generator, roleService *corerole.
 	webhookReactionHook := corewebhook.NewReactionCreateHook(webhookService, idGen, entityPacker)
 	webhookFollowingHook := corewebhook.NewFollowingHook(webhookService, sharedUserPacker)
 	mutingService := coremuting.NewService(userRepo, mutingRepo, idGen)
+	// Service を直接呼ぶ通知 (絵文字の申請) にもミュートを効かせる (#4065)
+	notificationService.SetMuteChecker(mutingService)
 	renoteMutingService := coremuting.NewRenoteService(userRepo, renoteMutingRepo, idGen)
 	// note 著者にブロックされた user の投票を弾く (upstream youHaveBeenBlocked、#1538)。
 	pollService := corepoll.NewService(noteRepo, pollRepo, pollVoteRepo, followingRepo, idGen, blockingService)
