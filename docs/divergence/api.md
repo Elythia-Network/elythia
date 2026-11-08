@@ -161,7 +161,7 @@ nodeinfoの`usage.users.total`、`/api/stats`の`usersCount`・`originalUsersCou
 | 項目 | 本家 | Elythia |
 |---|---|---|
 | 載るエンドポイント | 本家の全エンドポイント(`endpoint-list.ts`) | Echoに登録した`/api/<名前>`のGET / POSTだけ。本家にあってもElythiaが持たないもの(testModeでないときの`reset-db`)は載らない。GETはElythiaがGETのルートを持つときだけ載せる |
-| Elythiaにしかないエンドポイント | — | タグ`Elythia`にまとめ、引数と応答の型を付けずに一覧だけ載せる。このときだけ、トップレベルの`tags`を出す(本家互換のタグをpathに現れた順に並べ、`Elythia`を最後に置く) |
+| Elythiaにしかないエンドポイント | — | タグ`Elythia`にまとめる。宣言のあるもの(下の節)は、本家互換のものと同じ形で引数・認証の要否・権限・応答を載せる。宣言の無いもの(プラグインのルートと`drive/files/create-chunked/append`)は、引数と応答の型を付けずに一覧だけ載せる。各エンドポイントの`externalDocs`は付けない(本家のendpointのソースに当たるファイルが無いため)。このときだけ、トップレベルの`tags`を出す(本家互換のタグをpathに現れた順に並べ、`Elythia`を最後に置く) |
 | 本家互換のエンドポイントの応答にElythiaが足したフィールド | — | 載せない(本家の型のまま) |
 | `endpoint-list.ts`の外で登録されるroute(`signup` / `signin-flow` / miauthのcheckなど) | 載らない | 載らない(本家と同じ。本家の`ApiServerService.ts`から抜き出した一覧で外す) |
 | 本家の旧いpathの互換(`signin`) | 載らない(今の本家には無い) | 載らない(`internal/api/openapi`の`legacyRoutes`で外す) |
@@ -170,6 +170,25 @@ nodeinfoの`usage.users.total`、`/api/stats`の`usersCount`・`originalUsersCou
 | `servers` | `config.apiUrl` | `config.url` + `/api` |
 
 2026-10-24の`develop`(本家2026.10.1追従)で数えると、`/api.json`のpathは519で、本家互換が437、Elythia独自が82。数え方は、testModeでない設定で起動した実サーバーの`elythia dump-routes`から`/api/<名前>`のGET / POSTを取り、catch-all(`*`を含むもの)、本家の`directRoutes`、`legacyRoutes`を除いた名前の数(GETとPOSTの両方があっても1つと数える)。`/api.json`のpathの集合とメソッドがこれと一致することを確かめた。
+
+### Elythia独自のエンドポイントの宣言 (#4084)
+
+Elythia独自のエンドポイントは、2つのファイルの宣言から組み立てる。どちらも`internal/api/paramschema`にあり、名前の集合が一致しないと読み込みで落とす。
+
+- `elythia_paramdefs.json`: 引数(`paramDef`)と`allowGet` / `requireFile`(#3869、[param-shadow.md](../param-shadow.md#elythia独自のendpointの宣言3869))。本番の400の拒否にも使う
+- `elythia_apidoc.json`: `meta`に`requireCredential` / `requireModerator` / `requireAdmin` / `requiredRolePolicy` / `prohibitMoved` / `secure` / `kind`を、`doc`に`res`(応答の型)を、本家のgoldenと同じ名前と形で書く。独自の応答の型は最上位の`refs`に書き、`components.schemas`に足す(本家の型と同じ名前は書けない)
+
+ファイルを分けるのは、引数の宣言がajvの照合corpusとファイルのhashで結び付いているため。同じファイルに書くと、応答の型を直すたびにcorpusを作り直すことになる。
+
+- **`meta`は、組み立てたサーバーへの実際のリクエストで確かめる。** `internal/server`の`TestElythiaAPIDocMatchesRoutes`が、各エンドポイントに本文`[]`のリクエストを10通りの主体(トークン無し、一般の利用者、移行済みの利用者、移行済みの管理者、一般の管理者、宣言したポリシーだけを持つ利用者(`requireModerator`を宣言したものでは一般の管理者)、管理者、管理者のアプリのトークン3種(権限無し、すべての権限、宣言した`kind`だけ))から送る。一般の利用者・移行済みの利用者・一般の管理者には、真偽のロールポリシーをすべてfalseにするロールを持たせる。既定でtrueのポリシー(`canRequestCustomEmojis`など)のゲートは、持たせないと誰でも通り、宣言の漏れが見えないため。宣言したポリシーを持つ利用者も、そのポリシーだけをtrueにし、ほかはfalseにする。ほかが既定のtrueのままだと、ルートが宣言と別のポリシーを見ていても通ってしまうため。応答のコードとidが、宣言から決まるゲートの答えと一致することを求める。本文が配列なら、引数の検証(ルートのmiddlewareの最後)が400で止めるので、handlerには届かない。ソースを読んで突き合わせる形は、ゲートの後ろに隠れたゲート(一般の管理者のゲートの後ろのポリシーなど)を取りこぼす
+- **ゲートの順序は本家と違うので、断るときのエラーのコードが変わることがある。** 本家の`ApiCallService.ts`は、secure → レート制限 → 資格情報 → `prohibitMoved` → ロール → ポリシー → `kind`(とアプリのトークンの拒否)の順で見る。Elythiaはルートのmiddlewareの並びの順で見る。2026-11-08に本家2026.10.1と比べた例を挙げる。どれも断ることは同じ
+  - `kind`とsecureの両方を持つもの(`i/update-federation`)に権限の無いアプリが来たときは、`PERMISSION_DENIED`を返す(本家は`ACCESS_DENIED`)
+  - secureのもの(`admin/backup/*`)にトークン無しで来たときは、401の`CREDENTIAL_REQUIRED`を返す(本家は403の`ACCESS_DENIED`)
+  - `emoji-application/create`に、ポリシーを持たない利用者のアプリのトークンで来たときは、`PERMISSION_DENIED`を返す(本家は`ROLE_PERMISSION_DENIED`)。上のテストのアプリのトークンは管理者のものなので、この順序は確かめていない
+  - 上のテストは、移行済みでロールを持たない利用者にはロールの拒否を先に返す順序を期待している(本家は`YOUR_ACCOUNT_MOVED`が先)。`prohibitMoved`とロールの両方を宣言したものは今は無い
+- **`kind`が無く資格情報を要するものは、アプリのトークンを一律で断る。** 本家の`ApiCallService.ts`と同じ。宣言でこれを表す項目は無く、上のテストがアプリのトークンの拒否を確かめる
+- **応答の型をまだ書いていないものは、`doc`を書かない。** `/api.json`には型の無い200と「応答の型は、まだ載せていません」の説明を載せる。結果を返さないものは、空の`doc`(`{}`)を書くと204になる(本家と同じ)。応答の型が実際の応答と合うかは、#4024の段階Dの18で確かめる
+- エンドポイントごとのエラーの例(本家の`doc.errors`)は書かない。独自のエンドポイントの返すエラーを全件拾う手段と、正しいかを確かめる手段が無いため
 
 `/api.json`の本文(約1.3MB)とそのgzipは、初めて読まれたときに1度だけ作って持つ。全体のgzip middlewareはこのルートを外し(`selfEncodedRoutes`)、ハンドラが`Accept-Encoding`(`q=0`も見る)でどちらを返すかを決め、`Vary: Accept-Encoding`を付ける。組み立てに使った変換済みのgolden(十数MB)は、本文を作ったら捨てる。
 
