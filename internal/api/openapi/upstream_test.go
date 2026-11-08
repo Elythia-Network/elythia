@@ -28,6 +28,8 @@ func TestSpecMatchesUpstreamAPIJSON(t *testing.T) {
 	up, err := decode(data)
 	require.NoError(t, err)
 
+	// 本番と同じ組み立て(独自の宣言を足したもの)で比べ、独自の型はcomponents
+	// から外す。独自の宣言を足す処理が本家互換の部分を書き換えたら落ちるように。
 	g, err := NewDefault()
 	require.NoError(t, err)
 	eps, err := paramschema.Upstream()
@@ -50,6 +52,14 @@ func TestSpecMatchesUpstreamAPIJSON(t *testing.T) {
 	assert.ElementsMatch(t, upPaths.keys, minePaths.keys)
 	for _, p := range upPaths.keys {
 		assert.Equal(t, mustMarshal(t, upPaths.vals[p]), mustMarshal(t, minePaths.vals[p]), p)
+	}
+	apiDoc, err := decode(paramschema.ElythiaAPIDocJSON())
+	require.NoError(t, err)
+	schemas := field(field(mine, "components"), "schemas").(*object)
+	if refs, ok := field(apiDoc, "refs").(*object); ok {
+		for _, k := range refs.keys {
+			schemas.del(k)
+		}
 	}
 	assert.Equal(t, mustMarshal(t, field(up, "components")), mustMarshal(t, field(mine, "components")))
 }

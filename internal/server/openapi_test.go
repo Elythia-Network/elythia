@@ -27,8 +27,10 @@ func newOpenAPITestServer(t *testing.T) (*Server, *echo.Echo) {
 	// GETを持つ本家互換のもの(本家はallowGet)。
 	e.GET("/api/charts/notes", noop)
 	e.POST("/api/charts/notes", noop)
-	// Elythia独自のもの。
-	e.POST("/api/bubble-game/versus/create", noop)
+	// Elythia独自のもの。宣言のあるもの(elythia_apidoc.json)と、宣言の無い
+	// プラグインのもの。
+	e.POST("/api/bubble-game/versus/invite", noop)
+	e.POST("/api/plugin/example/hello", noop)
 	// 本家がendpointの外で登録するもの、/api配下以外、catchallは載らない。
 	e.POST("/api/signup", noop)
 	// 本家の旧いpathの互換も載らない。
@@ -79,7 +81,7 @@ func TestOpenAPISpec(t *testing.T) {
 	for k := range paths {
 		keys = append(keys, k)
 	}
-	assert.ElementsMatch(t, []string{"/notes/create", "/notes/show", "/i", "/charts/notes", "/bubble-game/versus/create"}, keys)
+	assert.ElementsMatch(t, []string{"/notes/create", "/notes/show", "/i", "/charts/notes", "/bubble-game/versus/invite", "/plugin/example/hello"}, keys)
 	assert.ElementsMatch(t, []string{"get", "post"}, mapKeys(paths["/charts/notes"].(map[string]any)))
 	assert.ElementsMatch(t, []string{"post"}, mapKeys(paths["/notes/show"].(map[string]any)))
 
@@ -88,9 +90,14 @@ func TestOpenAPISpec(t *testing.T) {
 	assert.Contains(t, create, "requestBody")
 	assert.Contains(t, create["responses"], "200")
 	assert.Equal(t, []any{"notes"}, create["tags"])
-	own := paths["/bubble-game/versus/create"].(map[string]any)["post"].(map[string]any)
+	// 宣言のある独自のものには引数と認証が付き、宣言の無いものには付かない。
+	own := paths["/bubble-game/versus/invite"].(map[string]any)["post"].(map[string]any)
 	assert.Equal(t, []any{openapi.ElythiaTag}, own["tags"])
-	assert.NotContains(t, own, "requestBody")
+	assert.Contains(t, own, "requestBody")
+	assert.Contains(t, own, "security")
+	plugin := paths["/plugin/example/hello"].(map[string]any)["post"].(map[string]any)
+	assert.Equal(t, []any{openapi.ElythiaTag}, plugin["tags"])
+	assert.NotContains(t, plugin, "requestBody")
 	assert.Contains(t, doc["components"].(map[string]any)["schemas"], "Note")
 }
 
