@@ -282,21 +282,9 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) {
 // looked up by ID because local users have a NULL URI column; other URIs use
 // FindByURI. Returns ("", false) when unwired or the URI is not known locally.
 func (h *Handler) resolveUserIDByURI(uri string) (string, bool) {
-	if h.userRepo == nil {
-		return "", false
-	}
-	if id := activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI(uri); id != "" {
-		u, err := h.userRepo.FindByID(id)
-		if err != nil || u == nil {
-			return "", false
-		}
-		return u.ID, true
-	}
-	u, err := h.userRepo.FindByURI(uri)
-	if err != nil || u == nil {
-		return "", false
-	}
-	return u.ID, true
+	// 解決の実装は meUpdated と同じ user.NewMoveTargetResolver に寄せる。片方だけを直すと、
+	// /api/i・users/show・meUpdated の結果が食い違う (#4064)
+	return user.NewMoveTargetResolver(h.userRepo, activitypub.NewURLBuilder(h.serverURL).LocalUserIDFromURI)(uri)
 }
 
 // resolveAlsoKnownAs converts the i/update alsoKnownAs lines (each an acct
