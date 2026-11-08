@@ -1,0 +1,134 @@
+{
+  "_comment": "#4082 の a11y.spec.ts の基準。screens は画面ごとに出る規則、reasons は残す規則の理由、ignoredRules は画面ごとには比べない規則と理由、buttonNameAllowed は名前の無いボタンのうち残すものの印と理由",
+  "screens": {
+    "anon /about": [
+      "button-name"
+    ],
+    "anon /signup-application": [
+      "button-name"
+    ],
+    "user /": [
+      "button-name"
+    ],
+    "user /my/notifications": [
+      "button-name"
+    ],
+    "user /my/drive": [
+      "button-name"
+    ],
+    "user /settings": [
+      "button-name",
+      "label"
+    ],
+    "user /settings/profile": [
+      "button-name",
+      "label"
+    ],
+    "user /settings/preferences": [
+      "button-name",
+      "image-alt"
+    ],
+    "user /settings/other": [
+      "button-name"
+    ],
+    "user /search": [
+      "button-name"
+    ],
+    "user /chat": [
+      "button-name"
+    ],
+    "user /@:me": [
+      "button-name"
+    ],
+    "user /notes/:note": [
+      "button-name"
+    ],
+    "user /about-elythia": [
+      "button-name"
+    ],
+    "user /bubble-game": [
+      "button-name",
+      "image-alt",
+      "label"
+    ],
+    "user /bubble-game/versus/history": [
+      "button-name"
+    ],
+    "user /emoji-request": [
+      "button-name",
+      "label"
+    ],
+    "user /my/follow-requests": [
+      "button-name"
+    ],
+    "admin /admin": [
+      "button-name"
+    ],
+    "admin /admin/users": [
+      "button-name",
+      "label"
+    ],
+    "admin /admin/settings": [
+      "button-name",
+      "label"
+    ],
+    "admin /admin/moderation": [
+      "button-name",
+      "label",
+      "nested-interactive"
+    ],
+    "admin /admin/backups": [
+      "button-name"
+    ],
+    "admin /admin/federation": [
+      "button-name",
+      "label"
+    ],
+    "admin /admin/ip-search": [
+      "button-name"
+    ],
+    "admin /admin/signup-applications": [
+      "button-name"
+    ],
+    "admin /admin/server-plugins": [
+      "button-name"
+    ],
+    "admin /admin/files": [
+      "button-name",
+      "label"
+    ],
+    "admin /admin/database": [
+      "button-name"
+    ],
+    "admin /admin/modlog": [
+      "button-name"
+    ],
+    "admin /custom-emojis-manager": [
+      "button-name",
+      "label"
+    ]
+  },
+  "reasons": {
+    "button-name": "名前の無いボタンは、要素の単位で buttonNameAllowed に書いた印のものだけを許す",
+    "image-alt": "バブルゲームのロゴと、端末の設定の画面の画像に alt が無い (本家の部品)",
+    "label": "MkInput / MkTextarea / MkSwitch のラベルが入力欄に結び付いていない (本家の共通の部品。#4082 では直さない)",
+    "nested-interactive": "/admin/moderation の中で、操作できる要素が入れ子になっている (本家の部品)"
+  },
+  "ignoredRules": {
+    "color-contrast": "本家のテーマの配色のまま。色を変えると見た目が変わるので、#4082 では直さない。タイムラインや右の列の中身しだいで出たり出なかったりするので、画面ごとには比べない",
+    "meta-viewport": "起動の HTML (internal/server/frontend.go) の maximum-scale=1, user-scalable=no。本家と同じ。全画面に出る"
+  },
+  "buttonNameAllowed": {
+    "icon:ti-chevron-left": "ナビの縮めるボタン。ふさわしい既存の語が無いので、Elythia の語を足す #4071 の後に直す",
+    "icon:ti-dots": "未ログインの画面の右上 (MkVisitorDashboard)・プロフィール (pages/user/home.vue)・ヒントの枠 (MkTip)・端末の設定の項目 (MkPreferenceContainer) の「…」のメニュー (本家の部品)",
+    "testid:drive-menu": "ドライブの「…」のメニュー (本家の部品に Elythia が data-testid だけを足したもの)",
+    "testid:timeline-tab-local": "タイムラインのタブ。選んでいないタブはアイコンだけで出る (本家の部品)",
+    "testid:timeline-tab-social": "同上",
+    "testid:timeline-tab-global": "同上",
+    "testid:timeline-tab-lists": "同上",
+    "testid:timeline-tab-antennas": "同上",
+    "testid:timeline-tab-channels": "同上",
+    "icon:ti-chevron-up+ti-user": "ノートのページの、同じ利用者の前後のノートを読むボタン (本家の部品)",
+    "icon:ti-chevron-down+ti-user": "同上"
+  }
+}
