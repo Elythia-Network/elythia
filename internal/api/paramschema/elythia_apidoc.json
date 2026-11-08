@@ -5,6 +5,20 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"freedBytes": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
 			}
 		},
 		"admin/backup/download": {
@@ -12,6 +26,14 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupDownload"
+				}
 			}
 		},
 		"admin/backup/list": {
@@ -19,6 +41,14 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupOverview"
+				}
 			}
 		},
 		"admin/backup/reauth-challenge": {
@@ -26,6 +56,13 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false
+				}
 			}
 		},
 		"admin/backup/restore/abort": {
@@ -33,13 +70,39 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
-			}
+			},
+			"doc": {}
 		},
 		"admin/backup/restore/candidates": {
 			"meta": {
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"database": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"databases": {
+							"type": "array",
+							"optional": false,
+							"nullable": false,
+							"items": {
+								"type": "object",
+								"optional": false,
+								"nullable": false,
+								"ref": "BackupKeptDatabase"
+							}
+						}
+					}
+				}
 			}
 		},
 		"admin/backup/restore/confirm": {
@@ -47,23 +110,65 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
-			}
+			},
+			"doc": {}
 		},
 		"admin/backup/restore/prepare": {
 			"meta": {
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"opId": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"ticket": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"status": {
+							"type": "object",
+							"optional": false,
+							"nullable": false,
+							"ref": "BackupRestoreStatus"
+						}
+					}
+				}
 			}
 		},
 		"admin/backup/restore/status": {
-			"meta": {}
+			"meta": {},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupRestoreStatus"
+				}
+			}
 		},
 		"admin/backup/take": {
 			"meta": {
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupJobAccepted"
+				}
 			}
 		},
 		"admin/backup/verify": {
@@ -71,6 +176,14 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"secure": true
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupJobAccepted"
+				}
 			}
 		},
 		"admin/database-health": {
@@ -148,6 +261,14 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:server-info"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "RemoteCheckReport"
+				}
 			}
 		},
 		"admin/federation/clean-gone-instance": {
@@ -155,6 +276,14 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "write:admin:federation"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "GoneInstanceCleanResult"
+				}
 			}
 		},
 		"admin/federation/close-delivery-breaker": {
@@ -162,13 +291,22 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "write:admin:federation"
-			}
+			},
+			"doc": {}
 		},
 		"admin/federation/delivery-health": {
 			"meta": {
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:server-info"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "FederationHealthReport"
+				}
 			}
 		},
 		"admin/federation/gone-instances": {
@@ -176,6 +314,19 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:server-info"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "GoneInstance"
+					}
+				}
 			}
 		},
 		"admin/federation/inbox-health": {
@@ -183,6 +334,14 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:server-info"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "FederationHealthReport"
+				}
 			}
 		},
 		"admin/federation/rules/create": {
@@ -190,6 +349,14 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"kind": "write:admin:meta"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "FederationRule"
+				}
 			}
 		},
 		"admin/federation/rules/delete": {
@@ -197,13 +364,27 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"kind": "write:admin:meta"
-			}
+			},
+			"doc": {}
 		},
 		"admin/federation/rules/hits": {
 			"meta": {
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:meta"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "FederationRuleHit"
+					}
+				}
 			}
 		},
 		"admin/federation/rules/list": {
@@ -211,6 +392,19 @@
 				"requireCredential": true,
 				"requireModerator": true,
 				"kind": "read:admin:meta"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "FederationRule"
+					}
+				}
 			}
 		},
 		"admin/federation/rules/update": {
@@ -218,6 +412,14 @@
 				"requireCredential": true,
 				"requireAdmin": true,
 				"kind": "write:admin:meta"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "FederationRule"
+				}
 			}
 		},
 		"admin/ip/accounts": {
@@ -983,6 +1185,1350 @@
 					"type": "integer",
 					"optional": false,
 					"nullable": true
+				}
+			}
+		},
+		"BackupMigrationState": {
+			"type": "object",
+			"properties": {
+				"table": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"version": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"dirty": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"missing": {
+					"type": "boolean",
+					"optional": true,
+					"nullable": false
+				}
+			}
+		},
+		"BackupStageResult": {
+			"type": "object",
+			"properties": {
+				"stage": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"readable",
+						"restorable",
+						"usable"
+					]
+				},
+				"ok": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"skipped": {
+					"type": "boolean",
+					"optional": true,
+					"nullable": false
+				},
+				"error": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"warnings": {
+					"type": "array",
+					"optional": true,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				}
+			}
+		},
+		"BackupRowMismatch": {
+			"type": "object",
+			"properties": {
+				"table": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"expected": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"actual": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"BackupVerifySummary": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"verifiedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"stages": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupStageResult"
+					}
+				},
+				"mismatches": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupRowMismatch"
+					}
+				},
+				"error": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				}
+			}
+		},
+		"BackupGeneration": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"complete": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"metaError": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"size": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"objectCount": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"dumpSize": {
+					"type": "integer",
+					"optional": true,
+					"nullable": false
+				},
+				"encrypted": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"elythiaVersion": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"elythiaCommit": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"postgresVersion": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"database": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"migrations": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupMigrationState"
+					}
+				},
+				"verify": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BackupVerifySummary"
+				}
+			}
+		},
+		"BackupJob": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"take",
+						"verify",
+						"restore"
+					]
+				},
+				"trigger": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"schedule",
+						"api"
+					]
+				},
+				"generationId": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"startedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				}
+			}
+		},
+		"BackupVerifyResult": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"verifiedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"ok": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"stages": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupStageResult"
+					}
+				},
+				"mismatches": {
+					"type": "array",
+					"optional": true,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupRowMismatch"
+					}
+				},
+				"elythiaVersion": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"dumpSha256": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				}
+			}
+		},
+		"BackupJobResult": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"take",
+						"verify",
+						"restore"
+					]
+				},
+				"trigger": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"schedule",
+						"api"
+					]
+				},
+				"generationId": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"startedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"finishedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"ok": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"stage": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"enum": [
+						"take",
+						"verify",
+						"prune"
+					]
+				},
+				"error": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"verify": {
+					"type": "object",
+					"optional": true,
+					"nullable": false,
+					"ref": "BackupVerifyResult"
+				},
+				"deleted": {
+					"type": "array",
+					"optional": true,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				}
+			}
+		},
+		"BackupOverview": {
+			"type": "object",
+			"properties": {
+				"storageType": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"s3",
+						"dir"
+					]
+				},
+				"generations": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupGeneration"
+					}
+				},
+				"usage": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"totalBytes": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						},
+						"objectCount": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						},
+						"generationCount": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						},
+						"pricePerGbMonth": {
+							"type": "number",
+							"optional": false,
+							"nullable": true
+						},
+						"monthlyCost": {
+							"type": "number",
+							"optional": false,
+							"nullable": true
+						}
+					}
+				},
+				"service": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"configured": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false
+						},
+						"reachable": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false
+						},
+						"error": {
+							"type": "string",
+							"optional": true,
+							"nullable": false
+						},
+						"running": {
+							"type": "object",
+							"optional": false,
+							"nullable": true,
+							"ref": "BackupJob"
+						},
+						"nextRunAt": {
+							"type": "string",
+							"optional": false,
+							"nullable": true,
+							"format": "date-time"
+						},
+						"lastTake": {
+							"type": "object",
+							"optional": false,
+							"nullable": true,
+							"ref": "BackupJobResult"
+						},
+						"lastVerify": {
+							"type": "object",
+							"optional": false,
+							"nullable": true,
+							"ref": "BackupJobResult"
+						},
+						"latestUsable": {
+							"type": "object",
+							"optional": false,
+							"nullable": true,
+							"properties": {
+								"id": {
+									"type": "string",
+									"optional": false,
+									"nullable": false
+								},
+								"at": {
+									"type": "string",
+									"optional": false,
+									"nullable": false,
+									"format": "date-time"
+								}
+							}
+						},
+						"overdue": {
+							"type": "boolean",
+							"optional": false,
+							"nullable": false
+						},
+						"lastNotifyError": {
+							"type": "string",
+							"optional": true,
+							"nullable": false
+						}
+					}
+				}
+			}
+		},
+		"BackupJobAccepted": {
+			"type": "object",
+			"properties": {
+				"accepted": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"job": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupJob"
+				}
+			}
+		},
+		"BackupDownload": {
+			"type": "object",
+			"properties": {
+				"url": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "url"
+				},
+				"expiresAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"via": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"storage",
+						"server"
+					]
+				},
+				"fileName": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"size": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"encrypted": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"BackupRestoreRecord": {
+			"type": "object",
+			"properties": {
+				"opId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"restore",
+						"rollback"
+					]
+				},
+				"step": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"preparing",
+						"ready",
+						"entering",
+						"switched",
+						"resuming",
+						"reverting",
+						"aborting",
+						"done",
+						"failed",
+						"expired",
+						"aborted",
+						"reverted",
+						"unknown"
+					]
+				},
+				"generationId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"database": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"target": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"before": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"aside": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"userId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"error": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"updatedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"readyAt": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"format": "date-time"
+				}
+			}
+		},
+		"BackupMaintenanceBlocker": {
+			"type": "object",
+			"properties": {
+				"server": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"pid": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"user": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"application": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"addr": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"sameRole": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"BackupMaintenanceState": {
+			"type": "object",
+			"properties": {
+				"phase": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"entering",
+						"held",
+						"resuming"
+					]
+				},
+				"opId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"manual",
+						"restore",
+						"rollback"
+					]
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"startedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"requestedBy": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"leaseUntil": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"heldAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"judgedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"waitingFor": {
+					"type": "array",
+					"optional": false,
+					"nullable": true,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"blockers": {
+					"type": "array",
+					"optional": false,
+					"nullable": true,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupMaintenanceBlocker"
+					}
+				},
+				"terminated": {
+					"type": "array",
+					"optional": false,
+					"nullable": true,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupMaintenanceBlocker"
+					}
+				},
+				"judgeError": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"BackupRestoreStatus": {
+			"type": "object",
+			"properties": {
+				"record": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BackupRestoreRecord"
+				},
+				"journal": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"properties": {
+							"at": {
+								"type": "string",
+								"optional": false,
+								"nullable": false,
+								"format": "date-time"
+							},
+							"step": {
+								"type": "string",
+								"optional": false,
+								"nullable": false
+							},
+							"message": {
+								"type": "string",
+								"optional": false,
+								"nullable": false
+							}
+						}
+					}
+				},
+				"maintenance": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BackupMaintenanceState"
+				},
+				"final": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"BackupKeptDatabase": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"before_restore",
+						"rolled_back"
+					]
+				},
+				"at": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"size": {
+					"type": "integer",
+					"optional": false,
+					"nullable": true
+				},
+				"migrations": {
+					"type": "array",
+					"optional": false,
+					"nullable": true,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BackupMigrationState"
+					}
+				},
+				"needsMigration": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"problem": {
+					"type": "string",
+					"optional": true,
+					"nullable": false,
+					"enum": [
+						"migrationTooNew",
+						"migrationDirty",
+						"notElythia",
+						"unreadable"
+					]
+				}
+			}
+		},
+		"SelfCheckResult": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"ok",
+						"warn",
+						"fail",
+						"skip"
+					]
+				},
+				"detail": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"hint": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				}
+			}
+		},
+		"RemoteCheckReport": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"results": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "SelfCheckResult"
+					}
+				},
+				"ok": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"FederationHostHealth": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"success": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"failure": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"byClass": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"additionalProperties": {
+						"type": "integer"
+					}
+				},
+				"latencyP50Ms": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"latencyP95Ms": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"lastError": {
+					"type": "object",
+					"optional": true,
+					"nullable": false,
+					"properties": {
+						"at": {
+							"type": "string",
+							"optional": false,
+							"nullable": false,
+							"format": "date-time"
+						},
+						"class": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						},
+						"status": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						},
+						"message": {
+							"type": "string",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
+			}
+		},
+		"DeliveryBreakerState": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"open": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"consecutiveFailures": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"openedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"nextProbeAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"probeIntervalSeconds": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"throttledUntil": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"reservedUntil": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				}
+			}
+		},
+		"FederationHealthReport": {
+			"type": "object",
+			"properties": {
+				"windowSeconds": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"hosts": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "FederationHostHealth"
+					}
+				},
+				"evictedHosts": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"breakers": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DeliveryBreakerState"
+					}
+				}
+			}
+		},
+		"GoneInstance": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"suspendedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"followers": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"following": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"followRequests": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"GoneInstanceCleanResult": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"removedFollowers": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"removedFollowing": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"removedFollowRequests": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"remaining": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"FederationRule": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"updatedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"name": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"mode": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"disabled",
+						"record",
+						"enforce"
+					]
+				},
+				"target": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"note",
+						"activity"
+					]
+				},
+				"position": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"hosts": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"activityTypes": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"isBot": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": true
+				},
+				"newWithinHours": {
+					"type": "integer",
+					"optional": false,
+					"nullable": true
+				},
+				"patterns": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"hasAttachment": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": true
+				},
+				"tags": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"reject": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"stripMedia": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"sensitive": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"unlist": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"cw": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"hits": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				}
+			}
+		},
+		"FederationRuleHit": {
+			"type": "object",
+			"properties": {
+				"ruleId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"host": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"subject": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"kind": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"applied": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"at": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
 				}
 			}
 		}
