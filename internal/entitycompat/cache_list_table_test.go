@@ -46,6 +46,10 @@ var cacheEntries = map[string]cacheEntry{
 		nil, nil},
 	"internal/api/paramschema.effectiveOnce": {kindNotCache, "バイナリに埋め込んだ本家のparamDefとElythiaの重ねる宣言(elythia_overlays.json)を1回だけ解析する。DBから読んだ値ではない (#3865)",
 		nil, nil},
+	"internal/api/paramschema.elythiaAPIDocOnce": {kindNotCache, "バイナリに埋め込んだElythia独自のエンドポイントの認証と応答の型の宣言(elythia_apidoc.json)を1回だけ解析する。DBから読んだ値ではない (#4084)",
+		nil, nil},
+	"internal/api/paramschema.upstreamRefs": {kindNotCache, "バイナリに埋め込んだ本家のgolden(upstream_paramdefs.json)から応答の型の名前を1回だけ集める。DBから読んだ値ではない (#4084)",
+		nil, nil},
 	"internal/api/stats.Handler": {kindDropLocal, "",
 		[]string{"counts", "countsGen", "countsMu", "db", "notesChart", "now", "sf", "usersChart"}, map[string]string{
 			"sf": "実行中の数えをまとめるsingleflight。鍵に世代の番号を含める(4.4)",

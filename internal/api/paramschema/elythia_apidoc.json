@@ -1,0 +1,553 @@
+{
+	"endpoints": {
+		"admin/backup/delete": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/download": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/list": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/reauth-challenge": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/restore/abort": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/restore/candidates": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/restore/confirm": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/restore/prepare": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/restore/status": {
+			"meta": {}
+		},
+		"admin/backup/take": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/backup/verify": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"secure": true
+			}
+		},
+		"admin/database-health": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "read:admin:table-stats"
+			}
+		},
+		"admin/drive/usage": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:drive"
+			}
+		},
+		"admin/emoji-application/approve": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "write:admin:emoji"
+			}
+		},
+		"admin/emoji-application/list": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "read:admin:emoji"
+			}
+		},
+		"admin/emoji-application/list-by-user": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "read:admin:emoji"
+			}
+		},
+		"admin/emoji-application/reject": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "write:admin:emoji"
+			}
+		},
+		"admin/emoji-application/related": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "read:admin:emoji"
+			}
+		},
+		"admin/emoji-application/reset-user-quota": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "write:admin:emoji"
+			}
+		},
+		"admin/emoji-application/user-summary": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "read:admin:emoji"
+			}
+		},
+		"admin/emoji/fetch-remote-meta": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canManageCustomEmojis",
+				"kind": "read:admin:emoji"
+			}
+		},
+		"admin/federation/check-host": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/federation/clean-gone-instance": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "write:admin:federation"
+			}
+		},
+		"admin/federation/close-delivery-breaker": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "write:admin:federation"
+			}
+		},
+		"admin/federation/delivery-health": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/federation/gone-instances": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/federation/inbox-health": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/federation/rules/create": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:meta"
+			}
+		},
+		"admin/federation/rules/delete": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:meta"
+			}
+		},
+		"admin/federation/rules/hits": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:meta"
+			}
+		},
+		"admin/federation/rules/list": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:meta"
+			}
+		},
+		"admin/federation/rules/update": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:meta"
+			}
+		},
+		"admin/ip/accounts": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"requiredRolePolicy": "canSearchIpHistory",
+				"kind": "read:admin:user-ips"
+			}
+		},
+		"admin/ip/lookup-log": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"requiredRolePolicy": "canSearchIpHistory",
+				"kind": "read:admin:user-ips"
+			}
+		},
+		"admin/ip/related-accounts": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"requiredRolePolicy": "canSearchIpHistory",
+				"kind": "read:admin:user-ips"
+			}
+		},
+		"admin/roles/assignment-show": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:roles"
+			}
+		},
+		"admin/self-check": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/server-metrics": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:server-info"
+			}
+		},
+		"admin/server-plugins": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:meta"
+			}
+		},
+		"admin/signup-application/approve": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "write:admin:invite-codes"
+			}
+		},
+		"admin/signup-application/list": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "read:admin:invite-codes"
+			}
+		},
+		"admin/signup-application/reject": {
+			"meta": {
+				"requireCredential": true,
+				"requireModerator": true,
+				"kind": "write:admin:invite-codes"
+			}
+		},
+		"bubble-game/versus/accept": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/cancel": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/decline": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/history": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"bubble-game/versus/invitations": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"bubble-game/versus/invite": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/record": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"bubble-game/versus/report": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/set-public": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"bubble-game/versus/show": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"chat/messages": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:chat"
+			}
+		},
+		"chat/messages/create": {
+			"meta": {
+				"requireCredential": true,
+				"prohibitMoved": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/messages/reactions/create": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/messages/reactions/delete": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/messages/read": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/messages/update": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/invitations/accept": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/invitations/delete": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/invitations/reject": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/joined": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:chat"
+			}
+		},
+		"chat/rooms/members/ban": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/members/update-membership": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/transfer-ownership": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/rooms/unmute": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:chat"
+			}
+		},
+		"chat/unread-count": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:chat"
+			}
+		},
+		"drive/files/create-chunked/abort": {
+			"meta": {
+				"requireCredential": true,
+				"prohibitMoved": true,
+				"kind": "write:drive"
+			}
+		},
+		"drive/files/create-chunked/finish": {
+			"meta": {
+				"requireCredential": true,
+				"prohibitMoved": true,
+				"kind": "write:drive"
+			}
+		},
+		"drive/files/create-chunked/start": {
+			"meta": {
+				"requireCredential": true,
+				"prohibitMoved": true,
+				"kind": "write:drive"
+			}
+		},
+		"emoji-application/cancel": {
+			"meta": {
+				"requireCredential": true
+			}
+		},
+		"emoji-application/create": {
+			"meta": {
+				"requireCredential": true,
+				"requiredRolePolicy": "canRequestCustomEmojis"
+			}
+		},
+		"emoji-application/list-mine": {
+			"meta": {
+				"requireCredential": true
+			}
+		},
+		"following/silent/list": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:following"
+			}
+		},
+		"i/federation": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"i/flashs": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:flash"
+			}
+		},
+		"i/flashs/likes": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:flash-likes"
+			}
+		},
+		"i/update-federation": {
+			"meta": {
+				"requireCredential": true,
+				"secure": true,
+				"kind": "write:account"
+			}
+		},
+		"reversi/claim-time-is-up": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"reversi/put-stone": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"reversi/ready": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "write:account"
+			}
+		},
+		"roles/assignment-show": {
+			"meta": {
+				"requireCredential": true,
+				"kind": "read:account"
+			}
+		},
+		"signup-application/apply": {
+			"meta": {}
+		},
+		"signup-application/form-token": {
+			"meta": {}
+		},
+		"signup-application/register": {
+			"meta": {}
+		},
+		"signup-application/status": {
+			"meta": {}
+		}
+	},
+	"refs": {}
+}
