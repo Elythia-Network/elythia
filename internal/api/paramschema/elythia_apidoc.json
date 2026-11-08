@@ -1252,7 +1252,8 @@
 						"surrender",
 						"timeUp",
 						"disconnected",
-						"invalidReport"
+						"invalidReport",
+						null
 					]
 				},
 				"user1Id": {
