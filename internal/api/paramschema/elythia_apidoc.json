@@ -426,6 +426,19 @@
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:chat"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "ChatMessage"
+					}
+				}
 			}
 		},
 		"chat/messages/create": {
@@ -433,84 +446,130 @@
 				"requireCredential": true,
 				"prohibitMoved": true,
 				"kind": "write:chat"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "ChatMessage"
+				}
 			}
 		},
 		"chat/messages/reactions/create": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/messages/reactions/delete": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/messages/read": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/messages/update": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/invitations/accept": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/invitations/delete": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/invitations/reject": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/joined": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:chat"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "ChatRoom"
+					}
+				}
 			}
 		},
 		"chat/rooms/members/ban": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/members/update-membership": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/transfer-ownership": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/rooms/unmute": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:chat"
-			}
+			},
+			"doc": {}
 		},
 		"chat/unread-count": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:chat"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"properties": {
+						"count": {
+							"type": "integer",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
 			}
 		},
 		"drive/files/create-chunked/abort": {
