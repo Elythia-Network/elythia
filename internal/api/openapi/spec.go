@@ -4,8 +4,10 @@
 // server/api/openapi/gen-spec.ts over the embedded golden of
 // internal/api/paramschema (paramDef, meta.res, meta.errors and the packed
 // schemas), restricted to the endpoints Elythia actually serves. Endpoints
-// only Elythia has are listed under their own tag without parameter or
-// response types.
+// only Elythia has are listed under their own tag, typed from
+// elythia_paramdefs.json and elythia_apidoc.json of internal/api/paramschema
+// (#4084). Those declared in neither, such as the routes of plugins, are
+// listed without parameter or response types.
 package openapi
 
 import (
@@ -21,13 +23,21 @@ import (
 // ElythiaTag is the tag of the endpoints upstream Misskey does not have.
 const ElythiaTag = "Elythia"
 
-// elythiaTagDescription and elythiaOperationDescription describe the
-// endpoints only Elythia has.
+// The descriptions of the endpoints only Elythia has.
 //
-// 型を付けていないことを、読む人がタグと各エンドポイントの両方で分かるようにする。
+// 型を付けていないものがあることを、読む人がタグと各エンドポイントの両方で
+// 分かるようにする。宣言の無いもの(プラグインのルートなど)は型を持たない。
 const (
-	elythiaTagDescription       = "Elythia独自のエンドポイント。引数と応答の型はまだ載せていません。"
-	elythiaOperationDescription = "Elythia独自のエンドポイントです。引数と応答の型は、まだ載せていません。"
+	elythiaTagDescription = "Elythia独自のエンドポイント。応答の型をまだ載せていないものと、プラグインのエンドポイントなど、引数と応答の型を載せていないものがあります。"
+	// elythiaOperationDescription is the description of an endpoint
+	// declared in neither file.
+	elythiaOperationDescription = "Elythia独自のエンドポイントです。引数と応答の型は載せていません。"
+	// elythiaTypedDescription replaces upstream's "No description
+	// provided." of a declared endpoint.
+	elythiaTypedDescription = "Elythia独自のエンドポイントです。"
+	// elythiaPendingDescription is elythiaTypedDescription of an endpoint
+	// whose response type is not declared yet.
+	elythiaPendingDescription = "Elythia独自のエンドポイントです。応答の型は、まだ載せていません。"
 )
 
 // Route is one endpoint Elythia serves under /api.
@@ -63,6 +73,9 @@ type Generator struct {
 	// (ApiServerService.ts), with path parameters normalized.
 	direct  map[string]bool
 	schemas *object
+	// elythia are the operations of the declared endpoints only Elythia
+	// has, by endpoint name, before the method prefix.
+	elythia map[string]*object
 }
 
 // legacyRoutes are routes Elythia keeps under /api only for clients of older
@@ -81,7 +94,86 @@ var legacyRoutes = map[string]bool{
 // (internal/serverのapiSpecCache)。goldenの解析はここで別に行うので、
 // paramschema.Upstreamが持つ解析の結果には触れない。
 func NewDefault() (*Generator, error) {
-	return New(paramschema.UpstreamGolden())
+	// 宣言の検査(引数の宣言との名前の一致、権限の名前など)はparamschemaが持つ。
+	// 通らない宣言からは組み立てない。
+	if _, err := paramschema.ElythiaAPIDocs(); err != nil {
+		return nil, err
+	}
+	g, err := New(paramschema.UpstreamGolden())
+	if err != nil {
+		return nil, err
+	}
+	if err := g.AddElythia(paramschema.ElythiaParamDefs(), paramschema.ElythiaAPIDocJSON()); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// AddElythia adds the endpoints only Elythia has, from paramDefs (the format
+// of elythia_paramdefs.json) and apiDoc (elythia_apidoc.json). Each is
+// rendered like an upstream endpoint, with the meta of both files and the doc
+// of apiDoc, under ElythiaTag. The refs of apiDoc are added to the component
+// schemas and must not shadow upstream's.
+func (g *Generator) AddElythia(paramDefs, apiDoc []byte) error {
+	pRoot, err := decode(paramDefs)
+	if err != nil {
+		return err
+	}
+	pEps, ok := field(pRoot, "endpoints").(*object)
+	if !ok {
+		return errors.New("openapi: elythia paramDefs have no endpoints")
+	}
+	aRoot, err := decode(apiDoc)
+	if err != nil {
+		return err
+	}
+	aEps, ok := field(aRoot, "endpoints").(*object)
+	if !ok {
+		return errors.New("openapi: elythia apidoc has no endpoints")
+	}
+	if refs, ok := field(aRoot, "refs").(*object); ok {
+		for _, k := range refs.keys {
+			if _, dup := g.schemas.get(k); dup {
+				return fmt.Errorf("openapi: elythia ref %s shadows a schema", k)
+			}
+			g.schemas.set(k, convertSchema(refs.vals[k], kindRes))
+		}
+	}
+	for _, name := range pEps.keys {
+		if _, ok := aEps.get(name); !ok {
+			return fmt.Errorf("openapi: elythia endpoint %s is not in both files", name)
+		}
+	}
+	g.elythia = make(map[string]*object, len(aEps.keys))
+	for _, name := range aEps.keys {
+		if _, upstream := g.operations[name]; upstream {
+			return fmt.Errorf("openapi: elythia endpoint %s is an upstream endpoint", name)
+		}
+		a, _ := aEps.vals[name].(*object)
+		p, ok := field(pEps, name).(*object)
+		if a == nil || !ok {
+			return fmt.Errorf("openapi: elythia endpoint %s is not in both files", name)
+		}
+		// allowGetとrequireFileは引数の宣言に、残りはapidocにある。本家のgoldenと
+		// 同じく1つのmetaにまとめてから組み立てる。
+		meta := newObject()
+		for _, m := range []any{field(p, "meta"), field(a, "meta")} {
+			if mo, ok := m.(*object); ok {
+				for _, k := range mo.keys {
+					meta.set(k, mo.vals[k])
+				}
+			}
+		}
+		ep := newObject()
+		ep.set("paramDef", field(p, "paramDef"))
+		ep.set("meta", meta)
+		doc, hasDoc := a.get("doc")
+		if hasDoc {
+			ep.set("doc", doc)
+		}
+		g.elythia[name] = elythiaTypedOperation(name, ep, hasDoc)
+	}
+	return nil
 }
 
 // New builds a Generator from a golden in the format of
@@ -159,7 +251,11 @@ func (g *Generator) Spec(opts Options) ([]byte, error) {
 	for _, name := range names {
 		base, upstream := g.operations[name]
 		if !upstream {
-			base = elythiaOperation(name)
+			if op, ok := g.elythia[name]; ok {
+				base = op
+			} else {
+				base = elythiaOperation(name)
+			}
 			hasElythia = true
 		} else if tags, ok := field(base, "tags").([]any); ok {
 			if t := toString(tags[0]); !slices.Contains(upstreamTags, t) {
@@ -248,6 +344,41 @@ func elythiaOperation(name string) *object {
 	op.set("summary", name)
 	op.set("description", elythiaOperationDescription)
 	op.set("tags", []any{ElythiaTag})
+	return op
+}
+
+// elythiaTypedOperation is operation for a declared endpoint only Elythia
+// has. hasDoc is false while its response type is not declared yet.
+//
+// externalDocsは外す。本家のoperationは本家のGitHubの.tsを指すが、独自の
+// エンドポイントには対応するファイルが無い。応答の型がまだ無いものは、本家の
+// 形(resが無ければ204)だと「結果を返さない」と読めてしまうので、型の無い200に
+// する。
+func elythiaTypedOperation(name string, ep *object, hasDoc bool) *object {
+	op := operation(name, ep)
+	op.del("externalDocs")
+	op.set("tags", []any{ElythiaTag})
+	desc := elythiaTypedDescription
+	if !hasDoc {
+		desc = elythiaPendingDescription
+	}
+	op.set("description", strings.Replace(toString(field(op, "description")), "No description provided.", desc, 1))
+	if !hasDoc {
+		old, _ := field(op, "responses").(*object)
+		if old == nil {
+			old = newObject()
+		}
+		responses := newObject()
+		ok := newObject()
+		ok.set("description", "OK (応答の型は、まだ載せていません)")
+		responses.set("200", ok)
+		for _, k := range old.keys {
+			if k != "204" {
+				responses.set(k, old.vals[k])
+			}
+		}
+		op.set("responses", responses)
+	}
 	return op
 }
 
