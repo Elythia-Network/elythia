@@ -267,7 +267,9 @@ export class Paginator<
 		// mk-go: 中身を総入れ替えしたことを外から判別するための世代 (#3132)。
 		// 再接続の穴埋めは「切断した時点の id」を起点に取りに行くので、その間に
 		// リロードされていたら起点ごと捨てないと、古いページが最新の上に積まれる。
-		this.generation++;
+		// 応答を待つ間に次の init (条件の変更や再読み込み) が始まったら、この応答は古い取得のものなので
+		// 捨てる (#4076)。
+		const generation = ++this.generation;
 		this.items.value = [];
 		this.aheadQueue = [];
 		this.queuedAheadItemsCount.value = 0;
@@ -296,6 +298,8 @@ export class Paginator<
 		// (ExcessKeys) を型の上で解けないので、fetchOlder / fetchNewer と同じく応答の型を
 		// 明示して呼ぶ (#3439)
 		const apiRes = (await misskeyApi<T[]>(this.endpoint, data).catch(err => {
+			// 後から始まった init の状態 (読み込み中の表示・失敗の印) を、古い取得の失敗で上書きしない (#4076)
+			if (generation !== this.generation) return null;
 			// **初回の取得でも 429 を区別する (レビュー M-2)。** ここを汎用の
 			// error に潰すと `MkError` が「何かがおかしいようです」を描く。
 			// 自動追い読みが止まった直後に利用者が最初にやるのは再読み込み
@@ -315,6 +319,10 @@ export class Paginator<
 		})) as T[] | null;
 
 		if (apiRes == null) {
+			return;
+		}
+		// 古い取得の応答。新しい一覧に足さず、読み込み中の表示も変えない (#4076)
+		if (generation !== this.generation) {
 			return;
 		}
 
@@ -457,6 +465,8 @@ export class Paginator<
 		if (this.rateLimited.value) return;
 		if (!this.canFetchOlder.value || this.fetching.value || this.fetchingOlder.value || this.items.value.length === 0) return;
 		this.fetchingOlder.value = true;
+		// 応答を待つ間に init (条件の変更や再読み込み) が走ったら、この応答は古い一覧の続きなので捨てる (#4076)
+		const generation = this.generation;
 
 		const data: E['req'] = {
 			...(typeof this.params === 'function' ? this.params() : this.params),
@@ -471,13 +481,14 @@ export class Paginator<
 		};
 
 		const apiRes = (await misskeyApi<T[]>(this.endpoint, data).catch(err => {
-			this.noteRateLimit(err, 'older');
+			// 古い一覧への 429 を、新しい一覧の印にしない
+			if (generation === this.generation) this.noteRateLimit(err, 'older');
 			return null;
 		})) as T[] | null;
 
 		this.fetchingOlder.value = false;
 
-		if (apiRes == null) {
+		if (apiRes == null || generation !== this.generation) {
 			return;
 		}
 
@@ -607,7 +618,8 @@ export class Paginator<
 		key: string,
 	): Promise<void> {
 		const apiRes = (await misskeyApi<T[]>(this.endpoint, data).catch(err => {
-			this.noteRateLimit(err, 'newer');
+			// 古い世代への 429 を、新しい一覧の印にしない (#4076。下の世代の判定より前に走るため)
+			if (generation === this.generation) this.noteRateLimit(err, 'newer');
 			return null;
 		})) as T[] | null;
 
