@@ -297,60 +297,129 @@
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BubbleVersusMatch"
+				}
 			}
 		},
 		"bubble-game/versus/cancel": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"bubble-game/versus/decline": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"bubble-game/versus/history": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:account"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BubbleVersusRecord"
+					}
+				}
 			}
 		},
 		"bubble-game/versus/invitations": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:account"
+			},
+			"doc": {
+				"res": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "BubbleVersusMatch"
+					}
+				}
 			}
 		},
 		"bubble-game/versus/invite": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BubbleVersusMatch"
+				}
 			}
 		},
 		"bubble-game/versus/record": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:account"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BubbleVersusRecord"
+				}
 			}
 		},
 		"bubble-game/versus/report": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BubbleVersusMatch"
+				}
 			}
 		},
 		"bubble-game/versus/set-public": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"bubble-game/versus/show": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "read:account"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "BubbleVersusMatch"
+				}
 			}
 		},
 		"chat/messages": {
@@ -516,19 +585,22 @@
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"reversi/put-stone": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"reversi/ready": {
 			"meta": {
 				"requireCredential": true,
 				"kind": "write:account"
-			}
+			},
+			"doc": {}
 		},
 		"roles/assignment-show": {
 			"meta": {
@@ -549,5 +621,311 @@
 			"meta": {}
 		}
 	},
-	"refs": {}
+	"refs": {
+		"BubbleVersusMatch": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"gameMode": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"status": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"invited",
+						"accepted",
+						"playing",
+						"ended"
+					]
+				},
+				"seed": {
+					"type": "string",
+					"optional": false,
+					"nullable": true
+				},
+				"createdAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"startAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"endedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "date-time"
+				},
+				"winnerId": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "id"
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"enum": [
+						"gameOver",
+						"surrender",
+						"timeUp",
+						"disconnected",
+						"invalidReport"
+					]
+				},
+				"user1Id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"user2Id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"user1": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "UserLite"
+				},
+				"user2": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "UserLite"
+				},
+				"user1Ready": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"user2Ready": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"user1Result": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BubbleVersusResultSummary"
+				},
+				"user2Result": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BubbleVersusResultSummary"
+				}
+			}
+		},
+		"BubbleVersusResultSummary": {
+			"type": "object",
+			"properties": {
+				"score": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"frame": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"gameOver",
+						"surrender",
+						"timeUp",
+						"opponentEnded",
+						"invalidReport"
+					]
+				}
+			}
+		},
+		"BubbleVersusRecord": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"gameMode": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"startedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"endedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				},
+				"winnerId": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"format": "id"
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"gameOver",
+						"surrender",
+						"timeUp",
+						"disconnected",
+						"invalidReport"
+					]
+				},
+				"isPublic": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"user1Id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"user2Id": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"user1": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "UserLite"
+				},
+				"user2": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "UserLite"
+				},
+				"user1Public": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"user2Public": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"user1Result": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BubbleVersusRecordResult"
+				},
+				"user2Result": {
+					"type": "object",
+					"optional": false,
+					"nullable": true,
+					"ref": "BubbleVersusRecordResult"
+				},
+				"seed": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"user1Logs": {
+					"type": "array",
+					"optional": true,
+					"nullable": true,
+					"items": {
+						"type": "array",
+						"optional": false,
+						"nullable": false,
+						"items": {
+							"type": "number",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				},
+				"user2Logs": {
+					"type": "array",
+					"optional": true,
+					"nullable": true,
+					"items": {
+						"type": "array",
+						"optional": false,
+						"nullable": false,
+						"items": {
+							"type": "number",
+							"optional": false,
+							"nullable": false
+						}
+					}
+				}
+			}
+		},
+		"BubbleVersusRecordResult": {
+			"type": "object",
+			"properties": {
+				"score": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"frame": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"reason": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"enum": [
+						"gameOver",
+						"surrender",
+						"timeUp",
+						"opponentEnded",
+						"invalidReport"
+					]
+				},
+				"gameVersion": {
+					"type": "integer",
+					"optional": false,
+					"nullable": true
+				}
+			}
+		}
+	}
 }
