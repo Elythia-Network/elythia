@@ -28,16 +28,13 @@ const ElythiaTag = "Elythia"
 // 型を付けていないものがあることを、読む人がタグと各エンドポイントの両方で
 // 分かるようにする。宣言の無いもの(プラグインのルートなど)は型を持たない。
 const (
-	elythiaTagDescription = "Elythia独自のエンドポイント。応答の型をまだ載せていないものと、プラグインのエンドポイントなど、引数と応答の型を載せていないものがあります。"
+	elythiaTagDescription = "Elythia独自のエンドポイント。プラグインのエンドポイントなど、引数と応答の型を載せていないものがあります。"
 	// elythiaOperationDescription is the description of an endpoint
 	// declared in neither file.
 	elythiaOperationDescription = "Elythia独自のエンドポイントです。引数と応答の型は載せていません。"
 	// elythiaTypedDescription replaces upstream's "No description
 	// provided." of a declared endpoint.
 	elythiaTypedDescription = "Elythia独自のエンドポイントです。"
-	// elythiaPendingDescription is elythiaTypedDescription of an endpoint
-	// whose response type is not declared yet.
-	elythiaPendingDescription = "Elythia独自のエンドポイントです。応答の型は、まだ載せていません。"
 )
 
 // Route is one endpoint Elythia serves under /api.
@@ -167,11 +164,14 @@ func (g *Generator) AddElythia(paramDefs, apiDoc []byte) error {
 		ep := newObject()
 		ep.set("paramDef", field(p, "paramDef"))
 		ep.set("meta", meta)
-		doc, hasDoc := a.get("doc")
-		if hasDoc {
-			ep.set("doc", doc)
+		// docの無いもの(とnull)は、本家の形だと204(結果を返さない)になって
+		// しまう。結果を返さないものは、空のdocで書く。
+		doc, ok := a.get("doc")
+		if !ok || doc == nil {
+			return fmt.Errorf("openapi: elythia endpoint %s has no doc", name)
 		}
-		g.elythia[name] = elythiaTypedOperation(name, ep, hasDoc)
+		ep.set("doc", doc)
+		g.elythia[name] = elythiaTypedOperation(name, ep)
 	}
 	return nil
 }
@@ -348,37 +348,15 @@ func elythiaOperation(name string) *object {
 }
 
 // elythiaTypedOperation is operation for a declared endpoint only Elythia
-// has. hasDoc is false while its response type is not declared yet.
+// has.
 //
 // externalDocsは外す。本家のoperationは本家のGitHubの.tsを指すが、独自の
-// エンドポイントには対応するファイルが無い。応答の型がまだ無いものは、本家の
-// 形(resが無ければ204)だと「結果を返さない」と読めてしまうので、型の無い200に
-// する。
-func elythiaTypedOperation(name string, ep *object, hasDoc bool) *object {
+// エンドポイントには対応するファイルが無い。
+func elythiaTypedOperation(name string, ep *object) *object {
 	op := operation(name, ep)
 	op.del("externalDocs")
 	op.set("tags", []any{ElythiaTag})
-	desc := elythiaTypedDescription
-	if !hasDoc {
-		desc = elythiaPendingDescription
-	}
-	op.set("description", strings.Replace(toString(field(op, "description")), "No description provided.", desc, 1))
-	if !hasDoc {
-		old, _ := field(op, "responses").(*object)
-		if old == nil {
-			old = newObject()
-		}
-		responses := newObject()
-		ok := newObject()
-		ok.set("description", "OK (応答の型は、まだ載せていません)")
-		responses.set("200", ok)
-		for _, k := range old.keys {
-			if k != "204" {
-				responses.set(k, old.vals[k])
-			}
-		}
-		op.set("responses", responses)
-	}
+	op.set("description", strings.Replace(toString(field(op, "description")), "No description provided.", elythiaTypedDescription, 1))
 	return op
 }
 

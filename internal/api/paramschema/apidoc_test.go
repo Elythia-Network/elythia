@@ -13,28 +13,25 @@ const testAPIDocParamDefs = `{"endpoints":{"own/a":{"paramDef":{"type":"object"}
 func TestParseElythiaAPIDoc(t *testing.T) {
 	d, err := parseElythiaAPIDoc([]byte(`{"endpoints":{
 "own/a":{"meta":{"requireCredential":true,"requireAdmin":true,"secure":true,"prohibitMoved":true,"requiredRolePolicy":"canManageCustomEmojis","kind":"write:account"},"doc":{"res":{"type":"array","items":{"type":"object","ref":"Own"}}}},
-"own/b":{"meta":{}}
+"own/b":{"meta":{},"doc":{}}
 },"refs":{"Own":{"type":"object"}}}`), []byte(testAPIDocParamDefs))
 	require.NoError(t, err)
 	assert.Equal(t, APIMeta{RequireCredential: true, RequireAdmin: true, Secure: true, ProhibitMoved: true, RequiredRolePolicy: "canManageCustomEmojis", Kind: "write:account"}, d.Meta["own/a"])
 	assert.Equal(t, APIMeta{}, d.Meta["own/b"])
-	// docの無いものだけが、応答の型の宣言を待つものになる。
-	assert.Equal(t, []string{"own/b"}, d.Pending)
 }
 
 func TestParseElythiaAPIDocRefuses(t *testing.T) {
 	entry := func(meta, doc string) string {
-		s := `{"endpoints":{"own/b":{"meta":{}},"own/a":{"meta":` + meta
-		if doc != "" {
-			s += `,"doc":` + doc
+		if doc == "" {
+			doc = `{}`
 		}
-		return s + `}},"refs":{"Own":{"type":"object"}}}`
+		return `{"endpoints":{"own/b":{"meta":{},"doc":{}},"own/a":{"meta":` + meta + `,"doc":` + doc + `}},"refs":{"Own":{"type":"object"}}}`
 	}
 	for name, b := range map[string]string{
 		"not json":                   `{`,
-		"trailing data":              `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}}} {}`,
+		"trailing data":              `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}}} {}`,
 		"no endpoints":               `{"endpoints":{}}`,
-		"unknown top-level field":    `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}},"x":1}`,
+		"unknown top-level field":    `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}},"x":1}`,
 		"unknown meta field":         entry(`{"limit":true}`, ""),
 		"unknown doc field":          entry(`{}`, `{"errors":{}}`),
 		"unknown kind":               entry(`{"requireCredential":true,"kind":"write:everything"}`, ""),
@@ -50,21 +47,24 @@ func TestParseElythiaAPIDocRefuses(t *testing.T) {
 		"non-boolean policy":         entry(`{"requireCredential":true,"requiredRolePolicy":"driveCapacityMb"}`, ""),
 		"null doc":                   entry(`{}`, `null`),
 		"null res":                   entry(`{}`, `{"res":null}`),
-		"unknown ref in a ref":       `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}},"refs":{"Own":{"type":"object","properties":{"x":{"type":"object","ref":"Missing"}}}}}`,
-		"null ref":                   `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}},"refs":{"Own":null}}`,
-		"ref named like upstream":    `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}},"refs":{"UserLite":{"type":"object"}}}`,
+		"unknown ref in a ref":       `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}},"refs":{"Own":{"type":"object","properties":{"x":{"type":"object","ref":"Missing"}}}}}`,
+		"null ref":                   `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}},"refs":{"Own":null}}`,
+		"ref named like upstream":    `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}},"refs":{"UserLite":{"type":"object"}}}`,
 		"nullable enum without null": entry(`{}`, `{"res":{"type":"string","nullable":true,"enum":["a"]}}`),
-		"ref named Error":            `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}}},"refs":{"Error":{"type":"object"}}}`,
-		"missing an endpoint":        `{"endpoints":{"own/a":{"meta":{}}}}`,
-		"extra endpoint":             `{"endpoints":{"own/a":{"meta":{}},"own/b":{"meta":{}},"own/c":{"meta":{}}}}`,
+		"ref named Error":            `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}}},"refs":{"Error":{"type":"object"}}}`,
+		"missing an endpoint":        `{"endpoints":{"own/a":{"meta":{},"doc":{}}}}`,
+		"extra endpoint":             `{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{},"doc":{}},"own/c":{"meta":{},"doc":{}}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseElythiaAPIDoc([]byte(b), []byte(testAPIDocParamDefs))
 			assert.Error(t, err)
 		})
 	}
-	_, err := parseElythiaAPIDoc([]byte(`{"endpoints":{"own/a":{"meta":{}}}}`), []byte(`{`))
+	_, err := parseElythiaAPIDoc([]byte(`{"endpoints":{"own/a":{"meta":{},"doc":{}}}}`), []byte(`{`))
 	assert.Error(t, err, "paramDefs that do not parse")
+	// 結果を返さないものも、空のdocを書く。docの無いものは型の書き忘れとして断る。
+	_, err = parseElythiaAPIDoc([]byte(`{"endpoints":{"own/a":{"meta":{},"doc":{}},"own/b":{"meta":{}}}}`), []byte(testAPIDocParamDefs))
+	assert.ErrorContains(t, err, "own/b has no doc")
 }
 
 func TestParseElythiaAPIDocAcceptsRefs(t *testing.T) {

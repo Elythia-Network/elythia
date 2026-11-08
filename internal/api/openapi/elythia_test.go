@@ -16,12 +16,12 @@ import (
 const (
 	testElythiaParamDefs = `{"endpoints":{
 "own/typed": {"paramDef":{"type":"object","properties":{"gameId":{"type":"string","format":"misskey:id"}},"required":["gameId"]},"meta":{}},
-"own/pending": {"paramDef":{"type":"object","properties":{}},"meta":{"allowGet":true}},
+"own/admin": {"paramDef":{"type":"object","properties":{}},"meta":{"allowGet":true}},
 "own/public": {"paramDef":{"type":"object","properties":{"q":{"type":"string"}}},"meta":{}}
 }}`
 	testElythiaAPIDoc = `{"endpoints":{
 "own/typed": {"meta":{"requireCredential":true,"kind":"write:account","secure":true},"doc":{"res":{"type":"object","properties":{"game":{"type":"object","ref":"OwnGame"},"note":{"type":"object","ref":"Note","nullable":true}}}}},
-"own/pending": {"meta":{"requireCredential":true,"requireModerator":true,"kind":"read:admin:meta"}},
+"own/admin": {"meta":{"requireCredential":true,"requireModerator":true,"kind":"read:admin:meta"},"doc":{}},
 "own/public": {"meta":{},"doc":{}}
 },"refs":{"OwnGame":{"type":"object","properties":{"id":{"type":"string"}}}}}`
 )
@@ -55,20 +55,18 @@ func TestSpecElythiaTypedOperation(t *testing.T) {
 	assert.Contains(t, s.Comp.Schemas, "Note")
 }
 
-func TestSpecElythiaPendingAndNoContent(t *testing.T) {
-	s, raw := renderSpec(t, newElythiaTestGenerator(t), Route{"GET", "own/pending"}, Route{"POST", "own/pending"}, Route{"POST", "own/public"})
-	o := op(t, s, "/own/pending", "post")
-	assert.Equal(t, elythiaPendingDescription+"\n\n**Credential required**: *Yes* / **Permission**: *read:admin:meta*", o["description"])
-	responses := o["responses"].(map[string]any)
-	// 応答の型がまだ無いものは、結果を返さない(204)とは書かず、型の無い200にする。
-	assert.Equal(t, map[string]any{"description": "OK (応答の型は、まだ載せていません)"}, responses["200"])
-	assert.NotContains(t, responses, "204")
-	assert.Contains(t, responses, "400")
-	assert.Less(t, strings.Index(raw, `"OK (応答の型`), strings.Index(raw, `"Client error"`), "200 comes first")
-	// allowGetは引数の宣言のmetaから読む。
-	assert.Equal(t, "get___own___pending", op(t, s, "/own/pending", "get")["operationId"])
-
+func TestSpecElythiaNoContent(t *testing.T) {
+	s, _ := renderSpec(t, newElythiaTestGenerator(t), Route{"GET", "own/admin"}, Route{"POST", "own/admin"}, Route{"POST", "own/public"})
 	// docが空なら、本家と同じく結果を返さない。
+	o := op(t, s, "/own/admin", "post")
+	assert.Equal(t, elythiaTypedDescription+"\n\n**Credential required**: *Yes* / **Permission**: *read:admin:meta*", o["description"])
+	responses := o["responses"].(map[string]any)
+	assert.Contains(t, responses, "204")
+	assert.NotContains(t, responses, "200")
+	assert.Contains(t, responses, "400")
+	// allowGetは引数の宣言のmetaから読む。
+	assert.Equal(t, "get___own___admin", op(t, s, "/own/admin", "get")["operationId"])
+
 	pub := op(t, s, "/own/public", "post")
 	assert.Equal(t, elythiaTypedDescription+"\n\n**Credential required**: *No*", pub["description"])
 	assert.Contains(t, pub["responses"], "204")
@@ -85,7 +83,9 @@ func TestAddElythiaErrors(t *testing.T) {
 		"shadows a schema":  {testElythiaParamDefs, `{"endpoints":{},"refs":{"Note":{"type":"object"}}}`},
 		"upstream endpoint": {`{"endpoints":{"i":{"paramDef":{"type":"object"}}}}`, `{"endpoints":{"i":{"meta":{}}}}`},
 		"no paramDef":       {testElythiaParamDefs, `{"endpoints":{"own/other":{"meta":{}}}}`},
-		"no apidoc entry":   {testElythiaParamDefs, `{"endpoints":{"own/typed":{"meta":{}},"own/pending":{"meta":{}}}}`},
+		"no apidoc entry":   {testElythiaParamDefs, `{"endpoints":{"own/typed":{"meta":{},"doc":{}},"own/admin":{"meta":{},"doc":{}}}}`},
+		"no doc":            {testElythiaParamDefs, strings.Replace(testElythiaAPIDoc, `"own/public": {"meta":{},"doc":{}}`, `"own/public": {"meta":{}}`, 1)},
+		"null doc":          {testElythiaParamDefs, strings.Replace(testElythiaAPIDoc, `"own/public": {"meta":{},"doc":{}}`, `"own/public": {"meta":{},"doc":null}`, 1)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Error(t, newTestGenerator(t).AddElythia([]byte(tc.paramDefs), []byte(tc.apiDoc)))
@@ -114,10 +114,6 @@ func TestDefaultTypesTheElythiaEndpoints(t *testing.T) {
 	require.NoError(t, err)
 	var s specJSON
 	require.NoError(t, json.Unmarshal(b, &s))
-	pending := map[string]bool{}
-	for _, n := range docs.Pending {
-		pending[n] = true
-	}
 	for name, m := range docs.Meta {
 		o := op(t, s, "/"+name, "post")
 		assert.Equal(t, []any{ElythiaTag}, o["tags"], name)
@@ -129,11 +125,14 @@ func TestDefaultTypesTheElythiaEndpoints(t *testing.T) {
 		if m.Kind != "" {
 			assert.Contains(t, o["description"], "**Permission**: *"+m.Kind+"*", name)
 		}
-		if pending[name] {
-			assert.Contains(t, o["description"], elythiaPendingDescription, name)
-		} else {
-			assert.NotContains(t, o["description"], elythiaPendingDescription, name)
-		}
+		// 本家の"No description provided."を置き換えている。
+		assert.True(t, strings.HasPrefix(toString(o["description"]), elythiaTypedDescription), name)
+		// 型の無い一覧の扱い(elythiaOperation)に落ちていない。
+		assert.NotEqual(t, elythiaOperationDescription, o["description"], name)
+		responses, _ := o["responses"].(map[string]any)
+		_, has200 := responses["200"]
+		_, has204 := responses["204"]
+		assert.True(t, has200 || has204, name)
 	}
 	assert.Equal(t, elythiaOperationDescription, op(t, s, "/plugin/example/hello", "post")["description"])
 }
