@@ -199,10 +199,16 @@ func checkAPIDocDoc(raw json.RawMessage, refs map[string]json.RawMessage, known 
 }
 
 // checkRefs reports a ref in v that names neither a type of refs nor one of
-// known (upstreamRefs).
+// known (upstreamRefs), and a nullable enum without null.
+//
+// nullableな列挙にはnullも書かせる(本家のgoldenと同じ書き方)。/api.jsonでは
+// 型にnullが足されるが、列挙はそのまま写るので、nullが列挙で弾かれる形になる。
 func checkRefs(v any, refs map[string]json.RawMessage, known map[string]bool) error {
 	switch v := v.(type) {
 	case map[string]any:
+		if enum, ok := v["enum"].([]any); ok && v["nullable"] == true && !slices.Contains(enum, nil) {
+			return errors.New("a nullable enum must contain null")
+		}
 		if r, ok := v["ref"]; ok {
 			name, _ := r.(string)
 			if _, ok := refs[name]; !ok && !known[name] {
