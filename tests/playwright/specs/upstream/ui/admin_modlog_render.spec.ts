@@ -9,11 +9,6 @@
 //
 // 広告は期限の切れたものを作る (記録は残り、タイムラインなどの描画には出ない)。
 //
-// 今は絞り込みを変えても一覧が取り直されない (#4074)。前提と操作は普通に流し、要の主張だけを
-// 設定の表の checkEffect (fixtures/settings_table.ts) と同じ形で受ける。番号入りの主張で落ちたときだけ
-// 今の期待どおりとし、通ったら「直ったように見える」で落とす。test.fail() だと前提や部品の取り違えで
-// 落ちても緑になる。
-//
 // 記録の行の種類は <b> に出る。選んだ後の MkSelect の表示値にも「Ad created」が出るので、<b> に絞る。
 // 絞ると古い一覧がフェードで残り、ローディング (0 件)、新しい一覧の順に移る。凍結の記録が無く広告の
 // 作成の記録がある組は、そのどちらの途中でも成り立たない。
@@ -45,20 +40,16 @@ test.describe('UI: /admin/modlog', () => {
       const suspended = pageBody(page).locator('b').filter({ hasText: /^\s*Suspended\s*$/ });
       const adCreated = pageBody(page).locator('b').filter({ hasText: /^\s*Ad created\s*$/ });
       await expect(suspended.first(), '絞る前は凍結の記録が出る (対照)').toBeVisible({ timeout: 20_000 });
-      // 広告の作成の記録も前提として見ておく。見えないまま絞ると、#4074 が直っても要の主張が
-      // 番号入りで落ち、「今の期待どおり」として受けてしまう
+      // 広告の作成の記録も前提として見ておく。見えないまま絞ると、絞った後に 0 件になったのが
+      // 絞り込みのせいか前提のせいか区別できない
       await expect(adCreated.first(), '絞る前は広告の作成の記録が出る (対照)').toBeVisible();
 
       await clickButtonWithIcon(page, 'i.ti-filter');
+      const filtered = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/admin/show-moderation-logs' && r.request().postDataJSON()?.type === 'createAd', { timeout: 15_000 });
       await pickSelect(page, await fieldByLabel(page, 'Type'), 'Ad created');
-      let passed = false;
-      try {
-        await expect.poll(async () => [await suspended.count(), await adCreated.count() > 0], { message: '#4074: 絞っても別の種類の記録が残る', timeout: 10_000 }).toEqual([0, true]);
-        passed = true;
-      } catch (e) {
-        if (!(e instanceof Error) || e.name === 'TimeoutError' || !e.message.includes('#4074')) throw e;
-      }
-      expect(passed, '#4074 が直ったように見える。この受け方を外し、主張をそのまま流す').toBe(false);
+      // 絞り込みを変えたら取り直す (#4074)
+      expect((await filtered).ok(), 'admin/show-moderation-logs が失敗した').toBe(true);
+      await expect.poll(async () => [await suspended.count(), await adCreated.count() > 0], { message: '絞っても別の種類の記録が残る' }).toEqual([0, true]);
     } finally {
       await callApi(request, 'admin/unsuspend-user', { i: root.token, userId: user.id });
       await cleanupApi(request, 'admin/ad/delete', { i: root.token, id: ad.id });
