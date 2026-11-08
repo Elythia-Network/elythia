@@ -9,10 +9,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<MkSelect v-model="order" :class="$style.order" :items="orderDef">
 			<template #prefix><i class="ti ti-arrows-sort"></i></template>
 		</MkSelect>
-		<MkButton v-if="paginator.canSearch" v-tooltip="i18n.ts.search" iconOnly transparent rounded :active="searchOpened" @click="searchOpened = !searchOpened"><i class="ti ti-search"></i></MkButton>
-		<MkButton v-if="canFilter" v-tooltip="i18n.ts.filter" iconOnly transparent rounded :active="filterOpened" @click="filterOpened = !filterOpened"><i class="ti ti-filter"></i></MkButton>
-		<MkButton v-tooltip="i18n.ts.dateAndTime" iconOnly transparent rounded :active="date != null" @click="date = date == null ? Date.now() : null"><i class="ti ti-calendar-clock"></i></MkButton>
-		<MkButton v-tooltip="i18n.ts.reload" iconOnly transparent rounded @click="paginator.reload()"><i class="ti ti-refresh"></i></MkButton>
+		<MkButton v-if="paginator.canSearch" v-tooltip="i18n.ts.search" :aria-label="i18n.ts.search" iconOnly transparent rounded :active="searchOpened" @click="searchOpened = !searchOpened"><i class="ti ti-search"></i></MkButton>
+		<MkButton v-if="canFilter" v-tooltip="i18n.ts.filter" :aria-label="i18n.ts.filter" iconOnly transparent rounded :active="filterOpened" @click="filterOpened = !filterOpened"><i class="ti ti-filter"></i></MkButton>
+		<MkButton v-tooltip="i18n.ts.dateAndTime" :aria-label="i18n.ts.dateAndTime" iconOnly transparent rounded :active="date != null" @click="date = date == null ? Date.now() : null"><i class="ti ti-calendar-clock"></i></MkButton>
+		<MkButton v-tooltip="i18n.ts.reload" :aria-label="i18n.ts.reload" iconOnly transparent rounded @click="paginator.reload()"><i class="ti ti-refresh"></i></MkButton>
 	</div>
 
 	<MkInput

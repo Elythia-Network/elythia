@@ -11,6 +11,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		[$style.large]: large,
 	}]"
 >
+	<!-- mk-go (#4082): サムネイルの無いファイルで出す下のアイコン (<i>) にも、画像の alt と同じくファイル名を付ける -->
 	<MkImgWithBlurhash
 		v-if="isThumbnailAvailable && prefer.s.enableHighQualityImagePlaceholders"
 		:hash="file.blurhash"
@@ -29,14 +30,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 		:class="$style.thumbnail"
 		:style="{ objectFit: fit }"
 	/>
-	<i v-else-if="is === 'image'" class="ti ti-photo" :class="$style.icon"></i>
-	<i v-else-if="is === 'video'" class="ti ti-video" :class="$style.icon"></i>
-	<i v-else-if="is === 'audio' || is === 'midi'" class="ti ti-file-music" :class="$style.icon"></i>
-	<i v-else-if="is === 'csv'" class="ti ti-file-text" :class="$style.icon"></i>
-	<i v-else-if="is === 'pdf'" class="ti ti-file-text" :class="$style.icon"></i>
-	<i v-else-if="is === 'textfile'" class="ti ti-file-text" :class="$style.icon"></i>
-	<i v-else-if="is === 'archive'" class="ti ti-file-zip" :class="$style.icon"></i>
-	<i v-else class="ti ti-file" :class="$style.icon"></i>
+	<i v-else-if="is === 'image'" class="ti ti-photo" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'video'" class="ti ti-video" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'audio' || is === 'midi'" class="ti ti-file-music" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'csv'" class="ti ti-file-text" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'pdf'" class="ti ti-file-text" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'textfile'" class="ti ti-file-text" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else-if="is === 'archive'" class="ti ti-file-zip" :class="$style.icon" role="img" :aria-label="file.name"></i>
+	<i v-else class="ti ti-file" :class="$style.icon" role="img" :aria-label="file.name"></i>
 
 	<i v-if="isThumbnailAvailable && is === 'video'" class="ti ti-video" :class="$style.iconSub"></i>
 </div>

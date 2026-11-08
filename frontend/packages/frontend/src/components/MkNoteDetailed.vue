@@ -162,7 +162,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					:myReaction="$appearNote.myReaction"
 					:noteId="appearNote.id"
 				/>
-				<button class="_button" :class="$style.noteFooterButton" data-testid="note-reply" @click="reply()">
+				<button class="_button" :class="$style.noteFooterButton" data-testid="note-reply" :aria-label="footerLabel(i18n.ts.reply, appearNote.repliesCount, true)" @click="reply()">
 					<i class="ti ti-arrow-back-up"></i>
 					<p v-if="appearNote.repliesCount > 0" :class="$style.noteFooterButtonCount">{{ number(appearNote.repliesCount) }}</p>
 				</button>
@@ -172,6 +172,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					class="_button"
 					:class="$style.noteFooterButton"
 					data-testid="note-renote"
+					:aria-label="footerLabel(i18n.ts.renote, appearNote.renoteCount, true)"
 					@mousedown.prevent="renote()"
 				>
 					<i class="ti ti-repeat"></i>
@@ -180,7 +181,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<button v-else class="_button" :class="$style.noteFooterButton" disabled>
 					<i class="ti ti-ban"></i>
 				</button>
-				<button ref="reactButton" :class="$style.noteFooterButton" class="_button" data-testid="note-react" @click="toggleReact()">
+				<button ref="reactButton" :class="$style.noteFooterButton" class="_button" data-testid="note-react" :aria-label="footerLabel(appearNote.reactionAcceptance === 'likeOnly' ? ($appearNote.myReaction != null ? i18n.ts.unlike : i18n.ts.like) : i18n.ts.reaction, $appearNote.reactionCount, appearNote.reactionAcceptance === 'likeOnly' || prefer.s.showReactionsCount)" @click="toggleReact()">
 					<i v-if="appearNote.reactionAcceptance === 'likeOnly' && $appearNote.myReaction != null" class="ti ti-heart-filled" style="color: var(--MI_THEME-love);"></i>
 					<i v-else-if="$appearNote.myReaction != null" class="ti ti-minus" style="color: var(--MI_THEME-accent);"></i>
 					<i v-else-if="appearNote.reactionAcceptance === 'likeOnly'" class="ti ti-heart"></i>
@@ -190,7 +191,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<button v-if="prefer.s.showClipButtonInNoteFooter" ref="clipButton" class="_button" :class="$style.noteFooterButton" @mousedown.prevent="clip()">
 					<i class="ti ti-paperclip"></i>
 				</button>
-				<button ref="menuButton" class="_button" :class="$style.noteFooterButton" data-testid="note-menu" @mousedown.prevent="showMenu()">
+				<button ref="menuButton" class="_button" :class="$style.noteFooterButton" data-testid="note-menu" :aria-label="i18n.ts.menu" @mousedown.prevent="showMenu()">
 					<i class="ti ti-dots"></i>
 				</button>
 			</footer>
@@ -277,6 +278,13 @@ import MkUserCardMini from '@/components/MkUserCardMini.vue';
 import MkPagination from '@/components/MkPagination.vue';
 import MkReactionIcon from '@/components/MkReactionIcon.vue';
 import MkButton from '@/components/MkButton.vue';
+
+// mk-go (#4082): フッターのボタンの読み上げる名前。aria-label はボタンの中の文字 (数) を上書きするので、
+// 数を出しているときは名前にも入れる。いいねだけを受け付けるノートでは、押したときの働きに合わせて
+// 「いいね」「いいねを解除」にする
+function footerLabel(label: string, count: number, shown: boolean): string {
+	return shown && count > 0 ? `${label} ${number(count)}` : label;
+}
 
 const props = withDefaults(defineProps<{
 	note: Misskey.entities.Note;

@@ -8,12 +8,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<i v-if="warn" class="ti ti-alert-triangle" :class="$style.i"></i>
 	<i v-else class="ti ti-info-circle" :class="$style.i"></i>
 	<div><slot></slot></div>
-	<button v-if="closable" :class="$style.button" class="_button" @click="close()"><i class="ti ti-x"></i></button>
+	<button v-if="closable" :class="$style.button" class="_button" :aria-label="i18n.ts.close" @click="close()"><i class="ti ti-x"></i></button>
 </div>
 </template>
 
 <script lang="ts" setup>
 import { } from 'vue';
+import { i18n } from '@/i18n.js';
 
 const props = defineProps<{
 	warn?: boolean;

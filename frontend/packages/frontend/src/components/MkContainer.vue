@@ -12,7 +12,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		</div>
 		<div :class="$style.headerSub">
 			<slot name="func" :buttonStyleClass="$style.headerButton"></slot>
-			<button v-if="foldable" :class="$style.headerButton" class="_button" @click="() => showBody = !showBody">
+			<button v-if="foldable" :class="$style.headerButton" class="_button" :aria-label="showBody ? i18n.ts.hide : i18n.ts.show" @click="() => showBody = !showBody">
 				<template v-if="showBody"><i class="ti ti-chevron-up"></i></template>
 				<template v-else><i class="ti ti-chevron-down"></i></template>
 			</button>
