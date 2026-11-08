@@ -56,8 +56,6 @@ type APIMeta struct {
 type ElythiaAPIDoc struct {
 	// Meta is the meta of each endpoint, by name.
 	Meta map[string]APIMeta
-	// Pending are the endpoints whose response type is not declared yet.
-	Pending []string
 }
 
 var elythiaAPIDocOnce = sync.OnceValues(func() (*ElythiaAPIDoc, error) {
@@ -137,15 +135,15 @@ func parseElythiaAPIDoc(b, paramDefs []byte) (*ElythiaAPIDoc, error) {
 			return nil, fmt.Errorf("paramschema: elythia apidoc: %s: %w", name, err)
 		}
 		out.Meta[name] = ep.Meta
+		// docの無いものを許すと、/api.jsonでは本家と同じく204(結果を返さない)に
+		// 読めてしまう。結果を返さないものも、空のdocを書かせる。
 		if len(ep.Doc) == 0 {
-			out.Pending = append(out.Pending, name)
-			continue
+			return nil, fmt.Errorf("paramschema: elythia apidoc: %s has no doc", name)
 		}
 		if err := checkAPIDocDoc(ep.Doc, f.Refs, known); err != nil {
 			return nil, fmt.Errorf("paramschema: elythia apidoc: %s: %w", name, err)
 		}
 	}
-	sort.Strings(out.Pending)
 	return out, nil
 }
 
@@ -183,10 +181,9 @@ func checkAPIDocDoc(raw json.RawMessage, refs map[string]json.RawMessage, known 
 	if err := dec.Decode(&d); err != nil {
 		return fmt.Errorf("doc: %w", err)
 	}
-	// nullは書かせない。docのnullは「結果を返さない」(204)と「型をまだ書いて
-	// いない」のどちらとも読めてしまう。
+	// nullは書かせない。結果を返さないことは、空のdocで書く。
 	if d == nil {
-		return errors.New("doc is null; leave it out while the response type is not declared, or write {} for no content")
+		return errors.New("doc is null; write {} for no content")
 	}
 	if len(d.Res) == 0 {
 		return nil
