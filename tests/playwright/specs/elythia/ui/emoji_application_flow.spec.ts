@@ -38,8 +38,10 @@ async function applyInUi(page: Page, request: APIRequestContext, baseURL: string
   const resp = await created;
   expect(resp.ok(), `emoji-application/create が失敗した (${resp.status()})`).toBe(true);
   const id = (await resp.json() as { id: string }).id;
-  // 申請を受け付けた知らせのダイアログを閉じる
+  // 申請を受け付けた知らせのダイアログを閉じる。閉じきる前に次の確認のダイアログが開くと、
+  // OK のボタンが 2 つ並ぶので、消えきるのを待つ
   await page.getByTestId('modal-dialog-ok').click();
+  await expect(page.getByTestId('modal-dialog-ok')).toHaveCount(0);
   await page.getByTestId('emoji-request-tab-mine').click();
   await expect(page.locator(`[data-testid="emoji-application-mine"][data-application-id="${id}"]`), '自分の申請の一覧に出ない').toHaveAttribute('data-status', 'pending');
   return id;
