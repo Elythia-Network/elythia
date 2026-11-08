@@ -12,7 +12,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<template #label>{{ i18n.ts.type }}</template>
 				</MkSelect>
 
-				<MkInput v-model="moderatorId" style="margin: 0; flex: 1;">
+				<!-- mk-go (#4074): 打つたびに取り直すので、1 文字ごとに要求が出ないよう待ってから反映する -->
+				<MkInput v-model="moderatorId" :debounce="true" style="margin: 0; flex: 1;">
 					<template #label>{{ i18n.ts.moderator }}(ID)</template>
 				</MkInput>
 			</MkPaginationControl>
@@ -88,17 +89,26 @@ const {
 });
 const moderatorId = ref('');
 
+const filterParams = computed(() => ({
+	type: type.value,
+	userId: moderatorId.value === '' ? null : moderatorId.value,
+}));
+
 const paginator = markRaw(new Paginator('admin/show-moderation-logs', {
 	limit: 20,
 	canFetchDetection: 'limit',
 	canSearch: true,
-	computedParams: computed(() => ({
-		type: type.value,
-		userId: moderatorId.value === '' ? null : moderatorId.value,
-	})),
+	computedParams: filterParams,
 }));
 
 paginator.init();
+
+// mk-go (#4074): 絞り込み (種類・モデレーター) が変わったら取り直す。他の画面では MkPagination が
+// この watch を持つが、この画面は一覧を MkTl で描いていて MkPagination を使わないので、
+// 書かないと再読み込みのボタンを押すまで前の一覧のままになる (本家も同じ作り)。
+watch(filterParams, () => {
+	paginator.reload();
+}, { deep: true });
 
 const timeline = computed(() => {
 	return paginator.items.value.map(x => ({
