@@ -70,6 +70,13 @@ func (r *Resolver) shouldRefreshActor(u *model.User) bool {
 // 戻り値は actor document の取得・検証の error だけ。DB への書き込みの失敗は
 // 従来どおり握る (次の refresh で再試行される)。
 func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured bool, chain *resolveChain) error {
+	// **削除済みの行は取り直さない** (#4106)。本家の updatePerson と同じく何もせずに
+	// 戻る (`isDeleted: false` を条件に更新し、0 件なら skip)。取り直すと、削除した
+	// 利用者のプロフィールとピン留めを、相手が好きな内容に書き換えられる。削除済みの
+	// 状態は管理者が決めたもので、相手の document で変えない。
+	if existing.IsDeleted {
+		return nil
+	}
 	// background refresh は federation-loop 扱いで Strict (request host binding 有効)。
 	actor, err := r.fetchActor(uri, false)
 	if err != nil {

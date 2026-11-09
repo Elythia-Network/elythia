@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -364,9 +365,9 @@ func TestResolveActor_SuspendedOnCreate_OriginWriteFails_Unsuspends(t *testing.T
 	assert.False(t, repo.Users[user.ID].IsSuspended, "DB 側も取り下げること")
 }
 
-// **削除済みの行には触らない** (#2973 レビュー H2)。
-// `admin/accounts/delete` は isSuspended と isDeleted を同時に立てるので、
-// remote 由来の記録が残っていると発信元が tombstone の凍結を外せる。
+// **削除済みの行には触らない** (#2973 レビュー H2)。凍結してから削除した行や、
+// #4106 より前に削除した行には凍結が立っている。remote 由来の記録が残っていても、
+// 発信元にこの凍結を外させない (外すのは管理画面の解除だけ)。
 func TestResolveActor_DeletedTombstone_IsNotUnsuspended(t *testing.T) {
 	r, repo := newResolver(t, actorWithSuspended(t, "false"), nil)
 	origins := newStubOriginRepo()
@@ -384,4 +385,35 @@ func TestResolveActor_DeletedTombstone_IsNotUnsuspended(t *testing.T) {
 	require.NoError(t, err)
 	assert.Truef(t, user.IsSuspended,
 		"削除済み tombstone の凍結が発信元に解除された。読み取り側は isSuspended で隠すので、削除したアカウントが見えるようになる")
+}
+
+// **削除済みの行は取り直さない** (#4106)。本家の updatePerson と同じ。取り直すと、
+// 削除した利用者のプロフィールとピン留めを、相手が好きな内容に書き換えられる。
+// 比べるために、削除していない行は取り直されることも確かめる。
+func TestResolveActor_DeletedRowIsNotRefreshed(t *testing.T) {
+	for _, deleted := range []bool{true, false} {
+		t.Run(fmt.Sprintf("deleted=%v", deleted), func(t *testing.T) {
+			r, repo := newResolver(t, sampleActor, nil)
+			host := "remote.example"
+			uri := "https://remote.example/users/alice"
+			old := "old name"
+			repo.Users["existing"] = &model.User{
+				ID: "existing", Username: "alice", UsernameLower: "alice",
+				Host: &host, URI: &uri, Name: &old, IsDeleted: deleted,
+			}
+
+			_, err := r.ResolveActor(uri)
+			require.NoError(t, err)
+			_, err = r.RefreshActor(uri)
+			require.NoError(t, err)
+
+			got := repo.Users["existing"].Name
+			require.NotNil(t, got)
+			if deleted {
+				assert.Equal(t, old, *got, "a deleted row was refreshed from the remote document")
+			} else {
+				assert.Equal(t, "Alice", *got, "the control: a live row is refreshed")
+			}
+		})
+	}
 }

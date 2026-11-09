@@ -720,7 +720,11 @@ func (h *Handler) UnsuspendUser(c echo.Context) error {
 		}
 		return c.JSON(http.StatusNotFound, apierr.Error("NO_SUCH_USER", "No such user.", "2b730f78-1179-461b-88ad-d24c9af1a5ce"))
 	}
-	if user.IsDeleted {
+	// **ローカルの削除済みだけを断る。** 退会から資格情報の失効までの間、ログインを
+	// 止めているのが isSuspended のため。リモートの削除済みは本家と同じく解除できる
+	// (#4106)。以前の削除で凍結も立っていた行を、ここで解除できるようにするため。
+	// 削除済みのままなので、届くアクティビティは捨て続ける。
+	if user.IsDeleted && user.IsLocal() {
 		return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Cannot unsuspend a deleted user.", "1fb7cb09-d46a-4fff-b8df-057708cce513"))
 	}
 
