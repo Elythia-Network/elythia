@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -100,7 +101,7 @@ func TestAvatarHandler_FallsBackToIdenticonWhenNoAvatar(t *testing.T) {
 	c, rec := newAvatarTestContext(t, "dan")
 	require.NoError(t, h(c))
 	assert.Equal(t, http.StatusFound, rec.Code)
-	assert.Equal(t, "/identicon/u4", rec.Header().Get(echo.HeaderLocation))
+	assert.Equal(t, "/identicon/dan", rec.Header().Get(echo.HeaderLocation))
 }
 
 func TestAvatarHandler_UnknownUserRedirectsToStaticFallback(t *testing.T) {
@@ -199,10 +200,9 @@ func TestAvatarHandler_StaticGoesThroughProxy(t *testing.T) {
 
 // **identicon は static でもプロキシへ回さない (#2908)。**
 //
-// 相対 URL なので `mediaproxy.Fetch` の同一オリジン判定 (`<instance>/files/` の
-// 接頭一致) を外れて `fetchRemote` に落ち、取りに行けない URL として
-// 400 + `max-age=86400` になる (#3034 より前は 404 + 同じキャッシュ)。
-// PNG を生成して返すのでアニメーションもしない。
+// PNG を生成して返すのでアニメーションせず、回す理由が無い。回すと `mediaproxy.Fetch`
+// が自分自身へ HTTP で取りに行き、自分のホストが private IP に解決される構成
+// (`allowedPrivateNetworks` で許していないもの) では SSRF の防御で 403 になる (相対 URL だった #4095 より前は 400 + `max-age=86400`)。
 func TestAvatarHandler_StaticKeepsIdenticonDirect(t *testing.T) {
 	pk := withMediaProxy(t)
 	repo := &stubAvatarLookup{users: map[string]*model.User{
@@ -213,8 +213,41 @@ func TestAvatarHandler_StaticKeepsIdenticonDirect(t *testing.T) {
 	c, rec := newAvatarStaticContext(t, "dave")
 	require.NoError(t, h(c))
 	require.Equal(t, http.StatusFound, rec.Code)
-	assert.Equal(t, "/identicon/u4", rec.Header().Get(echo.HeaderLocation),
-		"identicon をプロキシへ回すと allowlist に無い URL になって 403 になる")
+	assert.Equal(t, "https://local.example/identicon/dave@local.example", rec.Header().Get(echo.HeaderLocation),
+		"自分の identicon はプロキシへ回さない")
+}
+
+// 他のインスタンスの identicon は向こうの生成物なので、静止画にするならプロキシへ回す。
+// 自分の identicon を外す判定 (#4095) が、/identicon/ の付く URL をすべて外していないこと。
+func TestAvatarHandler_StaticProxiesRemoteIdenticon(t *testing.T) {
+	pk := withMediaProxy(t)
+	host := "remote.example"
+	avatarURL := "https://remote.example/identicon/erin@remote.example"
+	repo := &stubAvatarLookup{users: map[string]*model.User{
+		"erin|remote.example": {ID: "u6", Username: "erin", Host: &host, AvatarURL: &avatarURL},
+	}}
+	h := avatarHandler(pk, repo, "local.example")
+
+	c, rec := newAvatarStaticContext(t, "erin@remote.example")
+	require.NoError(t, h(c))
+	require.Equal(t, http.StatusFound, rec.Code)
+	loc := rec.Header().Get(echo.HeaderLocation)
+	assert.True(t, strings.HasPrefix(loc, "https://local.example/proxy/"), "got %q", loc)
+	assert.Contains(t, loc, "static=1")
+}
+
+// /avatar の fallback は、API の avatarUrl と同じ URL にする。種が違うと別の絵になる (#4095)。
+func TestAvatarHandler_FallbackMatchesAPIAvatarURL(t *testing.T) {
+	pk := withMediaProxy(t)
+	user := &model.User{ID: "u7", Username: "Frank"}
+	repo := &stubAvatarLookup{users: map[string]*model.User{"frank|": user}}
+	h := avatarHandler(pk, repo, "local.example")
+
+	c, rec := newAvatarTestContext(t, "frank")
+	require.NoError(t, h(c))
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, pk.IdenticonURL(user), rec.Header().Get(echo.HeaderLocation))
+	assert.Equal(t, "https://local.example/identicon/frank@local.example", rec.Header().Get(echo.HeaderLocation))
 }
 
 // **同一オリジンのアバターもプロキシへ回す (#2908)。**

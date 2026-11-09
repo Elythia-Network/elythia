@@ -36,6 +36,9 @@ type MediaURLContext struct {
 	// instanceHost is the host[:port] of this instance, used to distinguish
 	// local URLs (which must never be proxied) from remote origins.
 	instanceHost string
+	// instanceURL is config.URL. identicon の URL を本家と同じ絶対 URL で組むのに
+	// 使う (#4095)。
+	instanceURL string
 	// mediaProxyBase is config.MediaProxy (e.g. "https://host/proxy" for the
 	// internal proxy, or the operator's external proxy base).
 	mediaProxyBase string
@@ -83,6 +86,7 @@ func NewMediaURLContext(instanceURL, mediaProxy string, secret []byte, externalE
 	}
 	return &MediaURLContext{
 		instanceHost:     host,
+		instanceURL:      instanceURL,
 		mediaProxyBase:   strings.TrimRight(mediaProxy, "/"),
 		secret:           secret,
 		externalEnabled:  externalEnabled,

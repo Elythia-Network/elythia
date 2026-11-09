@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
 	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/identicon"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/google/uuid"
 
@@ -41,6 +43,15 @@ func NewURLBuilder(baseURL string) *URLBuilder {
 
 // BaseURL returns the canonical origin used by this builder.
 func (b *URLBuilder) BaseURL() string { return b.baseURL }
+
+// Host returns the host[:port] of the base URL, or "" when it does not parse.
+func (b *URLBuilder) Host() string {
+	u, err := url.Parse(b.baseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
 
 // UserURI returns the canonical actor URI for a local user.
 func (b *URLBuilder) UserURI(userID string) string {
@@ -567,9 +578,9 @@ func (r *Renderer) RenderPerson(u *model.User, profile *model.UserProfile, publi
 	case isSystem && instanceIcon != "":
 		p.Icon = &Image{Type: "Image", URL: APLenientHref(instanceIcon)}
 	default:
-		// identicon URL は mk-go の /identicon/<username> route 規則に合わせる
-		// ((*entity.Packer).IdenticonURL と同一 seed なので REST avatarUrl と同じ画像)。
-		p.Icon = &Image{Type: "Image", URL: APLenientHref(r.urls.baseURL + "/identicon/" + u.Username)}
+		// API の avatarUrl ((*entity.Packer).FallbackAvatarURL) と同じ URL にする。種が
+		// 同じなので同じ絵になる。本家も getIdenticonUrl を使う (#4095)
+		p.Icon = &Image{Type: "Image", URL: APLenientHref(identicon.URL(r.urls.baseURL, u.Username, r.urls.Host()))}
 	}
 	switch {
 	case u.BannerURL != nil && *u.BannerURL != "":

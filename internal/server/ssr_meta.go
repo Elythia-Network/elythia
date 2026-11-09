@@ -351,7 +351,7 @@ func (h *ssrMetaHandler) pageTitle(head string) string {
 // absoluteURL makes a site-relative URL absolute.
 //
 // OGP を読むのは別 origin のクローラなので、相対 URL では解決できない
-// (identicon fallback や local drive の URL が相対になる、#2527 と同じ罠)。
+// (local drive の URL が相対になる、#2527 と同じ罠。identicon は #4095 から絶対 URL)。
 func (h *ssrMetaHandler) absoluteURL(u string) string {
 	if u == "" || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
 		return u
