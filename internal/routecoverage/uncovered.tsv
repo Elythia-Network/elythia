@@ -49,7 +49,6 @@ export-custom-emojis	#4024
 federation/update-remote-user	#4024
 fetch-external-resources	#4024
 fetch-rss	#4024
-flash/like	#4024
 flash/my-likes	#4024
 flash/search	#4024
 flash/unlike	#4024
