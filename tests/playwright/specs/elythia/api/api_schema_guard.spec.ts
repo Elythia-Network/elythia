@@ -151,9 +151,7 @@ test.describe('the response types of the server', () => {
   test.skip(isTsBackend, '/api.json の Elythia の operation は Elythia にしか無い');
 
   // 宣言の無いものは、ここに番号と一緒に挙げる。宣言が付いたら外す
-  const PENDING: Record<string, string> = {
-    'drive/files/create-chunked/append': '#4090',
-  };
+  const PENDING: Record<string, string> = {};
 
   test('every Elythia endpoint has a response type to check against', async ({ request }) => {
     const schemas = await responseSchemas(request);

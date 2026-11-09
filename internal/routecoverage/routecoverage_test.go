@@ -20,7 +20,7 @@ func TestEndpoints(t *testing.T) {
 		"miauth/:session/check":             Upstream, // directRoutes
 		"signin":                            Upstream, // undeclared
 		"admin/backup/list":                 Elythia,  // elythia_paramdefs.json
-		"drive/files/create-chunked/append": Elythia,  // undeclared
+		"drive/files/create-chunked/append": Elythia,  // elythia_paramdefs.json (requireFile)
 	} {
 		assert.Equal(t, want, eps[name], name)
 	}

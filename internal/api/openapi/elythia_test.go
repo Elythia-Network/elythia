@@ -135,4 +135,14 @@ func TestDefaultTypesTheElythiaEndpoints(t *testing.T) {
 		assert.True(t, has200 || has204, name)
 	}
 	assert.Equal(t, elythiaOperationDescription, op(t, s, "/plugin/example/hello", "post")["description"])
+
+	// 分割アップロードの append は multipart で、ファイルの欄は meta.fileField の
+	// "chunk" になる。本家の決まった名前の "file" は足さない (#4090)。
+	body := op(t, s, "/drive/files/create-chunked/append", "post")["requestBody"].(map[string]any)["content"].(map[string]any)
+	require.Contains(t, body, "multipart/form-data")
+	schema := body["multipart/form-data"].(map[string]any)["schema"].(map[string]any)
+	props := schema["properties"].(map[string]any)
+	assert.Equal(t, map[string]any{"type": "string", "format": "binary", "description": "The file contents."}, props["chunk"])
+	assert.NotContains(t, props, "file")
+	assert.ElementsMatch(t, []any{"uploadId", "index", "chunk"}, schema["required"])
 }

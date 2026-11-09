@@ -502,14 +502,20 @@ func operation(name string, ep *object) *object {
 			props = newObject()
 		}
 		props = clone(props).(*object)
+		// ファイルの欄の名前は本家では"file"に決まっている。Elythiaの宣言は
+		// meta.fileFieldで変えられる(分割アップロードのappendは"chunk")。
+		fileField := "file"
+		if ff, ok := field(meta, "fileField").(string); ok && ff != "" {
+			fileField = ff
+		}
 		file := newObject()
 		file.set("type", "string")
 		file.set("format", "binary")
 		file.set("description", "The file contents.")
-		props.set("file", file)
+		props.set(fileField, file)
 		schema.set("properties", props)
 		req, _ := field(schema, "required").([]any)
-		schema.set("required", append(slices.Clone(req), "file"))
+		schema.set("required", append(slices.Clone(req), fileField))
 	}
 	// 空の配列はOpenAPIで許されないので、本家と同じく落とす。
 	if req, ok := field(schema, "required").([]any); ok && len(req) == 0 {

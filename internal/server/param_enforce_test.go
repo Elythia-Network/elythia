@@ -1321,12 +1321,27 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 			assert.NotContains(t, seeded.stops, env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
 			elythiaReached[tc.ep]++
 		}
-		if eps[tc.ep].RequireFile {
+		if effective[tc.ep].RequireFile {
 			// 本家は requireFile の endpoint (drive/files/create) の引数を multipart の
 			// field から読み、JSON の body には ajv より先に本文の無い 400 を返す
 			// (handleMultipartRequest)。Elythia は RequireMultipartFile が同じ 400 を返す。
 			// 検証器は multipart を検証しないので、ajv の判定によらずこの応答になる (#3839)。
 			assert.Equal(t, http.StatusBadRequest, rec.Code, "%s (corpus line %d)", name, tc.line)
+			if effective[tc.ep].Elythia {
+				// Elythia の requireFile の endpoint (分割アップロードの append) は、
+				// RequireMultipartFile を通らず、handler が multipart の欄を読む。object の
+				// JSON の body は handler まで届き、欄が無いので位置の無い INVALID_PARAM に
+				// なる。object でない body は、その手前の requireObjectBody が #/type で
+				// 断る (#4090)。
+				assert.Equal(t, "INVALID_PARAM", env.Error.Code, "%s (corpus line %d): body %s", name, tc.line, rec.Body.String())
+				// object かどうかは先頭の文字で見る。decode すると 1e400 のような値で失敗する
+				if bytes.HasPrefix(bytes.TrimSpace(tc.in), []byte("{")) {
+					assert.Empty(t, env.Error.Info.Param, name)
+				} else {
+					assert.Equal(t, "#/type", env.Error.Info.Param, name)
+				}
+				continue
+			}
 			assert.Empty(t, rec.Body.String(), name)
 			continue
 		}

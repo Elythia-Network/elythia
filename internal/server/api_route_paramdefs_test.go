@@ -32,10 +32,6 @@ var undeclaredAPIRoutes = map[string]string{
 	"*": "router.go: api.Any(\"/*\", apiCatchall)",
 	// 本家の旧いpathの互換。本家のendpointの一覧にもdirectRoutesにも無い。
 	"signin": "routes_auth.go: api.POST(\"/signin\", signinHandler.Signin)",
-	// Elythia独自の分割アップロードの本文はmultipartで、拒否の検証はJSONでない
-	// 本文を検証せずにhandlerへ渡す(SkipNotJSON)。宣言しても何も拒否しないので
-	// 宣言しない(#3877)。
-	"drive/files/create-chunked/append": "routes_drive.go: api.POST(\"/drive/files/create-chunked/append\", driveHandler.FilesCreateChunkedAppend, ...)",
 }
 
 // getRoutesWithoutAllowGet are the declared endpoints that Elythia also

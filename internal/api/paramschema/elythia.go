@@ -38,6 +38,10 @@ func addElythiaEndpoints(eps map[string]Endpoint, b []byte) error {
 			Meta     struct {
 				AllowGet    bool `json:"allowGet"`
 				RequireFile bool `json:"requireFile"`
+				// FileField is the name of the multipart file part of a
+				// requireFile endpoint, when it is not upstream's "file"
+				// (drive/files/create-chunked/append sends "chunk").
+				FileField string `json:"fileField"`
 			} `json:"meta"`
 		} `json:"endpoints"`
 	}
@@ -64,6 +68,25 @@ func addElythiaEndpoints(eps map[string]Endpoint, b []byte) error {
 		}
 		if err := checkNoDefault(o, "#"); err != nil {
 			return fmt.Errorf("paramschema: elythia paramDef for %s: %w", name, err)
+		}
+		// ファイルの欄の名前は、ファイルを受けるendpointにしか意味が無い。引数と
+		// 同じ名前にすると、/api.jsonの本文で引数の型がファイルに上書きされる。
+		if ff := ep.Meta.FileField; ff != "" {
+			if !ep.Meta.RequireFile {
+				return fmt.Errorf("paramschema: elythia paramDef for %s: meta.fileField without meta.requireFile", name)
+			}
+			// anyOf の分岐ごとの項目には足していないので、elythia-js の型の検査
+			// (elythiajs) が分岐の項目と必須を食い違えて作る
+			if _, ok := o.get("anyOf"); ok {
+				return fmt.Errorf("paramschema: elythia paramDef for %s: meta.fileField with anyOf", name)
+			}
+			if props, ok := o.get("properties"); ok {
+				if po, ok := props.(*orderedObject); ok {
+					if _, dup := po.get(ff); dup {
+						return fmt.Errorf("paramschema: elythia paramDef for %s: meta.fileField %q is also a property", name, ff)
+					}
+				}
+			}
 		}
 		s, err := Compile(ep.ParamDef)
 		if err != nil {

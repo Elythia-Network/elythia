@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"248b8de38f13b8523aaeb0bd53e8b5193a29667472f99e0df3ba4c21a03dda2b","elythiaParamdefsSha256":"486f8ad9fc6dbd893db92c6b3cf23dd2e1861633d26bd05a4a162893a593df42","cases":3855}
+{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"248b8de38f13b8523aaeb0bd53e8b5193a29667472f99e0df3ba4c21a03dda2b","elythiaParamdefsSha256":"984eb91ad7c7af6e9ec8babc6b8416f386eb391e223a3ea62d92a49e222f0e90","cases":3887}
 {"ep":"admin/backup/delete"}
 {"in":{"password":"hello","id":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
@@ -3004,6 +3004,39 @@
 {"in":{"uploadId":"ａｂｃ"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
 {"in":{"uploadId":"abc\u0000"},"ok":false,"path":"#/properties/uploadId/format","msg":"must match format \"misskey:id\""}
 {"in":{"uploadId":{"bad":1}},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"ep":"drive/files/create-chunked/append"}
+{"in":{"uploadId":"hello","index":0},"ok":true}
+{"in":{},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"uploadId":"hello","index":0,"unknownProperty":1},"ok":true}
+{"in":{"index":0},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
+{"in":{"uploadId":null,"index":0},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":123,"index":0},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":true,"index":0},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":[],"index":0},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"uploadId":"","index":0},"ok":false,"path":"#/properties/uploadId/minLength","msg":"must NOT have fewer than 1 characters"}
+{"in":{"uploadId":"a","index":0},"ok":true}
+{"in":{"uploadId":"😀","index":0},"ok":true}
+{"in":{"uploadId":"x-y","index":0},"ok":true}
+{"in":{"uploadId":"hello"},"ok":false,"path":"#/required","msg":"must have required property 'index'"}
+{"in":{"uploadId":"hello","index":null},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":1.5},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":10.0},"ok":true}
+{"in":{"uploadId":"hello","index":1e1},"ok":true}
+{"in":{"uploadId":"hello","index":1e400},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":-0},"ok":true}
+{"in":{"uploadId":"hello","index":"1"},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":true},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":-1},"ok":false,"path":"#/properties/index/minimum","msg":"must be >= 0"}
+{"in":{"uploadId":"hello","index":-0.5},"ok":false,"path":"#/properties/index/type","msg":"must be integer"}
+{"in":{"uploadId":"hello","index":0.0},"ok":true}
+{"in":{"uploadId":{"bad":1},"index":{"bad":1}},"ok":false,"path":"#/properties/uploadId/type","msg":"must be string"}
+{"in":{"index":{"bad":1}},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
 {"ep":"drive/files/create-chunked/finish"}
 {"in":{"uploadId":"abc123"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'uploadId'"}
