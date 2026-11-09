@@ -105,9 +105,6 @@ pages/unlike	#4024
 promo/read	#4024
 request-reset-password	#4024
 reset-password	#4024
-reversi/claim-time-is-up	#4024(18)
-reversi/put-stone	#4024(18)
-reversi/ready	#4024(18)
 reversi/verify	#4024
 roles/assignment-show	#4024(18)
 roles/notes	#4024
