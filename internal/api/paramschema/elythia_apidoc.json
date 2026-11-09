@@ -61,7 +61,8 @@
 				"res": {
 					"type": "object",
 					"optional": false,
-					"nullable": false
+					"nullable": false,
+					"ref": "BackupReauthChallenge"
 				}
 			}
 		},
@@ -2219,6 +2220,79 @@
 					"type": "boolean",
 					"optional": false,
 					"nullable": false
+				}
+			}
+		},
+		"BackupReauthChallenge": {
+			"type": "object",
+			"properties": {
+				"challenge": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"timeout": {
+					"type": "integer",
+					"optional": true,
+					"nullable": false
+				},
+				"rpId": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"allowCredentials": {
+					"type": "array",
+					"optional": true,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"properties": {
+							"type": {
+								"type": "string",
+								"optional": false,
+								"nullable": false
+							},
+							"id": {
+								"type": "string",
+								"optional": false,
+								"nullable": false
+							},
+							"transports": {
+								"type": "array",
+								"optional": true,
+								"nullable": false,
+								"items": {
+									"type": "string",
+									"optional": false,
+									"nullable": false
+								}
+							}
+						}
+					}
+				},
+				"userVerification": {
+					"type": "string",
+					"optional": true,
+					"nullable": false
+				},
+				"hints": {
+					"type": "array",
+					"optional": true,
+					"nullable": false,
+					"items": {
+						"type": "string",
+						"optional": false,
+						"nullable": false
+					}
+				},
+				"extensions": {
+					"type": "object",
+					"optional": true,
+					"nullable": false,
+					"additionalProperties": true
 				}
 			}
 		},

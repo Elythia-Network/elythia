@@ -153,8 +153,6 @@ test.describe('the response types of the server', () => {
   // 宣言の無いものは、ここに番号と一緒に挙げる。宣言が付いたら外す
   const PENDING: Record<string, string> = {
     'drive/files/create-chunked/append': '#4090',
-    // 応答が欄の無い { type: 'object' }。宣言はこの issue の reauth-challenge の段で直す
-    'admin/backup/reauth-challenge': '#4093',
   };
 
   test('every Elythia endpoint has a response type to check against', async ({ request }) => {
