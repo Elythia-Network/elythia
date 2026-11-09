@@ -51,9 +51,12 @@ services:
       TZ: Asia/Tokyo
     volumes:
       - ./instance.yml:/app/.config/default.yml:ro
-      # 管理画面のバックアップの一覧を出すための保存先 (#4072)。目印のファイルだけがあり、
-      # 世代は無い。取得・検証・復元は別のサービス (backup-daemon) が要り、このスタックには無い
-      - ./backup-fixture:/backup:ro
+      # 管理画面のバックアップの保存先 (#4072)。目印のファイルだけがあり、世代は無い。
+      # 取得・検証・復元は別のサービス (backup-daemon) が要り、このスタックには無い。
+      # 書き込めるのは、削除とダウンロードの spec (admin_backup) が、runner から
+      # 世代のファイルを置いて叩き、削除で消すため (#4093)。runner は同じ
+      # ディレクトリを /work/backup-fixture として見る
+      - ./backup-fixture:/backup
     healthcheck:
       test: ["CMD", "/app/elythia", "healthcheck", "-config", ".config/default.yml"]
       interval: 5s

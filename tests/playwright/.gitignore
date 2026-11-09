@@ -12,6 +12,8 @@ playwright-report/
 results.json
 # globalSetup が root credentials を書き出す fixture ディレクトリ (#744 PR-2)。
 .auth/
+# バックアップの削除とダウンロードの spec が、テストの間だけ置く世代 (#4093)。
+backup-fixture/generations/
 # tsc の出力。**import 先に同名の `.js` があると、そちらが先に読まれる。**
 # spec / fixture の import は拡張子なし (`from './fixtures/rate_limit'`) で、
 # playwright 1.62.1 は同名の `.js` を先に解決する (両方置いて実測: `.js` 側が
