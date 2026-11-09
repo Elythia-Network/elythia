@@ -257,6 +257,26 @@ export function checkResponse(schemas: ResponseSchemas, endpoint: string, status
   return body;
 }
 
+// JSON の文字列のうち、日時に見えるもの (日付と T で始まる)
+const DATE_LIKE = /"(\d{4}-\d\d-\d\dT[^"]*)"/g;
+
+/**
+ * The options for {@link checkResponse} when the dates of a known bug may or
+ * may not be in the body: `{ knownBug: issue }` when a date in the body is not
+ * in the upstream format, `{}` otherwise.
+ *
+ * For an endpoint whose rows come and go with the other specs (the delivery
+ * health, the gone instances), or whose dates are in the upstream format by
+ * chance (a date with trailing zeros). It does not tell when the bug is fixed;
+ * where the dates are always there, use `knownBug` directly.
+ */
+export function knownDateBug(text: string, issue: string): ExpectOptions {
+  for (const [, value] of text.matchAll(DATE_LIKE)) {
+    if (!UPSTREAM_DATE_TIME.test(value)) return { knownBug: issue };
+  }
+  return {};
+}
+
 /** Checks an API response against the /api.json of the server; see {@link checkResponse}. */
 export async function expectApiResponse<T = unknown>(request: APIRequestContext, endpoint: string, resp: APIResponse, opts: ExpectOptions = {}): Promise<T> {
   return checkResponse(await responseSchemas(request), endpoint, resp.status(), await resp.text(), opts) as T;

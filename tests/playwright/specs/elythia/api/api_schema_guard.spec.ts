@@ -8,7 +8,7 @@
 // サーバーの /api.json を読んで、独自の API がすべて照合の対象になることを確かめる。
 
 import { expect, test } from '@playwright/test';
-import { callChecked, checkResponse, compileResponseSchemas, responseSchemas } from '../../../fixtures/api_schema';
+import { callChecked, checkResponse, compileResponseSchemas, knownDateBug, responseSchemas } from '../../../fixtures/api_schema';
 import { isTsBackend } from '../../../fixtures/backend';
 
 const ELYTHIA = { tags: ['Elythia'] };
@@ -130,6 +130,20 @@ test.describe('the response check of the Elythia endpoints', () => {
     // 日時のほかにも食い違いがあれば落とす
     expect(() => check('own', { ...own, createdAt: GO_DATE, stray: 1 }, { knownBug: '#4091' })).toThrow(/fails on more than the dates of #4091/);
     expect(() => checkResponse(schemas, 'own/empty', 204, '', { knownBug: '#4091' })).toThrow(/204 has none/);
+  });
+
+  test('knownDateBug marks a body as the known bug only while it has a date in the Go format', () => {
+    expect(knownDateBug(JSON.stringify({ ...own, createdAt: GO_DATE }), '#4091')).toEqual({ knownBug: '#4091' });
+    expect(knownDateBug(JSON.stringify([own, { ...own, createdAt: GO_DATE }]), '#4091')).toEqual({ knownBug: '#4091' });
+    // 日時が無いか、どれも本家の書式なら、印を付けない (付けると「直ったように見える」で落ちる)
+    expect(knownDateBug(JSON.stringify({ rows: [] }), '#4091')).toEqual({});
+    expect(knownDateBug(JSON.stringify(own), '#4091')).toEqual({});
+    expect(knownDateBug(JSON.stringify({ id: 'aTb', at: null }), '#4091')).toEqual({});
+    // 照合と組み合わせると、どちらの体も通る
+    for (const body of [own, { ...own, createdAt: GO_DATE }]) {
+      const text = JSON.stringify(body);
+      expect(checkResponse(schemas, 'own', 200, text, knownDateBug(text, '#4091'))).toEqual(body);
+    }
   });
 });
 
