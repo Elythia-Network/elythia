@@ -661,6 +661,9 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
   からも引かれる型 (`UserLite`など) は、Elythia が欄を足しているので落とさない。本家の型を枝に持つ`allOf`も閉じない
 - 型の無い 200 (空の schema や、欄の無い`{ type: 'object' }`) は照合できないので、helper が落とす。`api_schema_guard.spec.ts`は、サーバーの
   全部の独自の API が照合できることを確かめる。宣言が無いものは、番号と一緒に`PENDING`に挙げる
+- **API では作れない行 (リモートのサーバー・利用者・絵文字) は、テストの間だけ DB に入れる。** `fixtures/db.ts`の
+  `withDb`で、スタックの postgres に直接つなぐ (`pg`、版は`package.json`で固定)。入れた行は`finally`で消す。
+  スタックの起動時に入れないのは、連合の管理画面や a11y など、ほかの spec の画面にも見えてしまうため
 
 ## spec を書くときの注意
 
