@@ -8,13 +8,13 @@
 // 宣言で照合する (#4093)。
 
 import { expect, test } from '@playwright/test';
-import { authenticator } from 'otplib';
 import { callApi } from '../../../fixtures/api';
 import { callChecked, expectApiResponse, knownDateBug } from '../../../fixtures/api_schema';
 import { rootFixture } from '../../../fixtures/admin_table';
-import { DEFAULT_TEST_PASSWORD, randomUsername, signupUser } from '../../../fixtures/auth';
+import { randomUsername, signupUser } from '../../../fixtures/auth';
 import { isTsBackend } from '../../../fixtures/backend';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
+import { totpAdmin } from '../../../fixtures/reauth';
 
 // 解決されない予約の名前 (RFC 6761)。ルールの対象にしても、ほかの spec の連合に効かない
 const HOST = 'pw-read.invalid';
@@ -86,27 +86,12 @@ test.describe('admin: the Elythia endpoints that read answer as declared', () =>
 
   test('the generations of the backups, after re-authenticating with the password and TOTP', async ({ request }) => {
     const root = rootFixture();
-    const admin = await signupUser(request, randomUsername('admbk'));
-    const role = await callApi(request, 'admin/roles/create', {
-      i: root.token, name: `pw-backup-${Date.now()}`, description: '', color: null, iconUrl: null,
-      target: 'manual', condFormula: {}, isPublic: false, isExplorable: false,
-      isAdministrator: true, isModerator: false, asBadge: false,
-      canEditMembersByModerator: false, displayOrder: 0, policies: {},
-    });
-    expect(role.status(), await role.text()).toBe(200);
-    const roleId = ((await role.json()) as { id: string }).id;
+    const reauth = await totpAdmin(request, root, 'admbk');
     try {
-      expect((await callApi(request, 'admin/roles/assign', { i: root.token, roleId, userId: admin.id })).status()).toBe(204);
-      const registered = await callApi(request, 'i/2fa/register', { i: admin.token, password: DEFAULT_TEST_PASSWORD });
-      expect(registered.status(), await registered.text()).toBe(200);
-      const { secret } = (await registered.json()) as { secret: string };
-      expect((await callApi(request, 'i/2fa/done', { i: admin.token, token: authenticator.generate(secret) })).status()).toBe(200);
-      // 登録で使ったコードは使用済みになる。サーバーは前後 1 ステップを許すので、次のステップのコードを使う
-      const token = authenticator.clone({ epoch: Date.now() + 30_000 }).generate(secret);
-      // このスタックにはバックアップのデーモンも世代も無いので、外側の型だけを照合している
-      await callWithRows(request, 'admin/backup/list', { i: admin.token, password: DEFAULT_TEST_PASSWORD, token });
+      // このスタックにはバックアップのデーモンが無く、世代も置かないので、外側の型だけを照合している
+      await callWithRows(request, 'admin/backup/list', { i: reauth.admin.token, password: reauth.password, token: reauth.code(1) });
     } finally {
-      expect((await callApi(request, 'admin/roles/delete', { i: root.token, roleId })).status()).toBe(204);
+      expect((await callApi(request, 'admin/roles/delete', { i: root.token, roleId: reauth.roleId })).status()).toBe(204);
     }
   });
 });

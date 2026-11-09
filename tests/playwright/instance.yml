@@ -36,8 +36,9 @@ id: aidx
 # overlay) では BullMQ 固定で、本キーは TS 側に渡されても無視されるので副作用なし。
 jobQueueDriver: mkq
 
-# 管理画面のバックアップの一覧を出すための保存先 (#4072)。compose.yml が目印のファイル
-# (.elythia-backup) だけを入れたディレクトリを /backup に読み取り専用で mount する。
+# 管理画面のバックアップの保存先 (#4072)。compose.yml が目印のファイル
+# (.elythia-backup) だけを入れたディレクトリを /backup に mount する。世代は、
+# 削除とダウンロードの spec がテストの間だけ置く (#4093)。
 # TS image は backup キーを読まない。
 backup:
   storage:

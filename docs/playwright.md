@@ -668,6 +668,11 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
 - **API では作れない行 (リモートのサーバー・利用者・絵文字) は、テストの間だけ DB に入れる。** `fixtures/db.ts`の
   `withDb`で、スタックの postgres に直接つなぐ (`pg`、版は`package.json`で固定)。入れた行は`finally`で消す。
   スタックの起動時に入れないのは、連合の管理画面や a11y など、ほかの spec の画面にも見えてしまうため
+- **バックアップの世代も、テストの間だけ置く。** スタックの保存先 (`backup-fixture`) は mkgo の`/backup`と共有で、
+  runner から書き込める。`admin_backup.spec.ts`は世代のファイル (`meta.json`とダンプ) を置き、ダウンロードと
+  削除の API を叩く。残すと、世代が無いことを確かめる`admin_backups.spec.ts`が落ちるので、`finally`でも消す。
+  再認証 (パスワードと TOTP) が要る口は、`fixtures/reauth.ts`の`totpAdmin`で管理者を作る。各コードは 1 度しか
+  使えないので、1 つのテストで叩けるのは 2 回 (前後の段のコード)
 
 ## spec を書くときの注意
 
