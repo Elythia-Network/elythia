@@ -645,6 +645,23 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
   `image-alt` / `nested-interactive` / `button-name`(ナビの縮めるボタンなど 11 種類の印)。全画面で無視する
   規則は`color-contrast`(本家の配色) / `meta-viewport`(起動の HTML の`user-scalable=no`、本家と同じ)
 
+## 独自の API の応答の照合 (#4093)
+
+`fixtures/api_schema.ts`は、Elythia 独自の API (`/api.json`で`Elythia`のタグが付いた operation) の
+応答を、実行中のサーバーの`/api.json`の宣言で照合する (ajv、版は`package.json`で固定)。spec からは
+`callChecked(request, endpoint, body)`で叩くか、自分で叩いた応答を`expectApiResponse`に渡す。
+
+- **status は宣言のとおりか見る。** 200 を宣言していれば 200、204 だけなら 204 で、204 の body は空でなければ落とす。
+  4xx を確かめる呼び出しには使わない (`callApi`で叩く)
+- **`date-time`は本家の書式 (ミリ秒 3 桁と`Z`) で判定する。** ajv-formats の`date-time`は Go の既定の書式
+  (RFC3339Nano) も通すため。13 月のような有り得ない日時は、ajv-formats の判定でも落とす。日時の書式がずれている既知の不具合は`{ knownBug: '#4091' }`で通す。このときも、
+  日時のほかに食い違いがあれば落とし、日時が本家の書式で返るようになったら「外す」と言って落とす
+- **宣言に無いフィールドは、Elythia 独自の型でだけ落とす** (`unevaluatedProperties: false`)。独自の型は、
+  独自の operation からしか引かれない components と、独自の operation に直接書かれた型。本家の operation
+  からも引かれる型 (`UserLite`など) は、Elythia が欄を足しているので落とさない。本家の型を枝に持つ`allOf`も閉じない
+- 型の無い 200 (空の schema や、欄の無い`{ type: 'object' }`) は照合できないので、helper が落とす。`api_schema_guard.spec.ts`は、サーバーの
+  全部の独自の API が照合できることを確かめる。宣言が無いものは、番号と一緒に`PENDING`に挙げる
+
 ## spec を書くときの注意
 
 `_spec.ts` は silent skip される。ファイル名は必ず `.spec.ts`。
