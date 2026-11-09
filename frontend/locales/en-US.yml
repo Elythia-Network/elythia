@@ -4266,6 +4266,7 @@ _mkgoRegistration:
   approvalEmailNote: "Approved applicants are sent a confirmation email."
   approvalListNote: "Applications can be reviewed on the signup requests screen."
   closedNotice: "New registrations are currently closed."
+  approvalNotEnabled: "Registrations on this server do not require approval, so you cannot apply here."
   inviteUnusableWhileClosed: "New registrations are currently closed, so the invitation codes you issued cannot be used until registrations reopen."
   inconsistent: "Approval and invite-only are both enabled, so nobody can register from anywhere. Choose how registrations are accepted again."
 _mkgoSuspendedSoftware:
