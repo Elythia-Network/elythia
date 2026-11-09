@@ -33,13 +33,7 @@ func (h *Handler) AccountsDelete(c echo.Context) error {
 	}
 	// #2230: local user は物理削除 (Soft=false)、remote user は tombstone (Soft=true)。
 	user, _ := h.userRepo.FindByID(req.UserID)
-	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"isSuspended": true, "isDeleted": true}); err == nil {
-		// **モデレーターの判断として刻む** (#2973)。刻まないと、発信元由来の
-		// 凍結が `remote` のまま残っている行では、発信元が `toot:suspended` を
-		// 下ろした時点で tombstone の凍結が解除される。削除済みの行は inbound の
-		// gate (`isDeleted`) で捨てられるが、読み取り側は `isSuspended` を見て
-		// 隠すので、凍結が外れると削除したアカウントが見えるようになる。
-		h.recordLocalSuspensionOrigin(req.UserID)
+	if err := h.markAccountDeleted(req.UserID, user); err == nil {
 		// 論理削除直後の auth bypass 防止 (#965)。target の全 token cache
 		// entry を即時 invalidate して 30s stale window を消す。DB 更新が
 		// 失敗したケースでは cache を触る理由がないので、err 成功時のみ。
@@ -49,6 +43,31 @@ func (h *Handler) AccountsDelete(c echo.Context) error {
 	}
 	h.scheduleAccountCascade(req.UserID, user != nil && user.Host != nil)
 	return c.NoContent(http.StatusNoContent)
+}
+
+// markAccountDeleted flags the account deleted, for admin/accounts/delete and
+// admin/delete-account. user is the row read before the update, or nil when it
+// could not be read.
+//
+// **リモートの利用者は isDeleted だけを立てる** (#4106)。本家の
+// DeleteAccountService と同じ。以前は凍結も立てていたので、管理画面に凍結と
+// 出て、凍結の解除 (削除済みは断る) もできなかった。削除した利用者から届く
+// アクティビティは isDeleted で捨て、照会し直してもプロフィールを取り直さない
+// (resolver の refreshActor。本家の updatePerson と同じ) ので、凍結を立てなくても
+// 連合から復活しない。プロフィールが users/show や検索に出るのは本家と同じ。
+//
+// ローカルの利用者は凍結も立て、モデレーターの判断として刻む (#2973)。退会から
+// 資格情報の失効までの間、ログインを止めているのが isSuspended のため。行を
+// 読めなかったときもローカルとして扱う (止める側に倒す)。
+func (h *Handler) markAccountDeleted(userID string, user *model.User) error {
+	if user != nil && !user.IsLocal() {
+		return h.userRepo.UpdateUser(userID, map[string]any{"isDeleted": true})
+	}
+	if err := h.userRepo.UpdateUser(userID, map[string]any{"isSuspended": true, "isDeleted": true}); err != nil {
+		return err
+	}
+	h.recordLocalSuspensionOrigin(userID)
+	return nil
 }
 
 // AccountsFindByEmail handles POST /api/admin/accounts/find-by-email.
@@ -115,13 +134,7 @@ func (h *Handler) DeleteAccount(c echo.Context) error {
 	}
 	// AP Delete(actor) 配信のため、更新前に user を控える (#1759)。
 	user, _ := h.userRepo.FindByID(req.UserID)
-	if err := h.userRepo.UpdateUser(req.UserID, map[string]any{"isSuspended": true, "isDeleted": true}); err == nil {
-		// **モデレーターの判断として刻む** (#2973)。刻まないと、発信元由来の
-		// 凍結が `remote` のまま残っている行では、発信元が `toot:suspended` を
-		// 下ろした時点で tombstone の凍結が解除される。削除済みの行は inbound の
-		// gate (`isDeleted`) で捨てられるが、読み取り側は `isSuspended` を見て
-		// 隠すので、凍結が外れると削除したアカウントが見えるようになる。
-		h.recordLocalSuspensionOrigin(req.UserID)
+	if err := h.markAccountDeleted(req.UserID, user); err == nil {
 		// AccountsDelete と同じ。target の全 token cache entry を即時
 		// invalidate (#965)。
 		h.invalidateUserTokenCache(req.UserID)

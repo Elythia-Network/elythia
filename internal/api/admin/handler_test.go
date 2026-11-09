@@ -987,6 +987,20 @@ func TestUnsuspendUser_RejectsDeletedAccount(t *testing.T) {
 	assert.True(t, userRepo.Users["u1"].IsSuspended, "a retained tombstone must not be revived")
 }
 
+// **リモートの削除済みは解除できる** (#4106)。本家と同じ。以前の削除で凍結も
+// 立っていた行を解除できるようにする。削除済みのままにする。
+func TestUnsuspendUser_RemoteDeletedAccount(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	host := "remote.example"
+	userRepo.Users["u1"] = &model.User{ID: "u1", Host: &host, IsSuspended: true, IsDeleted: true}
+
+	rec := doPost(h.UnsuspendUser, `{"userId":"u1"}`, nil)
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.False(t, userRepo.Users["u1"].IsSuspended)
+	assert.True(t, userRepo.Users["u1"].IsDeleted, "unsuspending must not undelete")
+}
+
 func TestUnsuspendUser_NotFound(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	rec := doPost(h.UnsuspendUser, `{"userId":"ghost"}`, nil)
@@ -4732,22 +4746,56 @@ func TestUnsuspendUser_OriginWriteFailureIs500(t *testing.T) {
 		"由来を記録できないのに解除を成功として返している")
 }
 
-// **アカウント削除も local として刻む。** `isSuspended` と `isDeleted` を同時に
-// 立てるので、remote 由来の記録が残っていると発信元が tombstone の凍結を外せる。
-// 読み取り側は `isSuspended` を見て隠すので、凍結が外れると削除したアカウントが
-// 見えるようになる。
-func TestAccountsDelete_RecordsLocalOrigin(t *testing.T) {
-	h, userRepo, _, _ := newTestHandler(t)
-	host := "remote.example"
-	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host}
-	origins := newStubOriginRepo()
-	origins.origins["u1"] = model.SuspensionOriginRemote
-	h.SetSuspensionOriginRepoForTest(origins)
+// **ローカルの利用者の削除は凍結も立て、local として刻む。** 退会から資格情報の
+// 失効までの間、ログインを止めているのが `isSuspended` のため。
+func TestAccountsDelete_LocalUserIsSuspendedWithLocalOrigin(t *testing.T) {
+	for name, del := range map[string]func(*apiadmin.Handler) echo.HandlerFunc{
+		"accounts/delete": func(h *apiadmin.Handler) echo.HandlerFunc { return h.AccountsDelete },
+		"delete-account":  func(h *apiadmin.Handler) echo.HandlerFunc { return h.DeleteAccount },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, userRepo, _, _ := newTestHandler(t)
+			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+			origins := newStubOriginRepo()
+			h.SetSuspensionOriginRepoForTest(origins)
 
-	rec := doPost(h.AccountsDelete, `{"userId":"u1"}`, nil)
-	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
-	assert.Equalf(t, model.SuspensionOriginLocal, origins.origins["u1"],
-		"削除で由来を刻んでいない。発信元が tombstone の凍結を外せる")
+			rec := doPost(del(h), `{"userId":"u1"}`, nil)
+			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			assert.True(t, userRepo.Users["u1"].IsDeleted)
+			assert.True(t, userRepo.Users["u1"].IsSuspended, "the login gate relies on isSuspended")
+			assert.Equal(t, model.SuspensionOriginLocal, origins.origins["u1"])
+		})
+	}
+}
+
+// **リモートの利用者の削除は isDeleted だけを立てる** (#4106)。本家と同じ。凍結も
+// 立てると、管理画面に凍結と出て、解除もできなかった。発信元由来の凍結が先に
+// あれば、それには触らない。
+func TestAccountsDelete_RemoteUserIsNotSuspended(t *testing.T) {
+	for name, del := range map[string]func(*apiadmin.Handler) echo.HandlerFunc{
+		"accounts/delete": func(h *apiadmin.Handler) echo.HandlerFunc { return h.AccountsDelete },
+		"delete-account":  func(h *apiadmin.Handler) echo.HandlerFunc { return h.DeleteAccount },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, userRepo, _, _ := newTestHandler(t)
+			host := "remote.example"
+			userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice", Host: &host}
+			userRepo.Users["u2"] = &model.User{ID: "u2", Username: "bob", Host: &host, IsSuspended: true}
+			origins := newStubOriginRepo()
+			origins.origins["u2"] = model.SuspensionOriginRemote
+			h.SetSuspensionOriginRepoForTest(origins)
+
+			for _, id := range []string{"u1", "u2"} {
+				rec := doPost(del(h), fmt.Sprintf(`{"userId":%q}`, id), nil)
+				require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+				assert.True(t, userRepo.Users[id].IsDeleted, id)
+			}
+			assert.False(t, userRepo.Users["u1"].IsSuspended, "deleting a remote user must not suspend it")
+			assert.NotContains(t, origins.origins, "u1")
+			assert.True(t, userRepo.Users["u2"].IsSuspended, "an existing suspension stays")
+			assert.Equal(t, model.SuspensionOriginRemote, origins.origins["u2"])
+		})
+	}
 }
 
 // #3015: 最小文字数の範囲検証。上限は `localUsernamePattern` の 20 と揃える。
