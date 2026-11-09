@@ -17,8 +17,17 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkInfo v-if="registrationClosed" warn>{{ i18n.ts._mkgoRegistration.closedNotice }}</MkInfo>
 			<MkInfo v-if="fatal" warn>{{ fatal }}</MkInfo>
 
+			<!--
+				承認制でないサーバーでは、申請も照会もできない (どちらの API も 503 を返す)。
+				フォームを出すと準備 (form-token) が失敗するので、案内だけを出す (#4101)。
+				登録を閉じているときは上の案内と重なるので出さない。
+			-->
+			<template v-if="!approvalRequired">
+				<MkInfo v-if="!registrationClosed" data-testid="signup-application-not-approval">{{ i18n.ts._mkgoRegistration.approvalNotEnabled }}</MkInfo>
+			</template>
+
 			<!-- 申請直後: コードを 1 度だけ見せる -->
-			<template v-if="issuedCode">
+			<template v-else-if="issuedCode">
 				<MkInfo warn>
 					<div><b>このコードを控えてください。</b>二度と表示されません。</div>
 					<div>登録の状況を確認したり、承認後に登録したりするのに必要です。失くした場合は申請し直してください。</div>
@@ -173,7 +182,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import type * as Elythia from 'elythia-js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
@@ -212,6 +221,9 @@ const emailRequired = computed(() => instance.emailRequiredForSignup === true);
 const busy = ref(false);
 const fatal = ref<string | null>(null);
 const registrationClosed = isRegistrationClosed();
+// Elythia 独自の meta (#2556)。型は elythia-js の MetaDetailed が持つ (#3418)。
+// 端末に残った古い meta で組み上がった後に、boot の取り直しで変わりうるので追従する
+const approvalRequired = computed(() => instance.approvalRequiredForSignup === true);
 const application = ref<Elythia.SignupApplicationView | null>(null);
 // **有効な provider のトークンを全部送る (#3037 レビュー)。**
 //
@@ -275,8 +287,13 @@ async function fetchFormToken() {
 	}
 }
 
+// 承認制が有効になった時点で 1 度だけ取る (古い meta では無効のまま始まることがある)
+watch(approvalRequired, (required) => {
+	if (required && !registrationClosed && !formTokenLoaded.value) void fetchFormToken();
+});
+
 onMounted(() => {
-	if (!registrationClosed) void fetchFormToken();
+	if (approvalRequired.value && !registrationClosed) void fetchFormToken();
 	ticker = window.setInterval(() => { now.value = Date.now(); }, 500);
 });
 

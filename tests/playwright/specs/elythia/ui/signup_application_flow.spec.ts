@@ -138,3 +138,41 @@ test.describe('signup application (approval required)', () => {
     }
   });
 });
+
+test.describe('signup application (approval not required)', () => {
+  test.skip(isTsBackend, '承認制の登録は Elythia だけにある');
+
+  let original: Record<string, unknown> | undefined;
+  test.beforeEach(async ({ request }) => {
+    original = undefined;
+    const root = rootFixture();
+    const meta = await expectApiOk(request, 'admin/meta', { i: root.token });
+    original = Object.fromEntries(KEYS.map((k) => [k, meta[k]]));
+    await expectApiOk(request, 'admin/update-meta', { i: root.token, registrationClosed: false, approvalRequiredForSignup: false, disableRegistration: false });
+  });
+  test.afterEach(async ({ request }) => {
+    if (original === undefined) return;
+    const restored = await callApi(request, 'admin/update-meta', { i: rootFixture().token, ...original });
+    expect.soft(restored.ok(), '登録の受け付け方を元に戻せなかった').toBe(true);
+  });
+
+  // 承認制でなければ申請も照会もできない (どちらの API も 503)。フォームを出すと準備の
+  // form-token が 503 で失敗するので、案内だけを出し、API を叩かない (#4101)
+  test('shows that applications are not taken, and asks the server nothing', coversRoutes('/signup-application'), async ({ browser, baseURL }) => {
+    const visitor = await visitorPage(browser);
+    try {
+      const calls: string[] = [];
+      visitor.on('request', (r) => {
+        const path = new URL(r.url()).pathname;
+        if (path.startsWith('/api/signup-application/')) calls.push(path);
+      });
+      await gotoRoute(visitor, baseURL!, '/signup-application');
+      await expect(visitor.getByTestId('signup-application-not-approval')).toBeVisible({ timeout: 15_000 });
+      await expect(visitor.getByTestId('signup-application-apply')).toHaveCount(0);
+      await expect(visitor.getByTestId('signup-application-lookup-folder')).toHaveCount(0);
+      expect(calls).toEqual([]);
+    } finally {
+      await visitor.context().close();
+    }
+  });
+});

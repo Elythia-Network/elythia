@@ -4395,6 +4395,7 @@ _mkgoRegistration:
   approvalEmailNote: "承認された相手には確認メールを送ります。"
   approvalListNote: "申請は登録申請の画面で確認できます。"
   closedNotice: "現在、新規登録を受け付けていません。"
+  approvalNotEnabled: "このサーバーの登録は承認制ではありません。登録の申請はできません。"
   inviteUnusableWhileClosed: "現在は新規登録を受け付けていないため、発行した招待コードは受け付けを再開するまで使えません。"
   inconsistent: "承認制と招待制が同時に有効になっていて、どこからも登録できない状態です。受け付け方を選び直してください。"
 _mkgoSuspendedSoftware:

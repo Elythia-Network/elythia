@@ -16490,6 +16490,10 @@ export interface Locale extends ILocale {
          */
         "closedNotice": string;
         /**
+         * このサーバーの登録は承認制ではありません。登録の申請はできません。
+         */
+        "approvalNotEnabled": string;
+        /**
          * 現在は新規登録を受け付けていないため、発行した招待コードは受け付けを再開するまで使えません。
          */
         "inviteUnusableWhileClosed": string;
