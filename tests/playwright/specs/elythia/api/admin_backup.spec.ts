@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
 import { callChecked } from '../../../fixtures/api_schema';
+import { withDb } from '../../../fixtures/db';
 import { rootFixture } from '../../../fixtures/admin_table';
 import { isTsBackend } from '../../../fixtures/backend';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
@@ -89,6 +90,30 @@ test.describe('admin: the backup generations, downloaded and deleted', () => {
     } finally {
       if (generation !== undefined) rmSync(generation.dir, { recursive: true, force: true });
       if (roleId !== undefined) expect.soft((await callApi(request, 'admin/roles/delete', { i: root.token, roleId })).status()).toBe(204);
+    }
+  });
+
+  // パスキーでの再認証のチャレンジ。登録はブラウザの認証器が要るので、鍵の行を DB に直に
+  // 入れる。チャレンジを作るときに読むのは鍵の id と、デコードできる公開鍵
+  // (internal/core/twofactor/webauthn.go の userAdapter。どちらも base64url で、読めない行は
+  // 落とされる)。公開鍵の値は検証のときにしか使わないので、base64url の乱数でよい
+  test('the challenge to re-authenticate with a passkey', async ({ request }) => {
+    const root = rootFixture();
+    const reauth = await totpAdmin(request, root, 'admbkc');
+    const keyId = randomBytes(16).toString('base64url');
+    try {
+      await withDb((db) => db.query(
+        'INSERT INTO user_security_key (id, "userId", name, "publicKey") VALUES ($1, $2, $3, $4)',
+        [keyId, reauth.admin.id, 'pw key', randomBytes(32).toString('base64url')],
+      ));
+      const challenge = await callChecked<{ challenge: string; allowCredentials?: { type: string; id: string }[] }>(
+        request, 'admin/backup/reauth-challenge', { i: reauth.admin.token },
+      );
+      expect(challenge.challenge.length).toBeGreaterThan(0);
+      expect(challenge.allowCredentials).toEqual([expect.objectContaining({ type: 'public-key', id: keyId })]);
+    } finally {
+      await withDb((db) => db.query('DELETE FROM user_security_key WHERE id = $1', [keyId]));
+      expect.soft((await callApi(request, 'admin/roles/delete', { i: root.token, roleId: reauth.roleId })).status()).toBe(204);
     }
   });
 });

@@ -673,6 +673,9 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
   削除の API を叩く。残すと、世代が無いことを確かめる`admin_backups.spec.ts`が落ちるので、`finally`でも消す。
   再認証 (パスワードと TOTP) が要る口は、`fixtures/reauth.ts`の`totpAdmin`で管理者を作る。各コードは 1 度しか
   使えないので、1 つのテストで叩けるのは 2 回 (前後の段のコード)
+- **パスキーの再認証のチャレンジ (`admin/backup/reauth-challenge`) は、鍵の行を DB に直に入れて叩く。**
+  チャレンジを作るときに読むのは鍵の id とデコードできる公開鍵 (どちらも base64url) なので、公開鍵は
+  base64url の乱数でよく、ブラウザの認証器で登録しなくてよい
 
 ## spec を書くときの注意
 
