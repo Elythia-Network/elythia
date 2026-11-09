@@ -21,8 +21,6 @@ admin/delete-all-files-of-a-user	#4024
 admin/drive/clean-remote-files	#4024
 admin/drive/cleanup	#4024
 admin/emoji/copy	#4024
-admin/emoji/fetch-remote-meta	#4024(18)
-admin/federation/clean-gone-instance	#4024(18)
 admin/federation/delete-all-files	#4024
 admin/federation/refresh-remote-instance-metadata	#4024
 admin/federation/remove-all-following	#4024
