@@ -14,7 +14,8 @@ function makeProxy(mediaProxy = `${INSTANCE}/proxy`): MediaProxy {
 }
 
 describe('MediaProxy.getStaticImageUrl', () => {
-	// #2913: アバター未設定の利用者の avatarUrl は相対の `/identicon/<username>`。
+	// #2913: アバター未設定の利用者の avatarUrl は自分の identicon (#4095 より前は相対の
+	// `/identicon/<username>`、今は `<url>/identicon/<username>@<host>`)。
 	// これをプロキシに包むと allowlist に無いので 403 + max-age=86400 になり、
 	// 静止画設定を有効にした利用者にはアイコンが 1 日壊れて見えていた。
 	test('leaves a relative identicon URL alone', () => {

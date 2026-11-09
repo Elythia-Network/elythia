@@ -2,10 +2,12 @@ package entity
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/identicon"
 	"github.com/elythia-network/elythia/internal/misc/remoteurl"
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/datatypes"
@@ -46,7 +48,7 @@ type UserLite struct {
 	Host     *string `json:"host"`
 	// AvatarURL は upstream Misskey TS 互換で常に non-null。
 	// avatarId が無い / DB の avatarUrl が空のときは IdenticonURL() が
-	// /identicon/<username>(@<host>) にフォールバックする (#710)。
+	// <url>/identicon/<username>@<host> にフォールバックする (#710、#4095)。
 	AvatarURL         string                  `json:"avatarUrl"`
 	AvatarBlurhash    *string                 `json:"avatarBlurhash"`
 	AvatarDecorations []AvatarDecorationItem  `json:"avatarDecorations"`
@@ -467,9 +469,8 @@ type InstanceLite struct {
 	ThemeColor      *string `json:"themeColor"`
 }
 
-// IdenticonURL returns the avatar URL for u, falling back to the local
-// `/identicon/<username>(@<host>)` route when the user has no explicit
-// avatarUrl. Mirrors upstream Misskey TS の identicon URL 規則。
+// IdenticonURL returns the avatar URL for u, falling back to
+// FallbackAvatarURL when the user has no explicit avatarUrl.
 //
 // 共有 helper として切り出してあるので、UserLite 以外のレスポンスも同じ規則を
 // 使える (#692 / #708 review)。chat の利用者は #3438 から PackUserLite を通る。
@@ -489,8 +490,15 @@ func (pkr *Packer) IdenticonURL(u *model.User) string {
 		// (ProxyAvatarURL は同一オリジン・相対 URL を wrap しない)。
 		return pkr.currentMediaURLContext().ProxyAvatarURL(avatar)
 	}
-	// upstream getIdenticonUrl (UserEntityService.ts:386-391): local かつ
-	// username に '.' を含むユーザー (= system account relay.actor /
+	return pkr.FallbackAvatarURL(u)
+}
+
+// FallbackAvatarURL returns the avatar URL of a user who has none, as upstream
+// getIdenticonUrl (UserEntityService.ts:386-391) does: the instance icon for a
+// local system account, and otherwise the identicon at
+// `<url>/identicon/<username>@<host>` (identicon.URL).
+func (pkr *Packer) FallbackAvatarURL(u *model.User) string {
+	// local かつ username に '.' を含むユーザー (= system account relay.actor /
 	// instance.actor / proxy.actor) は meta.iconUrl が設定されていれば
 	// identicon ではなくインスタンスアイコンを avatarUrl に使う (#1781)。
 	if u.Host == nil || *u.Host == "" {
@@ -500,11 +508,32 @@ func (pkr *Packer) IdenticonURL(u *model.User) string {
 			}
 		}
 	}
-	host := ""
-	if u.Host != nil {
-		host = "@" + *u.Host
+	// 本家は絶対 URL を返し、ローカルの人にも自分の host を付ける。以前は相対の
+	// `/identicon/<username>` で、本家のクライアントが絶対 URL として扱うと壊れる
+	// 形だった (#4095)。
+	base, host := "", ""
+	if c := pkr.currentMediaURLContext(); c != nil {
+		base, host = c.instanceURL, c.instanceHost
 	}
-	return "/identicon/" + u.Username + host
+	if u.Host != nil && *u.Host != "" {
+		host = *u.Host
+	}
+	return identicon.URL(base, u.Username, host)
+}
+
+// IsOwnIdenticonURL reports whether rawURL is an identicon this instance
+// serves: a relative `/identicon/...` or one under the instance host. The
+// host is the one FallbackAvatarURL builds the URL from.
+func (pkr *Packer) IsOwnIdenticonURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || !strings.HasPrefix(u.Path, "/identicon/") {
+		return false
+	}
+	if u.Host == "" {
+		return true
+	}
+	c := pkr.currentMediaURLContext()
+	return c != nil && c.instanceHost != "" && strings.EqualFold(u.Host, c.instanceHost)
 }
 
 // PackUserLite converts a model.User to a UserLite DTO.

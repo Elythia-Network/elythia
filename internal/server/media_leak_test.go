@@ -75,7 +75,7 @@ func TestAvatarHandler_MalformedRemoteAvatarFallsBackToIdenticon(t *testing.T) {
 
 	require.Equal(t, http.StatusFound, rec.Code)
 	loc := rec.Header().Get(echo.HeaderLocation)
-	assert.Contains(t, loc, "/identicon/u1", "崩れた形の avatarUrl は使わない (got %q)", loc)
+	assert.Equal(t, "https://local.example/identicon/bob@remote.example", loc, "崩れた形の avatarUrl は使わない")
 	assert.NotContains(t, loc, "remote.example/files")
 }
 
@@ -131,7 +131,7 @@ func TestAvatarHandler_LocalAvatarUnchanged(t *testing.T) {
 	assert.Equal(t, "https://local.example/files/avatar.png", rec.Header().Get(echo.HeaderLocation))
 }
 
-// avatar 未設定は identicon への相対 URL。プロキシに包まれてはいけない。
+// avatar 未設定は自分の identicon。同一オリジンなのでプロキシに包まれてはいけない。
 func TestAvatarHandler_IdenticonFallbackUnchanged(t *testing.T) {
 	pk := withMediaProxy(t)
 	repo := leakUserRepo{user: &model.User{ID: "u1", Username: "alice"}}
@@ -142,7 +142,7 @@ func TestAvatarHandler_IdenticonFallbackUnchanged(t *testing.T) {
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/avatar/@alice", nil))
 
 	require.Equal(t, http.StatusFound, rec.Code)
-	assert.Equal(t, "/identicon/u1", rec.Header().Get(echo.HeaderLocation))
+	assert.Equal(t, "https://local.example/identicon/alice@local.example", rec.Header().Get(echo.HeaderLocation))
 }
 
 // `/emoji/:path` の redirect 先もメディアプロキシ経由 (#2425)。

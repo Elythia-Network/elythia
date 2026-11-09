@@ -264,7 +264,7 @@ func TestRenderer_RenderPerson_NoOptionalFields(t *testing.T) {
 	assert.Empty(t, p.Name)
 	// #1969: avatar 未設定でも upstream は identicon を icon に必ず付ける。
 	require.NotNil(t, p.Icon)
-	assert.Equal(t, "https://example.com/identicon/alice", p.Icon.URL.String())
+	assert.Equal(t, "https://example.com/identicon/alice@example.com", p.Icon.URL.String())
 	// 通常 user で banner 未設定なら image は付かない (upstream null)。
 	assert.Nil(t, p.Image)
 	assert.False(t, p.ManuallyApproves.Bool())
@@ -276,7 +276,16 @@ func TestRenderer_RenderPerson_IdenticonFallback(t *testing.T) {
 	u := &model.User{ID: "u1", Username: "alice"}
 	p := r.RenderPerson(u, nil, "PUBKEY", nil)
 	require.NotNil(t, p.Icon)
-	assert.Equal(t, "https://example.com/identicon/alice", p.Icon.URL.String())
+	assert.Equal(t, "https://example.com/identicon/alice@example.com", p.Icon.URL.String())
+}
+
+// アイコンの identicon は API の avatarUrl と同じ本家の形にする (#4095)。種になる
+// username は小文字にする。
+func TestRenderer_RenderPerson_IdenticonLowercasesUsername(t *testing.T) {
+	r := newRenderer()
+	p := r.RenderPerson(&model.User{ID: "u1", Username: "Alice"}, nil, "PUBKEY", nil)
+	require.NotNil(t, p.Icon)
+	assert.Equal(t, "https://example.com/identicon/alice@example.com", p.Icon.URL.String())
 }
 
 // #1969: system actor は meta.iconUrl / bannerUrl を icon/image に使う。
@@ -297,7 +306,7 @@ func TestRenderer_RenderPerson_SystemActorUsesInstanceImages(t *testing.T) {
 	r2 := newRenderer()
 	p2 := r2.RenderPerson(u, nil, "PUBKEY", nil)
 	require.NotNil(t, p2.Icon)
-	assert.Equal(t, "https://example.com/identicon/relay.actor", p2.Icon.URL.String())
+	assert.Equal(t, "https://example.com/identicon/relay.actor@example.com", p2.Icon.URL.String())
 	assert.Nil(t, p2.Image)
 }
 
@@ -311,7 +320,7 @@ func TestRenderer_RenderPerson_NormalUserDoesNotLeakInstanceImages(t *testing.T)
 	u := &model.User{ID: "u1", Username: "alice"} // 通常 user
 	p := r.RenderPerson(u, nil, "PUBKEY", nil)
 	require.NotNil(t, p.Icon)
-	assert.Equal(t, "https://example.com/identicon/alice", p.Icon.URL.String(), "通常 user は instance icon でなく identicon")
+	assert.Equal(t, "https://example.com/identicon/alice@example.com", p.Icon.URL.String(), "通常 user は instance icon でなく identicon")
 	assert.Nil(t, p.Image, "通常 user は banner 未設定で image 省略 (instance banner を漏らさない)")
 }
 

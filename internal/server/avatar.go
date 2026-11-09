@@ -37,8 +37,9 @@ type avatarUserLookup interface {
 //   - acct = "username@host" → remote user; if the host matches the
 //     running instance's host it is treated as local (host == nil)
 //     since upstream stores local users with host=NULL.
-//   - User found → 302 redirect to user.avatarUrl, or to the
-//     identicon endpoint (/identicon/:userID) when avatarUrl is unset.
+//   - User found → 302 redirect to user.avatarUrl, or to the fallback the
+//     API returns as avatarUrl ((*entity.Packer).FallbackAvatarURL) when
+//     avatarUrl is unset.
 //   - User missing or suspended → 302 redirect to
 //     /static-assets/user-unknown.png so the existence of an account
 //     is not leaked via mention probes.
@@ -78,8 +79,9 @@ func avatarHandler(pk *entity.Packer, userRepo avatarUserLookup, localHost strin
 			}
 		}
 		if target == nil || *target == "" {
-			// identicon fallback。`user.id` をシード化文字列として使う。
-			target = strPtr("/identicon/" + user.ID)
+			// API の avatarUrl と同じ fallback にする。以前は `/identicon/<user.id>` で、
+			// 種が違うので API の avatarUrl とは別の絵になっていた (#4095)
+			target = strPtr(pk.FallbackAvatarURL(user))
 		}
 		// リモートの avatar はメディアプロキシ経由に書き換える (#2425)。
 		//
@@ -103,7 +105,7 @@ func avatarHandler(pk *entity.Packer, userRepo avatarUserLookup, localHost strin
 		// `StaticAvatarProxyURL` は必ず `sig` を付け、`Authorize` は allowlist より
 		// **先に** HMAC を見る (`/emoji/:path` が無条件にプロキシへ回しているのと
 		// 同じ形、#2905)。
-		if _, wantsStatic := c.QueryParams()["static"]; wantsStatic && proxyableAvatarTarget(*target) {
+		if _, wantsStatic := c.QueryParams()["static"]; wantsStatic && proxyableAvatarTarget(pk, *target) {
 			if proxied := pk.StaticAvatarProxyURL(*target); proxied != "" {
 				return c.Redirect(http.StatusFound, proxied)
 			}
@@ -117,13 +119,22 @@ func avatarHandler(pk *entity.Packer, userRepo avatarUserLookup, localHost strin
 // proxyableAvatarTarget reports whether the media proxy can fetch the avatar
 // URL at all (#2908).
 //
-// 除外するのは identicon fallback (`/identicon/<id>`) だけ。相対 URL なので
-// `mediaproxy.Fetch` は同一オリジン判定 (`instanceURL + "/files/"` の接頭一致) を
-// 外れて `fetchRemote` に落ち、取りに行けない URL として弾かれる。結果は
-// **400 + `max-age=86400`** (#3034 より前は 404 + 同じキャッシュ) で、静止画
-// 設定を入れた利用者だけがアバターを 1 日失う。identicon は PNG を生成して
-// 返すのでアニメーションもせず、回す理由が無い。
-func proxyableAvatarTarget(rawURL string) bool {
+// 除外するのは、自分の identicon だけ。identicon は PNG を生成して返すので
+// アニメーションせず、回す理由が無い。`mediaproxy.Fetch` は同一オリジン判定
+// (`instanceURL + "/files/"` の接頭一致) を外れたものを `fetchRemote` に回すので、
+// 回すと自分自身へ HTTP で取りに行く。自分のホストが private IP に解決される
+// 構成 (`allowedPrivateNetworks` で許していないもの) では SSRF の防御で 403 になり、
+// そうでなくても往復が 1 回増える。
+//
+// #4095 より前の identicon は相対 URL で、回していれば `fetchRemote` の入口で
+// 400 + `max-age=86400` になるところを、この関数の scheme の検査で外していた。本家と同じ
+// 絶対 URL にしたので、自分の identicon を名指しで外す。自分かどうかは、URL を
+// 組んだのと同じ Packer のホストで見る。他のインスタンスの /identicon/ は
+// 向こうの生成物なので、従来どおり回す。
+func proxyableAvatarTarget(pk *entity.Packer, rawURL string) bool {
+	if pk.IsOwnIdenticonURL(rawURL) {
+		return false
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false

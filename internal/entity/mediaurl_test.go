@@ -283,7 +283,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 	t.Run("malformed remote avatar falls back to identicon", func(t *testing.T) {
 		for _, raw := range []string{"/a.png", "https:\\\\" + remoteHost + "/a.png", "https:///" + remoteHost + "/a.png"} {
 			u0 := &model.User{Username: "carol", Host: sp(remoteHost), AvatarURL: sp(raw)}
-			if got := currentPacker().IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
+			if got := currentPacker().IdenticonURL(u0); got != testInstanceURL+"/identicon/carol@"+remoteHost {
 				t.Errorf("%q: got %s", raw, got)
 			}
 		}
@@ -307,7 +307,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 	})
 	t.Run("identicon fallback unchanged", func(t *testing.T) {
 		u0 := &model.User{Username: "carol", Host: sp(remoteHost)}
-		if got := currentPacker().IdenticonURL(u0); got != "/identicon/carol@"+remoteHost {
+		if got := currentPacker().IdenticonURL(u0); got != testInstanceURL+"/identicon/carol@"+remoteHost {
 			t.Errorf("identicon changed: %s", got)
 		}
 	})
@@ -325,7 +325,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 		SetInstanceIconURLLookup(func() string { return "" })
 		defer SetInstanceIconURLLookup(nil)
 		u0 := &model.User{Username: "instance.actor"}
-		if got := currentPacker().IdenticonURL(u0); got != "/identicon/instance.actor" {
+		if got := currentPacker().IdenticonURL(u0); got != testInstanceURL+"/identicon/instance.actor@mk.example" {
 			t.Errorf("empty meta.iconUrl should fall back to identicon, got: %s", got)
 		}
 	})
@@ -333,7 +333,7 @@ func TestAvatarBannerProxying(t *testing.T) {
 		SetInstanceIconURLLookup(func() string { return "https://example.test/icon.png" })
 		defer SetInstanceIconURLLookup(nil)
 		u0 := &model.User{Username: "alice"} // no '.' in username
-		if got := currentPacker().IdenticonURL(u0); got != "/identicon/alice" {
+		if got := currentPacker().IdenticonURL(u0); got != testInstanceURL+"/identicon/alice@mk.example" {
 			t.Errorf("non-system account must use identicon, got: %s", got)
 		}
 	})

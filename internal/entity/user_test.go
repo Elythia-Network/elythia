@@ -141,6 +141,47 @@ func TestPackUserLite_IdenticonWithHost(t *testing.T) {
 	assert.Equal(t, "/identicon/alice@remote.example", lite.AvatarURL)
 }
 
+// アバターの無い人の avatarUrl は、本家 (getIdenticonUrl) と同じ
+// `<url>/identicon/<小文字の username>@<host>` の絶対 URL にする。ローカルの人にも
+// 自分の host を付ける。以前は相対の `/identicon/<username>` だった (#4095)。
+func TestPackUserLite_IdenticonIsUpstreamAbsoluteURL(t *testing.T) {
+	pk := NewPacker(NewMediaURLContext("https://mk.example/", "https://mk.example/proxy", []byte("s"), false, true), PackerDeps{})
+	remote := "remote.example"
+	tests := []struct {
+		name string
+		user *model.User
+		want string
+	}{
+		{"local user", &model.User{ID: "u1", Username: "alice"}, "https://mk.example/identicon/alice@mk.example"},
+		{"local user with capitals", &model.User{ID: "u2", Username: "Alice"}, "https://mk.example/identicon/alice@mk.example"},
+		{"remote user", &model.User{ID: "u3", Username: "Bob", Host: &remote}, "https://mk.example/identicon/bob@remote.example"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.user.AvatarDecorations = datatypes.JSON([]byte("[]"))
+			assert.Equal(t, tt.want, pk.PackUserLite(tt.user).AvatarURL)
+			assert.True(t, pk.IsOwnIdenticonURL(tt.want), "the fallback is our own identicon")
+		})
+	}
+}
+
+func TestIsOwnIdenticonURL(t *testing.T) {
+	pk := NewPacker(NewMediaURLContext("https://mk.example", "https://mk.example/proxy", []byte("s"), false, true), PackerDeps{})
+	for raw, want := range map[string]bool{
+		"https://mk.example/identicon/alice@mk.example": true,
+		"https://MK.example/identicon/alice@mk.example": true,
+		"/identicon/alice": true,
+		"https://remote.example/identicon/bob@remote.example": false,
+		"https://mk.example/files/a.png":                      false,
+		"https://mk.example/identiconx/a":                     false,
+		"":                                                    false,
+	} {
+		assert.Equal(t, want, pk.IsOwnIdenticonURL(raw), raw)
+	}
+	// ホストを知らない Packer は、絶対 URL を自分のものと見なさない
+	assert.False(t, (*Packer)(nil).IsOwnIdenticonURL("https://mk.example/identicon/alice"))
+}
+
 func TestPackUserLite_ExistingAvatarURL(t *testing.T) {
 	avatar := "https://example.com/avatar.png"
 	u := &model.User{
