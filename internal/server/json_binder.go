@@ -41,8 +41,9 @@ var nonEndpointAPIRoutes = map[string]bool{
 // multipartUploadRoutes are the routes of upstream's requireFile endpoints
 // (`meta.requireFile: true` in endpoints/*.ts; drive/files/create is the
 // only one). ApiServerService.ts routes them to handleMultipartRequest,
-// which middleware.RequireMultipartFile mirrors. mk-go's own multipart
-// endpoint (drive/files/create-chunked/append) is not one of them.
+// which middleware.RequireMultipartFile mirrors. Elythia's own requireFile
+// endpoint (drive/files/create-chunked/append) is not one of them: it reads
+// its "chunk" part itself and is not checked for a "file" part.
 var multipartUploadRoutes = []string{"/api/drive/files/create"}
 
 // isAPIEndpointRoute reports whether c was routed to an /api endpoint whose
@@ -323,9 +324,10 @@ func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
 		case isMultipartForm(ct):
 			// 本家は @fastify/multipart を全体に登録しているので 415 にはならず、
 			// requireFile でない endpoint では request.body が object にならずに
-			// ajv の #/type で落ちる。requireFile の endpoint (と Elythia の
-			// create-chunked/append) は handler が multipart を読むので通す。
-			if multipartBodyRoutes[c.Path()] {
+			// ajv の #/type で落ちる。requireFile の endpoint (本家の
+			// drive/files/create と Elythia の create-chunked/append) は handler が
+			// multipart を読むので通す。
+			if multipartBodyRoutes()[c.Path()] {
 				return next(c)
 			}
 			notObject = true
@@ -362,16 +364,31 @@ func unsupportedMediaType(c echo.Context) error {
 	})
 }
 
-// multipartBodyRoutes are the /api routes whose handler reads a multipart body:
-// upstream's requireFile endpoints (multipartUploadRoutes) and Elythia's
-// drive/files/create-chunked/append (docs/param-shadow.md の宣言しない例外)。
-var multipartBodyRoutes = func() map[string]bool {
-	m := map[string]bool{"/api/drive/files/create-chunked/append": true}
+// multipartBodyRoutes returns the /api routes whose handler reads a multipart
+// body: the endpoints declared with meta.requireFile, upstream's
+// (multipartUploadRoutes) and Elythia's (drive/files/create-chunked/append).
+//
+// 名前を手で書くと、宣言を足したときに取り残されるので、宣言から求める (#4090)。
+// 宣言を読めなくても、サーバーは引数の検証を止めて起動する (paramShadowMiddleware)。
+// そのときも、今あるファイルを受ける endpoint は通す (落とすとアップロードと分割
+// アップロードが全部 400 になる)。
+var multipartBodyRoutes = sync.OnceValue(func() map[string]bool {
+	m := map[string]bool{}
 	for _, p := range multipartUploadRoutes {
 		m[p] = true
 	}
+	eps, err := paramschema.Effective()
+	if err != nil {
+		m["/api/drive/files/create-chunked/append"] = true
+		return m
+	}
+	for name, ep := range eps {
+		if ep.RequireFile {
+			m["/api/"+name] = true
+		}
+	}
 	return m
-}()
+})
 
 // isMultipartForm reports whether the content type is multipart/form-data.
 func isMultipartForm(ct string) bool {

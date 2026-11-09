@@ -175,8 +175,8 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
   「5xx が出た」に分けて数える。400 や 401 だけのものは handler の中身を通っていないので、
   通ったことにしない。`miauth/:session/check` のようなパラメータ付きのパスはルートの形に直す
 - **分母**: 本家の paramDef の golden (`upstream_paramdefs.json`。直接のルートを含む) と Elythia の
-  宣言 (`elythia_paramdefs.json`) に、宣言を持たない 2 つ (`signin`、`drive/files/create-chunked/append`)
-  を足したもの (`internal/routecoverage` の `Endpoints`)。組み立てたサーバーのルートと一致することを
+  宣言 (`elythia_paramdefs.json`) に、宣言を持たない 1 つ (`signin`) を足したもの
+  (`internal/routecoverage` の `Endpoints`)。組み立てたサーバーのルートと一致することを
   `internal/server` の `TestRouteCoverageEndpointsMatchRoutes` が確かめる。`reset-db` は testMode でだけ
   登録されるが、分母には入る。プラグインのパスと catch-all (`*`) は「エンドポイントでないパス」に出る
 - **集め方**: `upstream-backend-e2e` は shard ごとに集計した `route-hits-upstream-backend-e2e-<shard>`

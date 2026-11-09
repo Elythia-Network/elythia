@@ -1474,6 +1474,29 @@
 			},
 			"meta": {}
 		},
+		"drive/files/create-chunked/append": {
+			"paramDef": {
+				"type": "object",
+				"properties": {
+					"uploadId": {
+						"type": "string",
+						"minLength": 1
+					},
+					"index": {
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"required": [
+					"uploadId",
+					"index"
+				]
+			},
+			"meta": {
+				"requireFile": true,
+				"fileField": "chunk"
+			}
+		},
 		"drive/files/create-chunked/finish": {
 			"paramDef": {
 				"type": "object",

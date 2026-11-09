@@ -173,6 +173,8 @@ export type ParamDefChecks = [
 	Check<Equal<RequiredKeys<Req<'chat/unread-count'>>, never>>,
 	Check<Equal<Keys<Req<'drive/files/create-chunked/abort'>>, 'uploadId'>>,
 	Check<Equal<RequiredKeys<Req<'drive/files/create-chunked/abort'>>, 'uploadId'>>,
+	Check<Equal<Keys<Req<'drive/files/create-chunked/append'>>, 'chunk' | 'index' | 'uploadId'>>,
+	Check<Equal<RequiredKeys<Req<'drive/files/create-chunked/append'>>, 'chunk' | 'index' | 'uploadId'>>,
 	Check<Equal<Keys<Req<'drive/files/create-chunked/finish'>>, 'uploadId'>>,
 	Check<Equal<RequiredKeys<Req<'drive/files/create-chunked/finish'>>, 'uploadId'>>,
 	Check<Equal<Keys<Req<'drive/files/create-chunked/start'>>, 'comment' | 'folderId' | 'force' | 'isSensitive' | 'name' | 'size'>>,

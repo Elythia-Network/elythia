@@ -1060,6 +1060,21 @@
 			},
 			"doc": {}
 		},
+		"drive/files/create-chunked/append": {
+			"meta": {
+				"requireCredential": true,
+				"prohibitMoved": true,
+				"kind": "write:drive"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "ChunkAppendResult"
+				}
+			}
+		},
 		"drive/files/create-chunked/finish": {
 			"meta": {
 				"requireCredential": true,
@@ -4740,6 +4755,36 @@
 					"optional": false,
 					"nullable": false,
 					"format": "date-time"
+				}
+			}
+		},
+		"ChunkAppendResult": {
+			"type": "object",
+			"properties": {
+				"index": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"next": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"receivedBytes": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"totalSize": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"completed": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
 				}
 			}
 		},

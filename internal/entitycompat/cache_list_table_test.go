@@ -279,6 +279,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"err", "mu", "parts", "started", "stopped"}, nil},
 	"internal/server.maintTracker": {kindNotCache, "メンテナンスの状態はRedisにあり、監視のgoroutineが周期と通知で読み直す",
 		[]string{"cancel", "done", "handler", "hbCancel", "hbDone", "id", "idleInterval", "judgeCancel", "judgeDone", "judgeWake", "lastErr", "lastStop", "mu", "pollInterval", "proc", "reportFailed", "reported", "reportedAt", "retryAt", "retryWait", "role", "state", "store", "subscribe", "sup", "writeMu"}, nil},
+	"internal/server.multipartBodyRoutes": {kindNotCache, "multipartの本文を受けるルート(宣言のrequireFile)の集合を、埋め込みの宣言から1回だけ組む。DB・設定・外部のどれからも来ない",
+		[]string{}, nil},
 	"internal/server.nodeInfoPeerLister": {kindDropLocal, "",
 		[]string{"cache", "client", "gen", "local", "mu", "urlFor"}, map[string]string{
 			"local": "こちらのpeeredプラグインの名前(構築のときの設定)",

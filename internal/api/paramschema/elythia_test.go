@@ -9,7 +9,8 @@ func TestAddElythiaEndpoints(t *testing.T) {
 	eps := map[string]Endpoint{}
 	err := addElythiaEndpoints(eps, []byte(`{"endpoints":{
 		"x/list":{"paramDef":{"type":"object","properties":{"limit":{"type":"integer","minimum":1}},"required":[]},"meta":{}},
-		"x/upload":{"paramDef":{"type":"object","properties":{},"required":[]},"meta":{"allowGet":true,"requireFile":true}}
+		"x/upload":{"paramDef":{"type":"object","properties":{},"required":[]},"meta":{"allowGet":true,"requireFile":true}},
+		"x/chunk":{"paramDef":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},"meta":{"requireFile":true,"fileField":"part"}}
 	}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -23,6 +24,9 @@ func TestAddElythiaEndpoints(t *testing.T) {
 	}
 	if up := eps["x/upload"]; !up.Elythia || !up.AllowGet || !up.RequireFile {
 		t.Errorf("x/upload: %+v", up)
+	}
+	if ch := eps["x/chunk"]; !ch.Elythia || !ch.RequireFile {
+		t.Errorf("x/chunk: %+v", ch)
 	}
 }
 
@@ -41,6 +45,9 @@ func TestAddElythiaEndpointsRefuses(t *testing.T) {
 		{"default", `{"endpoints":{"x/y":{"paramDef":{"type":"object","properties":{"limit":{"type":"integer","default":10}}}}}}`, "cannot have a default"},
 		{"nested default", `{"endpoints":{"x/y":{"paramDef":{"type":"object","properties":{"a":{"anyOf":[{"type":"string","default":"z"}]}}}}}}`, "cannot have a default"},
 		{"does not compile", `{"endpoints":{"x/y":{"paramDef":{"type":"object","properties":{"a":{"type":"nope"}}}}}}`, "x/y:"},
+		{"fileField without requireFile", `{"endpoints":{"x/y":{"paramDef":{"type":"object"},"meta":{"fileField":"chunk"}}}}`, "meta.fileField without meta.requireFile"},
+		{"fileField with anyOf", `{"endpoints":{"x/y":{"paramDef":{"type":"object","anyOf":[{"required":["a"]}],"properties":{"a":{"type":"string"}}},"meta":{"requireFile":true,"fileField":"chunk"}}}}`, "meta.fileField with anyOf"},
+		{"fileField is a property", `{"endpoints":{"x/y":{"paramDef":{"type":"object","properties":{"chunk":{"type":"string"}}},"meta":{"requireFile":true,"fileField":"chunk"}}}}`, `meta.fileField "chunk" is also a property`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eps := map[string]Endpoint{"notes/show": {}}

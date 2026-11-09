@@ -86,6 +86,9 @@ func Render(defs []byte) ([]byte, error) {
 	var f struct {
 		Endpoints map[string]struct {
 			ParamDef map[string]json.RawMessage `json:"paramDef"`
+			Meta     struct {
+				FileField string `json:"fileField"`
+			} `json:"meta"`
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal(defs, &f); err != nil {
@@ -107,6 +110,12 @@ func Render(defs []byte) ([]byte, error) {
 			return nil, fmt.Errorf("elythiajs: %s: %w", name, err)
 		}
 		props := propertySet(pd.properties)
+		// ファイルの欄 (meta.fileField) は paramDef の外にあるが、elythia-js の
+		// リクエストの型には必須の項目として書く (multipart の本文の一部なので)
+		if ff := f.Endpoints[name].Meta.FileField; ff != "" {
+			props[ff] = true
+			pd.required = append(pd.required, ff)
+		}
 		for _, r := range pd.required {
 			if !props[r] {
 				return nil, fmt.Errorf("elythiajs: %s: required %s is not a property", name, r)

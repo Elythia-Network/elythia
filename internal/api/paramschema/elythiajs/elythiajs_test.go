@@ -55,6 +55,16 @@ func TestRender(t *testing.T) {
 	assert.Contains(t, s, "\tCheck<Equal<Keys<Req<'a/y'>>, never>>,\n\tCheck<Equal<RequiredKeys<Req<'a/y'>>, never>>,\n")
 }
 
+// ファイルを受けるendpointのファイルの欄 (meta.fileField) は、paramDefの外にあるが、
+// elythia-jsの型には必須の項目として書くので、検査にも足す (#4090)。
+func TestRenderFileField(t *testing.T) {
+	b, err := Render([]byte(`{"endpoints":{
+		"c/up":{"paramDef":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},"meta":{"requireFile":true,"fileField":"chunk"}}
+	}}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "\tCheck<Equal<Keys<Req<'c/up'>>, 'chunk' | 'id'>>,\n\tCheck<Equal<RequiredKeys<Req<'c/up'>>, 'chunk' | 'id'>>,\n")
+}
+
 // 分岐ごとに必須を分けるanyOf(本家のdrive/files/showと同じ書き方)は、union型と
 // 突き合わせる(#3872)。
 func TestRenderAnyOf(t *testing.T) {

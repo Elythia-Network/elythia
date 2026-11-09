@@ -38,8 +38,6 @@ const (
 var undeclared = map[string]Origin{
 	// 本家の旧いpathの互換
 	"signin": Upstream,
-	// Elythia独自の分割アップロードの本文(multipartなので宣言しない、#3877)
-	"drive/files/create-chunked/append": Elythia,
 }
 
 // Endpoints returns every endpoint the server routes, by the path after
