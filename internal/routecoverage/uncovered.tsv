@@ -22,19 +22,14 @@ admin/drive/clean-remote-files	#4024
 admin/drive/cleanup	#4024
 admin/emoji/copy	#4024
 admin/emoji/fetch-remote-meta	#4024(18)
-admin/federation/check-host	#4024(18)
 admin/federation/clean-gone-instance	#4024(18)
-admin/federation/close-delivery-breaker	#4024(18)
 admin/federation/delete-all-files	#4024
 admin/federation/refresh-remote-instance-metadata	#4024
 admin/federation/remove-all-following	#4024
-admin/federation/rules/hits	#4024(18)
 admin/federation/update-instance	#4024
 admin/forward-abuse-user-report	#4024
 admin/promo/create	#4024
 admin/queue/retry-job	#4024
-admin/roles/assignment-show	#4024(18)
-admin/self-check	#4024(18)
 admin/send-email	#4024
 admin/unset-mfa	#4024
 admin/unset-user-banner	#4024
@@ -76,8 +71,6 @@ i/export-favorites	#4024
 i/export-following	#4024
 i/export-mute	#4024
 i/export-user-lists	#4024
-i/flashs	#4024(18)
-i/flashs/likes	#4024(18)
 my/apps	#4024
 notes/conversation	#4024
 notes/polls/recommendation	#4024
@@ -91,7 +84,6 @@ promo/read	#4024
 request-reset-password	#4024
 reset-password	#4024
 reversi/verify	#4024
-roles/assignment-show	#4024(18)
 roles/notes	#4024
 signin	#4024
 signin-with-passkey	#4024
