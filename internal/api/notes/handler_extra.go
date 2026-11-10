@@ -64,7 +64,9 @@ func (h *Handler) FavoritesCreate(c echo.Context) error {
 	}
 	exists, _ := h.favoriteRepo.Exists(user.ID, req.NoteID)
 	if exists {
-		return c.JSON(http.StatusConflict, apierr.Error("ALREADY_FAVORITED", "Already favorited.", "a402c12b-34dd-41d2-97d8-4d2ffd96a1a6"))
+		// upstream notes/favorites/create.ts の alreadyFavorited は httpStatusCode を
+		// 持たないので、kind client の既定どおり400で、messageも本家と揃える (#4122)。
+		return c.JSON(http.StatusBadRequest, apierr.Error("ALREADY_FAVORITED", "The note has already been marked as a favorite.", "a402c12b-34dd-41d2-97d8-4d2ffd96a1a6"))
 	}
 	now := time.Now()
 	fav := &model.NoteFavorite{
