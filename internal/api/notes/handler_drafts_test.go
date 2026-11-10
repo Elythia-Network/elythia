@@ -761,7 +761,8 @@ func TestDraftsUpdate_NotFound(t *testing.T) {
 	// NO_SUCH_NOTE_DRAFT (UUID 49cd6b9d-...) を返すこと。
 	h, _ := newDraftHandlerWithRepo()
 	rec := postDraft(h.DraftsUpdate, `{"draftId":"ghost"}`, &model.User{ID: "u1"})
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// upstream の noSuchNoteDraft は httpStatusCode を持たないので400 (#4122)。
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	errObj := resp["error"].(map[string]any)
@@ -776,7 +777,7 @@ func TestDraftsUpdate_InvalidParam(t *testing.T) {
 }
 
 // #1934: drafts/update も visibility / reactionAcceptance enum を検証する。
-// 不正 enum は draft 不在 (404) より先に 400 で弾く (paramDef 相当)。
+// 不正 enum は draft 不在 (NO_SUCH_NOTE_DRAFT) より先に INVALID_PARAM で弾く (paramDef 相当)。
 func TestDraftsUpdate_InvalidVisibility(t *testing.T) {
 	h, repo := newDraftHandlerWithRepo()
 	text := "old"
@@ -796,7 +797,7 @@ func TestDraftsUpdate_InvalidReactionAcceptance(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
 }
 
-// #1421: 他人 draftID を投げると NO_SUCH_NOTE_DRAFT 404 で reject される
+// #1421: 他人 draftID を投げると NO_SUCH_NOTE_DRAFT (400、#4122) で reject される
 // (IDOR regression guard)。現行 handler は repo.FindByIDAndUser に owner filter
 // を SQL push-down しているので構造的に他人 draft を書き換えられないが、
 // refactor で FindByID に入れ替わると owner check が抜ける。その回帰を
@@ -806,7 +807,7 @@ func TestDraftsUpdate_OtherUserDraft(t *testing.T) {
 	text := "owner-only"
 	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Text: &text, Visibility: "public"}
 	rec := postDraft(h.DraftsUpdate, `{"draftId":"d1","text":"pwned"}`, &model.User{ID: "u2"})
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	errObj := resp["error"].(map[string]any)
@@ -841,11 +842,11 @@ func TestDraftsDelete_InvalidParam(t *testing.T) {
 func TestDraftsDelete_NotFound(t *testing.T) {
 	// #688 review follow-up: 存在しない draftId で削除しても upstream
 	// notes/drafts/delete.ts と同じく `NO_SUCH_NOTE_DRAFT` を返す。silent
-	// 204 だと frontend が「該当 draft が無い」を観測できないので 404 が
-	// 期待挙動。
+	// 204 だと frontend が「該当 draft が無い」を観測できない。upstream の
+	// noSuchNoteDraft は httpStatusCode を持たないので400 (#4122)。
 	h, _ := newDraftHandlerWithRepo()
 	rec := postDraft(h.DraftsDelete, `{"draftId":"ghost"}`, &model.User{ID: "u1"})
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	errObj := resp["error"].(map[string]any)

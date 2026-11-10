@@ -256,7 +256,7 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 	}
 	// visibility / reactionAcceptance enum 検証 (drafts/create と共有、#1934)。"" /
 	// nil は「変更しない」セマンティクスなので許容し、非空の不正値のみ弾く。paramDef
-	// 相当なので draft 不在 (404) より先に 400 を返す。
+	// 相当なので draft 不在 (NO_SUCH_NOTE_DRAFT) より先に INVALID_PARAM を返す。
 	if err := validateNoteEnums(req.Visibility, req.ReactionAcceptance); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", err.Error(), apierr.UUIDInvalidParam))
 	}
@@ -269,7 +269,9 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
-		return c.JSON(http.StatusNotFound, apierr.NoSuchNoteDraft())
+		// upstream notes/drafts/update.ts の noSuchNoteDraft は httpStatusCode を
+		// 持たないので、kind client の既定どおり400で返す (#4122)。
+		return c.JSON(http.StatusBadRequest, apierr.NoSuchNoteDraft())
 	}
 	if req.Text != nil {
 		draft.Text = req.Text
@@ -644,7 +646,8 @@ func (h *Handler) DraftsDelete(c echo.Context) error {
 	// upstream notes/drafts/delete.ts は存在チェックして無ければ
 	// `NO_SUCH_NOTE_DRAFT` を返す。silent 204 だと frontend が削除確認 UI
 	// で「該当 draft が無い」フィードバックを出せないので、本家挙動に合わせて
-	// 404 を返すよう修正 (#688 review follow-up)。
+	// エラーを返すよう修正 (#688 review follow-up)。upstream の noSuchNoteDraft は
+	// httpStatusCode を持たないので、kind client の既定どおり400で返す (#4122)。
 	// Delete は RowsAffected を返すので、Find → Delete の 2 query 化を避け
 	// つつ TOCTOU race も発生しない (DB 1 文で atomic に「あれば削除」)。
 	rowsAffected, err := h.draftRepo.Delete(req.DraftID, user.ID)
@@ -652,7 +655,7 @@ func (h *Handler) DraftsDelete(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if rowsAffected == 0 {
-		return c.JSON(http.StatusNotFound, apierr.NoSuchNoteDraft())
+		return c.JSON(http.StatusBadRequest, apierr.NoSuchNoteDraft())
 	}
 	// delete に成功したら旧 delayed task も best-effort で clear する
 	// (#1045 Phase 2-C)。upstream は `clearSchedule(draftId)` を fire

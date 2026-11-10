@@ -139,7 +139,17 @@ func TestFavoritesCreate_AlreadyFavorited(t *testing.T) {
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
 	favRepo.Favorites["u1:n1"] = &model.NoteFavorite{ID: "f1", UserID: "u1", NoteID: "n1"}
 	rec := postExtra(h.FavoritesCreate, `{"noteId":"n1"}`, &model.User{ID: "u1"})
-	assert.Equal(t, http.StatusConflict, rec.Code)
+	// upstream の alreadyFavorited は httpStatusCode を持たないので400 (#4122)。
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	errObj, ok := resp["error"].(map[string]any)
+	require.True(t, ok, "error envelope")
+	assert.Equal(t, "ALREADY_FAVORITED", errObj["code"])
+	assert.Equal(t, "The note has already been marked as a favorite.", errObj["message"])
+	assert.Equal(t, "a402c12b-34dd-41d2-97d8-4d2ffd96a1a6", errObj["id"])
+	assert.Equal(t, "client", errObj["kind"])
+	assert.Len(t, favRepo.Favorites, 1, "duplicate favorite must not be inserted")
 }
 
 func TestFavoritesCreate_NoteNotFound(t *testing.T) {
