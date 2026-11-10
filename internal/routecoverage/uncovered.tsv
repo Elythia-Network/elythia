@@ -39,10 +39,6 @@ chat/rooms/update	#4024
 clear-browser-cache	#4024
 drive/files/attached-chat-messages	#4024
 drive/files/check-existence	#4024
-drive/files/create-chunked/abort	#4024(18)
-drive/files/create-chunked/append	#4024(18)
-drive/files/create-chunked/finish	#4024(18)
-drive/files/create-chunked/start	#4024(18)
 drive/folders/find	#4024
 drive/stream	#4024
 export-custom-emojis	#4024

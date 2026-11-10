@@ -589,7 +589,9 @@ meta を書かないので main で流れる。
 
 **効き目を確かめられない行は、理由を書いて省く。** 外部のサービス (S3、SMTP、センシティブの判定、メールの検証、
 DeepL)、リモートのサーバー (連合の相手、リレー)、時間の経過、手元の設定 (`disableEndpointRateLimits` があるので
-`rateLimitFactor`)、外から見えない内部の経路 (FTT、RBT) が要るもの。保存と表示までは確かめる。
+`rateLimitFactor`)、外から見えない内部の経路 (FTT、RBT) が要るもの。保存と表示までは確かめる。スタックには
+S3 互換の minio があるが、使うのは分割アップロードの照合 (`drive_chunked.spec.ts`) だけで、オブジェクトストレージの
+設定の行の効き目は確かめていない。
 
 ```bash
 make playwright-test PLAYWRIGHT_ARGS="specs/elythia/ui/admin_settings/ --retries=0"
@@ -676,6 +678,13 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
 - **パスキーの再認証のチャレンジ (`admin/backup/reauth-challenge`) は、鍵の行を DB に直に入れて叩く。**
   チャレンジを作るときに読むのは鍵の id とデコードできる公開鍵 (どちらも base64url) なので、公開鍵は
   base64url の乱数でよく、ブラウザの認証器で登録しなくてよい
+- **分割アップロード (`drive/files/create-chunked/*`) は、テストの間だけ保存先を minio に向けて叩く。**
+  分割アップロードは S3 の multipart upload で組み立てるので、ローカルの保存先では
+  `CHUNKED_UPLOAD_UNAVAILABLE`で断られる。スタックには minio (S3 互換) と、バケット`drive`を作る`minio-init`がある。
+  `drive_chunked.spec.ts`は`admin/update-meta`で保存先と分割アップロードを有効にし、終わったらオブジェクト
+  ストレージを必ず無効に戻す。保存先のホストは`minio.local`(別名) で指す。ファイルの`url`はこのホストから
+  作られ、ajv の`url`書式はドットの無いホストを受けないため。チャンクの大きさの下限は 5MiB (S3 の部分の下限)
+  なので、2 つに分かれるファイルは 5MiB を超える。利用者には`canUseChunkedUpload`を許すロールを付ける
 
 ## spec を書くときの注意
 
