@@ -937,6 +937,19 @@ func bakeUniqueAndIntersection(schema Schema, idx *rowUniqueIndex, gb *groupBuff
 	return out
 }
 
+// CursorWindow returns the oldest and newest buckets GetChart reads for a
+// window of amount buckets ending at cursor: the bounds of its range query.
+// The charts API checks them against the int4 date column before calling
+// GetChart (#4120).
+func CursorWindow(span Span, amount int, cursor time.Time) (gt, end time.Time) {
+	if amount <= 0 {
+		amount = 1
+	}
+	end = ceilToSpan(cursor, span)
+	gtBase := stepBack(truncateToSpan(cursor, span), -1, span) // floor(cursor) + 1span
+	return stepBack(gtBase, amount-1, span), end
+}
+
 // GetChart returns the result for the requested span/amount window.
 // The semantics mirror upstream:
 //
@@ -965,16 +978,14 @@ func (c *Chart) GetChart(ctx context.Context, span Span, amount int, cursor *tim
 	// backfill (logs.at(-1).date == gt) も抑止されて最古バケットが 0/空に
 	// 補間される。非境界 cursor / nil now path では gtBase == end なので
 	// gt は最古表示バケットと一致し従来挙動を保つ (#1610 / #1565 follow-up)。
-	var gtBase time.Time
+	var gt time.Time
 	if cursor != nil {
-		end = ceilToSpan(*cursor, span)
-		gtBase = stepBack(truncateToSpan(*cursor, span), -1, span) // floor(cursor) + 1span
+		gt, end = CursorWindow(span, amount, *cursor)
 	} else {
 		now := truncateToSpan(c.clock.Now(), span)
 		end = now
-		gtBase = now
+		gt = stepBack(now, amount-1, span)
 	}
-	gt := stepBack(gtBase, amount-1, span)
 
 	rows, err := c.repo.FindRange(ctx, span, group, gt.Unix(), end.Unix())
 	if err != nil {

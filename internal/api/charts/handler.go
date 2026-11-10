@@ -8,6 +8,7 @@
 package charts
 
 import (
+	"math"
 	"net/http"
 	"time"
 
@@ -283,6 +284,14 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 			return "", 0, nil, &paramError{param: "#", reason: "Invalid request body."}
 		}
 		t := time.UnixMilli(*offset)
+		// **表の date の列は int4 の秒** (1901-12-13〜2038-01-19)。問い合わせる範囲
+		// (chart.CursorWindow) がその外に出ると、pgx が値を送る前に落とし、500 になって
+		// いた (#4120)。範囲外のバケットはどの行も持たないので、JavaScript の Date の
+		// 範囲外と同じ 400 にする。区切りちょうどの cursor では gt が end より 1 span
+		// 新しくなる (CursorWindow) ので、両方を見る
+		if gt, end := chart.CursorWindow(span, amount, t); !fitsInt4Seconds(gt) || !fitsInt4Seconds(end) {
+			return "", 0, nil, &paramError{param: "#", reason: "Invalid request body."}
+		}
 		cursor = &t
 	}
 	return span, amount, cursor, nil
@@ -318,4 +327,10 @@ func internalError(c echo.Context) error {
 
 func chartUnavailable(c echo.Context) error {
 	return c.JSON(http.StatusServiceUnavailable, apierr.Error("CHART_UNAVAILABLE", "Chart not available.", "5e3a8d12-6c4f-4d70-b3bc-1f3dd0c7a37a"))
+}
+
+// fitsInt4Seconds reports whether t, in Unix seconds, fits the int4 date
+// column of the chart tables.
+func fitsInt4Seconds(t time.Time) bool {
+	return t.Unix() >= math.MinInt32 && t.Unix() <= math.MaxInt32
 }

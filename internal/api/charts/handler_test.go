@@ -490,7 +490,7 @@ func TestParseRequest_OffsetIsEpochMs(t *testing.T) {
 }
 
 // offset が JavaScript の Date で表せない時刻 (絶対値が 8.64e15 を超える) なら、
-// int64 の範囲外と同じ 400 にする (以前は 500。#3369)。境界の 8.64e15 は通す。
+// int64 の範囲外と同じ 400 にする (以前は 500。#3369)。
 func TestParseRequest_OffsetOutsideJSDateRange(t *testing.T) {
 	h, _ := newHandlerWithAllCharts(t)
 	for _, offset := range []string{"1e17", "9223372036854775807", "-9223372036854775808", "8640000000000001", "-8640000000000001"} {
@@ -499,10 +499,36 @@ func TestParseRequest_OffsetOutsideJSDateRange(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code, offset)
 		assert.Contains(t, rec.Body.String(), `"param":"#"`, offset)
 	}
-	for _, offset := range []string{"8640000000000000", "-8640000000000000"} {
-		c, rec := newReq(t, `{"span":"hour","offset":`+offset+`}`)
+}
+
+// 読む範囲 (chart.CursorWindow) が表の date の列 (int4 の秒) の外に出る offset も
+// 400 にする。実 DB では pgx が値を送る前に落として 500 になっていた (#4120)。
+// 境界は span の区切りで決まる。int4 の上限 (2038-01-19T03:14:07Z) の直前の時の区切りは
+// 2147482800。それより後ろの cursor は切り上げると上限を越え、区切りちょうどの cursor は
+// gt (floor + 1 span) が上限を越える。下は limit ぶん遡った区切りが、int4 の下限の後の
+// 最初の時の区切り (-2147482800) を下回るかで決まる。実 DB で、内側が 200、外側が 400
+// (以前は 500) になることを確かめた
+func TestParseRequest_OffsetWindowOutsideInt4Seconds(t *testing.T) {
+	h, _ := newHandlerWithAllCharts(t)
+	const hour = int64(3600)
+	const lastHour, firstHour = int64(2147482800), int64(-2147482800)
+	// limit 30 の span hour は、区切りの cursor から 28 時間遡った区切りまで読む
+	lowest := firstHour + 28*hour
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{fmt.Sprintf(`{"span":"hour","limit":1,"offset":%d}`, (lastHour-1)*1000), http.StatusOK},
+		{fmt.Sprintf(`{"span":"hour","limit":1,"offset":%d}`, lastHour*1000), http.StatusBadRequest},
+		{fmt.Sprintf(`{"span":"hour","limit":1,"offset":%d}`, (lastHour+1)*1000), http.StatusBadRequest},
+		{fmt.Sprintf(`{"span":"hour","limit":30,"offset":%d}`, lowest*1000), http.StatusOK},
+		{fmt.Sprintf(`{"span":"hour","limit":30,"offset":%d}`, (lowest-hour)*1000), http.StatusBadRequest},
+		{`{"span":"hour","offset":8640000000000000}`, http.StatusBadRequest},
+		{`{"span":"day","offset":-8640000000000000}`, http.StatusBadRequest},
+	} {
+		c, rec := newReq(t, tc.body)
 		require.NoError(t, h.Notes(c))
-		assert.Equal(t, http.StatusOK, rec.Code, "%s: %s", offset, rec.Body.String())
+		assert.Equal(t, tc.want, rec.Code, "%s: %s", tc.body, rec.Body.String())
 	}
 }
 
