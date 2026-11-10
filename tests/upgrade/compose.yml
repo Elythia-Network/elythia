@@ -1,0 +1,49 @@
+# tests/upgrade/compose.yml — 前のリリースで作った DB を、今のコードが引き継げるか (#4123)
+#
+# 1. old (前のリリースの image) で migrate して起動し、scenario.py seed でデータを作る
+# 2. old を止め、今のコードを go build したものでその DB に migrate up して起動する
+# 3. scenario.py verify で、作ったデータが読めて書き足せることを確かめる
+#
+# どれもホストの 127.0.0.1 に寄せる。今のコードはホストで動かすので、old も同じポートで
+# 待ち受けられるよう network_mode: host にする。使い方は Makefile の upgrade-test。
+name: mk-upgrade
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "127.0.0.1:54314:5432"
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U misskey -d misskey"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56314:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # 前のリリース。版は run.sh が UPGRADE_FROM (HEAD から辿れる最新のリリースのタグ) で渡す。
+  # 既定値は、版を渡さない撤去 (make e2e-down-all など) で compose の読み込みを落とさない
+  # ためのもので、その版の image は無い
+  old:
+    profiles: [old]
+    image: ghcr.io/elythia-network/elythia:${UPGRADE_FROM:-unset}
+    network_mode: host
+    volumes:
+      - ./elythia.yml:/app/.config/default.yml:ro
+    # ドライブのファイルは作業ディレクトリの drive-files に置かれる。image の /app は
+    # 実行するユーザー (991) が書けないので、そのユーザーの tmpfs を置く。ファイルの中身は
+    # 引き継がない (確かめるのは DB の行)
+    tmpfs:
+      - /app/drive-files:uid=991,gid=991

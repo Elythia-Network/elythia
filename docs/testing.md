@@ -17,6 +17,7 @@
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、397 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
 | fuzz | 連合の相手が中身を決める入力を読む関数(署名のヘッダ、公開鍵、JSON-LDの正規化、ActivityPubの型、リモートのHTML、ホスト、ソフトウェアの照合) | 不要(`internal/core/federation`と`mkqdriver`はRedisをtestcontainersで立てる) | `make fuzz` (詳細は[fuzz](#fuzz-4116)) |
+| 前のリリースからの更新 | 前のリリースの image で作った DB を、今のコードで`migrate up`して引き継げるか | PostgreSQL / Redis (compose) + 前の版の image + Elythia バイナリ | `make upgrade-test` (詳細は[前のリリースからの更新](#前のリリースからの更新-4123)) |
 | /api.json から入力を作る検査 | 全エンドポイント (外す一覧を除く) の 5xx・宣言に無い status・宣言の型に合わない応答 | PostgreSQL / Redis (compose) + Elythia バイナリ | `make schemathesis-test` (詳細は[/api.json から入力を作る検査](#apijson-から入力を作る検査-4118)) |
 | fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
 | 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体正本のまま Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態を追加) | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
@@ -440,6 +441,16 @@ nightly 19:00 UTC で `dropin-frontend-e2e` を実行 (`.github/workflows/dropin
 make fuzz                                 # 全部を2分ずつ(FUZZTIMEの既定)
 make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
 ```
+
+## 前のリリースからの更新 (#4123)
+
+前のリリースのimage(`ghcr.io/elythia-network/elythia:<版>`)で作ったDBに、今のコードで`migrate up`して起動し、作ったデータが読めて書き足せるかを確かめる。運営者がリリースのたびに踏む順と同じ。空のDBへの`migrate up`とmigrationの往復のテストでは、前の版が実際に書いた行の上で新しいmigrationとコードが動くかは分からない。
+
+- **`make upgrade-test`で回す。** `tests/upgrade/run.sh`が、DBとRedisを作り直し、前の版のimageで`migrate`して起動し、`scenario.py seed`でデータを作る。前の版を止めて、`go build`した今のコードで`migrate up`して起動し、`scenario.py verify`で確かめる。片付けは`make upgrade-down`
+- **前の版は、HEADから辿れる最新のリリースのタグ(x.y.z。HEADそのものに付いたタグは除く)。** `UPGRADE_FROM=2.0.0`のように渡すと選べる。タグを読むので、`git fetch --tags`が要る
+- **作るデータ:** 利用者3人(管理者を含む)、公開範囲ごとのノート、CW、返信、リノート、フォロー、リアクション、ドライブのファイル(行だけ。ファイルの中身は引き継がない)、クリップ、アンテナ、ロールの割り当て
+- **確かめること:** 前の版のmigrationの後と今のコードの`migrate up`の後の版(`schema_migrations`)を出し、後のほうが最新のmigrationの番号と一致すること(新しいmigrationが無ければ注意を出す)、seedとverifyの相手が前の版と今のビルドであること(`/api/meta`の`mkGoVersion`と`mkGoCommit`)、tokenがそのまま使えること、パスワードでサインインできること、ノートの本文・公開範囲・返信・リノート・数、宛先指定のノートが宛先でない人に伏せられたままであること、フォロー、リアクションの行と数、ドライブのファイルの行、クリップ、アンテナ、ロール、更新した後にノートとリアクションを書き足せてタイムラインに出ること
+- **リリースの前に、`upgrade` workflowを手動で回す**([ci.md](ci.md))。PRでは、サーバーのコードかmigrationを変えたときに回る
 
 ## /api.json から入力を作る検査 (#4118)
 

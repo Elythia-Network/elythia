@@ -1,0 +1,61 @@
+name: Upgrade from the previous release
+
+# 前のリリースの image で作った DB に、今のコードで migrate up して起動し、作ったデータが
+# 読めて書き足せるかを確かめる (#4123)。手順は tests/upgrade/compose.yml の冒頭。
+#
+# - 前の版は、HEAD から辿れる最新のリリースのタグ (x.y.z) を run.sh が選ぶ。タグを読む
+#   ので、checkout は履歴とタグを全部取る
+# - pull_request: サーバーのコードか migration を変えたときに回す。古い行を読むのは
+#   migration とモデルだけでなく、core / entity (JSON の列や enum を読んで pack する側)、
+#   migration を流す仕組み (internal/cli/migrate)、依存 (gorm / pgx) もあるため。
+#   diff-e2e のうちサーバーの側の範囲
+# - workflow_dispatch: リリースの前に回す (docs/testing.md の「前のリリースからの更新」)
+# - **必須にしない** (#3369)。前の版の image を ghcr.io から取るので、外の都合でも落ちうる
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "migration/**"
+      - "internal/**"
+      - "cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "tests/upgrade/**"
+      - ".github/workflows/upgrade.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    # ビルド 3〜5 分、前の版の image の取得、データを作って確かめるのは 1 分ほど
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Upgrade and verify
+        run: make upgrade-test
+
+      - name: Upload logs on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-logs
+          path: tests/upgrade/out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: make upgrade-down >/dev/null 2>&1 || true

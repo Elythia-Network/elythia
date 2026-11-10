@@ -250,6 +250,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `playwright` | PR(paths限定) | | ブラウザのe2e(11 shard)、バックアップのspecを専用のスタックで流す1 job、叩いたAPIの集計 |
 | `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard)、叩いたAPIの集計 |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分、叩いたAPIの集計 |
+| `upgrade` | PR(paths限定) | | 前のリリースのimageで作ったDBを、今のコードで`migrate up`して引き継げるか |
 | `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
 | `build-with-plugins-selftest` | PR(paths限定) | | 運営者向けreusable workflowのビルド |
 | `docker` | `main` / `develop` / tagへのpush、PR | | imageがビルドできるか。PR以外ではimageをpublishする |
@@ -307,6 +308,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-10: 前のリリースで作ったDBを今のコードが引き継げるかを確かめる`upgrade` workflowを足したので、Section 8の表に1行を足した (#4123) → [docs/testing.md](docs/testing.md#前のリリースからの更新-4123)
 - 2026-11-10: `/api.json`から入力を作る検査を毎週回す`schemathesis` workflowを足したので、Section 8の表に1行を足した (#4118) → [docs/testing.md](docs/testing.md#apijson-から入力を作る検査-4118)
 - 2026-11-10: Goのfuzzを毎日回す`fuzz` workflowを足したので、Section 8の表に1行を足した (#4116) → [docs/testing.md](docs/testing.md#fuzz-4116)
 - 2026-11-10: `playwright`に、バックアップのspecをデーモン付きの専用のスタックで流すjob(`spec (Elythia backup/1)`)を足したので、Section 8の行に足した (#4102) → [docs/playwright.md](docs/playwright.md#独自の-api-の応答の照合-4093)
