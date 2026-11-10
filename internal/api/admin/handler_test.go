@@ -3539,7 +3539,8 @@ func TestEmojiUpdate_NotFound(t *testing.T) {
 	emojiRepo := testutil.NewMockEmojiRepository()
 	h.SetEmojiRepo(emojiRepo)
 	rec := doPost(h.EmojiUpdate, `{"id":"ghost","name":"x"}`, nil)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_EMOJI"`)
 }
 
 func TestEmojiUpdate_InvalidParam(t *testing.T) {

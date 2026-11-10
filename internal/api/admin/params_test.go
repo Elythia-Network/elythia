@@ -293,12 +293,12 @@ func TestEmojiList_NonStringCategoryIsIgnored(t *testing.T) {
 // 絵文字が無いので NO_SUCH_EMOJI になる (#3857)。
 func TestEmojiUpdate_IDShapes(t *testing.T) {
 	for body, wantCode := range map[string]int{
-		`{"id":123,"name":"hello","category":"c"}`:     http.StatusNotFound,
-		`{"id":true,"name":"hello","category":"c"}`:    http.StatusNotFound,
-		`{"id":[],"name":"hello","category":"c"}`:      http.StatusNotFound,
-		`{"id":{},"name":"hello","category":"c"}`:      http.StatusNotFound,
-		`{"id":-1,"name":"hello","category":"c"}`:      http.StatusNotFound,
-		`{"id":1e400,"name":"hello","category":"c"}`:   http.StatusNotFound,
+		`{"id":123,"name":"hello","category":"c"}`:     http.StatusBadRequest,
+		`{"id":true,"name":"hello","category":"c"}`:    http.StatusBadRequest,
+		`{"id":[],"name":"hello","category":"c"}`:      http.StatusBadRequest,
+		`{"id":{},"name":"hello","category":"c"}`:      http.StatusBadRequest,
+		`{"id":-1,"name":"hello","category":"c"}`:      http.StatusBadRequest,
+		`{"id":1e400,"name":"hello","category":"c"}`:   http.StatusBadRequest,
 		`{"id":0,"name":"hello","category":"c"}`:       http.StatusNoContent,
 		`{"id":-0,"name":"hello","category":"c"}`:      http.StatusNoContent,
 		`{"id":0.0,"name":"hello","category":"c"}`:     http.StatusNoContent,
@@ -306,7 +306,7 @@ func TestEmojiUpdate_IDShapes(t *testing.T) {
 		`{"id":0e5,"name":"hello","category":"c"}`:     http.StatusNoContent,
 		`{"id":1e-400,"name":"hello","category":"c"}`:  http.StatusNoContent,
 		`{"id":false,"name":"hello","category":"c"}`:   http.StatusNoContent,
-		`{"id":{"a":1},"name":"hello","category":"c"}`: http.StatusNotFound,
+		`{"id":{"a":1},"name":"hello","category":"c"}`: http.StatusBadRequest,
 		`{"id":null,"name":"hello","category":"c"}`:    http.StatusNoContent,
 		`{"id":"","name":"hello","category":"c"}`:      http.StatusNoContent,
 	} {
@@ -314,7 +314,7 @@ func TestEmojiUpdate_IDShapes(t *testing.T) {
 		rec := doPost(h.EmojiUpdate, body, adminUser)
 		require.Equal(t, wantCode, rec.Code, body+": "+rec.Body.String())
 		e := findEmojiByID(t, repo, "e1")
-		if wantCode == http.StatusNotFound {
+		if wantCode == http.StatusBadRequest {
 			assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_EMOJI"`, body)
 			assert.Nil(t, e.Category, body)
 			continue
@@ -333,7 +333,7 @@ func TestEmojiUpdate_LogsRawNonStringID(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "hello"})
 	rec := doPost(h.EmojiUpdate, `{"id":123,"name":"hello"}`, adminUser)
-	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	assert.Contains(t, buf.String(), "rawId=123")
 }
 
