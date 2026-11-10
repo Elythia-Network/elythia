@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
-import { listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from './shard-plan.mjs';
+import { BACKUP_SPEC_DIR, listShardedSpecFiles, listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from './shard-plan.mjs';
 
 // mk-go backend に対する Playwright e2e の設定 (#744)。spec は
 // `specs/upstream/` に 339 ファイル、`specs/elythia/` に 49 ファイル。CI では
@@ -16,10 +16,24 @@ import { listSpecFiles, loadDurations, parseShard, planShards, writesMeta } from
 // 並び順で切るだけで、軽い api の spec と重い ui の spec が別の shard に偏る。
 // 所要時間の記録 (shard-durations.json) から割り振る (shard-plan.mjs)。
 // 指定が無ければ全部を流す。
-const allSpecs = listSpecFiles(__dirname);
+//
+// specs/backup/ は、バックアップのデーモンを付けた専用のスタック (backup-stack/compose.yml、
+// #4102) でだけ流す。復元の確定が DB を入れ替えるので、ほかの spec と同じスタックには
+// 置けない。そのスタックの runner は PLAYWRIGHT_STACK=backup を渡し、shard は切らない。
+// PLAYWRIGHT_STACK=all は、spec を読むゲート (route-coverage.mjs の listTests) が全部を
+// 一覧にするためのもので、流すためのものではない
+const stack = process.env.PLAYWRIGHT_STACK;
+// 綴りを間違えると、黙って通常の spec を全部流してしまう (バックアップのスタックに向けたなら、そこで
+// ほかの spec が走る)
+if (stack !== undefined && !['', 'all', 'backup'].includes(stack)) throw new Error(`PLAYWRIGHT_STACK must be empty, all or backup: ${stack}`);
+const allSpecs = (() => {
+  if (stack === 'all') return listSpecFiles(__dirname);
+  if (stack === 'backup') return listSpecFiles(__dirname).filter((f) => f.startsWith(BACKUP_SPEC_DIR));
+  return listShardedSpecFiles(__dirname);
+})();
 const shardEnv = process.env.PLAYWRIGHT_SHARD;
 const selected = (() => {
-  if (shardEnv === undefined || shardEnv === '') return allSpecs;
+  if (stack === 'backup' || stack === 'all' || shardEnv === undefined || shardEnv === '') return allSpecs;
   const { current, total } = parseShard(shardEnv);
   return planShards(allSpecs, loadDurations(__dirname), total)[current - 1];
 })();

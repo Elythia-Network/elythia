@@ -225,6 +225,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 |---|---|---|
 | `make playwright-up` `playwright-test` `playwright-down` `playwright-logs` | Elythia backend に対する Playwright spec | — |
 | `make playwright-ts-up` `playwright-ts-test` `playwright-ts-down` | 同じ spec を Misskey TS backend に対して実行し、drop-in 互換を担保する | — |
+| `make playwright-backup-up` `playwright-backup-test` `playwright-backup-down` | バックアップの取得・検証・戻す操作の spec を、デーモン付きの専用のスタックで実行する (#4102) | [Playwright e2e](playwright.md#独自の-api-の応答の照合-4093) |
 | `make diff-up` `diff-test` `diff-down` `diff-logs` | Elythia と TS に同一リクエストを投げてレスポンスを値レベルで diff | [差分比較ハーネス](diff-e2e.md) |
 | `make dropin-up` `dropin-test` `dropin-down` `dropin-logs` | TS 2 インスタンスの federation smoke | [Drop-in e2e](dropin-e2e.md) |
 | `make dropin-mk-up` `dropin-mk-test` `dropin-mk-down` `dropin-mk-logs` | 上記の backend を Elythia に差し替えた overlay | 同上 |
@@ -349,7 +350,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_xxx" ON "yyy" ("zzz");
 | `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない) |
-| `spec (Elythia 1/11)` 〜 `11/11` | Playwright | ブラウザからの統合互換。TS backend での実行は `workflow_dispatch` のみ |
+| `spec (Elythia 1/11)` 〜 `11/11`、`spec (Elythia backup/1)` | Playwright | ブラウザからの統合互換。`backup/1` はバックアップの spec を専用のスタックで流す (#4102)。TS backend での実行は `workflow_dispatch` のみ |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | 本家の backend e2e が Elythia に対して通るか |
 | `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか |
 | `swap-test` / `elythia-born` / `ed25519-verify` / `federation` / `federation-mastodon` | Drop-in e2e | 切替・TS へ戻す経路の測定・Ed25519・実連合 (Misskey TS / Mastodon) の 5 シナリオ |

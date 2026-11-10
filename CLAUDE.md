@@ -247,7 +247,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
 | `dropin-e2e` | PR(paths限定) | | TS→mkの切替(往路)、TSへ戻す復路の測定、実Misskey / Mastodonとの連合など5シナリオ |
-| `playwright` | PR(paths限定) | | ブラウザのe2e(11 shard)、叩いたAPIの集計 |
+| `playwright` | PR(paths限定) | | ブラウザのe2e(11 shard)、バックアップのspecを専用のスタックで流す1 job、叩いたAPIの集計 |
 | `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard)、叩いたAPIの集計 |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分、叩いたAPIの集計 |
 | `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
@@ -305,6 +305,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-10: `playwright`に、バックアップのspecをデーモン付きの専用のスタックで流すjob(`spec (Elythia backup/1)`)を足したので、Section 8の行に足した (#4102) → [docs/playwright.md](docs/playwright.md#独自の-api-の応答の照合-4093)
 - 2026-11-07: `make frontend-check`とCIの`frontend`に、管理画面が`admin/update-meta`で書くキーとロールのポリシーのキーが、Playwrightの管理画面の表で確かめられているかの検査を足したので、Section 3とSection 8の行に足した (#4066) → [docs/playwright.md](docs/playwright.md#管理画面の設定とロールのポリシーの表-4066)
 - 2026-11-07: `playwright`のshardを7から11にしたので、Section 8の行を直した (#4056) → [docs/playwright.md](docs/playwright.md#shard-の数)
 - 2026-11-07: `make frontend-check`とCIの`frontend`に、設定のページが`prefer.model`で扱う端末の設定のキーが、Playwrightの設定の表で確かめられているかの検査を足したので、Section 3とSection 8の行に足した (#4056) → [docs/playwright.md](docs/playwright.md#設定の表-4056)

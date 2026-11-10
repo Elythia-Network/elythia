@@ -1,0 +1,89 @@
+# tests/playwright/backup-stack/compose.yml — バックアップの取得・検証・復元 (#4102)
+#
+# 取得・検証・復元の API は、バックアップのデーモン (`elythia backup daemon`) が処理する。
+# 復元の確定は DB の名前を入れ替え、Redis を片付けるので、ほかの spec と共有するスタック
+# (../compose.yml) では流せない。このスタックは specs/backup/ だけを流し、流し終えたら捨てる。
+#
+# 本体・DB・Redis・nginx・runner の定義は ../compose.yml から extends で借りる。overlay に
+# しないのは、overlay は base と同じ project 名 (mk-playwright) になり、手元で base の
+# スタックが動いていると、そのコンテナに合流して作り直すため。
+#
+# 使い方は Makefile の playwright-backup-up / playwright-backup-test / playwright-backup-down。
+name: mk-playwright-backup
+
+services:
+  postgres:
+    extends: {file: ../compose.yml, service: postgres}
+
+  redis:
+    extends: {file: ../compose.yml, service: redis}
+
+  # 保存先に目印のファイルを置き、デーモン (UID 70) が書けるようにする。名前付きの volume は
+  # 空の root の持ち物で作られる。base の ./backup-fixture を使わないのは、取った世代が
+  # 残ると、世代が無いことを確かめる base の admin_backups が落ちるため
+  backup-init:
+    image: postgres:18-alpine
+    user: root
+    entrypoint: ["sh", "-c", "echo 'Playwright のバックアップのスタックの保存先 (#4102)' > /backup/.elythia-backup && chown -R 70:70 /backup"]
+    volumes:
+      - backup-store:/backup
+    networks: [playwright]
+
+  mkgo:
+    extends: {file: ../compose.yml, service: mkgo}
+    volumes:
+      - ./instance.yml:/app/.config/default.yml:ro
+      - backup-store:/backup
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backup-init: {condition: service_completed_successfully}
+
+  backup-daemon:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: backup
+    command: ["daemon", "-config", ".config/default.yml"]
+    # 起動に失敗したことを、spec の取得で分かりにくく落ちる前に、runner の起動で止める
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--header", "Authorization: Bearer playwright-backup-service-token", "http://127.0.0.1:3010/status"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ./instance.yml:/app/.config/default.yml:ro
+      - backup-store:/backup
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backup-init: {condition: service_completed_successfully}
+    networks: [playwright]
+
+  nginx-tls:
+    extends: {file: ../compose.yml, service: nginx-tls}
+    depends_on:
+      mkgo: {condition: service_healthy}
+
+  playwright-runner:
+    extends: {file: ../compose.yml, service: playwright-runner}
+    environment:
+      # playwright.config.ts が specs/backup/ だけを選ぶ
+      PLAYWRIGHT_STACK: backup
+      # spec がデーモンの制御 API (GET /status) を直に読み、取得と検証が終わるのを待つ。
+      # 管理画面の API (admin/backup/list) で待つと、読むたびに再認証のコードを使う
+      BACKUP_DAEMON_URL: http://backup-daemon:3010
+      BACKUP_SERVICE_TOKEN: playwright-backup-service-token
+    # base の depends_on には、このスタックに無い minio-init がある。extends は depends_on を
+    # 継ぐので、丸ごと置き換える
+    depends_on: !override
+      mkgo: {condition: service_healthy}
+      nginx-tls: {condition: service_started}
+      backup-daemon: {condition: service_healthy}
+
+volumes:
+  backup-store:
+
+networks:
+  playwright:
+    driver: bridge

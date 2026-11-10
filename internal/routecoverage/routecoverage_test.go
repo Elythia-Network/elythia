@@ -215,13 +215,16 @@ func TestUncoveredListIsWellFormed(t *testing.T) {
 	rows, malformed := ParseUncovered(UncoveredList())
 	assert.Empty(t, malformed)
 	assert.Empty(t, CheckRows(eps, rows))
-	// 読み口が空振りしていないことを、件数と、本家互換・Elythia独自の両方の行があることで確かめる
+	// 読み口が空振りしていないことを、件数と、本家互換の行があることで確かめる。Elythia独自の
+	// 行は #4102 で無くなったので、行には求めず、分類の側が独自のエンドポイントを拾えている
+	// ことを確かめる (全部が本家互換に分類されると、独自の行が残っていても見分けられない)
 	assert.Greater(t, len(rows), 50)
 	origins := map[Origin]bool{}
 	for _, r := range rows {
 		origins[eps[r.Endpoint]] = true
 	}
-	assert.True(t, origins[Upstream] && origins[Elythia], "uncovered.tsv has rows of one origin only")
+	assert.True(t, origins[Upstream], "uncovered.tsv has no upstream rows")
+	assert.Equal(t, Elythia, eps["admin/backup/take"], "the endpoints do not classify an Elythia endpoint as Elythia")
 }
 
 func TestParseUncovered(t *testing.T) {

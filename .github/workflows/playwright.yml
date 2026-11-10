@@ -44,6 +44,8 @@ on:
       - "tests/playwright/**"
       - "frontend/**"
       - "Makefile"
+      # バックアップの spec の job が、デーモンの image (target backup) をここから作る (#4102)
+      - "Dockerfile"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/playwright.yml"
@@ -151,6 +153,22 @@ jobs:
           # 直積にして渡すのが唯一の方法。
           matrix=$(jq -c -n --argjson bs "$backends" --argjson n "$SHARD_TOTAL" \
             '[$bs[] as $b | range(1; $n + 1) | $b + {shard: ., shard_total: $n}]')
+          # バックアップの取得・検証・復元の spec (specs/backup/) は、デーモンを付けた
+          # 専用のスタックで 1 回だけ流す (#4102)。復元の確定が DB を入れ替えるので、
+          # 上の shard のスタックには置けない。shard の番号の代わりに backup を入れる。
+          # artifact の名前 (アクセスログの mkgo-access-playwright-backup など) が
+          # shard と重ならないようにするため。Elythia の backend でだけ流す。時間の枠を
+          # 広げるのは、デーモンの image (Dockerfile の target backup) も作るため
+          backup=$(jq -c -n --argjson a "$mkgo" '$a + {
+            up_target: "playwright-backup-up",
+            test_target: "playwright-backup-test",
+            down_target: "playwright-backup-down",
+            compose_args: "-f tests/playwright/backup-stack/compose.yml",
+            shard: "backup",
+            shard_total: 1,
+            timeout_minutes: 35
+          }')
+          matrix=$(jq -c -n --argjson m "$matrix" --argjson b "$backup" '$m + [$b]')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "$matrix" | jq .
 

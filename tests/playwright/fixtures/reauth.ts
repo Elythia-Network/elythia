@@ -29,6 +29,13 @@ export interface TotpAdmin {
    * so use it first.
    */
   code(offset: -1 | 1): string;
+  /**
+   * A TOTP code not used yet, for tests that re-authenticate more than twice.
+   * It takes the earliest step the server still accepts (its own and the ones
+   * before and after, skipping the one before when it is about to expire) and
+   * waits for the next step when none is left. Do not mix it with `code`.
+   */
+  nextCode(): Promise<string>;
 }
 
 /**
@@ -58,10 +65,30 @@ export async function totpAdmin(request: APIRequestContext, root: RootFixture, p
   const { secret } = (await registered.json()) as { secret: string };
   const epoch = Date.now();
   expect((await callApi(request, 'i/2fa/done', { i: admin.token, token: authenticator.clone({ epoch }).generate(secret) })).status()).toBe(200);
+  // 使ったコードはサーバーが Redis に覚え、同じ値を断る (internal/core/strongauth の reserve)。
+  // 登録に使った段のコードも使ったものに数える
+  const stepOf = (ms: number) => Math.floor(ms / 1000 / STEP_SECONDS);
+  const used = new Set([stepOf(epoch)]);
+  const nextCode = async (): Promise<string> => {
+    for (;;) {
+      const now = stepOf(Date.now());
+      // 前の段のコードは、段が進むと通らなくなる。届く前に進まないよう、残りが短ければ使わない
+      const left = (now + 1) * STEP_SECONDS * 1000 - Date.now();
+      const candidates = left >= 5_000 ? [now - 1, now, now + 1] : [now, now + 1];
+      const step = candidates.find((s) => !used.has(s));
+      if (step !== undefined) {
+        used.add(step);
+        return authenticator.clone({ epoch: step * STEP_SECONDS * 1000 }).generate(secret);
+      }
+      // 使えるものが無いので、次の段の頭まで待つ。サーバーの時計とずれても次の段に入っているよう、少し後まで待つ
+      await new Promise((resolve) => setTimeout(resolve, left + 500));
+    }
+  };
   return {
     admin,
     roleId,
     password: DEFAULT_TEST_PASSWORD,
     code: (offset) => authenticator.clone({ epoch: epoch + offset * STEP_SECONDS * 1000 }).generate(secret),
+    nextCode,
   };
 }

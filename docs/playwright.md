@@ -20,7 +20,16 @@ make playwright-down    # volume ごと撤去
 make playwright-ts-up
 make playwright-ts-test
 make playwright-ts-down
+
+# バックアップの取得・検証・復元の spec (specs/backup/) を、デーモン付きの専用のスタックで実行 (#4102)
+make playwright-backup-up
+make playwright-backup-test
+make playwright-backup-down   # 流し終えたら必ず捨てる。もう一度流すときも作り直す
 ```
+
+バックアップのスタックは、上の Elythia backend のスタックと同時に流さない。project は分けてあるが、runner は
+同じ `tests/playwright` を mount するので、root の token (`.auth/`) と `test-results/`・`results.json` を
+互いに上書きする。
 
 `make playwright-check` は起動から実行までを一括で行う (クリーン DB 前提)。
 
@@ -79,7 +88,9 @@ spec を `elythia/` へ移したり、文言で取り直したりはしない。
 `workflow_dispatch` で発火する。nightly から PR トリガーへ移行済み (#2291)。
 
 **11 シャード並列** (`PLAYWRIGHT_SHARD=i/11`、`fail-fast: false`)。check 名は
-`spec (Elythia 1/11)` 〜 `11/11`。
+`spec (Elythia 1/11)` 〜 `11/11`。このほかに、バックアップの spec を専用のスタックで流す
+`spec (Elythia backup/1)` が 1 つある ([独自の API の応答の照合](#独自の-api-の応答の照合-4093)の
+バックアップの項目)。
 
 **1 スタックあたりは直列でしか回せない。** 397 spec のうち 194 が共有の root (alice) で
 **ブラウザでサインインした状態**を使い (`uiSigninAsRoot` helper が 184、管理画面の表の helper (`fixtures/admin_table.ts` の
@@ -674,7 +685,8 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
   runner から書き込める。`admin_backup.spec.ts`は世代のファイル (`meta.json`とダンプ) を置き、ダウンロードと
   削除の API を叩く。残すと、世代が無いことを確かめる`admin_backups.spec.ts`が落ちるので、`finally`でも消す。
   再認証 (パスワードと TOTP) が要る口は、`fixtures/reauth.ts`の`totpAdmin`で管理者を作る。各コードは 1 度しか
-  使えないので、1 つのテストで叩けるのは 2 回 (前後の段のコード)
+  使えない。`code(-1)`と`code(1)`で叩けるのは 2 回 (前後の段のコード) で、それより多く叩くテストは
+  `nextCode()`で、まだ使っていないコードを取る (サーバーが受ける 3 つの段を使い切ったら、次の段まで待つ)
 - **パスキーの再認証のチャレンジ (`admin/backup/reauth-challenge`) は、鍵の行を DB に直に入れて叩く。**
   チャレンジを作るときに読むのは鍵の id とデコードできる公開鍵 (どちらも base64url) なので、公開鍵は
   base64url の乱数でよく、ブラウザの認証器で登録しなくてよい
@@ -685,6 +697,23 @@ WCAG 2.1 A / AA の規則で検査し、基準 (`tests/playwright/a11y-baseline.
   ストレージを必ず無効に戻す。保存先のホストは`minio.local`(別名) で指す。ファイルの`url`はこのホストから
   作られ、ajv の`url`書式はドットの無いホストを受けないため。チャンクの大きさの下限は 5MiB (S3 の部分の下限)
   なので、2 つに分かれるファイルは 5MiB を超える。利用者には`canUseChunkedUpload`を許すロールを付ける
+- **バックアップの取得・検証と、画面から戻す操作 (`admin/backup/take`・`verify`・`restore/*`) は、専用のスタックで
+  叩く (#4102)。** 処理するのはバックアップのデーモン (`elythia backup daemon`) で、戻す操作の確定は DB の名前を
+  入れ替え、Redis を片付ける。ほかの spec と同じスタックでは、後に走る spec の前提が壊れる。
+  - `tests/playwright/backup-stack/compose.yml`は、本体・DB・Redis・nginx・runner を`../compose.yml`から
+    `extends`で借り、デーモンを足す。project は`mk-playwright-backup`。overlay にしないのは、overlay は base と同じ
+    project 名になる決まりで (`TestTestComposeFilesAreSelfContained`)、手元で base のスタックが動いていると合流するため
+  - 本体とデーモンは`backup-stack/instance.yml`を読む。定期実行はせず、取った後の検証も自動では流さない
+    (spec が`verify`を叩く)。保存先は名前付きの volume で、base の`backup-fixture`とは分ける
+  - runner は`PLAYWRIGHT_STACK=backup`を渡し、`playwright.config.ts`は`specs/backup/`だけを選ぶ (shard は
+    切らない)。渡さないときは`specs/backup/`を外す。所要時間の記録 (`shard-plan.mjs`の`update`と`show`) も
+    `specs/backup/`を数えない。spec を読むゲート (`route-coverage.mjs`の`listTests`) は`PLAYWRIGHT_STACK=all`で
+    全部を一覧にし、`specs/backup/`の`test.only`も落とす
+  - 取得と検証は非同期なので、終わるのをデーモンの制御 API (`GET /status`) で待つ。管理画面の`admin/backup/list`
+    で待つと、読むたびに再認証のコードを使うため
+  - `backup_restore.spec.ts`は、取得 → 検証 → 退避した DB の一覧 → 準備して中止 → 準備して切り替え → 一覧、の順に
+    叩く。取得の前に作ったノートが残り、取得の後に作ったノートが消えることで、切り替えが取得の時点の DB に
+    入れ替えたことを確かめる。流し直すと前の操作が残っていて通らないので、retry しない
 
 ## spec を書くときの注意
 
