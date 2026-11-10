@@ -1682,6 +1682,25 @@ func TestUpdateMeta_UpdateError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// rejectingUpdateMetaRepo fails Update with a value PostgreSQL refused.
+type rejectingUpdateMetaRepo struct {
+	*testutil.MockMetaRepository
+}
+
+func (f *rejectingUpdateMetaRepo) Update(_ map[string]any) error { return errRejectedValue }
+
+// 利用者の値を DB が断ったとき (長すぎる name など) は、500 ではなく 400 にする (#4120)。
+func TestUpdateMeta_RejectedValueIs400(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	metaRepo := &rejectingUpdateMetaRepo{testutil.NewMockMetaRepository()}
+	metaRepo.Meta = &model.Meta{ID: "x"}
+	idGen, _ := id.NewGenerator("aidx")
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), nil, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	rec := doPost(h.UpdateMeta, `{"name":"test"}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
 func TestAccountsCreate_SignupInternalError(t *testing.T) {
 	// User作成で失敗するrepoを使ってINTERNAL_ERRORパスをテスト
 	repo := &failingUpdateUserRepo{testutil.NewMockUserRepository()}
@@ -2496,6 +2515,63 @@ type failingCreateRoleRepo struct {
 }
 
 func (f *failingCreateRoleRepo) Create(_ *model.Role) error { return assert.AnError }
+
+// rejectingCreateRoleRepo fails Create with a value PostgreSQL refused.
+type rejectingCreateRoleRepo struct {
+	*testutil.MockRoleRepository
+}
+
+func (f *rejectingCreateRoleRepo) Create(_ *model.Role) error { return errRejectedValue }
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestRolesCreate_RejectedValueIs400(t *testing.T) {
+	rejectRepo := &rejectingCreateRoleRepo{testutil.NewMockRoleRepository()}
+	assignRepo := testutil.NewMockRoleAssignmentRepository(rejectRepo.MockRoleRepository)
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
+	idGen, _ := id.NewGenerator("aidx")
+	roleSvc := role.NewService(rejectRepo, assignRepo, metaRepo, idGen)
+	userRepo := testutil.NewMockUserRepository()
+	h := apiadmin.NewHandler(signup.NewService(userRepo, metaRepo, idGen, nil, nil, nil), roleSvc, metaRepo, userRepo, idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	rec := doPost(h.RolesCreate, fullRoleCreatePayload, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
+// update も create と同じく 400 にする (#4120)。
+func TestRolesUpdate_RejectedValueIs400(t *testing.T) {
+	existing := &model.Role{ID: "r1", Name: "old"}
+	base := testutil.NewMockRoleRepository()
+	base.Roles[existing.ID] = existing
+	repo := &adminRoleRepository{RoleRepository: base, lookups: []adminRoleLookup{{role: existing}}, updateErr: errRejectedValue}
+	h, _, _ := adminHandlerWithRoleRepository(t, repo, base)
+	rec := doPost(h.RolesUpdate, `{"roleId":"r1","name":"new"}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
+// displayOrder は int4 の列なので、範囲外は保存に進まず 400 にする (#4120)。
+// 以前は pgx が送る前に落とし、500 になっていた
+func TestRolesCreateAndUpdate_DisplayOrderOutsideInt4(t *testing.T) {
+	for _, order := range []string{"2147483648", "-2147483649"} {
+		h, _, _, roleRepo := newTestHandler(t)
+		body := strings.Replace(fullRoleCreatePayload, `"displayOrder": 0`, `"displayOrder": `+order, 1)
+		require.NotEqual(t, fullRoleCreatePayload, body)
+		rec := doPost(h.RolesCreate, body, nil)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, order)
+		assert.Empty(t, roleRepo.Roles, order)
+
+		roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "old"}
+		rec = doPost(h.RolesUpdate, `{"roleId":"r1","displayOrder":`+order+`}`, nil)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, order)
+		assert.Equal(t, 0, roleRepo.Roles["r1"].DisplayOrder, order)
+	}
+	h, _, _, roleRepo := newTestHandler(t)
+	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "old"}
+	rec := doPost(h.RolesUpdate, `{"roleId":"r1","displayOrder":2147483647}`, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.Equal(t, 2147483647, roleRepo.Roles["r1"].DisplayOrder)
+}
 
 func TestRolesAssign_InternalError(t *testing.T) {
 	// Exists がエラーになるケースをテスト

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -72,6 +73,24 @@ func TestUpdateUserNote(t *testing.T) {
 		got := repo.Profiles["u1"]
 		require.NotNil(t, got.ModerationNote)
 		assert.Equal(t, "naughty user", *got.ModerationNote)
+	})
+	// 以前は書き込みの失敗を握りつぶして 204 を返し、保存していないのに成功と
+	// 答えていた (#4120)。DB が断る値 (長すぎる text など) は 400、それ以外は 500
+	t.Run("rejected value returns 400 INVALID_PARAM", func(t *testing.T) {
+		h, repo, _, _ := newTestHandler(t)
+		repo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
+		repo.UpdateProfileErr = errRejectedValue
+		rec := doPost(h.UpdateUserNote, `{"userId":"u1","text":"x"}`, adminUser)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+	})
+	t.Run("other write failure returns 500", func(t *testing.T) {
+		h, repo, _, _ := newTestHandler(t)
+		repo.Profiles["u1"] = &model.UserProfile{UserID: "u1"}
+		repo.UpdateProfileErr = assertError{}
+		rec := doPost(h.UpdateUserNote, `{"userId":"u1","text":"x"}`, adminUser)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"code":"INTERNAL_ERROR"`)
 	})
 }
 
@@ -147,6 +166,25 @@ func TestUpdateAbuseUserReport_UpdateFailureIs500(t *testing.T) {
 
 	rec := doPost(h.UpdateAbuseUserReport, `{"reportId":"r1","moderationNote":"x"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// rejectingAbuseUpdateRepo fails UpdateFields with a value PostgreSQL refused.
+type rejectingAbuseUpdateRepo struct {
+	*testutil.MockAbuseReportRepository
+}
+
+func (r *rejectingAbuseUpdateRepo) UpdateFields(string, map[string]any) error {
+	return errRejectedValue
+}
+
+// DB が断る値 (長すぎる moderationNote など) は、障害ではないので 400 にする (#4120)。
+func TestUpdateAbuseUserReport_RejectedValueIs400(t *testing.T) {
+	h, inner := setupAbuseReportHandler(t, &model.AbuseUserReport{ID: "r1"})
+	h.SetAbuseRepo(&rejectingAbuseUpdateRepo{MockAbuseReportRepository: inner})
+
+	rec := doPost(h.UpdateAbuseUserReport, `{"reportId":"r1","moderationNote":"x"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // updateAbuseReportNote の log info に before/after が記録される。

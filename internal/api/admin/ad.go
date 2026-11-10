@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"math"
 	"net/http"
 	"time"
 
@@ -40,6 +41,9 @@ func (h *Handler) AdCreate(c echo.Context) error {
 	if !jsdate.ValidMillis(int64(req.StartsAt)) || !jsdate.ValidMillis(int64(req.ExpiresAt)) {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
 	}
+	if !fitsInt4(req.Ratio) || !fitsInt4(req.DayOfWeek) {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
 	if req.Place == "" {
 		req.Place = "square"
 	}
@@ -63,6 +67,9 @@ func (h *Handler) AdCreate(c echo.Context) error {
 		ExpiresAt:   millisOrDefault(int64(req.ExpiresAt), time.Now().Add(30*24*time.Hour)),
 	}
 	if err := h.adRepo.Create(ad); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	h.invalidateMetaResponseCache()
@@ -231,6 +238,9 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 	if req.Priority != nil {
 		fields["priority"] = *req.Priority
 	}
+	if (req.Ratio != nil && !fitsInt4(*req.Ratio)) || (req.DayOfWeek != nil && !fitsInt4(*req.DayOfWeek)) {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
 	if req.Ratio != nil {
 		fields["ratio"] = int(*req.Ratio)
 	}
@@ -253,6 +263,9 @@ func (h *Handler) AdUpdate(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	if err := h.adRepo.UpdateFields(req.ID, fields); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	h.invalidateMetaResponseCache()
@@ -282,4 +295,14 @@ func millisOrDefault(ms int64, def time.Time) time.Time {
 		return def
 	}
 	return time.UnixMilli(ms)
+}
+
+// fitsInt4 reports whether n fits an int4 column (ad.ratio, ad.dayOfWeek,
+// role.displayOrder).
+//
+// 本家の宣言は integer だけで範囲を持たず、範囲外の値は DB のエラーで 500 になる。
+// pgx は送る前に落とすので、PostgreSQL のエラー (repository.IsRejectedValue) にも
+// ならない。ここで 400 にする (#4120)
+func fitsInt4(n jsnum.Int) bool {
+	return n >= math.MinInt32 && n <= math.MaxInt32
 }

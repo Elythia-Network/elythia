@@ -2,6 +2,8 @@ package announcements_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +14,10 @@ import (
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -704,6 +708,24 @@ func TestAdminCreate_Error(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// rejectingCreateAnnouncementRepo fails Create with a value PostgreSQL refused.
+type rejectingCreateAnnouncementRepo struct {
+	*testutil.MockAnnouncementRepository
+}
+
+func (f *rejectingCreateAnnouncementRepo) Create(_ *model.Announcement) error {
+	return fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})
+}
+
+// 利用者の値を DB が断ったとき (長すぎる本文など) は、500 ではなく 400 にする (#4120)。
+func TestAdminCreate_RejectedValueIs400(t *testing.T) {
+	idGen, _ := id.NewGenerator("aidx")
+	h := announcements.NewHandler(&rejectingCreateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
+	rec := doPost(h.AdminCreate, `{"title":"x","text":"y","imageUrl":null}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
 type failingMarkReadRepo struct {
 	*testutil.MockAnnouncementRepository
 }
@@ -718,11 +740,49 @@ func (f *failingUpdateAnnouncementRepo) UpdateFields(_ string, _ map[string]any)
 	return assert.AnError
 }
 
-func TestAdminUpdate_Error(t *testing.T) {
+// 行が無い id は、書き込みの前の引き当てで NO_SUCH_ANNOUNCEMENT になる (UpdateFields は
+// 呼ばれない。書き込みの失敗は TestAdminUpdate_UpdateFieldsErrors)。
+func TestAdminUpdate_MissingRowIsNoSuchAnnouncement(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	h := announcements.NewHandler(&failingUpdateAnnouncementRepo{testutil.NewMockAnnouncementRepository()}, idGen, nil)
 	rec := doPost(h.AdminUpdate, `{"id":"x","title":"y"}`, nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_ANNOUNCEMENT"`)
+}
+
+// erroringUpdateAnnouncementRepo fails UpdateFields with err after the
+// handler's lookup found the row.
+type erroringUpdateAnnouncementRepo struct {
+	*testutil.MockAnnouncementRepository
+	err error
+}
+
+func (r *erroringUpdateAnnouncementRepo) UpdateFields(string, map[string]any) error { return r.err }
+
+// 更新の失敗は原因ごとに分けて返す (#4120)。以前はどれも NO_SUCH_ANNOUNCEMENT で、
+// 長すぎる title や DB の障害まで「無い」と答えていた。行は先に引けるようにしておき、
+// UpdateFields の失敗だけを見る
+func TestAdminUpdate_UpdateFieldsErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantBody string
+	}{
+		{"rejected value", fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"}), http.StatusBadRequest, `"code":"INVALID_PARAM"`},
+		{"not found", fmt.Errorf("wrap: %w", repository.ErrNotFound), http.StatusBadRequest, `"code":"NO_SUCH_ANNOUNCEMENT"`},
+		{"other failure", errors.New("boom"), http.StatusInternalServerError, `"code":"INTERNAL_ERROR"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			idGen, _ := id.NewGenerator("aidx")
+			repo := &erroringUpdateAnnouncementRepo{testutil.NewMockAnnouncementRepository(), tc.err}
+			repo.Items["x"] = &model.Announcement{ID: "x", Title: "t", Text: "x"}
+			h := announcements.NewHandler(repo, idGen, nil)
+			rec := doPost(h.AdminUpdate, `{"id":"x","title":"y"}`, nil)
+			assert.Equal(t, tc.wantCode, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), tc.wantBody)
+		})
+	}
 }
 
 type failingDeleteAnnouncementRepo struct {

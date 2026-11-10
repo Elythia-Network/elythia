@@ -114,6 +114,9 @@ func (h *Handler) Register(c echo.Context) error {
 		SendReadMessage: req.SendReadMessage,
 	}
 	if err := h.repo.Create(sub); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	// 配送側は購読の一覧を memory 3 分 / Redis 1 時間 cache するので、落とさないと

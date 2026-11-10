@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -144,9 +146,15 @@ func TestCreate_EmptyTitleAndScriptAccepted(t *testing.T) {
 // failingFlashRepo causes Create to fail.
 type failingFlashRepo struct {
 	*testutil.MockFlashRepository
+	err error
 }
 
-func (r *failingFlashRepo) Create(_ *model.Flash) error { return errors.New("boom") }
+func (r *failingFlashRepo) Create(_ *model.Flash) error {
+	if r.err != nil {
+		return r.err
+	}
+	return errors.New("boom")
+}
 
 func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockFlashRepository()
@@ -158,6 +166,19 @@ func TestCreate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎるスクリプトなど) は、500 ではなく 400 にする (#4120)。
+func TestCreate_RejectedValueIs400(t *testing.T) {
+	repo := &failingFlashRepo{MockFlashRepository: testutil.NewMockFlashRepository(), err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
+	h := NewHandler(svc, nil, nil, nil)
+	c, rec := newReq(t, `{"title":"t","summary":"s","script":"x","permissions":[]}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Show ------------------------------------------------------------------
@@ -243,9 +264,13 @@ func TestUpdate_TitleEmpty(t *testing.T) {
 // failingUpdateRepo causes UpdateFields to fail.
 type failingUpdateRepo struct {
 	*testutil.MockFlashRepository
+	err error
 }
 
 func (r *failingUpdateRepo) UpdateFields(_ string, _ map[string]any) error {
+	if r.err != nil {
+		return r.err
+	}
 	return errors.New("boom")
 }
 
@@ -260,6 +285,21 @@ func TestUpdate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestUpdate_RejectedValueIs400(t *testing.T) {
+	mock := testutil.NewMockFlashRepository()
+	mock.Flashes["f1"] = &model.Flash{ID: "f1", UserID: "alice"}
+	repo := &failingUpdateRepo{MockFlashRepository: mock, err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coreflash.NewService(repo, testutil.NewMockFlashLikeRepository(), idGen)
+	h := NewHandler(svc, nil, nil, nil)
+	c, rec := newReq(t, `{"flashId":"f1","title":"x"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Delete ----------------------------------------------------------------

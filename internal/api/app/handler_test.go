@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -209,6 +211,16 @@ func TestCreate_DBError(t *testing.T) {
 
 	rec := post(h.Create, `{"name":"App","description":"d","permission":["read:account"]}`, nil)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestCreate_RejectedValueIs400(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.createErr = fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})
+
+	rec := post(h.Create, `{"name":"App","description":"d","permission":["read:account"]}`, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Show ---

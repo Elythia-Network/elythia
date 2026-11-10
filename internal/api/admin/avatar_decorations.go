@@ -39,6 +39,9 @@ func (h *Handler) AvatarDecorationsCreate(c echo.Context) error {
 		Category:    req.Category,
 	}
 	if err := h.avatarDecoRepo.Create(d); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	// entity 側の catalog cache (30s TTL) を落とす。これが無いと作成直後に
@@ -191,6 +194,9 @@ func (h *Handler) AvatarDecorationsUpdate(c echo.Context) error {
 		fields["category"] = *req.Category
 	}
 	if err := h.avatarDecoRepo.UpdateFields(req.ID, fields); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	h.invalidateAvatarDecorationCache()

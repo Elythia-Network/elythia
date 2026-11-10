@@ -359,6 +359,9 @@ func (h *Handler) AdminCreate(c echo.Context) error {
 		a.NeedConfirmationToRead = *req.NeedConfirmationToRead
 	}
 	if err := h.repo.Create(a); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	h.scheduleArchive(c, a)
@@ -528,7 +531,15 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 	}
 	beforeActive := before.IsActive
 	if err := h.repo.UpdateFields(req.ID, fields); err != nil {
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ANNOUNCEMENT", "No such announcement.", "d3aae5a7-6372-4cb4-b61c-f511ffc2d7cc"))
+		// 以前は、どの失敗も NO_SUCH_ANNOUNCEMENT にしていた。長すぎる title や DB の
+		// 障害まで「無い」と答えるので、分けて返す (#4120)
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
+		if repository.IsNotFound(err) {
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_ANNOUNCEMENT", "No such announcement.", "d3aae5a7-6372-4cb4-b61c-f511ffc2d7cc"))
+		}
+		return apierr.JSONInternalError(c)
 	}
 	after, err := h.repo.FindByID(req.ID)
 	if err != nil {

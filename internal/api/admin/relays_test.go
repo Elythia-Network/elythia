@@ -66,6 +66,15 @@ func TestRelaysAdd_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// 利用者の値を DB が断ったとき (長すぎる inbox など) は、500 ではなく 400 にする (#4120)。
+func TestRelaysAdd_RejectedValueIs400(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	h.SetRelayService(&fakeRelaySvc{err: errRejectedValue})
+	rec := doPost(h.RelaysAdd, `{"inbox":"https://r.example/inbox"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
 func TestRelaysList(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	assert.Equal(t, http.StatusOK, doPost(h.RelaysList, `{}`, adminUser).Code)

@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -574,6 +576,17 @@ func TestGenToken_CreateError(t *testing.T) {
 
 	rec := post(h.GenToken, `{"permission":["read:account"]}`, user)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestGenToken_RejectedValueIs400(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.createErr = fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})
+	user := &model.User{ID: "u1", Username: "testuser"}
+
+	rec := post(h.GenToken, `{"permission":["read:account"]}`, user)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- MiAuthCheck (#1224) ---

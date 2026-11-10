@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 )
@@ -33,6 +34,9 @@ func (h *Handler) RelaysAdd(c echo.Context) error {
 	if h.relayService != nil {
 		rel, err := h.relayService.Add(c.Request().Context(), req.Inbox)
 		if err != nil {
+			if repository.IsRejectedValue(err) {
+				return apierr.JSONInvalidParam(c)
+			}
 			return apierr.JSONInternalError(c)
 		}
 		return c.JSON(http.StatusOK, rel)

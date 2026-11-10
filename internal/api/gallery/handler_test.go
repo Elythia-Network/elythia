@@ -3,6 +3,7 @@ package gallery_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -381,6 +382,54 @@ func TestPostsCreate_DBError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, doPost(brokenHandler().PostsCreate, `{"title":"x","fileIds":["galf_x"]}`, &model.User{ID: "u1"}).Code)
 }
 
+// writeFailingHandler returns a handler whose DB fails every create or update
+// (op is "create" or "update") with a generic error, while reads still work.
+//
+// 書き込みだけを失敗させるため、別の接続を開き、その接続にだけ callback を足す。
+// testDB の callback は他のテストと共有なので触らない
+func writeFailingHandler(t *testing.T, op string) *gallery.Handler {
+	t.Helper()
+	db := testutil.MustOpenTestDB()
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	fail := func(tx *gorm.DB) { _ = tx.AddError(errors.New("boom")) }
+	switch op {
+	case "create":
+		require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:fail_create", fail))
+	case "update":
+		require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:fail_update", fail))
+	default:
+		t.Fatalf("unknown op %q", op)
+	}
+	return gallery.NewHandler(db, testIDGen, nil)
+}
+
+// 長すぎる title は DB が断る (varchar(256))。500 ではなく 400 にし、行は作らない (#4120)。
+func TestPostsCreate_TooLongTitleIs400(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedDriveFile(t, "galf_long", "gal_u1")
+	body := `{"title":"` + strings.Repeat("a", 257) + `","fileIds":["galf_long"]}`
+	rec := doPost(newHandler().PostsCreate, body, &model.User{ID: "gal_u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+	var n int64
+	require.NoError(t, testDB.Model(&model.GalleryPost{}).Count(&n).Error)
+	assert.Zero(t, n)
+}
+
+// 書き込みが利用者の値以外の理由で失敗したら 500 にする。
+func TestPostsCreate_WriteError(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedDriveFile(t, "galf_werr", "gal_u1")
+	rec := doPost(writeFailingHandler(t, "create").PostsCreate, `{"title":"x","fileIds":["galf_werr"]}`, &model.User{ID: "gal_u1"})
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+}
+
 // --- Show ---
 
 func TestPostsShow_Found(t *testing.T) {
@@ -545,6 +594,31 @@ func TestPostsUpdate_FileIdsAndSensitive(t *testing.T) {
 
 func TestPostsUpdate_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, doPost(newHandler().PostsUpdate, `{"postId":"ghost","title":"x"}`, &model.User{ID: "u1"}).Code)
+}
+
+// 自分の投稿でも、長すぎる title は DB が断る。以前は書き込みの失敗を見ずに
+// NO_SUCH_POST と答えていた。400 INVALID_PARAM にし、行は変えない (#4120)
+func TestPostsUpdate_TooLongTitleIs400(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedPost(t, &model.GalleryPost{ID: "gp_long", UpdatedAt: time.Now(), Title: "Old", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	body := `{"postId":"gp_long","title":"` + strings.Repeat("a", 257) + `"}`
+	rec := doPost(newHandler().PostsUpdate, body, &model.User{ID: "gal_u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+	var got model.GalleryPost
+	require.NoError(t, testDB.First(&got, "id = ?", "gp_long").Error)
+	assert.Equal(t, "Old", got.Title)
+}
+
+// 書き込みが利用者の値以外の理由で失敗したら、NO_SUCH_POST ではなく 500 にする (#4120)。
+func TestPostsUpdate_WriteError(t *testing.T) {
+	cleanup()
+	defer cleanup()
+	seedPost(t, &model.GalleryPost{ID: "gp_werr", UpdatedAt: time.Now(), Title: "Old", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
+	rec := doPost(writeFailingHandler(t, "update").PostsUpdate, `{"postId":"gp_werr","title":"New"}`, &model.User{ID: "gal_u1"})
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"code":"INTERNAL_ERROR"`)
 }
 
 func TestPostsUpdate_InvalidParam(t *testing.T) {

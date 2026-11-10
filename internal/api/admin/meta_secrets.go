@@ -270,6 +270,10 @@ func (h *Handler) writeCheckedUpdateError(c echo.Context, fields map[string]any,
 	if errors.As(err, &re) {
 		return secretReentryRequired(c, re.field)
 	}
+	// 長すぎる name などは、DB が断る利用者の値なので 400 にする (#4120)
+	if repository.IsRejectedValue(err) {
+		return apierr.JSONInvalidParam(c)
+	}
 	slog.Error("admin: writing meta failed", "path", c.Path(), "fields", fieldKeys(fields), "err", err)
 	return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 }

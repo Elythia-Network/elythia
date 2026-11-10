@@ -3,6 +3,7 @@ package pages
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,9 +176,15 @@ func TestCreate_NameConflict(t *testing.T) {
 // failingPageRepo causes Create to fail.
 type failingPageRepo struct {
 	*testutil.MockPageRepository
+	err error
 }
 
-func (r *failingPageRepo) Create(_ *model.Page) error { return errors.New("boom") }
+func (r *failingPageRepo) Create(_ *model.Page) error {
+	if r.err != nil {
+		return r.err
+	}
+	return errors.New("boom")
+}
 
 func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockPageRepository()
@@ -188,6 +196,19 @@ func TestCreate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる title など) は、500 ではなく 400 にする (#4120)。
+func TestCreate_RejectedValueIs400(t *testing.T) {
+	repo := &failingPageRepo{MockPageRepository: testutil.NewMockPageRepository(), err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
+	c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[]}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Show ------------------------------------------------------------------
@@ -405,9 +426,13 @@ func TestUpdate_NameConflict(t *testing.T) {
 // failingUpdateRepo causes UpdateFields to fail.
 type failingUpdateRepo struct {
 	*testutil.MockPageRepository
+	err error
 }
 
 func (r *failingUpdateRepo) UpdateFields(_ string, _ map[string]any) error {
+	if r.err != nil {
+		return r.err
+	}
 	return errors.New("boom")
 }
 
@@ -422,6 +447,21 @@ func TestUpdate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// update も create と同じく 400 にする (#4120)。
+func TestUpdate_RejectedValueIs400(t *testing.T) {
+	mock := testutil.NewMockPageRepository()
+	mock.Pages["p1"] = &model.Page{ID: "p1", UserID: "alice"}
+	repo := &failingUpdateRepo{MockPageRepository: mock, err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := corepage.NewService(repo, testutil.NewMockPageLikeRepository(), idGen)
+	h := NewHandler(svc, idGen, nil, nil, nil)
+	c, rec := newReq(t, `{"pageId":"p1","title":"x"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Delete ----------------------------------------------------------------

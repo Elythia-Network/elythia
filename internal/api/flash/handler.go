@@ -96,6 +96,9 @@ func (h *Handler) Create(c echo.Context) error {
 		Visibility:  req.Visibility,
 	})
 	if err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return apierr.JSONInternalError(c)
 	}
 	return c.JSON(http.StatusOK, h.flashWithKnownUser(f, user))
@@ -168,6 +171,9 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FLASH", "No such flash.", "611e13d2-309e-419a-a5e4-e0422da39b02"))
 		case errors.Is(err, coreflash.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "08e60c88-5948-478e-a132-02ec701d67b2"))
+		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
 		}
 		return apierr.JSONInternalError(c)
 	}

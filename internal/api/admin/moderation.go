@@ -87,7 +87,12 @@ func (h *Handler) UpdateUserNote(c echo.Context) error {
 		before = *profile.ModerationNote
 	}
 	if err := h.userRepo.UpdateProfile(req.UserID, map[string]any{"moderationNote": req.Text}); err != nil {
-		return c.NoContent(http.StatusNoContent)
+		// 以前は失敗を握りつぶして 204 を返し、保存されていないのに成功と答えていた
+		// (#4120)。長すぎる text などは 400、それ以外は本家と同じく 500
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
+		return apierr.JSONInternalError(c)
 	}
 	target, err := h.userRepo.FindByID(req.UserID)
 	if err != nil || target == nil {
@@ -142,7 +147,11 @@ func (h *Handler) UpdateAbuseUserReport(c echo.Context) error {
 	beforeNote := before.ModerationNote
 	logRow := abuseReportLogRow(before)
 	if err := h.abuseRepo.UpdateFields(req.ReportID, map[string]any{"moderationNote": note}); err != nil {
-		// 行があることは引いて確かめ済みなので、ここで失敗するのは DB の障害 (#2792)。
+		// 行があることは引いて確かめ済みなので、ここで失敗するのは DB の障害 (#2792) か、
+		// 長すぎる moderationNote のように DB が断る値 (#4120)。
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	// 変化があったときのみ updateAbuseReportNote を記録 (upstream と同じ)。

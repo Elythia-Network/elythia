@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -224,6 +225,9 @@ func (h *Handler) PostsCreate(c echo.Context) error {
 		Tags:        []string{},
 	}
 	if err := h.db.Create(post).Error; err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 	post.User = user
@@ -382,6 +386,13 @@ func (h *Handler) PostsUpdate(c echo.Context) error {
 		fields["fileIds"] = model.StringArray(owned)
 	}
 	result := h.db.Model(&model.GalleryPost{}).Where("id = ? AND \"userId\" = ?", req.PostID, user.ID).Updates(fields)
+	// 書き込みの失敗を先に見る。以前は見ずに、長すぎる title なども NO_SUCH_POST と答えていた (#4120)
+	if err := result.Error; err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
+		return apierr.JSONInternalError(c)
+	}
 	if result.RowsAffected == 0 {
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_POST", "No such post.", "1137bf14-c27b-46e0-86d3-0cbbf8b0aca5"))
 	}
