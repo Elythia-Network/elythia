@@ -82,3 +82,18 @@ func TestNormalizeGateHost_MappedSpellingsMatchBlockedHosts(t *testing.T) {
 		assert.True(t, instance.HostMatchesAny(blocked, federation.NormalizeGateHost(u)), u)
 	}
 }
+
+// 角括弧の無い IPv6 のように、コロンを含むのに IP のリテラルでないホストは、ホスト無しと
+// して扱う。以前は `[:]:0` を返し、URL として読み直すと空になった (#4116 の fuzz)。
+// この形はスキームの無い入力でしか届かない。スキームの付いた URL は url.Parse が
+// 先に断る (Go 1.27 の url.Parse は角括弧の中を netip.ParseAddr で確かめ、角括弧の
+// 無いコロンはポートとして読んで断る。Go を上げたら下の 2 つで確かめ直す) ので、配送や受信の inbox・actor の値は変わらない (下の 2 つ)。本物の IPv6 の
+// リテラルは角括弧付きで返す
+func TestNormalizeGateHost_ColonHostThatIsNotAnIP(t *testing.T) {
+	assert.Equal(t, "", federation.NormalizeGateHost("//::0"))
+	assert.Equal(t, "", federation.NormalizeGateHost("//a:b:c/"))
+	assert.Equal(t, "", federation.NormalizeGateHost("https://[a:b]/inbox"))
+	assert.Equal(t, "", federation.NormalizeGateHost("https://::0/inbox"))
+	assert.Equal(t, "[::1]:8443", federation.NormalizeGateHost("https://[::1]:8443/inbox"))
+	assert.Equal(t, "[fe80::1%en0]", federation.NormalizeGateHost("https://[fe80::1%25en0]/"))
+}
