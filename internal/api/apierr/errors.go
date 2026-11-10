@@ -152,6 +152,10 @@ const (
 	// upstream に揃え直す (#729)。
 	UUIDNoSuchEmoji = "684dec9d-a8c2-4364-9aa8-456c49cb1dc8"
 
+	// UUIDNoSuchRecipient は upstream `admin/abuse-report/notification-recipient/show`
+	// の `noSuchRecipient` UUID (show.ts:31)。update でも同じものを返す (#4122)。
+	UUIDNoSuchRecipient = "013de6a8-f757-04cb-4d73-cc2a7e3368e4"
+
 	// UUIDs for notes/create errors (packages/backend/src/.../endpoints/notes/create.ts).
 	UUIDNoSuchRenoteTarget                                         = "b5c90186-4ab0-49c8-9bba-a1f76c282ba4"
 	UUIDCannotRenoteToAPureRenote                                  = "fd4cc33e-2a37-48dd-99cc-9b806eb2031a"
@@ -325,18 +329,26 @@ func NoSuchUser() map[string]any {
 	return Error("NO_SUCH_USER", "No such user.", UUIDNoSuchUser)
 }
 
-// NoSuchEmoji returns a 404 NO_SUCH_EMOJI error response (#729). upstream
+// NoSuchEmoji returns the NO_SUCH_EMOJI error body (#729), served with HTTP
+// 400 like upstream (#4122). upstream
 // `admin/emoji/update.ts` / `admin/emoji/copy.ts` の noSuchEmoji と code /
 // id / message を完全一致させる。
 func NoSuchEmoji() map[string]any {
 	return Error("NO_SUCH_EMOJI", "No such emoji.", UUIDNoSuchEmoji)
 }
 
-// NoSuchNoteDraft returns a 404 NO_SUCH_NOTE_DRAFT error response (#688 /
-// #673 Phase B). upstream `notes/drafts/{update,delete}` と code / id /
+// NoSuchNoteDraft returns the NO_SUCH_NOTE_DRAFT error body (#688 / #673
+// Phase B). Callers serve it with HTTP 400 like upstream (#4122). upstream `notes/drafts/{update,delete}` と code / id /
 // message を完全一致させる。
 func NoSuchNoteDraft() map[string]any {
 	return Error("NO_SUCH_NOTE_DRAFT", "No such note draft.", UUIDNoSuchNoteDraft)
+}
+
+// NoSuchRecipient returns the NO_SUCH_RECIPIENT error body of upstream
+// admin/abuse-report/notification-recipient/show (kind server, served with
+// HTTP 404). update returns it too, where upstream answers 500 (#4122).
+func NoSuchRecipient() map[string]any {
+	return ErrorWithKind("NO_SUCH_RECIPIENT", "No such recipient.", UUIDNoSuchRecipient, KindServer)
 }
 
 // AccessDenied returns a 403 ACCESS_DENIED error response with the

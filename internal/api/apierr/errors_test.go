@@ -160,6 +160,16 @@ func TestNoSuchEmoji(t *testing.T) {
 	assert.Equal(t, "No such emoji.", errObj["message"])
 }
 
+func TestNoSuchRecipient(t *testing.T) {
+	// #4122: upstream admin/abuse-report/notification-recipient/show.ts 互換。
+	assert.Equal(t, map[string]any{"error": map[string]any{
+		"message": "No such recipient.",
+		"code":    "NO_SUCH_RECIPIENT",
+		"id":      "013de6a8-f757-04cb-4d73-cc2a7e3368e4",
+		"kind":    "server",
+	}}, NoSuchRecipient())
+}
+
 func TestAccessDenied(t *testing.T) {
 	result := AccessDenied()
 	errObj := result["error"].(map[string]any)
