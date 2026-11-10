@@ -219,7 +219,7 @@ func recipientMatchesMethod(r *model.AbuseReportNotificationRecipient, methodSet
 // AbuseReportNotificationRecipientShow handles POST /api/admin/abuse-report/notification-recipient/show.
 func (h *Handler) AbuseReportNotificationRecipientShow(c echo.Context) error {
 	if h.recipientRepo == nil {
-		return c.JSON(http.StatusNotFound, apierr.NotFound())
+		return c.JSON(http.StatusNotFound, apierr.NoSuchRecipient())
 	}
 	var req struct {
 		ID string `json:"id"`
@@ -233,7 +233,7 @@ func (h *Handler) AbuseReportNotificationRecipientShow(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
-		return c.JSON(http.StatusNotFound, apierr.NotFound())
+		return c.JSON(http.StatusNotFound, apierr.NoSuchRecipient())
 	}
 	return c.JSON(http.StatusOK, h.packRecipient(r))
 }
@@ -274,7 +274,10 @@ func (h *Handler) AbuseReportNotificationRecipientUpdate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
-		return c.JSON(http.StatusNotFound, apierr.NotFound())
+		// 本家の update は findOneByOrFail が投げて500になる。system-webhook の
+		// update / delete が show のエラーを使うのと同じく、show と同じ
+		// NO_SUCH_RECIPIENT の404で返す (#3262、#4122)。
+		return c.JSON(http.StatusNotFound, apierr.NoSuchRecipient())
 	}
 	fields := map[string]any{}
 	if req.Name != nil {
@@ -367,7 +370,7 @@ func (h *Handler) AbuseReportNotificationRecipientUpdate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err != nil {
-		return c.JSON(http.StatusNotFound, apierr.NotFound())
+		return c.JSON(http.StatusNotFound, apierr.NoSuchRecipient())
 	}
 	if before != nil {
 		h.logModeration(c, moderationlog.LogUpdateAbuseReportNotificationRecipient, map[string]any{

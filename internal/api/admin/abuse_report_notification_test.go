@@ -3,6 +3,7 @@ package admin_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -122,7 +123,24 @@ func TestRecipientShow_FoundAndNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	rec2 := doPost(h.AbuseReportNotificationRecipientShow, `{"id":"missing"}`, adminUser)
-	assert.Equal(t, http.StatusNotFound, rec2.Code)
+	assertNoSuchRecipient(t, rec2)
+}
+
+// assertNoSuchRecipient pins the upstream show.ts noSuchRecipient envelope
+// (404, kind server) that show and update return for a missing recipient (#4122).
+func assertNoSuchRecipient(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	var body struct {
+		Error map[string]any `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, map[string]any{
+		"message": "No such recipient.",
+		"code":    "NO_SUCH_RECIPIENT",
+		"id":      "013de6a8-f757-04cb-4d73-cc2a7e3368e4",
+		"kind":    "server",
+	}, body.Error)
 }
 
 func TestRecipientDelete_Removes(t *testing.T) {
@@ -190,7 +208,7 @@ func TestRecipientUpdate_NotFoundTakesPrecedenceOverCorrelationCheck(t *testing.
 	// 400 になるが、ID が存在しないので 404 が先に返る。
 	rec := doPost(h.AbuseReportNotificationRecipientUpdate,
 		`{"id":"ghost","method":"webhook"}`, adminUser)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assertNoSuchRecipient(t, rec)
 	// correlation_check のメッセージは含まれていないこと
 	assert.NotContains(t, rec.Body.String(), "CORRELATION_CHECK_WEBHOOK")
 }
@@ -198,7 +216,30 @@ func TestRecipientUpdate_NotFoundTakesPrecedenceOverCorrelationCheck(t *testing.
 func TestRecipientUpdate_NotFound(t *testing.T) {
 	h, _ := setupAbuseRecipientHandler(t)
 	rec := doPost(h.AbuseReportNotificationRecipientUpdate, `{"id":"missing","name":"x"}`, adminUser)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// 本家の update は findOneByOrFail が投げて500になるが、show と同じ
+	// NO_SUCH_RECIPIENT の404で返す (#4122)。
+	assertNoSuchRecipient(t, rec)
+}
+
+// recipientGoneOnUpdateRepo deletes the row inside Update, so the re-read
+// after the update misses it (a concurrent delete between the two queries).
+type recipientGoneOnUpdateRepo struct {
+	*testutil.MockAbuseReportNotificationRecipientRepository
+}
+
+func (r *recipientGoneOnUpdateRepo) Update(id string, _ map[string]any) error {
+	delete(r.Recipients, id)
+	return nil
+}
+
+// 更新の後に読み直した行が消えていたときも、同じ NO_SUCH_RECIPIENT で返す (#4122)。
+func TestRecipientUpdate_RowGoneAfterUpdate(t *testing.T) {
+	h, repo := setupAbuseRecipientHandler(t,
+		&model.AbuseReportNotificationRecipient{ID: "r1", Name: "x", Method: "webhook", SystemWebhookID: ptr("w1")},
+	)
+	h.SetRecipientRepo(&recipientGoneOnUpdateRepo{MockAbuseReportNotificationRecipientRepository: repo})
+	rec := doPost(h.AbuseReportNotificationRecipientUpdate, `{"id":"r1","name":"y"}`, adminUser)
+	assertNoSuchRecipient(t, rec)
 }
 
 func TestRecipientUpdate_MissingID(t *testing.T) {
@@ -234,7 +275,7 @@ func TestAbuseReportNotificationRecipientList(t *testing.T) {
 
 func TestAbuseReportNotificationRecipientShow(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
-	assert.Equal(t, http.StatusNotFound, doPost(h.AbuseReportNotificationRecipientShow, `{}`, adminUser).Code)
+	assertNoSuchRecipient(t, doPost(h.AbuseReportNotificationRecipientShow, `{}`, adminUser))
 }
 
 func TestAbuseReportNotificationRecipientUpdate(t *testing.T) {
