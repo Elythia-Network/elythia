@@ -1,0 +1,82 @@
+name: Fuzz (nightly)
+
+# Go の fuzz を毎日回す (#4116)。普通の `go test` (必須の test) は、各 Fuzz 関数の種と
+# `testdata/fuzz/` に置いた入力しか流さない。新しい入力を作って探すのはここだけ。
+#
+# - 対象は `make fuzz` が選ぶ全部 (画像デコーダは除く。`make fuzz-imagedecode` で回す)。
+#   1 つずつ FUZZTIME ずつ回す
+# - 見つかった入力 (`testdata/fuzz/<関数名>/` に書かれる) は artifact に残す。直すときは
+#   その入力を同じ場所にコミットし、必須の test で毎回流れるようにする (docs/testing.md)
+# - fuzz が貯めた入力 (corpus、`$GOCACHE/fuzz`) は actions/cache で次の日に引き継ぐ。
+#   毎日ゼロから探し直さないため
+# - **必須にしない。** 見つかるかは運しだいで、PR の変更と関係なく落ちうる (#3369)
+# - pull_request: この workflow と fuzz のテストを変えたときだけ、短く回して確かめる
+
+on:
+  schedule:
+    # 21:30 UTC (= JST 06:30)。ほかの schedule (queue-bench-smoke 17:30、dropin-frontend-e2e
+    # 19:00、bench-upstream と codeql の 20:30〜) と重ならないようにずらす
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/fuzz.yml"
+      # make fuzz
+      - "Makefile"
+      - "**/*fuzz*_test.go"
+      # 名前に fuzz を含まないのに Fuzz 関数を持つファイル
+      - "internal/activitypub/local_references_scan_test.go"
+      - "**/testdata/fuzz/**"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    # 対象 14 個 x 2 分 + ビルド。対象が増えたら FUZZTIME か timeout を見直す
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Locate the fuzz corpus
+        id: corpus
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+
+      # キーは run ごとに変え、前の run の corpus を restore-keys で読む (同じキーには
+      # 書き戻せないため)
+      - name: Restore the fuzz corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+
+      - name: Fuzz
+        env:
+          # PR では短く回し、仕組みが動くことだけを確かめる
+          FUZZTIME: ${{ github.event_name == 'pull_request' && '15s' || '2m' }}
+        run: make fuzz FUZZTIME="$FUZZTIME" FUZZPARALLEL=4
+
+      # 落ちた入力は、追跡していないファイルとして testdata/fuzz/ に書かれる
+      - name: Collect failing inputs
+        if: failure()
+        run: |
+          mkdir -p /tmp/fuzz-findings
+          git ls-files --others --exclude-standard -z -- '*/testdata/fuzz/*' | xargs -0 -r cp --parents -t /tmp/fuzz-findings
+
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-findings
+          path: /tmp/fuzz-findings/
+          if-no-files-found: ignore
+          retention-days: 30

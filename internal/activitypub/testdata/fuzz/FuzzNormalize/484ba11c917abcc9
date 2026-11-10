@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"https://www.w3.org/ns/activitystreams#@type\":[]}")

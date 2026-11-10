@@ -875,6 +875,7 @@ PR では回らないので、失敗は Actions 上で確認して別 PR で対�
 |---|---|---|
 | `dropin-frontend-e2e.yml` | 3 TS インスタンス + cypress で frontend 視点の drop-in 互換 | 19:00 UTC |
 | `queue-bench-smoke.yml` | queue driver がジョブを落としていないか (`ok == sent`) | 17:30 UTC |
+| `fuzz.yml` | Go の fuzz を対象ごとに 2 分ずつ回す (画像デコーダは除く、#4116)。PR でも、この workflow か fuzz のテストを変えたときは 15 秒ずつ回る | 21:30 UTC (06:30 日本時間) |
 | `bench-upstream.yml` | 本家 Misskey との性能比較 (develop と`UPSTREAM_MISSKEY_VERSION`の版) | 日曜日 20:40 UTC (月曜日 05:40 日本時間) |
 | `api-coverage.yml` | どの層でも通っていない API が一覧 (`internal/routecoverage/uncovered.tsv`) と一致しているか (#4039)。PR でも、集計の道具 (`internal/routecoverage/*.go`、`tools/routecoverage/`) か workflow を変えたときは回る | 火曜日 03:30 UTC (火曜日 12:30 日本時間) |
 

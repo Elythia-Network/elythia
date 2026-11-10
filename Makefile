@@ -16,7 +16,7 @@
 	uds-init uds-layout-check uds-frontend-build uds-build uds-rebuild uds-restart uds-up uds-down uds-down-v uds-logs uds-ps \
 	bench-up bench-run bench-down bench-logs bench-compare bench-compare-down bench-upstream \
 	apicompat apicompat-routes apicompat-render \
-	test-fast fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
+	test-fast fuzz fuzz-imagedecode shapecheck shapecheck-gen shapecheck-report errorid-check perm-check wiring-check catalog-check notfound-check nulparam-check compose-check testflags-check gaterun-check secretfield-check ipshape-check iprecord-check \
 	diff-up diff-test diff-down diff-logs \
 	upstream-e2e upstream-e2e-deps upstream-e2e-up upstream-e2e-down upstream-e2e-migrate upstream-e2e-test
 
@@ -448,6 +448,23 @@ plugin-vet: ## 同梱プラグインの既定無効を検査 + go vet (CI の bu
 FUZZTIME ?= 2m
 FUZZPARALLEL ?= 2
 FUZZ ?= Fuzz
+
+# 画像デコーダ (internal/misc/imagedecode) は外す。種の組み立てとメモリの見込みが別なので
+# fuzz-imagedecode で回す。対象は git ls-files の *_test.go にある func Fuzz* で、FUZZ の
+# 正規表現に名前が合うものを 1 つずつ回す (#4116)。go test -fuzz は 1 回に 1 つの関数しか
+# 回せない。1 つも合わなければ落とす
+fuzz: ## fuzz を回す (画像デコーダは除く。FUZZTIME= 時間、FUZZ= 対象の正規表現、FUZZPARALLEL= worker 数)
+	@found=0; \
+	for f in $$(git ls-files '*_test.go' | xargs grep -l '^func Fuzz' | grep -v '^internal/misc/imagedecode/'); do \
+		for fz in $$(sed -n 's/^func \(Fuzz[A-Za-z0-9_]*\)(.*/\1/p' "$$f"); do \
+			echo "$$fz" | grep -qE '$(FUZZ)' || continue; \
+			found=$$((found + 1)); \
+			echo "==> ./$$(dirname $$f) $$fz ($(FUZZTIME), parallel $(FUZZPARALLEL))"; \
+			go test "./$$(dirname $$f)" -run '^$$' -fuzz="^$$fz$$" -fuzztime=$(FUZZTIME) -parallel=$(FUZZPARALLEL) || exit 1; \
+		done; \
+	done; \
+	[ $$found -gt 0 ] || { echo "no fuzz target matches FUZZ=$(FUZZ)"; exit 1; }; \
+	echo "fuzzed $$found targets"
 
 fuzz-imagedecode: ## 画像デコーダの fuzz を回す (FUZZTIME= 時間、FUZZ= 対象の正規表現、FUZZPARALLEL= worker 数)
 	# 種は module cache にある各ライブラリの testdata を IMAGEDECODE_FUZZ_SEEDS で
