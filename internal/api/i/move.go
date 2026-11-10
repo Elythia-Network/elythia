@@ -49,10 +49,12 @@ func (h *Handler) Move(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.MoveToAccount == nil {
 		return apierr.JSONInvalidParam(c)
 	}
-	// 空のmoveToAccountは、本家と同じくrootの判定より先にNO_SUCH_USERで返す
-	// (move.tsの`if (!ps.moveToAccount)`)。以前は400にしていた(#3851)。
+	// 空のmoveToAccountは、本家と同じくrootの判定より先にNO_SUCH_USERを返す
+	// (move.tsの`if (!ps.moveToAccount)`。#3851)。本家のnoSuchUserは
+	// httpStatusCodeを持たないので、このファイルのNO_SUCH_USERはすべて、kind
+	// clientの既定どおり400で返す (#4122)。
 	if *req.MoveToAccount == "" {
-		return c.JSON(http.StatusNotFound, apierr.Error(
+		return c.JSON(http.StatusBadRequest, apierr.Error(
 			"NO_SUCH_USER", "No such user.",
 			"fcd2eef9-a9b2-4c4f-8624-038099e90aa5",
 		))
@@ -114,14 +116,14 @@ func (h *Handler) Move(c echo.Context) error {
 	if !strings.HasPrefix(moveTo, "http://") && !strings.HasPrefix(moveTo, "https://") {
 		u := h.lookupAlsoKnownAsTarget(moveTo)
 		if u == nil {
-			return c.JSON(http.StatusNotFound, apierr.Error(
+			return c.JSON(http.StatusBadRequest, apierr.Error(
 				"NO_SUCH_USER", "No such user.",
 				"fcd2eef9-a9b2-4c4f-8624-038099e90aa5",
 			))
 		}
 		uri := h.canonicalUserURI(u)
 		if uri == "" {
-			return c.JSON(http.StatusNotFound, apierr.Error(
+			return c.JSON(http.StatusBadRequest, apierr.Error(
 				"NO_SUCH_USER", "No such user.",
 				"fcd2eef9-a9b2-4c4f-8624-038099e90aa5",
 			))
@@ -139,7 +141,7 @@ func (h *Handler) Move(c echo.Context) error {
 	case err == nil:
 		return h.Me(c)
 	case errors.Is(err, move.ErrNoSuchUser):
-		return c.JSON(http.StatusNotFound, apierr.Error(
+		return c.JSON(http.StatusBadRequest, apierr.Error(
 			"NO_SUCH_USER", "No such user.",
 			"fcd2eef9-a9b2-4c4f-8624-038099e90aa5",
 		))

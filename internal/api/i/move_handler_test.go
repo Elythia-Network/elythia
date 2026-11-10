@@ -78,16 +78,37 @@ func TestMove_AcctFormatResolved(t *testing.T) {
 	assert.Equal(t, "https://remote.example/users/bob", sm.gotURI)
 }
 
-// acct を解決できなければ NO_SUCH_USER。
+// acct を解決できなければ NO_SUCH_USER。本家の noSuchUser は httpStatusCode を
+// 持たないので400 (#4122)。
 func TestMove_AcctFormatNotFound(t *testing.T) {
 	h, userRepo, _, _ := newTestHandler(t)
 	user := &model.User{ID: "me", Username: "me"}
 	userRepo.Users["me"] = user
 	h.SetUserRepo(userRepo)
-	h.SetAccountMover(&stubMover{})
+	sm := &stubMover{}
+	h.SetAccountMover(sm)
 	rec := post(h.Move, `{"moveToAccount":"@ghost@remote.example"}`, user)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_USER")
+	assert.False(t, sm.called)
+}
+
+// acct は解決できても URI を持たない remote user なら、移行先が決まらないので
+// NO_SUCH_USER (400、#4122)。
+func TestMove_AcctFormatWithoutURI(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	user := &model.User{ID: "me", Username: "me"}
+	userRepo.Users["me"] = user
+	host := "remote.example"
+	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob", UsernameLower: "bob", Host: &host}
+	h.SetUserRepo(userRepo)
+	sm := &stubMover{}
+	h.SetAccountMover(sm)
+	rec := post(h.Move, `{"moveToAccount":"@bob@remote.example"}`, user)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_USER"`)
+	assert.Contains(t, rec.Body.String(), "fcd2eef9-a9b2-4c4f-8624-038099e90aa5")
+	assert.False(t, sm.called)
 }
 
 func TestMove_NoProfile(t *testing.T) {
@@ -154,7 +175,7 @@ func TestMove_NoSuchUser(t *testing.T) {
 	h, user, setMover := moveHandlerWithPasswordUser(t)
 	setMover(&stubMover{err: move.ErrNoSuchUser})
 	rec := post(h.Move, `{"moveToAccount":"https://x","password":"pw"}`, user)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_USER")
 }
 
