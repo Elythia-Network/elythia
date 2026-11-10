@@ -82,7 +82,7 @@ func TestUpdate_RejectsUnknownVisibility(t *testing.T) {
 	c2, rec2 := newReq(t, `{"pageId":"p1","visibility":"private"}`)
 	setUser(c2, "alice")
 	require.NoError(t, h2.Update(c2))
-	require.Equal(t, http.StatusOK, rec2.Code, "正しい値は通ること")
+	require.Equal(t, http.StatusNoContent, rec2.Code, "正しい値は通ること")
 }
 
 // **update では空文字も弾くこと。**
@@ -113,5 +113,5 @@ func TestUpdate_OmittedVisibilityIsAccepted(t *testing.T) {
 	c, rec := newReq(t, `{"pageId":"p1","title":"t2"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code, "visibility を省略した update は通ること")
+	require.Equal(t, http.StatusNoContent, rec.Code, "visibility を省略した update は通ること")
 }

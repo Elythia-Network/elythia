@@ -55,6 +55,29 @@ func TestCreate_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+// upstream pages/create は pageEntityService.pack(page) を返すので `user` を必ず含む。
+// viewer を渡さない pack なので isLiked は出ない (#4121)。
+func TestCreate_ResponseIncludesUser(t *testing.T) {
+	h, _, _ := newHandler(t)
+	h.SetUserSource(&stubUserSource{
+		bundle: &coreuser.UserWithProfile{
+			User: &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"},
+		},
+	})
+	c, rec := newReq(t, `{"title":"t","name":"alpha","content":[],"variables":[]}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var row map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &row))
+	user, ok := row["user"].(map[string]any)
+	require.True(t, ok, "create response must include user")
+	assert.Equal(t, "alice", user["username"])
+	_, hasLiked := row["isLiked"]
+	assert.False(t, hasLiked, "create packs without a viewer, so isLiked is omitted")
+	shapetest.Assert(t, "Page", row)
+}
+
 func TestCreate_BadJSON(t *testing.T) {
 	h, _, _ := newHandler(t)
 	c, rec := newReq(t, `{not`)
@@ -141,7 +164,7 @@ func TestCreateAndUpdate_EmptyEyeCatchingImageIsNull(t *testing.T) {
 	c, rec = newReq(t, `{"pageId":"p1","eyeCatchingImageId":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	last := repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
 	require.Contains(t, last, "eyeCatchingImageId")
 	assert.Nil(t, repo.Pages["p1"].EyeCatchingImageID)
@@ -373,7 +396,10 @@ func TestUpdate_Success(t *testing.T) {
 	c, rec := newReq(t, `{"pageId":"p1","title":"t2","summary":"s","content":[{"x":1}],"variables":[1],"eyeCatchingImageId":"img"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	assert.Equal(t, http.StatusOK, rec.Code)
+	// 本家と同じく何も返さない (#4121)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Body.String())
+	assert.Equal(t, "t2", repo.Pages["p1"].Title)
 }
 
 func TestUpdate_BadJSON(t *testing.T) {
@@ -408,7 +434,7 @@ func TestUpdate_TitleEmpty(t *testing.T) {
 	c, rec := newReq(t, `{"pageId":"p1","title":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	assert.Equal(t, "", repo.Pages["p1"].Title)
 }
 
@@ -1162,7 +1188,7 @@ func TestUpdate_NullClearsSummaryAndEyeCatchingImage(t *testing.T) {
 	c, rec := newReq(t, `{"pageId":"p1","title":"t2"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	last := repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
 	assert.NotContains(t, last, "summary", "an absent summary must be kept")
 	assert.NotContains(t, last, "eyeCatchingImageId", "an absent eyeCatchingImageId must be kept")
@@ -1172,15 +1198,10 @@ func TestUpdate_NullClearsSummaryAndEyeCatchingImage(t *testing.T) {
 	c, rec = newReq(t, `{"pageId":"p1","summary":null,"eyeCatchingImageId":null}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	last = repo.UpdateFieldsCalls[len(repo.UpdateFieldsCalls)-1]
 	require.Contains(t, last, "summary")
 	require.Contains(t, last, "eyeCatchingImageId")
 	assert.Nil(t, repo.Pages["p1"].Summary)
 	assert.Nil(t, repo.Pages["p1"].EyeCatchingImageID)
-
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Nil(t, resp["summary"])
-	assert.Nil(t, resp["eyeCatchingImageId"])
 }

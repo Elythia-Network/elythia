@@ -62,9 +62,8 @@ test.describe('pages: CRUD round-trip', () => {
       variables: [],
       script: '',
     });
-    // update は upstream TS では 204、mk-go では 200 + page を返す。
-    // どちらでも 2xx で OK と扱い、続けて show で更新反映を検証する。
-    expect([200, 204]).toContain(updateResp.status());
+    // update は本家と同じく何も返さない (204、#4121)。更新の反映は続く show で見る
+    expect(updateResp.status()).toBe(204);
 
     const show2 = await callApi(request, 'pages/show', { i: me.token, pageId: created.id });
     expect(show2.status()).toBe(200);
