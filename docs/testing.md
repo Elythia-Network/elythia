@@ -17,6 +17,7 @@
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、397 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
 | fuzz | 連合の相手が中身を決める入力を読む関数(署名のヘッダ、公開鍵、JSON-LDの正規化、ActivityPubの型、リモートのHTML、ホスト、ソフトウェアの照合) | 不要(`internal/core/federation`と`mkqdriver`はRedisをtestcontainersで立てる) | `make fuzz` (詳細は[fuzz](#fuzz-4116)) |
+| /api.json から入力を作る検査 | 全エンドポイント (外す一覧を除く) の 5xx・宣言に無い status・宣言の型に合わない応答 | PostgreSQL / Redis (compose) + Elythia バイナリ | `make schemathesis-test` (詳細は[/api.json から入力を作る検査](#apijson-から入力を作る検査-4118)) |
 | fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
 | 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体正本のまま Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態を追加) | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
 
@@ -438,6 +439,27 @@ nightly 19:00 UTC で `dropin-frontend-e2e` を実行 (`.github/workflows/dropin
 ```bash
 make fuzz                                 # 全部を2分ずつ(FUZZTIMEの既定)
 make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
+```
+
+## /api.json から入力を作る検査 (#4118)
+
+[schemathesis](https://schemathesis.readthedocs.io/)で、`/api.json`の宣言から入力を作り、全エンドポイントへ送る。見るのは、5xxを返さないこと、宣言に無いstatusを返さないこと、応答が宣言の型に合うこと。
+
+- **`make schemathesis-test`で回す。** `tests/schemathesis/run.sh`が、DBとRedis(`compose.yml`)を作り直し、`go build`したElythiaをホストで起動し、最初の利用者として管理者を作って、そのtokenで送る。frontendは要らない。片付けは`make schemathesis-down`
+- **外すエンドポイントは`tests/schemathesis/exclude.tsv`。** 検査に使う管理者やtokenを壊すもの、インスタンスの設定を変えるもの、渡したURLや相手を外へ取りに行くことが目的のもの。理由には叩くと何が起きるかを書く。どのpathにも当たらない行があると`run.sh`が落ちる
+  - IDやhostを引数に持つだけの口は外さない。webhookの作成やメールアドレスの確かめ(`email-address/available`はMXを引く)のように、作られた値で外への通信を試みる口は残っている。作られる値(`"0"`など)では、実際にインターネットへ出ることはまず無い
+- **宣言どおりの入力だけを送る(`--mode positive`)。** 壊れたJSONや型の違う入力も送ると、本家と同じFastifyの形の400(`FST_ERR_CTP_INVALID_JSON_BODY`など)が宣言のエラーの形と合わず、ほぼ全部の口で食い違いが出て、ほかの失敗が埋もれる。同じ理由で、文字列はUTF-8で表せるものだけにする(`--generation-codec utf-8`。対になっていないサロゲートはJSONの本文にならない)
+- **IDの書式(`misskey:id`)は`tests/schemathesis/hooks.py`で教える。** schemathesisはこの書式を知らず、教えないと半分以上の入力が引数の検証で弾かれる
+- **Elythia自身は全てのインターフェースで待ち受ける**(設定で待ち受けのアドレスを選べない)。rate limitを切っているので、手元では同じLANから見えないホストで回す。tokenは`docker compose run`の引数に載るので、共有のホストでは`ps`から見える(報告のファイルでは伏せられる)
+- **入力は乱数で作るので、見つかるものは実行ごとに変わる。** 2026-11-10の実行では、約500の口に約14,000件を送り、2xxまで届いた口が275、失敗のある口と検査の組が82だった(5xx 18、宣言に無いstatus 43、宣言の型に合わない応答 21)。IDの書式を教える前の試走では、流し直すたびに新しい失敗が14〜22件出た。schemathesisの既知の失敗の一覧(`--baseline`)は収束しないので使わない。見つかったものは原因ごとにissueへ切り出して直す
+- **結果は`tests/schemathesis/out/`に残る。** `python3 tests/schemathesis/summarize.py`が、検査と口ごとの表を出す。叩いた口が400に届かなければ落とす(起動や読み込みが壊れたのを、失敗の無い実行と取り違えないため)
+- **毎週の`schemathesis` workflowで回す**([ci.md](ci.md#schedule-で回る-workflow))。必須ではなく、見つかったものが直るまでは赤のままになる
+
+```bash
+make schemathesis-test                                  # 1 つの口に 20 件ずつ
+make schemathesis-test SCHEMATHESIS_MAX_EXAMPLES=5 SCHEMATHESIS_ARGS='--include-path-regex ^/notes/'
+SCHEMATHESIS_MIN_OPERATIONS=1 python3 tests/schemathesis/summarize.py   # 口を絞ったときは下限を下げる
+make schemathesis-down
 ```
 
 ## 画像デコーダの fuzz (#3480)

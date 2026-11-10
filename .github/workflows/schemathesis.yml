@@ -1,0 +1,67 @@
+name: API fuzz (schemathesis)
+
+# /api.json の宣言から入力を作り、全エンドポイントへ送る検査を毎週回す (#4118)。
+# 5xx、宣言に無い status、宣言の型に合わない応答を探す。
+#
+# - make schemathesis-test が、DB と Redis を作り直し、go build した Elythia をホストで
+#   起動して schemathesis (tests/schemathesis/compose.yml、digest で固定) を流す。
+#   frontend は要らない
+# - 外すエンドポイントは tests/schemathesis/exclude.tsv
+# - 失敗は Summary (summarize.py) と artifact (NDJSON と JUnit) に出す
+# - **必須にしない。** 入力は乱数で作るので、見つかるかは実行しだいで、PR の変更と
+#   関係なく落ちる (#3369)。見つかったものが直るまでは赤のままになる
+# - pull_request: この workflow か tests/schemathesis/ を変えたときだけ回し、仕組みが
+#   動くことを確かめる
+
+on:
+  schedule:
+    # 木曜日 03:30 UTC (= 木曜日 12:30 日本時間)。api-coverage (火曜日 03:30) と
+    # 毎日の fuzz (21:30) から離す
+    - cron: "30 3 * * 4"
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/schemathesis.yml"
+      - "tests/schemathesis/**"
+
+permissions:
+  contents: read
+
+jobs:
+  schemathesis:
+    runs-on: ubuntu-latest
+    # ビルド 3〜5 分、DB の用意と migration、schemathesis 2〜3 分 (手元の実測は約 2 分)
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run schemathesis
+        run: make schemathesis-test
+
+      # 失敗したときも、何を叩いて何が落ちたかを出す。叩いた口が下限に届かなければ、
+      # ここも落ちる (起動や抽出が壊れたのを、失敗の無い実行と取り違えないため)
+      - name: Summarize
+        if: ${{ !cancelled() }}
+        run: python3 tests/schemathesis/summarize.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: schemathesis-report
+          path: |
+            tests/schemathesis/out/report/
+            tests/schemathesis/out/mkgo.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: make schemathesis-down >/dev/null 2>&1 || true

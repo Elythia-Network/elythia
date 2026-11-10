@@ -1,0 +1,49 @@
+# tests/schemathesis/compose.yml — /api.json から入力を作る検査 (#4118)
+#
+# Elythia はホストで直接動かす (make schemathesis-test が go build したものを起動する)。
+# frontend を作らずに済むので、Playwright のスタックより速く立つ。ここに置くのは DB と
+# Redis と、schemathesis を動かす runner だけ。DB と Redis はホストの 127.0.0.1 にだけ出す。
+# **Elythia 自身は全てのインターフェースで待ち受ける** (port の設定だけで、待ち受けの
+# アドレスを選べない)。rate limit を切っているので、手元では同じ LAN から見えないホストで回す。
+#
+# 使い方は Makefile の schemathesis-test / schemathesis-down。
+name: mk-schemathesis
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "127.0.0.1:54313:5432"
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U misskey -d misskey"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56313:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # schemathesis は、ホストで動く Elythia (127.0.0.1:61813) を叩くので、ホストのネットワークに
+  # 入れる。引数は run.sh が渡す。版は digest で固定する
+  schemathesis:
+    profiles: [test]
+    image: schemathesis/schemathesis:4.33.1@sha256:ddf8b3c9e0b3ee7edfa65dad4d0c0e05c53fb5d92f99db379d40da01883474c7
+    network_mode: host
+    # api.json と結果は out/ に置く。schemathesis が作業のファイル (.hypothesis など) を
+    # 書くので、作業の場所も out/ にする
+    volumes:
+      - .:/work
+    working_dir: /work/out
+    environment:
+      SCHEMATHESIS_HOOKS: /work/hooks.py

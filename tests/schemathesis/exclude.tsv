@@ -1,0 +1,33 @@
+# /api.json から入力を作る検査 (#4118) で叩かないエンドポイント。`<エンドポイント>\t<理由>`。
+# エンドポイントは /api の後ろの path で、正規表現として完全一致で読む。どの path にも
+# 当たらない行があると run.sh が落ちる。選択肢は必ず `(a|b)` のように括弧で囲み、選択肢
+# ごとに 1 行にしない (run.sh は行を `|` でつなぐので、囲まない `a|b` の b は先頭の / を
+# 失い、どの口にも当たらないまま見逃される)。
+# 理由には「叩くと何が起きるか」を書く。叩いても検査が続けられるものは載せない。
+# 外へ取りに行くことが目的の口 (渡した URL や相手を取りに行くもの) も外す。CI の runner から
+# 任意のホストへ通信させないため。ID や host を引数に持つだけの口は外さない。
+i/regenerate-token	検査に使う token が無効になり、以後の全部が 401 になる
+i/revoke-token	検査に使う token を失効させうる
+i/change-password	パスワードが変わり、再認証が要る口が通らなくなる
+i/delete-account	検査に使う管理者が消える
+i/2fa/.*	二段階認証が有効になると、再認証が要る口の前提が変わる
+i/update-email	メールの送信を試みる
+i/move	移行先のアカウントを外へ取りに行き、成功すると検査に使う管理者が移行済みになる
+admin/update-meta	登録やメディアの設定など、インスタンス全体の設定が変わる
+admin/roles/update-default-policies	既定のポリシーが変わり、以後の口の許可が変わる
+admin/roles/assign	作られたロールが検査に使う管理者に付き、ポリシーで操作が制限されうる (条件付きのロールでも同じことが起きうる。summarize.py が 401/403 の数を出す)
+admin/accounts/delete	利用者 (検査に使う管理者を含む) を消す
+admin/delete-account	同上
+admin/reset-password	利用者のパスワードを変える
+admin/suspend-user	利用者を凍結する (検査に使う管理者を含む)
+admin/backup/.*	バックアップのデーモンが要り、戻す操作は DB を入れ替える
+admin/queue/(clear|promote-jobs|remove-job|retry-job|pause|resume)	ジョブの queue を消す・止める
+ap/get	渡した URL を外へ取りに行く
+ap/show	同上
+drive/files/upload-from-url	同上
+fetch-rss	同上
+fetch-external-resources	同上
+admin/emoji/fetch-remote-meta	リモートのサーバーへ取りに行く
+federation/update-remote-user	リモートの利用者を取りに行く
+i/webhooks/test	登録した webhook の URL へ送る
+admin/system-webhook/test	同上

@@ -1,0 +1,27 @@
+# /api.json から入力を作る検査 (#4118) で、ホストで動かす Elythia の設定。DB と Redis は
+# compose.yml がホストの 127.0.0.1 に出す。
+url: http://schemathesis.local/
+port: 61813
+
+db:
+  host: 127.0.0.1
+  port: 54313
+  db: misskey
+  user: misskey
+  pass: testpass
+
+redis:
+  host: 127.0.0.1
+  port: 56313
+
+id: aidx
+
+jobQueueDriver: mkq
+
+# 入力を作って送り続けるので、rate limit で 429 にならないようにする。**production には
+# 入れない** (docs/configuration.md の disableEndpointRateLimits の行)
+disableEndpointRateLimits: true
+enableIpRateLimit: false
+
+# 外への通信は、schemathesis が作った URL で起きうる。プライベートなアドレスは許さない
+# (既定のまま)。testMode も有効にしない (/api/reset-db などを叩かせない)

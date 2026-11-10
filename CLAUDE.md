@@ -257,6 +257,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `build-with-plugins` | 呼び出し専用(`workflow_call`) | | 運営者が自分のリポジトリから呼び、プラグイン入りのimageを作る |
 | `dropin-frontend-e2e` | 毎日(schedule) | | 3つのTSインスタンス + cypressで、frontend視点のdrop-in互換 |
 | `queue-bench-smoke` | 毎日(schedule) | | queue driverがジョブを落としていないか |
+| `schemathesis` | 毎週木曜日(schedule)、PR(paths限定) | | `/api.json`の宣言から入力を作り、全エンドポイントの5xx・宣言に無いstatus・宣言の型に合わない応答を探す |
 | `fuzz` | 毎日(schedule)、PR(paths限定) | | Goのfuzzで、外から来る入力を読む関数を回す(画像デコーダは除く) |
 | `bench-compare` | PR(paths限定) | | baseとheadの2つのcommitを同じスタックで交互に流し、性能を比べる。主に手動で使う。PRでは、ベンチの仕組みを変えたときだけhead同士を流す |
 | `bench-compare-comment` | `bench-compare`の完了(`workflow_run`) | | `bench-compare`の結果を、対象のPRにコメントで出す。headのコードは動かさない。default branchにある版で動く |
@@ -306,6 +307,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-10: `/api.json`から入力を作る検査を毎週回す`schemathesis` workflowを足したので、Section 8の表に1行を足した (#4118) → [docs/testing.md](docs/testing.md#apijson-から入力を作る検査-4118)
 - 2026-11-10: Goのfuzzを毎日回す`fuzz` workflowを足したので、Section 8の表に1行を足した (#4116) → [docs/testing.md](docs/testing.md#fuzz-4116)
 - 2026-11-10: `playwright`に、バックアップのspecをデーモン付きの専用のスタックで流すjob(`spec (Elythia backup/1)`)を足したので、Section 8の行に足した (#4102) → [docs/playwright.md](docs/playwright.md#独自の-api-の応答の照合-4093)
 - 2026-11-07: `make frontend-check`とCIの`frontend`に、管理画面が`admin/update-meta`で書くキーとロールのポリシーのキーが、Playwrightの管理画面の表で確かめられているかの検査を足したので、Section 3とSection 8の行に足した (#4066) → [docs/playwright.md](docs/playwright.md#管理画面の設定とロールのポリシーの表-4066)
