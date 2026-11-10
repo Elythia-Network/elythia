@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"testing"
 
+	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/entitycompat/shapetest"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -41,6 +44,18 @@ func TestAchievements_NotFound(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := postStub(h.Achievements, `{"userId":"ghost"}`, nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"NO_SUCH_USER"`)
+}
+
+// 対象の利用者を引けないのが DB の障害なら、NO_SUCH_USER の404でなく500にする (#2792、#4122)。
+func TestAchievements_UserLookupErrorIs500(t *testing.T) {
+	repo := &failingFindUserRepo{&countingUserRepo{MockUserRepository: testutil.NewMockUserRepository()}}
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coreuser.NewService(repo, testutil.NewMockNoteRepository(), testutil.NewMockUserNotePiningRepository(), idGen, nil)
+	h := NewHandler(svc, nil, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	rec := postStub(h.Achievements, `{"userId":"u1"}`, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "NO_SUCH_USER")
 }
 
 func TestAchievements_InvalidParam(t *testing.T) {
