@@ -468,6 +468,14 @@ make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
   - `admin/federation/refresh-remote-instance-metadata`: 登録の無いホストのとき。本家の`instance not found`と同じ500
   - `users/show`: リモートの利用者を解決できないとき。本家の`FAILED_TO_RESOLVE_REMOTE_USER`は種類が`server`なので500
   - `admin/announcements/create`: 存在しない`userId`のとき。本家と同じく外部キーの違反で500
+- **本家と同じ応答で、本家の宣言(`/api.json`)のほうが合っていない食い違いがある(#4121)。** 毎週の結果に出続けるが、Elythiaの応答は本家に揃えてあるので直さない
+  - `__proto__`のキーを含む本文に、本家のFastifyと同じ形の400(`FST_ERR_CTP_INVALID_JSON_BODY`。`statusCode`・`code`・`error`・`message`)を返す。宣言のエラーの形(`error`がobject)と合わない。schemathesisは宣言が許す余分なキーとして`__proto__`を作るので、多くの口で出る
+  - `meta`の`clientOptions`: 本家はDBの値(列の既定は`'{}'`)をそのまま返すので、新しいサーバーでは`{}`になり、宣言が必須とする`entrancePageStyle`などが無い
+  - ロールの`condFormula`: 本家の`paramDef`は`{type:'object'}`だけで、送られた値をそのまま保存して返すので、`{}`のような宣言の`oneOf`のどれにも当たらない値も返る
+  - ロールの`policies`: 宣言は値を数値か真偽値に限るが、`chatAvailability`は文字列(`available`など)
+  - `users`・`admin/show-users`などの`UserDetailed`: 宣言の`oneOf`の2つ以上に当たる(本家の宣言のあいまいさ)
+  - `pages/create`のブロックの中身: 利用者が送った形をそのまま返すので、宣言の`PageBlock`の`oneOf`に当たらないことがある
+  - `drive/files/create`の本文の無い400: 本家と同じく、fileの無い・読めないmultipartに返す。schemathesisはJSONでない応答として報告する。schemathesisが作るpartのheaderの制御文字は、本家は通しElythiaは読めないとして断る([approximations.md](divergence/approximations.md))
 - **結果は`tests/schemathesis/out/`に残る。** `python3 tests/schemathesis/summarize.py`が、検査と口ごとの表を出す。叩いた口が400に届かなければ落とす(起動や読み込みが壊れたのを、失敗の無い実行と取り違えないため)
 - **毎週の`schemathesis` workflowで回す**([ci.md](ci.md#schedule-で回る-workflow))。必須ではなく、見つかったものが直るまでは赤のままになる
 
