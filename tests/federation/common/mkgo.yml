@@ -17,7 +17,7 @@ id: aidx
 # コンテナ間で連合させるには docker の私有レンジを許可する必要がある。
 # mk-go は送信 HTTP に SSRF ガードをかけており、既定では私有 IP への
 # fetch を止めるため、これが無いと ap/show や actor 解決が
-# REQUEST_FAILED (502) になる。tests/dropin/instance_*.yml と同じ設定。
+# REQUEST_FAILED (400。#4122 より前は 502) になる。tests/dropin/instance_*.yml と同じ設定。
 allowedPrivateNetworks:
   - 127.0.0.0/8
   - 10.0.0.0/8

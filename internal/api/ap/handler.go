@@ -905,12 +905,14 @@ func (h *Handler) APIShow(c echo.Context) error {
 			var parsed map[string]any
 			if json.Unmarshal(data, &parsed) != nil {
 				// fetch できたが JSON として不正 → RESPONSE_INVALID (70193c39)。
-				return c.JSON(http.StatusBadGateway, apierr.Error("RESPONSE_INVALID", "Response from remote server is invalid.", "70193c39-54f3-4813-82f0-70a680f7495b"))
+				// upstream ap/show.ts の responseInvalid / requestFailed は httpStatusCode を
+				// 持たないので、kind client の既定どおり400で返す (#4122)。
+				return c.JSON(http.StatusBadRequest, apierr.Error("RESPONSE_INVALID", "Response from remote server is invalid.", "70193c39-54f3-4813-82f0-70a680f7495b"))
 			}
 			// AP object は id 必須。欠落は upstream の `object.id == null` →
 			// responseInvalid に対応する。
 			if objID, _ := parsed["id"].(string); objID == "" {
-				return c.JSON(http.StatusBadGateway, apierr.Error("RESPONSE_INVALID", "Response from remote server is invalid.", "70193c39-54f3-4813-82f0-70a680f7495b"))
+				return c.JSON(http.StatusBadRequest, apierr.Error("RESPONSE_INVALID", "Response from remote server is invalid.", "70193c39-54f3-4813-82f0-70a680f7495b"))
 			}
 			// `type` は配列で来ることがある (JSON-LD の `@type` は配列表現が
 			// 正規)。string 決め打ちだと Note / Article / Question の分岐を
@@ -971,7 +973,7 @@ func (h *Handler) APIShow(c echo.Context) error {
 	// fetch が transport 失敗 (5xx / network) だった場合は REQUEST_FAILED、
 	// それ以外 (404/410 / 純粋に不在) は NO_SUCH_OBJECT。
 	if fetchRequestFailed {
-		return c.JSON(http.StatusBadGateway, apierr.Error("REQUEST_FAILED", "Request failed.", "81b539cf-4f57-4b29-bc98-032c33c0792e"))
+		return c.JSON(http.StatusBadRequest, apierr.Error("REQUEST_FAILED", "Request failed.", "81b539cf-4f57-4b29-bc98-032c33c0792e"))
 	}
 	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_OBJECT", "No such object.", "dc94d745-1262-4e63-a17d-fecaa57efc82"))
 }
