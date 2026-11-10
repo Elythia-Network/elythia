@@ -68,6 +68,38 @@ services:
       redis: {condition: service_healthy}
     networks: [playwright]
 
+  # 分割アップロード (drive/files/create-chunked/*) の照合のための S3 互換のストレージ
+  # (#4093)。分割アップロードは S3 の multipart upload で組み立てるので、ローカルの
+  # 保存先では CHUNKED_UPLOAD_UNAVAILABLE になる。mkgo は普段ローカルに保存し、
+  # drive_chunked の spec が admin/update-meta でここへ向け、終わったら戻す。
+  # image は internal/core/backupadmin/minio_test.go と同じもの (Docker Hub の
+  # minio/minio は repository が無くなった)
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin-secret
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    # 分割アップロードの spec は、保存先をこの名前で指す。ファイルの url はこのホストから
+    # 作られ、/api.json の照合 (ajv の url 書式) はドットの無いホストを受けない
+    networks:
+      playwright:
+        aliases:
+          - minio.local
+
+  # バケットを作るだけで終わる。spec の側で作ると、S3 の署名を runner に持ち込むことになる
+  minio-init:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    entrypoint: ["sh", "-c", "mc alias set pw http://minio:9000 minioadmin minioadmin-secret && mc mb --ignore-existing pw/drive"]
+    depends_on:
+      minio: {condition: service_healthy}
+    networks: [playwright]
+
   # nginx TLS proxy (#817 part2)。
   # Browser の WebAuthn API は secure context (HTTPS) を要求するため、
   # mk-go (HTTP 3000) の前に nginx を立てて self-signed cert で HTTPS
@@ -117,6 +149,8 @@ services:
       mkgo: {condition: service_healthy}
       # nginx-tls は MK_BASE_URL=https://mkgo.local の解決先。
       nginx-tls: {condition: service_started}
+      # drive_chunked の spec が使う
+      minio-init: {condition: service_completed_successfully}
     networks: [playwright]
 
 networks:
