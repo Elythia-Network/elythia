@@ -169,7 +169,16 @@ func (h *Handler) Create(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.pageToMap(p))
+	// upstream pages/create.ts は `pageEntityService.pack(page)` を返し、pack は
+	// 常に `user` (UserLite) を含む。pages/show と同じ経路で owner を付ける (#4121)。
+	// viewer を渡さない pack なので isLiked は出さない。
+	owner := user
+	if h.userSource != nil {
+		if bundle, oerr := h.userSource.ShowByID(p.UserID); oerr == nil && bundle != nil && bundle.User != nil {
+			owner = bundle.User
+		}
+	}
+	return c.JSON(http.StatusOK, h.pageToMapWithOwner(p, owner, nil))
 }
 
 // nilIfEmpty returns nil for an empty eyeCatchingImageId.
@@ -369,7 +378,7 @@ func (h *Handler) Update(c echo.Context) error {
 	if req.Variables != nil {
 		in.Variables = req.Variables
 	}
-	p, err := h.svc.Update(user.ID, req.PageID, in)
+	_, err := h.svc.Update(user.ID, req.PageID, in)
 	if err != nil {
 		switch {
 		case errors.Is(err, corepage.ErrPageNotFound):
@@ -390,7 +399,9 @@ func (h *Handler) Update(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.pageToMap(p))
+	// 本家の pages/update は res を持たず、何も返さない (204)。以前はページを 200 で
+	// 返していたが、user が無く /api.json の宣言とも合わなかった (#4121)
+	return c.NoContent(http.StatusNoContent)
 }
 
 // DeleteRequest is the request body for pages/delete.
@@ -677,18 +688,6 @@ func (h *Handler) pagesToListForViewer(rows []*model.Page, ownerLookup func(user
 		out = append(out, h.pageToMapWithOwner(p, owner, &liked))
 	}
 	return out
-}
-
-// pageToMap delegates to entity.PackPage so the JSON shape (timestamp
-// format, field set) stays in sync between /api/pages/* and other places
-// that embed a page (e.g. pinnedPage on /api/i and /api/users/show).
-//
-// Use pageToMapWithOwner for list endpoints / detail views — they need
-// `page.user` populated or the frontend templates fail to render (#1134).
-// This bare variant remains for pinned-page embeds where the user context
-// is implicit (the embedding endpoint already returns the user separately).
-func (h *Handler) pageToMap(p *model.Page) map[string]any {
-	return entity.PackPage(p, h.idGen)
 }
 
 // pageToMapWithOwner enriches the page entity with `user` (UserLite) and
