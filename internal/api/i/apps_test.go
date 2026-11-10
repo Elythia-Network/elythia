@@ -88,6 +88,64 @@ func TestApps_ReturnsTokensWithApp(t *testing.T) {
 	assert.Equal(t, "write:notes", perm2[0])
 }
 
+// upstream は `name: token.name ?? token.app?.name` / `lastUsedAt: token.lastUsedAt?.toISOString()`
+// なので、どちらも無い token では key ごと出さない。description は `?? null` で null (#4121)。
+func TestApps_OmitsNameAndLastUsedAtWhenAbsent(t *testing.T) {
+	h, _ := newExtraHandler(t)
+	tokens := testutil.NewMockAccessTokenRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	bare := idGen.Generate(time.Now())
+	tokens.Tokens["h1"] = &model.AccessToken{ID: bare, Hash: "h1", UserID: stubUser.ID}
+	used := idGen.Generate(time.Now().Add(time.Second))
+	usedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tokens.Tokens["h2"] = &model.AccessToken{ID: used, Hash: "h2", UserID: stubUser.ID, LastUsedAt: &usedAt}
+	h.accessTokenRepo = tokens
+
+	rec := postExtra(h.Apps, `{}`, stubUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got, 2)
+	byID := map[string]map[string]any{}
+	for _, e := range got {
+		byID[e["id"].(string)] = e
+	}
+
+	b := byID[bare]
+	_, hasName := b["name"]
+	assert.False(t, hasName, "name must be omitted, not null, when neither the token nor an app has one")
+	_, hasLastUsed := b["lastUsedAt"]
+	assert.False(t, hasLastUsed, "lastUsedAt must be omitted, not null, when the token was never used")
+	desc, hasDesc := b["description"]
+	assert.True(t, hasDesc, "description stays present (upstream `?? null`)")
+	assert.Nil(t, desc)
+
+	assert.Equal(t, "2026-01-02T03:04:05.000Z", byID[used]["lastUsedAt"])
+}
+
+// 本家の `??` は空文字を値として残すので、token の name / description が "" なら
+// app の値に置き換えずに "" を返す (#4121)。
+func TestApps_EmptyTokenNameIsKept(t *testing.T) {
+	h, _ := newExtraHandler(t)
+	tokens := testutil.NewMockAccessTokenRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	empty := ""
+	tokens.Tokens["h1"] = &model.AccessToken{
+		ID: idGen.Generate(time.Now()), Hash: "h1", UserID: stubUser.ID,
+		Name: &empty, Description: &empty,
+		App: &model.App{ID: "app1", Name: "the app", Description: "about the app"},
+	}
+	h.accessTokenRepo = tokens
+
+	rec := postExtra(h.Apps, `{}`, stubUser)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "", got[0]["name"])
+	assert.Equal(t, "", got[0]["description"])
+}
+
 // sort=+createdAt は新しい順 (ID DESC)。
 func TestApps_SortByCreatedAtDesc(t *testing.T) {
 	h, _ := newExtraHandler(t)

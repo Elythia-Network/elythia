@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -45,14 +44,22 @@ func (h *Handler) Apps(c echo.Context) error {
 	for _, t := range tokens {
 		entry := map[string]any{
 			"id":         t.ID,
-			"name":       coalesceString(t.Name, appName(t.App)),
-			"lastUsedAt": formatNullableTime(t.LastUsedAt, tsFormat),
 			"permission": []string(tokenPermission(t)),
 			"iconUrl":    t.IconURL,
 			"description": coalesceString(
 				t.Description,
 				appDescription(t.App),
 			),
+		}
+		// upstream は `name: token.name ?? token.app?.name` と
+		// `lastUsedAt: token.lastUsedAt?.toISOString()` で、どちらも値が無ければ
+		// undefined (key ごと出ない)。schema も optional で nullable ではないので、
+		// null を出すと本家の型に反する (#4121)。description だけは `?? null` で null を出す。
+		if name := coalesceString(t.Name, appName(t.App)); name != nil {
+			entry["name"] = *name
+		}
+		if t.LastUsedAt != nil {
+			entry["lastUsedAt"] = t.LastUsedAt.UTC().Format(tsFormat)
 		}
 		if ct, err := h.idGen.ParseTime(t.ID); err == nil {
 			entry["createdAt"] = ct.UTC().Format(tsFormat)
@@ -62,9 +69,10 @@ func (h *Handler) Apps(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-// coalesceString は本家の `a ?? b` チェーン相当。a が nil/"" なら b を返す。
+// coalesceString は本家の `a ?? b` 相当。a が nil のときだけ b を返す。`??` は空文字を
+// 値として残すので、"" を値が無いものとして扱わない (#4121)。
 func coalesceString(a, b *string) *string {
-	if a != nil && *a != "" {
+	if a != nil {
 		return a
 	}
 	return b
@@ -91,15 +99,6 @@ func tokenPermission(t *model.AccessToken) []string {
 		return []string(t.App.Permission)
 	}
 	return []string(t.Permission)
-}
-
-// formatNullableTime は *time.Time が nil の場合 nil を返し、そうでなければ
-// 指定 layout で UTC 文字列に整形する。
-func formatNullableTime(t *time.Time, layout string) any {
-	if t == nil {
-		return nil
-	}
-	return t.UTC().Format(layout)
 }
 
 // AuthorizedApps handles POST /api/i/authorized-apps.
