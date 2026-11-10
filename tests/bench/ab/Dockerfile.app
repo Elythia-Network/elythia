@@ -9,7 +9,7 @@
 #
 # 実行バイナリが elythia 1 つにまとまった #3394 (2026-10-05) より前の commit は、
 # ./cmd/elythia が無いのでビルドできない (run.sh は exit 1 で止まる)。
-FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
+FROM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
 
 # 公式 image は GOTOOLCHAIN=local なので、比べる commit の go.mod がこの image より
 # 新しい Go を要求するとビルドが落ちる。auto にして必要な toolchain を取りに行かせる
