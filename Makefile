@@ -1,4 +1,4 @@
-.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all schemathesis-test schemathesis-down \
+.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all schemathesis-test schemathesis-down upgrade-test upgrade-down \
 	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update uds-deploy uds-backup-refresh \
 	image-up image-down image-down-v image-logs image-build \
 	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-down-local migrate-create migrate-create-local \
@@ -144,6 +144,7 @@ E2E_COMPOSE_FILES = \
 	tests/playwright/compose.yml \
 	tests/playwright/backup-stack/compose.yml \
 	tests/schemathesis/compose.yml \
+	tests/upgrade/compose.yml \
 	tests/dropin/compose.yml \
 	tests/dropin-frontend/compose.yml \
 	tests/federation/compose.misskey.yml \
@@ -155,7 +156,7 @@ E2E_COMPOSE_FILES = \
 # 使われている profile を全部渡す。**`down` は有効な profile の container しか
 # 消さない**ので、付けないと seed / runner 系が残る。存在しない profile 名を
 # 渡してもエラーにはならないので、ファイルごとに出し分けず全部並べる。
-E2E_PROFILES = --profile test --profile bench --profile outbound --profile inbound --profile report --profile tools
+E2E_PROFILES = --profile test --profile bench --profile outbound --profile inbound --profile report --profile tools --profile old
 
 e2e-down-all: ## 検証用スタックを一括撤去 (本番 project mk は対象外)
 	@for f in $(E2E_COMPOSE_FILES); do \
@@ -1351,11 +1352,15 @@ playwright-ts-test: ## Playwright spec を実行 (TS backend、upstream 追従�
 playwright-ts-down: ## Playwright TS スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) -f $(PLAYWRIGHT_TS_OVERLAY) --profile test down -v
 
-# Differential e2e diff harness (#2089) ― mk-go と Misskey TS を同一版で
-# 並列に立て、同一 endpoint のレスポンスを diff して entitycompat
-# golden gate がカバーしない値レベル乖離を検出する。詳細は docs/diff-e2e.md。
-# 隔離 stack (own network/volumes)、production UDS には触れない。
-DIFF_COMPOSE=tests/diff/compose.yml
+##@ e2e: 前のリリースからの更新
+# 前のリリースの image で作った DB に、今のコードで migrate up して起動し、作ったデータが
+# 読めて書き足せるかを確かめる (#4123)。前の版は UPGRADE_FROM で選べる (既定は HEAD から
+# 辿れる最新のリリースのタグ)。DB と Redis は毎回作り直す。結果は tests/upgrade/out/
+upgrade-test: build ## 前のリリースで作った DB を、今のコードが引き継げるかを確かめる (UPGRADE_FROM= で版を選ぶ)
+	tests/upgrade/run.sh
+
+upgrade-down: ## 前のリリースからの更新の検査のスタックを撤去 (volume ごと)
+	docker compose -f tests/upgrade/compose.yml --profile old down -v
 
 ##@ e2e: /api.json から入力を作る検査
 # schemathesis で、/api.json の宣言から入力を作って全エンドポイントへ送る (#4118)。
@@ -1371,6 +1376,12 @@ schemathesis-test: build ## /api.json から入力を作って全エンドポイ
 
 schemathesis-down: ## /api.json の検査のスタックを撤去 (volume ごと)
 	docker compose -f $(SCHEMATHESIS_COMPOSE) --profile test down -v
+
+# Differential e2e diff harness (#2089) ― mk-go と Misskey TS を同一版で
+# 並列に立て、同一 endpoint のレスポンスを diff して entitycompat
+# golden gate がカバーしない値レベル乖離を検出する。詳細は docs/diff-e2e.md。
+# 隔離 stack (own network/volumes)、production UDS には触れない。
+DIFF_COMPOSE=tests/diff/compose.yml
 
 ##@ e2e: 差分比較ハーネス
 diff-up: ## 差分比較ハーネスのスタックを起動

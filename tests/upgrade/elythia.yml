@@ -1,0 +1,23 @@
+# 前のリリースと今のコードの両方が読む設定 (#4123)。DB と Redis は compose.yml が
+# ホストの 127.0.0.1 に出す。
+url: http://upgrade.local/
+port: 61814
+
+db:
+  host: 127.0.0.1
+  port: 54314
+  db: misskey
+  user: misskey
+  pass: testpass
+
+redis:
+  host: 127.0.0.1
+  port: 56314
+
+id: aidx
+
+jobQueueDriver: mkq
+
+# 続けて叩くので rate limit で 429 にならないようにする。**production には入れない**
+disableEndpointRateLimits: true
+enableIpRateLimit: false

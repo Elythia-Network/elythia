@@ -106,6 +106,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `apicompat` | apicompat | **`docs/api-compat.md` が実態とずれていないか** (生成物なので再生成して diff を見る)。あわせて golden (本家の`paramDef`とajvの照合corpusを含む、#3673) が本家の版に追いついているか (`make upstream-check`、#3378) | 未計測 | `make apicompat` (**プラグイン抜き + testMode が要る**。手順は docs/development.md) |
 | `e2e (1/4)` 〜 `4/4` | Upstream backend e2e | **本家の backend e2e 1256 テスト**が Elythia に対して通るか | 3-7 min | `make upstream-e2e` |
 | `diff` | Diff e2e | Elythia と TS の**レスポンスの値**が一致するか (endpoint 比較 35 件) | 4 min | `make diff-check` |
+| `upgrade` | Upgrade from the previous release | **前のリリースの image で作った DB を、今のコードで`migrate up`して引き継げるか** (#4123)。サーバーのコードか migration を変えた PR と、リリースの前の手動実行で回る | 未計測 | `make upgrade-test` |
 | `swap-test` | Drop-in e2e | TS→mk 切替で state が保たれるか | 5 min | `make dropin-swap-test` |
 | `elythia-born` | Drop-in e2e | **Elythia 生まれの DB を TS に引き渡せるか** (測る対象。保証はしない、#3191) | 5 min | `make dropin-elythia-born-test` |
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
