@@ -222,7 +222,16 @@ func TestUpdate_Success(t *testing.T) {
 	c, rec := newReq(t, `{"flashId":"f1","title":"t2","summary":"s","script":"y","permissions":["a"],"visibility":"private"}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	assert.Equal(t, http.StatusOK, rec.Code)
+	// upstream flash/update.ts は res を持たないので、204で本文を返さない (#4122)。
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Body.String())
+	f := repo.Flashes["f1"]
+	assert.Equal(t, "t2", f.Title)
+	assert.Equal(t, "s", f.Summary)
+	assert.Equal(t, "y", f.Script)
+	// mockの反映はStringArrayを扱わないので、渡した値の側で確かめる。
+	assert.Equal(t, model.StringArray{"a"}, repo.LastUpdates["permissions"])
+	assert.Equal(t, "private", f.Visibility)
 }
 
 func TestUpdate_BadJSON(t *testing.T) {
@@ -257,8 +266,9 @@ func TestUpdate_TitleEmpty(t *testing.T) {
 	c, rec := newReq(t, `{"flashId":"f1","title":""}`)
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	assert.Equal(t, "", repo.LastUpdates["title"])
+	assert.Equal(t, "", repo.Flashes["f1"].Title)
 }
 
 // failingUpdateRepo causes UpdateFields to fail.

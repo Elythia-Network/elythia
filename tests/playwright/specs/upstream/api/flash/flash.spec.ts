@@ -62,8 +62,9 @@ test.describe('flash: CRUD round-trip', () => {
     expect(myList.find((f: { id: string }) => f.id === created.id)).toBeTruthy();
 
     // update — permissions に空配列 [] を渡しても NOT NULL 制約に当たらず
-    // 200 で更新できる (#896 で fix)。pq.StringArray wrap の regression
-    // guard として frontend と同じ payload を送る。
+    // 更新できる (#896 で fix)。pq.StringArray wrap の regression
+    // guard として frontend と同じ payload を送る。本家と同じく、応答は本文の
+    // 無い 204 (#4122)。
     const updateResp = await callApi(request, 'flash/update', {
       i: me.token,
       flashId: created.id,
@@ -73,7 +74,7 @@ test.describe('flash: CRUD round-trip', () => {
       permissions: [],
       visibility: 'public',
     });
-    expect([200, 204]).toContain(updateResp.status());
+    expect(updateResp.status()).toBe(204);
 
     const showAfterUpdate = await callApi(request, 'flash/show', {
       i: me.token,
