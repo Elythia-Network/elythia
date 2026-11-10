@@ -68,6 +68,27 @@ func TestNormalize_IRIDirectKeys(t *testing.T) {
 	assert.Equal(t, "https://remote.example/users/alice", m["actor"])
 }
 
+func TestNormalize_IRINonTermLocalNameIsKept(t *testing.T) {
+	// AS / security の IRI の後ろが語彙の語でない名前 (@ で始まる予約語、IRI の重なり) は
+	// 短縮しない。短縮すると、もう一度正規化したときに type・id・actor へ変わる (#4116)
+	for _, key := range []string{
+		"https://www.w3.org/ns/activitystreams#@type",
+		"https://www.w3.org/ns/activitystreams#@id",
+		"https://w3id.org/security#@type",
+		"https://www.w3.org/ns/activitystreams#https://www.w3.org/ns/activitystreams#actor",
+		"https://w3id.org/security#https://www.w3.org/ns/activitystreams#id",
+		"https://www.w3.org/ns/activitystreams#as:actor",
+	} {
+		in := []byte(`{"` + key + `":"Delete"}`)
+		out, err := Normalize(in)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{key: "Delete"}, asMap(t, out), key)
+		again, err := Normalize(out)
+		require.NoError(t, err)
+		assert.JSONEq(t, string(out), string(again), key)
+	}
+}
+
 func TestNormalize_IRIUnknownLocalName(t *testing.T) {
 	// AS IRI prefix だが local name が canonical テーブルに無い → そのまま残す
 	in := []byte(`{

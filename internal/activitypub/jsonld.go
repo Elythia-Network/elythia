@@ -243,6 +243,18 @@ func normalizeValue(v any) (any, error) {
 	}
 }
 
+// isTermLocalName reports whether the part of a key after the AS or security
+// IRI can be a term of the vocabulary.
+//
+// `#@type` (JSON-LD の予約語) や `#https://www.w3.org/ns/activitystreams#actor`
+// (IRI がもう一度続く) を短縮すると、出力に予約語や IRI のキーが残り、もう一度
+// 正規化すると type・id・actor に変わる。正規化が冪等でなくなり、正規化した本文を
+// 外へ送る経路 (Accept に入れる Follow) では、受け取った側に送り手の書いていない
+// actor が現れる (#4116 の fuzz)。そうした名前はキーのまま残す。
+func isTermLocalName(local string) bool {
+	return local != "" && !strings.ContainsAny(local, "@:/#")
+}
+
 // canonicalKey resolves a JSON property name to its canonical short form.
 // 戻り値の bool は「マッピングが見つかったか」を示す。
 func canonicalKey(k string) (string, bool) {
@@ -250,13 +262,14 @@ func canonicalKey(k string) (string, bool) {
 		return v, true
 	}
 	// AS IRI の直記述 ("https://www.w3.org/ns/activitystreams#type") を短縮。
-	if local, ok := strings.CutPrefix(k, asPrefix); ok && local != "" {
+	// 語彙の語でない名前は短縮しない (isTermLocalName)。
+	if local, ok := strings.CutPrefix(k, asPrefix); ok && isTermLocalName(local) {
 		if v, ok := canonicalTerms[local]; ok {
 			return v, true
 		}
 		return local, true
 	}
-	if local, ok := strings.CutPrefix(k, secPrefix); ok && local != "" {
+	if local, ok := strings.CutPrefix(k, secPrefix); ok && isTermLocalName(local) {
 		if v, ok := canonicalTerms["sec:"+local]; ok {
 			return v, true
 		}
