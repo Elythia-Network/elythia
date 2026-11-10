@@ -16,6 +16,7 @@
 | Drop-in e2e (pytest) | TS-A backend を mk-A に差し替えて state preservation 検証 | TS 2 instance + mk overlay | `make dropin-swap-test` (#365 / #367 / #372 / #374、詳細は[dropin-e2e.md](dropin-e2e.md)) |
 | Drop-in frontend e2e (cypress) | 3 TS instance + mk overlay swap で frontend 視点の互換 | cypress + 3 TS + mk-A | `make dropin-frontend-swap-test` (#380 / #381 / #387 / #394、詳細は[dropin-frontend-e2e.md](dropin-frontend-e2e.md)) |
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、397 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
+| fuzz | 連合の相手が中身を決める入力を読む関数(署名のヘッダ、公開鍵、JSON-LDの正規化、ActivityPubの型、リモートのHTML、ホスト、ソフトウェアの照合) | 不要(`internal/core/federation`と`mkqdriver`はRedisをtestcontainersで立てる) | `make fuzz` (詳細は[fuzz](#fuzz-4116)) |
 | fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
 | 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体正本のまま Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態を追加) | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
 
@@ -420,6 +421,24 @@ make dropin-frontend-swap-test     # TS-A → mk-A 切替まで含む end-to-end
 ```
 
 nightly 19:00 UTC で `dropin-frontend-e2e` を実行 (`.github/workflows/dropin-frontend-e2e.yml`)。
+
+## fuzz (#4116)
+
+外から来る入力を読む関数のfuzz。対象は`git ls-files '*_test.go' | xargs grep -h '^func Fuzz'`で並ぶもので、2026-11-10の時点で14個(画像デコーダの4つを除く)。
+
+- **確かめること:** panicしないこと、5秒のうちに返ること(各ファイルの`within`。Goのfuzzは1入力の時間の上限を持たないため)、性質のはっきりしたものはその性質
+  - 冪等であること。`Normalize`と`NormalizeGateHost`は、もう一度かけても変わらない。`NormalizeActivity`は、正規化した本文(`act.raw`)から読み直しても同じactor・id・typeになる。正規化した本文は、Followへの`Accept`に入れて外へ送るため
+  - 範囲を読んだ直後とキャッシュから読んだ答えが同じこと(`semverrange.Satisfies`)
+  - 決定的であること(同じ入力で2回呼んで同じ結果)。`json.Unmarshal`で読む`Note`などの型、`FromHTML`、ソフトウェアの照合。`encoding/json`はほぼ常に決定的なので、これらは主にpanicと時間を見る対象
+  - `APLenient*`の型には`MarshalJSON`が無いので、書き戻して読み直す往復は確かめない
+- **普通の`go test`では種と`testdata/fuzz/`の入力だけが流れる。** 新しい入力を探すのは`make fuzz`と、毎日の`fuzz` workflow([ci.md](ci.md#schedule-で回る-workflow))
+- **`TestMain`がRedisを立てるパッケージ(`internal/core/federation`、`internal/queue/driver/mkqdriver`)は、fuzzのworkerの数だけRedisのコンテナを立てる。** workerは`TestMain`から起動し直されるため。Dockerが要る
+- **見つかった入力は`testdata/fuzz/<関数名>/`に書かれる。** 直したら、その入力をコミットする。以後は必須の`test`で毎回流れる。CIで見つかったものはartifact `fuzz-findings`に残る(公開のリポジトリでは、ログとartifactは誰でも読める。脆弱性に当たりそうなものは、artifactを消してから手元で直し、PRだけを出す)
+
+```bash
+make fuzz                                 # 全部を2分ずつ(FUZZTIMEの既定)
+make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
+```
 
 ## 画像デコーダの fuzz (#3480)
 
