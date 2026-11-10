@@ -285,7 +285,7 @@ upstream bump時は`make shapecheck-gen`で全goldenを再生成してcommit。�
 
 `TestErrorHTTPStatusDrift`は、エラーレスポンスの**HTTPステータス**をgateする。ただし**Misskeyが明示的にステータスを固定しているエラーだけ**を対象にする。
 
-Misskeyの`ApiCallService`は`httpStatusCode` → 無ければ`kind`既定(`client`→400 / `permission`→403 / `server`→500)でステータスを決め、`kind`既定値は`client`。実態として**459エラー中431件(93.9%)が未指定=400**で、Elythiaは`NO_SUCH_*`に404、`ACCESS_DENIED`に403というセマンティックなステータスを返す。misskey-jsは`status===200`以外を一律errorとしてbodyを読むため400/404を区別せず、**全部400に倒すのは設計上の損失**(REST的セマンティクスを失う)。
+Misskeyの`ApiCallService`は`httpStatusCode` → 無ければ`kind`既定(`client`→400 / `permission`→403 / `server`→500)でステータスを決め、`kind`既定値は`client`。実態として**459エラー中431件(93.9%)が未指定=400**で、Elythiaも、以前は`NO_SUCH_*`に404などのセマンティックなステータスを返していたが、statusで分岐するクライアントを壊さないよう、本家の暗黙の400に揃えた(#2345、#4122)。本家が500を返す口で、Elythiaが意図して4xxにしているものは[divergence](divergence.md)に記録している。暗黙の400はこのgateでは見ず、handlerのテストで固定する。
 
 そこで本gateは「Misskeyが`httpStatusCode`または非デフォルト`kind`を明示している」契約(28件)だけを golden 化(`tools/erroriddiff`が`golden_error_status.json`に出力、暗黙400は記録しない)。Elythiaが各endpointで返すステータス(inline `c.JSON(http.StatusX, ...)` / `JSONXxx` wrapper)を解決して突合する。
 

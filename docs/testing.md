@@ -476,6 +476,11 @@ make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
   - `users`・`admin/show-users`などの`UserDetailed`: 宣言の`oneOf`の2つ以上に当たる(本家の宣言のあいまいさ)
   - `pages/create`のブロックの中身: 利用者が送った形をそのまま返すので、宣言の`PageBlock`の`oneOf`に当たらないことがある
   - `drive/files/create`の本文の無い400: 本家と同じく、fileの無い・読めないmultipartに返す。schemathesisはJSONでない応答として報告する。schemathesisが作るpartのheaderの制御文字は、本家は通しElythiaは読めないとして断る([approximations.md](divergence/approximations.md))
+- **`/api.json`に出ないstatusがある(#4122)。** 本家の`/api.json`の組み立て(`gen-spec.ts`)は、エラーを全部400の例として載せ、400以外の個別のstatus(404・409・413・422・503など)の応答を載せない。Elythiaの`/api.json`も同じ組み立て(`internal/api/openapi/spec.go`)なので、次のstatusはschemathesisが「宣言に無い」と報告し続けるが、直すものではない
+  - 本家も同じstatusを返すもの: `users/show`と通報の3つの口(`admin/forward-abuse-user-report`など)、`admin/system-webhook/show`、`admin/abuse-report/notification-recipient/show`の404、`drive/files/create`の413、`i/update`の422、`fetch-rss`の422・503
+  - 本家にある口で、Elythiaが一時的に応じられないときに返す503: `charts/*`の`CHART_UNAVAILABLE`、WebAuthnが設定されていないときの`i/2fa`とpasskeyのログイン、パスワードの照合の枠が取れないときの`i/change-password`とログインの口(#2849)など
+  - 本家は500か204で、Elythiaが4xxにしているもの([approximations.md](divergence/approximations.md)と[security.md](divergence/security.md)に記録): 存在しない行への404(`admin/show-user`、`admin/queue/show-job`、`users/achievements`など)、`admin/accounts/create`の使われているusernameと`admin/roles/assign`の付いているロールへの409
+  - Elythia独自の口の404・503(申請、バブルゲームの対戦、チャットの招待、分割アップロードの中止、承認制の登録が無効のときの503など)。宣言(`elythia_apidoc.json`)にエラーを足しても、組み立ては400の例にしか載せないので、宣言では直らない
 - **結果は`tests/schemathesis/out/`に残る。** `python3 tests/schemathesis/summarize.py`が、検査と口ごとの表を出す。叩いた口が400に届かなければ落とす(起動や読み込みが壊れたのを、失敗の無い実行と取り違えないため)
 - **毎週の`schemathesis` workflowで回す**([ci.md](ci.md#schedule-で回る-workflow))。必須ではなく、見つかったものが直るまでは赤のままになる
 
