@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -357,7 +358,8 @@ func isDefaultPortForScheme(scheme, port string) bool {
 
 // NormalizeGateHost returns the canonical host form used by the federation
 // gates (blockedHosts / silencedHosts / federationHosts) and by `instance.host`
-// for an absolute URL string. Returns "" when the URL has no host.
+// for an absolute URL string. Returns "" when the URL has no host, or a host
+// with a colon that is not an IP literal (no connection can reach it).
 //
 // **配送側と取り込み側で同じ規則を使うための唯一の入口。** 別パッケージ
 // (`internal/queue/processors`) の inbox URL 解釈もここを通す — 規則を写すと
@@ -366,6 +368,16 @@ func NormalizeGateHost(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
 		return ""
+	}
+	// スキームの無い `//::0` (角括弧の無い IPv6) では、Hostname() がコロンだけの
+	// 名前を返し、HostPort が角括弧で囲んで `[:]:0` を作る。その値は URL として読み
+	// 直せず、正規化し直すと別の値になる (#4116 の fuzz)。どの接続先にも当たらない
+	// ので、ホストが無いものとして扱う。スキームの付いた URL では url.Parse が先に
+	// 断るので、inbox や actor の値はこれで変わらない
+	if h := u.Hostname(); strings.Contains(h, ":") {
+		if _, err := netip.ParseAddr(h); err != nil {
+			return ""
+		}
 	}
 	return punyHostPort(u)
 }
