@@ -110,9 +110,9 @@ func (h *Handler) me(c echo.Context, allowSecrets bool) error {
 	// memo / moderationNote は UserDetailed.Memo (omitempty) / MeDetailed
 	// memo は PackMeDetailed (UserDetailed.Memo, #1259) が null で乗せるので
 	// override 不要。moderationNote は golden で `moderationNote?: string`
-	// (optional・null 不可、moderator が他者を見るとき専用) なので self-view
-	// (/api/i) では出さない。旧実装は `resp["moderationNote"]=nil` で null を出し
-	// golden 非互換だった (#1270 L3 で検出)。
+	// (optional・null 不可) なので null は出さない。旧実装は
+	// `resp["moderationNote"]=nil` で null を出し golden 非互換だった (#1270 L3 で
+	// 検出)。self が moderator のときは下で '' か本人の値を出す (#2094)。
 	// isSilenced は role policy 由来 (MeDetailed/UserDetailedNotMe 共通 field)。
 	// PackUserDetailed も Packer の silenced lookup で同値を埋めるが、/api/i は
 	// handler 層の roleProvider を権威ソースとして明示的に上書きする (両者とも

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -143,7 +144,12 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 	}
 
 	u := result.User
-	detailed := h.entityPacker.PackUserDetailed(u, nil)
+	profile := result.Profile
+	if profile == nil && h.userRepo != nil {
+		if p, perr := h.userRepo.FindProfileByUserID(u.ID); perr == nil {
+			profile = p
+		}
+	}
 
 	isAdmin := false
 	isMod := false
@@ -154,95 +160,51 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 		userPolicies = h.roleService.GetUserPolicies(u.ID)
 	}
 
-	out := map[string]any{
-		// UserLite
-		"id":                u.ID,
-		"name":              detailed.Name,
-		"username":          detailed.Username,
-		"host":              detailed.Host,
-		"avatarUrl":         detailed.AvatarURL,
-		"avatarBlurhash":    detailed.AvatarBlurhash,
-		"avatarDecorations": detailed.AvatarDecorations,
-		"isBot":             detailed.IsBot,
-		"isCat":             detailed.IsCat,
-		"emojis":            detailed.Emojis,
-		"onlineStatus":      detailed.OnlineStatus,
-		"federationStatus":  detailed.FederationStatus,
-		"badgeRoles":        badgeRolesForMap(detailed.BadgeRoles),
-		// UserDetailed
-		"bannerUrl":      detailed.BannerURL,
-		"bannerBlurhash": detailed.BannerBlurhash,
-		"isLocked":       detailed.IsLocked,
-		"isSilenced":     false,
-		"isSuspended":    detailed.IsSuspended,
-		"description":    detailed.Description,
-		"location":       detailed.Location,
-		"birthday":       detailed.Birthday,
-		"lang":           detailed.Lang,
-		"fields":         detailed.Fields,
-		"verifiedLinks":  detailed.VerifiedLinks,
-		"followersCount": detailed.FollowersCount,
-		"followingCount": detailed.FollowingCount,
-		"notesCount":     detailed.NotesCount,
-		"uri":            detailed.URI,
-		"url":            detailed.URL,
-		"movedTo":        u.MovedToURI,
-		"alsoKnownAs":    u.AlsoKnownAs,
-		"updatedAt":      detailed.UpdatedAt,
-		"lastFetchedAt":  nil,
-		// MeDetailed (新規ユーザーなのでゼロ値が多い)
-		"avatarId":                        u.AvatarID,
-		"bannerId":                        u.BannerID,
-		"followersVisibility":             detailed.FollowersVisibility,
-		"followingVisibility":             detailed.FollowingVisibility,
-		"chatScope":                       u.ChatScope,
-		"canChat":                         true,
-		"followedMessage":                 nil,
-		"memo":                            nil,
-		"moderationNote":                  nil,
-		"hideOnlineStatus":                u.HideOnlineStatus,
-		"isAdmin":                         isAdmin,
-		"isModerator":                     isMod,
-		"isDeleted":                       u.IsDeleted,
-		"isExplorable":                    u.IsExplorable,
-		"hasUnreadNotification":           false,
-		"hasPendingReceivedFollowRequest": false,
-		"hasUnreadAnnouncement":           false,
-		"hasUnreadAntenna":                false,
-		"hasUnreadChannel":                false,
-		"hasUnreadMentions":               false,
-		"hasUnreadSpecifiedNotes":         false,
-		"hasUnreadChatMessages":           false,
-		"unreadNotificationsCount":        0,
-		"unreadAnnouncements":             []any{},
-		"pinnedNoteIds":                   []string{},
-		"pinnedNotes":                     []any{},
-		"pinnedPageId":                    nil,
-		"pinnedPage":                      nil,
-		"policies":                        userPolicies,
-		"roles":                           []any{},
-		"securityKeysList":                []any{},
-		"mutingNotificationTypes":         []any{},
-		"notificationRecieveConfig":       map[string]any{},
-		"emailNotificationTypes":          []string{"follow", "receiveFollowRequest"},
-		"twoFactorEnabled":                false,
-		"usePasswordLessLogin":            false,
-		"securityKeys":                    false,
-		"twoFactorBackupCodesStock":       "none",
-		"autoAcceptFollowed":              true,
-		"noCrawle":                        false,
-		"preventAiLearning":               true,
-		"alwaysMarkNsfw":                  false,
-		"autoSensitive":                   false,
-		"carefulBot":                      false,
-		"injectFeaturedNote":              true,
-		"receiveAnnouncementEmail":        true,
-		"publicReactions":                 true,
-		"loggedInDays":                    0,
-		"achievements":                    []any{},
-		// token (MeDetailed にない追加フィールド)
-		"token": result.Token,
+	// upstream create.ts は `pack(account, account, {schema: 'MeDetailed',
+	// includeSecrets: true})` に token を足して返す。つまり /api/i と同じ形なので、
+	// /api/i と同じ PackMeDetailed を通す。以前は map を手で組んでいて、
+	// followApprovalLocalSeconds などMeDetailedの必須の項目が欠けていた (#4121)。
+	me := h.entityPacker.PackMeDetailed(u, profile, h.idGen)
+	me.IsAdmin = isAdmin
+	me.IsModerator = isMod
+	me.Policies = userPolicies
+	b, err := json.Marshal(me)
+	if err != nil {
+		slog.Error("admin/accounts/create: marshal failed", "user", u.ID, "err", err)
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
+	out := map[string]any{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		slog.Error("admin/accounts/create: unmarshal failed", "user", u.ID, "err", err)
+		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
+	}
+
+	// upstream UserEntityService.ts:574 は `iAmModerator ? (moderationNote ?? '') :
+	// undefined`。viewer は作ったアカウント自身なので、そのアカウントが moderator
+	// (初回セットアップの root) のときだけ文字列で出し、それ以外は key を出さない。
+	// 以前は常に null を出していて、schema (`moderationNote?: string`) に反していた (#4121)。
+	if isMod {
+		mn := ""
+		if profile != nil && profile.ModerationNote != nil {
+			mn = *profile.ModerationNote
+		}
+		out["moderationNote"] = mn
+	} else {
+		delete(out, "moderationNote")
+	}
+
+	// includeSecrets 相当。作成直後のアカウントなので email は未設定、鍵も無い。
+	out["email"] = nil
+	out["emailVerified"] = false
+	if profile != nil {
+		out["email"] = profile.Email
+		out["emailVerified"] = profile.EmailVerified
+	}
+	out["securityKeysList"] = []any{}
+	// MeDetailed struct に無い /api/i 固有の項目。新規アカウントは常に未設定。
+	out["pinnedPageId"] = nil
+	out["pinnedPage"] = nil
+	out["token"] = result.Token
 
 	// createdAt は ID から復元
 	if s, err := aidxCreatedAtString(h.idGen, u.ID); err == nil {
