@@ -1,4 +1,4 @@
-.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all \
+.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all schemathesis-test schemathesis-down \
 	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update uds-deploy uds-backup-refresh \
 	image-up image-down image-down-v image-logs image-build \
 	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-down-local migrate-create migrate-create-local \
@@ -143,6 +143,7 @@ E2E_COMPOSE_FILES = \
 	tests/diff/compose.yml \
 	tests/playwright/compose.yml \
 	tests/playwright/backup-stack/compose.yml \
+	tests/schemathesis/compose.yml \
 	tests/dropin/compose.yml \
 	tests/dropin-frontend/compose.yml \
 	tests/federation/compose.misskey.yml \
@@ -1355,6 +1356,21 @@ playwright-ts-down: ## Playwright TS スタックを撤去
 # golden gate がカバーしない値レベル乖離を検出する。詳細は docs/diff-e2e.md。
 # 隔離 stack (own network/volumes)、production UDS には触れない。
 DIFF_COMPOSE=tests/diff/compose.yml
+
+##@ e2e: /api.json から入力を作る検査
+# schemathesis で、/api.json の宣言から入力を作って全エンドポイントへ送る (#4118)。
+# Elythia はホストで go build したものを動かし、DB と Redis だけを compose で立てる。
+# 外すエンドポイントは tests/schemathesis/exclude.tsv。結果は tests/schemathesis/out/
+SCHEMATHESIS_COMPOSE=tests/schemathesis/compose.yml
+
+# DB と Redis は毎回作り直す (run.sh)。SCHEMATHESIS_MAX_EXAMPLES は 1 つの口に送る入力の
+# 数 (既定 20)、SCHEMATHESIS_ARGS は schemathesis に素通しする追加引数。まとめは
+# python3 tests/schemathesis/summarize.py
+schemathesis-test: build ## /api.json から入力を作って全エンドポイントへ送る (schemathesis。DB は毎回作り直す)
+	tests/schemathesis/run.sh
+
+schemathesis-down: ## /api.json の検査のスタックを撤去 (volume ごと)
+	docker compose -f $(SCHEMATHESIS_COMPOSE) --profile test down -v
 
 ##@ e2e: 差分比較ハーネス
 diff-up: ## 差分比較ハーネスのスタックを起動
