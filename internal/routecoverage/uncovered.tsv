@@ -7,13 +7,6 @@ admin/abuse-report/notification-recipient/show	#4024
 admin/abuse-report/notification-recipient/update	#4024
 admin/accounts/delete	#4024
 admin/accounts/find-by-email	#4024
-admin/backup/restore/abort	#4102
-admin/backup/restore/candidates	#4102
-admin/backup/restore/confirm	#4102
-admin/backup/restore/prepare	#4102
-admin/backup/restore/status	#4102
-admin/backup/take	#4102
-admin/backup/verify	#4102
 admin/delete-all-files-of-a-user	#4024
 admin/drive/clean-remote-files	#4024
 admin/drive/cleanup	#4024

@@ -1,0 +1,60 @@
+# バックアップのスタック (#4102) の設定。本体 (mkgo) とデーモン (backup-daemon) が同じ
+# ファイルを読む。本体はデーモンへ依頼を送り (backup.server)、デーモンは同じ DB と Redis に
+# 繋いで取得・検証・復元を行う。
+#
+# ../instance.yml との違いは backup の節だけで、ほかは spec が叩く API に要るものに絞った
+# (画面の検査のための CSP や tarball の設定は、このスタックの spec が見ないので書かない)。
+url: https://mkgo.local/
+port: 3000
+
+db:
+  host: postgres
+  port: 5432
+  db: misskey
+  user: misskey
+  pass: testpass
+
+redis:
+  host: redis
+  port: 6379
+
+redisForPubsub:
+  host: redis
+  port: 6379
+
+redisForJobQueue:
+  host: redis
+  port: 6379
+
+redisForTimelines:
+  host: redis
+  port: 6379
+
+id: aidx
+
+jobQueueDriver: mkq
+
+backup:
+  storage:
+    type: dir
+    dir:
+      path: /backup
+  schedule:
+    # 定期実行はせず、頼まれたときだけ取る・確かめる。取った後の検証も自動では流さない。
+    # spec が verify の API を叩いて確かめるため
+    listen: ":3010"
+    verify: false
+  server:
+    serviceUrl: http://backup-daemon:3010
+    # compose.yml の playwright-runner の BACKUP_SERVICE_TOKEN と同じ値
+    serviceToken: playwright-backup-service-token
+
+# ../instance.yml と同じ理由で、rate limit を無効にする。**production には入れない**
+disableEndpointRateLimits: true
+enableIpRateLimit: false
+
+allowedPrivateNetworks:
+  - 127.0.0.0/8
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16

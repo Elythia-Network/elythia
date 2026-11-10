@@ -111,7 +111,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `ed25519-verify` | Drop-in e2e | Fedibird-like mock との Ed25519 双方向 verify | 5 min | `make dropin-fedibird-test` |
 | `federation` | Drop-in e2e | 本物の Misskey TS との実連合 (follow/note/reaction/renote/reply/mention/delete) | 4 min | `make federation-misskey-e2e` |
 | `federation-mastodon` | Drop-in e2e | 本物の Mastodon との引用の承認 (FEP-044f): 双方向の引用が承認済みになるか、取り消しが双方向で効くか | 未計測 | `make federation-mastodon-e2e` |
-| `spec (Elythia 1/11)` 〜 `11/11` | Playwright | ブラウザからの統合互換 (397 spec ファイル) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
+| `spec (Elythia 1/11)` 〜 `11/11`、`spec (Elythia backup/1)` | Playwright | ブラウザからの統合互換 (434 spec ファイル。数え方は `git ls-files tests/playwright/specs \| grep -c '\.spec\.ts$'`)。`backup/1` はバックアップの spec だけを専用のスタックで流す (#4102) | 実測は [playwright.md の「shard の数」](playwright.md#shard-の数) | `make playwright-check` |
 | `build-and-push` / `-bundled` | Docker | image がビルドできるか (PR では push しない)。`-bundled` は image の中で frontend もビルドする (#3379) | 4 min (`-bundled` はキャッシュが冷えていると frontend の分だけ延びる。手元の冷えたビルドで frontend stage だけ約 3 分) | `docker build -f Dockerfile .` / `docker build -f Dockerfile.bundled .` |
 | `compare` | Bench compare | **ベンチの仕組みを変えた PR でだけ**、PR の head 同士 (A/A) を同じスタックで流し、最後まで完了するか。「差なし」かどうかは check では見ず、Summary を人が見る。base と head を選んで比べるときは手動で起動する (`gh workflow run bench-compare.yml -f base=develop -f head=<ref>`、[bench-compare.md](bench-compare.md))。結果は対象の PR にコメントでも出る (下の「`bench-compare` / `bench-compare-comment` workflow」) | 35 min | `make bench-compare BASE=HEAD HEAD=HEAD SMOKE=1` (本番のホストでは smoke だけ) |
 | `compare` | Bench upstream | **本家の版 (`UPSTREAM_MISSKEY_VERSION`) かベンチの仕組み (bench-compare と同じ paths) を変えた PR でだけ**、本家の公式 image と PR の head を同じスタックで流し、最後まで完了するか。どちらが速いかは check では見ず、Summary を人が見る。毎週月曜日 (日本時間) の schedule と手動でも流れる (`gh workflow run bench-upstream.yml -f ref=develop`、[bench-compare.md](bench-compare.md#本家-misskey-との比較-bench-upstream)) | 未計測 (見込み 40 min) | `make bench-upstream SMOKE=1` (本番のホストでは smoke だけ) |
@@ -205,8 +205,10 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
 #### 通っていない API の一覧と週次のゲート (#4039)
 
 どの層でも 2xx・3xx で通っていないエンドポイントは、`internal/routecoverage/uncovered.tsv` に
-`<エンドポイント>\t<付ける予定の issue>` の形で載せる (4xx だけのものも載せる)。Elythia 独自のものは
-`#4024(18)`、本家互換のものは `#4024` (段階 C か (19) で見直す) にしてある。
+`<エンドポイント>\t<付ける予定の issue>` の形で載せる (4xx だけのものも載せる)。本家互換のものは
+`#4024` (段階 C か (19) で見直す) にしてある。Elythia 独自のものは、#4093 と #4102 で全部に
+テストが付き、一覧に残っていない。一覧を作り直すと、Elythia 独自の行には `#4024(18)` が付く
+(`tools/routecoverage`の既定)。戻ってきたら、付ける issue に書き換える。
 
 - **週次のゲート** (`api-coverage` workflow。毎週火曜日と手動実行、必須ではない): 3 つの層について、
   **develop にマージ済みの PR** の最新の run の `route-hits-<層>` を取ってきて合わせ、一覧と突き合わせる。
@@ -219,6 +221,9 @@ PKCS#1 のため TS 側の送信連合が全滅する不具合が見つかって
   - 一覧にあるのに通っている行がある。テストが付いたので、行を消す
   - 一覧の行が、実在しないエンドポイントを指している (改名か削除)
   - 3 層のどれかの集計が見つからない、または `notes/create` が通っていない (下限)
+  - バックアップの取得・検証・戻す操作の 7 件 (`admin/backup/take`・`verify`・`restore/*`) が通っていない。
+    この 7 件を叩くのは playwright の `spec (Elythia backup/1)` の job だけで (#4102)、その job が落ちた run が
+    使われると 7 件そろって未通過になる。一覧に足す前に、その run の job を見る
   - マージ済みの PR の最新の run から集計を取れなかった (古い run には戻らない)。その run が集計を出す前に
     落ちた (`notes/create` の下限など) か、集計の artifact が期限 (30 日) で消えたときに起きる。取り消された
     run は飛ばす。対処は、次に 3 つの workflow が走る PR のマージを待つ。develop で手動実行しても直らない

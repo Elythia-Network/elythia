@@ -47,6 +47,23 @@ export function listSpecFiles(root) {
 }
 
 /**
+ * Specs that run only on the backup stack (backup-stack/compose.yml, #4102).
+ * They are not split into shards and have no duration record.
+ */
+export const BACKUP_SPEC_DIR = 'specs/backup/';
+
+/**
+ * Lists the spec files the shards share: every spec but the ones of the backup
+ * stack.
+ *
+ * @param {string} root tests/playwright directory
+ * @returns {string[]}
+ */
+export function listShardedSpecFiles(root) {
+  return listSpecFiles(root).filter((f) => !f.startsWith(BACKUP_SPEC_DIR));
+}
+
+/**
  * Endpoints that write the instance meta. `admin/roles/update-default-policies`
  * stores the default role policies in the meta as well.
  */
@@ -193,14 +210,16 @@ if (process.argv[1] !== undefined && basename(process.argv[1]) === 'shard-plan.m
   const here = dirname(resolve(process.argv[1]));
   const [cmd, ...args] = process.argv.slice(2);
   if (cmd === 'update') {
-    const files = listSpecFiles(here);
+    // バックアップのスタックの spec は shard に入らないので、記録しない。CI の artifact を
+    // まとめて渡したときに、その結果が混ざっても落とす
+    const files = listShardedSpecFiles(here);
     const merged = mergeDurations(files, loadDurations(here), durationsFromReports(args.map((p) => JSON.parse(readFileSync(p, 'utf-8')))));
     writeFileSync(join(here, DURATIONS_FILE), `${JSON.stringify(merged, null, 2)}\n`);
     console.log(`recorded ${Object.keys(merged).length} of ${files.length} spec files`);
   } else if (cmd === 'show') {
     const total = Number(args[0]);
     const durations = loadDurations(here);
-    const files = listSpecFiles(here);
+    const files = listShardedSpecFiles(here);
     planShards(files, durations, total).forEach((s, i) => {
       const sec = s.reduce((a, f) => a + (durations[f] ?? 0), 0);
       console.log(`${i + 1}/${total}: ${s.length} files, ~${Math.round(sec)}s recorded`);

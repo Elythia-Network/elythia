@@ -142,6 +142,7 @@ E2E_COMPOSE_FILES = \
 	docker-compose.image.yml \
 	tests/diff/compose.yml \
 	tests/playwright/compose.yml \
+	tests/playwright/backup-stack/compose.yml \
 	tests/dropin/compose.yml \
 	tests/dropin-frontend/compose.yml \
 	tests/federation/compose.misskey.yml \
@@ -1290,6 +1291,22 @@ playwright-admin-settings-check: ## 管理画面が admin/update-meta で書く�
 
 playwright-down: ## Playwright スタックを撤去
 	docker compose -f $(PLAYWRIGHT_COMPOSE) --profile test down -v
+
+# バックアップの取得・検証・復元の spec (specs/backup/) を流すスタック (#4102)。復元の
+# 確定が DB を入れ替えるので、上のスタックとは別の project (mk-playwright-backup) にする。
+# 流し終えたら playwright-backup-down で捨てる。もう一度流すときも作り直す。
+# 上のスタックと同時に流さない。runner は同じ tests/playwright を mount するので、
+# root の token (.auth/) と test-results/・results.json を互いに上書きする
+PLAYWRIGHT_BACKUP_COMPOSE=tests/playwright/backup-stack/compose.yml
+
+playwright-backup-up: ## バックアップの spec のスタック (デーモン付き) を起動
+	docker compose -f $(PLAYWRIGHT_BACKUP_COMPOSE) up -d --build
+
+playwright-backup-test: ## バックアップの spec (specs/backup/) を実行 (PLAYWRIGHT_ARGS で引数追加)
+	docker compose -f $(PLAYWRIGHT_BACKUP_COMPOSE) --profile test run --rm --build playwright-runner test $(PLAYWRIGHT_ARGS)
+
+playwright-backup-down: ## バックアップの spec のスタックを撤去
+	docker compose -f $(PLAYWRIGHT_BACKUP_COMPOSE) --profile test down -v
 
 playwright-logs: ## Playwright スタックのログを表示
 	docker compose -f $(PLAYWRIGHT_COMPOSE) logs -f

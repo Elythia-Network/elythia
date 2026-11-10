@@ -347,6 +347,9 @@ export function listTests() {
   // shard で絞った一覧にしない。`--list` は test.only があっても全テストを並べるが、実行では
   // only の 1 本しか流れない。--forbid-only で一覧ごと落とす (exit 2)
   delete env.PLAYWRIGHT_SHARD;
+  // バックアップのスタックでだけ流す specs/backup/ も並べる (playwright.config.ts)。外すと、
+  // そこに書いた test.only や宣言を、このゲートが見なくなる
+  env.PLAYWRIGHT_STACK = 'all';
   const cli = join(here, 'node_modules', '@playwright', 'test', 'cli.js');
   const out = execFileSync(process.execPath, [cli, 'test', '--config', 'playwright.config.ts', '--list', '--forbid-only', '--reporter=json'], {
     cwd: here,
