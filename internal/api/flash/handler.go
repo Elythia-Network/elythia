@@ -158,7 +158,7 @@ func (h *Handler) Update(c echo.Context) error {
 	if req.Visibility != nil && *req.Visibility != "public" && *req.Visibility != "private" {
 		return apierr.JSONInvalidParam(c)
 	}
-	f, err := h.svc.Update(user.ID, req.FlashID, coreflash.UpdateInput{
+	_, err := h.svc.Update(user.ID, req.FlashID, coreflash.UpdateInput{
 		Title:       req.Title,
 		Summary:     req.Summary,
 		Script:      req.Script,
@@ -177,7 +177,8 @@ func (h *Handler) Update(c echo.Context) error {
 		}
 		return apierr.JSONInternalError(c)
 	}
-	return c.JSON(http.StatusOK, h.flashWithKnownUser(f, user))
+	// upstream flash/update.ts は res を持たず何も返さないので、204で本文を返さない (#4122)。
+	return c.NoContent(http.StatusNoContent)
 }
 
 // DeleteRequest is the request body for flash/delete.
