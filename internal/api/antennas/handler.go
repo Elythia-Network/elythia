@@ -256,6 +256,9 @@ func (h *Handler) Create(c echo.Context) error {
 		if errors.Is(err, coreantenna.ErrTooManyAntennas) {
 			return apierr.JSONTooManyAntennas(c)
 		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return apierr.JSONInternalError(c)
 	}
 	return c.JSON(http.StatusOK, h.antennaToMap(a))
@@ -350,6 +353,9 @@ func (h *Handler) Update(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER_LIST", "No such user list.", "1c6b35c9-943e-48c2-81e4-2844989407f7"))
 		case errors.Is(err, coreantenna.ErrAntennaNameRequired),
 			errors.Is(err, coreantenna.ErrInvalidSource):
+			return apierr.JSONInvalidParam(c)
+		}
+		if repository.IsRejectedValue(err) {
 			return apierr.JSONInvalidParam(c)
 		}
 		return apierr.JSONInternalError(c)

@@ -95,6 +95,9 @@ func (h *Handler) Create(c echo.Context) error {
 		CallbackURL: req.CallbackURL,
 	}
 	if err := h.repo.CreateApp(a); err != nil {
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
 

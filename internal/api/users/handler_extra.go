@@ -708,6 +708,9 @@ func (h *Handler) UpdateMemo(c echo.Context) error {
 			Memo:         *req.Memo,
 		}
 		if err := h.memoRepo.CreateOrUpdate(memo); err != nil {
+			if repository.IsRejectedValue(err) {
+				return apierr.JSONInvalidParam(c)
+			}
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		}
 	}

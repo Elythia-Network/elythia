@@ -164,6 +164,9 @@ func (h *Handler) Create(c echo.Context) error {
 		if errors.Is(err, corepage.ErrPageNameInvalid) {
 			return apierr.JSONInvalidParam(c)
 		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
+		}
 		return apierr.JSONInternalError(c)
 	}
 	return c.JSON(http.StatusOK, h.pageToMap(p))
@@ -381,6 +384,9 @@ func (h *Handler) Update(c echo.Context) error {
 			return apierr.JSONInvalidParam(c)
 		case errors.Is(err, corepage.ErrPageNameConflict):
 			return c.JSON(http.StatusBadRequest, apierr.Error("NAME_ALREADY_EXISTS", "The page name is already in use.", "2298a392-d4a1-44c5-9ebb-ac1aeaa5a9ab"))
+		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
 		}
 		return apierr.JSONInternalError(c)
 	}

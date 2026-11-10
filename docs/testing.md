@@ -463,6 +463,11 @@ make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
 - **IDの書式(`misskey:id`)は`tests/schemathesis/hooks.py`で教える。** schemathesisはこの書式を知らず、教えないと半分以上の入力が引数の検証で弾かれる
 - **Elythia自身は全てのインターフェースで待ち受ける**(設定で待ち受けのアドレスを選べない)。rate limitを切っているので、手元では同じLANから見えないホストで回す。tokenは`docker compose run`の引数に載るので、共有のホストでは`ps`から見える(報告のファイルでは伏せられる)
 - **入力は乱数で作るので、見つかるものは実行ごとに変わる。** 2026-11-10の実行では、約500の口に約14,000件を送り、2xxまで届いた口が275、失敗のある口と検査の組が82だった(5xx 18、宣言に無いstatus 43、宣言の型に合わない応答 21)。IDの書式を教える前の試走では、流し直すたびに新しい失敗が14〜22件出た。schemathesisの既知の失敗の一覧(`--baseline`)は収束しないので使わない。見つかったものは原因ごとにissueへ切り出して直す
+- **2026-11-10の実行で出た5xxのうち、本家と同じなので残しているものが4つある(#4120)。** 毎週の結果に出続けるが、直すものではない。ほかの5xxが出たら、#4120と同じく原因を見て直す
+  - `chat/rooms/join`: 招待が無いとき。本家の`findOneByOrFail`と同じ500
+  - `admin/federation/refresh-remote-instance-metadata`: 登録の無いホストのとき。本家の`instance not found`と同じ500
+  - `users/show`: リモートの利用者を解決できないとき。本家の`FAILED_TO_RESOLVE_REMOTE_USER`は種類が`server`なので500
+  - `admin/announcements/create`: 存在しない`userId`のとき。本家と同じく外部キーの違反で500
 - **結果は`tests/schemathesis/out/`に残る。** `python3 tests/schemathesis/summarize.py`が、検査と口ごとの表を出す。叩いた口が400に届かなければ落とす(起動や読み込みが壊れたのを、失敗の無い実行と取り違えないため)
 - **毎週の`schemathesis` workflowで回す**([ci.md](ci.md#schedule-で回る-workflow))。必須ではなく、見つかったものが直るまでは赤のままになる
 

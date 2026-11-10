@@ -79,6 +79,10 @@ func (h *Handler) RolesCreate(c echo.Context) error {
 		req.Policies == nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Required parameters missing.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 	}
+	// displayOrder は int4 の列。範囲外は pgx が送る前に落とし 500 になっていた (#4120、fitsInt4)
+	if !fitsInt4(*req.DisplayOrder) {
+		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
 	opts := role.CreateOptions{
 		Color:                     req.Color,
 		IconURL:                   req.IconURL,
@@ -129,6 +133,9 @@ func (h *Handler) RolesCreate(c echo.Context) error {
 		if errors.Is(err, role.ErrSelfGrantablePrivilege) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
 				selfGrantableRoleMessage, "3d81ceae-475f-4600-b2a8-2bc116157532"))
+		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
 		}
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 	}
@@ -348,6 +355,9 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		fields["preserveAssignmentOnMoveAccount"] = *req.PreserveAssignmentOnMoveAccount
 	}
 	if req.DisplayOrder != nil {
+		if !fitsInt4(*req.DisplayOrder) {
+			return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+		}
 		fields["displayOrder"] = int(*req.DisplayOrder)
 	}
 	if req.Policies != nil {
@@ -377,6 +387,9 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 		if errors.Is(err, role.ErrSelfGrantablePrivilege) {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
 				selfGrantableRoleMessage, "3d81ceae-475f-4600-b2a8-2bc116157532"))
+		}
+		if repository.IsRejectedValue(err) {
+			return apierr.JSONInvalidParam(c)
 		}
 		return apierr.JSONInternalError(c)
 	}

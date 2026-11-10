@@ -32,6 +32,33 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows)
 }
 
+// IsRejectedValue reports whether PostgreSQL refused a value the client sent:
+// too long for its column (SQLSTATE 22001), a number out of its column's
+// range (22003), a date out of range (22008), a NUL byte (22021), or a NUL
+// escape in a jsonb value (22P05). Handlers answer these with 400 instead of
+// 500 (#4120).
+//
+// 本家は引数の宣言に長さや範囲の上限を持たない口が多く、同じ入力で DB のエラーになって
+// 500 を返す。値そのものが列に入らない、利用者の入力の誤りなので、Elythia は 400
+// INVALID_PARAM にする (docs/divergence/approximations.md)。
+// **外部キーの違反 (23503) は入れない。** 指した行が無いのは値の形の誤りではない。
+// 本家の ajv が通す入力に INVALID_PARAM を返すことになるので、corpus
+// (internal/server の TestEnforcedEndpointsMatchTheCorpus) にそうした入力が入ったら、
+// handlerStricterThanUpstream に足す。
+// 利用者の値だけを書く文の直後で使う。サーバーが計算した数や日時を書く文 (カウンタの
+// 加算など) の失敗にも 22003 や 22008 は出るので、そこで使うと本物の 500 を隠す
+func IsRejectedValue(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	switch pgErr.Code {
+	case "22001", "22003", "22008", "22021", "22P05":
+		return true
+	}
+	return false
+}
+
 // IsUniqueViolation reports whether err is a PostgreSQL unique constraint
 // violation (SQLSTATE 23505), so callers can tell "someone else inserted the
 // same row first" from other failures without importing pgconn.

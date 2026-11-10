@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -222,6 +223,15 @@ func TestRegister_CreateError(t *testing.T) {
 	repo.createErr = errMock
 	rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる endpoint など) は、500 ではなく 400 にする (#4120)。
+func TestRegister_RejectedValueIs400(t *testing.T) {
+	h, repo := newTestHandler()
+	repo.createErr = fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})
+	rec := post(h.Register, `{"endpoint":"https://push.example/1","auth":"a1","publickey":"pk1"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 func TestRegister_NoMeta(t *testing.T) {

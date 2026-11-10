@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,6 +102,121 @@ func TestAdCreate_RepoError(t *testing.T) {
 	repo.CreateErr = assertError{}
 	rec := doPost(h.AdCreate, `{"url":"https://x","imageUrl":"https://y"}`, adminUser)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// errRejectedValue is a store error carrying a PostgreSQL SQLSTATE that
+// repository.IsRejectedValue reports as a value the client sent (22001).
+var errRejectedValue = fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})
+
+// 利用者の値を DB が断ったとき (長すぎる文字列など) は、500 ではなく 400 にする (#4120)。
+func TestAdCreate_RejectedValueIs400(t *testing.T) {
+	h, repo := setupAdHandler(t)
+	repo.CreateErr = errRejectedValue
+	rec := doPost(h.AdCreate, `{"url":"https://x","imageUrl":"https://y"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
+// countingAdRepo counts the writes that reach the store.
+type countingAdRepo struct {
+	*testutil.MockAdRepository
+	creates int
+	updates int
+}
+
+func (r *countingAdRepo) Create(a *model.Ad) error {
+	r.creates++
+	return r.MockAdRepository.Create(a)
+}
+
+func (r *countingAdRepo) UpdateFields(id string, fields map[string]any) error {
+	r.updates++
+	return r.MockAdRepository.UpdateFields(id, fields)
+}
+
+// ratio と dayOfWeek の列は int4。範囲外の値は pgx が送る前に落とし、PostgreSQL の
+// エラーにならないので、store を呼ぶ前に 400 にする (#4120)。int4 の端の値は通す。
+func TestAdCreate_RatioAndDayOfWeekOutsideInt4(t *testing.T) {
+	for _, body := range []string{
+		`{"url":"https://x","imageUrl":"https://y","ratio":2147483648}`,
+		`{"url":"https://x","imageUrl":"https://y","ratio":-2147483649}`,
+		`{"url":"https://x","imageUrl":"https://y","dayOfWeek":2147483648}`,
+		`{"url":"https://x","imageUrl":"https://y","dayOfWeek":-2147483649}`,
+	} {
+		h, _ := setupAdHandler(t)
+		repo := &countingAdRepo{MockAdRepository: testutil.NewMockAdRepository()}
+		h.SetAdRepo(repo)
+		rec := doPost(h.AdCreate, body, adminUser)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`, body)
+		assert.Zero(t, repo.creates, body)
+	}
+	for _, body := range []string{
+		`{"url":"https://x","imageUrl":"https://y","ratio":2147483647,"dayOfWeek":2147483647}`,
+		`{"url":"https://x","imageUrl":"https://y","ratio":-2147483648,"dayOfWeek":-2147483648}`,
+	} {
+		h, _ := setupAdHandler(t)
+		repo := &countingAdRepo{MockAdRepository: testutil.NewMockAdRepository()}
+		h.SetAdRepo(repo)
+		rec := doPost(h.AdCreate, body, adminUser)
+		assert.Equal(t, http.StatusOK, rec.Code, "%s: %s", body, rec.Body.String())
+		assert.Equal(t, 1, repo.creates, body)
+	}
+}
+
+// failingUpdateAdRepo fails UpdateFields with err.
+type failingUpdateAdRepo struct {
+	*testutil.MockAdRepository
+	err error
+}
+
+func (r *failingUpdateAdRepo) UpdateFields(string, map[string]any) error { return r.err }
+
+func TestAdUpdate_RepoError(t *testing.T) {
+	h, base := setupAdHandler(t, &model.Ad{ID: "a1", URL: "u", Place: "square", Priority: "middle", Ratio: 1, ImageURL: "i"})
+	h.SetAdRepo(&failingUpdateAdRepo{base, assertError{}})
+	rec := doPost(h.AdUpdate, `{"id":"a1","url":"new"}`, adminUser)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる URL など) は、500 ではなく 400 にする (#4120)。
+func TestAdUpdate_RejectedValueIs400(t *testing.T) {
+	h, base := setupAdHandler(t, &model.Ad{ID: "a1", URL: "u", Place: "square", Priority: "middle", Ratio: 1, ImageURL: "i"})
+	h.SetAdRepo(&failingUpdateAdRepo{base, errRejectedValue})
+	rec := doPost(h.AdUpdate, `{"id":"a1","url":"new"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
+// update も create と同じ範囲で断る (#4120)。
+func TestAdUpdate_RatioAndDayOfWeekOutsideInt4(t *testing.T) {
+	seed := func() *countingAdRepo {
+		repo := &countingAdRepo{MockAdRepository: testutil.NewMockAdRepository()}
+		require.NoError(t, repo.MockAdRepository.Create(&model.Ad{ID: "a1", URL: "u", Place: "square", Priority: "middle", Ratio: 1, ImageURL: "i"}))
+		return repo
+	}
+	for _, body := range []string{
+		`{"id":"a1","ratio":2147483648}`,
+		`{"id":"a1","ratio":-2147483649}`,
+		`{"id":"a1","dayOfWeek":2147483648}`,
+		`{"id":"a1","dayOfWeek":-2147483649}`,
+	} {
+		h, _ := setupAdHandler(t)
+		repo := seed()
+		h.SetAdRepo(repo)
+		rec := doPost(h.AdUpdate, body, adminUser)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`, body)
+		assert.Zero(t, repo.updates, body)
+		assert.Equal(t, 1, repo.Ads["a1"].Ratio, body)
+	}
+	h, _ := setupAdHandler(t)
+	repo := seed()
+	h.SetAdRepo(repo)
+	rec := doPost(h.AdUpdate, `{"id":"a1","ratio":2147483647,"dayOfWeek":2147483647}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, repo.updates)
+	assert.Equal(t, 2147483647, repo.Ads["a1"].Ratio)
 }
 
 // fakeMetaResponseInvalidator counts InvalidateResponseCache calls.
@@ -365,6 +481,22 @@ func TestAvatarDecorationsCreate_MissingName(t *testing.T) {
 		doPost(h.AvatarDecorationsCreate, `{"url":"https://i"}`, adminUser).Code)
 }
 
+func TestAvatarDecorationsCreate_RepoError(t *testing.T) {
+	h, repo := setupAvatarDecorationHandler(t)
+	repo.CreateErr = assertError{}
+	rec := doPost(h.AvatarDecorationsCreate, `{"name":"deco","description":"d","url":"https://i"}`, adminUser)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったときは 400 にする (#4120)。
+func TestAvatarDecorationsCreate_RejectedValueIs400(t *testing.T) {
+	h, repo := setupAvatarDecorationHandler(t)
+	repo.CreateErr = errRejectedValue
+	rec := doPost(h.AvatarDecorationsCreate, `{"name":"deco","description":"d","url":"https://i"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
+}
+
 // upstream Misskey #17034 (= 2026.5.0): avatar_decoration に category 列を
 // 追加し、create / update / list / get-avatar-decorations の各 API で round-trip
 // する。create で category 指定 → 戻り値 + DB row に反映、update で別 string
@@ -464,6 +596,32 @@ func TestAvatarDecorationsUpdate_NotFound(t *testing.T) {
 	h, _ := setupAvatarDecorationHandler(t)
 	assert.Equal(t, http.StatusNotFound,
 		doPost(h.AvatarDecorationsUpdate, `{"id":"missing","name":"x"}`, adminUser).Code)
+}
+
+// failingUpdateAvatarDecorationRepo fails UpdateFields with err.
+type failingUpdateAvatarDecorationRepo struct {
+	*testutil.MockAvatarDecorationRepository
+	err error
+}
+
+func (r *failingUpdateAvatarDecorationRepo) UpdateFields(string, map[string]any) error {
+	return r.err
+}
+
+func TestAvatarDecorationsUpdate_RepoError(t *testing.T) {
+	h, base := setupAvatarDecorationHandler(t, &model.AvatarDecoration{ID: "d1", Name: "old", URL: "u"})
+	h.SetAvatarDecorationRepo(&failingUpdateAvatarDecorationRepo{base, assertError{}})
+	rec := doPost(h.AvatarDecorationsUpdate, `{"id":"d1","name":"new"}`, adminUser)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestAvatarDecorationsUpdate_RejectedValueIs400(t *testing.T) {
+	h, base := setupAvatarDecorationHandler(t, &model.AvatarDecoration{ID: "d1", Name: "old", URL: "u"})
+	h.SetAvatarDecorationRepo(&failingUpdateAvatarDecorationRepo{base, errRejectedValue})
+	rec := doPost(h.AvatarDecorationsUpdate, `{"id":"d1","name":"new"}`, adminUser)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 func TestAvatarDecorationsUpdate_MissingID(t *testing.T) {

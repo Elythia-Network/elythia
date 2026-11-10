@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -132,9 +133,15 @@ func TestCreate_InvalidSource(t *testing.T) {
 // failingAntennaRepo returns errors on Create.
 type failingAntennaRepo struct {
 	*testutil.MockAntennaRepository
+	err error
 }
 
-func (r *failingAntennaRepo) Create(_ *model.Antenna) error { return errors.New("boom") }
+func (r *failingAntennaRepo) Create(_ *model.Antenna) error {
+	if r.err != nil {
+		return r.err
+	}
+	return errors.New("boom")
+}
 
 func TestCreate_RepoError(t *testing.T) {
 	mock := testutil.NewMockAntennaRepository()
@@ -145,6 +152,18 @@ func TestCreate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestCreate_RejectedValueIs400(t *testing.T) {
+	repo := &failingAntennaRepo{MockAntennaRepository: testutil.NewMockAntennaRepository(), err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
+	c, rec := newReq(t, `{"name":"alpha","src":"all","keywords":[["foo"]],"excludeKeywords":[],"users":[],"caseSensitive":false,"withReplies":false,"withFile":false}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Create(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // newHandlerWithUserList は userListRepo を配線した handler を返す
@@ -322,9 +341,13 @@ func TestUpdate_InvalidSource(t *testing.T) {
 // failingUpdateRepo causes UpdateFields to fail.
 type failingUpdateRepo struct {
 	*testutil.MockAntennaRepository
+	err error
 }
 
 func (r *failingUpdateRepo) UpdateFields(_ string, _ map[string]any) error {
+	if r.err != nil {
+		return r.err
+	}
 	return errors.New("boom")
 }
 
@@ -338,6 +361,20 @@ func TestUpdate_RepoError(t *testing.T) {
 	setUser(c, "alice")
 	require.NoError(t, h.Update(c))
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎる名前など) は、500 ではなく 400 にする (#4120)。
+func TestUpdate_RejectedValueIs400(t *testing.T) {
+	mock := testutil.NewMockAntennaRepository()
+	mock.Antennas["a1"] = &model.Antenna{ID: "a1", UserID: "alice"}
+	repo := &failingUpdateRepo{MockAntennaRepository: mock, err: fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})}
+	svc := coreantenna.NewService(repo, testutil.NewMockUserRepository(), testRedis.Client, idGen, nil)
+	h := NewHandler(svc, testutil.NewMockNoteRepository(), idGen, nil, nil, nil, nil, nil, nil)
+	c, rec := newReq(t, `{"antennaId":"a1","name":"x"}`)
+	setUser(c, "alice")
+	require.NoError(t, h.Update(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // upstream update.ts: keywords/excludeKeywords が両方指定され両方空なら EMPTY_KEYWORD (#1544)。

@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -661,6 +662,32 @@ func TestUpdateMemo_InvalidParam(t *testing.T) {
 	h, _, _ := newExtraHandler(t)
 	rec := postExtra(h.UpdateMemo, `{}`, &model.User{ID: "u1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// failingMemoRepo fails CreateOrUpdate with err.
+type failingMemoRepo struct {
+	*testutil.MockUserMemoRepository
+	err error
+}
+
+func (r *failingMemoRepo) CreateOrUpdate(*model.UserMemo) error { return r.err }
+
+func TestUpdateMemo_RepoError(t *testing.T) {
+	h, userRepo, _ := newExtraHandler(t)
+	userRepo.Users["u2"] = &model.User{ID: "u2"}
+	h.SetMemoRepo(&failingMemoRepo{testutil.NewMockUserMemoRepository(), errors.New("boom")})
+	rec := postExtra(h.UpdateMemo, `{"userId":"u2","memo":"m"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// 利用者の値を DB が断ったとき (長すぎるメモなど) は、500 ではなく 400 にする (#4120)。
+func TestUpdateMemo_RejectedValueIs400(t *testing.T) {
+	h, userRepo, _ := newExtraHandler(t)
+	userRepo.Users["u2"] = &model.User{ID: "u2"}
+	h.SetMemoRepo(&failingMemoRepo{testutil.NewMockUserMemoRepository(), fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22001"})})
+	rec := postExtra(h.UpdateMemo, `{"userId":"u2","memo":"m"}`, &model.User{ID: "u1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INVALID_PARAM"`)
 }
 
 // --- Failing repo ---
