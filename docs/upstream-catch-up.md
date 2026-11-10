@@ -429,7 +429,8 @@ Elythia 側の挙動に引きずられていた箇所が 19 件見つかり、�
 失敗した spec を見るときは以下に注意する。
 
 - Elythia には `docs/divergence.md` に記録した**意図的な差分**がある
-  (例: `NO_SUCH_*` を upstream は 400、Elythia は意味的に正確な 404 で返す)。
+  (例: 本家が 500 を返す口で、Elythia が 4xx を返すもの。`NO_SUCH_*` の 404 は
+  #2345 / #4122 で本家と同じ 400 に揃えた)。
   spec 側は `tests/playwright/fixtures/backend.ts` の `NOT_FOUND_STATUS` の
   ように backend ごとの期待値で吸収する。ただし**この逃げ道を足すたびに、その
   spec は parity を証明しなくなる**ので、安易に増やさない

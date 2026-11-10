@@ -42,10 +42,11 @@ var httpStatusValue = map[string]int{
 // TestErrorHTTPStatusDrift gates the HTTP status of error responses, but ONLY
 // for the errors where Misskey explicitly pins a status (httpStatusCode or a
 // non-default kind). Misskey returns 400 for ~95% of errors by default (kind
-// defaults to 'client'); mk-go intentionally keeps semantic statuses (404 for
-// NO_SUCH_*, 403 for ACCESS_DENIED) for those, and misskey-js does not branch on
-// the specific status. So only the explicit-status set is contractually binding,
-// and that is what this gate enforces.
+// defaults to 'client'). Elythia answers those with 400 as well (#2345, #4122:
+// a semantic 404 for NO_SUCH_* broke clients that branch on the status), but a
+// few deliberate 4xx for upstream's 500 remain (docs/divergence). Only the
+// explicit-status set is checked against the golden here; the implicit 400s
+// are pinned by the handler tests.
 func TestErrorHTTPStatusDrift(t *testing.T) {
 	root := repoRoot(t)
 
