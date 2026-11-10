@@ -210,14 +210,15 @@ func TestTwoFADone_EmptyTokenTakesTheUsualPath(t *testing.T) {
 }
 
 // i/move の空の moveToAccount は、本家と同じく root の判定より先に NO_SUCH_USER
-// を返す。キーが無いものは本家も 400 (#3851)。
+// を返す (#3851)。本家の noSuchUser は httpStatusCode を持たないので400 (#4122)。
+// キーが無いものは本家も 400 (#3851)。
 func TestMove_EmptyMoveToAccountIsNoSuchUser(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	sm := &stubMover{}
 	h.SetAccountMover(sm)
 	for _, u := range []*model.User{{ID: "me"}, {ID: "me", IsRoot: true}} {
 		rec := post(h.Move, `{"moveToAccount":""}`, u)
-		assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+		assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		code, id := errorOf(t, rec.Body.Bytes())
 		assert.Equal(t, "NO_SUCH_USER", code)
 		assert.Equal(t, "fcd2eef9-a9b2-4c4f-8624-038099e90aa5", id)
