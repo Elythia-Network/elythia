@@ -470,7 +470,9 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 		// 何か起きているのか切り分けに使う。
 		slog.WarnContext(c.Request().Context(), "EmojiUpdate: NO_SUCH_EMOJI on lookup",
 			"id", reqID, "rawId", string(req.ID), "err", err)
-		return c.JSON(http.StatusNotFound, apierr.NoSuchEmoji())
+		// upstream admin/emoji/update.ts の noSuchEmoji は httpStatusCode を持たない
+		// ので、kind client の既定どおり400で返す (#4122)。
+		return c.JSON(http.StatusBadRequest, apierr.NoSuchEmoji())
 	}
 	// 以降の UpdateFields / moderation log は解決済み id を使う。
 	reqID = before.ID
@@ -512,7 +514,9 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 				return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 			}
 			if derr == nil && dup != nil && dup.ID != reqID {
-				return c.JSON(http.StatusBadRequest, apierr.Error("SAME_NAME_EMOJI_EXISTS", "Emoji with the same name already exists.", "7180fe9d-1ee3-bff9-647d-fe9896d2ffb8"))
+				// message は upstream admin/emoji/update.ts の文言そのまま (#4122)。
+				// add / copy は別のエラー (DUPLICATE_NAME、"Duplicate name.") を使う。
+				return c.JSON(http.StatusBadRequest, apierr.Error("SAME_NAME_EMOJI_EXISTS", "Emoji that have same name already exists.", "7180fe9d-1ee3-bff9-647d-fe9896d2ffb8"))
 			}
 		}
 		fields["name"] = *req.Name
@@ -691,7 +695,7 @@ func (h *Handler) EmojiUpdate(c echo.Context) error {
 		// の昇格を含む) ので更新は載っておらず、絵文字は差し替え前の URL を指した
 		// まま。作った複製は誰からも参照されない孤児として残る。
 		h.deleteSystemEmojiFile(c.Request().Context(), systemFileID)
-		return c.JSON(http.StatusNotFound, apierr.NoSuchEmoji())
+		return c.JSON(http.StatusBadRequest, apierr.NoSuchEmoji())
 	}
 	after, err := h.emojiRepo.FindByID(reqID)
 	if err != nil {

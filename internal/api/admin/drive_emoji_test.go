@@ -1532,7 +1532,17 @@ func TestEmojiUpdate_SameNameExists(t *testing.T) {
 	// e1 を beta にリネーム → 既存 beta と衝突。
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","name":"beta"}`, adminUser)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "SAME_NAME_EMOJI_EXISTS")
+	// code / message / id は upstream admin/emoji/update.ts の sameNameEmojiExists と同じ (#4122)。
+	var body struct {
+		Error map[string]any `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, map[string]any{
+		"message": "Emoji that have same name already exists.",
+		"code":    "SAME_NAME_EMOJI_EXISTS",
+		"id":      "7180fe9d-1ee3-bff9-647d-fe9896d2ffb8",
+		"kind":    "client",
+	}, body.Error)
 }
 
 func TestEmojiUpdate_NoSuchFile(t *testing.T) {
@@ -1567,7 +1577,7 @@ func TestEmojiUpdate_NameOnly(t *testing.T) {
 func TestEmojiUpdate_NameOnly_NotFound(t *testing.T) {
 	h, _ := setupEmojiHandler(t, &model.Emoji{ID: "e1", Name: "smile"})
 	rec := doPost(h.EmojiUpdate, `{"name":"ghost","category":"x"}`, adminUser)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_EMOJI")
 }
 
@@ -1657,7 +1667,8 @@ func TestEmojiUpdate_NoSuchEmojiOnMissingID(t *testing.T) {
 	// から修正) と完全一致することも assert する。
 	h, _ := setupEmojiHandler(t)
 	rec := doPost(h.EmojiUpdate, `{"id":"ghost","name":"x"}`, adminUser)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// upstream の noSuchEmoji は httpStatusCode を持たないので400 (#4122)。
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	errField, ok := body["error"].(map[string]any)

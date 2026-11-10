@@ -309,7 +309,9 @@ func TestEmojiUpdate_DoesNotCopyBeforeValidation(t *testing.T) {
 	t.Run("絵文字が無ければ複製する前に弾く", func(t *testing.T) {
 		h, fetcher := newHandler(t, "image/png")
 		rec := doPost(h.EmojiUpdate, `{"id":"missing","fileId":"f_img"}`, adminUser)
-		require.Equal(t, http.StatusNotFound, rec.Code)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		code, _ := errorID(t, rec.Body.Bytes())
+		assert.Equal(t, "NO_SUCH_EMOJI", code)
 		assert.Empty(t, fetcher.copyCalls, "更新先が無いのに複製を作っている (孤児になる)")
 	})
 
@@ -384,7 +386,11 @@ func TestEmojiUpdate_RowGoneDeletesSystemCopy(t *testing.T) {
 	h.SetEmojiImageFetcherForTest(fetcher)
 
 	rec := doPost(h.EmojiUpdate, `{"id":"e1","fileId":"f_img"}`, adminUser)
-	require.Equal(t, http.StatusNotFound, rec.Code)
+	// upstream の noSuchEmoji は httpStatusCode を持たないので400 (#4122)。
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	code, id := errorID(t, rec.Body.Bytes())
+	assert.Equal(t, "NO_SUCH_EMOJI", code)
+	assert.Equal(t, "684dec9d-a8c2-4364-9aa8-456c49cb1dc8", id)
 	assert.Equal(t, []string{"sys10"}, fetcher.deletedIDs, "更新先が消えたのに複製が孤児として残っている")
 }
 

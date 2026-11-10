@@ -449,7 +449,7 @@ func TestEmojiColumnFit_DoesNotPreemptUpstreamErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		rec := doPost(h.EmojiUpdate, string(body), adminUser)
-		require.Equal(t, http.StatusNotFound, rec.Code)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
 		code, _ := errorID(t, rec.Body.Bytes())
 		assert.Equal(t, "NO_SUCH_EMOJI", code)
 	})
