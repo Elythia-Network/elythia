@@ -1078,13 +1078,14 @@ func TestAPIShow_ResponseInvalid(t *testing.T) {
 	// id 欠落
 	h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","content":"no id"}`)}, nil)
 	rec := postJSON(h.APIShow, `{"uri":"https://remote.example/notes/1"}`)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	// upstream の responseInvalid は httpStatusCode を持たないので400 (#4122)。
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "RESPONSE_INVALID")
 
 	// JSON 不正
 	h.SetRemote(&mockFetcher{data: []byte(`not json`)}, nil)
 	rec = postJSON(h.APIShow, `{"uri":"https://remote.example/notes/2"}`)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "RESPONSE_INVALID")
 }
 
@@ -1101,7 +1102,8 @@ func TestAPIShow_RemoteNotFound(t *testing.T) {
 }
 
 // #1557 remote fetch が 404 以外 (network / 5xx) で失敗し fallback も失敗 →
-// REQUEST_FAILED (upstream の catch-all requestFailed)。
+// REQUEST_FAILED (upstream の catch-all requestFailed)。httpStatusCode を
+// 持たないので400 (#4122)。
 func TestAPIShow_RemoteRequestFailed(t *testing.T) {
 	h, _, _, _ := newHandler(t)
 	h.SetRemote(
@@ -1109,7 +1111,7 @@ func TestAPIShow_RemoteRequestFailed(t *testing.T) {
 		&mockResolver{err: assert.AnError},
 	)
 	rec := postJSON(h.APIShow, `{"uri":"https://remote.example/unknown"}`)
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "REQUEST_FAILED")
 }
 
