@@ -10,6 +10,7 @@
 import * as fs from 'node:fs';
 import { load as loadYaml } from 'js-yaml';
 import { languages, primaries } from './const.js';
+import { ELYTHIA_LOCALES_DIR, overlayLocale } from './elythia.js';
 import type { Locale } from './autogen/locale.js';
 import type { ILocale, ParameterizedString } from './types.js';
 
@@ -63,6 +64,12 @@ function build(): Record<Language, Locale> {
 	const metaUrl = import.meta.url;
 	const locales = languages.reduce<Locales>((a, lang) => {
 		a[lang] = (loadYaml(clean(fs.readFileSync(new URL(`./locales/${lang}.yml`, metaUrl), 'utf-8'))) ?? {}) as ILocale;
+		// Elythia: 本家の語の上に、locales-elythia の同じ言語の語を重ねる (#4071)。
+		// 言語をまたぐフォールバックは下で行うので、ここでは同じ言語どうしだけを重ねる
+		const ownUrl = new URL(`./${ELYTHIA_LOCALES_DIR}/${lang}.yml`, metaUrl);
+		if (fs.existsSync(ownUrl)) {
+			a[lang] = overlayLocale(a[lang], loadYaml(clean(fs.readFileSync(ownUrl, 'utf-8'))) as ILocale | null);
+		}
 		return a;
 	}, {} as Locales);
 
