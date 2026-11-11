@@ -491,6 +491,8 @@ func TestCustomJSONMarshalersAreKnown(t *testing.T) {
 		"internal/entitycompat/marshalerfixture/marshalers.go#Plain.MarshalJSON",
 		"internal/entitycompat/marshalerfixture/marshalers.go#Pointer.MarshalJSON",
 		"internal/entitycompat/marshalerfixture/marshalers.go#Text.MarshalText",
+		// 応答の日時を本家の書式 (Date.toISOString) で書く (#4091)。中身は時刻だけ。
+		"internal/misc/jsdate/iso.go#Time.MarshalJSON",
 		// job の payload (#3614)。struct の field (タグ付き) をそのまま書き、本文
 		// (activity) の形だけを変える。field は増やしていないので IP は持たない。
 		"internal/queue/activity_body.go#DeliverPayload.MarshalJSON",
