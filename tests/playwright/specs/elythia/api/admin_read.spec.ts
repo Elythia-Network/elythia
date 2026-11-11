@@ -9,7 +9,7 @@
 
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
-import { callChecked, expectApiResponse, knownDateBug } from '../../../fixtures/api_schema';
+import { callChecked, expectApiResponse } from '../../../fixtures/api_schema';
 import { rootFixture } from '../../../fixtures/admin_table';
 import { randomUsername, signupUser } from '../../../fixtures/auth';
 import { isTsBackend } from '../../../fixtures/backend';
@@ -20,12 +20,12 @@ import { totpAdmin } from '../../../fixtures/reauth';
 const HOST = 'pw-read.invalid';
 
 /**
- * Calls an endpoint whose rows (and their dates, #4091) come and go with the
- * other specs, and checks it marking the known bug only while a date is there.
+ * Calls an endpoint whose rows come and go with the other specs, and checks
+ * it against the declaration.
  */
 async function callWithRows<T = unknown>(request: Parameters<typeof callApi>[0], endpoint: string, body: Record<string, unknown>): Promise<T> {
   const resp = await callApi(request, endpoint, body);
-  return expectApiResponse<T>(request, endpoint, resp, knownDateBug(await resp.text(), '#4091'));
+  return expectApiResponse<T>(request, endpoint, resp);
 }
 
 test.describe('admin: the Elythia endpoints that read answer as declared', () => {
@@ -37,8 +37,7 @@ test.describe('admin: the Elythia endpoints that read answer as declared', () =>
 
   test('the health and the information of the server', async ({ request }) => {
     const { token } = rootFixture();
-    // 日時の書式は #4091 で直す
-    await callChecked(request, 'admin/database-health', { i: token }, { knownBug: '#4091' });
+    await callChecked(request, 'admin/database-health', { i: token });
     await callChecked(request, 'admin/drive/usage', { i: token });
     await callChecked(request, 'admin/server-metrics', { i: token });
     await callChecked(request, 'admin/server-plugins', { i: token });
@@ -59,11 +58,11 @@ test.describe('admin: the Elythia endpoints that read answer as declared', () =>
     expect(created.status(), await created.text()).toBe(200);
     const ruleId = ((await created.json()) as { id: string }).id;
     try {
-      const rules = await callChecked<{ id: string }[]>(request, 'admin/federation/rules/list', { i: token }, { knownBug: '#4091' });
+      const rules = await callChecked<{ id: string }[]>(request, 'admin/federation/rules/list', { i: token });
       expect(rules.map((r) => r.id)).toContain(ruleId);
       const updated = await callChecked<{ id: string; name: string }>(request, 'admin/federation/rules/update', {
         i: token, ruleId, name: 'pw read (updated)', mode: 'record', target: 'note', hosts: [HOST], unlist: true,
-      }, { knownBug: '#4091' });
+      });
       expect(updated).toMatchObject({ id: ruleId, name: 'pw read (updated)' });
     } finally {
       expect((await callApi(request, 'admin/federation/rules/delete', { i: token, ruleId })).status()).toBe(204);

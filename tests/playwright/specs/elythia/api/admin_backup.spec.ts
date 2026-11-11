@@ -74,9 +74,9 @@ test.describe('admin: the backup generations, downloaded and deleted', () => {
       roleId = reauth.roleId;
       const auth = { i: reauth.admin.token, password: reauth.password };
 
-      // 前の段のコードはサーバーの段が進むと通らなくなるので、先に使う。日時の書式は #4091 で直す
+      // 前の段のコードはサーバーの段が進むと通らなくなるので、先に使う
       const download = await callChecked<{ url: string; size: number; fileName: string; via: string; encrypted: boolean }>(
-        request, 'admin/backup/download', { ...auth, token: reauth.code(-1), id: generation.id }, { knownBug: '#4091' },
+        request, 'admin/backup/download', { ...auth, token: reauth.code(-1), id: generation.id },
       );
       expect(download).toMatchObject({ size: generation.dump.length, fileName: `${generation.id}-${DUMP_FILE}`, via: 'server', encrypted: false });
       const fetched = await request.get(download.url, { failOnStatusCode: false });

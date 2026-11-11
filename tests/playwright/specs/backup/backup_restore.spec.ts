@@ -13,7 +13,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { callApi } from '../../fixtures/api';
-import { callChecked, expectApiResponse, knownDateBug } from '../../fixtures/api_schema';
+import { callChecked, expectApiResponse } from '../../fixtures/api_schema';
 import { rootFixture } from '../../fixtures/admin_table';
 import { withDb } from '../../fixtures/db';
 import { isTsBackend } from '../../fixtures/backend';
@@ -40,7 +40,9 @@ async function finished(request: APIRequestContext, job: Job, key: 'lastTake' | 
   let result: JobResult | null = null;
   await expect.poll(async () => {
     result = (await daemonStatus(request))[key];
-    return result?.startedAt === job.startedAt;
+    // デーモンの /status は Go の既定の書式 (ナノ秒) で、本体の応答は本家の書式 (ミリ秒) で
+    // 書く (#4091)。文字列でなく時刻として比べる
+    return result != null && Date.parse(result.startedAt) === Date.parse(job.startedAt);
   }, { timeout: 120_000, intervals: [1_000] }).toBe(true);
   return result as unknown as JobResult;
 }
@@ -62,8 +64,7 @@ async function reachStep(request: APIRequestContext, token: string, t: Ticket, s
     return st.record.step;
   }, { timeout: 300_000, intervals: [1_000] }).toBe(step);
   const resp = await callApi(request, 'admin/backup/restore/status', body);
-  const text = await resp.text();
-  return expectApiResponse<RestoreStatus>(request, 'admin/backup/restore/status', resp, knownDateBug(text, '#4091'));
+  return expectApiResponse<RestoreStatus>(request, 'admin/backup/restore/status', resp);
 }
 
 test.describe('admin: take, verify and restore a backup', () => {
@@ -83,7 +84,7 @@ test.describe('admin: take, verify and restore a backup', () => {
     // 本当に取得の時点の DB へ入れ替えたことを、これで確かめる
     const before = await createNote(request, token, { text: 'before the backup' });
 
-    const take = await callChecked<{ accepted: boolean; job: Job }>(request, 'admin/backup/take', await auth(), { knownBug: '#4091' });
+    const take = await callChecked<{ accepted: boolean; job: Job }>(request, 'admin/backup/take', await auth());
     expect(take).toMatchObject({ accepted: true, job: { kind: 'take', trigger: 'api' } });
     const taken = await finished(request, take.job, 'lastTake');
     expect(taken, taken.error).toMatchObject({ ok: true });
@@ -92,21 +93,20 @@ test.describe('admin: take, verify and restore a backup', () => {
 
     const after = await createNote(request, token, { text: 'after the backup' });
 
-    const verify = await callChecked<{ accepted: boolean; job: Job }>(request, 'admin/backup/verify', { ...(await auth()), id }, { knownBug: '#4091' });
+    const verify = await callChecked<{ accepted: boolean; job: Job }>(request, 'admin/backup/verify', { ...(await auth()), id });
     expect(verify).toMatchObject({ accepted: true, job: { kind: 'verify', trigger: 'api', generationId: id } });
     const verified = await finished(request, verify.job, 'lastVerify');
     expect(verified, verified.error).toMatchObject({ ok: true, generationId: id });
 
     // 退避した DB は、まだ無い
     const candidatesResp = await callApi(request, 'admin/backup/restore/candidates', await auth());
-    const candidatesText = await candidatesResp.text();
     const candidates = await expectApiResponse<{ database: string; databases: { name: string }[] }>(
-      request, 'admin/backup/restore/candidates', candidatesResp, knownDateBug(candidatesText, '#4091'),
+      request, 'admin/backup/restore/candidates', candidatesResp,
     );
     expect(candidates).toEqual({ database: 'misskey', databases: [] });
 
     // 準備して中止する。作った DB は消え、元の DB のまま動く
-    const first = await callChecked<Ticket & { status: RestoreStatus }>(request, 'admin/backup/restore/prepare', { ...(await auth()), id }, { knownBug: '#4091' });
+    const first = await callChecked<Ticket & { status: RestoreStatus }>(request, 'admin/backup/restore/prepare', { ...(await auth()), id });
     expect(first.status.record).toMatchObject({ kind: 'restore', generationId: id });
     const ready = await reachStep(request, token, first, 'ready');
     const target = ready.record.target;
@@ -119,7 +119,7 @@ test.describe('admin: take, verify and restore a backup', () => {
     expect((await showNoteRaw(request, token, after.id)).status(), 'the abort keeps the database').toBe(200);
 
     // 準備して切り替える
-    const second = await callChecked<Ticket & { status: RestoreStatus }>(request, 'admin/backup/restore/prepare', { ...(await auth()), id }, { knownBug: '#4091' });
+    const second = await callChecked<Ticket & { status: RestoreStatus }>(request, 'admin/backup/restore/prepare', { ...(await auth()), id });
     expect(second.opId).not.toBe(first.opId);
     await reachStep(request, token, second, 'ready');
     await callChecked(request, 'admin/backup/restore/confirm', { ...(await auth()), opId: second.opId, ticket: second.ticket });
@@ -132,9 +132,8 @@ test.describe('admin: take, verify and restore a backup', () => {
 
     // 切り替える前の DB は、退避した DB として一覧に出る
     const keptResp = await callApi(request, 'admin/backup/restore/candidates', await auth());
-    const keptText = await keptResp.text();
     const kept = await expectApiResponse<{ database: string; databases: { name: string }[] }>(
-      request, 'admin/backup/restore/candidates', keptResp, knownDateBug(keptText, '#4091'),
+      request, 'admin/backup/restore/candidates', keptResp,
     );
     expect(kept.databases).toEqual([expect.objectContaining({ name: expect.stringMatching(/^misskey_before_restore_/) })]);
   });
