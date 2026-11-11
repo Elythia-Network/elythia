@@ -8,6 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -45,11 +46,11 @@ func packSignupApplication(a *model.SignupApplication) map[string]any {
 		"id":            a.ID,
 		"status":        a.Status,
 		"answers":       a.Answers,
-		"createdAt":     a.CreatedAt,
-		"updatedAt":     a.UpdatedAt,
-		"expiresAt":     a.ExpiresAt,
+		"createdAt":     jsdate.ISOString(a.CreatedAt),
+		"updatedAt":     jsdate.ISOString(a.UpdatedAt),
+		"expiresAt":     jsdate.ISOString(a.ExpiresAt),
 		"processedById": a.ProcessedByID,
-		"processedAt":   a.ProcessedAt,
+		"processedAt":   jsdate.NewTimePtr(a.ProcessedAt),
 		"usedById":      a.UsedByID,
 	}
 }

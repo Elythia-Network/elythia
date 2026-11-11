@@ -253,6 +253,8 @@ func TestApplicationStatus(t *testing.T) {
 
 	app := parseResp(t, rec)["application"].(map[string]any)
 	assert.Equal(t, "approved", app["status"])
+	// 日時は本家の書式で出す (#4091)。
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "createdAt", "expiresAt")
 }
 
 func TestApplicationStatus_Errors(t *testing.T) {
