@@ -12,6 +12,7 @@ import (
 	coresignup "github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/core/signupform"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/labstack/echo/v4"
 )
@@ -59,8 +60,8 @@ func applicationView(a *model.SignupApplication) map[string]any {
 	}
 	return map[string]any{
 		"status":    a.Status,
-		"createdAt": a.CreatedAt,
-		"expiresAt": a.ExpiresAt,
+		"createdAt": jsdate.ISOString(a.CreatedAt),
+		"expiresAt": jsdate.ISOString(a.ExpiresAt),
 	}
 }
 

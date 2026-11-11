@@ -10,6 +10,7 @@ import (
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/core/signupapplication"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,7 +80,10 @@ func sampleApplication() *model.SignupApplication {
 }
 
 func TestSignupApplicationList(t *testing.T) {
-	rev := &stubReviewer{rows: []*model.SignupApplication{sampleApplication()}, count: 1}
+	row := sampleApplication()
+	processed := time.Date(2026, 10, 1, 9, 0, 0, 123_456_789, time.FixedZone("JST", 9*60*60))
+	row.ProcessedAt = &processed
+	rev := &stubReviewer{rows: []*model.SignupApplication{row}, count: 1}
 	h := newReviewerHandler(t, rev)
 
 	rec := doPost(h.SignupApplicationList, `{"filter":"pending","limit":10,"offset":5}`, testModerator)
@@ -105,6 +109,8 @@ func TestSignupApplicationList(t *testing.T) {
 	// 管理者が申請者になりすまして登録できる。
 	assert.NotContains(t, app, "claimCode")
 	assert.NotContains(t, app, "claimCodeHash")
+	// 日時は本家の書式で出す (#4091)。
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "createdAt", "updatedAt", "expiresAt", "processedAt")
 
 	assert.Equal(t, "pending", rev.lastFilter)
 	assert.Equal(t, 10, rev.lastLimit)
