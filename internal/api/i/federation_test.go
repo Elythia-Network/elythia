@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,3 +67,26 @@ func TestUpdateFederationInvalidatesUserCache(t *testing.T) {
 }
 
 var _ repository.LocalFederationRepository = (*federationAPIRepository)(nil)
+
+// The times of i/federation go out in the format upstream sends (#4091).
+func TestFederation_DatesInUpstreamFormat(t *testing.T) {
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h := NewHandler(nil, idGen, nil, nil, nil, nil, nil, &stubTokenInvalidator{}, nil, nil, nil, nil)
+	enabled := time.Date(2026, 10, 1, 9, 0, 0, 123_456_789, time.FixedZone("JST", 9*60*60))
+	referenced := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	h.SetLocalFederationService(localfederation.NewService(&federationAPIRepository{
+		user: model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn, FederationEnabledAt: &enabled, FirstExternalReferenceAt: &referenced},
+	}, false))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/i/federation", strings.NewReader(`{}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(middleware.UserContextKey), &model.User{ID: "u1", Username: "alice", FederationStatus: model.FederationStatusOn})
+
+	require.NoError(t, h.Federation(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "federationEnabledAt", "firstExternalReferenceAt")
+}

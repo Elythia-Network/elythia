@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"gorm.io/gorm"
@@ -34,8 +35,8 @@ const (
 // StatusSnapshot is returned by the authenticated self-service endpoints.
 type StatusSnapshot struct {
 	FederationStatus             model.FederationStatus `json:"federationStatus"`
-	FederationEnabledAt          *time.Time             `json:"federationEnabledAt"`
-	FirstExternalReferenceAt     *time.Time             `json:"firstExternalReferenceAt"`
+	FederationEnabledAt          *jsdate.Time           `json:"federationEnabledAt"`
+	FirstExternalReferenceAt     *jsdate.Time           `json:"firstExternalReferenceAt"`
 	FirstExternalReferenceReason *string                `json:"firstExternalReferenceReason"`
 	FirstExternalReferenceHost   *string                `json:"firstExternalReferenceHost"`
 	IsSystemAccount              bool                   `json:"isSystemAccount"`
@@ -201,8 +202,8 @@ func (s *Service) WithLockedUser(userID string, fn func(tx *gorm.DB, user *model
 func snapshot(user *model.User, isSystem bool) StatusSnapshot {
 	return StatusSnapshot{
 		FederationStatus:             user.FederationStatus,
-		FederationEnabledAt:          user.FederationEnabledAt,
-		FirstExternalReferenceAt:     user.FirstExternalReferenceAt,
+		FederationEnabledAt:          jsdate.NewTimePtr(user.FederationEnabledAt),
+		FirstExternalReferenceAt:     jsdate.NewTimePtr(user.FirstExternalReferenceAt),
 		FirstExternalReferenceReason: user.FirstExternalReferenceReason,
 		FirstExternalReferenceHost:   user.FirstExternalReferenceHost,
 		IsSystemAccount:              isSystem,
