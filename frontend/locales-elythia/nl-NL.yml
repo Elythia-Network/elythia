@@ -1,0 +1,7 @@
+introMisskey: "Welkom! Elythia is een open source, gedecentraliseerde microblogdienst.\nMaak \"notities\" om je gedachten te delen met iedereen om je heen. 📡\nMet \"reacties\" kun je ook snel je mening geven over berichten van anderen. 👍\nLaten we een nieuwe wereld verkennen! 🚀"
+poweredByMisskeyDescription: "{name} is één van de services die door het open source platform <b>Elythia</b> wordt geleverd (het wordt ook wel een \"Elythia server genmoemd\")."
+initialPasswordForSetupDescription: "Gebruik het initiële wachtwoord uit de configuratie, als je Elythia zelf hebt geïnstalleerd.\nAls je een Elythia hosting provider gebruikt, gebruik dan het gegeven wachtwoord.\nAls je geen wachtwoord hebt gezet, laat het dan leeg om verder te gaan."
+flagAsBotDescription: "Als dit account van een programma wordt beheerd, zet deze vlag aan. Het aanzetten helpt andere ontwikkelaars om bijvoorbeeld onbedoelde feedback loops te doorbreken of om Elythia meer geschikt te maken."
+useSoundOnlyWhenActive: "Geluid alleen inschakelen wanneer Elythia actief is"
+scratchpadDescription: "De testomgeving biedt een gebied voor AiScript experimenten. Daar kunt u AiScript schrijven en uitvoeren en de effecten ervan op Elythia controleren."
+sendErrorReportsDescription: "Als u deze optie inschakelt, wordt gedetailleerde foutinformatie met Elythia gedeeld wanneer zich een probleem voordoet. Dit helpt de kwaliteit van Elythia te verbeteren.\nDit omvat informatie zoals de versie van uw OS, welke browser u gebruikt, uw activiteit in Elythia, enz."

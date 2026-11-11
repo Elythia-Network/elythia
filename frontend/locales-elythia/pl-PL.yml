@@ -1,0 +1,6 @@
+introMisskey: "Elythia jest serwisem mikroblogowym typu open source.\nElythia to opensource'owy serwis mikroblogowy, w którym możesz tworzyć \"notatki\", aby dzielić się tym, co się dzieje i opowiadać wszystkim o sobie.\nMożesz również użyć funkcji \"Reakcje\", aby szybko dodać własne reakcje do notatek innych użytkowników👍.\nOdkrywaj nowy świat🚀!"
+poweredByMisskeyDescription: "{name} jest jedną z usług działającą na otwartoźródłowej platformie <b>Elythia</b> (określana jako \"instancja Elythia\")."
+flagAsBotDescription: "Jeżeli ten kanał jest kontrolowany przez jakiś program, ustaw tę opcję. Jeżeli włączona, będzie działać jako flaga informująca innych programistów, aby zapobiegać nieskończonej interakcji z różnymi botami i dostosowywać wewnętrzne systemy Elythia, traktując konto jako bota."
+useSoundOnlyWhenActive: "Puszczaj dźwięki tylko, gdy Elythia jest aktywne."
+scratchpadDescription: "Brudnopis zawiera eksperymentalne środowisko dla AiScript. Możesz pisać, wykonywać i sprawdzać wyniki w interakcji z Elythia."
+sendErrorReportsDescription: "Gdy włączone, jeśli wystąpi problem, szczegółowe informacje o błędach będą udostępniane Elythia, pomagając ulepszyć jakość Elythia.\nBędzie to zawierało informacje takie jak wersja twojego systemu operacyjnego, jakiej przeglądarki używasz, twoja aktywność w Elythia, itd."

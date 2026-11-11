@@ -1,0 +1,43 @@
+introMisskey: "Bem-vindo! O Elythia é um serviço de microblog descentralizado de código aberto.\nCrie \"notas\" para compartilhar o que está acontecendo agora ou para se expressar com todos à sua volta 📡\nVocê também pode adicionar rapidamente reações às notas de outras pessoas usando a função \"Reações\" 👍\nVamos explorar um novo mundo 🚀"
+poweredByMisskeyDescription: "{name} é uma instância da plataforma de código aberto <b>Elythia</b>."
+initialPasswordForSetupDescription: "Use a senha configurada no arquivo de configuração se você instalou o Elythia manualmente.\nSe você estiver utilizando um serviço de hospedagem, utilize a senha fornecida.\nSe uma senha não foi configurada, deixe em branco e continue."
+flagAsBotDescription: "Se esta conta for operada por uma aplicação, ative esta opção. Ao ativá-la, ela servirá como um sinalizador para evitar reações em cadeia e ajudar outros desenvolvedores. Além disso, ajustará o tratamento da conta no sistema do Elythia para que se adeque a um Bot."
+useSoundOnlyWhenActive: "Apenas reproduzir sons quando Elythia estiver aberto."
+scratchpadDescription: "O Bloco de rascunho fornece um ambiente experimental para AiScript. Permite escrever, executar e verificar os resultados do código para interagir com o Elythia."
+sendErrorReportsDescription: "Ao ativar essa opção, informações detalhadas de erro serão compartilhadas com o Elythia em caso de problemas, o que pode ajudar a melhorar a qualidade do software. As informações de erro podem incluir a versão do sistema operacional, o tipo de navegador e o sua atividade no Elythia."
+goToMisskey: "Ao Elythia"
+repositoryUrlDescription: "Se você estiver utilizando Elythia como está (sem mudanças no código-fonte), insira https://github.com/Elythia-Network/elythia"
+_initialAccountSetting:
+  youCanContinueTutorial: "Você pode iniciar um tutorial de como utilizar {name} (Elythia) ou pode sair da configuração e começar o uso imediatamente."
+_initialTutorial:
+  _landing:
+    description: "Aqui, você pode aprender o básico de como usar o Elythia e as suas funções."
+  _note:
+    description: "Publicações no Elythia chamam-se 'Notas'. Notas são organizadas cronologicamente na linha do tempo e atualizam em tempo real."
+  _timeline:
+    description1: "Elythia providencia diversas linhas do tempo baseadas na sua utilidade (algumas podem não estar disponíveis a partir das configurações da instância)."
+  _postNote:
+    description1: "Ao postar uma nota no Elythia, diversas opções estão disponíveis. A ficha de publicação parece com isto: "
+  _done:
+    description: "As funções apresentadas aqui são apenas uma pequena parte. Para um conhecimento mais detalhado do uso do Elythia, acesse {link}."
+_achievements:
+  _types:
+    _notes1:
+      flavor: "Divirta-se com o Elythia!"
+    _login1000:
+      flavor: "Obrigado por utilizar o Elythia!"
+    _client30min:
+      description: "Deixe o Elythia aberto por pelo menos 30 minutos"
+    _client60min:
+      description: "Deixe o Elythia aberto por pelo menos 60 minutos"
+    _tutorialCompleted:
+      title: "Diploma de Ensino Fundamental Elythia"
+_soundSettings:
+  driveFileDurationWarnDescription: "Áudios longos podem atrapalhar o funcionamento do Elythia. Deseja continuar?"
+_urlPreviewSetting:
+  summaryProxyDescription: "Fora do Elythia, gerar prévias usando o Sumally Proxy."
+_bootErrors:
+  otherOption4: "Abrir Elythia no modo seguro"
+_serverSetupWizard:
+  installCompleted: "Instalação do Elythia concluída!"
+  howWillYouUseMisskey: "Como você usará o Elythia?"

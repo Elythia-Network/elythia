@@ -1,0 +1,53 @@
+introMisskey: "Eccoci! Elythia è un servizio di microblogging decentralizzato, libero e aperto. \n📡 Puoi pubblicare «Note» per condividere ciò che sta succedendo o per dire a tutti qualcosa su di te. \n👍 Puoi reagire inviando emoji rapidi alle «Note» provenienti da altri profili nel Fediverso.\n🚀 Esplora un nuovo mondo insieme a noi!"
+poweredByMisskeyDescription: "{name} è uno dei servizi (chiamati istanze) che utilizzano la piattaforma open source <b>Elythia</b>."
+initialPasswordForSetupDescription: "Se hai installato Elythia personalmente, usa la password che hai inserito nel file di configurazione.\nSe stai utilizzando un servizio di hosting Elythia, usa la password fornita dal gestore.\nSe non hai una password preimpostata, lascia il campo vuoto e continua."
+flagAsBotDescription: "Attiva questo campo se il profilo esegue principalmente operazioni automatiche. L'attivazione segnala agli altri sviluppatori come comportarsi per evitare catene d’interazione infinite con altri bot. I sistemi interni di Elythia si adegueranno al fine di trattare questo profilo come bot."
+useSoundOnlyWhenActive: "Emetti suoni solo quando Elythia è in attività"
+scratchpadDescription: "Lo Scratchpad offre un ambiente per esperimenti di AiScript. È possibile scrivere, eseguire e confermare i risultati dell'interazione del codice con Elythia."
+sendErrorReportsDescription: "Quando abilitato, se si verifica un problema, informazioni dettagliate sugli errori verranno condivise con Elythia in modo da aiutare a migliorare la qualità del software.\nCiò include informazioni come la versione del sistema operativo, il tipo di navigatore web che usi, la cronologia delle attività, ecc."
+logoutConfirm: "Vuoi davvero uscire da Elythia? "
+goToMisskey: "Vai a Elythia"
+repositoryUrlDescription: "Se esiste un repository il cui il codice sorgente è disponibile pubblicamente, inserisci il suo URL. Se stai utilizzando Elythia così com'è (senza alcuna modifica al codice sorgente), inserisci https://github.com/Elythia-Network/elythia."
+_initialAccountSetting:
+  youCanContinueTutorial: "Puoi continuare con l'esercitazione su come usare {name} (Elythia), oppure interrompere, iniziando subito a usarlo."
+_initialTutorial:
+  _landing:
+    description: "Qui puoi verificare l'uso delle funzionalità base di Elythia."
+  _note:
+    description: "Gli status su Elythia sono chiamati \"Note\". Le Note sono elencate in ordine cronologico nelle timeline e vengono aggiornate in tempo reale."
+  _timeline:
+    description1: "Elythia fornisce alcune Timeline (sequenze cronologiche di Note). Una di queste potrebbe essere stata disattivata dagli amministratori."
+  _postNote:
+    description1: "Quando scrivi una Nota su Elythia, hai a disposizione varie opzioni. Il modulo di invio è simile a questo."
+  _done:
+    description: "Queste sono solamente alcune delle funzionalità principali di Elythia. Per ulteriori informazioni, {link}."
+_achievements:
+  _types:
+    _notes1:
+      title: "Hai iniziato a usare Elythia"
+      flavor: "Goditi la vita su Elythia!"
+    _login1000:
+      flavor: "Grazie per aver usato Elythia!"
+    _client30min:
+      description: "Hai passato più di 30 minuti su Elythia"
+    _client60min:
+      description: "Hai letto Elythia almeno per un'ora"
+    _tutorialCompleted:
+      title: "Attestato di partecipazione al corso per principianti di Elythia"
+_role:
+  _options:
+    maxFileSize_caption2: "La dimensione massima dei file caricabili sul server è {max}. Per consentire il caricamento di file più grandi, aumenta la dimensione nel file di configurazione Elythia."
+_soundSettings:
+  driveFileDurationWarnDescription: "Scegliere un audio lungo potrebbe interferire con l'uso di Elythia. Vuoi continuare lo stesso?"
+_urlPreviewSetting:
+  summaryProxyDescription: "Genera anteprime utilizzando un proxy Summaly anziché Elythia."
+_bootErrors:
+  otherOption4: "Avvia Elythia in modalità sicura"
+_serverSetupWizard:
+  installCompleted: "L'installazione di Elythia è completata!"
+  howWillYouUseMisskey: "Come si usa Elythia?"
+_followApproval:
+  title: ""
+  remoteDescription: ""
+  description: ""
+  autoAcceptDescription: ""

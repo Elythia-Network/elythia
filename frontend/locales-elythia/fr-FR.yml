@@ -1,0 +1,32 @@
+introMisskey: "Bienvenue ! Elythia est un service de microblogage décentralisé, libre et ouvert.\nÉcrivez des « notes » et partagez ce qui se passe à l’instant présent, autour de vous avec les autres 📡\nLa fonction « réactions », vous permet également d’ajouter une réaction rapide aux notes des autres utilisateur·rice·s 👍\nExplorons un nouveau monde 🚀"
+poweredByMisskeyDescription: "{name} est l'un des services propulsés par la plateforme ouverte <b>Elythia</b> (appelée \"instance Elythia\")."
+initialPasswordForSetupDescription: "Utilisez le mot de passe que vous avez entré pour le fichier de configuration si vous avez installé Elythia vous-même.\nSi vous utilisez un service d'hébergement Elythia, utilisez le mot de passe fourni.\nSi vous n'avez pas défini de mot de passe, laissez le champ vide pour continuer."
+flagAsBotDescription: "Si ce compte est géré de manière automatisée, choisissez cette option. Si elle est activée, elle agira comme un marqueur pour les autres développeurs afin d'éviter des chaînes d'interaction sans fin avec d'autres robots et d'ajuster les systèmes internes d'Elythia pour traiter ce compte comme un robot."
+useSoundOnlyWhenActive: "Émettre des sons uniquement quand Elythia est active"
+scratchpadDescription: "ScratchPad fournit un environnement expérimental pour AiScript. Vous pouvez vérifier la rédaction de votre code, sa bonne exécution et le résultat de son interaction avec Elythia."
+sendErrorReportsDescription: "Si vous activez l'envoi des rapports d'erreur, vous contribuerez à améliorer la qualité d'Elythia grâce au partage d'informations détaillées sur les erreurs lorsqu'un problème survient.\nCela inclut des informations telles que la version de votre système d'exploitation, le type de navigateur que vous utilisez, votre historique d'activité, etc."
+goToMisskey: "Retour vers Elythia"
+repositoryUrlDescription: "Entrez l'URL du dépôt où se trouve le code source ici. Si vous utilisez Elythia tel quel (sans changer le code source), entrez https://github.com/Elythia-Network/elythia"
+_initialAccountSetting:
+  youCanContinueTutorial: "Vous pouvez procéder au tutoriel sur l'utilisation de {name}(Elythia) ou vous arrêter ici et commencer à l'utiliser immédiatement."
+_initialTutorial:
+  _landing:
+    description: "Ici, vous pouvez apprendre l'utilisation de base d'Elythia et ses fonctionnalités."
+  _note:
+    description: "Les messages sur Elythia sont appelés des « notes » . Les notes sont classées par ordre chronologique sur le fil et sont mises à jour en temps réel."
+  _timeline:
+    description1: "Elythia offre plusieurs fils selon l'usage (certains peuvent être désactivés par le serveur)."
+  _postNote:
+    description1: "Lorsque vous publiez des notes sur Elythia, diverses options sont disponibles. Voici le formulaire de publication."
+  _done:
+    description: "Les fonctionnalités introduites ici ne sont que quelques-unes. Pour savoir plus sur l'utilisation d'Elythia, veuillez consulter {link}."
+_achievements:
+  _types:
+    _notes1:
+      flavor: "Passez un bon moment avec Elythia !"
+    _login1000:
+      flavor: "Merci d'utiliser Elythia !"
+    _tutorialCompleted:
+      title: "Diplôme de la course élémentaire d'Elythia"
+_soundSettings:
+  driveFileDurationWarnDescription: "Utiliser un effet sonore long peut affecter l'utilisation d'Elythia. Voulez-vous encore continuer ?"

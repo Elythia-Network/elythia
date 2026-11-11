@@ -69,14 +69,20 @@ function toYaml(flat) {
  * @param {string} allowlist
  * @param {string[]} [args]
  * @param {{ ja: Record<string, string>, en: Record<string, string> }} [upstream]
+ * @param {{ ja?: Record<string, string>, en?: Record<string, string> }} [own] Elythia's words (locales-elythia/)
  */
-function runOn(ja, en, allowlist, args = [], upstream) {
+function runOn(ja, en, allowlist, args = [], upstream, own) {
 	const root = mkdtempSync(join(tmpdir(), 'locale-coverage-'));
 	try {
 		mkdirSync(join(root, 'locales'));
 		mkdirSync(join(root, 'scripts'));
 		writeFileSync(join(root, 'locales', 'ja-JP.yml'), toYaml(ja));
 		writeFileSync(join(root, 'locales', 'en-US.yml'), toYaml(en));
+		if (own != null) {
+			mkdirSync(join(root, 'locales-elythia'));
+			if (own.ja != null) writeFileSync(join(root, 'locales-elythia', 'ja-JP.yml'), toYaml(own.ja));
+			if (own.en != null) writeFileSync(join(root, 'locales-elythia', 'en-US.yml'), toYaml(own.en));
+		}
 		writeFileSync(join(root, 'scripts', 'locale-coverage-allowlist.tsv'), allowlist);
 		const fullArgs = [...args];
 		if (upstream != null) {
@@ -202,6 +208,25 @@ test('--write-allowlist writes the upstream untranslated strings and refuses Ely
 	const refused = runOn({ ...ja, elythia: 'え' }, lowerBound(), 'kept\tr\n', ['--write-allowlist'], upstream);
 	assert.equal(refused.code, 1);
 	assert.equal(refused.allowlist, 'kept\tr\n', 'the allowlist must not be rewritten when an Elythia string is missing');
+});
+
+test('run reads Elythia\'s words (locales-elythia/) laid over the upstream words (#4071)', () => {
+	const upstreamJa = Object.fromEntries(Object.entries(lowerBound()).filter(([key]) => !ELYTHIA_MARKERS.includes(key)));
+	const ownJa = { ...Object.fromEntries(ELYTHIA_MARKERS.map(key => [key, key])), '_mkgoX.y': 'お' };
+
+	// 目印の語は Elythia のファイルにだけある。重ねて読まないと下限で落ちる
+	const ok = runOn(upstreamJa, upstreamJa, '', [], undefined, { ja: ownJa, en: ownJa });
+	assert.equal(ok.code, 0, ok.errors.join('\n'));
+
+	// Elythia の ja-JP に足した語が、Elythia の en-US に無い
+	const missing = runOn(upstreamJa, upstreamJa, '', [], undefined, { ja: ownJa, en: Object.fromEntries(ELYTHIA_MARKERS.map(key => [key, key])) });
+	assert.equal(missing.code, 1);
+	assert.match(missing.errors.join('\n'), /locales-elythia\/en-US\.yml: _mkgoX\.y is missing/);
+
+	// Elythia の en-US が本家の英語の語を空文字で消すと、英語の UI に日本語が出る
+	const removed = runOn(upstreamJa, upstreamJa, '', [], undefined, { ja: ownJa, en: { ...ownJa, 'filler.k0': '' } });
+	assert.equal(removed.code, 1);
+	assert.match(removed.errors.join('\n'), /filler\.k0 is missing/);
 });
 
 test('run cannot be trusted with unknown arguments or --write-allowlist without a directory', () => {

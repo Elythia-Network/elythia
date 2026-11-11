@@ -1,0 +1,44 @@
+introMisskey: "Hoş geldiniz! Elythia, merkezi olmayan bir açık kaynaklı mikroblog platformudur.\n“Notlar” yazarak şu anda neler olduğunu anlatabilir veya olayları başkalarıyla paylaşabilirsiniz. 📡\n“Tepkiler” ile diğer kullanıcıların notları hakkındaki duygularınızı hızlı bir şekilde ifade edebilirsiniz. 👍\nYeni bir dünya sizi bekliyor! 🚀"
+poweredByMisskeyDescription: "{name}, açık kaynak platformu <b>Elythia</b> (kısaca “Elythia örneği” olarak anılır) tarafından desteklenen hizmetlerden biridir."
+initialPasswordForSetupDescription: "Elythia'yı kendiniz kurduysan, yapılandırma dosyasında belirtilen şifreyi kullan.\nElythia barındırma hizmeti veya benzeri bir hizmet kullanıyorsan, orada belirtilen şifreyi kullan.\nŞifre belirlemediysen, devam etmek için boş bırak."
+flagAsBotDescription: "Bu hesap bir program tarafından kontrol ediliyorsa bu seçeneği etkinleştir. Etkinleştirildiğinde, diğer geliştiriciler için bir işaret görevi görerek diğer botlarla sonsuz etkileşim zincirlerini önleyecek ve Elythia'nın iç sistemlerini bu hesabı bir bot olarak ele alacak şekilde ayarlayacak."
+useSoundOnlyWhenActive: "Elythia etkin olduğunda ses çıkarılır."
+scratchpadDescription: "Scratchpad, AiScript deneyleri için bir ortam sağlar. Elythia ile etkileşim halindeyken yazabilir, çalıştırabilir ve sonuçlarını kontrol edebilirsin."
+needToRestartServerToApply: "Değişikliğin yansıtılması için Elythia'nın yeniden başlatılması gerekir."
+sendErrorReportsDescription: "Etkinleştirildiğinde, bir sorun oluştuğunda ayrıntılı hata bilgileri Elythia ile paylaşılacak ve bu da Elythia'nın kalitesinin iyileştirilmesine yardımcı olacak.\nBu bilgiler arasında işletim sisteminizin sürümü, kullandığınız tarayıcı, Elythia'daki faaliyetlerin vb. yer alacaktır."
+goToMisskey: "Elythia'ya"
+repositoryUrlDescription: "Elythia'yı olduğu gibi kullanıyorsanız (kaynak kodunda herhangi bir değişiklik yapmadan), https://github.com/Elythia-Network/elythia adresini girin."
+_initialAccountSetting:
+  youCanContinueTutorial: "{name} (Elythia) öğreticisine geçebilir veya buradan kurulumu sonlandırıp hemen kullanabilirsin."
+_initialTutorial:
+  _landing:
+    description: "Burada, Elythia'yı kullanmanın temellerini ve özelliklerini öğrenebilirsin."
+  _note:
+    description: "Elythia'daki gönderiler “Notlar” olarak adlandırılır. Notlar panoda kronolojik olarak düzenlenir ve gerçek zamanlı olarak güncellenir."
+  _timeline:
+    description1: "Elythia, kullanıma göre birden fazla Pano sunar (Bazı Pano'lar sunucunun politikalarına bağlı olarak kullanılamayabilir)."
+  _postNote:
+    description1: "Elythia'da not yayınlarken çeşitli seçenekler mevcuttur. Yayınlama formu şu şekildedir."
+  _done:
+    description: "Burada tanıtılan işlevler sadece küçük bir kısmıdır. Elythia'yı kullanma konusunda daha ayrıntılı bilgi için lütfen şu kaynağa bakın: {link}."
+_achievements:
+  _types:
+    _notes1:
+      flavor: "Elythia ile iyi vakit geçirin!"
+    _login1000:
+      flavor: "Elythia'yı kullandığınız için teşekkür ederiz!"
+    _client30min:
+      description: "Elythia'yı en az 30 dakika açık tutun."
+    _client60min:
+      description: "Elythia'yı en az 60 dakika açık tutun."
+    _tutorialCompleted:
+      title: "Elythia Temel Kurs Diploması"
+_soundSettings:
+  driveFileDurationWarnDescription: "Uzun sesli mesajlar Elythia'nın kullanımını engelleyebilir. Devam etmek istiyor musunuz?"
+_urlPreviewSetting:
+  summaryProxyDescription: "Elythia'nın kendisi değil, Summaly Proxy kullanarak önizlemeler oluştur."
+_bootErrors:
+  otherOption4: "Elythia'yı güvenli modda başlatın"
+_serverSetupWizard:
+  installCompleted: "Elythia kurulumu tamamlandı!"
+  howWillYouUseMisskey: "Elythia'yı nasıl kullanacaksınız?"
