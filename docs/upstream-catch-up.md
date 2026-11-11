@@ -322,6 +322,13 @@ cd frontend && node scripts/check-locale-coverage.mjs --write-allowlist ../.cach
 
 あわせて、`make upstream-check` (CI では `apicompat`) が `frontend/locales/` が本家の版と同じかを見る。取り込みの途中で本家のファイルに手を入れると落ちる。
 
+### 本家の版を上げた後に必須: 日本語の直書きの許可リスト
+
+`frontend/scripts/check-hardcoded-japanese.mjs` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check`) は、`frontend/packages` の画面の文言を日本語で直書きしていないかを見る (#4070)。例外の `frontend/scripts/hardcoded-japanese-allowlist.tsv` には、本家にもともとある直書きと、訳さないもの (支援者の名前、言語名、見本の文字) を入れている。本家を取り込むと、次のどちらかで落ちることがある。
+
+- **本家が日本語の直書きを足した。** 本家の直書きなら、ファイルと文の組を、どこで画面に出るかの理由と一緒に許可リストに足す。支援者の名前が増えたときも同じ
+- **本家が直書きを消したか、文を変えた。** 許可リストの行が使われなくなって落ちる。その行を消すか、新しい文に直す
+
 ### 本家の版を上げた後に必須: divergence doc の件数
 
 `golden_upstream_columns.json` を撮り直すと `TestDivergenceDoc_ColumnCountMatchesSchema` が動く。**upstream が列を DROP すると、その列は「Elythia 独自カラム」に転じる**ので `docs/divergence/db.md` §2-2 の件数が増える (`note_favorite.createdAt` がその経緯で独自列になっている)。

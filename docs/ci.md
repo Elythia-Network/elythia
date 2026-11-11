@@ -20,7 +20,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 | `build` | CI | 全パッケージがコンパイルできるか + 同梱プラグインの `go vet` + 同梱サンプルが既定無効か + 同梱サンプル入りの統合バイナリ (`make plugins-all && go build ./cmd/elythia`、#2495) | `go build ./...` / `make plugin-vet` / `make plugins-all && go build -o /dev/null ./cmd/elythia` |
 | `lint` | CI | `go vet` + **actionlint** + `gofmt -s -d` の差分 + 重複 fixture ID + **golangci-lint** | `make lint` / `make actionlint` / `make fmt` / `make golangci-lint` |
 | `test` | CI | 4-way shard、Python delivery artifact test、A/B harness helper test、ベンチのデータの生成器のテストの集約。どれか 1 つでも落ちれば赤 | `make test` / `python3 -m unittest discover -s tests/bench/queue/common -p 'test_*.py' -v` / `bash tests/bench/ab/test_run_helpers.sh` / `python3 -m unittest discover -s tests/bench/data -p 'test_*.py' -v` |
-| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、en-US の語の抜け、Elythia の語が書き換える本家の語の一覧、ルートと Playwright の spec の対応付け、設定のページの `prefer.model` のキーと Playwright の設定の表の対応付け、管理画面の `admin/update-meta` のキーとロールのポリシーのキーと Playwright の管理画面の表の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
+| `frontend` | frontend | `frontend-lint` (10 workspace の eslint、typecheck、check-dts、SPDX ヘッダー、Elythia のファイルの import、en-US の語の抜け、Elythia の語が書き換える本家の語の一覧、日本語の直書き、ルートと Playwright の spec の対応付け、設定のページの `prefer.model` のキーと Playwright の設定の表の対応付け、管理画面の `admin/update-meta` のキーとロールのポリシーのキーと Playwright の管理画面の表の対応付け、locale、misskey-js の API レポート、`emoji-regex-check`) と `frontend-test` (本番設定のビルド、frontend の vitest、misskey-js のテスト) の集約。frontend に関係しない差分では両方を skip して成功する | 下の「`frontend` が落ちたとき」 |
 
 ### `test` が落ちたとき
 
@@ -359,6 +359,7 @@ package load エラーで解析が空振りしうる。**ローカルの `go` �
   check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
   ja-JP の語が en-US にもあるかの検査とその self test (#4047)、
   Elythia の語 (`frontend/locales-elythia`) が書き換える・消す本家の語が一覧 (`overrides.tsv`) にあるかの検査とその self test、本家のファイルと比べる検査の self test (#4071)、
+  画面の文言を日本語で直書きしていないかの検査とその self test (#4070)、
   全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035。`tests/playwright` で `npm ci` してから回す)、
   設定のページが `prefer.model` で扱う端末の設定のキーが、Playwright の設定の表で確かめられているかの検査とその self test (`make playwright-settings-check`、#4056)、
   管理画面が `admin/update-meta` で書くキーとロールのポリシーのキーが、Playwright の管理画面の表で確かめられているかの検査とその self test (`make playwright-admin-settings-check`、#4066)、
@@ -790,6 +791,7 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
     check-dts とその self test、SPDX ヘッダーとその検査ツールの self test、Elythia のファイルが misskey-js を直接 import していないかの検査とその self test (#4028)、
     ja-JP の語が en-US にもあるかの検査とその self test (#4047)、
     Elythia の語が書き換える・消す本家の語の一覧の検査とその self test、本家のファイルと比べる検査の self test (#4071)、
+    画面の文言を日本語で直書きしていないかの検査とその self test (#4070)、
     `tests/playwright` の `npm ci` → 全ルートが Playwright の spec に対応付いているかの検査とその self test (`make playwright-route-check`、#4035)、
     設定のページの `prefer.model` のキーが Playwright の設定の表で確かめられているかの検査とその self test (`make playwright-settings-check`、#4056)、
     管理画面の `admin/update-meta` のキーとロールのポリシーのキーが Playwright の管理画面の表で確かめられているかの検査とその self test (`make playwright-admin-settings-check`、#4066)、
