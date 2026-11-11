@@ -15,42 +15,42 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div class="_gaps">
 				<!-- null は「確認できなかった」。空配列 (= 残存なし) と混同させない -->
 				<MkInfo v-if="result.orphanSchemas == null" warn>
-					プラグインの残存データを確認できませんでした。サーバーログを参照してください。
+					{{ i18n.ts._mkgoServerPlugins.orphanCheckFailed }}
 				</MkInfo>
 				<MkInfo v-else-if="result.orphanSchemas.length > 0" warn>
-					使われていないプラグインのデータが残っています: {{ result.orphanSchemas.join(', ') }}
-					<br>不要なら手動で削除してください。
+					{{ i18n.tsx._mkgoServerPlugins.orphanData({ schemas: result.orphanSchemas.join(', ') }) }}
+					<br>{{ i18n.ts._mkgoServerPlugins.orphanDataRemove }}
 				</MkInfo>
 
 				<MkInfo v-if="result.plugins.length === 0" data-testid="server-plugins-empty">
-					組み込まれているサーバープラグインはありません。プラグインはビルド時に組み込まれます。
+					{{ i18n.ts._mkgoServerPlugins.none }}
 				</MkInfo>
 
 				<MkFolder v-for="p in result.plugins" :key="p.name" :defaultOpen="true">
 					<template #icon><i class="ti ti-puzzle"></i></template>
 					<template #label>{{ p.name }}</template>
-					<template #suffix>{{ p.enabled ? '有効' : '無効' }}</template>
+					<template #suffix>{{ p.enabled ? i18n.ts._mkgoServerPlugins.enabled : i18n.ts._mkgoServerPlugins.disabled }}</template>
 
 					<div class="_gaps_s">
 						<MkKeyValue oneline>
-							<template #key>バージョン</template>
-							<template #value>{{ p.version || '(未設定)' }} / API v{{ p.apiVersion }}</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.version }}</template>
+							<template #value>{{ p.version || i18n.ts._mkgoServerPlugins.notSet }} / API v{{ p.apiVersion }}</template>
 						</MkKeyValue>
 						<MkKeyValue oneline>
-							<template #key>状態</template>
-							<template #value>{{ p.enabled ? '有効' : '無効（設定で止められています。ビルドには含まれています）' }}</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.status }}</template>
+							<template #value>{{ p.enabled ? i18n.ts._mkgoServerPlugins.enabled : i18n.ts._mkgoServerPlugins.disabledByConfig }}</template>
 						</MkKeyValue>
 						<MkKeyValue oneline>
-							<template #key>機能</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.capabilities }}</template>
 							<template #value>{{ capabilities(p) }}</template>
 						</MkKeyValue>
 						<MkKeyValue oneline>
-							<template #key>データ</template>
-							<template #value>{{ p.schema }}（migration {{ p.migrations }}件）</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.data }}</template>
+							<template #value>{{ i18n.tsx._mkgoServerPlugins.schemaWithMigrations({ schema: p.schema, n: p.migrations }) }}</template>
 						</MkKeyValue>
 						<MkKeyValue v-if="p.configKeys.length > 0" oneline>
-							<template #key>設定キー</template>
-							<template #value>{{ p.configKeys.join(', ') }}（値は表示されません）</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.configKeys }}</template>
+							<template #value>{{ i18n.tsx._mkgoServerPlugins.configKeysHidden({ keys: p.configKeys.join(', ') }) }}</template>
 						</MkKeyValue>
 						<!--
 							秘密の値 (#3470)。状態も管理者にしか返らないので、管理者にだけ出す。
@@ -58,13 +58,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 						-->
 						<MkFolder v-if="p.secrets.length > 0 && $i?.isAdmin">
 							<template #icon><i class="ti ti-key"></i></template>
-							<template #label>秘密の値</template>
-							<template #suffix>{{ p.secrets.length }}件</template>
+							<template #label>{{ i18n.ts._mkgoPluginSecrets.title }}</template>
+							<template #suffix>{{ i18n.tsx._mkgoServerPlugins.count({ n: p.secrets.length }) }}</template>
 							<MkPluginSecrets v-if="p.enabled" :plugin="p.name"/>
-							<MkInfo v-else>無効なプラグインの秘密の値は設定できません。有効にして再起動してください。</MkInfo>
+							<MkInfo v-else>{{ i18n.ts._mkgoPluginSecrets.disabledPlugin }}</MkInfo>
 						</MkFolder>
 						<MkKeyValue v-if="pagesOf(p.name).length > 0">
-							<template #key>ページ</template>
+							<template #key>{{ i18n.ts._mkgoServerPlugins.pages }}</template>
 							<template #value>
 								<div class="_gaps_s">
 									<MkA v-for="pg in pagesOf(p.name)" :key="pg.to" :to="pg.to" class="_link">
@@ -95,6 +95,7 @@ import MkPluginSecrets from '@/components/MkPluginSecrets.vue';
 import { $i } from '@/i.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { definePage } from '@/page.js';
+import { i18n } from '@/i18n.js';
 import { collectPages } from '@/plugin-api.js';
 import { serverPlugins } from '@/server-plugins.generated.js';
 
@@ -112,9 +113,9 @@ function hasFrontend(name: string): boolean {
 function capabilities(p: ServerPluginInfo): string {
 	const caps: string[] = [];
 	if (p.routes) caps.push('API');
-	if (p.jobs) caps.push('ジョブ');
-	if (hasFrontend(p.name)) caps.push('フロントエンド');
-	return caps.length > 0 ? caps.join(' / ') : '(なし)';
+	if (p.jobs) caps.push(i18n.ts._mkgoServerPlugins.capabilityJobs);
+	if (hasFrontend(p.name)) caps.push(i18n.ts._mkgoServerPlugins.capabilityFrontend);
+	return caps.length > 0 ? caps.join(' / ') : i18n.ts._mkgoServerPlugins.capabilityNone;
 }
 
 // navIcon を宣言していないプラグインもあるので既定を用意する。
@@ -128,7 +129,7 @@ function pagesOf(name: string): { to: string; label: string; icon: string }[] {
 		.filter(pg => pg.plugin === name)
 		.map(pg => ({
 			to: `/admin${pg.fullPath}`,
-			label: `${pg.navTitle ?? pg.fullPath}（管理画面）`,
+			label: i18n.tsx._mkgoServerPlugins.adminPage({ name: pg.navTitle ?? pg.fullPath }),
 			icon: pg.navIcon ?? defaultPageIcon,
 		}));
 	return [...normal, ...admin];
@@ -139,7 +140,7 @@ const headerActions = computed(() => []);
 const headerTabs = computed(() => []);
 
 definePage(() => ({
-	title: 'サーバープラグイン',
+	title: i18n.ts._mkgoServerPlugins.title,
 	icon: 'ti ti-puzzle',
 }));
 </script>

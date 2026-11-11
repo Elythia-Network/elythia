@@ -7,20 +7,20 @@ SPDX-License-Identifier: AGPL-3.0-only
 <div v-if="metrics" :class="$style.root" data-testid="server-metrics" :data-goroutines="metrics.go.goroutines">
 	<div class="_table status">
 		<div class="_row">
-			<div class="_cell"><div class="_label">Goroutines</div>{{ number(metrics.go.goroutines) }}</div>
-			<div class="_cell"><div class="_label">Heap</div>{{ bytes(metrics.go.heapAllocBytes) }}</div>
-			<div class="_cell"><div class="_label">GC</div>{{ number(metrics.go.gcNum) }}</div>
-			<div class="_cell"><div class="_label">Uptime</div>{{ uptimeLabel }}</div>
+			<div class="_cell"><div class="_label">{{ i18n.ts._mkgoServerMetrics.goroutines }}</div>{{ number(metrics.go.goroutines) }}</div>
+			<div class="_cell"><div class="_label">{{ i18n.ts._mkgoServerMetrics.heap }}</div>{{ bytes(metrics.go.heapAllocBytes) }}</div>
+			<div class="_cell"><div class="_label">{{ i18n.ts._mkgoServerMetrics.gc }}</div>{{ number(metrics.go.gcNum) }}</div>
+			<div class="_cell"><div class="_label">{{ i18n.ts._mkgoServerMetrics.uptime }}</div>{{ uptimeLabel }}</div>
 		</div>
 	</div>
 
 	<div class="charts">
 		<div class="chart">
-			<div class="title">Goroutines</div>
+			<div class="title">{{ i18n.ts._mkgoServerMetrics.goroutines }}</div>
 			<MkMiniChart v-if="goroutineHistory.length > 1" class="graph" :src="goroutineHistory"/>
 		</div>
 		<div class="chart">
-			<div class="title">Heap</div>
+			<div class="title">{{ i18n.ts._mkgoServerMetrics.heap }}</div>
 			<MkMiniChart v-if="heapHistory.length > 1" class="graph" :src="heapHistory"/>
 		</div>
 	</div>
@@ -33,6 +33,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type * as Elythia from 'elythia-js';
 import MkMiniChart from '@/components/MkMiniChart.vue';
+import { i18n } from '@/i18n.js';
 import number from '@/filters/number.js';
 import bytes from '@/filters/bytes.js';
 import { misskeyApi } from '@/utility/misskey-api.js';

@@ -29,7 +29,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							有無に関わらず意味があるので常に出す。
 						-->
 						<MkKeyValue v-if="runtimeOf(q)">
-							<template #key>Workers</template>
+							<template #key>{{ i18n.ts._mkgoJobQueue.workers }}</template>
 							<template #value>{{ workerLabel(runtimeOf(q)!) }}</template>
 						</MkKeyValue>
 					</div>
@@ -106,23 +106,23 @@ SPDX-License-Identifier: AGPL-3.0-only
 						<hr>
 						<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
 							<MkKeyValue>
-								<template #key>Workers</template>
+								<template #key>{{ i18n.ts._mkgoJobQueue.workers }}</template>
 								<template #value>{{ workerLabel(runtime) }}</template>
 							</MkKeyValue>
 							<MkKeyValue>
-								<template #key>Auto-scale</template>
-								<template #value>{{ runtime.autoScale ? 'enabled' : 'disabled' }}</template>
+								<template #key>{{ i18n.ts._mkgoJobQueue.autoScale }}</template>
+								<template #value>{{ runtime.autoScale ? i18n.ts._mkgoJobQueue.enabled : i18n.ts._mkgoJobQueue.disabled }}</template>
 							</MkKeyValue>
 							<MkKeyValue>
-								<template #key>Dispatch wait (p50/p95)</template>
+								<template #key>{{ i18n.ts._mkgoJobQueue.dispatchWait }}</template>
 								<template #value>{{ latencyLabel(runtime.dispatchWaitMs) }}</template>
 							</MkKeyValue>
 							<MkKeyValue>
-								<template #key>Processing (p50/p95)</template>
+								<template #key>{{ i18n.ts._mkgoJobQueue.processing }}</template>
 								<template #value>{{ latencyLabel(runtime.processingMs) }}</template>
 							</MkKeyValue>
 							<MkKeyValue>
-								<template #key>Recent failures</template>
+								<template #key>{{ i18n.ts._mkgoJobQueue.recentFailures }}</template>
 								<template #value>{{ kmg(runtime.recentFailures, 2) }}</template>
 							</MkKeyValue>
 						</div>

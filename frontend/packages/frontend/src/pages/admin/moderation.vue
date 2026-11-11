@@ -42,38 +42,38 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<!-- 閉じている間も承認制の値は残るので、再開前に項目を直せるようにする。 -->
 				<MkFolder v-if="approvalEnabled" :defaultOpen="false">
 					<template #icon><i class="ti ti-forms"></i></template>
-					<template #label>申請フォームの項目</template>
-					<template #suffix>{{ signupApplicationForm.length }} 項目</template>
+					<template #label>{{ i18n.ts._mkgoSignupApplication._form.title }}</template>
+					<template #suffix>{{ i18n.tsx._mkgoSignupApplication._form.fieldCount({ n: signupApplicationForm.length }) }}</template>
 
 					<div class="_gaps_m">
 						<div v-if="signupApplicationForm.length === 0" style="font-size: 0.9em; opacity: 0.8;">
-							項目を追加しないと、申請者は理由を書かずに申請することになります。
+							{{ i18n.ts._mkgoSignupApplication._form.noFieldsNotice }}
 						</div>
 
 						<div v-for="(field, i) in signupApplicationForm" :key="i" class="_gaps_s" :class="$style.formField">
 							<MkInput v-model="field.label">
-								<template #label>項目名</template>
+								<template #label>{{ i18n.ts._mkgoSignupApplication._form.fieldLabel }}</template>
 							</MkInput>
 							<MkSelect v-model="field.type" :items="fieldTypeDef">
-								<template #label>入力欄</template>
+								<template #label>{{ i18n.ts._mkgoSignupApplication._form.fieldType }}</template>
 							</MkSelect>
 							<MkSwitch v-model="field.required">
-								<template #label>必須にする</template>
+								<template #label>{{ i18n.ts._mkgoSignupApplication._form.required }}</template>
 							</MkSwitch>
 							<MkButton danger inline @click="removeField(i)">
-								<i class="ti ti-trash"></i> この項目を削除
+								<i class="ti ti-trash"></i> {{ i18n.ts._mkgoSignupApplication._form.removeField }}
 							</MkButton>
 						</div>
 
 						<MkButton :disabled="signupApplicationForm.length >= maxFormFields" @click="addField">
-							<i class="ti ti-plus"></i> 項目を追加
+							<i class="ti ti-plus"></i> {{ i18n.ts._mkgoSignupApplication._form.addField }}
 						</MkButton>
 						<div v-if="signupApplicationForm.length >= maxFormFields" style="font-size: 0.9em; opacity: 0.8;">
-							項目は{{ maxFormFields }}個までです。
+							{{ i18n.tsx._mkgoSignupApplication._form.maxFields({ n: maxFormFields }) }}
 						</div>
 
 						<MkButton primary @click="saveSignupApplicationForm">
-							<i class="ti ti-device-floppy"></i> 保存
+							<i class="ti ti-device-floppy"></i> {{ i18n.ts._mkgoSignupApplication._form.save }}
 						</MkButton>
 					</div>
 				</MkFolder>
@@ -82,7 +82,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<MkSwitch v-model="emailRequiredForSignup" @change="onChange_emailRequiredForSignup">
 						<template #label><SearchLabel>{{ i18n.ts.emailRequiredForSignup }}</SearchLabel> ({{ i18n.ts.recommended }})</template>
 						<template v-if="registrationMode === 'approval'" #caption>
-							承認済みの登録にも確認メールを挟みます (#2571)。
+							{{ i18n.ts._mkgoSignupApplication.emailConfirmationForApproved }}
 						</template>
 					</MkSwitch>
 				</SearchMarker>
@@ -285,8 +285,8 @@ const signupApplicationForm = ref<SignupFormField[]>(
 		: []);
 
 const fieldTypeDef = [
-	{ label: '1 行', value: 'text' },
-	{ label: '複数行', value: 'textarea' },
+	{ label: i18n.ts._mkgoSignupApplication._form.singleLine, value: 'text' },
+	{ label: i18n.ts._mkgoSignupApplication._form.multiLine, value: 'textarea' },
 ];
 
 function addField() {

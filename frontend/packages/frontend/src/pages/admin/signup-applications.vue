@@ -17,11 +17,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<div class="_spacer" style="--MI_SPACER-w: 800px; --MI_SPACER-min: 16px; --MI_SPACER-max: 32px;">
 		<div class="_gaps_m">
 			<MkSelect v-model="filter" :items="filterDef">
-				<template #label>表示</template>
+				<template #label>{{ i18n.ts._mkgoSignupApplication._admin.show }}</template>
 			</MkSelect>
 
 			<MkInfo v-if="applications.length === 0">
-				{{ filter === 'pending' ? '審査待ちの申請はありません。' : '該当する申請はありません。' }}
+				{{ filter === 'pending' ? i18n.ts._mkgoSignupApplication._admin.noPending : i18n.ts._mkgoSignupApplication._admin.noMatching }}
 			</MkInfo>
 
 			<div v-else class="_gaps_s">
@@ -32,25 +32,25 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 					<div class="_gaps_s">
 						<MkKeyValue oneline>
-							<template #key>申請日時</template>
+							<template #key>{{ i18n.ts._mkgoSignupApplication._admin.appliedAt }}</template>
 							<template #value><MkTime :time="app.createdAt" mode="detail"/></template>
 						</MkKeyValue>
 						<MkKeyValue oneline>
-							<template #key>期限</template>
+							<template #key>{{ i18n.ts._mkgoSignupApplication._admin.expiresAt }}</template>
 							<template #value><MkTime :time="app.expiresAt" mode="detail"/></template>
 						</MkKeyValue>
 						<MkKeyValue v-if="app.processedAt != null" oneline>
-							<template #key>審査日時</template>
+							<template #key>{{ i18n.ts._mkgoSignupApplication._admin.processedAt }}</template>
 							<template #value><MkTime :time="app.processedAt" mode="detail"/></template>
 						</MkKeyValue>
 						<MkKeyValue v-for="(answer, i) in app.answers" :key="i">
 							<template #key>{{ answer.label }}</template>
-							<template #value><div :class="$style.reason">{{ answer.value || '(未回答)' }}</div></template>
+							<template #value><div :class="$style.reason">{{ answer.value || i18n.ts._mkgoSignupApplication._admin.unanswered }}</div></template>
 						</MkKeyValue>
 
 						<div v-if="app.status === 'pending'" :class="$style.actions">
-							<MkButton primary inline data-testid="signup-application-approve" @click="approve(app)"><i class="ti ti-check"></i> 承認</MkButton>
-							<MkButton danger inline data-testid="signup-application-reject" @click="reject(app)"><i class="ti ti-x"></i> 却下</MkButton>
+							<MkButton primary inline data-testid="signup-application-approve" @click="approve(app)"><i class="ti ti-check"></i> {{ i18n.ts._mkgoSignupApplication._admin.approve }}</MkButton>
+							<MkButton danger inline data-testid="signup-application-reject" @click="reject(app)"><i class="ti ti-x"></i> {{ i18n.ts._mkgoSignupApplication._admin.reject }}</MkButton>
 						</div>
 					</div>
 				</MkFolder>
@@ -72,6 +72,7 @@ import { useMkSelect } from '@/composables/use-mkselect.js';
 import * as os from '@/os.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { definePage } from '@/page.js';
+import { i18n } from '@/i18n.js';
 
 type SignupApplication = Elythia.AdminSignupApplication;
 
@@ -81,20 +82,20 @@ const {
 	def: filterDef,
 } = useMkSelect({
 	items: [
-		{ label: '審査待ち', value: 'pending' },
-		{ label: '承認済み（未登録）', value: 'approved' },
-		{ label: '処理済み', value: 'processed' },
-		{ label: 'すべて', value: 'all' },
+		{ label: i18n.ts._mkgoSignupApplication._admin.statusPending, value: 'pending' },
+		{ label: i18n.ts._mkgoSignupApplication._admin.statusApproved, value: 'approved' },
+		{ label: i18n.ts._mkgoSignupApplication._admin.filterProcessed, value: 'processed' },
+		{ label: i18n.ts._mkgoSignupApplication._admin.filterAll, value: 'all' },
 	],
 	initialValue: 'pending',
 });
 
 const statusLabels: Record<SignupApplication['status'], string> = {
-	pending: '審査待ち',
-	approved: '承認済み（未登録）',
-	rejected: '却下',
-	expired: '期限切れ',
-	completed: '登録済み',
+	pending: i18n.ts._mkgoSignupApplication._admin.statusPending,
+	approved: i18n.ts._mkgoSignupApplication._admin.statusApproved,
+	rejected: i18n.ts._mkgoSignupApplication._admin.statusRejected,
+	expired: i18n.ts._mkgoSignupApplication._admin.statusExpired,
+	completed: i18n.ts._mkgoSignupApplication._admin.statusCompleted,
 };
 
 function statusLabel(status: SignupApplication['status']): string {
@@ -110,7 +111,7 @@ async function refresh() {
 async function approve(app: SignupApplication) {
 	const { canceled } = await os.confirm({
 		type: 'question',
-		text: 'この申請を承認しますか？',
+		text: i18n.ts._mkgoSignupApplication._admin.approveConfirm,
 	});
 	if (canceled) return;
 	await os.apiWithDialog('admin/signup-application/approve', { applicationId: app.id });
@@ -120,7 +121,7 @@ async function approve(app: SignupApplication) {
 async function reject(app: SignupApplication) {
 	const { canceled } = await os.confirm({
 		type: 'warning',
-		text: 'この申請を却下しますか？',
+		text: i18n.ts._mkgoSignupApplication._admin.rejectConfirm,
 	});
 	if (canceled) return;
 	await os.apiWithDialog('admin/signup-application/reject', { applicationId: app.id });
@@ -133,14 +134,14 @@ await refresh();
 
 const headerActions = computed(() => [{
 	icon: 'ti ti-refresh',
-	text: '再読み込み',
+	text: i18n.ts._mkgoSignupApplication._admin.reload,
 	handler: refresh,
 }]);
 
 const headerTabs = computed(() => []);
 
 definePage(() => ({
-	title: '登録申請',
+	title: i18n.ts._mkgoSignupApplication._admin.title,
 	icon: 'ti ti-user-plus',
 }));
 </script>
