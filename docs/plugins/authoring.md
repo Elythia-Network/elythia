@@ -33,7 +33,7 @@ apiVersion: 1
 ```
 module github.com/you/elythia-plugin-myplugin
 
-go 1.27.3
+go 1.27.4
 
 require github.com/elythia-network/elythia v0.0.0
 
