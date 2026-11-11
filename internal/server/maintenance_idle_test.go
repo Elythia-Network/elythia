@@ -241,7 +241,7 @@ func TestMaintenance_FailedReportIsRetriedAtTheShortInterval(t *testing.T) {
 
 	before := report(t, rig.store).UpdatedAt
 	m.refresh(ctx)
-	assert.True(t, report(t, rig.store).UpdatedAt.After(before), "the refresh after a failed write did not write")
+	assert.True(t, report(t, rig.store).UpdatedAt.After(before.Time), "the refresh after a failed write did not write")
 	assert.Equal(t, time.Hour, m.interval(), "a successful write did not restore the idle interval")
 }
 

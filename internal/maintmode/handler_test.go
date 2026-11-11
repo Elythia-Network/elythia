@@ -77,7 +77,7 @@ func TestHandler_Responses(t *testing.T) {
 	t.Run("status is public and hides the kind and the operator", func(t *testing.T) {
 		rec := serve(h, http.MethodGet, StatusPath, nil)
 		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.JSONEq(t, `{"maintenance":true,"phase":"held","startedAt":"2026-10-10T03:00:00Z","reason":"<b>DB</b>"}`,
+		assert.JSONEq(t, `{"maintenance":true,"phase":"held","startedAt":"2026-10-10T03:00:00.000Z","reason":"<b>DB</b>"}`,
 			rec.Body.String())
 		assert.NotContains(t, rec.Body.String(), "restore")
 		assert.NotContains(t, rec.Body.String(), "admin")

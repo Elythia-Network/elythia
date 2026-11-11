@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // HeaderMarker marks a response as coming from the maintenance handler. The
@@ -65,10 +66,10 @@ type HandlerOptions struct {
 // 誰でも読めるので、種類 (リストアかどうか) と操作した人は出さない
 // (設計 §7-5 の決定)。
 type Status struct {
-	Maintenance bool       `json:"maintenance"`
-	Phase       string     `json:"phase,omitempty"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	Reason      string     `json:"reason,omitempty"`
+	Maintenance bool         `json:"maintenance"`
+	Phase       string       `json:"phase,omitempty"`
+	StartedAt   *jsdate.Time `json:"startedAt,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
 }
 
 // NewHandler returns the handler a process serves while it is in
@@ -218,7 +219,7 @@ func StatusOf(st *State, holding bool) Status {
 	out.Phase = st.Phase
 	out.Reason = st.Reason
 	if !st.StartedAt.IsZero() {
-		t := st.StartedAt.UTC()
+		t := st.StartedAt
 		out.StartedAt = &t
 	}
 	return out
