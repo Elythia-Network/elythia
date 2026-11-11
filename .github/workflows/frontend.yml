@@ -187,6 +187,13 @@ jobs:
       - name: check-locale-upstream self test
         run: node --test scripts/check-locale-upstream.test.mjs
 
+      - name: check-hardcoded-japanese self test
+        run: node --test scripts/check-hardcoded-japanese.test.mjs
+
+      # 画面の文言を日本語で直書きしない (#4070)。英語の UI でも日本語のまま出る
+      - name: Hardcoded Japanese
+        run: node scripts/check-hardcoded-japanese.mjs
+
       # frontend の全ルートが、どこかの Playwright spec に対応付いているか (#4035)。
       # spec の一覧は playwright の `test --list` に解かせるので、tests/playwright の
       # 依存を入れる (ブラウザは要らない)。frontend だけを変えた PR でも spec の書き
