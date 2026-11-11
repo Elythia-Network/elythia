@@ -83,9 +83,9 @@ func realIPOf(srv *Server, req *http.Request) string {
 	return srv.echo.NewContext(req, httptest.NewRecorder()).RealIP()
 }
 
-// trustProxy: false / [] でも IPExtractor は必ず設定する。未設定のまま残すと
-// Echo の RealIP は XFF の最左を無条件に信頼するので、誰でも IP を詐称できる
-// (以前は len(nets) > 0 のときだけ設定していた)。
+// trustProxy: false / [] でも IPExtractor は必ず設定する (以前は len(nets) > 0 の
+// ときだけ設定していた)。echo v4.16.3 からは未設定でも接続元を返すので、下の
+// 2 つの値は未設定でも同じになる。設定したことを守っているのは require.NotNil。
 func TestNew_EmptyTrustProxyStillSetsIPExtractor(t *testing.T) {
 	logs := captureWarnLogs(t)
 	srv := newServerWithTrustProxy(t, []string{})
