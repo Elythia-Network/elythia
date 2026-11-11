@@ -4,13 +4,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/gonecleanup"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/repository"
 )
 
@@ -30,10 +30,10 @@ type goneInstanceResponse struct {
 	Host string `json:"host"`
 	// SuspendedAt は goneSuspended になった時刻。記録が無い (TS が立てた停止など)
 	// ときは null。
-	SuspendedAt    *time.Time `json:"suspendedAt"`
-	Followers      int64      `json:"followers"`
-	Following      int64      `json:"following"`
-	FollowRequests int64      `json:"followRequests"`
+	SuspendedAt    *jsdate.Time `json:"suspendedAt"`
+	Followers      int64        `json:"followers"`
+	Following      int64        `json:"following"`
+	FollowRequests int64        `json:"followRequests"`
 }
 
 // FederationGoneInstances handles POST /api/admin/federation/gone-instances.
@@ -51,7 +51,7 @@ func (h *Handler) FederationGoneInstances(c echo.Context) error {
 	}
 	for _, g := range list {
 		out = append(out, goneInstanceResponse{
-			Host: g.Host, SuspendedAt: g.SuspendedAt,
+			Host: g.Host, SuspendedAt: jsdate.NewTimePtr(g.SuspendedAt),
 			Followers: g.Followers, Following: g.Following, FollowRequests: g.FollowRequests,
 		})
 	}

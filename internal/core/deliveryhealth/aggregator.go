@@ -5,6 +5,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // latencyBucketsMs are the upper bounds (inclusive) of the latency histogram,
@@ -37,7 +39,7 @@ type hostCounters struct {
 
 // LastError is the most recent failing attempt for a host.
 type LastError struct {
-	At      time.Time    `json:"at"`
+	At      jsdate.Time  `json:"at"`
 	Class   OutcomeClass `json:"class"`
 	Status  int          `json:"status"`
 	Message string       `json:"message"`
@@ -105,7 +107,7 @@ func (a *Aggregator) Record(host string, o Outcome) {
 	c.latency[latencyBucketIndex(o.Latency)]++
 	if !a.succeeded(o.Class) {
 		c.last = &LastError{
-			At:      a.clock().UTC(),
+			At:      jsdate.NewTime(a.clock().UTC()),
 			Class:   o.Class,
 			Status:  o.Status,
 			Message: truncateErr(o.Err),

@@ -548,7 +548,7 @@ func TestBreaker_ListShowsTheReservationTail(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Nil(t, list[0].ThrottledUntil)
 	require.NotNil(t, list[0].ReservedUntil)
-	assert.True(t, tail.Equal(*list[0].ReservedUntil), "%v != %v", tail, *list[0].ReservedUntil)
+	assert.True(t, tail.Equal(list[0].ReservedUntil.Time), "%v != %v", tail, *list[0].ReservedUntil)
 
 	clk.Advance(time.Minute)
 	mr.FastForward(time.Minute)

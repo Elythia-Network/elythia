@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -65,9 +65,9 @@ func (b federationRuleBody) model(id string) *model.FederationRule {
 }
 
 type federationRuleResponse struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string      `json:"id"`
+	CreatedAt jsdate.Time `json:"createdAt"`
+	UpdatedAt jsdate.Time `json:"updatedAt"`
 	federationRuleBody
 	// Hits は直近 24 時間に当たった件数 (fedrule.HitWindow)。
 	Hits int64 `json:"hits"`
@@ -81,7 +81,7 @@ func packFederationRule(r *model.FederationRule, hits int64) federationRuleRespo
 		return []string(s)
 	}
 	return federationRuleResponse{
-		ID: r.ID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Hits: hits,
+		ID: r.ID, CreatedAt: jsdate.NewTime(r.CreatedAt), UpdatedAt: jsdate.NewTime(r.UpdatedAt), Hits: hits,
 		federationRuleBody: federationRuleBody{
 			Name: r.Name, Mode: r.Mode, Target: r.Target, Position: jsnum.Int(r.Position),
 			Hosts: nonNil(r.Hosts), ActivityTypes: nonNil(r.ActivityTypes), IsBot: r.IsBot,

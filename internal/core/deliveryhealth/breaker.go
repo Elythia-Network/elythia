@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Circuit breaker for outbound delivery (#3048).
@@ -118,16 +120,16 @@ type BreakerState struct {
 	Host string `json:"host"`
 	// Open は開いている (配送を止めている) か。false なら 429 で間隔を空けているか、
 	// 待たせた分を予約どおりに送っているだけ。
-	Open                bool       `json:"open"`
-	ConsecutiveFailures int        `json:"consecutiveFailures"`
-	OpenedAt            *time.Time `json:"openedAt"`
-	NextProbeAt         *time.Time `json:"nextProbeAt"`
-	ProbeIntervalSec    int        `json:"probeIntervalSeconds"`
+	Open                bool         `json:"open"`
+	ConsecutiveFailures int          `json:"consecutiveFailures"`
+	OpenedAt            *jsdate.Time `json:"openedAt"`
+	NextProbeAt         *jsdate.Time `json:"nextProbeAt"`
+	ProbeIntervalSec    int          `json:"probeIntervalSeconds"`
 	// ThrottledUntil は 429 で送らずにいる期限。nil なら止めていない。
-	ThrottledUntil *time.Time `json:"throttledUntil"`
+	ThrottledUntil *jsdate.Time `json:"throttledUntil"`
 	// ReservedUntil は 429 で待たせた配送の最後の予約時刻 (送り終わる見込み)。
 	// nil なら予約は残っていない。
-	ReservedUntil *time.Time `json:"reservedUntil"`
+	ReservedUntil *jsdate.Time `json:"reservedUntil"`
 }
 
 // Breaker holds per-host breaker and throttle state in Redis.
@@ -477,16 +479,16 @@ func (b *Breaker) state(ctx context.Context, host string) (BreakerState, bool, e
 	st := BreakerState{Host: host}
 	if d := pttl.Val(); d > 0 {
 		t := b.clock().Add(d)
-		st.ThrottledUntil = &t
+		st.ThrottledUntil = jsdate.NewTimePtr(&t)
 	}
 	if r := msField(last.Val()); r != nil && r.After(b.clock()) {
-		st.ReservedUntil = r
+		st.ReservedUntil = jsdate.NewTimePtr(r)
 	}
 	st.ConsecutiveFailures, _ = strconv.Atoi(h["f"])
 	if o := msField(h["o"]); o != nil {
 		st.Open = true
-		st.OpenedAt = o
-		st.NextProbeAt = msField(h["p"])
+		st.OpenedAt = jsdate.NewTimePtr(o)
+		st.NextProbeAt = jsdate.NewTimePtr(msField(h["p"]))
 		if i, err := strconv.ParseInt(h["i"], 10, 64); err == nil {
 			st.ProbeIntervalSec = int(i / 1000)
 		}

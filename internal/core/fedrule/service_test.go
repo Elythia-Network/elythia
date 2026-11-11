@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -123,7 +124,7 @@ func TestEvaluateNote_ModesAndComposition(t *testing.T) {
 	require.NotNil(t, d.CW)
 	assert.Equal(t, "first", *d.CW)
 	require.Len(t, rec.hits, 4, "disabled rules and activity rules are not evaluated for notes")
-	assert.Equal(t, Hit{RuleID: "rec", Host: "spam.example", Subject: "https://spam.example/n/1", Kind: "Note", Applied: false, At: testNow}, rec.hits[0])
+	assert.Equal(t, Hit{RuleID: "rec", Host: "spam.example", Subject: "https://spam.example/n/1", Kind: "Note", Applied: false, At: jsdate.NewTime(testNow)}, rec.hits[0])
 	assert.True(t, rec.hits[1].Applied)
 
 	// CW の文言は返り値を書き換えてもルールに影響しない。

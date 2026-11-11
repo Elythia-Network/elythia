@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -149,7 +150,7 @@ func (s *Service) EvaluateActivity(in ActivityInput) Decision {
 		if enforced {
 			d.merge(c.rule)
 		}
-		s.record(Hit{RuleID: c.rule.ID, Host: in.Host, Subject: in.Subject, Kind: in.Type, Applied: enforced, At: now})
+		s.record(Hit{RuleID: c.rule.ID, Host: in.Host, Subject: in.Subject, Kind: in.Type, Applied: enforced, At: jsdate.NewTime(now)})
 	}
 	return d
 }
@@ -182,7 +183,7 @@ func (s *Service) EvaluateNote(in NoteInput) Decision {
 		if enforced {
 			d.merge(c.rule)
 		}
-		s.record(Hit{RuleID: c.rule.ID, Host: in.Host, Subject: in.Subject, Kind: kind, Applied: enforced, At: now})
+		s.record(Hit{RuleID: c.rule.ID, Host: in.Host, Subject: in.Subject, Kind: kind, Applied: enforced, At: jsdate.NewTime(now)})
 	}
 	return d
 }
