@@ -405,7 +405,7 @@ export async function launchServerPlugins(plugins: PluginDefinition[]): Promise<
 		try {
 			await p.setup(buildHost(p.name));
 		} catch (err) {
-			console.error(`[plugin:${p.name}] setup に失敗しました`, err);
+			console.error(`[plugin:${p.name}] setup failed`, err);
 		}
 	}
 }

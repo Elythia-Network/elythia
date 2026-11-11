@@ -62,7 +62,7 @@ export default [
 			'no-restricted-imports': ['error', {
 				paths: [
 					{ name: 'punycode' },
-					{ name: 'vue', importNames: ['useCssModule'], message: '本番のビルドでは、描画関数に _ctx.$style の参照が残らない部品で空を返す。クラスはテンプレートの $style で参照する' },
+					{ name: 'vue', importNames: ['useCssModule'], message: 'In production builds this returns an empty object for components whose render function keeps no reference to _ctx.$style. Refer to classes with $style in the template' },
 					...mfmParserImports,
 				],
 				patterns: mfmParserImportPatterns,

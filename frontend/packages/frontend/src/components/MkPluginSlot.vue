@@ -70,7 +70,7 @@ onMounted(() => {
 			const cleanup = renderer(container, props.ctx ?? {});
 			if (typeof cleanup === 'function') cleanups.push(cleanup);
 		} catch (err) {
-			console.error(`[plugin:${plugin}] slot ${props.name} の描画に失敗しました`, err);
+			console.error(`[plugin:${plugin}] failed to render slot ${props.name}`, err);
 		}
 	}
 });
@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
 		try {
 			cleanup();
 		} catch (err) {
-			console.error('[plugin] 後片付けに失敗しました', err);
+			console.error('[plugin] failed to clean up', err);
 		}
 	}
 });
