@@ -2,6 +2,7 @@ package restoreop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestRestore_HappyPath(t *testing.T) {
@@ -49,6 +51,10 @@ func TestRestore_HappyPath(t *testing.T) {
 	st, err := e.m.Status(context.Background(), got)
 	require.NoError(t, err)
 	assert.NotEmpty(t, st.Journal)
+	// 管理画面へは、日時を本家の書式で出す (#4091)。
+	b, err := json.Marshal(st)
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "createdAt", "updatedAt", "readyAt", "at")
 }
 
 // TestRestore_DoesNotSwitchBeforeHeld (R2): while a session stays on the

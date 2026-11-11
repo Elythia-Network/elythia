@@ -15,6 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 type recorded struct {
@@ -45,7 +47,7 @@ const (
 	statusBody = `{"now":"2026-10-10T05:00:00Z","schedule":{"interval":"24h","at":"04:00","timezone":"Asia/Tokyo","keep":7,"verify":true,"delayAfter":"36h"},` +
 		`"running":{"kind":"take","trigger":"schedule","startedAt":"2026-10-10T04:59:00Z"},"pending":0,"nextRunAt":"2026-10-11T04:00:00Z",` +
 		`"lastTake":{"kind":"take","trigger":"schedule","generationId":"20261009T190000Z","startedAt":"2026-10-09T19:00:00Z","finishedAt":"2026-10-09T19:03:00Z","ok":false,"stage":"prune","error":"denied","deleted":["20261001T040000Z"]},` +
-		`"lastVerify":{"kind":"verify","trigger":"api","generationId":"20261009T190000Z","startedAt":"2026-10-09T19:03:00Z","finishedAt":"2026-10-09T19:05:00Z","ok":true,"verify":{"id":"20261009T190000Z","ok":true,"stages":[{"stage":"readable","ok":true}]}},` +
+		`"lastVerify":{"kind":"verify","trigger":"api","generationId":"20261009T190000Z","startedAt":"2026-10-09T19:03:00Z","finishedAt":"2026-10-09T19:05:00Z","ok":true,"verify":{"id":"20261009T190000Z","verifiedAt":"2026-10-10T04:05:00.123456789+09:00","ok":true,"stages":[{"stage":"readable","ok":true}]}},` +
 		`"latestUsable":{"id":"20261009T190000Z","at":"2026-10-09T19:00:00Z"},"overdue":true,"lastNotifyError":"webhook returned 500"}`
 )
 
@@ -85,9 +87,19 @@ func TestHTTPControl_Status(t *testing.T) {
 	require.NotNil(t, st.LastVerify)
 	require.NotNil(t, st.LastVerify.Verify)
 	assert.True(t, st.LastVerify.Verify.OK)
+	assert.Equal(t, "20261009T190000Z", st.LastVerify.Verify.ID)
+	assert.True(t, st.LastVerify.Verify.VerifiedAt.Equal(time.Date(2026, 10, 9, 19, 5, 0, 123456789, time.UTC)))
 	assert.Equal(t, "20261009T190000Z", st.LatestUsable.ID)
 	assert.True(t, st.Overdue)
 	assert.Equal(t, "webhook returned 500", st.LastNotifyError)
+
+	// サービスは Go の既定の書式で書くが、管理画面へは本家の書式で出す (#4091)。
+	// verify の verifiedAt は、埋め込んだ backup.VerifyResult の同名の欄ではなく
+	// 外側の欄で読み書きされる。
+	b, err := json.Marshal(st)
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "startedAt", "finishedAt", "nextRunAt", "verifiedAt", "at")
+	assert.Contains(t, string(b), `"verifiedAt":"2026-10-09T19:05:00.123Z"`)
 }
 
 func TestHTTPControl_StatusIdle(t *testing.T) {

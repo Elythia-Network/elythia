@@ -984,7 +984,7 @@ export type BackupVerifyStage = 'readable' | 'restorable' | 'usable';
 export type BackupVerifySummary = {
 	/** True when verify.json passed and belongs to the generation's current dump (the same check restore uses). */
 	ok: boolean;
-	verifiedAt: string;
+	verifiedAt: string | null;
 	stages: { stage: BackupVerifyStage; ok: boolean; skipped?: boolean; error?: string }[];
 	mismatches: { table: string; expected: number; actual: number }[];
 	/** Set when verify.json could not be read, or when it passed but does not count: meta.json is missing or unreadable, or it belongs to another generation or an earlier dump. */

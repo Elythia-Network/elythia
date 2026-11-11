@@ -2,6 +2,7 @@ package maintmode
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/pgactivity"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -37,7 +39,7 @@ func TestStore_EnterGetClear(t *testing.T) {
 	lease := started.Add(time.Minute)
 	require.NoError(t, s.Enter(ctx, State{
 		OpID: "op-1", Kind: KindManual, Reason: "重い migration", RequestedBy: "u1",
-		StartedAt: started, LeaseUntil: lease,
+		StartedAt: jsdate.NewTime(started), LeaseUntil: jsdate.NewTime(lease),
 	}))
 	assert.True(t, mr.Exists("pfx:elythia:maintenance"), "キーに接頭辞が付いていない")
 
@@ -46,7 +48,7 @@ func TestStore_EnterGetClear(t *testing.T) {
 	require.NotNil(t, st)
 	assert.Equal(t, State{
 		Phase: PhaseEntering, OpID: "op-1", Kind: KindManual, Reason: "重い migration",
-		RequestedBy: "u1", StartedAt: started, LeaseUntil: lease,
+		RequestedBy: "u1", StartedAt: jsdate.NewTime(started), LeaseUntil: jsdate.NewTime(lease),
 	}, *st)
 	assert.True(t, st.Holding())
 
@@ -209,7 +211,7 @@ func TestStore_JudgeFieldsRoundTrip(t *testing.T) {
 	require.NoError(t, s.progress(ctx, "op", at, []string{"p1(running)"}, []Blocker{b}, []Blocker{b}, "boom"))
 	st, err := s.Get(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, at, st.JudgedAt)
+	assert.Equal(t, at, st.JudgedAt.Time)
 	assert.Equal(t, []string{"p1(running)"}, st.WaitingFor)
 	assert.Equal(t, []Blocker{b}, st.Blockers)
 	assert.Equal(t, []Blocker{b}, st.Terminated)
@@ -243,7 +245,7 @@ func TestStore_JudgeWritesAreTiedToTheOpID(t *testing.T) {
 	assert.True(t, moved)
 	st, _ = s.Get(ctx)
 	assert.Equal(t, PhaseHeld, st.Phase)
-	assert.Equal(t, at, st.HeldAt)
+	assert.Equal(t, at, st.HeldAt.Time)
 	// held から held にはしない (entering のときだけ)。
 	moved, err = s.markHeld(ctx, "new", at, nil)
 	require.NoError(t, err)
@@ -384,4 +386,22 @@ func TestStore_EnterFillsAnOpID(t *testing.T) {
 	st, err := s.Get(context.Background())
 	require.NoError(t, err)
 	assert.Regexp(t, `^op-[0-9a-f]{16}$`, st.OpID)
+}
+
+// The state goes to the admin page through the backup service, with the
+// times in the format upstream sends; a time the judge has not set yet is
+// left out instead of written as the zero time (#4091).
+func TestState_JSONDates(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	at := time.Date(2026, 10, 11, 10, 2, 3, 456_789_000, jst)
+	b, err := json.Marshal(&State{Phase: PhaseEntering, StartedAt: jsdate.NewTime(at)})
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "startedAt")
+	assert.NotContains(t, string(b), "leaseUntil")
+	assert.NotContains(t, string(b), "heldAt")
+	assert.NotContains(t, string(b), "judgedAt")
+
+	b, err = json.Marshal(&State{Phase: PhaseHeld, StartedAt: jsdate.NewTime(at), LeaseUntil: jsdate.NewTime(at), HeldAt: jsdate.NewTime(at), JudgedAt: jsdate.NewTime(at)})
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "startedAt", "leaseUntil", "heldAt", "judgedAt")
 }

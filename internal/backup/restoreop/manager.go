@@ -14,6 +14,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // DB is the database side of a restore. *backup.Restorer implements it.
@@ -502,7 +503,7 @@ func (m *Manager) prepareChecks(ctx context.Context, req PrepareRequest) (*Recor
 	now := m.now()
 	rec := &Record{
 		OpID: newOpID(), Kind: KindRestore, Step: StepPreparing, GenerationID: plan.ID, Database: m.o.Database,
-		Target: target, Before: before, UserID: req.UserID, CreatedAt: now, UpdatedAt: now,
+		Target: target, Before: before, UserID: req.UserID, CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 		ticketHash: ticketHash, tokenHash: hashString(req.Token),
 	}
 	if err := m.o.Store.create(ctx, rec); err != nil {
@@ -775,7 +776,7 @@ func (m *Manager) CheckTicket(ctx context.Context, opID, ticket, token string) (
 // Status is what the admin page shows.
 type Status struct {
 	Record      *Record          `json:"record"`
-	Journal     []JournalEntry   `json:"journal"`
+	Journal     []JournalLine    `json:"journal"`
 	Maintenance *maintmode.State `json:"maintenance"`
 	Final       bool             `json:"final"`
 }
@@ -793,7 +794,22 @@ func (m *Manager) Status(ctx context.Context, rec *Record) (*Status, error) {
 	if st != nil && st.OpID != rec.OpID {
 		st = nil
 	}
-	return &Status{Record: rec, Journal: journal, Maintenance: st, Final: Final(rec.Step)}, nil
+	lines := make([]JournalLine, len(journal))
+	for i, e := range journal {
+		lines[i] = JournalLine{At: jsdate.NewTime(e.At), Step: e.Step, Message: e.Message}
+	}
+	return &Status{Record: rec, Journal: lines, Maintenance: st, Final: Final(rec.Step)}, nil
+}
+
+// JournalLine is a JournalEntry as the admin page shows it, with the time in
+// the format upstream sends (#4091).
+//
+// JournalEntry は Redis に JSON で置き、lineWritten が読み戻した At をナノ秒まで
+// 比べるので、保存の書式は変えない。応答にだけ本家の書式を使う。
+type JournalLine struct {
+	At      jsdate.Time `json:"at"`
+	Step    string      `json:"step"`
+	Message string      `json:"message"`
 }
 
 // Confirm starts the switch of a ready operation: the maintenance, the name

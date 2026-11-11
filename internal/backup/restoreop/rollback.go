@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // ErrKept wraps the refusals of a rollback that are about the kept
@@ -113,7 +114,7 @@ func (m *Manager) rollbackChecks(ctx context.Context, req RollbackRequest) (*Rec
 	now := m.now()
 	rec := &Record{
 		OpID: newOpID(), Kind: KindRollback, Step: StepPreparing, Database: m.o.Database,
-		Target: req.Database, Before: before, UserID: req.UserID, CreatedAt: now, UpdatedAt: now,
+		Target: req.Database, Before: before, UserID: req.UserID, CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 		ticketHash: ticketHash, tokenHash: hashString(req.Token),
 	}
 	if err := m.o.Store.create(ctx, rec); err != nil {

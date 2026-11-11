@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -224,7 +226,7 @@ func TestList(t *testing.T) {
 	svc := NewService(Options{StorageType: "dir", Storage: st, PricePerGBMonth: 0.02,
 		Control: &fakeControl{status: &Status{
 			Running:         &Job{Kind: "take", Trigger: "schedule"},
-			NextRunAt:       &next,
+			NextRunAt:       jsdate.NewTimePtr(&next),
 			LastTake:        &JobResult{Job: Job{Kind: "take"}, OK: false, Stage: "take", Error: "x"},
 			LastVerify:      &JobResult{Job: Job{Kind: "verify", GenerationID: gen1}, OK: true},
 			LatestUsable:    &UsableGeneration{ID: gen1},
@@ -255,7 +257,7 @@ func TestList(t *testing.T) {
 	assert.Equal(t, int64(len("partial")), g3.Size)
 	assert.Nil(t, g3.Verify)
 	created3, _ := backup.IDTime(gen3)
-	assert.Equal(t, created3, g3.CreatedAt)
+	assert.Equal(t, created3, g3.CreatedAt.Time)
 
 	g2 := ov.Generations[1]
 	assert.True(t, g2.Complete)
@@ -283,12 +285,42 @@ func TestList(t *testing.T) {
 	assert.True(t, ov.Service.Reachable)
 	require.NotNil(t, ov.Service.Running)
 	assert.Equal(t, "schedule", ov.Service.Running.Trigger)
-	assert.Equal(t, &next, ov.Service.NextRunAt)
+	assert.Equal(t, jsdate.NewTimePtr(&next), ov.Service.NextRunAt)
 	assert.Equal(t, "x", ov.Service.LastTake.Error)
 	assert.True(t, ov.Service.LastVerify.OK)
 	assert.Equal(t, gen1, ov.Service.LatestUsable.ID)
 	assert.True(t, ov.Service.Overdue)
 	assert.Equal(t, "webhook 500", ov.Service.LastNotifyError)
+
+	// 管理画面へは、日時を本家の書式で出す (#4091)。
+	b, err := json.Marshal(ov)
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "createdAt", "verifiedAt", "nextRunAt", "startedAt", "finishedAt", "at")
+}
+
+// A verify.json that cannot be read has no time: the summary says null, not
+// the zero time (#4091).
+func TestList_UnreadableVerifyHasNoTime(t *testing.T) {
+	st := newMemStorage()
+	putGeneration(t, st, gen1, []byte("dump-one"), false)
+	require.NoError(t, st.Put(context.Background(), backup.Key(gen1, backup.VerifyFile), strings.NewReader("{")))
+	ov, err := NewService(Options{StorageType: "dir", Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ov.Generations, 1)
+	require.NotNil(t, ov.Generations[0].Verify)
+	assert.NotEmpty(t, ov.Generations[0].Verify.Error)
+	b, err := json.Marshal(ov.Generations[0].Verify)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"verifiedAt":null`)
+
+	// 読めても verifiedAt の無い verify.json も同じ。
+	putJSON(t, st, backup.Key(gen1, backup.VerifyFile), backup.VerifyResult{ID: gen1, OK: true})
+	ov, err = NewService(Options{StorageType: "dir", Storage: st}).List(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, ov.Generations[0].Verify)
+	b, err = json.Marshal(ov.Generations[0].Verify)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"verifiedAt":null`)
 }
 
 func TestList_Edges(t *testing.T) {
@@ -478,7 +510,10 @@ func TestDownload_Presigned(t *testing.T) {
 	assert.Equal(t, "storage", d.Via)
 	assert.Equal(t, "https://s3.example/"+backup.Key(gen1, backup.DumpFileAge)+"?sig=x", d.URL)
 	assert.Equal(t, DefaultDownloadTTL, st.ttl)
-	assert.Equal(t, now.Add(DefaultDownloadTTL), d.ExpiresAt)
+	assert.Equal(t, now.Add(DefaultDownloadTTL), d.ExpiresAt.Time)
+	b, err := json.Marshal(d)
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "expiresAt")
 	assert.True(t, d.Encrypted)
 	assert.Equal(t, int64(len("encrypted-dump")), d.Size)
 	assert.Equal(t, gen1+"-dump.pgc.age", d.FileName)

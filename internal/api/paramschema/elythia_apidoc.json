@@ -1770,7 +1770,7 @@
 				"verifiedAt": {
 					"type": "string",
 					"optional": false,
-					"nullable": false,
+					"nullable": true,
 					"format": "date-time"
 				},
 				"stages": {
@@ -2485,19 +2485,19 @@
 				},
 				"leaseUntil": {
 					"type": "string",
-					"optional": false,
+					"optional": true,
 					"nullable": false,
 					"format": "date-time"
 				},
 				"heldAt": {
 					"type": "string",
-					"optional": false,
+					"optional": true,
 					"nullable": false,
 					"format": "date-time"
 				},
 				"judgedAt": {
 					"type": "string",
-					"optional": false,
+					"optional": true,
 					"nullable": false,
 					"format": "date-time"
 				},

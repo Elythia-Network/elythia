@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // crashed leaves an operation at step with the given database names and
@@ -28,7 +29,7 @@ func crashed(t *testing.T, step string, names map[string]string, phase string, a
 	rec := &Record{
 		OpID: "restore-crashed", Step: step, GenerationID: "20261010T120000Z", Database: testDB,
 		Target: testDB + "_restore_20261010120000", Before: testDB + "_before_restore_20261010120000",
-		Aside: aside, UserID: "u1", CreatedAt: now, UpdatedAt: now,
+		Aside: aside, UserID: "u1", CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 	}
 	require.NoError(t, e.store.create(ctx, rec))
 	e.db.mu.Lock()
@@ -610,7 +611,7 @@ func TestStore_SignsRecordNames(t *testing.T) {
 	e.stop()
 	e.store.SetIntegrityKey(key)
 	now := time.Now()
-	rec := &Record{OpID: "op-signed", Kind: KindRestore, Step: StepPreparing, Database: testDB, Target: tgt, Before: before, CreatedAt: now, UpdatedAt: now}
+	rec := &Record{OpID: "op-signed", Kind: KindRestore, Step: StepPreparing, Database: testDB, Target: tgt, Before: before, CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now)}
 	require.NoError(t, e.store.create(ctx, rec))
 
 	got, err := e.store.Get(ctx, rec.OpID)
@@ -649,7 +650,7 @@ func TestRecover_RefusesUnsignedRecordWithKey(t *testing.T) {
 	now := time.Now()
 	rec := &Record{
 		OpID: "restore-forged", Step: StepSwitched, GenerationID: "20261010T120000Z", Database: testDB,
-		Target: tgt, Before: before, UserID: "u1", CreatedAt: now, UpdatedAt: now,
+		Target: tgt, Before: before, UserID: "u1", CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 	}
 	require.NoError(t, e.store.create(ctx, rec)) // 鍵を持たない者が書いた記録
 	e.store.SetIntegrityKey([]byte(strings.Repeat("k", 32)))
@@ -765,7 +766,7 @@ func TestRecover_RefusesKeptDatabaseWithoutThisOperationsMark(t *testing.T) {
 			e.process("p1")
 			ctx := context.Background()
 			now := time.Now()
-			rec := &Record{OpID: "restore-forged", Step: StepSwitched, Database: testDB, Target: tgt, Before: before, CreatedAt: now, UpdatedAt: now}
+			rec := &Record{OpID: "restore-forged", Step: StepSwitched, Database: testDB, Target: tgt, Before: before, CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now)}
 			require.NoError(t, e.store.create(ctx, rec))
 			e.db.mu.Lock()
 			e.db.dbs = map[string]string{testDB: "live", before: "old-kept"}
