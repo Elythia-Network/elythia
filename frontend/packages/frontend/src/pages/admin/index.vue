@@ -213,7 +213,7 @@ const menuDef = computed<SuperMenuDef[]>(() => [{
 		// mk-go: 承認制の登録の審査 (#2555)。**承認制のときだけ出す** — 使って
 		// いないインスタンスのメニューに、押しても空の項目を並べない (#2557)。
 		icon: 'ti ti-user-plus',
-		text: '登録申請',
+		text: i18n.ts._mkgoSignupApplication._admin.title,
 		to: '/admin/signup-applications',
 		active: currentPage.value?.route.name === 'signup-applications',
 	}] : []), {
@@ -362,10 +362,10 @@ const menuDef = computed<SuperMenuDef[]>(() => [{
 	// なるので、メニューにも出す。先頭は一覧ページ (#2497) で、プラグインが
 	// 0 個でも組み込み状況と残存データを確認できるよう常設する。続けて各
 	// プラグインが宣言した管理画面を並べる。
-	title: 'プラグイン',
+	title: i18n.ts._mkgoServerPlugins.menuSection,
 	items: [{
 		icon: 'ti ti-puzzle',
-		text: 'サーバープラグイン',
+		text: i18n.ts._mkgoServerPlugins.title,
 		to: '/admin/server-plugins',
 		active: currentPage.value?.route.name === 'server-plugins',
 	}, ...pluginAdminMenu.value],

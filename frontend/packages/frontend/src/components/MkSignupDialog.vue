@@ -37,12 +37,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</template>
 			<template v-else-if="approvalRequired">
 				<div class="_gaps_m" style="padding: 24px;">
-					<div>このサーバーでは、登録に申請と承認が必要です。</div>
+					<div>{{ i18n.ts._mkgoSignupApplication.dialogApprovalRequired }}</div>
 					<div style="font-size: 0.9em; opacity: 0.8;">
-						申請するとクレームコードが発行されます。結果の確認と登録に必要なので控えてください。
+						{{ i18n.ts._mkgoSignupApplication.dialogCodeIssued }}
 					</div>
 					<MkButton primary rounded @click="goToApplication">
-						<i class="ti ti-user-plus"></i> 登録を申請する
+						<i class="ti ti-user-plus"></i> {{ i18n.ts._mkgoSignupApplication.applyForSignup }}
 					</MkButton>
 				</div>
 			</template>

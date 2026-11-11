@@ -11,14 +11,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 <template>
 <div class="_gaps_s">
 	<MkLoading v-if="loading"/>
-	<MkInfo v-else-if="forbidden === 'admin'">秘密の値を扱えるのは管理者だけです。</MkInfo>
-	<MkInfo v-else-if="forbidden === 'token'" warn>秘密の値は、ブラウザでログインしたときだけ扱えます (アプリや API のトークンでは操作できません)。</MkInfo>
-	<MkInfo v-else-if="loadError" warn>秘密の値を読み込めませんでした: {{ loadError }}</MkInfo>
+	<MkInfo v-else-if="forbidden === 'admin'">{{ i18n.ts._mkgoPluginSecrets.adminOnly }}</MkInfo>
+	<MkInfo v-else-if="forbidden === 'token'" warn>{{ i18n.ts._mkgoPluginSecrets.browserOnly }}</MkInfo>
+	<MkInfo v-else-if="loadError" warn>{{ i18n.tsx._mkgoPluginSecrets.loadFailed({ error: loadError }) }}</MkInfo>
 	<template v-else-if="list">
 		<MkInfo v-if="!list.available" warn>
-			設定ファイルに pluginSecretKey が無いため、秘密の値を保存できません。鍵を設定して再起動してください。
+			{{ i18n.ts._mkgoPluginSecrets.noKey }}
 		</MkInfo>
-		<MkInfo v-if="list.secrets.length === 0">このプラグインは秘密の値を宣言していません。</MkInfo>
+		<MkInfo v-if="list.secrets.length === 0">{{ i18n.ts._mkgoPluginSecrets.noneDeclared }}</MkInfo>
 		<div v-for="s in list.secrets" :key="s.name" class="_gaps_s" :class="$style.secret">
 			<MkInput
 				v-if="s.declared"
@@ -27,7 +27,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				autocomplete="new-password"
 				:spellcheck="false"
 				:disabled="!list.available || busy"
-				:placeholder="s.configured ? '新しい値を入れると上書きします' : ''"
+				:placeholder="s.configured ? i18n.ts._mkgoPluginSecrets.overwritePlaceholder : ''"
 			>
 				<template #label>{{ s.name }}</template>
 				<template #caption>
@@ -36,7 +36,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</template>
 			</MkInput>
 			<div v-else>
-				<div :class="$style.label">{{ s.name }}（プラグインが保存した値）</div>
+				<div :class="$style.label">{{ i18n.tsx._mkgoPluginSecrets.storedByPlugin({ name: s.name }) }}</div>
 				<div :class="$style.caption">{{ statusText(s) }}</div>
 			</div>
 			<div class="_buttons">
@@ -47,7 +47,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					:disabled="!list.available || busy || !inputs[s.name]"
 					@click="save(s.name)"
 				>
-					<i class="ti ti-check"></i> 保存
+					<i class="ti ti-check"></i> {{ i18n.ts._mkgoPluginSecrets.save }}
 				</MkButton>
 				<MkButton
 					v-if="s.configured"
@@ -56,7 +56,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					:disabled="!list.available || busy"
 					@click="remove(s.name)"
 				>
-					<i class="ti ti-trash"></i> 削除
+					<i class="ti ti-trash"></i> {{ i18n.ts._mkgoPluginSecrets.delete }}
 				</MkButton>
 			</div>
 		</div>
@@ -72,6 +72,7 @@ import MkInfo from '@/components/MkInfo.vue';
 import MkInput from '@/components/MkInput.vue';
 import MkLoading from '@/components/global/MkLoading.vue';
 import * as os from '@/os.js';
+import { i18n } from '@/i18n.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 
 const props = defineProps<{
@@ -107,7 +108,7 @@ async function load() {
 		// 入力口が張られていないとき (プラグインが無効、宣言が無いなど) は、本体の
 		// catchall が 200 + {} を返す。空の一覧と取り違えないよう、形で見分ける。
 		if (!Array.isArray(res?.secrets)) {
-			throw new Error('このプラグインの秘密の値の入力口がありません (無効か、秘密の値を宣言していません)');
+			throw new Error(i18n.ts._mkgoPluginSecrets.noEndpoint);
 		}
 		list.value = res;
 		forbidden.value = null;
@@ -128,13 +129,13 @@ async function load() {
 }
 
 function statusText(s: Elythia.PluginSecretInfo): string {
-	if (!s.configured) return '未設定';
+	if (!s.configured) return i18n.ts._mkgoPluginSecrets.notConfigured;
 	if (!s.readable) {
 		return list.value?.available
-			? '設定済みですが、今の鍵では読めません (鍵が変わっています)。入れ直してください'
-			: '設定済み (鍵が無いため確認できません)';
+			? i18n.ts._mkgoPluginSecrets.unreadable
+			: i18n.ts._mkgoPluginSecrets.configuredNoKey;
 	}
-	return s.hint != null ? `設定済み (末尾 ${s.hint})` : '設定済み';
+	return s.hint != null ? i18n.tsx._mkgoPluginSecrets.configuredWithHint({ hint: s.hint }) : i18n.ts._mkgoPluginSecrets.configured;
 }
 
 async function save(name: string) {
@@ -156,7 +157,7 @@ async function save(name: string) {
 async function remove(name: string) {
 	const { canceled } = await os.confirm({
 		type: 'warning',
-		text: `${name} を削除しますか? プラグインはこの値を使えなくなります。`,
+		text: i18n.tsx._mkgoPluginSecrets.deleteConfirm({ name }),
 	});
 	if (canceled) return;
 	busy.value = true;

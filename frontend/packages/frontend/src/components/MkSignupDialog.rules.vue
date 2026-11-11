@@ -16,7 +16,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					内部で使うだけで利用者には渡らないので、実態と食い違う。
 				-->
 				<MkInfo v-if="registrationClosed" warn>{{ i18n.ts._mkgoRegistration.closedNotice }}</MkInfo>
-				<MkInfo v-else-if="approvalRequiredForSignup" warn>このサーバーの登録は承認制です。申請すると管理者が確認し、承認されると登録できます。</MkInfo>
+				<MkInfo v-else-if="approvalRequiredForSignup" warn>{{ i18n.ts._mkgoSignupApplication.approvalRequiredNotice }}</MkInfo>
 				<MkInfo v-else-if="instance.disableRegistration" warn>{{ i18n.ts.invitationRequiredToRegister }}</MkInfo>
 				<MkInfo v-if="instance.federation === 'specified'" warn>{{ i18n.ts.federationSpecified }}</MkInfo>
 				<MkInfo v-else-if="instance.federation === 'none'" warn>{{ i18n.ts.federationDisabled }}</MkInfo>

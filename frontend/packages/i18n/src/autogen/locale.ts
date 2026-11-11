@@ -14525,6 +14525,10 @@ export interface Locale extends ILocale {
              */
             "unknown": string;
         };
+        /**
+         * スキップ
+         */
+        "stageSkipped": string;
     };
     "_databaseHealth": {
         /**
@@ -16667,5 +16671,561 @@ export interface Locale extends ILocale {
          * このユーザーはローカル専用アカウントです。
          */
         "publicProfile": string;
+    };
+    "_mkgoSignupApplication": {
+        /**
+         * 登録の申請
+         */
+        "title": string;
+        /**
+         * このコードを控えてください。
+         */
+        "saveCodeTitle": string;
+        /**
+         * 二度と表示されません。
+         */
+        "saveCodeNotShownAgain": string;
+        /**
+         * 登録の状況を確認したり、承認後に登録したりするのに必要です。失くした場合は申請し直してください。
+         */
+        "saveCodeDescription": string;
+        /**
+         * クレームコード
+         */
+        "claimCode": string;
+        /**
+         * 控えました
+         */
+        "savedCode": string;
+        /**
+         * {email} に確認メールを送りました。リンクを開くと登録が完了します。
+         */
+        "confirmationSent": ParameterizedString<"email">;
+        /**
+         * 届かない場合は迷惑メールを確認してください。アドレスを間違えた場合は、同じクレームコードでもう一度登録してください。
+         */
+        "confirmationNotArrived": string;
+        /**
+         * やり直すと前のリンクは無効になります。
+         */
+        "confirmationLinkInvalidated": string;
+        /**
+         * 登録の入力に戻る
+         */
+        "backToRegistration": string;
+        /**
+         * 申請を受け付けました。審査までしばらくお待ちください。
+         */
+        "pending": string;
+        /**
+         * 結果はこのページでコードを入力すると確認できます。
+         */
+        "checkResultWithCode": string;
+        /**
+         * この申請は{time}まで有効です。
+         */
+        "validUntil": ParameterizedString<"time">;
+        /**
+         * 状態を確認する
+         */
+        "checkStatus": string;
+        /**
+         * 申請が承認されました。アカウントを作成してください。
+         */
+        "approved": string;
+        /**
+         * 確認メールを送ります。リンクを開くと登録が完了します。
+         */
+        "emailConfirmationCaption": string;
+        /**
+         * この申請は承認されませんでした。
+         */
+        "rejected": string;
+        /**
+         * もう一度申請する
+         */
+        "applyAgain": string;
+        /**
+         * 申請の期限が切れました。
+         */
+        "expired": string;
+        /**
+         * この申請では既に登録が完了しています。
+         */
+        "completed": string;
+        /**
+         * このサーバーの登録は承認制です。申請すると管理者が確認します。
+         */
+        "approvalRequired": string;
+        /**
+         * 申請するとクレームコードが 1 度だけ表示されます。
+         */
+        "codeShownOnce": string;
+        /**
+         * 結果の確認と登録に必要なので、必ず控えてください。
+         */
+        "keepCode": string;
+        /**
+         * 申請する
+         */
+        "apply": string;
+        /**
+         * このサーバーは申請項目を設定していません。そのまま申請できます。
+         */
+        "noFormFields": string;
+        /**
+         * フォームを開いた直後は送信できません。少し待ってから送信してください。
+         */
+        "waitBeforeSubmit": string;
+        /**
+         * フォームの準備に失敗しました。そのまま送信もできますが、うまくいかない場合は読み込み直してください。
+         */
+        "formTokenFailed": string;
+        /**
+         * 読み込み直す
+         */
+        "reload": string;
+        /**
+         * コードで状況を確認する
+         */
+        "lookupByCode": string;
+        /**
+         * 確認する
+         */
+        "check": string;
+        /**
+         * アカウントを作成しました。
+         */
+        "accountCreated": string;
+        "_errors": {
+            /**
+             * そのコードの申請は見つかりませんでした。入力を確認してください。
+             */
+            "noSuchApplication": string;
+            /**
+             * この申請はまだ承認されていません。
+             */
+            "notApproved": string;
+            /**
+             * 必須の項目が入力されていません。
+             */
+            "answerRequired": string;
+            /**
+             * 入力が長すぎる項目があります。
+             */
+            "answerTooLong": string;
+            /**
+             * 申請フォームが変更されました。ページを再読み込みしてやり直してください。
+             */
+            "formChanged": string;
+            /**
+             * 認証に失敗しました。やり直してください。
+             */
+            "captchaFailed": string;
+            /**
+             * フォームの有効期限が切れました。もう一度送信してください。
+             */
+            "formTokenInvalid": string;
+            /**
+             * 送信が早すぎます。少し待ってからもう一度送信してください。
+             */
+            "formTokenTooSoon": string;
+            /**
+             * そのユーザー名は使えません。
+             */
+            "unusableUsername": string;
+            /**
+             * そのメールアドレスは使えません。
+             */
+            "emailUnavailable": string;
+            /**
+             * このサーバーでは承認制の登録を受け付けていません。
+             */
+            "unavailable": string;
+            /**
+             * そのユーザー名は既に使われています。
+             */
+            "usedUsername": string;
+            /**
+             * ユーザー名は{n}文字以上にしてください。
+             */
+            "usernameTooShort": ParameterizedString<"n">;
+            /**
+             * パスワードが長すぎます。
+             */
+            "passwordTooLong": string;
+            /**
+             * 処理に失敗しました。時間をおいて試してください。
+             */
+            "unknown": string;
+        };
+        "_admin": {
+            /**
+             * 登録申請
+             */
+            "title": string;
+            /**
+             * 表示
+             */
+            "show": string;
+            /**
+             * 審査待ちの申請はありません。
+             */
+            "noPending": string;
+            /**
+             * 該当する申請はありません。
+             */
+            "noMatching": string;
+            /**
+             * 申請日時
+             */
+            "appliedAt": string;
+            /**
+             * 期限
+             */
+            "expiresAt": string;
+            /**
+             * 審査日時
+             */
+            "processedAt": string;
+            /**
+             * (未回答)
+             */
+            "unanswered": string;
+            /**
+             * 承認
+             */
+            "approve": string;
+            /**
+             * 却下
+             */
+            "reject": string;
+            /**
+             * 審査待ち
+             */
+            "statusPending": string;
+            /**
+             * 承認済み（未登録）
+             */
+            "statusApproved": string;
+            /**
+             * 却下
+             */
+            "statusRejected": string;
+            /**
+             * 期限切れ
+             */
+            "statusExpired": string;
+            /**
+             * 登録済み
+             */
+            "statusCompleted": string;
+            /**
+             * 処理済み
+             */
+            "filterProcessed": string;
+            /**
+             * すべて
+             */
+            "filterAll": string;
+            /**
+             * この申請を承認しますか？
+             */
+            "approveConfirm": string;
+            /**
+             * この申請を却下しますか？
+             */
+            "rejectConfirm": string;
+            /**
+             * 再読み込み
+             */
+            "reload": string;
+        };
+        /**
+         * このサーバーでは、登録に申請と承認が必要です。
+         */
+        "dialogApprovalRequired": string;
+        /**
+         * 申請するとクレームコードが発行されます。結果の確認と登録に必要なので控えてください。
+         */
+        "dialogCodeIssued": string;
+        /**
+         * 登録を申請する
+         */
+        "applyForSignup": string;
+        /**
+         * このサーバーの登録は承認制です。申請すると管理者が確認し、承認されると登録できます。
+         */
+        "approvalRequiredNotice": string;
+        /**
+         * 承認済みの登録にも確認メールを挟みます (#2571)。
+         */
+        "emailConfirmationForApproved": string;
+        "_form": {
+            /**
+             * 申請フォームの項目
+             */
+            "title": string;
+            /**
+             * {n} 項目
+             */
+            "fieldCount": ParameterizedString<"n">;
+            /**
+             * 項目を追加しないと、申請者は理由を書かずに申請することになります。
+             */
+            "noFieldsNotice": string;
+            /**
+             * 項目名
+             */
+            "fieldLabel": string;
+            /**
+             * 入力欄
+             */
+            "fieldType": string;
+            /**
+             * 必須にする
+             */
+            "required": string;
+            /**
+             * この項目を削除
+             */
+            "removeField": string;
+            /**
+             * 項目を追加
+             */
+            "addField": string;
+            /**
+             * 項目は{n}個までです。
+             */
+            "maxFields": ParameterizedString<"n">;
+            /**
+             * 保存
+             */
+            "save": string;
+            /**
+             * 1 行
+             */
+            "singleLine": string;
+            /**
+             * 複数行
+             */
+            "multiLine": string;
+        };
+    };
+    "_mkgoServerPlugins": {
+        /**
+         * プラグイン
+         */
+        "menuSection": string;
+        /**
+         * サーバープラグイン
+         */
+        "title": string;
+        /**
+         * プラグインの残存データを確認できませんでした。サーバーログを参照してください。
+         */
+        "orphanCheckFailed": string;
+        /**
+         * 使われていないプラグインのデータが残っています: {schemas}
+         */
+        "orphanData": ParameterizedString<"schemas">;
+        /**
+         * 不要なら手動で削除してください。
+         */
+        "orphanDataRemove": string;
+        /**
+         * 組み込まれているサーバープラグインはありません。プラグインはビルド時に組み込まれます。
+         */
+        "none": string;
+        /**
+         * 有効
+         */
+        "enabled": string;
+        /**
+         * 無効
+         */
+        "disabled": string;
+        /**
+         * 無効（設定で止められています。ビルドには含まれています）
+         */
+        "disabledByConfig": string;
+        /**
+         * バージョン
+         */
+        "version": string;
+        /**
+         * (未設定)
+         */
+        "notSet": string;
+        /**
+         * 状態
+         */
+        "status": string;
+        /**
+         * 機能
+         */
+        "capabilities": string;
+        /**
+         * ジョブ
+         */
+        "capabilityJobs": string;
+        /**
+         * フロントエンド
+         */
+        "capabilityFrontend": string;
+        /**
+         * (なし)
+         */
+        "capabilityNone": string;
+        /**
+         * データ
+         */
+        "data": string;
+        /**
+         * {schema}（migration {n}件）
+         */
+        "schemaWithMigrations": ParameterizedString<"schema" | "n">;
+        /**
+         * 設定キー
+         */
+        "configKeys": string;
+        /**
+         * {keys}（値は表示されません）
+         */
+        "configKeysHidden": ParameterizedString<"keys">;
+        /**
+         * {n}件
+         */
+        "count": ParameterizedString<"n">;
+        /**
+         * ページ
+         */
+        "pages": string;
+        /**
+         * {name}（管理画面）
+         */
+        "adminPage": ParameterizedString<"name">;
+    };
+    "_mkgoPluginSecrets": {
+        /**
+         * 秘密の値
+         */
+        "title": string;
+        /**
+         * 無効なプラグインの秘密の値は設定できません。有効にして再起動してください。
+         */
+        "disabledPlugin": string;
+        /**
+         * 秘密の値を扱えるのは管理者だけです。
+         */
+        "adminOnly": string;
+        /**
+         * 秘密の値は、ブラウザでログインしたときだけ扱えます (アプリや API のトークンでは操作できません)。
+         */
+        "browserOnly": string;
+        /**
+         * 秘密の値を読み込めませんでした: {error}
+         */
+        "loadFailed": ParameterizedString<"error">;
+        /**
+         * 設定ファイルに pluginSecretKey が無いため、秘密の値を保存できません。鍵を設定して再起動してください。
+         */
+        "noKey": string;
+        /**
+         * このプラグインは秘密の値を宣言していません。
+         */
+        "noneDeclared": string;
+        /**
+         * 新しい値を入れると上書きします
+         */
+        "overwritePlaceholder": string;
+        /**
+         * {name}（プラグインが保存した値）
+         */
+        "storedByPlugin": ParameterizedString<"name">;
+        /**
+         * 保存
+         */
+        "save": string;
+        /**
+         * 削除
+         */
+        "delete": string;
+        /**
+         * このプラグインの秘密の値の入力口がありません (無効か、秘密の値を宣言していません)
+         */
+        "noEndpoint": string;
+        /**
+         * 未設定
+         */
+        "notConfigured": string;
+        /**
+         * 設定済みですが、今の鍵では読めません (鍵が変わっています)。入れ直してください
+         */
+        "unreadable": string;
+        /**
+         * 設定済み (鍵が無いため確認できません)
+         */
+        "configuredNoKey": string;
+        /**
+         * 設定済み (末尾 {hint})
+         */
+        "configuredWithHint": ParameterizedString<"hint">;
+        /**
+         * 設定済み
+         */
+        "configured": string;
+        /**
+         * {name} を削除しますか? プラグインはこの値を使えなくなります。
+         */
+        "deleteConfirm": ParameterizedString<"name">;
+    };
+    "_mkgoJobQueue": {
+        /**
+         * ワーカー数
+         */
+        "workers": string;
+        /**
+         * 自動スケール
+         */
+        "autoScale": string;
+        /**
+         * 有効
+         */
+        "enabled": string;
+        /**
+         * 無効
+         */
+        "disabled": string;
+        /**
+         * 取り出しまでの待ち (p50/p95)
+         */
+        "dispatchWait": string;
+        /**
+         * 処理時間 (p50/p95)
+         */
+        "processing": string;
+        /**
+         * 最近の失敗
+         */
+        "recentFailures": string;
+    };
+    "_mkgoServerMetrics": {
+        /**
+         * ゴルーチン
+         */
+        "goroutines": string;
+        /**
+         * ヒープ
+         */
+        "heap": string;
+        /**
+         * GC
+         */
+        "gc": string;
+        /**
+         * 稼働時間
+         */
+        "uptime": string;
     };
 }

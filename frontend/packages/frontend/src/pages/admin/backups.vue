@@ -143,7 +143,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						</MkKeyValue>
 						<div v-if="g.verify && !g.verify.ok" class="_monospace" :class="$style.verifyError">
 							<div v-if="g.verify.error">{{ g.verify.error }}</div>
-							<div v-for="s in g.verify.stages.filter(x => !x.ok)" :key="s.stage">{{ s.stage }}: {{ s.skipped ? 'skipped' : s.error }}</div>
+							<div v-for="s in g.verify.stages.filter(x => !x.ok)" :key="s.stage">{{ s.stage }}: {{ s.skipped ? i18n.ts._backups.stageSkipped : s.error }}</div>
 							<div v-for="m in g.verify.mismatches" :key="m.table">{{ m.table }}: {{ m.expected }} → {{ m.actual }}</div>
 						</div>
 						<div class="_buttons">

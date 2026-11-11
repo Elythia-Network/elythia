@@ -88,14 +88,14 @@ const ROWS: MetaRow[] = [
     // 申請フォームの枠は承認制のときだけ出るので、先に承認制にしておく
     setup: async ({ request, root }) => { await expectApiOk(request, 'admin/update-meta', { i: root.token, registrationClosed: false, approvalRequiredForSignup: true, disableRegistration: false }); },
     set: async ({ page }) => {
-      const group = pageBody(page).getByTestId('folder-header').filter({ has: page.getByText('申請フォームの項目', { exact: true }) }).locator('xpath=ancestor::*[@role="group"][1]');
-      await group.getByRole('button', { name: '項目を追加' }).click();
-      await (await fieldByLabel(page, '項目名')).locator('input').last().fill('pw fediverse account');
-      await savedBy(page, () => group.getByRole('button', { name: '保存' }).click());
+      const group = pageBody(page).getByTestId('folder-header').filter({ has: page.getByText('Application form questions', { exact: true }) }).locator('xpath=ancestor::*[@role="group"][1]');
+      await group.getByRole('button', { name: 'Add a question' }).click();
+      await (await fieldByLabel(page, 'Question')).locator('input').last().fill('pw fediverse account');
+      await savedBy(page, () => group.getByRole('button', { name: 'Save' }).click());
     },
     read: (meta) => (meta.signupApplicationForm as { label: string }[] | undefined)?.at(-1)?.label,
     expected: 'pw fediverse account',
-    shows: async ({ page }) => { await expect((await fieldByLabel(page, '項目名')).locator('input').last()).toHaveValue('pw fediverse account'); },
+    shows: async ({ page }) => { await expect((await fieldByLabel(page, 'Question')).locator('input').last()).toHaveValue('pw fediverse account'); },
     effect: async ({ request }) => {
       const form = (await expectApiOk(request, 'meta', { detail: true })).signupApplicationForm as { label: string }[];
       expect(form.map((f) => f.label), '/api/meta の申請フォームに項目が出ない').toContain('pw fediverse account');
