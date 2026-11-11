@@ -62,8 +62,8 @@ Windows checkoutでComposeが`gen-certs.sh`を直接実行するときは、work
 
 - mkq の drain は、1 人から送ると 3 倍以上かかる。1 人の条件で処理が詰まっている間、inbox の worker 16 本のうち 15 本が `userRepository.IncrementNotesCount` で待っていた (goroutine の一覧で確認)
 - 1,000 人の条件の mkq の受信の rps は TS の 3.3〜3.5 倍
-- TS の drain は、計測限界 (下) のとおり queue depth を観測できていないので参考値
-- 下準備 (投稿者ごとに 1 件) の drain は、mkq 2.5〜2.7s、TS 1.4〜1.5s
+- TS の drain は、計測限界 (下) のとおり TS の queue を観測できていないので参考値。送信が終わった時刻とほぼ同じになる
+- 下準備 (投稿者ごとに 1 件) の drain は、mkq 2.5〜2.7s。TS (1.4〜1.5s) は同じ理由で参考値で、TS の下準備の処理が計測の始まりまでに片付いていることは保証されない
 - 同じ日の同じ mkq の image の outbound: mk-go (mkq) 4.36s (2294.9 jobs/s)、Misskey TS 78.14s (128.0 jobs/s)
 
 #### Activity type (`INBOUND_ACTIVITY_TYPE`)
@@ -177,7 +177,8 @@ inbound bench で TS instance を sender に使うと、TS 側の deliver throug
 
 ### 計測限界
 
-- inbound で receiver workers が即処理する場合、queue depth は polling 粒度 (50ms) では peak ≈ 0 に見える。実効 throughput は faker.send rps が真の receiver ingest+process rate
+- **TS の queue は probe から見えていない。** probe は `bull:<queue>:wait` などを読むが、本家の queue は `queue:<queue>` (設定によってはその前に prefix が付く) を BullMQ の prefix にしていて、key の名前が違う (`packages/backend/src/queue/const.ts` の `baseQueueOptions`)。そのため TS の peak depth は常に 0 で、drain は送信の終了とほぼ同じ時刻になる。TS の drain と、下準備の後に TS の queue が空になったかは確かめられない
+- inbound で receiver workers が即処理する場合も、queue depth は polling 粒度 (100ms) では peak ≈ 0 に見える。実効 throughput は faker.send rps が真の receiver ingest+process rate
 - outbound は blackhole hits (delivered count) が primary signal なので polling race の影響を受けない
 
 ### Federation flag 注意
