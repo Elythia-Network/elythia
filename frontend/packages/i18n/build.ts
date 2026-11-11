@@ -11,6 +11,7 @@ import * as esbuild from 'esbuild';
 import { build } from 'esbuild';
 import { execa } from 'execa';
 import { generateLocaleInterface } from './scripts/generateLocaleInterface.js';
+import { ELYTHIA_LOCALES_DIR } from './src/elythia.js';
 import type { BuildOptions, BuildResult, Plugin, PluginBuild } from 'esbuild';
 
 const _filename = fileURLToPath(import.meta.url);
@@ -20,6 +21,8 @@ const _rootPackageDir = resolve(_dirname, '../../');
 const _rootPackage = JSON.parse(fs.readFileSync(resolve(_rootPackageDir, 'package.json'), 'utf-8'));
 const _frontendLocalesDir = resolve(_dirname, '../../built/_frontend_dist_/locales');
 const _localesDir = resolve(_rootPackageDir, 'locales');
+// Elythia: 本家の語に重ねる Elythia の語 (#4071)
+const _elythiaLocalesDir = resolve(_rootPackageDir, ELYTHIA_LOCALES_DIR);
 
 const entryPoints = fs.globSync('./src/**/**.{ts,tsx}');
 
@@ -49,16 +52,20 @@ if (args.includes('--watch')) {
 }
 
 function copyLocales(): void {
-	const srcDir = _localesDir;
-	const destDir = resolve(_dirname, 'built/locales');
+	// Elythia: build() は built の下の写しを読むので、Elythia の語も同じ形で写す (#4071)
+	for (const [srcDir, destName] of [[_localesDir, 'locales'], [_elythiaLocalesDir, ELYTHIA_LOCALES_DIR]]) {
+		const destDir = resolve(_dirname, 'built', destName);
 
-	fs.mkdirSync(destDir, { recursive: true });
+		// Elythia の語のファイルは消すことがあるので、watch の間に古い写しを重ね続けないよう作り直す
+		if (destName === ELYTHIA_LOCALES_DIR) fs.rmSync(destDir, { recursive: true, force: true });
+		fs.mkdirSync(destDir, { recursive: true });
 
-	const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.yml'));
-	for (const file of files) {
-		fs.copyFileSync(resolve(srcDir, file), resolve(destDir, file));
+		const files = fs.existsSync(srcDir) ? fs.readdirSync(srcDir).filter(f => f.endsWith('.yml')) : [];
+		for (const file of files) {
+			fs.copyFileSync(resolve(srcDir, file), resolve(destDir, file));
+		}
+		console.log(`[${_package.name}] ${destName} copied (${files.length} files).`);
 	}
-	console.log(`[${_package.name}] locales copied (${files.length} files).`);
 }
 
 /**
@@ -75,7 +82,7 @@ async function writeFrontendLocalesJson(): Promise<void> {
 async function buildSrc(): Promise<void> {
 	console.log(`[${_package.name}] start building...`);
 
-	await generateLocaleInterface(_localesDir);
+	await generateLocaleInterface(_localesDir, _elythiaLocalesDir);
 
 	await build(options)
 		.then(() => {
@@ -116,7 +123,7 @@ function buildDts(): Promise<unknown> {
 }
 
 async function watchSrc(): Promise<void> {
-	const localesWatcher = chokidarWatch(_localesDir, {
+	const localesWatcher = chokidarWatch([_localesDir, _elythiaLocalesDir], {
 		ignoreInitial: true,
 	});
 	localesWatcher.on('all', async (event, path) => {
@@ -124,7 +131,7 @@ async function watchSrc(): Promise<void> {
 		console.log(`[${_package.name}] locales changed: ${event} ${path}`);
 		copyLocales();
 		await writeFrontendLocalesJson();
-		await generateLocaleInterface(_localesDir);
+		await generateLocaleInterface(_localesDir, _elythiaLocalesDir);
 	});
 
 	const plugins: Plugin[] = [{

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
 import ts from 'typescript';
+import { ELYTHIA_LOCALES_DIR, overlayLocale } from '../src/elythia.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,8 +62,13 @@ function createMembers(record: LocaleRecord): ts.TypeElement[] {
 	});
 }
 
-export async function generateLocaleInterface(localesDir: string): Promise<void> {
-	const locale = loadYaml(fs.readFileSync(`${localesDir}/ja-JP.yml`, 'utf-8').toString()) as LocaleRecord;
+export async function generateLocaleInterface(localesDir: string, elythiaLocalesDir?: string): Promise<void> {
+	let locale = loadYaml(fs.readFileSync(`${localesDir}/ja-JP.yml`, 'utf-8').toString()) as LocaleRecord;
+	// Elythia: 型は build() と同じく、本家の ja-JP に Elythia の ja-JP を重ねたものから作る (#4071)
+	const ownPath = elythiaLocalesDir && `${elythiaLocalesDir}/ja-JP.yml`;
+	if (ownPath && fs.existsSync(ownPath)) {
+		locale = overlayLocale(locale, loadYaml(fs.readFileSync(ownPath, 'utf-8').toString()) as LocaleRecord | null);
+	}
 	const members = createMembers(locale);
 
 	const elements: ts.Statement[] = [
@@ -149,5 +155,5 @@ export async function generateLocaleInterface(localesDir: string): Promise<void>
 // スクリプトとして直接実行された場合
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
-	await generateLocaleInterface(resolve(__dirname, '../../../locales'));
+	await generateLocaleInterface(resolve(__dirname, '../../../locales'), resolve(__dirname, '../../..', ELYTHIA_LOCALES_DIR));
 }

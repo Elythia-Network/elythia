@@ -165,6 +165,10 @@ jobs:
       - name: Elythia imports
         run: node scripts/check-elythia-imports.mjs
 
+      # 本家の語に Elythia の語 (frontend/locales-elythia) を重ねる処理 (#4071)
+      - name: i18n overlay self test
+        run: node --test scripts/i18n-overlay.test.mjs
+
       - name: check-locale-coverage self test
         run: node --test scripts/check-locale-coverage.test.mjs
 
