@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Errors returned by Service.
@@ -45,8 +46,8 @@ const bytesPerGB = 1 << 30
 
 // Generation is one generation as shown in the admin page.
 type Generation struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string      `json:"id"`
+	CreatedAt jsdate.Time `json:"createdAt"`
 	// Complete is false when meta.json is missing or unreadable, or when the
 	// dump it names is missing (backup.Generation.Complete). Such a
 	// generation cannot be restored; it still uses storage.
@@ -74,7 +75,7 @@ type VerifySummary struct {
 	// OK is backup.VerifyPassed: verify.json passed and belongs to the
 	// generation's current dump.
 	OK         bool                 `json:"ok"`
-	VerifiedAt time.Time            `json:"verifiedAt"`
+	VerifiedAt *jsdate.Time         `json:"verifiedAt"`
 	Stages     []backup.StageResult `json:"stages"`
 	Mismatches []backup.RowMismatch `json:"mismatches"`
 	// Error says why verify.json could not be read, or why a passing
@@ -114,7 +115,7 @@ type ServiceState struct {
 	// The rest comes from GET /status of the backup service. It is kept only
 	// in the service's memory and is empty after the service restarts.
 	Running         *Job              `json:"running"`
-	NextRunAt       *time.Time        `json:"nextRunAt"`
+	NextRunAt       *jsdate.Time      `json:"nextRunAt"`
 	LastTake        *JobResult        `json:"lastTake"`
 	LastVerify      *JobResult        `json:"lastVerify"`
 	LatestUsable    *UsableGeneration `json:"latestUsable"`
@@ -126,8 +127,8 @@ type ServiceState struct {
 type Download struct {
 	// URL is a presigned storage URL (S3) or a short-lived URL served by the
 	// main server (directory storage).
-	URL       string    `json:"url"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	URL       string      `json:"url"`
+	ExpiresAt jsdate.Time `json:"expiresAt"`
 	// Via is "storage" (presigned) or "server".
 	Via       string `json:"via"`
 	FileName  string `json:"fileName"`
@@ -214,7 +215,7 @@ func (s *Service) List(ctx context.Context) (*Overview, error) {
 func (s *Service) generation(ctx context.Context, bg backup.Generation) Generation {
 	g := Generation{ID: bg.ID, Size: bg.Size, ObjectCount: len(bg.Objects), Migrations: []backup.MigrationState{}}
 	if t, err := backup.IDTime(bg.ID); err == nil {
-		g.CreatedAt = t
+		g.CreatedAt = jsdate.NewTime(t)
 	}
 	switch m := bg.Meta; {
 	case bg.MetaError != nil:
@@ -234,7 +235,7 @@ func (s *Service) generation(ctx context.Context, bg backup.Generation) Generati
 			g.MetaError = m.DumpFile + " is missing"
 		}
 		if !m.CreatedAt.IsZero() {
-			g.CreatedAt = m.CreatedAt
+			g.CreatedAt = jsdate.NewTime(m.CreatedAt)
 		}
 		g.DumpSize = m.DumpSize
 		g.Encrypted = m.Encrypted
@@ -267,7 +268,11 @@ func (s *Service) verifySummary(ctx context.Context, bg backup.Generation) *Veri
 	}
 	// restore と同じ基準で「通った」と言う。別の世代や、同じ ID で取り直す前の
 	// dump を確かめた verify.json を、画面だけ通ったと見せない。
-	vs := &VerifySummary{OK: backup.VerifyPassed(bg.ID, vr, bg.Meta), VerifiedAt: vr.VerifiedAt, Stages: vr.Stages, Mismatches: vr.Mismatches}
+	vs := &VerifySummary{OK: backup.VerifyPassed(bg.ID, vr, bg.Meta), Stages: vr.Stages, Mismatches: vr.Mismatches}
+	// verifiedAt の無い verify.json もゼロ値の日時ではなく null で出す (#4091)。
+	if !vr.VerifiedAt.IsZero() {
+		vs.VerifiedAt = jsdate.NewTimePtr(&vr.VerifiedAt)
+	}
 	if vr.OK && !vs.OK {
 		vs.Error = "verify.json does not belong to this generation's current dump (meta.json is missing or unreadable, or the generation ID or dumpSha256 differs); verify it again"
 	}
@@ -394,7 +399,7 @@ func (s *Service) Download(ctx context.Context, id, userID string) (*Download, e
 		return nil, fmt.Errorf("stat dump: %w", err)
 	}
 	d := &Download{
-		ExpiresAt: s.o.Now().Add(s.o.DownloadTTL),
+		ExpiresAt: jsdate.NewTime(s.o.Now().Add(s.o.DownloadTTL)),
 		// 署名付き URL の Content-Disposition (backup.S3Storage.PresignGet) と同じ
 		// 名前にし、どちらの保存先でも同じ名前で保存されるようにする。
 		FileName:  id + "-" + m.DumpFile,

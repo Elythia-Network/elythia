@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Phases of a maintenance, as stored in the state hash.
@@ -105,22 +107,22 @@ var ErrNotActive = errors.New("maintmode: no maintenance is active")
 // State is the maintenance currently requested. A nil *State means the
 // processes should serve normally.
 type State struct {
-	Phase       string    `json:"phase"`
-	OpID        string    `json:"opId"`
-	Kind        string    `json:"kind"`
-	Reason      string    `json:"reason"`
-	StartedAt   time.Time `json:"startedAt"`
-	RequestedBy string    `json:"requestedBy"`
+	Phase       string      `json:"phase"`
+	OpID        string      `json:"opId"`
+	Kind        string      `json:"kind"`
+	Reason      string      `json:"reason"`
+	StartedAt   jsdate.Time `json:"startedAt"`
+	RequestedBy string      `json:"requestedBy"`
 	// LeaseUntil is refreshed by the backup service while it drives an
 	// operation (#3463 (6c)). Zero for a manual maintenance.
-	LeaseUntil time.Time `json:"leaseUntil"`
+	LeaseUntil jsdate.Time `json:"leaseUntil,omitzero"`
 
 	// The fields below are written by the judge.
 
 	// HeldAt is when the judge moved the maintenance to held.
-	HeldAt time.Time `json:"heldAt"`
+	HeldAt jsdate.Time `json:"heldAt,omitzero"`
 	// JudgedAt is when the judge last looked.
-	JudgedAt time.Time `json:"judgedAt"`
+	JudgedAt jsdate.Time `json:"judgedAt,omitzero"`
 	// WaitingFor lists the processes whose report is not drained yet.
 	WaitingFor []string `json:"waitingFor"`
 	// Blockers are the sessions on the database at JudgedAt. While held, a
@@ -197,10 +199,10 @@ func (s *Store) Get(ctx context.Context) (*State, error) {
 		Kind:        m["kind"],
 		Reason:      m["reason"],
 		RequestedBy: m["requestedBy"],
-		StartedAt:   parseTime(m["startedAt"]),
-		LeaseUntil:  parseTime(m["leaseUntil"]),
-		HeldAt:      parseTime(m["heldAt"]),
-		JudgedAt:    parseTime(m["judgedAt"]),
+		StartedAt:   jsdate.NewTime(parseTime(m["startedAt"])),
+		LeaseUntil:  jsdate.NewTime(parseTime(m["leaseUntil"])),
+		HeldAt:      jsdate.NewTime(parseTime(m["heldAt"])),
+		JudgedAt:    jsdate.NewTime(parseTime(m["judgedAt"])),
 		JudgeError:  m["judgeError"],
 	}
 	// 判定役が書く欄は表示のためのもの。壊れていたら空として読む。
@@ -235,7 +237,7 @@ func (s *Store) Enter(ctx context.Context, st State) error {
 		st.Phase = PhaseEntering
 	}
 	if st.StartedAt.IsZero() {
-		st.StartedAt = time.Now()
+		st.StartedAt = jsdate.NewTime(time.Now())
 	}
 	if st.OpID == "" {
 		st.OpID = "op-" + randomHex()
@@ -246,10 +248,10 @@ func (s *Store) Enter(ctx context.Context, st State) error {
 		"kind", st.Kind,
 		"reason", st.Reason,
 		"requestedBy", st.RequestedBy,
-		"startedAt", formatTime(st.StartedAt),
+		"startedAt", formatTime(st.StartedAt.Time),
 	}
 	if !st.LeaseUntil.IsZero() {
-		args = append(args, "leaseUntil", formatTime(st.LeaseUntil))
+		args = append(args, "leaseUntil", formatTime(st.LeaseUntil.Time))
 	}
 	n, err := enterScript.Run(ctx, s.rdb, []string{s.StateKey()}, args...).Int()
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/misc/headreq"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/go-webauthn/webauthn/protocol"
@@ -191,7 +192,10 @@ func (c *control) Take(_ context.Context, ip string) (*backupadmin.Job, error) {
 func (c *control) Verify(_ context.Context, id, ip string) (*backupadmin.Job, error) {
 	c.calls++
 	c.ips = append(c.ips, ip)
-	return &backupadmin.Job{Kind: "verify", Trigger: "api", GenerationID: id}, c.err
+	// 応答に本家の書式 (ミリ秒 3 桁と Z) で出ることを見るため、UTC でない
+	// ナノ秒付きの時刻を返す (#4091)。
+	started := jsdate.NewTime(time.Date(2026, 10, 1, 13, 0, 0, 123_456_789, time.FixedZone("JST", 9*60*60)))
+	return &backupadmin.Job{Kind: "verify", Trigger: "api", GenerationID: id, StartedAt: started}, c.err
 }
 func (c *control) Status(context.Context) (*backupadmin.Status, error) {
 	return &backupadmin.Status{}, nil
@@ -489,7 +493,7 @@ func TestOperationResponses(t *testing.T) {
 
 	rec = f.post(t, "/api/admin/backup/verify", native(adminID), auth(map[string]any{"id": gen1}))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"accepted":true,"job":{"kind":"verify","trigger":"api","generationId":"`+gen1+`","startedAt":"0001-01-01T00:00:00Z"}}`, rec.Body.String())
+	assert.JSONEq(t, `{"accepted":true,"job":{"kind":"verify","trigger":"api","generationId":"`+gen1+`","startedAt":"2026-10-01T04:00:00.123Z"}}`, rec.Body.String())
 	rec = f.post(t, "/api/admin/backup/take", native(adminID), auth(nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, 2, f.control.calls)

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Kinds of a kept database (KeptDatabase.Kind).
@@ -67,7 +69,7 @@ type KeptDatabase struct {
 	// Kind is KeptBeforeRestore or KeptRolledBack.
 	Kind string `json:"kind"`
 	// At is the time in the name: when it was swapped out.
-	At time.Time `json:"at"`
+	At jsdate.Time `json:"at"`
 	// Size is the size in bytes, or nil when the database user cannot
 	// read it.
 	Size *int64 `json:"size"`
@@ -130,7 +132,7 @@ func (r *Restorer) KeptDatabases(ctx context.Context, maintenance, database stri
 		if !ok {
 			continue
 		}
-		out = append(out, KeptDatabase{Name: n, Kind: kind, At: at})
+		out = append(out, KeptDatabase{Name: n, Kind: kind, At: jsdate.NewTime(at)})
 		names = append(names, n)
 	}
 	if len(out) == 0 {
@@ -163,7 +165,7 @@ func (r *Restorer) KeptDatabases(ctx context.Context, maintenance, database stri
 		out[i].Problem = KeptProblem(err)
 	}
 	slices.SortStableFunc(out, func(a, b KeptDatabase) int {
-		if c := b.At.Compare(a.At); c != 0 {
+		if c := b.At.Compare(a.At.Time); c != 0 {
 			return c
 		}
 		return strings.Compare(a.Name, b.Name)

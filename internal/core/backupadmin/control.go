@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Errors returned by Control.
@@ -29,29 +30,39 @@ type Job struct {
 	// Kind is "take" or "verify".
 	Kind string `json:"kind"`
 	// Trigger is "schedule" or "api".
-	Trigger      string    `json:"trigger"`
-	GenerationID string    `json:"generationId,omitempty"`
-	StartedAt    time.Time `json:"startedAt"`
+	Trigger      string      `json:"trigger"`
+	GenerationID string      `json:"generationId,omitempty"`
+	StartedAt    jsdate.Time `json:"startedAt"`
 }
 
 // JobResult is a finished Job.
 type JobResult struct {
 	Job
-	FinishedAt time.Time `json:"finishedAt"`
-	OK         bool      `json:"ok"`
+	FinishedAt jsdate.Time `json:"finishedAt"`
+	OK         bool        `json:"ok"`
 	// Stage is where it failed: "take", "verify" or "prune".
 	Stage string `json:"stage,omitempty"`
 	Error string `json:"error,omitempty"`
 	// Verify is the result of the verification, when one ran.
-	Verify *backup.VerifyResult `json:"verify,omitempty"`
+	Verify *VerifyResult `json:"verify,omitempty"`
 	// Deleted are the generations pruned after this job.
 	Deleted []string `json:"deleted,omitempty"`
 }
 
+// VerifyResult is a backup.VerifyResult as the admin page shows it, with the
+// time in the format upstream sends (#4091).
+//
+// backup.VerifyResult は verify.json としても書くので、保存の書式は変えない。
+// 外側の VerifiedAt が埋め込みの同名の欄より優先され、読みも書きもこちらを通る。
+type VerifyResult struct {
+	backup.VerifyResult
+	VerifiedAt jsdate.Time `json:"verifiedAt"`
+}
+
 // UsableGeneration is the newest generation the service counts as usable.
 type UsableGeneration struct {
-	ID string    `json:"id"`
-	At time.Time `json:"at"`
+	ID string      `json:"id"`
+	At jsdate.Time `json:"at"`
 }
 
 // Status is GET /status of the backup service (#3460). The state lives only
@@ -60,7 +71,7 @@ type UsableGeneration struct {
 type Status struct {
 	Now          time.Time         `json:"now"`
 	Running      *Job              `json:"running"`
-	NextRunAt    *time.Time        `json:"nextRunAt"`
+	NextRunAt    *jsdate.Time      `json:"nextRunAt"`
 	LastTake     *JobResult        `json:"lastTake"`
 	LastVerify   *JobResult        `json:"lastVerify"`
 	LatestUsable *UsableGeneration `json:"latestUsable"`

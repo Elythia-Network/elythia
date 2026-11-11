@@ -24,6 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // env carries the process-level dependencies so tests can replace them.
@@ -133,7 +134,7 @@ func enter(e env, args []string) int {
 	}
 	opID := "manual-" + newID()
 	err := s.store.Enter(ctx, maintmode.State{
-		OpID: opID, Kind: maintmode.KindManual, Reason: *reason, StartedAt: e.now(),
+		OpID: opID, Kind: maintmode.KindManual, Reason: *reason, StartedAt: jsdate.NewTime(e.now()),
 		RequestedBy: "cli",
 	})
 	if errors.Is(err, maintmode.ErrActive) {
@@ -338,10 +339,10 @@ func status(e env, args []string) int {
 			// 動いていないなら、wait で CLI が判定する。
 			fmt.Fprintln(e.stdout, "judge: none (run `elythia maintenance wait` to judge)")
 		} else {
-			fmt.Fprintf(e.stdout, "judge: %s (last looked %s)\n", judge, formatTime(st.JudgedAt))
+			fmt.Fprintf(e.stdout, "judge: %s (last looked %s)\n", judge, formatTime(st.JudgedAt.Time))
 		}
 		if st.Phase == maintmode.PhaseHeld {
-			fmt.Fprintf(e.stdout, "held since %s\n", formatTime(st.HeldAt))
+			fmt.Fprintf(e.stdout, "held since %s\n", formatTime(st.HeldAt.Time))
 			if len(st.Blockers) > 0 {
 				fmt.Fprintln(e.stdout, "warning: these sessions connected after the maintenance was held:")
 			}

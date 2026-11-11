@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Names of a rollback in the tests: the kept database it swaps back in, and
@@ -28,7 +29,7 @@ func crashedRollback(t *testing.T, step string, names map[string]string, phase s
 	now := time.Now()
 	rec := &Record{
 		OpID: "restore-rollback", Kind: KindRollback, Step: step, Database: testDB,
-		Target: keptDB, Before: asideDB, UserID: "u1", CreatedAt: now, UpdatedAt: now,
+		Target: keptDB, Before: asideDB, UserID: "u1", CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 	}
 	require.NoError(t, e.store.create(ctx, rec))
 	e.db.mu.Lock()

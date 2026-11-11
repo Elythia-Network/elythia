@@ -20,6 +20,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/pgactivity"
 )
 
@@ -151,7 +152,7 @@ func (f *fakeDB) KeptDatabases(_ context.Context, _, database string) ([]backup.
 	var out []backup.KeptDatabase
 	for n := range f.dbs {
 		if kind, at, ok := backup.ParseKeptName(database, n); ok {
-			out = append(out, backup.KeptDatabase{Name: n, Kind: kind, At: at})
+			out = append(out, backup.KeptDatabase{Name: n, Kind: kind, At: jsdate.NewTime(at)})
 		}
 	}
 	return out, nil

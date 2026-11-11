@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Steps of an operation, as recorded.
@@ -97,18 +99,18 @@ type Record struct {
 	OpID string `json:"opId"`
 	// Kind is KindRestore or KindRollback. A record written before the
 	// field existed is a restore.
-	Kind         string    `json:"kind"`
-	Step         string    `json:"step"`
-	GenerationID string    `json:"generationId"`
-	Database     string    `json:"database"`
-	Target       string    `json:"target"`
-	Before       string    `json:"before"`
-	Aside        string    `json:"aside,omitempty"`
-	UserID       string    `json:"userId"`
-	Error        string    `json:"error,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	ReadyAt      time.Time `json:"readyAt,omitzero"`
+	Kind         string      `json:"kind"`
+	Step         string      `json:"step"`
+	GenerationID string      `json:"generationId"`
+	Database     string      `json:"database"`
+	Target       string      `json:"target"`
+	Before       string      `json:"before"`
+	Aside        string      `json:"aside,omitempty"`
+	UserID       string      `json:"userId"`
+	Error        string      `json:"error,omitempty"`
+	CreatedAt    jsdate.Time `json:"createdAt"`
+	UpdatedAt    jsdate.Time `json:"updatedAt"`
+	ReadyAt      jsdate.Time `json:"readyAt,omitzero"`
 
 	ticketHash string
 	tokenHash  string
@@ -229,10 +231,10 @@ func (s *Store) fields(r *Record) []any {
 		"opId", r.OpID, "kind", r.Kind, "step", r.Step, "generationId", r.GenerationID, "database", r.Database,
 		"target", target, "keptTarget", kept, "before", r.Before, "aside", r.Aside, "userId", r.UserID, "error", r.Error,
 		"ticketHash", r.ticketHash, "tokenHash", r.tokenHash,
-		"createdAt", formatTime(r.CreatedAt), "updatedAt", formatTime(r.UpdatedAt), "readyAt", formatTime(r.ReadyAt),
+		"createdAt", formatTime(r.CreatedAt.Time), "updatedAt", formatTime(r.UpdatedAt.Time), "readyAt", formatTime(r.ReadyAt.Time),
 	}
 	if len(s.macKey) > 0 {
-		out = append(out, "mac", recordMAC(s.macKey, r.OpID, r.Kind, r.Database, r.Target, r.Before, formatTime(r.CreatedAt)))
+		out = append(out, "mac", recordMAC(s.macKey, r.OpID, r.Kind, r.Database, r.Target, r.Before, formatTime(r.CreatedAt.Time)))
 		if r.Aside != "" {
 			out = append(out, "asideMac", asideMAC(s.macKey, r.OpID, r.Aside))
 		}
@@ -261,7 +263,7 @@ func (s *Store) Get(ctx context.Context, opID string) (*Record, error) {
 	r := &Record{
 		OpID: m["opId"], Kind: kind, Step: m["step"], GenerationID: m["generationId"], Database: m["database"],
 		Target: target, Before: m["before"], Aside: m["aside"], UserID: m["userId"], Error: m["error"],
-		CreatedAt: parseTime(m["createdAt"]), UpdatedAt: parseTime(m["updatedAt"]), ReadyAt: parseTime(m["readyAt"]),
+		CreatedAt: jsdate.NewTime(parseTime(m["createdAt"])), UpdatedAt: jsdate.NewTime(parseTime(m["updatedAt"])), ReadyAt: jsdate.NewTime(parseTime(m["readyAt"])),
 		ticketHash: m["ticketHash"], tokenHash: m["tokenHash"],
 	}
 	if len(s.macKey) > 0 {

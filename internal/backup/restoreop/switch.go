@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/backup"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // stopping reports whether the service is stopping.
@@ -187,7 +188,7 @@ func (m *Manager) switchSteps(ctx context.Context, rec *Record) {
 
 	// C3: メンテナンスに入れる。
 	err := m.o.Maint.Enter(ctx, maintmode.State{
-		OpID: rec.OpID, Kind: maintKind(rec), RequestedBy: rec.UserID, StartedAt: m.now(),
+		OpID: rec.OpID, Kind: maintKind(rec), RequestedBy: rec.UserID, StartedAt: jsdate.NewTime(m.now()),
 	})
 	if err != nil {
 		// 書き込みは済んだのに応答を読めなかっただけのことがあり、書き込みが後から届く

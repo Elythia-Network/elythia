@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/backup"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // TestFinalStep_CarriesItsEnding checks that the journal line telling how an
@@ -283,7 +284,7 @@ func crashedFinished(t *testing.T) (*env, *Record) {
 	now := time.Now()
 	rec := &Record{
 		OpID: "restore-crashed", Step: StepResuming, GenerationID: "20261010T120000Z", Database: testDB,
-		Target: tgt, Before: before, UserID: "u1", CreatedAt: now, UpdatedAt: now,
+		Target: tgt, Before: before, UserID: "u1", CreatedAt: jsdate.NewTime(now), UpdatedAt: jsdate.NewTime(now),
 	}
 	require.NoError(t, e.store.create(context.Background(), rec))
 	e.db.mu.Lock()

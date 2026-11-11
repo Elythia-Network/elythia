@@ -17,6 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/backup/restoreop"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/maintmode"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 const apiKept = "app_before_restore_20261001000000"
@@ -111,7 +112,7 @@ func TestRollbackAPI_PrepareErrors(t *testing.T) {
 func TestRollbackAPI_Candidates(t *testing.T) {
 	r := newAPIRig(t)
 	size := int64(1234)
-	r.db.kept = []backup.KeptDatabase{{Name: apiKept, Kind: backup.KeptBeforeRestore, At: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), Size: &size}}
+	r.db.kept = []backup.KeptDatabase{{Name: apiKept, Kind: backup.KeptBeforeRestore, At: jsdate.NewTime(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)), Size: &size}}
 	rec, out := r.post(t, "/restore/candidates", map[string]any{})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "app", out["database"])

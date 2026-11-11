@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func TestParseKeptName(t *testing.T) {
@@ -137,7 +140,10 @@ func TestRollbackChecks(t *testing.T) {
 	assert.Nil(t, byName[locked].Size)
 	assert.Nil(t, byName[locked].Migrations)
 	assert.Equal(t, KeptProblemUnreadable, byName[locked].Problem)
-	assert.Equal(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), byName[current].At)
+	assert.Equal(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), byName[current].At.Time)
+	b, err := json.Marshal(byName[current])
+	require.NoError(t, err)
+	testutil.AssertUpstreamDates(t, b, "at")
 
 	// 前の版の daemon がロールバックの記録を読むと、戻す先の名前は空になる
 	// (restoreop の keptTarget)。空の名前では何も消えず、何も無いことになる。
