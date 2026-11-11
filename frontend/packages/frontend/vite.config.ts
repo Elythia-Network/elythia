@@ -46,7 +46,7 @@ function loadMkPlugins(): MkPluginManifest {
 	} catch (err) {
 		// 壊れた生成物で build 全体を止めない。プラグインが読まれないことは
 		// 起動ログと mk-go 側の登録で気付ける。
-		console.error('[mk-plugins] 生成物を読めませんでした', err);
+		console.error('[mk-plugins] failed to read the generated file', err);
 		return { aliases: {}, allow: [] };
 	}
 }
