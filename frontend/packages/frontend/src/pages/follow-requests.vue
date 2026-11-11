@@ -38,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					<div class="body">
 						<div class="name">
 							<MkA v-user-preview="item.follower.id" class="name" :to="userPage(item.follower)"><MkUserName :user="item.follower"/></MkA>
-							<p class="acct">@{{ acct(item.follower) }} · <MkTime :time="item.createdAt"/></p>
+							<p class="acct">@{{ acct(item.follower) }}<template v-if="item.createdAt"> · <MkTime :time="item.createdAt"/></template></p>
 						</div>
 						<div class="commands">
 							<span v-if="notFollowerIds.has(item.follower.id)" :class="$style.notFollower">{{ i18n.ts._followApproval.notFollower }}</span>

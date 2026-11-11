@@ -526,8 +526,8 @@ export type MeDetailed = Misskey.entities.MeDetailed & ElythiaMeDetailedFields;
 export type SilentFollow = {
 	/** The cursor. Changes each time the same user follows again. */
 	id: string;
-	/** When the latest silent follow from this user happened. */
-	createdAt: string;
+	/** When the latest silent follow from this user happened. Null when the id cannot be read (a row made before the id method was changed). */
+	createdAt: string | null;
 	follower: Misskey.entities.UserLite;
 };
 

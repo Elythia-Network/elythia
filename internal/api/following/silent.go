@@ -10,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
@@ -19,8 +20,10 @@ type SilentFollowItem struct {
 	// ID is the cursor for sinceId / untilId. It is regenerated each time the
 	// same user follows again.
 	ID string `json:"id"`
-	// CreatedAt is when the latest silent follow from this user happened.
-	CreatedAt string          `json:"createdAt"`
+	// CreatedAt is when the latest silent follow from this user happened,
+	// read from ID. It is null when ID cannot be read (no generator, or a row
+	// made before the id method was changed).
+	CreatedAt *string         `json:"createdAt"`
 	Follower  entity.UserLite `json:"follower"`
 }
 
@@ -92,7 +95,8 @@ func (h *Handler) packSilent(rows []*model.SilentFollow) []SilentFollowItem {
 		item := SilentFollowItem{ID: r.ID, Follower: follower}
 		if h.idGen != nil {
 			if t, err := h.idGen.ParseTime(r.ID); err == nil {
-				item.CreatedAt = t.UTC().Format("2006-01-02T15:04:05.000Z")
+				s := jsdate.ISOString(t)
+				item.CreatedAt = &s
 			}
 		}
 		out = append(out, item)
