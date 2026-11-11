@@ -1,18 +1,15 @@
 package entity
 
-import "time"
+import (
+	"time"
 
-// isoMillisLayout is the fixed millisecond ISO8601 layout produced by
-// JavaScript's Date.toISOString() (always 3 fractional digits, trailing Z, UTC).
-// Upstream Misskey serializes every timestamp through toISOString(), so mk-go
-// must match this exact layout rather than stdlib RFC3339Nano (variable
-// fractional digits, numeric offset for non-UTC locations).
-const isoMillisLayout = "2006-01-02T15:04:05.000Z"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
+)
 
 // ISOMillis formats t as a Misskey-compatible ISO8601 millisecond timestamp,
-// mirroring upstream's Date.toISOString(). The value is normalized to UTC first.
+// mirroring upstream's Date.toISOString() (jsdate.ISOString).
 func ISOMillis(t time.Time) string {
-	return t.UTC().Format(isoMillisLayout)
+	return jsdate.ISOString(t)
 }
 
 // ISOMillisPtr returns nil for a nil pointer, otherwise the ISOMillis string,
