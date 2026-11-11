@@ -50,8 +50,8 @@ test.describe('admin: the Elythia endpoints answer as declared', () => {
     expect(created.status(), await created.text()).toBe(200);
     const rule = (await created.json()) as { id: string };
     try {
-      // 照合が落ちてもルールを消すよう、照合は作った後で行う。日時は #4091 で直す
-      await expectApiResponse(request, 'admin/federation/rules/create', created, { knownBug: '#4091' });
+      // 照合が落ちてもルールを消すよう、照合は作った後で行う
+      await expectApiResponse(request, 'admin/federation/rules/create', created);
       expect(await callChecked<unknown[]>(request, 'admin/federation/rules/hits', { i: root.token, ruleId: rule.id })).toEqual([]);
     } finally {
       await callChecked(request, 'admin/federation/rules/delete', { i: root.token, ruleId: rule.id });

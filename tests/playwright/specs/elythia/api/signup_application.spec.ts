@@ -18,9 +18,6 @@ import { resetRateLimit } from '../../../fixtures/rate_limit';
 
 const KEYS = ['registrationClosed', 'approvalRequiredForSignup', 'disableRegistration', 'signupApplicationForm', 'emailRequiredForSignup'] as const;
 
-// 申請・状況・審査の一覧の日時は、毎回 Go の書式で返る。#4091 で直す
-const DATES = { knownBug: '#4091' };
-
 interface Applied { claimCode: string; application: { status: string } }
 interface AdminApplication { id: string; answers: { value: string }[] }
 
@@ -29,7 +26,7 @@ interface AdminApplication { id: string; answers: { value: string }[] }
  * The applicant's view has no id, so the reviewer finds it by the answer.
  */
 async function pendingId(request: APIRequestContext, token: string, answer: string): Promise<string> {
-  const listed = await callChecked<{ applications: AdminApplication[] }>(request, 'admin/signup-application/list', { i: token, filter: 'pending', limit: 100 }, DATES);
+  const listed = await callChecked<{ applications: AdminApplication[] }>(request, 'admin/signup-application/list', { i: token, filter: 'pending', limit: 100 });
   const found = listed.applications.find((a) => a.answers.some((x) => x.value === answer));
   expect(found, `the review list has the application answered ${answer}`).toBeDefined();
   return found!.id;
@@ -40,7 +37,7 @@ async function apply(request: APIRequestContext, answer: string): Promise<Applie
   const form = await callChecked<{ token: string; minWaitSeconds: number }>(request, 'signup-application/form-token', {});
   // 最短の滞在時間より早く送ると FORM_TOKEN_TOO_SOON で断られる
   if (form.minWaitSeconds > 0) await new Promise((resolve) => setTimeout(resolve, form.minWaitSeconds * 1000 + 200));
-  return callChecked<Applied>(request, 'signup-application/apply', { answers: [answer], formToken: form.token }, DATES);
+  return callChecked<Applied>(request, 'signup-application/apply', { answers: [answer], formToken: form.token });
 }
 
 test.describe('signup applications: the Elythia endpoints answer as declared', () => {
@@ -72,18 +69,18 @@ test.describe('signup applications: the Elythia endpoints answer as declared', (
     const answer = `pw-api-approve-${Date.now().toString(36)}`;
     const applied = await apply(request, answer);
     expect(applied.application.status).toBe('pending');
-    const status = await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode }, DATES);
+    const status = await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode });
     expect(status.application.status).toBe('pending');
 
     const id = await pendingId(request, token, answer);
     expect(await callChecked(request, 'admin/signup-application/approve', { i: token, applicationId: id })).toEqual({ ok: true });
-    expect((await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode }, DATES)).application.status).toBe('approved');
+    expect((await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode })).application.status).toBe('approved');
 
     const username = randomUsername('pwsar');
     const registered = await callChecked<{ username: string; token: string }>(request, 'signup-application/register', { claimCode: applied.claimCode, username, password: DEFAULT_TEST_PASSWORD });
     expect(registered.username).toBe(username);
     expect((await callApi(request, 'i', { i: registered.token })).status()).toBe(200);
-    expect((await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode }, DATES)).application.status).toBe('completed');
+    expect((await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode })).application.status).toBe('completed');
   });
 
   test('apply and get rejected', async ({ request }) => {
@@ -92,7 +89,7 @@ test.describe('signup applications: the Elythia endpoints answer as declared', (
     const applied = await apply(request, answer);
     const id = await pendingId(request, token, answer);
     expect(await callChecked(request, 'admin/signup-application/reject', { i: token, applicationId: id })).toEqual({ ok: true });
-    const status = await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode }, DATES);
+    const status = await callChecked<Applied>(request, 'signup-application/status', { claimCode: applied.claimCode });
     expect(status.application.status).toBe('rejected');
   });
 });

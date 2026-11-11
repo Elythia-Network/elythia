@@ -8,7 +8,7 @@
 
 import { expect, test } from '@playwright/test';
 import { callApi } from '../../../fixtures/api';
-import { callChecked, expectApiResponse, knownDateBug } from '../../../fixtures/api_schema';
+import { callChecked, expectApiResponse } from '../../../fixtures/api_schema';
 import { randomUsername, signupUser } from '../../../fixtures/auth';
 import { isTsBackend } from '../../../fixtures/backend';
 import { resetRateLimit } from '../../../fixtures/rate_limit';
@@ -22,15 +22,13 @@ test.describe('account: the Elythia endpoints that read answer as declared', () 
 
   test('my federation setting, read and turned off and on', async ({ request }) => {
     const user = await signupUser(request, randomUsername('accfd'));
-    // 日時の書式は #4091 で直す。DB から読んだ日時はマイクロ秒までなので、末尾が 0 だと
-    // たまたま本家の書式になる。その回でも落ちないよう、日時を見てから印を付ける
     for (const [endpoint, body] of [
       ['i/federation', { i: user.token }],
       ['i/update-federation', { i: user.token, federationStatus: 'off' }],
       ['i/update-federation', { i: user.token, federationStatus: 'on' }],
     ] as const) {
       const resp = await callApi(request, endpoint, body);
-      await expectApiResponse(request, endpoint, resp, knownDateBug(await resp.text(), '#4091'));
+      await expectApiResponse(request, endpoint, resp);
     }
   });
 

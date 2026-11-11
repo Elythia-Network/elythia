@@ -46,8 +46,7 @@ interface Appended { index: number; next: number; receivedBytes: number; totalSi
 
 /** Starts a chunked upload of `size` bytes and checks the response. */
 async function start(request: APIRequestContext, user: Principal, name: string, size: number): Promise<Session> {
-  // expiresAt は time.Now() から作るので、いつも Go の書式 (ナノ秒まで) で返る。#4091 で直す
-  return callChecked<Session>(request, 'drive/files/create-chunked/start', { i: user.token, name, size }, { knownBug: '#4091' });
+  return callChecked<Session>(request, 'drive/files/create-chunked/start', { i: user.token, name, size });
 }
 
 /** Appends the chunk `index` of `data` as multipart and checks the response. */
