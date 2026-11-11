@@ -4800,7 +4800,7 @@
 				"createdAt": {
 					"type": "string",
 					"optional": false,
-					"nullable": false,
+					"nullable": true,
 					"format": "date-time"
 				},
 				"follower": {

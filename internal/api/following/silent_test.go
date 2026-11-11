@@ -84,3 +84,33 @@ func TestListSilent_InternalError(t *testing.T) {
 	rec := postJSON(h.ListSilent, `{}`, bob)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+// An ID the generator cannot read (a row made before the id method was
+// changed) has no time: createdAt is null, not "" (#4131).
+func TestListSilent_UnreadableIDHasNullCreatedAt(t *testing.T) {
+	fake := &fakeSilentFollowRepo{}
+	h, repo := newTestHandlerWithSilentFollows(t, fake)
+	gen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	h.SetIDGen(gen)
+	h.packer = &stubListPacker{}
+	bob := addUser(repo, "bob", false)
+	addUser(repo, "alice", false)
+	fake.rows = []*model.SilentFollow{{ID: "x-1", FollowerID: "alice", FolloweeID: "bob"}}
+	_, err = gen.ParseTime(fake.rows[0].ID)
+	require.Error(t, err, "the ID must be one aidx cannot read")
+
+	rec := postJSON(h.ListSilent, `{}`, bob)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `null`, string(mustField(t, rec.Body.Bytes(), "createdAt")))
+}
+
+func mustField(t *testing.T, body []byte, key string) json.RawMessage {
+	t.Helper()
+	var out []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &out))
+	require.Len(t, out, 1)
+	v, ok := out[0][key]
+	require.True(t, ok, "%s is missing", key)
+	return v
+}
