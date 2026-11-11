@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // seqReads makes readFn return a report whose GeneratedAt is base plus the call
@@ -22,7 +24,7 @@ func seqReads(s *Service, base time.Time) (calls *atomic.Int64, entered, release
 			close(entered)
 			<-release
 		}
-		return Report{GeneratedAt: base.Add(time.Duration(n) * time.Second)}, nil
+		return Report{GeneratedAt: jsdate.NewTime(base.Add(time.Duration(n) * time.Second))}, nil
 	}
 	return calls, entered, release
 }
@@ -44,7 +46,7 @@ func TestService_DropLocal(t *testing.T) {
 	r, err := s.Report(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), calls.Load(), "the report is read again after DropLocal")
-	assert.Equal(t, base.Add(2*time.Second), r.GeneratedAt)
+	assert.Equal(t, base.Add(2*time.Second), r.GeneratedAt.Time)
 }
 
 // A drop while the statistics are being read keeps that report out of the
@@ -68,13 +70,13 @@ func TestService_DropDuringRead(t *testing.T) {
 	defer cancel()
 	r, err := s.Report(ctx)
 	require.NoError(t, err, "a call after the drop waited for the reading started before it")
-	assert.Equal(t, base.Add(2*time.Second), r.GeneratedAt)
+	assert.Equal(t, base.Add(2*time.Second), r.GeneratedAt.Time)
 
 	close(release)
 	wg.Wait()
 	cached, err := s.Report(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), calls.Load())
-	assert.Equal(t, base.Add(2*time.Second), cached.GeneratedAt,
+	assert.Equal(t, base.Add(2*time.Second), cached.GeneratedAt.Time,
 		"the report read before the drop is not stored over the newer one")
 }

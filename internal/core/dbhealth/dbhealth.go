@@ -17,6 +17,8 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // Thresholds for the warnings. 小さいテーブルは比率が振れやすく、実害も無いので
@@ -65,8 +67,8 @@ type TableStat struct {
 	// 0 のままなので、0 B と出すと空に見える)。
 	SizeBytes *int64 `json:"sizeBytes"`
 	// LastVacuum / LastAnalyze は手動と自動の新しい方。一度も無ければ nil。
-	LastVacuum  *time.Time `json:"lastVacuum"`
-	LastAnalyze *time.Time `json:"lastAnalyze"`
+	LastVacuum  *jsdate.Time `json:"lastVacuum"`
+	LastAnalyze *jsdate.Time `json:"lastAnalyze"`
 	// ModifiedSinceAnalyze は最後の ANALYZE からの変更行数。
 	ModifiedSinceAnalyze int64 `json:"modifiedSinceAnalyze"`
 	// Vacuuming は VACUUM の最中 (pg_stat_progress_vacuum に載っている)。**DB の
@@ -78,12 +80,12 @@ type TableStat struct {
 
 // Report is one reading of the statistics.
 type Report struct {
-	GeneratedAt time.Time `json:"generatedAt"`
+	GeneratedAt jsdate.Time `json:"generatedAt"`
 	// StatsReset は pg_stat_reset などで統計を最後にリセットした記録。無ければ nil。
 	// **統計の起点としては保証されない** — 異常終了からの復旧やフェイルオーバーでも
 	// 統計は消えるが、この時刻は進まない (#3095 の敵対的レビューで実測)。
 	// Scans = 0 を「使われていない」と読む前に確かめる材料の 1 つでしかない。
-	StatsReset *time.Time `json:"statsReset"`
+	StatsReset *jsdate.Time `json:"statsReset"`
 	// ReplicasConfigured は読み取りレプリカが有効か。統計はプライマリから読むので、
 	// レプリカでの index の利用は Scans に入らない。
 	ReplicasConfigured bool `json:"replicasConfigured"`
@@ -130,10 +132,10 @@ func (r Report) findProblems(now time.Time) []Problem {
 		if r.AutovacuumMaxThreshold > 0 && trigger > float64(r.AutovacuumMaxThreshold) {
 			trigger = float64(r.AutovacuumMaxThreshold)
 		}
-		if float64(t.DeadRows) > trigger && (t.LastVacuum == nil || now.Sub(*t.LastVacuum) >= VacuumStaleAfter) {
+		if float64(t.DeadRows) > trigger && (t.LastVacuum == nil || now.Sub(t.LastVacuum.Time) >= VacuumStaleAfter) {
 			since := "一度も無い"
 			if t.LastVacuum != nil {
-				since = fmt.Sprintf("%d 日前", int(now.Sub(*t.LastVacuum).Hours()/24))
+				since = fmt.Sprintf("%d 日前", int(now.Sub(t.LastVacuum.Time).Hours()/24))
 			}
 			out = append(out, Problem{Table: t.Table, Kind: "vacuum",
 				Detail: fmt.Sprintf("%s: 最後の VACUUM が%s (dead tuple %d 行)", t.Table, since, t.DeadRows)})
@@ -181,7 +183,7 @@ func (s *Service) Report(ctx context.Context) (Report, error) {
 	cached := s.cached
 	gen := s.gen
 	s.mu.Unlock()
-	if cached != nil && s.clock().Sub(cached.GeneratedAt) < cacheTTL {
+	if cached != nil && s.clock().Sub(cached.GeneratedAt.Time) < cacheTTL {
 		return *cached, nil
 	}
 	// singleflight のキーに世代の番号を含める。捨てた後の呼び出しが、捨てる前に
@@ -232,14 +234,14 @@ func (s *Service) read(ctx context.Context, now time.Time) (Report, error) {
 	// レプリカへ振るが、VACUUM が走るのはプライマリで、レプリカの
 	// n_dead_tup / last_*vacuum は意味を持たない。
 	db := s.db.WithContext(ctx).Clauses(dbresolver.Write)
-	r := Report{GeneratedAt: now, ReplicasConfigured: s.replicas, UnusedIndexes: []IndexStat{}, Tables: []TableStat{}}
+	r := Report{GeneratedAt: jsdate.NewTime(now), ReplicasConfigured: s.replicas, UnusedIndexes: []IndexStat{}, Tables: []TableStat{}}
 
 	var reset struct{ StatsReset *time.Time }
 	if err := db.Raw(`SELECT stats_reset FROM pg_stat_database WHERE datname = current_database()`).
 		Scan(&reset).Error; err != nil {
 		return Report{}, fmt.Errorf("dbhealth: stats_reset: %w", err)
 	}
-	r.StatsReset = reset.StatsReset
+	r.StatsReset = jsdate.NewTimePtr(reset.StatsReset)
 
 	var av struct {
 		Threshold    int64
@@ -312,7 +314,7 @@ func (s *Service) read(ctx context.Context, now time.Time) (Report, error) {
 	}
 	for _, t := range tables {
 		ts := TableStat{Table: t.Table, LiveRows: t.LiveRows, DeadRows: t.DeadRows, Vacuuming: t.Vacuuming,
-			LastVacuum: latest(t.LastVacuum, t.LastAutovacuum), LastAnalyze: latest(t.LastAnalyze, t.LastAutoanalyze),
+			LastVacuum: jsdate.NewTimePtr(latest(t.LastVacuum, t.LastAutovacuum)), LastAnalyze: jsdate.NewTimePtr(latest(t.LastAnalyze, t.LastAutoanalyze)),
 			ModifiedSinceAnalyze: t.ModifiedSinceAnalyze}
 		if t.SizeKnown {
 			size := t.SizeBytes
