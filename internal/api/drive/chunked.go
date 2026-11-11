@@ -10,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v4"
 )
@@ -106,7 +107,7 @@ func (h *Handler) FilesCreateChunkedStart(c echo.Context) error {
 		"uploadId":    sess.ID,
 		"chunkSize":   sess.ChunkSize,
 		"totalChunks": totalChunks,
-		"expiresAt":   sess.ExpiresAt,
+		"expiresAt":   jsdate.ISOString(sess.ExpiresAt),
 	})
 }
 

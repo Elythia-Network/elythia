@@ -125,6 +125,8 @@ func TestFilesCreateChunkedStart_Success(t *testing.T) {
 	assert.Equal(t, float64(apiChunkSize), body["chunkSize"])
 	assert.Equal(t, float64(2), body["totalChunks"])
 	assert.NotEmpty(t, body["expiresAt"])
+	// 日時は本家の書式で出す (#4091)。
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "expiresAt")
 	// S3 の UploadId は決してクライアントに出さない。
 	assert.NotContains(t, rec.Body.String(), "upload-")
 }
