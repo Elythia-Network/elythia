@@ -85,6 +85,9 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# あるものだけ (#4071)。本家のファイルが本家と同じかは、本家が要るので upstream-check で見る
 	cd frontend && node --test scripts/check-locale-overrides.test.mjs && node scripts/check-locale-overrides.mjs
 	cd frontend && node --test scripts/check-locale-upstream.test.mjs
+	# 画面の文言を日本語で直書きしない (#4070)。英語の UI でも日本語のまま出る。
+	# 例外は scripts/hardcoded-japanese-allowlist.tsv (本家にもともとある直書きと、訳さないもの)
+	cd frontend && node --test scripts/check-hardcoded-japanese.test.mjs && node scripts/check-hardcoded-japanese.mjs
 	# 足したルートに spec の宣言があるか (#4035)。tests/playwright の node_modules が要る
 	$(MAKE) playwright-route-check
 	# 設定のページが prefer.model で扱う端末の設定のキーに、設定の表の行があるか (#4056)
