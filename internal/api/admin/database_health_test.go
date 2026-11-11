@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 type stubDBHealth struct {
@@ -26,19 +27,19 @@ func TestDatabaseHealth(t *testing.T) {
 
 	at := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	size := int64(100)
-	h.SetDatabaseHealth(stubDBHealth{r: dbhealth.Report{GeneratedAt: at, ReplicasConfigured: true,
+	h.SetDatabaseHealth(stubDBHealth{r: dbhealth.Report{GeneratedAt: jsdate.NewTime(at), ReplicasConfigured: true,
 		AutovacuumThreshold: 50, AutovacuumScaleFactor: 0.2,
 		UnusedIndexes: []dbhealth.IndexStat{{Table: "note", Index: "IDX_x", SizeBytes: 8192, Unique: true}},
-		Tables:        []dbhealth.TableStat{{Table: "note", LiveRows: 10, DeadRows: 5, DeadRatio: 1.0 / 3, SizeBytes: &size, LastVacuum: &at}},
+		Tables:        []dbhealth.TableStat{{Table: "note", LiveRows: 10, DeadRows: 5, DeadRatio: 1.0 / 3, SizeBytes: &size, LastVacuum: jsdate.NewTimePtr(&at)}},
 		Problems:      []dbhealth.Problem{{Table: "note", Kind: "bloat", Detail: "note: dead"}},
 	}})
 	rec := doPost(h.DatabaseHealth, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"generatedAt":"2026-09-29T00:00:00Z","statsReset":null,"replicasConfigured":true,
+	assert.JSONEq(t, `{"generatedAt":"2026-09-29T00:00:00.000Z","statsReset":null,"replicasConfigured":true,
 		"autovacuumThreshold":50,"autovacuumScaleFactor":0.2,"autovacuumMaxThreshold":0,
 		"unusedIndexes":[{"table":"note","index":"IDX_x","scans":0,"sizeBytes":8192,"unique":true,"primary":false}],
 		"tables":[{"table":"note","liveRows":10,"deadRows":5,"deadRatio":0.3333333333333333,"sizeBytes":100,
-		"lastVacuum":"2026-09-29T00:00:00Z","lastAnalyze":null,"modifiedSinceAnalyze":0,"vacuuming":false}],
+		"lastVacuum":"2026-09-29T00:00:00.000Z","lastAnalyze":null,"modifiedSinceAnalyze":0,"vacuuming":false}],
 		"problems":[{"table":"note","kind":"bloat","detail":"note: dead"}]}`, rec.Body.String())
 
 	h.SetDatabaseHealth(stubDBHealth{err: errors.New("db down")})

@@ -9,6 +9,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -200,7 +201,7 @@ func TestCheckDatabaseHealth(t *testing.T) {
 
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	recent := now.Add(-time.Hour)
-	healthy := dbhealth.Report{GeneratedAt: now, Tables: []dbhealth.TableStat{{Table: "note", DeadRows: 5, LastVacuum: &recent}}, Problems: []dbhealth.Problem{}}
+	healthy := dbhealth.Report{GeneratedAt: jsdate.NewTime(now), Tables: []dbhealth.TableStat{{Table: "note", DeadRows: 5, LastVacuum: jsdate.NewTimePtr(&recent)}}, Problems: []dbhealth.Problem{}}
 	res = CheckDatabaseHealth(ctx, LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) { return healthy, nil }})
 	assert.Equal(t, StatusOK, res.Status)
 	assert.Contains(t, res.Detail, "1 テーブル")
@@ -210,7 +211,7 @@ func TestCheckDatabaseHealth(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		problems = append(problems, dbhealth.Problem{Table: fmt.Sprintf("t%d", i), Kind: "bloat", Detail: fmt.Sprintf("t%d: dead", i)})
 	}
-	bloated := dbhealth.Report{GeneratedAt: now, Problems: problems}
+	bloated := dbhealth.Report{GeneratedAt: jsdate.NewTime(now), Problems: problems}
 	res = CheckDatabaseHealth(ctx, LocalDeps{DBHealth: func(context.Context) (dbhealth.Report, error) { return bloated, nil }})
 	assert.Equal(t, StatusWarn, res.Status)
 	assert.Contains(t, res.Detail, "t0")

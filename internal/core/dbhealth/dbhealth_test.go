@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
 
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
@@ -120,7 +121,7 @@ func TestService_Report(t *testing.T) {
 		assert.Nil(t, r.StatsReset)
 	} else {
 		require.NotNil(t, r.StatsReset)
-		assert.True(t, want.StatsReset.Equal(*r.StatsReset))
+		assert.True(t, want.StatsReset.Equal(r.StatsReset.Time))
 	}
 
 	// 使われていない index: 主キー / UNIQUE は印を付けて出す (消せない)。
@@ -220,7 +221,7 @@ func TestService_Caches(t *testing.T) {
 	now = now.Add(time.Second)
 	fresh, err := s.Report(context.Background())
 	require.NoError(t, err)
-	assert.True(t, fresh.GeneratedAt.After(first.GeneratedAt))
+	assert.True(t, fresh.GeneratedAt.After(first.GeneratedAt.Time))
 
 	// 読めなければエラー (キャッシュを汚さない)。
 	failing := NewService(db, false)
@@ -242,7 +243,7 @@ func TestService_WaitsOnlyForTheCallersContext(t *testing.T) {
 		reads++
 		mu.Unlock()
 		<-release
-		return Report{GeneratedAt: now}, nil
+		return Report{GeneratedAt: jsdate.NewTime(now)}, nil
 	}
 
 	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -301,14 +302,14 @@ func TestProblems(t *testing.T) {
 	recent := now.Add(-time.Hour)
 	old := now.Add(-VacuumStaleAfter)
 	r := Report{Tables: []TableStat{
-		{Table: "bloated_recent", DeadRows: MinDeadTuples, DeadRatio: BloatDeadRatio, LastVacuum: &recent},
-		{Table: "stale", DeadRows: MinDeadTuples, DeadRatio: 0.01, LastVacuum: &old},
-		{Table: "fine", DeadRows: MinDeadTuples, DeadRatio: BloatDeadRatio - 0.01, LastVacuum: &recent},
+		{Table: "bloated_recent", DeadRows: MinDeadTuples, DeadRatio: BloatDeadRatio, LastVacuum: jsdate.NewTimePtr(&recent)},
+		{Table: "stale", DeadRows: MinDeadTuples, DeadRatio: 0.01, LastVacuum: jsdate.NewTimePtr(&old)},
+		{Table: "fine", DeadRows: MinDeadTuples, DeadRatio: BloatDeadRatio - 0.01, LastVacuum: jsdate.NewTimePtr(&recent)},
 		{Table: "small", DeadRows: MinDeadTuples - 1, DeadRatio: 0.9},
 		// autovacuum の起動条件 (50 + 20% = 200050) に届いていないので、VACUUM が
 		// 古くても正常。比率も低い。
-		{Table: "large_below_trigger", LiveRows: 1_000_000, DeadRows: 200_000, DeadRatio: 0.166, LastVacuum: &old},
-		{Table: "large_over_trigger", LiveRows: 1_000_000, DeadRows: 200_051, DeadRatio: 0.166, LastVacuum: &old},
+		{Table: "large_below_trigger", LiveRows: 1_000_000, DeadRows: 200_000, DeadRatio: 0.166, LastVacuum: jsdate.NewTimePtr(&old)},
+		{Table: "large_over_trigger", LiveRows: 1_000_000, DeadRows: 200_051, DeadRatio: 0.166, LastVacuum: jsdate.NewTimePtr(&old)},
 		// VACUUM の最中は判定しない。
 		{Table: "vacuuming", DeadRows: MinDeadTuples, DeadRatio: 0.9, Vacuuming: true},
 	}, AutovacuumThreshold: 50, AutovacuumScaleFactor: 0.2}
@@ -367,7 +368,7 @@ func TestService_DoesNotWaitForTableLocks(t *testing.T) {
 func TestProblems_MaxThreshold(t *testing.T) {
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	old := now.Add(-VacuumStaleAfter)
-	huge := TableStat{Table: "huge", LiveRows: 1_000_000_000, DeadRows: 150_000_000, DeadRatio: 0.13, LastVacuum: &old}
+	huge := TableStat{Table: "huge", LiveRows: 1_000_000_000, DeadRows: 150_000_000, DeadRatio: 0.13, LastVacuum: jsdate.NewTimePtr(&old)}
 	r := Report{Tables: []TableStat{huge}, AutovacuumThreshold: 50, AutovacuumScaleFactor: 0.2}
 	assert.Empty(t, r.findProblems(now), "below 50 + 20% without a cap")
 	r.AutovacuumMaxThreshold = 100_000_000
