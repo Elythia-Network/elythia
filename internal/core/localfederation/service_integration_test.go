@@ -48,7 +48,7 @@ func TestServiceWithPostgres_StateAndKeyLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, model.FederationStatusOn, status.FederationStatus)
 	require.NotNil(t, status.FederationEnabledAt)
-	assert.True(t, now.Equal(*status.FederationEnabledAt))
+	assert.True(t, now.Equal(status.FederationEnabledAt.Time))
 
 	rsa, err := repository.NewUserKeypairRepository(integrationDB).FindByUserID(pending.ID)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestServiceWithPostgres_StateAndKeyLifecycle(t *testing.T) {
 	status, err = service.GetStatus(pending.ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.FirstExternalReferenceAt)
-	assert.True(t, recordedAt.Equal(*status.FirstExternalReferenceAt))
+	assert.True(t, recordedAt.Equal(status.FirstExternalReferenceAt.Time))
 	require.NotNil(t, status.FirstExternalReferenceReason)
 	assert.Equal(t, ExternalReferenceReasonActor, *status.FirstExternalReferenceReason)
 	require.NotNil(t, status.FirstExternalReferenceHost)
@@ -84,7 +84,7 @@ func TestServiceWithPostgres_StateAndKeyLifecycle(t *testing.T) {
 	require.ErrorIs(t, err, ErrFederationAlreadyReferenced)
 	status, err = service.GetStatus(pending.ID)
 	require.NoError(t, err)
-	assert.True(t, recordedAt.Equal(*status.FirstExternalReferenceAt))
+	assert.True(t, recordedAt.Equal(status.FirstExternalReferenceAt.Time))
 	assert.Equal(t, ExternalReferenceReasonActor, *status.FirstExternalReferenceReason)
 	assert.Equal(t, "peer.example", *status.FirstExternalReferenceHost)
 
@@ -103,7 +103,7 @@ func TestServiceWithPostgres_StateAndKeyLifecycle(t *testing.T) {
 	status, err = service.ChangeStatus(off.ID, model.FederationStatusOn)
 	require.NoError(t, err)
 	assert.Equal(t, model.FederationStatusOn, status.FederationStatus)
-	assert.True(t, recordedAt.Equal(*status.FederationEnabledAt))
+	assert.True(t, recordedAt.Equal(status.FederationEnabledAt.Time))
 	rsa, err = repository.NewUserKeypairRepository(integrationDB).FindByUserID(off.ID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, rsa.PublicKey)
@@ -117,7 +117,7 @@ func TestServiceWithPostgres_StateAndKeyLifecycle(t *testing.T) {
 	status, err = service.ChangeStatus(off.ID, model.FederationStatusOn)
 	require.NoError(t, err)
 	assert.Equal(t, model.FederationStatusOn, status.FederationStatus)
-	assert.True(t, recordedAt.Equal(*status.FederationEnabledAt))
+	assert.True(t, recordedAt.Equal(status.FederationEnabledAt.Time))
 }
 
 func TestServiceWithPostgres_InvalidatesCachedUsersAfterFederationChanges(t *testing.T) {
