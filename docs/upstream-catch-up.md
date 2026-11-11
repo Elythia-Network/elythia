@@ -125,6 +125,8 @@ mirror (`.cache/misskey/mirror.git`、無ければ作る) に今の版 (`UPSTREA
 | 作り直す | `pnpm-lock.yaml` | 当てない。手順 4 で作り直す |
 | 取り込まない | `packages/backend` (アセットを除く)、`.github/`、`.config/`、`Dockerfile`、文書類など。Elythia が `frontend/` から外したもの (Storybook の `packages/frontend/.storybook/`・`*.stories.impl.ts`・`*.stories.meta.ts`・`src/index.mdx` (#4027)、本家の frontend の e2e の `packages/frontend/test/e2e/` (`shared.ts` を除く)・`playwright.config.ts` (#4025)) | 当てない。外したものへの本家の変更を当てようとすると、当てる先が無くて止まるため。Storybook の依存の版上げなど `package.json` への変更は「取り込む」の側で衝突するので、足し戻さずに消す側で解く |
 
+**Elythia の語は `frontend/locales-elythia/` に置いている (#4071)。** 本家に無いディレクトリなので、取り込みでは触れない。`frontend/locales/` は本家のファイルをそのまま持つので、本家の `locales/` の変更は衝突せずに当たる。
+
 **どの区分にも当たらないパスがあると、何も当てずに止まる。** 本家が直下に新しく足したファイルや、submodule の gitlink の変更が該当する。「取り込む」で絞るだけだと新しいパスが黙って落ちるため。止まったら、そのパスの区分を決めて `tools/upstreamsync/main.go` の表 (`importFiles` / `importDirs` / `skipFiles` / `skipDirs`。Elythia が `frontend/` から外したパスなら `removedDirs` / `removedFiles` / `removedSuffixes`、外したディレクトリの中で残すものは `keptInRemovedDirs`) と設計 D1 の表の両方に足し、`go test ./tools/upstreamsync/` を通してからやり直す。
 
 **2. 当てる。**
@@ -308,7 +310,17 @@ make upstream-fetch   # .cache/misskey/<版> が無ければ
 cd frontend && node scripts/check-locale-coverage.mjs --write-allowlist ../.cache/misskey/$(cat ../UPSTREAM_MISSKEY_VERSION)/locales
 ```
 
-本家の ja-JP に無い語 (Elythia の語) と、本家の en-US にある語が抜けていると、許可リストを書かずに落ちる。前者は en-US に英訳を足し、後者は本家の en-US から写す。
+本家の ja-JP に無い語 (Elythia の語) と、本家の en-US にある語が抜けていると、許可リストを書かずに落ちる。前者は `frontend/locales-elythia/en-US.yml` に英訳を足し、後者は本家の en-US から写す。
+
+### 本家の版を上げた後に必須: Elythia の語が書き換える本家の語の一覧
+
+`frontend/scripts/check-locale-overrides.mjs` (CI では `frontend` workflow の `frontend-lint`、手元では `make frontend-check`) は、Elythia の語 (`frontend/locales-elythia/`) が本家の語を書き換える・消すのを、`frontend/locales-elythia/overrides.tsv` にあるキーだけに許す (#4071)。本家の `locales/` を取り込むと、次のどれかで落ちることがある。
+
+- **本家が、Elythia が足した語と同じキーを足した。** Elythia の語が本家の語を上書きする形になる。Elythia の語のキーを変えるか、上書きしてよいなら理由を付けて一覧に足す
+- **本家の文が、Elythia が書き換えた文と同じになった。** `locales-elythia/<言語>.yml` のその行を消す。どの言語でも書き換えなくなったら、一覧の行も消す
+- **本家が、Elythia が書き換えていた語を消した、またはキーを変えた。** 一覧の行が使われなくなって落ちる。Elythia の文の行は新しい語として残るので、要るかを見て、要らなければ消す。空文字の行は消すものが無くなったと落ちるので、消す。検査が目印にしている `introMisskey` がそうなったときは、終了コード 2 (検査を信用できない) で落ちるので、目印を別の書き換えている語に変える
+
+あわせて、`make upstream-check` (CI では `apicompat`) が `frontend/locales/` が本家の版と同じかを見る。取り込みの途中で本家のファイルに手を入れると落ちる。
 
 ### 本家の版を上げた後に必須: divergence doc の件数
 

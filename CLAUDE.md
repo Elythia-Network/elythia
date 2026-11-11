@@ -94,7 +94,7 @@ make test-fast               # -race抜き。反復用で、コミット前の�
 make gates                   # 静的なparityゲートを一括(サーバー・Docker不要)
 make plugin-test             # 同梱プラグインのテスト(別moduleなので./...に入らない)
 make migrate-up / migrate-down   # downは本体の系列を1段だけ戻す(forkの系列はmake migrate-down-local、docs/fork-migrations.md)
-make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + importの検査 + en-USの語の抜け + ルートとspecの対応付け + 設定の表の対応付け + 管理画面の表の対応付け + eslint
+make frontend-check          # frontend/の型チェック + frontendを読むゲート + 絵文字の正規表現 + importの検査 + en-USの語の抜け + localeの書き換えの一覧 + ルートとspecの対応付け + 設定の表の対応付け + 管理画面の表の対応付け + eslint
 make frontend-lint / frontend-test   # frontend/のeslint / vitest
 ```
 
@@ -242,7 +242,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` test | push / PR | ○ | 4 shardで`-race -count=1 -shuffle=3`、パッケージごとのカバレッジ閾値 |
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
-| `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、Elythiaのファイルのimport、en-USの語の抜け、ルートとPlaywrightのspecの対応付け、設定のページの`prefer.model`のキーとPlaywrightの設定の表の対応付け、管理画面の`admin/update-meta`のキーとロールのポリシーのキーとPlaywrightの管理画面の表の対応付け、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
+| `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、Elythiaのファイルのimport、en-USの語の抜け、Elythiaの語が書き換える本家の語の一覧、ルートとPlaywrightのspecの対応付け、設定のページの`prefer.model`のキーとPlaywrightの設定の表の対応付け、管理画面の`admin/update-meta`のキーとロールのポリシーのキーとPlaywrightの管理画面の表の対応付け、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
 | `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
@@ -251,7 +251,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard)、叩いたAPIの集計 |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分、叩いたAPIの集計 |
 | `upgrade` | PR(paths限定) | | 前のリリースのimageで作ったDBを、今のコードで`migrate up`して引き継げるか |
-| `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenが本家の版に追いついているか(`make upstream-check`) |
+| `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenと`frontend/locales`が本家の版に追いついているか(`make upstream-check`) |
 | `build-with-plugins-selftest` | PR(paths限定) | | 運営者向けreusable workflowのビルド |
 | `docker` | `main` / `develop` / tagへのpush、PR | | imageがビルドできるか。PR以外ではimageをpublishする |
 | `docker-branch` | `develop`へのpush(paths限定) | | composeだけを載せた配布用ブランチ`docker`を更新 |
@@ -308,6 +308,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-11: Elythiaのlocaleの語を`frontend/locales-elythia`へ分け、本家の語の書き換えの一覧の検査と、`frontend/locales`が本家と同じかの検査を足したので、Section 3の`make frontend-check`の行と、Section 8の`frontend`と`apicompat`の行に足した (#4071) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)
 - 2026-11-10: 前のリリースで作ったDBを今のコードが引き継げるかを確かめる`upgrade` workflowを足したので、Section 8の表に1行を足した (#4123) → [docs/testing.md](docs/testing.md#前のリリースからの更新-4123)
 - 2026-11-10: `/api.json`から入力を作る検査を毎週回す`schemathesis` workflowを足したので、Section 8の表に1行を足した (#4118) → [docs/testing.md](docs/testing.md#apijson-から入力を作る検査-4118)
 - 2026-11-10: Goのfuzzを毎日回す`fuzz` workflowを足したので、Section 8の表に1行を足した (#4116) → [docs/testing.md](docs/testing.md#fuzz-4116)
