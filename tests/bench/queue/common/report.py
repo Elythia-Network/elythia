@@ -108,6 +108,9 @@ def render_inbound(inb: dict[str, Any]) -> list[str]:
         "rate)。queue が即時 drain される (peak depth ≈ 0) 状況では send 側 rps",
         "がそのまま receiver inbox 処理 throughput になる。",
         "",
+        # 送り手の投稿者の数 (#4138)。#4138 より前の inbound.json は 1 人から送っている
+        f"送り手の投稿者: {fmt(inb.get('actors', 1), 0)} 人",
+        "",
         "| Stack | Expected jobs | Send Duration (s) | Effective Throughput (req/s) | Drain after send (s) | Peak depth |",
         "|---|---|---|---|---|---|",
     ]
