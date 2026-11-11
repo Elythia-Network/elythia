@@ -1,0 +1,18 @@
+introMisskey: "Vítejte! Elythia je otevřená a decentralizovaná microblogovací služba.\n\"Poznámkami\" můžete sdílet co se zrovna děje se všemi ve Vašem okolí. 📡\nPomocí \"reakcí\" můžete sdílet své názory a pocity na ostatní poznámky. 👍\nPojďte objevovat nový svět! 🚀"
+poweredByMisskeyDescription: "{name} je jeden ze serverů využívající open source platformu <b>Elythia<b> (nazývaná \"Elythia instance\")."
+initialPasswordForSetupDescription: "Použijte heslo, které jste nastavili v konfiguračním souboru, pokud jste Elythia instalovali ručně.\nPokud užíváte Elythia hostovací službu, použijte poskytnuté heslo.\nPokud jste heslo nenastavovali, zanechte prázdné."
+flagAsBotDescription: "Pokud je tento účet kontrolován programem zaškrtněte tuto možnost. To označí tento účet jako bot pro ostatní vývojáře a zabrání tak nekonečným interakcím s ostatními boty a upraví Elythia systém aby se choval k tomuhle účtu jako bot."
+scratchpadDescription: "Scratchpad poskytuje rozhraní pro AiScript experimenty. Můžete psát, spustit či zkontrolovat výsledky jeho interakce s Elythia."
+sendErrorReportsDescription: "Pokud je tato funkce zapnutá, budou se při výskytu problému sdílet podrobné informace o chybách se službou Elythia, což pomůže zlepšit kvalitu služby Elythia. Tyto informace budou zahrnovat například verzi operačního systému, jaký prohlížeč používáte, vaši aktivitu v Elythia atd."
+goToMisskey: "Jít na Elythia"
+_achievements:
+  _types:
+    _notes1:
+      title: "Dobrý den Elythia!"
+      flavor: "Užijte si to s Elythia!"
+    _login1000:
+      flavor: "Děkujeme, že používáte Elythia!"
+    _client30min:
+      description: "Mějte otevřený Elythia alespoň po dobu 30 minut"
+    _client60min:
+      description: "Mějte otevřený Elythia alespoň po dobu 60 minut"

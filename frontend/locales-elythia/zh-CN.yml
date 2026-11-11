@@ -1,0 +1,47 @@
+introMisskey: "欢迎！Elythia是一个开源的、去中心化的“微博客”服务。\n通过编写「帖文」来和大家分享你的以及你周围的事情吧！📡\n通过「回应」功能，可以让你快速地对大家的帖文表达反馈👍\n来探索新的世界吧！🚀"
+poweredByMisskeyDescription: "{name} 是开源平台 <b>Elythia</b> 的服务器之一。"
+initialPasswordForSetupDescription: "如果是自己安装的 Elythia，请输入配置文件里设好的密码。\n如果使用的是 Elythia 的托管服务等，请输入服务商提供的密码。\n如果没有设置密码，请留空并继续。"
+flagAsBotDescription: "如果此账户由程序控制，请启用此项。启用后，此标志可以帮助其他开发人员防止机器人之间产生无限互动的行为，并让 Elythia 的内部系统将此账户识别为机器人。"
+useSoundOnlyWhenActive: "仅在使用 Elythia 时发出音效"
+scratchpadDescription: "AiScript 控制台为 AiScript 提供了实验环境。您可以编写代码与 Elythia 交互，运行并查看结果。"
+sendErrorReportsDescription: "启用后，如果出现问题，可以与 Elythia 共享详细的错误信息，从而帮助提高软件的质量。错误信息包括操作系统版本、浏览器类型、行为历史记录等。"
+goToMisskey: "去往 Elythia"
+repositoryUrlDescription: "若源代码所在的仓库是公开的，请填入对应的 URL。若并未追加或者修改 Elythia 的代码，请填入 https://github.com/Elythia-Network/elythia。"
+_initialAccountSetting:
+  youCanContinueTutorial: "您可以继续了解 {name}(Elythia) 的使用教程，也可以在此停止教程并立即开始使用它。\n"
+_initialTutorial:
+  _landing:
+    description: "在这里，您可以查看 Elythia 的基本使用方法和功能。"
+  _note:
+    description: "在 Elythia 上发表的文章称为 “帖子”。帖子在时间线上按照时间顺序排列，并实时更新。"
+  _timeline:
+    description1: "Elythia 根据使用方式提供了多个时间线（根据服务器的设定，可能有一些被禁用）。"
+  _postNote:
+    description1: "在 Elythia 发布帖子时，您可以设置各种选项。发帖窗口看起来是这样的。\n"
+  _done:
+    description: "这里介绍的只是其中一小部分的功能。 要了解更多有关如何使用 Elythia 的更多信息，请访问 {link}。"
+_achievements:
+  _types:
+    _notes1:
+      flavor: "祝您在 Elythia 玩的愉快～"
+    _login1000:
+      flavor: "感谢您使用 Elythia！"
+    _tutorialCompleted:
+      title: "Elythia 初学者课程 结业证书"
+_role:
+  _options:
+    maxFileSize_caption2: "服务器整体的最大文件大小限制为 {max}。若要允许上传大于此限制的文件，请在 Elythia 配置文件中放宽此设置。"
+_soundSettings:
+  driveFileDurationWarnDescription: "使用长音频可能会影响 Elythia 的使用。即使这样也要继续吗？"
+_urlPreviewSetting:
+  summaryProxyDescription: "不使用 Elythia 本体，而是通过 Summaly Proxy 生成预览。"
+_bootErrors:
+  otherOption4: "以安全模式启动 Elythia"
+_serverSetupWizard:
+  installCompleted: "Elythia 安装完成！"
+  howWillYouUseMisskey: "打算怎样使用 Elythia？"
+_followApproval:
+  title: ""
+  remoteDescription: ""
+  description: ""
+  autoAcceptDescription: ""

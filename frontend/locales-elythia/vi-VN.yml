@@ -1,0 +1,24 @@
+introMisskey: "Xin chào! Elythia là một nền tảng tiểu blog phi tập trung mã nguồn mở.\nViết \"tút\" để chia sẻ những suy nghĩ của bạn 📡\nBằng \"biểu cảm\", bạn có thể bày tỏ nhanh chóng cảm xúc của bạn với các tút 👍\nHãy khám phá một thế giới mới! 🚀"
+poweredByMisskeyDescription: "{name} là một trong những chủ máy của <b>Elythia</b> là nền tảng mã nguồn mở"
+initialPasswordForSetupDescription: "Nếu bạn tự cài đặt Elythia, hãy sử dụng mật khẩu ban đầu của bạn đã nhập trong tệp cấu hình.\nNếu bạn đang sử dụng dịch vụ nào đó giống như dịch vụ lưu trữ của Elythia, hãy sử dụng mật khẩu ban đầu được cung cấp.\nNếu bạn chưa đặt mật khẩu ban đầu, vui lòng để trống và tiếp tục."
+flagAsBotDescription: "Bật tùy chọn này nếu tài khoản này được kiểm soát bởi một chương trình. Nếu được bật, nó sẽ được đánh dấu để các nhà phát triển khác ngăn chặn chuỗi tương tác vô tận với các bot khác và điều chỉnh hệ thống nội bộ của Elythia để coi tài khoản này như một bot."
+useSoundOnlyWhenActive: "Chỉ phát âm thanh khi Elythia đang được hiển thị"
+scratchpadDescription: "Scratchpad cung cấp môi trường cho các thử nghiệm AiScript. Bạn có thể viết, thực thi và kiểm tra kết quả tương tác với Elythia trong đó."
+sendErrorReportsDescription: "Khi được bật, thông tin chi tiết về lỗi sẽ được chia sẻ với Elythia khi xảy ra sự cố, giúp nâng cao chất lượng của Elythia.\nBao gồm thông tin như phiên bản hệ điều hành của bạn, trình duyệt bạn đang sử dụng, hoạt động của bạn trong Elythia, v.v."
+goToMisskey: "Tới Elythia"
+repositoryUrlDescription: "Nếu bạn có kho lưu trữ mã nguồn có thể truy cập công khai, hãy nhập URL. Nếu bạn đang sử dụng Elythia theo mặc định (không thực hiện bất kỳ thay đổi nào đối với mã nguồn), hãy nhập https://github.com/Elythia-Network/elythia."
+_initialAccountSetting:
+  youCanContinueTutorial: "Bạn có thể tiếp tục xem hướng dẫn về cách sử dụng {name} (Elythia) hoặc bạn có thể thoát khỏi phần thiết lập tại đây và bắt đầu sử dụng ngay lập tức."
+_initialTutorial:
+  _landing:
+    description: "Tại đây, bạn có thể tìm hiểu những điều cơ bản về cách sử dụng Elythia và các tính năng của nó."
+  _note:
+    description: "Các bài đăng trên Elythia được gọi là 'Bài Viết'. Ghi chú được sắp xếp theo thứ tự thời gian trên dòng thời gian và được cập nhật theo thời gian thực."
+_achievements:
+  _types:
+    _login1000:
+      flavor: "Cảm ơn bạn đã sử dụng Elythia!"
+    _client30min:
+      description: "Giữ Elythia mở trong ít nhất 30 phút"
+    _client60min:
+      description: "Giữ Elythia mở trong ít nhất 60 phút"

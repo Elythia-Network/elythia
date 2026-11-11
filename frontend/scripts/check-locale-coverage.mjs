@@ -17,6 +17,7 @@
  *   2 = the check could not be trusted (a parser, a malformed allowlist, the lower bound, or the
  *       arguments failed, or --write-allowlist was given Elythia's own locales/)
  *
+ * 各言語は本家の語 (locales/) に Elythia の語 (locales-elythia/) を重ねたものを読む (#4071)。
  * ロケールは ja-JP を土台に重ねる (packages/i18n/src/index.ts) ので、en-US に無い語は
  * 英語の UI でも日本語のまま出る。Elythia の語を接頭辞 (`_mkgo`) で見分けると、付け忘れた
  * 語が素通りするので、ja-JP の語はすべて en-US にあることを求める。
@@ -27,10 +28,12 @@
  * 本家の語かどうかは書き直すときにだけ判定する。
  */
 
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// build() と同じ重ね方で読む (書き写すと食い違う)
+import { ELYTHIA_LOCALES_DIR, overlayLocale } from '../packages/i18n/src/elythia.ts';
 
 const frontendRoot = fileURLToPath(new URL('..', import.meta.url));
 // js-yaml はロケールを読む i18n パッケージの依存として入っている (ルートには無い)
@@ -214,6 +217,20 @@ function loadLocale(path) {
 }
 
 /**
+ * Reads a language as the build does: the upstream words with Elythia's words laid over them.
+ *
+ * @param {string} root the frontend/ directory
+ * @param {string} lang
+ * @returns {LocaleRecord}
+ */
+export function loadMergedLocale(root, lang) {
+	const upstream = loadLocale(join(root, 'locales', `${lang}.yml`));
+	const ownPath = join(root, ELYTHIA_LOCALES_DIR, `${lang}.yml`);
+	if (!existsSync(ownPath)) return upstream;
+	return /** @type {LocaleRecord} */ (overlayLocale(upstream, loadLocale(ownPath)));
+}
+
+/**
  * Runs the check (or rewrites the allowlist) and returns the exit code.
  *
  * @param {string} root the frontend/ directory
@@ -223,8 +240,8 @@ function loadLocale(path) {
  * @returns {number}
  */
 export function run(root, args, out, allowlistPath = join(root, 'scripts', 'locale-coverage-allowlist.tsv')) {
-	const ja = loadLocale(join(root, 'locales', 'ja-JP.yml'));
-	const en = loadLocale(join(root, 'locales', 'en-US.yml'));
+	const ja = loadMergedLocale(root, 'ja-JP');
+	const en = loadMergedLocale(root, 'en-US');
 	const { entries, malformed } = parseAllowlist(readFileSync(allowlistPath, 'utf8'));
 	for (const problem of malformed) out.error(`check-locale-coverage: ${allowlistPath}: ${problem}`);
 	if (malformed.length > 0) return 2;
@@ -240,7 +257,7 @@ export function run(root, args, out, allowlistPath = join(root, 'scripts', 'loca
 			return 2;
 		}
 		const upstreamJa = loadLocale(join(args[1], 'ja-JP.yml'));
-		// Elythia 自身の locales/ を渡すと、抜けた Elythia の語がすべて許可リストへ逃げる。
+		// Elythia の語 (locales-elythia/) を渡すと、抜けた Elythia の語がすべて許可リストへ逃げる。
 		// 見分けは `_mkgo` の節で行う (目印の語だと、本家が同じ名前の語を足したときに
 		// 正しい本家の locales/ まで拒むことになる)
 		const own = Object.keys(upstreamJa).filter(key => key.startsWith('_mkgo'));
@@ -262,7 +279,7 @@ export function run(root, args, out, allowlistPath = join(root, 'scripts', 'loca
 	}
 
 	for (const key of result.violations) {
-		out.error(`locales/en-US.yml: ${key} is missing, so the English UI shows the Japanese text. Add its translation.`);
+		out.error(`${ELYTHIA_LOCALES_DIR}/en-US.yml: ${key} is missing, so the English UI shows the Japanese text. Add its translation.`);
 	}
 	for (const key of result.unused) {
 		out.error(`${allowlistPath}: ${key} is listed but en-US has it (or ja-JP no longer does). Remove the line.`);

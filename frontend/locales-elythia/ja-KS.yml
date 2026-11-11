@@ -1,0 +1,34 @@
+introMisskey: "ようお越し！Elythiaは、オープンソースの分散型マイクロブログサービスやねん。\n「ノート」を作って、いま起こっとることを共有したり、あんたについて皆に発信しよう📡\n「ツッコミ」機能で、皆のノートに素早く反応を追加したりもできるで✌\nほな、新しい世界を探検しよか🚀"
+poweredByMisskeyDescription: "{name}は、オープンソースのプラットフォーム<b>Elythia</b>のサーバーのひとつなんやで。"
+flagAsBotDescription: "もしこのアカウントをプログラム使うて運用するんやったら、このフラグをオンにしてや。オンにすれば、反応がバーッて連鎖せんように開発者が使うたり、Elythiaのシステム上での扱いがBotに合ったもんになるからな。"
+useSoundOnlyWhenActive: "Elythiaがアクティブなときだけ音出す"
+scratchpadDescription: "スクラッチパッドではAiScriptを色々試すことができるんや。Elythiaに対して色々できるコードを書いて動かしてみたり、結果を見たりできるで。"
+sendErrorReportsDescription: "オンにしたら、なんか変なことが起きたとき、詳しいのが全部Elythiaに送られて、ソフトウェアをもっと良うするで。エラー情報には、OSのバージョン、ブラウザの種類、行動履歴なんかが含まれるな。"
+goToMisskey: "Elythiaへ"
+repositoryUrlDescription: "ソースコードが公開されているリポジトリがある場合、そのURLを記入するで。Elythiaをそのまんま（ソースコードにいかなる変更も加えずに）使っとる場合は https://github.com/Elythia-Network/elythia と記入するで。"
+_initialAccountSetting:
+  youCanContinueTutorial: "こんまま{name}(Elythia)の使い方のチュートリアルにも行けるけど、ここでやめてすぐに使い始めてもええで。"
+_initialTutorial:
+  _landing:
+    description: "ここでは、Elythiaのカンタンな使い方とか機能を確かめれんで。"
+  _note:
+    description: "Elythiaでの投稿は「ノート」って呼ばれてんで。ノートは順々にタイムラインに載ってて、リアルタイムで新しくなってくで。"
+  _timeline:
+    description1: "Elythiaには、いろいろタイムラインがあんで（ただ、サーバーによっては無効化されてるところもあるな）。"
+  _postNote:
+    description1: "Elythiaにノートを投稿するとき、いろんなオプションが付けれるで。投稿画面はこんな感じや。"
+_achievements:
+  _types:
+    _notes1:
+      flavor: "Elythiaを楽しんでな～"
+    _login1000:
+      flavor: "Elythiaようさん使てもろておおきにな！"
+    _tutorialCompleted:
+      title: "Elythiaひよっこ講座 修了証"
+_soundSettings:
+  driveFileDurationWarnDescription: "長い音使うたらElythia使うのに良うないかもしれへんで。それでもええか？"
+_urlPreviewSetting:
+  summaryProxyDescription: "Elythia本体やなく、サマリープロキシを使用してプレビューを生成するで。"
+_serverSetupWizard:
+  installCompleted: "Elythiaのインストールが終わったで！"
+  howWillYouUseMisskey: "Elythiaをどんな感じに使うん？"

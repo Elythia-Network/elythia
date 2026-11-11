@@ -450,8 +450,9 @@ func TestEmojiApplicationIsWired(t *testing.T) {
 			"modlog が %s の行に対象者を出していない (#2962)", m[1])
 	}
 
+	// 独自の型の見出しは Elythia の語なので、本家の語に重ねる locales-elythia にある (#4071)
 	for _, locale := range []string{"ja-JP.yml", "en-US.yml"} {
-		section := yamlSection(t, readFileString(t, filepath.Join(fe, "..", "..", "locales", locale)),
+		section := yamlSection(t, readFileString(t, filepath.Join(fe, "..", "..", "locales-elythia", locale)),
 			"_moderationLogTypes:")
 		for _, m := range ownTypes {
 			require.Containsf(t, section, "  "+m[1]+":",

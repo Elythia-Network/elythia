@@ -1,0 +1,52 @@
+introMisskey: "¡Bienvenido/a! Elythia es un servicio de microblogging descentralizado de código abierto.\nEscribe \"notas\" para compartir lo que te ocurre ahora o para contar sobre ti a todos 📡\nCon la función de \"reacciones\", puedes también añadir una reacción rápida a las notas de todos 👍\n¡Exploremos juntos un nuevo mundo! 🚀"
+poweredByMisskeyDescription: "{name} es uno de los servicios (también llamado instancia) que usa la plataforma de código abierto <b>Elythia</b>"
+initialPasswordForSetupDescription: "Si ha instalado Elythia usted mismo, utilice la contraseña introducida en el archivo de configuración.\nSi utiliza un servicio de alojamiento de Elythia o similar, utilice la contraseña proporcionada.\nSi no ha establecido una contraseña, déjela en blanco para continuar."
+flagAsBotDescription: "Activa esta opción si la cuenta es utilizada por un programa. Si se activa, actuará como una etiqueta para otros desarrolladores para prevenir cadenas eternas de interacción con otros bots, y ajustará los sistemas internos de Elythia para tratar esta cuenta de manera acorde."
+useSoundOnlyWhenActive: "Sonar solo cuando Elythia esté activo"
+scratchpadDescription: "Scratchpad proporciona un entorno experimental para AiScript. Puede escribir, ejecutar y verificar los resultados que interactúan con Elythia."
+sendErrorReportsDescription: "Si habilita esta opción, ayudará a mejorar la calidad de Elythia compartiendo información detallada sobre los errores cuando se produzca un problema.\nEsto incluye información como la versión de su sistema operativo, el tipo de navegador que utiliza, su historial de actividad, etc."
+goToMisskey: "ir a Elythia"
+repositoryUrlDescription: "Si estás usando Elythia tal cual (sin cambios en el código fuente), entra en https://github.com/Elythia-Network/elythia"
+_initialAccountSetting:
+  youCanContinueTutorial: "Puedes proceder a un tutorial sobre cómo usar {name} (Elythia) o puedes terminar la instalación aquí y empezar a usarlo ya mismo."
+_initialTutorial:
+  _landing:
+    description: "Aquí podrás aprender las nociones básicas sobre cómo usar Elythia y sus funciones."
+  _note:
+    description: "Las publicaciones en Elythia se llaman 'Notas'. Las notas se ordenan de forma cronológica en la línea de tiempo y se actualizan en tiempo real."
+  _timeline:
+    description1: "Elythia proporciona múltiples líneas de tiempo basadas en su uso (algunas pueden no estar disponibles dependiendo de las políticas de la instancia)."
+  _postNote:
+    description1: "Cuando publicas una nota en Elythia, hay varias opciones disponibles. El formulario tiene este aspecto."
+  _done:
+    description: "Las funciones que mostramos aquí son sólo una pequeña parte. Para más detalles sobre el funcionamiento de Elythia, pulsa en este enlace: {link}"
+_achievements:
+  _types:
+    _notes1:
+      title: "¡Hola Elythia!"
+      flavor: "¡Pasándola bien con Elythia!"
+    _login1000:
+      flavor: "¡Gracias por usar Elythia!"
+    _client30min:
+      description: "30 minutos dedicados a Elythia"
+    _client60min:
+      description: "Dejar abierto Elythia por al menos 60 minutos"
+    _tutorialCompleted:
+      title: "Diploma del Curso Básico de Elythia"
+_role:
+  _options:
+    maxFileSize_caption2: "El tamaño máximo de archivo para todo el servidor está fijado en {max}. Para poder subir archivos de mayor tamaño, modifica este valor en el archivo de configuración de Elythia."
+_soundSettings:
+  driveFileDurationWarnDescription: "Usar un audio de larga duración puede llegar a molestar mientras usas Elythia. ¿Quieres continuar?"
+_urlPreviewSetting:
+  summaryProxyDescription: "La vista previa se genera usando Summaly proxy, no la genera el mismo Elythia."
+_bootErrors:
+  otherOption4: "Iniciar Elythia en modo seguro"
+_serverSetupWizard:
+  installCompleted: "¡La instalación de Elythia se ha completado!"
+  howWillYouUseMisskey: "¿Cómo vas a usar Elythia?"
+_followApproval:
+  title: ""
+  remoteDescription: ""
+  description: ""
+  autoAcceptDescription: ""

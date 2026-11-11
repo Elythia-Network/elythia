@@ -1,0 +1,48 @@
+introMisskey: "환영합니다! Elythia는 오픈 소스 분산형 마이크로 블로그 서비스입니다.\n'노트'를 작성해서 지금 일어나고 있는 일을 공유하거나, 당신만의 이야기를 모두에게 발신하세요📡\n'리액션' 기능으로 친구의 노트에 총알같이 반응을 추가할 수도 있습니다👍\n새로운 세계를 탐험해 보세요🚀"
+poweredByMisskeyDescription: "{name} 서버는 오픈소스 플랫폼 <b>Elythia</b>의 서버 가운데 하나입니다."
+initialPasswordForSetupDescription: "Elythia를 직접 설치하는 경우, 설정 파일에 입력해둔 비밀번호를 사용하세요.\nElythia 설치를 도와주는 호스팅 서비스 등을 사용하는 경우, 서비스 제공자로부터 받은 비밀번호를 사용하세요.\n비밀번호를 따로 설정하지 않은 경우, 아무것도 입력하지 않아도 됩니다."
+useSoundOnlyWhenActive: "Elythia를 활성화한 때에만 소리를 출력하기"
+scratchpadDescription: "스크래치 패드는 AiScript 의 테스트 환경을 제공합니다. Elythia 와 상호 작용하는 코드를 작성, 실행 및 결과를 확인할 수 있습니다."
+sendErrorReportsDescription: "이 설정을 활성화하면, 문제가 발생했을 때 오류에 대한 상세 정보를 Elythia에 보내어 더 나은 소프트웨어를 만드는 데에 도움을 줄 수 있습니다."
+invalidParamErrorDescription: "요청 매개변수에 문제가 있습니다. 대부분의 경우 Elythia의 버그가 원인이지만, 입력 문자수가 너무 많았을 가능성 등도 있습니다."
+goToMisskey: "Elythia로"
+repositoryUrlDescription: "소스 코드를 공개한 저장소가 있는 경우, 그 URL을 적습니다. Elythia를 원본 그대로 (소스 코드를 어떤 식으로도 변경하지 않고) 쓰고 있는 경우 https://github.com/Elythia-Network/elythia 라고 적습니다."
+_initialAccountSetting:
+  youCanContinueTutorial: "이대로 {name}(Elythia)의 사용법에 대해 튜토리얼을 진행할 수도 있지만, 여기서 중단하고 바로 시작할 수도 있습니다."
+_initialTutorial:
+  _landing:
+    description: "여기서는 Elythia의 기본적인 사용법이나 기능을 확인할 수 있습니다."
+  _note:
+    description: "Elythia에서는 게시물을 '노트'라고 합니다. 노트는 타임라인에 시간순으로 정렬되어 있고, 실시간으로 갱신됩니다."
+  _timeline:
+    description1: "Elythia에는 종류에 따라 여러 가지의 타임라인으로 구성되어 있습니다.(서버에 따라서는 일부 타임라인을 사용할 수 없는 경우가 있습니다)"
+  _postNote:
+    description1: "Elythia에 노트를 게시할 때에는 다양한 옵션 설정이 가능합니다. 노트를 게시할 때 쓰이는 '글 입력란'은 이렇게 생겼습니다."
+  _done:
+    description: "여기에서 소개한 기능은 극히 일부에 지나지 않습니다. Elythia의 사용 방법을 더 자세히 알아보려면 {link}를 확인해 주세요!"
+_achievements:
+  _types:
+    _notes1:
+      title: "Elythia 계정 만들었어요"
+      flavor: "Elythia에 어서 오세요!"
+    _login1000:
+      flavor: "Elythia를 사용해 주셔서 감사합니다!"
+    _tutorialCompleted:
+      title: "Elythia 입문자 과정 수료증"
+_role:
+  _options:
+    maxFileSize_caption2: "서버 전체의 최대 파일 크기 설정은 {max}입니다. 이보다 큰 파일을 업로드하려면 Elythia 설정 파일에서 이 설정을 늘려주십시오."
+_soundSettings:
+  driveFileDurationWarnDescription: "긴 오디오로 설정할 경우 Elythia 사용에 지장이 갈 수도 있습니다. 그래도 괜찮습니까?"
+_urlPreviewSetting:
+  summaryProxyDescription: "Elythia 본체를 사용하지 않고 서머리 프록시로 미리보기를 만듭니다."
+_bootErrors:
+  otherOption4: "Elythia를 세이프 모드로 열기"
+_serverSetupWizard:
+  installCompleted: "Elythia의 설치가 완료됐습니다!"
+  howWillYouUseMisskey: "Elythia를 어떻게 사용하십니까?"
+_followApproval:
+  title: ""
+  remoteDescription: ""
+  description: ""
+  autoAcceptDescription: ""

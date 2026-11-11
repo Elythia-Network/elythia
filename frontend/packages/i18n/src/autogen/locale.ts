@@ -1833,10 +1833,6 @@ export interface Locale extends ILocale {
      */
     "aboutMisskey": string;
     /**
-     * Elythiaについて
-     */
-    "aboutMkGo": string;
-    /**
      * 管理者
      */
     "administrator": string;
@@ -2052,10 +2048,6 @@ export interface Locale extends ILocale {
      * a~z、A~Z、0~9、_が使えます
      */
     "usernameInvalidFormat": string;
-    /**
-     * {n}文字以上にしてください
-     */
-    "usernameTooShort": ParameterizedString<"n">;
     /**
      * 短すぎます
      */
@@ -2600,54 +2592,6 @@ export interface Locale extends ILocale {
      * inboxのURL
      */
     "inboxUrl": string;
-    /**
-     * リレー投稿の一時保存
-     */
-    "ephemeralRelayNotes": string;
-    /**
-     * リレー経由の投稿を一時保存にする
-     */
-    "enableEphemeralRelayNotes": string;
-    /**
-     * リレー経由でしか届かない投稿を、データベースに残さずキャッシュに置きます。誰も反応しなかった投稿は期限が来ると自動的に消えるため、データベースが肥大化しません。リアクションや返信など何らかの操作をした時点で、通常の投稿として保存されます。
-     */
-    "enableEphemeralRelayNotesDescription": string;
-    /**
-     * 保存期間
-     */
-    "ephemeralRelayNoteTtl": string;
-    /**
-     * キャッシュに置いておく時間です。これを過ぎた投稿は、誰も操作していなければ消えます。
-     */
-    "ephemeralRelayNoteTtlDescription": string;
-    /**
-     * 有効にすると、グローバルタイムラインをこの保存期間より過去に遡れなくなります。
-     */
-    "ephemeralRelayNotesWarning": string;
-    /**
-     * リレー由来ユーザーの整理
-     */
-    "relayOrphanUserCleanup": string;
-    /**
-     * 誰とも関わりのないユーザーを削除する
-     */
-    "enableRelayOrphanUserCleanup": string;
-    /**
-     * リレー経由でしか見かけなかったユーザーのうち、投稿もリアクションもフォロー関係も残っていないものを毎日削除します。再び見かければ自動的に取得し直すので、表示に影響はありません。
-     */
-    "enableRelayOrphanUserCleanupDescription": string;
-    /**
-     * 猶予期間
-     */
-    "relayOrphanUserGraceDays": string;
-    /**
-     * 最後に見かけてからこの日数が経過したユーザーが対象です。短くしすぎると、活動中のユーザーを削除しては取得し直すことを繰り返すため、7日未満は設定できません。
-     */
-    "relayOrphanUserGraceDaysDescription": string;
-    /**
-     * リレーを購読する前から知っているユーザーや、プロフィールを開いたことのあるユーザーは対象外です。フォロー・ブロック・ミュートしている相手も削除されません。
-     */
-    "relayOrphanUserCleanupInfo": string;
     /**
      * 追加済みのリレー
      */
@@ -3713,10 +3657,6 @@ export interface Locale extends ILocale {
      */
     "misskeyUpdated": string;
     /**
-     * Elythiaが更新されました！
-     */
-    "mkGoUpdated": string;
-    /**
      * 更新情報を見る
      */
     "whatIsNew": string;
@@ -3972,10 +3912,6 @@ export interface Locale extends ILocale {
      * レート制限を超えました
      */
     "rateLimitExceeded": string;
-    /**
-     * しばらく待ってから再試行してください
-     */
-    "rateLimitCooldown": string;
     /**
      * 画像のクロップ
      */
@@ -4345,14 +4281,6 @@ export interface Locale extends ILocale {
      */
     "invalidParamErrorDescription": string;
     /**
-     * 秘密の値を入力し直してください
-     */
-    "secretReentryRequired": string;
-    /**
-     * 送り先(ホストやURLなど)を変えるときは、それと組になっているパスワードやキーも入力し直してください。保存済みの値は、新しい送り先には使いません。
-     */
-    "secretReentryRequiredDescription": string;
-    /**
      * 操作が拒否されました
      */
     "permissionDeniedError": string;
@@ -4700,14 +4628,6 @@ export interface Locale extends ILocale {
      * 予約するユーザー名を改行で列挙します。ここで指定されたユーザー名はアカウント作成時に使えなくなりますが、管理者によるアカウント作成時はこの制限を受けません。また、既に存在するアカウントも影響を受けません。
      */
     "preservedUsernamesDescription": string;
-    /**
-     * ユーザー名の最小文字数
-     */
-    "minimumUsernameLength": string;
-    /**
-     * アカウント作成時に必要なユーザー名の文字数の下限を1〜20で指定します。管理者によるアカウント作成時はこの制限を受けません。また、既に存在するアカウントも影響を受けません。
-     */
-    "minimumUsernameLengthDescription": string;
     /**
      * このファイルからノートを作成
      */
@@ -5181,14 +5101,6 @@ export interface Locale extends ILocale {
      */
     "seasonalScreenEffect": string;
     /**
-     * 夜空の流れ星
-     */
-    "nightMeteorEffect": string;
-    /**
-     * 夜（20時〜翌4時）にダークテーマを使っているとき、ときどき画面に流れ星が流れます。季節に応じた画面の演出が出ている間は流れません。
-     */
-    "nightMeteorEffectDescription": string;
-    /**
      * デコる
      */
     "decorate": string;
@@ -5457,10 +5369,6 @@ export interface Locale extends ILocale {
      * リアクションする際に確認する
      */
     "confirmOnReact": string;
-    /**
-     * リアクションの相乗りをできるようにする
-     */
-    "reactableRemoteReaction": string;
     /**
      * " {emoji} " をリアクションしますか？
      */
@@ -6623,128 +6531,6 @@ export interface Locale extends ILocale {
          * 内容が正当でない通報の場合は「否認」を選択し、否定的にケースが解決されたことをマークします。
          */
         "resolveTutorial": string;
-    };
-    "_abuseReportForm": {
-        /**
-         * 違反カテゴリ
-         */
-        "category": string;
-        /**
-         * 違反カテゴリを選択してください
-         */
-        "categoryRequired": string;
-        /**
-         * 対象ユーザー
-         */
-        "targetUser": string;
-        /**
-         * 該当URL
-         */
-        "url": string;
-        /**
-         * 発生日時
-         */
-        "when": string;
-        /**
-         * 詳細
-         */
-        "details": string;
-        /**
-         * 詳細を入力してください
-         */
-        "detailsRequired": string;
-        /**
-         * 具体的な状況を記入してください
-         */
-        "detailsCaption": string;
-        /**
-         * 補足・証拠
-         */
-        "evidence": string;
-        /**
-         * スクリーンショットの説明や追加の経緯があれば記入してください
-         */
-        "evidenceCaption": string;
-        /**
-         * リノート元
-         */
-        "renoteSource": string;
-        /**
-         * 引用元ノート
-         */
-        "quoteSource": string;
-        /**
-         * 残り {n} 文字
-         */
-        "remainingChars": ParameterizedString<"n">;
-        /**
-         * 通報内容が長すぎます（{max} 文字以内）
-         */
-        "totalTooLong": ParameterizedString<"max">;
-        "_category": {
-            /**
-             * スパム
-             */
-            "spam": string;
-            /**
-             * 嫌がらせ・迷惑行為
-             */
-            "harassment": string;
-            /**
-             * なりすまし
-             */
-            "impersonation": string;
-            /**
-             * 違法・危険なコンテンツ
-             */
-            "illegal": string;
-            /**
-             * 著作権侵害
-             */
-            "copyright": string;
-            /**
-             * 個人情報の晒し
-             */
-            "doxxing": string;
-            /**
-             * その他
-             */
-            "other": string;
-        };
-        "_commentLabel": {
-            /**
-             * 【違反カテゴリ】
-             */
-            "category": string;
-            /**
-             * 【対象ユーザー】
-             */
-            "targetUser": string;
-            /**
-             * 【該当URL】
-             */
-            "url": string;
-            /**
-             * 【発生日時】
-             */
-            "when": string;
-            /**
-             * 【詳細】
-             */
-            "details": string;
-            /**
-             * 【補足・証拠】
-             */
-            "evidence": string;
-            /**
-             * 【リノート元】
-             */
-            "renoteSource": string;
-            /**
-             * 【引用元ノート】
-             */
-            "quoteSource": string;
-        };
     };
     "_delivery": {
         /**
@@ -9092,1189 +8878,6 @@ export interface Locale extends ILocale {
          */
         "projectMembers": string;
     };
-    "_aboutMkGo": {
-        /**
-         * このサーバーのソースコード
-         */
-        "sourceCodeOfThisServer": string;
-        /**
-         * このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。
-         */
-        "sourceCodeOfThisServerDescription": string;
-        /**
-         * Elythia本体(バックエンドとフロントエンド)
-         */
-        "sourceCodeOfMkGo": string;
-        /**
-         * ライセンス
-         */
-        "license": string;
-        /**
-         * Elythiaの開発はここで行っています。不具合の報告や提案も受け付けています。
-         */
-        "elythiaNetworkDescription": string;
-    };
-    "_federationHealth": {
-        /**
-         * 配送の健全性を取得できませんでした。この backend が対応していないか、権限がありません。
-         */
-        "unavailable": string;
-        /**
-         * 成功率
-         */
-        "successRate": string;
-        /**
-         * 対象ホスト
-         */
-        "hosts": string;
-        /**
-         * この期間に通信した相手のみ
-         */
-        "hostsCaption": string;
-        /**
-         * 失敗している相手
-         */
-        "degraded": string;
-        /**
-         * 集計する期間
-         */
-        "window": string;
-        /**
-         * 5分
-         */
-        "last5m": string;
-        /**
-         * 15分
-         */
-        "last15m": string;
-        /**
-         * 1時間
-         */
-        "last1h": string;
-        /**
-         * 失敗がある
-         */
-        "stateFailing": string;
-        /**
-         * 成功率95%未満
-         */
-        "stateDegraded": string;
-        /**
-         * 問題なし
-         */
-        "stateHealthy": string;
-        /**
-         * 失敗の多い順
-         */
-        "sortFailure": string;
-        /**
-         * 成功率の低い順
-         */
-        "sortRate": string;
-        /**
-         * p95の遅い順
-         */
-        "sortP95": string;
-        /**
-         * 通信量の多い順
-         */
-        "sortVolume": string;
-        /**
-         * 成功
-         */
-        "succeeded": string;
-        /**
-         * 失敗
-         */
-        "failed": string;
-        /**
-         * 超過
-         */
-        "overflow": string;
-        /**
-         * 応答なし
-         */
-        "noResponse": string;
-        /**
-         * この期間に失敗はありません。
-         */
-        "noFailures": string;
-        /**
-         * 期間外
-         */
-        "outsideWindow": string;
-        /**
-         * 失敗はありますが、直近のエラーが記録されていません。
-         */
-        "noRecordedError": string;
-        /**
-         * 条件に合う相手がいません。
-         */
-        "noHosts": string;
-        /**
-         * 集計の上限に達しているため、この一覧は全体の一部です（{n}件が対象外）。
-         */
-        "evicted": ParameterizedString<"n">;
-        /**
-         * 配送を止めている相手
-         */
-        "breakersTitle": string;
-        /**
-         * 停止中
-         */
-        "breakerOpen": string;
-        /**
-         * 間隔を空けている
-         */
-        "breakerThrottled": string;
-        /**
-         * 止めた時刻
-         */
-        "breakerOpenedAt": string;
-        /**
-         * 次に試す時刻
-         */
-        "breakerNextProbe": string;
-        /**
-         * 連続{failures}回失敗・{interval}ごとに試す
-         */
-        "breakerDetail": ParameterizedString<"failures" | "interval">;
-        /**
-         * 間隔を空ける期限
-         */
-        "breakerThrottledUntil": string;
-        /**
-         * 待たせた分を送っている
-         */
-        "breakerDraining": string;
-        /**
-         * 送り終わる見込み
-         */
-        "breakerReservedUntil": string;
-        /**
-         * 再開する
-         */
-        "breakerClose": string;
-        /**
-         * {host}への配送を再開しますか？待たせている配送は数分以内に送られます。相手がまだ応答しないか429を返せば、また止まります。
-         */
-        "breakerCloseConfirm": ParameterizedString<"host">;
-        /**
-         * 接続できないか5xxが続く相手への配送は止め、ときどき1件だけ試して、応答があれば自動で再開します。429を返した相手には指定された時間だけ配送を待たせ、明けたあとは待たせた分を間隔を空けて1件ずつ送ります。「再開する」で、待たせている配送をすぐに流せます。止めている間の配送は捨てずに待たせ、7日間応答が無ければ自動で配送停止になります。
-         */
-        "breakersNote": string;
-        /**
-         * {n}分
-         */
-        "minutes": ParameterizedString<"n">;
-        /**
-         * {n}時間
-         */
-        "hours": ParameterizedString<"n">;
-        /**
-         * 連合先の名簿ではありません。この期間に配送した相手だけが出ます。沈黙している相手は現れないので、一覧に無いことは正常を意味しません。
-         */
-        "deliverNote": string;
-        /**
-         * 連合先の名簿ではありません。この期間に受信した相手だけが出ます。沈黙している相手は現れないので、一覧に無いことは正常を意味しません。ブロックしたホストからの受信は意図した拒否ですが、成功率には失敗として数えます。
-         */
-        "inboxNote": string;
-        "_hints": {
-            /**
-             * 正常に受理されています。
-             */
-            "success": string;
-            /**
-             * 相手がもう存在しません。再送しません。
-             */
-            "gone": string;
-            /**
-             * 相手は健在で、流量を絞っているだけです。指定された間隔だけ、この相手への配送を待たせます。
-             */
-            "rateLimited": string;
-            /**
-             * 投函が受理されていません。署名や形式のほか、相手のbot対策で弾かれている場合もあります。再送しません。
-             */
-            "clientError": string;
-            /**
-             * 相手側の一時障害です。再送します。続くと配送を止め、ときどき試して復旧したら再開します。長引くようなら相手に連絡してください。
-             */
-            "serverError": string;
-            /**
-             * HTTP応答に至っていません。DNS・TCP・TLS・タイムアウトのいずれかです。再送します。続くと配送を止め、ときどき試して復旧したら再開します。
-             */
-            "transport": string;
-            /**
-             * 受理しました。
-             */
-            "accepted": string;
-            /**
-             * こちらが対応していない種類の活動です。相手は正しく送っているので異常ではありません。
-             */
-            "unsupported": string;
-            /**
-             * 処理済みの活動が再送されました。正常な二重配送でも起きますが、急に増えたら再投函を試されている合図です。
-             */
-            "duplicate": string;
-            /**
-             * HTTP署名を検証できませんでした。相手の鍵が変わったか、署名の実装が壊れています。
-             */
-            "signatureFailed": string;
-            /**
-             * 管理者がブロックしているホストです。意図した拒否ですが、成功率には失敗として数えます。
-             */
-            "blocked": string;
-            /**
-             * 署名者と本文のactorが食い違っています。なりすまし対策で拒否しました。
-             */
-            "actorUnauthorized": string;
-            /**
-             * LD-Signatureを検証できませんでした。
-             */
-            "ldSignatureFailed": string;
-            /**
-             * 処理中に失敗しました。再試行されます。
-             */
-            "processingError": string;
-        };
-    };
-    "_goneInstances": {
-        /**
-         * 消えたサーバー
-         */
-        "tab": string;
-        /**
-         * 共有の受け口が410を返し、もう存在しないと判定して配送を止めているサーバーです。そのサーバーの利用者とのフォロー関係は自動では消えないので、ここで片付けられます。
-         */
-        "description": string;
-        /**
-         * 消えたサーバーの一覧を取得できませんでした。この backend が対応していないか、権限がありません。
-         */
-        "unavailable": string;
-        /**
-         * 消えたサーバーはありません。
-         */
-        "none": string;
-        /**
-         * 消えたと判定した日時
-         */
-        "goneSince": string;
-        /**
-         * 不明
-         */
-        "unknown": string;
-        /**
-         * 相手からのフォロー{followers}件・相手へのフォロー{following}件・フォローリクエスト{requests}件
-         */
-        "relations": ParameterizedString<"followers" | "following" | "requests">;
-        /**
-         * フォロー関係を片付ける
-         */
-        "clean": string;
-        /**
-         * {host}の利用者とのフォロー関係を片付けますか？相手からのフォロー{followers}件と相手へのフォロー{following}件を解除し、フォローリクエスト{requests}件を消します。元に戻せません。利用者への通知やWebhookは出ません。
-         */
-        "cleanConfirm": ParameterizedString<"host" | "followers" | "following" | "requests">;
-        /**
-         * 片付けました（相手からのフォロー{followers}件・相手へのフォロー{following}件・フォローリクエスト{requests}件）
-         */
-        "cleaned": ParameterizedString<"followers" | "following" | "requests">;
-        /**
-         * まだ{n}件残っています。もう一度実行してください。
-         */
-        "remaining": ParameterizedString<"n">;
-        /**
-         * このサーバーはもう消えたサーバーとして扱われていません（配送停止の状態が変更されています）。途中まで片付けていた場合、その件数は監査ログに記録されています。一覧を読み直しました。
-         */
-        "notGone": string;
-        /**
-         * このサーバーの片付けは別の操作で実行中です。終わってから一覧を読み直してください。
-         */
-        "inProgress": string;
-    };
-    "_backups": {
-        /**
-         * バックアップ
-         */
-        "title": string;
-        /**
-         * データベースのバックアップの世代と、保存先の使用量を表示し、取得・検証・削除・ダウンロードを行います。バックアップには利用者の秘密鍵・トークン・パスワードのハッシュが含まれるため、表示を含む全ての操作で、その都度パスワードと二段階認証（またはパスキー）による認証を求めます。
-         */
-        "description": string;
-        /**
-         * この機能を使うには、二段階認証（TOTP）かパスキーを登録してください。
-         */
-        "twoFactorRequired": string;
-        /**
-         * セキュリティの設定を開く
-         */
-        "openSecuritySettings": string;
-        /**
-         * 認証して表示
-         */
-        "show": string;
-        /**
-         * 認証して再読み込み
-         */
-        "reload": string;
-        /**
-         * パスキーで認証する
-         */
-        "usePasskey": string;
-        /**
-         * バックアップの保存先が設定されていません。設定ファイルの「backup:」を確認してください。
-         */
-        "notConfigured": string;
-        /**
-         * バックアップ用のサービスが設定されていないため、ここからは取得・検証できません（backup.server.serviceUrl）。
-         */
-        "serviceNotConfigured": string;
-        /**
-         * バックアップ用のサービスに接続できません。
-         */
-        "serviceUnreachable": string;
-        /**
-         * バックアップ用のサービスが別の処理を実行中です。しばらくしてから再度お試しください。
-         */
-        "serviceBusy": string;
-        /**
-         * バックアップ用のサービスが処理を実行中です。
-         */
-        "serviceRunning": string;
-        /**
-         * パスワードまたは二段階認証のコードが正しくありません。
-         */
-        "reauthFailed": string;
-        /**
-         * パスワードと、二段階認証のコードかパスキーを入力してください。
-         */
-        "reauthRequired": string;
-        /**
-         * この二段階認証のコードは使用済みです。次のコードに切り替わるまで待つか、パスキーを使ってください。
-         */
-        "codeAlreadyUsed": string;
-        /**
-         * パスキーが登録されていないか、このサーバーではパスキーを使えません。
-         */
-        "passkeyUnavailable": string;
-        /**
-         * 認証の失敗が続いたため、しばらく操作できません。
-         */
-        "rateLimited": string;
-        /**
-         * 保存先
-         */
-        "storage": string;
-        /**
-         * 合計の容量
-         */
-        "totalSize": string;
-        /**
-         * 世代の数
-         */
-        "generationCount": string;
-        /**
-         * ファイルの数
-         */
-        "objectCount": string;
-        /**
-         * 月額の目安
-         */
-        "monthlyCost": string;
-        /**
-         * 1GBあたり{price}で計算
-         */
-        "monthlyCostDescription": ParameterizedString<"price">;
-        /**
-         * 次の定期実行
-         */
-        "nextRun": string;
-        /**
-         * 前回の取得
-         */
-        "lastTake": string;
-        /**
-         * 前回の検証
-         */
-        "lastVerify": string;
-        /**
-         * 使える最新の世代
-         */
-        "latestUsable": string;
-        /**
-         * 決められた間隔を過ぎても、使える新しい世代ができていません。
-         */
-        "overdue": string;
-        /**
-         * 通知を送れませんでした
-         */
-        "lastNotifyError": string;
-        /**
-         * なし
-         */
-        "none": string;
-        /**
-         * 今すぐ取得
-         */
-        "takeNow": string;
-        /**
-         * 今すぐバックアップを取得しますか？
-         */
-        "takeConfirm": string;
-        /**
-         * バックアップの取得を依頼しました。完了すると一覧に表示されます。
-         */
-        "takeAccepted": string;
-        /**
-         * 検証
-         */
-        "verifyNow": string;
-        /**
-         * 検証を依頼しました。完了すると結果が表示されます。
-         */
-        "verifyAccepted": string;
-        /**
-         * ダウンロード
-         */
-        "download": string;
-        /**
-         * ダウンロード用のURLは{minutes}分間だけ有効です。
-         */
-        "downloadDescription": ParameterizedString<"minutes">;
-        /**
-         * この世代は暗号化されています。復号にはageの秘密鍵が必要です。
-         */
-        "encryptedDownload": string;
-        /**
-         * {id} を削除しますか？この操作は取り消せません。
-         */
-        "deleteConfirm": ParameterizedString<"id">;
-        /**
-         * 削除しました（{size}）。
-         */
-        "deleted": ParameterizedString<"size">;
-        /**
-         * バックアップの世代はありません。
-         */
-        "empty": string;
-        /**
-         * 未完成
-         */
-        "incomplete": string;
-        /**
-         * 送信が途中で止まった世代です。容量を使っているので、不要なら削除してください。
-         */
-        "incompleteDescription": string;
-        /**
-         * 暗号化
-         */
-        "encrypted": string;
-        /**
-         * 暗号化なし
-         */
-        "notEncrypted": string;
-        /**
-         * 検証済み
-         */
-        "verified": string;
-        /**
-         * 検証に失敗
-         */
-        "verifyFailed": string;
-        /**
-         * 未検証
-         */
-        "notVerified": string;
-        /**
-         * 取得した日時
-         */
-        "createdAt": string;
-        /**
-         * 大きさ
-         */
-        "size": string;
-        /**
-         * Elythiaの版
-         */
-        "elythiaVersion": string;
-        /**
-         * PostgreSQLの版
-         */
-        "postgresVersion": string;
-        /**
-         * 管理表の番号
-         */
-        "migrations": string;
-        /**
-         * 検証した日時
-         */
-        "verifiedAt": string;
-        /**
-         * この世代へ戻す
-         */
-        "restore": string;
-        /**
-         * バックアップから戻す
-         */
-        "restoreTitle": string;
-        /**
-         * 世代 {id} を別の名前のデータベースへ戻して、切り替える準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。
-         */
-        "restoreConfirm": ParameterizedString<"id">;
-        /**
-         * 切り替える
-         */
-        "restoreSwitch": string;
-        /**
-         * メンテナンスに入り、データベースを切り替えます。切り替えが終わるまで、利用者はサーバーを使えません。今のデータベースは {before} という名前で残ります。続けますか？
-         */
-        "restoreSwitchConfirm": ParameterizedString<"before">;
-        /**
-         * 中止
-         */
-        "restoreAbort": string;
-        /**
-         * 準備したデータベースを削除して、中止しますか？
-         */
-        "restoreAbortConfirm": string;
-        /**
-         * 閉じる
-         */
-        "restoreClose": string;
-        /**
-         * 切り替えの間は、この画面を開いたままにしてください。再読み込みするとメンテナンスの画面になり、終わると戻ります。
-         */
-        "restoreKeepOpen": string;
-        /**
-         * データベースを切り替えたかどうか分からなくなったため、メンテナンスのまま止めています。サーバーの管理者がpg_databaseを確かめ、elythia backup restore -rollbackとelythia maintenance exitで戻してください。
-         */
-        "restoreUnknownHelp": string;
-        /**
-         * データベースへの接続が残っています
-         */
-        "restoreWaiting": string;
-        /**
-         * 進み具合を読めません。しばらくしてから自動で読み直します。
-         */
-        "restoreStatusUnavailable": string;
-        /**
-         * 戻したデータベースにこのセッションが無いときは、ほかの画面を開くとサインインし直すよう求められます。
-         */
-        "restoreSessionMayBeGone": string;
-        /**
-         * このセッションでは進み具合を読めなくなりました。戻したデータベースにこのセッションが無い可能性があります。サインインし直してください。サインインし直した後は、この戻す操作の進み具合をここでは読めないので、サーバーのログで確かめてください。
-         */
-        "restoreSessionGone": string;
-        /**
-         * 検証に通っていない世代は、ここからは戻せません。先に検証してください。
-         */
-        "restoreNotVerified": string;
-        /**
-         * すでにメンテナンス中です。
-         */
-        "maintenanceActive": string;
-        /**
-         * バックアップ用のサービスと、サーバーのプロセスの版が違います。版を揃えてから戻してください。
-         */
-        "versionMismatch": string;
-        /**
-         * 読み取りレプリカを使う構成では、ここからは戻せません。elythia backup restoreを使ってください。
-         */
-        "restoreNotSupported": string;
-        /**
-         * 今の段階では、この操作はできません。
-         */
-        "restoreStepMismatch": string;
-        /**
-         * この戻す操作は、別のセッションから始められたものです。
-         */
-        "restoreTicketInvalid": string;
-        /**
-         * バックアップ用のサービスでは、ここからの戻す操作を使えません。
-         */
-        "restoreUnavailable": string;
-        /**
-         * 退避したデータベース
-         */
-        "keptTitle": string;
-        /**
-         * バックアップから戻したときやロールバックしたときに、それまでのデータベースを消さずに残したものです。選んだものへ戻せます（ロールバック）。そのときも、今のデータベースは消さずに別の名前で残します。
-         */
-        "keptDescription": string;
-        /**
-         * 認証して表示
-         */
-        "keptShow": string;
-        /**
-         * 退避したデータベースはありません。
-         */
-        "keptEmpty": string;
-        /**
-         * バックアップから戻す前のデータベース
-         */
-        "keptBeforeRestore": string;
-        /**
-         * ロールバックで退避したデータベース
-         */
-        "keptRolledBack": string;
-        /**
-         * 退避した日時
-         */
-        "keptAt": string;
-        /**
-         * 今の版より古いデータベースです。戻す前に、管理表の番号を今の版まで進めます（migrate）。
-         */
-        "keptNeedsMigration": string;
-        /**
-         * 戻す先のデータベースに接続が残っています。接続を切ってから、もう一度お試しください。
-         */
-        "keptInUse": string;
-        /**
-         * 退避したデータベースの一覧を読めませんでした。バックアップ用のサービスのログを確かめてください。
-         */
-        "keptUnreadable": string;
-        /**
-         * その退避したデータベースはありません。
-         */
-        "noSuchKept": string;
-        "_keptProblems": {
-            /**
-             * 今のElythiaより新しい版のデータベースなので、戻せません。Elythiaをその版以上に上げてください。
-             */
-            "migrationTooNew": string;
-            /**
-             * 管理表の更新が途中で止まっている（dirty）ので、戻せません。サーバーの管理者が、このデータベースの管理表を直してから戻してください（手順はドキュメントの「退避したDBへ戻す」）。
-             */
-            "migrationDirty": string;
-            /**
-             * Elythiaのデータベースではないので、戻せません。
-             */
-            "notElythia": string;
-            /**
-             * このデータベースを読めませんでした。
-             */
-            "unreadable": string;
-        };
-        /**
-         * このデータベースへ戻す
-         */
-        "rollback": string;
-        /**
-         * 退避したデータベースへ戻す
-         */
-        "rollbackTitle": string;
-        /**
-         * {name}へ戻す準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。認証は今のデータベース（{database}）に登録されているパスワードと二段階認証で行います。
-         */
-        "rollbackConfirm": ParameterizedString<"name" | "database">;
-        /**
-         * ロールバックを中止しますか？戻す先のデータベースは、そのまま残ります。
-         */
-        "rollbackAbortConfirm": string;
-        /**
-         * 今のデータベースに、あなたのパスワードや二段階認証、管理者の役割が無い可能性があります（戻したバックアップより後に設定した場合など）。そのときは、この画面からは戻せません。サーバーの管理者が本体を止めてから、次のコマンドで戻してください。
-         * {command}
-         */
-        "rollbackCli": ParameterizedString<"command">;
-        /**
-         * バックアップから戻した直後で、今のデータベースに二段階認証が登録されていないときは、退避したデータベースへ戻す操作をelythia backup restore -rollbackで行ってください。
-         */
-        "rollbackCliHint": string;
-        "_restoreSteps": {
-            /**
-             * 準備中
-             */
-            "preparing": string;
-            /**
-             * 切り替えの準備ができました
-             */
-            "ready": string;
-            /**
-             * メンテナンスに入っています
-             */
-            "entering": string;
-            /**
-             * 切り替えました
-             */
-            "switched": string;
-            /**
-             * サーバーが戻るのを待っています
-             */
-            "resuming": string;
-            /**
-             * 元のデータベースへ戻しています
-             */
-            "reverting": string;
-            /**
-             * 中止しています
-             */
-            "aborting": string;
-            /**
-             * 戻しました
-             */
-            "done": string;
-            /**
-             * 準備に失敗しました
-             */
-            "failed": string;
-            /**
-             * 期限までに切り替えなかったため、中止しました
-             */
-            "expired": string;
-            /**
-             * 中止しました（今のデータベースは変わっていません）
-             */
-            "aborted": string;
-            /**
-             * 元のデータベースへ戻しました
-             */
-            "reverted": string;
-            /**
-             * 止まりました（確認が必要です）
-             */
-            "unknown": string;
-        };
-    };
-    "_databaseHealth": {
-        /**
-         * テーブル
-         */
-        "tabTables": string;
-        /**
-         * 健全性
-         */
-        "tabHealth": string;
-        /**
-         * PostgreSQLの統計から、使われていないインデックスと、テーブルごとの不要な行（dead tuple）やVACUUMの状況を表示します。判断の材料を出すだけで、何も削除しません。サーバーは統計を1分間保持するので、開き直しても1分以内は同じ内容です。
-         */
-        "description": string;
-        /**
-         * 統計を取得できませんでした。
-         */
-        "unavailable": string;
-        /**
-         * 取得した日時
-         */
-        "generatedAt": string;
-        /**
-         * 統計をリセットした記録
-         */
-        "statsReset": string;
-        /**
-         * 記録はありません
-         */
-        "statsNeverReset": string;
-        /**
-         * インデックスの利用回数は、統計が消えてから数えています。統計はリセットのほか、異常終了やフェイルオーバーでも消えますが、そのときは上の記録が変わりません。統計が消えた直後は、使われているインデックスも「使われていない」と表示されます（通常の再起動では消えません）。
-         */
-        "statsResetCaption": string;
-        /**
-         * 読み取りレプリカが有効です。統計はプライマリから読むため、レプリカで使われているインデックスも「使われていない」と表示されます。
-         */
-        "replicasNote": string;
-        /**
-         * 使われていないインデックス
-         */
-        "unusedIndexes": string;
-        /**
-         * 書き込みのたびに更新する手間だけがかかっています。ただし、外部キーで参照されている行を削除するとき（アカウントの削除など）にだけ使われるインデックスもあり、消すとその処理が遅くなります。消すかどうかは、下の注意も確かめてから判断してください。
-         */
-        "unusedIndexesCaption": string;
-        /**
-         * 使われていないインデックスはありません。
-         */
-        "noUnusedIndexes": string;
-        /**
-         * 制約を支えています（削除できません）
-         */
-        "constraint": string;
-        /**
-         * テーブル
-         */
-        "tables": string;
-        /**
-         * 不要な行の割合が高いテーブルや、自動VACUUMが走るはずの量を超えても長くVACUUMされていないテーブルは、放置すると膨らみ続けて性能が落ちます。サイズは最後のVACUUM・ANALYZEの時点の見積もりです（TOASTの分はVACUUMの時点）。
-         */
-        "tablesCaption": string;
-        /**
-         * サイズ不明（まだVACUUM・ANALYZEされていません）
-         */
-        "sizeUnknown": string;
-        /**
-         * VACUUM中
-         */
-        "vacuuming": string;
-        /**
-         * 不要な行 {n}件（{ratio}%）
-         */
-        "deadRows": ParameterizedString<"n" | "ratio">;
-        /**
-         * 有効な行 {n}件
-         */
-        "liveRows": ParameterizedString<"n">;
-        /**
-         * 最後のVACUUM
-         */
-        "lastVacuum": string;
-        /**
-         * 最後のANALYZE
-         */
-        "lastAnalyze": string;
-        /**
-         * まだありません
-         */
-        "never": string;
-        /**
-         * 要確認
-         */
-        "needsAttention": string;
-        /**
-         * 不要な行の割合が高い
-         */
-        "problemBloat": string;
-        /**
-         * 自動VACUUMが走るはずの量を超えても、長くVACUUMされていない
-         */
-        "problemVacuum": string;
-    };
-    "_federationRules": {
-        /**
-         * ルール
-         */
-        "tab": string;
-        /**
-         * 受信した投稿やactivityに、条件と動作の組を当てはめます。サーバー単位のブロックやサイレンスより細かい判断に使い、それらと併せて効きます。まず「記録だけ」で当たり具合を確かめてから「有効」にしてください。
-         */
-        "description": string;
-        /**
-         * ルールを取得できませんでした。このbackendが対応していないか、権限がありません。
-         */
-        "unavailable": string;
-        /**
-         * ルールはありません。
-         */
-        "none": string;
-        /**
-         * ルールの変更は管理者だけができます。
-         */
-        "readOnly": string;
-        /**
-         * ルールを追加
-         */
-        "add": string;
-        /**
-         * 名前のないルール
-         */
-        "untitled": string;
-        /**
-         * 名前
-         */
-        "name": string;
-        /**
-         * 動作
-         */
-        "mode": string;
-        /**
-         * 無効
-         */
-        "modeDisabled": string;
-        /**
-         * 記録だけ
-         */
-        "modeRecord": string;
-        /**
-         * 有効
-         */
-        "modeEnforce": string;
-        /**
-         * 「記録だけ」は当たった投稿やactivityを記録するだけで、何も変えません。
-         */
-        "modeCaption": string;
-        /**
-         * 対象
-         */
-        "target": string;
-        /**
-         * 投稿
-         */
-        "targetNote": string;
-        /**
-         * activity
-         */
-        "targetActivity": string;
-        /**
-         * 「投稿」は本文や添付まで見て、拒否や書き換えができます。ブーストや返信先として取り込む投稿と、編集にも効きます。「activity」はフォローやリアクションなどを種類で見て、拒否だけができます。
-         */
-        "targetCaption": string;
-        /**
-         * 評価順
-         */
-        "position": string;
-        /**
-         * 小さいものから順に評価します。付けるCWの文言は最初に当たったルールのものを使います。
-         */
-        "positionCaption": string;
-        /**
-         * 条件
-         */
-        "conditions": string;
-        /**
-         * 指定した条件をすべて満たすと当たります。複数行の欄は、どれか1行に当たれば満たします。
-         */
-        "conditionsCaption": string;
-        /**
-         * サーバー
-         */
-        "hosts": string;
-        /**
-         * 1行に1つ。サブドメインも含みます（ブロックと同じ書き方です）。
-         */
-        "hostsCaption": string;
-        /**
-         * activityの種類
-         */
-        "activityTypes": string;
-        /**
-         * botかどうか
-         */
-        "isBot": string;
-        /**
-         * 問わない
-         */
-        "any": string;
-        /**
-         * botだけ
-         */
-        "bot": string;
-        /**
-         * bot以外
-         */
-        "notBot": string;
-        /**
-         * 初めて見てからの時間
-         */
-        "newWithinHours": string;
-        /**
-         * このサーバーが初めて見てから指定した時間（時間単位）以内のアカウントに当たります。空欄なら問いません。
-         */
-        "newWithinHoursCaption": string;
-        /**
-         * 本文・CWのパターン
-         */
-        "patterns": string;
-        /**
-         * 禁止ワードと同じ書き方です。1行に1つで、スペースで区切るとすべてを含むものに当たり、/で囲むと正規表現になります。
-         */
-        "patternsCaption": string;
-        /**
-         * 添付
-         */
-        "hasAttachment": string;
-        /**
-         * 添付あり
-         */
-        "withAttachment": string;
-        /**
-         * 添付なし
-         */
-        "withoutAttachment": string;
-        /**
-         * ハッシュタグ
-         */
-        "tags": string;
-        /**
-         * 1行に1つ。#は付けても付けなくても構いません。
-         */
-        "tagsCaption": string;
-        /**
-         * 動作
-         */
-        "actions": string;
-        /**
-         * 拒否する
-         */
-        "reject": string;
-        /**
-         * メディアを落とす
-         */
-        "stripMedia": string;
-        /**
-         * 添付をセンシティブにする
-         */
-        "sensitive": string;
-        /**
-         * その人が同じ画像を添付した他の投稿でもセンシティブになります。
-         */
-        "sensitiveCaption": string;
-        /**
-         * タイムラインから外す
-         */
-        "unlist": string;
-        /**
-         * サイレンスと同じく、公開の投稿をホームに落とします。
-         */
-        "unlistCaption": string;
-        /**
-         * 付けるCW
-         */
-        "cw": string;
-        /**
-         * CWの無い投稿に付けます。送信者が付けたCWは上書きしません。
-         */
-        "cwCaption": string;
-        /**
-         * 直近24時間に当たった件数: {n}
-         */
-        "hits": ParameterizedString<"n">;
-        /**
-         * 当たった記録を見る
-         */
-        "showHits": string;
-        /**
-         * 記録はありません。
-         */
-        "noHits": string;
-        /**
-         * 適用
-         */
-        "applied": string;
-        /**
-         * 記録のみ
-         */
-        "recordedOnly": string;
-        /**
-         * ルール「{name}」を削除しますか？当たった記録も消えます。
-         */
-        "deleteConfirm": ParameterizedString<"name">;
-        /**
-         * 条件を変えると、それまでに当たった記録は消えます。
-         */
-        "conditionsResetNote": string;
-        /**
-         * 「{field}」には0以上の整数を入れてください。
-         */
-        "invalidNumber": ParameterizedString<"field">;
-    };
-    "_federationCheck": {
-        /**
-         * 疎通の診断
-         */
-        "tab": string;
-        /**
-         * このサーバーから相手へ実際に接続して、連合に必要な窓口が応答するかを1回だけ確かめます。相手へ投稿や配送は送りません。
-         */
-        "description": string;
-        /**
-         * 確かめるアカウント
-         */
-        "account": string;
-        /**
-         * 省略すると、このサーバーが知っている相手のユーザーを使います。相手のユーザーを知らないときは、アカウント名を指定すると確かめられる項目が増えます。
-         */
-        "accountCaption": string;
-        /**
-         * 診断する
-         */
-        "run": string;
-        /**
-         * 診断しています…
-         */
-        "running": string;
-        /**
-         * 問題は見つかりませんでした
-         */
-        "allOk": string;
-        /**
-         * 連合を妨げている問題があります
-         */
-        "hasFailure": string;
-        /**
-         * 注意が必要な項目があります
-         */
-        "hasWarning": string;
-        /**
-         * このサーバー自身はここでは診断できません。
-         */
-        "cannotCheckSelf": string;
-        "_status": {
-            /**
-             * 問題なし
-             */
-            "ok": string;
-            /**
-             * 注意
-             */
-            "warn": string;
-            /**
-             * 問題あり
-             */
-            "fail": string;
-            /**
-             * 確かめられず
-             */
-            "skip": string;
-        };
-        "_names": {
-            /**
-             * このサーバーの設定
-             */
-            "policy": string;
-            /**
-             * サーバー情報 (nodeinfo)
-             */
-            "nodeinfo": string;
-            /**
-             * アカウントの検索 (WebFinger)
-             */
-            "webfinger": string;
-            /**
-             * アカウントの情報 (actor)
-             */
-            "actor": string;
-            /**
-             * 署名付きの取得
-             */
-            "authorized-fetch": string;
-            /**
-             * 配送の受け口 (inbox)
-             */
-            "inbox": string;
-            /**
-             * 署名方式
-             */
-            "signature": string;
-            /**
-             * 直近の配送
-             */
-            "delivery": string;
-        };
-    };
-    "_remoteEmojiImport": {
-        /**
-         * 相手のサーバーからは詳細を取得できないため、カテゴリやタグは手で入力してください。
-         */
-        "unsupported": string;
-        /**
-         * 相手のサーバーから詳細を取得できませんでした。手で入力するか、時間をおいて試してください。
-         */
-        "fetchFailed": string;
-        /**
-         * スペース区切りで入力します。
-         */
-        "aliasesCaption": string;
-        /**
-         * 英数字とアンダースコアのみ、128 文字以内。
-         */
-        "nameCaption": string;
-        /**
-         * この名前はそのままでは使えません。直してからインポートしてください。
-         */
-        "invalidName": string;
-        /**
-         * 名前をそのままでは使えない絵文字が含まれています。その絵文字は個別にインポートして名前を直してください。
-         */
-        "invalidNameBulk": string;
-    };
     "_displayOfSensitiveMedia": {
         /**
          * センシティブ設定されたメディアを隠す
@@ -12213,10 +10816,6 @@ export interface Locale extends ILocale {
          */
         "pageSetting": string;
         /**
-         * 非公開にすると、自分以外の人は、URLを知っていても見られません。
-         */
-        "visibilityDescription": string;
-        /**
          * 指定されたページURLは既に存在しています
          */
         "nameAlreadyExists": string;
@@ -12388,6 +10987,10 @@ export interface Locale extends ILocale {
                 "detailed": string;
             };
         };
+        /**
+         * 非公開にすると、自分以外の人は、URLを知っていても見られません。
+         */
+        "visibilityDescription": string;
     };
     "_relayStatus": {
         /**
@@ -12973,70 +11576,6 @@ export interface Locale extends ILocale {
     };
     "_moderationLogTypes": {
         /**
-         * バックアップの一覧を表示
-         */
-        "listBackups": string;
-        /**
-         * バックアップを取得
-         */
-        "takeBackup": string;
-        /**
-         * バックアップを検証
-         */
-        "verifyBackup": string;
-        /**
-         * バックアップを削除
-         */
-        "deleteBackup": string;
-        /**
-         * バックアップをダウンロード
-         */
-        "downloadBackup": string;
-        /**
-         * バックアップから戻す
-         */
-        "restoreBackup": string;
-        /**
-         * 退避したデータベースへ戻す
-         */
-        "rollbackBackup": string;
-        /**
-         * 退避したデータベースの一覧を表示
-         */
-        "listKeptDatabases": string;
-        /**
-         * 絵文字申請枠をリセット
-         */
-        "resetEmojiApplicationQuota": string;
-        /**
-         * 消えたサーバーとのフォロー関係を片付け
-         */
-        "cleanGoneInstance": string;
-        /**
-         * 配送の停止を解除
-         */
-        "closeDeliveryBreaker": string;
-        /**
-         * 登録の申請を承認
-         */
-        "approveSignupApplication": string;
-        /**
-         * 登録の申請を却下
-         */
-        "rejectSignupApplication": string;
-        /**
-         * 連合のルールを作成
-         */
-        "createFederationRule": string;
-        /**
-         * 連合のルールを更新
-         */
-        "updateFederationRule": string;
-        /**
-         * 連合のルールを削除
-         */
-        "deleteFederationRule": string;
-        /**
          * ジョブキューをクリア
          */
         "clearQueue": string;
@@ -13248,6 +11787,70 @@ export interface Locale extends ILocale {
          * プロキシアカウントの説明を更新
          */
         "updateProxyAccountDescription": string;
+        /**
+         * バックアップの一覧を表示
+         */
+        "listBackups": string;
+        /**
+         * バックアップを取得
+         */
+        "takeBackup": string;
+        /**
+         * バックアップを検証
+         */
+        "verifyBackup": string;
+        /**
+         * バックアップを削除
+         */
+        "deleteBackup": string;
+        /**
+         * バックアップをダウンロード
+         */
+        "downloadBackup": string;
+        /**
+         * バックアップから戻す
+         */
+        "restoreBackup": string;
+        /**
+         * 退避したデータベースへ戻す
+         */
+        "rollbackBackup": string;
+        /**
+         * 退避したデータベースの一覧を表示
+         */
+        "listKeptDatabases": string;
+        /**
+         * 絵文字申請枠をリセット
+         */
+        "resetEmojiApplicationQuota": string;
+        /**
+         * 消えたサーバーとのフォロー関係を片付け
+         */
+        "cleanGoneInstance": string;
+        /**
+         * 配送の停止を解除
+         */
+        "closeDeliveryBreaker": string;
+        /**
+         * 登録の申請を承認
+         */
+        "approveSignupApplication": string;
+        /**
+         * 登録の申請を却下
+         */
+        "rejectSignupApplication": string;
+        /**
+         * 連合のルールを作成
+         */
+        "createFederationRule": string;
+        /**
+         * 連合のルールを更新
+         */
+        "updateFederationRule": string;
+        /**
+         * 連合のルールを削除
+         */
+        "deleteFederationRule": string;
     };
     "_fileViewer": {
         /**
@@ -14966,6 +13569,1403 @@ export interface Locale extends ILocale {
          */
         "mfm": string;
     };
+    /**
+     * Elythiaについて
+     */
+    "aboutMkGo": string;
+    /**
+     * {n}文字以上にしてください
+     */
+    "usernameTooShort": ParameterizedString<"n">;
+    /**
+     * リレー投稿の一時保存
+     */
+    "ephemeralRelayNotes": string;
+    /**
+     * リレー経由の投稿を一時保存にする
+     */
+    "enableEphemeralRelayNotes": string;
+    /**
+     * リレー経由でしか届かない投稿を、データベースに残さずキャッシュに置きます。誰も反応しなかった投稿は期限が来ると自動的に消えるため、データベースが肥大化しません。リアクションや返信など何らかの操作をした時点で、通常の投稿として保存されます。
+     */
+    "enableEphemeralRelayNotesDescription": string;
+    /**
+     * 保存期間
+     */
+    "ephemeralRelayNoteTtl": string;
+    /**
+     * キャッシュに置いておく時間です。これを過ぎた投稿は、誰も操作していなければ消えます。
+     */
+    "ephemeralRelayNoteTtlDescription": string;
+    /**
+     * 有効にすると、グローバルタイムラインをこの保存期間より過去に遡れなくなります。
+     */
+    "ephemeralRelayNotesWarning": string;
+    /**
+     * リレー由来ユーザーの整理
+     */
+    "relayOrphanUserCleanup": string;
+    /**
+     * 誰とも関わりのないユーザーを削除する
+     */
+    "enableRelayOrphanUserCleanup": string;
+    /**
+     * リレー経由でしか見かけなかったユーザーのうち、投稿もリアクションもフォロー関係も残っていないものを毎日削除します。再び見かければ自動的に取得し直すので、表示に影響はありません。
+     */
+    "enableRelayOrphanUserCleanupDescription": string;
+    /**
+     * 猶予期間
+     */
+    "relayOrphanUserGraceDays": string;
+    /**
+     * 最後に見かけてからこの日数が経過したユーザーが対象です。短くしすぎると、活動中のユーザーを削除しては取得し直すことを繰り返すため、7日未満は設定できません。
+     */
+    "relayOrphanUserGraceDaysDescription": string;
+    /**
+     * リレーを購読する前から知っているユーザーや、プロフィールを開いたことのあるユーザーは対象外です。フォロー・ブロック・ミュートしている相手も削除されません。
+     */
+    "relayOrphanUserCleanupInfo": string;
+    /**
+     * Elythiaが更新されました！
+     */
+    "mkGoUpdated": string;
+    /**
+     * しばらく待ってから再試行してください
+     */
+    "rateLimitCooldown": string;
+    /**
+     * 秘密の値を入力し直してください
+     */
+    "secretReentryRequired": string;
+    /**
+     * 送り先(ホストやURLなど)を変えるときは、それと組になっているパスワードやキーも入力し直してください。保存済みの値は、新しい送り先には使いません。
+     */
+    "secretReentryRequiredDescription": string;
+    /**
+     * ユーザー名の最小文字数
+     */
+    "minimumUsernameLength": string;
+    /**
+     * アカウント作成時に必要なユーザー名の文字数の下限を1〜20で指定します。管理者によるアカウント作成時はこの制限を受けません。また、既に存在するアカウントも影響を受けません。
+     */
+    "minimumUsernameLengthDescription": string;
+    /**
+     * 夜空の流れ星
+     */
+    "nightMeteorEffect": string;
+    /**
+     * 夜（20時〜翌4時）にダークテーマを使っているとき、ときどき画面に流れ星が流れます。季節に応じた画面の演出が出ている間は流れません。
+     */
+    "nightMeteorEffectDescription": string;
+    /**
+     * リアクションの相乗りをできるようにする
+     */
+    "reactableRemoteReaction": string;
+    "_abuseReportForm": {
+        /**
+         * 違反カテゴリ
+         */
+        "category": string;
+        /**
+         * 違反カテゴリを選択してください
+         */
+        "categoryRequired": string;
+        /**
+         * 対象ユーザー
+         */
+        "targetUser": string;
+        /**
+         * 該当URL
+         */
+        "url": string;
+        /**
+         * 発生日時
+         */
+        "when": string;
+        /**
+         * 詳細
+         */
+        "details": string;
+        /**
+         * 詳細を入力してください
+         */
+        "detailsRequired": string;
+        /**
+         * 具体的な状況を記入してください
+         */
+        "detailsCaption": string;
+        /**
+         * 補足・証拠
+         */
+        "evidence": string;
+        /**
+         * スクリーンショットの説明や追加の経緯があれば記入してください
+         */
+        "evidenceCaption": string;
+        /**
+         * リノート元
+         */
+        "renoteSource": string;
+        /**
+         * 引用元ノート
+         */
+        "quoteSource": string;
+        /**
+         * 残り {n} 文字
+         */
+        "remainingChars": ParameterizedString<"n">;
+        /**
+         * 通報内容が長すぎます（{max} 文字以内）
+         */
+        "totalTooLong": ParameterizedString<"max">;
+        "_category": {
+            /**
+             * スパム
+             */
+            "spam": string;
+            /**
+             * 嫌がらせ・迷惑行為
+             */
+            "harassment": string;
+            /**
+             * なりすまし
+             */
+            "impersonation": string;
+            /**
+             * 違法・危険なコンテンツ
+             */
+            "illegal": string;
+            /**
+             * 著作権侵害
+             */
+            "copyright": string;
+            /**
+             * 個人情報の晒し
+             */
+            "doxxing": string;
+            /**
+             * その他
+             */
+            "other": string;
+        };
+        "_commentLabel": {
+            /**
+             * 【違反カテゴリ】
+             */
+            "category": string;
+            /**
+             * 【対象ユーザー】
+             */
+            "targetUser": string;
+            /**
+             * 【該当URL】
+             */
+            "url": string;
+            /**
+             * 【発生日時】
+             */
+            "when": string;
+            /**
+             * 【詳細】
+             */
+            "details": string;
+            /**
+             * 【補足・証拠】
+             */
+            "evidence": string;
+            /**
+             * 【リノート元】
+             */
+            "renoteSource": string;
+            /**
+             * 【引用元ノート】
+             */
+            "quoteSource": string;
+        };
+    };
+    "_aboutMkGo": {
+        /**
+         * このサーバーのソースコード
+         */
+        "sourceCodeOfThisServer": string;
+        /**
+         * このサーバーで実際に動作しているコードです。改変されている場合は、改変後のコードがここから入手できます。
+         */
+        "sourceCodeOfThisServerDescription": string;
+        /**
+         * Elythia本体(バックエンドとフロントエンド)
+         */
+        "sourceCodeOfMkGo": string;
+        /**
+         * ライセンス
+         */
+        "license": string;
+        /**
+         * Elythiaの開発はここで行っています。不具合の報告や提案も受け付けています。
+         */
+        "elythiaNetworkDescription": string;
+    };
+    "_federationHealth": {
+        /**
+         * 配送の健全性を取得できませんでした。この backend が対応していないか、権限がありません。
+         */
+        "unavailable": string;
+        /**
+         * 成功率
+         */
+        "successRate": string;
+        /**
+         * 対象ホスト
+         */
+        "hosts": string;
+        /**
+         * この期間に通信した相手のみ
+         */
+        "hostsCaption": string;
+        /**
+         * 失敗している相手
+         */
+        "degraded": string;
+        /**
+         * 集計する期間
+         */
+        "window": string;
+        /**
+         * 5分
+         */
+        "last5m": string;
+        /**
+         * 15分
+         */
+        "last15m": string;
+        /**
+         * 1時間
+         */
+        "last1h": string;
+        /**
+         * 失敗がある
+         */
+        "stateFailing": string;
+        /**
+         * 成功率95%未満
+         */
+        "stateDegraded": string;
+        /**
+         * 問題なし
+         */
+        "stateHealthy": string;
+        /**
+         * 失敗の多い順
+         */
+        "sortFailure": string;
+        /**
+         * 成功率の低い順
+         */
+        "sortRate": string;
+        /**
+         * p95の遅い順
+         */
+        "sortP95": string;
+        /**
+         * 通信量の多い順
+         */
+        "sortVolume": string;
+        /**
+         * 成功
+         */
+        "succeeded": string;
+        /**
+         * 失敗
+         */
+        "failed": string;
+        /**
+         * 超過
+         */
+        "overflow": string;
+        /**
+         * 応答なし
+         */
+        "noResponse": string;
+        /**
+         * この期間に失敗はありません。
+         */
+        "noFailures": string;
+        /**
+         * 期間外
+         */
+        "outsideWindow": string;
+        /**
+         * 失敗はありますが、直近のエラーが記録されていません。
+         */
+        "noRecordedError": string;
+        /**
+         * 条件に合う相手がいません。
+         */
+        "noHosts": string;
+        /**
+         * 集計の上限に達しているため、この一覧は全体の一部です（{n}件が対象外）。
+         */
+        "evicted": ParameterizedString<"n">;
+        /**
+         * 配送を止めている相手
+         */
+        "breakersTitle": string;
+        /**
+         * 停止中
+         */
+        "breakerOpen": string;
+        /**
+         * 間隔を空けている
+         */
+        "breakerThrottled": string;
+        /**
+         * 止めた時刻
+         */
+        "breakerOpenedAt": string;
+        /**
+         * 次に試す時刻
+         */
+        "breakerNextProbe": string;
+        /**
+         * 連続{failures}回失敗・{interval}ごとに試す
+         */
+        "breakerDetail": ParameterizedString<"failures" | "interval">;
+        /**
+         * 間隔を空ける期限
+         */
+        "breakerThrottledUntil": string;
+        /**
+         * 待たせた分を送っている
+         */
+        "breakerDraining": string;
+        /**
+         * 送り終わる見込み
+         */
+        "breakerReservedUntil": string;
+        /**
+         * 再開する
+         */
+        "breakerClose": string;
+        /**
+         * {host}への配送を再開しますか？待たせている配送は数分以内に送られます。相手がまだ応答しないか429を返せば、また止まります。
+         */
+        "breakerCloseConfirm": ParameterizedString<"host">;
+        /**
+         * 接続できないか5xxが続く相手への配送は止め、ときどき1件だけ試して、応答があれば自動で再開します。429を返した相手には指定された時間だけ配送を待たせ、明けたあとは待たせた分を間隔を空けて1件ずつ送ります。「再開する」で、待たせている配送をすぐに流せます。止めている間の配送は捨てずに待たせ、7日間応答が無ければ自動で配送停止になります。
+         */
+        "breakersNote": string;
+        /**
+         * {n}分
+         */
+        "minutes": ParameterizedString<"n">;
+        /**
+         * {n}時間
+         */
+        "hours": ParameterizedString<"n">;
+        /**
+         * 連合先の名簿ではありません。この期間に配送した相手だけが出ます。沈黙している相手は現れないので、一覧に無いことは正常を意味しません。
+         */
+        "deliverNote": string;
+        /**
+         * 連合先の名簿ではありません。この期間に受信した相手だけが出ます。沈黙している相手は現れないので、一覧に無いことは正常を意味しません。ブロックしたホストからの受信は意図した拒否ですが、成功率には失敗として数えます。
+         */
+        "inboxNote": string;
+        "_hints": {
+            /**
+             * 正常に受理されています。
+             */
+            "success": string;
+            /**
+             * 相手がもう存在しません。再送しません。
+             */
+            "gone": string;
+            /**
+             * 相手は健在で、流量を絞っているだけです。指定された間隔だけ、この相手への配送を待たせます。
+             */
+            "rateLimited": string;
+            /**
+             * 投函が受理されていません。署名や形式のほか、相手のbot対策で弾かれている場合もあります。再送しません。
+             */
+            "clientError": string;
+            /**
+             * 相手側の一時障害です。再送します。続くと配送を止め、ときどき試して復旧したら再開します。長引くようなら相手に連絡してください。
+             */
+            "serverError": string;
+            /**
+             * HTTP応答に至っていません。DNS・TCP・TLS・タイムアウトのいずれかです。再送します。続くと配送を止め、ときどき試して復旧したら再開します。
+             */
+            "transport": string;
+            /**
+             * 受理しました。
+             */
+            "accepted": string;
+            /**
+             * こちらが対応していない種類の活動です。相手は正しく送っているので異常ではありません。
+             */
+            "unsupported": string;
+            /**
+             * 処理済みの活動が再送されました。正常な二重配送でも起きますが、急に増えたら再投函を試されている合図です。
+             */
+            "duplicate": string;
+            /**
+             * HTTP署名を検証できませんでした。相手の鍵が変わったか、署名の実装が壊れています。
+             */
+            "signatureFailed": string;
+            /**
+             * 管理者がブロックしているホストです。意図した拒否ですが、成功率には失敗として数えます。
+             */
+            "blocked": string;
+            /**
+             * 署名者と本文のactorが食い違っています。なりすまし対策で拒否しました。
+             */
+            "actorUnauthorized": string;
+            /**
+             * LD-Signatureを検証できませんでした。
+             */
+            "ldSignatureFailed": string;
+            /**
+             * 処理中に失敗しました。再試行されます。
+             */
+            "processingError": string;
+        };
+    };
+    "_goneInstances": {
+        /**
+         * 消えたサーバー
+         */
+        "tab": string;
+        /**
+         * 共有の受け口が410を返し、もう存在しないと判定して配送を止めているサーバーです。そのサーバーの利用者とのフォロー関係は自動では消えないので、ここで片付けられます。
+         */
+        "description": string;
+        /**
+         * 消えたサーバーの一覧を取得できませんでした。この backend が対応していないか、権限がありません。
+         */
+        "unavailable": string;
+        /**
+         * 消えたサーバーはありません。
+         */
+        "none": string;
+        /**
+         * 消えたと判定した日時
+         */
+        "goneSince": string;
+        /**
+         * 不明
+         */
+        "unknown": string;
+        /**
+         * 相手からのフォロー{followers}件・相手へのフォロー{following}件・フォローリクエスト{requests}件
+         */
+        "relations": ParameterizedString<"followers" | "following" | "requests">;
+        /**
+         * フォロー関係を片付ける
+         */
+        "clean": string;
+        /**
+         * {host}の利用者とのフォロー関係を片付けますか？相手からのフォロー{followers}件と相手へのフォロー{following}件を解除し、フォローリクエスト{requests}件を消します。元に戻せません。利用者への通知やWebhookは出ません。
+         */
+        "cleanConfirm": ParameterizedString<"host" | "followers" | "following" | "requests">;
+        /**
+         * 片付けました（相手からのフォロー{followers}件・相手へのフォロー{following}件・フォローリクエスト{requests}件）
+         */
+        "cleaned": ParameterizedString<"followers" | "following" | "requests">;
+        /**
+         * まだ{n}件残っています。もう一度実行してください。
+         */
+        "remaining": ParameterizedString<"n">;
+        /**
+         * このサーバーはもう消えたサーバーとして扱われていません（配送停止の状態が変更されています）。途中まで片付けていた場合、その件数は監査ログに記録されています。一覧を読み直しました。
+         */
+        "notGone": string;
+        /**
+         * このサーバーの片付けは別の操作で実行中です。終わってから一覧を読み直してください。
+         */
+        "inProgress": string;
+    };
+    "_backups": {
+        /**
+         * バックアップ
+         */
+        "title": string;
+        /**
+         * データベースのバックアップの世代と、保存先の使用量を表示し、取得・検証・削除・ダウンロードを行います。バックアップには利用者の秘密鍵・トークン・パスワードのハッシュが含まれるため、表示を含む全ての操作で、その都度パスワードと二段階認証（またはパスキー）による認証を求めます。
+         */
+        "description": string;
+        /**
+         * この機能を使うには、二段階認証（TOTP）かパスキーを登録してください。
+         */
+        "twoFactorRequired": string;
+        /**
+         * セキュリティの設定を開く
+         */
+        "openSecuritySettings": string;
+        /**
+         * 認証して表示
+         */
+        "show": string;
+        /**
+         * 認証して再読み込み
+         */
+        "reload": string;
+        /**
+         * パスキーで認証する
+         */
+        "usePasskey": string;
+        /**
+         * バックアップの保存先が設定されていません。設定ファイルの「backup:」を確認してください。
+         */
+        "notConfigured": string;
+        /**
+         * バックアップ用のサービスが設定されていないため、ここからは取得・検証できません（backup.server.serviceUrl）。
+         */
+        "serviceNotConfigured": string;
+        /**
+         * バックアップ用のサービスに接続できません。
+         */
+        "serviceUnreachable": string;
+        /**
+         * バックアップ用のサービスが別の処理を実行中です。しばらくしてから再度お試しください。
+         */
+        "serviceBusy": string;
+        /**
+         * バックアップ用のサービスが処理を実行中です。
+         */
+        "serviceRunning": string;
+        /**
+         * パスワードまたは二段階認証のコードが正しくありません。
+         */
+        "reauthFailed": string;
+        /**
+         * パスワードと、二段階認証のコードかパスキーを入力してください。
+         */
+        "reauthRequired": string;
+        /**
+         * この二段階認証のコードは使用済みです。次のコードに切り替わるまで待つか、パスキーを使ってください。
+         */
+        "codeAlreadyUsed": string;
+        /**
+         * パスキーが登録されていないか、このサーバーではパスキーを使えません。
+         */
+        "passkeyUnavailable": string;
+        /**
+         * 認証の失敗が続いたため、しばらく操作できません。
+         */
+        "rateLimited": string;
+        /**
+         * 保存先
+         */
+        "storage": string;
+        /**
+         * 合計の容量
+         */
+        "totalSize": string;
+        /**
+         * 世代の数
+         */
+        "generationCount": string;
+        /**
+         * ファイルの数
+         */
+        "objectCount": string;
+        /**
+         * 月額の目安
+         */
+        "monthlyCost": string;
+        /**
+         * 1GBあたり{price}で計算
+         */
+        "monthlyCostDescription": ParameterizedString<"price">;
+        /**
+         * 次の定期実行
+         */
+        "nextRun": string;
+        /**
+         * 前回の取得
+         */
+        "lastTake": string;
+        /**
+         * 前回の検証
+         */
+        "lastVerify": string;
+        /**
+         * 使える最新の世代
+         */
+        "latestUsable": string;
+        /**
+         * 決められた間隔を過ぎても、使える新しい世代ができていません。
+         */
+        "overdue": string;
+        /**
+         * 通知を送れませんでした
+         */
+        "lastNotifyError": string;
+        /**
+         * なし
+         */
+        "none": string;
+        /**
+         * 今すぐ取得
+         */
+        "takeNow": string;
+        /**
+         * 今すぐバックアップを取得しますか？
+         */
+        "takeConfirm": string;
+        /**
+         * バックアップの取得を依頼しました。完了すると一覧に表示されます。
+         */
+        "takeAccepted": string;
+        /**
+         * 検証
+         */
+        "verifyNow": string;
+        /**
+         * 検証を依頼しました。完了すると結果が表示されます。
+         */
+        "verifyAccepted": string;
+        /**
+         * ダウンロード
+         */
+        "download": string;
+        /**
+         * ダウンロード用のURLは{minutes}分間だけ有効です。
+         */
+        "downloadDescription": ParameterizedString<"minutes">;
+        /**
+         * この世代は暗号化されています。復号にはageの秘密鍵が必要です。
+         */
+        "encryptedDownload": string;
+        /**
+         * {id} を削除しますか？この操作は取り消せません。
+         */
+        "deleteConfirm": ParameterizedString<"id">;
+        /**
+         * 削除しました（{size}）。
+         */
+        "deleted": ParameterizedString<"size">;
+        /**
+         * バックアップの世代はありません。
+         */
+        "empty": string;
+        /**
+         * 未完成
+         */
+        "incomplete": string;
+        /**
+         * 送信が途中で止まった世代です。容量を使っているので、不要なら削除してください。
+         */
+        "incompleteDescription": string;
+        /**
+         * 暗号化
+         */
+        "encrypted": string;
+        /**
+         * 暗号化なし
+         */
+        "notEncrypted": string;
+        /**
+         * 検証済み
+         */
+        "verified": string;
+        /**
+         * 検証に失敗
+         */
+        "verifyFailed": string;
+        /**
+         * 未検証
+         */
+        "notVerified": string;
+        /**
+         * 取得した日時
+         */
+        "createdAt": string;
+        /**
+         * 大きさ
+         */
+        "size": string;
+        /**
+         * Elythiaの版
+         */
+        "elythiaVersion": string;
+        /**
+         * PostgreSQLの版
+         */
+        "postgresVersion": string;
+        /**
+         * 管理表の番号
+         */
+        "migrations": string;
+        /**
+         * 検証した日時
+         */
+        "verifiedAt": string;
+        /**
+         * この世代へ戻す
+         */
+        "restore": string;
+        /**
+         * バックアップから戻す
+         */
+        "restoreTitle": string;
+        /**
+         * 世代 {id} を別の名前のデータベースへ戻して、切り替える準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。
+         */
+        "restoreConfirm": ParameterizedString<"id">;
+        /**
+         * 切り替える
+         */
+        "restoreSwitch": string;
+        /**
+         * メンテナンスに入り、データベースを切り替えます。切り替えが終わるまで、利用者はサーバーを使えません。今のデータベースは {before} という名前で残ります。続けますか？
+         */
+        "restoreSwitchConfirm": ParameterizedString<"before">;
+        /**
+         * 中止
+         */
+        "restoreAbort": string;
+        /**
+         * 準備したデータベースを削除して、中止しますか？
+         */
+        "restoreAbortConfirm": string;
+        /**
+         * 閉じる
+         */
+        "restoreClose": string;
+        /**
+         * 切り替えの間は、この画面を開いたままにしてください。再読み込みするとメンテナンスの画面になり、終わると戻ります。
+         */
+        "restoreKeepOpen": string;
+        /**
+         * データベースを切り替えたかどうか分からなくなったため、メンテナンスのまま止めています。サーバーの管理者がpg_databaseを確かめ、elythia backup restore -rollbackとelythia maintenance exitで戻してください。
+         */
+        "restoreUnknownHelp": string;
+        /**
+         * データベースへの接続が残っています
+         */
+        "restoreWaiting": string;
+        /**
+         * 進み具合を読めません。しばらくしてから自動で読み直します。
+         */
+        "restoreStatusUnavailable": string;
+        /**
+         * 戻したデータベースにこのセッションが無いときは、ほかの画面を開くとサインインし直すよう求められます。
+         */
+        "restoreSessionMayBeGone": string;
+        /**
+         * このセッションでは進み具合を読めなくなりました。戻したデータベースにこのセッションが無い可能性があります。サインインし直してください。サインインし直した後は、この戻す操作の進み具合をここでは読めないので、サーバーのログで確かめてください。
+         */
+        "restoreSessionGone": string;
+        /**
+         * 検証に通っていない世代は、ここからは戻せません。先に検証してください。
+         */
+        "restoreNotVerified": string;
+        /**
+         * すでにメンテナンス中です。
+         */
+        "maintenanceActive": string;
+        /**
+         * バックアップ用のサービスと、サーバーのプロセスの版が違います。版を揃えてから戻してください。
+         */
+        "versionMismatch": string;
+        /**
+         * 読み取りレプリカを使う構成では、ここからは戻せません。elythia backup restoreを使ってください。
+         */
+        "restoreNotSupported": string;
+        /**
+         * 今の段階では、この操作はできません。
+         */
+        "restoreStepMismatch": string;
+        /**
+         * この戻す操作は、別のセッションから始められたものです。
+         */
+        "restoreTicketInvalid": string;
+        /**
+         * バックアップ用のサービスでは、ここからの戻す操作を使えません。
+         */
+        "restoreUnavailable": string;
+        /**
+         * 退避したデータベース
+         */
+        "keptTitle": string;
+        /**
+         * バックアップから戻したときやロールバックしたときに、それまでのデータベースを消さずに残したものです。選んだものへ戻せます（ロールバック）。そのときも、今のデータベースは消さずに別の名前で残します。
+         */
+        "keptDescription": string;
+        /**
+         * 認証して表示
+         */
+        "keptShow": string;
+        /**
+         * 退避したデータベースはありません。
+         */
+        "keptEmpty": string;
+        /**
+         * バックアップから戻す前のデータベース
+         */
+        "keptBeforeRestore": string;
+        /**
+         * ロールバックで退避したデータベース
+         */
+        "keptRolledBack": string;
+        /**
+         * 退避した日時
+         */
+        "keptAt": string;
+        /**
+         * 今の版より古いデータベースです。戻す前に、管理表の番号を今の版まで進めます（migrate）。
+         */
+        "keptNeedsMigration": string;
+        /**
+         * 戻す先のデータベースに接続が残っています。接続を切ってから、もう一度お試しください。
+         */
+        "keptInUse": string;
+        /**
+         * 退避したデータベースの一覧を読めませんでした。バックアップ用のサービスのログを確かめてください。
+         */
+        "keptUnreadable": string;
+        /**
+         * その退避したデータベースはありません。
+         */
+        "noSuchKept": string;
+        "_keptProblems": {
+            /**
+             * 今のElythiaより新しい版のデータベースなので、戻せません。Elythiaをその版以上に上げてください。
+             */
+            "migrationTooNew": string;
+            /**
+             * 管理表の更新が途中で止まっている（dirty）ので、戻せません。サーバーの管理者が、このデータベースの管理表を直してから戻してください（手順はドキュメントの「退避したDBへ戻す」）。
+             */
+            "migrationDirty": string;
+            /**
+             * Elythiaのデータベースではないので、戻せません。
+             */
+            "notElythia": string;
+            /**
+             * このデータベースを読めませんでした。
+             */
+            "unreadable": string;
+        };
+        /**
+         * このデータベースへ戻す
+         */
+        "rollback": string;
+        /**
+         * 退避したデータベースへ戻す
+         */
+        "rollbackTitle": string;
+        /**
+         * {name}へ戻す準備をします。準備の間もサーバーは動いたままです。準備ができたら、切り替えるかどうかをもう一度確かめます。認証は今のデータベース（{database}）に登録されているパスワードと二段階認証で行います。
+         */
+        "rollbackConfirm": ParameterizedString<"name" | "database">;
+        /**
+         * ロールバックを中止しますか？戻す先のデータベースは、そのまま残ります。
+         */
+        "rollbackAbortConfirm": string;
+        /**
+         * 今のデータベースに、あなたのパスワードや二段階認証、管理者の役割が無い可能性があります（戻したバックアップより後に設定した場合など）。そのときは、この画面からは戻せません。サーバーの管理者が本体を止めてから、次のコマンドで戻してください。
+         * {command}
+         */
+        "rollbackCli": ParameterizedString<"command">;
+        /**
+         * バックアップから戻した直後で、今のデータベースに二段階認証が登録されていないときは、退避したデータベースへ戻す操作をelythia backup restore -rollbackで行ってください。
+         */
+        "rollbackCliHint": string;
+        "_restoreSteps": {
+            /**
+             * 準備中
+             */
+            "preparing": string;
+            /**
+             * 切り替えの準備ができました
+             */
+            "ready": string;
+            /**
+             * メンテナンスに入っています
+             */
+            "entering": string;
+            /**
+             * 切り替えました
+             */
+            "switched": string;
+            /**
+             * サーバーが戻るのを待っています
+             */
+            "resuming": string;
+            /**
+             * 元のデータベースへ戻しています
+             */
+            "reverting": string;
+            /**
+             * 中止しています
+             */
+            "aborting": string;
+            /**
+             * 戻しました
+             */
+            "done": string;
+            /**
+             * 準備に失敗しました
+             */
+            "failed": string;
+            /**
+             * 期限までに切り替えなかったため、中止しました
+             */
+            "expired": string;
+            /**
+             * 中止しました（今のデータベースは変わっていません）
+             */
+            "aborted": string;
+            /**
+             * 元のデータベースへ戻しました
+             */
+            "reverted": string;
+            /**
+             * 止まりました（確認が必要です）
+             */
+            "unknown": string;
+        };
+    };
+    "_databaseHealth": {
+        /**
+         * テーブル
+         */
+        "tabTables": string;
+        /**
+         * 健全性
+         */
+        "tabHealth": string;
+        /**
+         * PostgreSQLの統計から、使われていないインデックスと、テーブルごとの不要な行（dead tuple）やVACUUMの状況を表示します。判断の材料を出すだけで、何も削除しません。サーバーは統計を1分間保持するので、開き直しても1分以内は同じ内容です。
+         */
+        "description": string;
+        /**
+         * 統計を取得できませんでした。
+         */
+        "unavailable": string;
+        /**
+         * 取得した日時
+         */
+        "generatedAt": string;
+        /**
+         * 統計をリセットした記録
+         */
+        "statsReset": string;
+        /**
+         * 記録はありません
+         */
+        "statsNeverReset": string;
+        /**
+         * インデックスの利用回数は、統計が消えてから数えています。統計はリセットのほか、異常終了やフェイルオーバーでも消えますが、そのときは上の記録が変わりません。統計が消えた直後は、使われているインデックスも「使われていない」と表示されます（通常の再起動では消えません）。
+         */
+        "statsResetCaption": string;
+        /**
+         * 読み取りレプリカが有効です。統計はプライマリから読むため、レプリカで使われているインデックスも「使われていない」と表示されます。
+         */
+        "replicasNote": string;
+        /**
+         * 使われていないインデックス
+         */
+        "unusedIndexes": string;
+        /**
+         * 書き込みのたびに更新する手間だけがかかっています。ただし、外部キーで参照されている行を削除するとき（アカウントの削除など）にだけ使われるインデックスもあり、消すとその処理が遅くなります。消すかどうかは、下の注意も確かめてから判断してください。
+         */
+        "unusedIndexesCaption": string;
+        /**
+         * 使われていないインデックスはありません。
+         */
+        "noUnusedIndexes": string;
+        /**
+         * 制約を支えています（削除できません）
+         */
+        "constraint": string;
+        /**
+         * テーブル
+         */
+        "tables": string;
+        /**
+         * 不要な行の割合が高いテーブルや、自動VACUUMが走るはずの量を超えても長くVACUUMされていないテーブルは、放置すると膨らみ続けて性能が落ちます。サイズは最後のVACUUM・ANALYZEの時点の見積もりです（TOASTの分はVACUUMの時点）。
+         */
+        "tablesCaption": string;
+        /**
+         * サイズ不明（まだVACUUM・ANALYZEされていません）
+         */
+        "sizeUnknown": string;
+        /**
+         * VACUUM中
+         */
+        "vacuuming": string;
+        /**
+         * 不要な行 {n}件（{ratio}%）
+         */
+        "deadRows": ParameterizedString<"n" | "ratio">;
+        /**
+         * 有効な行 {n}件
+         */
+        "liveRows": ParameterizedString<"n">;
+        /**
+         * 最後のVACUUM
+         */
+        "lastVacuum": string;
+        /**
+         * 最後のANALYZE
+         */
+        "lastAnalyze": string;
+        /**
+         * まだありません
+         */
+        "never": string;
+        /**
+         * 要確認
+         */
+        "needsAttention": string;
+        /**
+         * 不要な行の割合が高い
+         */
+        "problemBloat": string;
+        /**
+         * 自動VACUUMが走るはずの量を超えても、長くVACUUMされていない
+         */
+        "problemVacuum": string;
+    };
+    "_federationRules": {
+        /**
+         * ルール
+         */
+        "tab": string;
+        /**
+         * 受信した投稿やactivityに、条件と動作の組を当てはめます。サーバー単位のブロックやサイレンスより細かい判断に使い、それらと併せて効きます。まず「記録だけ」で当たり具合を確かめてから「有効」にしてください。
+         */
+        "description": string;
+        /**
+         * ルールを取得できませんでした。このbackendが対応していないか、権限がありません。
+         */
+        "unavailable": string;
+        /**
+         * ルールはありません。
+         */
+        "none": string;
+        /**
+         * ルールの変更は管理者だけができます。
+         */
+        "readOnly": string;
+        /**
+         * ルールを追加
+         */
+        "add": string;
+        /**
+         * 名前のないルール
+         */
+        "untitled": string;
+        /**
+         * 名前
+         */
+        "name": string;
+        /**
+         * 動作
+         */
+        "mode": string;
+        /**
+         * 無効
+         */
+        "modeDisabled": string;
+        /**
+         * 記録だけ
+         */
+        "modeRecord": string;
+        /**
+         * 有効
+         */
+        "modeEnforce": string;
+        /**
+         * 「記録だけ」は当たった投稿やactivityを記録するだけで、何も変えません。
+         */
+        "modeCaption": string;
+        /**
+         * 対象
+         */
+        "target": string;
+        /**
+         * 投稿
+         */
+        "targetNote": string;
+        /**
+         * activity
+         */
+        "targetActivity": string;
+        /**
+         * 「投稿」は本文や添付まで見て、拒否や書き換えができます。ブーストや返信先として取り込む投稿と、編集にも効きます。「activity」はフォローやリアクションなどを種類で見て、拒否だけができます。
+         */
+        "targetCaption": string;
+        /**
+         * 評価順
+         */
+        "position": string;
+        /**
+         * 小さいものから順に評価します。付けるCWの文言は最初に当たったルールのものを使います。
+         */
+        "positionCaption": string;
+        /**
+         * 条件
+         */
+        "conditions": string;
+        /**
+         * 指定した条件をすべて満たすと当たります。複数行の欄は、どれか1行に当たれば満たします。
+         */
+        "conditionsCaption": string;
+        /**
+         * サーバー
+         */
+        "hosts": string;
+        /**
+         * 1行に1つ。サブドメインも含みます（ブロックと同じ書き方です）。
+         */
+        "hostsCaption": string;
+        /**
+         * activityの種類
+         */
+        "activityTypes": string;
+        /**
+         * botかどうか
+         */
+        "isBot": string;
+        /**
+         * 問わない
+         */
+        "any": string;
+        /**
+         * botだけ
+         */
+        "bot": string;
+        /**
+         * bot以外
+         */
+        "notBot": string;
+        /**
+         * 初めて見てからの時間
+         */
+        "newWithinHours": string;
+        /**
+         * このサーバーが初めて見てから指定した時間（時間単位）以内のアカウントに当たります。空欄なら問いません。
+         */
+        "newWithinHoursCaption": string;
+        /**
+         * 本文・CWのパターン
+         */
+        "patterns": string;
+        /**
+         * 禁止ワードと同じ書き方です。1行に1つで、スペースで区切るとすべてを含むものに当たり、/で囲むと正規表現になります。
+         */
+        "patternsCaption": string;
+        /**
+         * 添付
+         */
+        "hasAttachment": string;
+        /**
+         * 添付あり
+         */
+        "withAttachment": string;
+        /**
+         * 添付なし
+         */
+        "withoutAttachment": string;
+        /**
+         * ハッシュタグ
+         */
+        "tags": string;
+        /**
+         * 1行に1つ。#は付けても付けなくても構いません。
+         */
+        "tagsCaption": string;
+        /**
+         * 動作
+         */
+        "actions": string;
+        /**
+         * 拒否する
+         */
+        "reject": string;
+        /**
+         * メディアを落とす
+         */
+        "stripMedia": string;
+        /**
+         * 添付をセンシティブにする
+         */
+        "sensitive": string;
+        /**
+         * その人が同じ画像を添付した他の投稿でもセンシティブになります。
+         */
+        "sensitiveCaption": string;
+        /**
+         * タイムラインから外す
+         */
+        "unlist": string;
+        /**
+         * サイレンスと同じく、公開の投稿をホームに落とします。
+         */
+        "unlistCaption": string;
+        /**
+         * 付けるCW
+         */
+        "cw": string;
+        /**
+         * CWの無い投稿に付けます。送信者が付けたCWは上書きしません。
+         */
+        "cwCaption": string;
+        /**
+         * 直近24時間に当たった件数: {n}
+         */
+        "hits": ParameterizedString<"n">;
+        /**
+         * 当たった記録を見る
+         */
+        "showHits": string;
+        /**
+         * 記録はありません。
+         */
+        "noHits": string;
+        /**
+         * 適用
+         */
+        "applied": string;
+        /**
+         * 記録のみ
+         */
+        "recordedOnly": string;
+        /**
+         * ルール「{name}」を削除しますか？当たった記録も消えます。
+         */
+        "deleteConfirm": ParameterizedString<"name">;
+        /**
+         * 条件を変えると、それまでに当たった記録は消えます。
+         */
+        "conditionsResetNote": string;
+        /**
+         * 「{field}」には0以上の整数を入れてください。
+         */
+        "invalidNumber": ParameterizedString<"field">;
+    };
+    "_federationCheck": {
+        /**
+         * 疎通の診断
+         */
+        "tab": string;
+        /**
+         * このサーバーから相手へ実際に接続して、連合に必要な窓口が応答するかを1回だけ確かめます。相手へ投稿や配送は送りません。
+         */
+        "description": string;
+        /**
+         * 確かめるアカウント
+         */
+        "account": string;
+        /**
+         * 省略すると、このサーバーが知っている相手のユーザーを使います。相手のユーザーを知らないときは、アカウント名を指定すると確かめられる項目が増えます。
+         */
+        "accountCaption": string;
+        /**
+         * 診断する
+         */
+        "run": string;
+        /**
+         * 診断しています…
+         */
+        "running": string;
+        /**
+         * 問題は見つかりませんでした
+         */
+        "allOk": string;
+        /**
+         * 連合を妨げている問題があります
+         */
+        "hasFailure": string;
+        /**
+         * 注意が必要な項目があります
+         */
+        "hasWarning": string;
+        /**
+         * このサーバー自身はここでは診断できません。
+         */
+        "cannotCheckSelf": string;
+        "_status": {
+            /**
+             * 問題なし
+             */
+            "ok": string;
+            /**
+             * 注意
+             */
+            "warn": string;
+            /**
+             * 問題あり
+             */
+            "fail": string;
+            /**
+             * 確かめられず
+             */
+            "skip": string;
+        };
+        "_names": {
+            /**
+             * このサーバーの設定
+             */
+            "policy": string;
+            /**
+             * サーバー情報 (nodeinfo)
+             */
+            "nodeinfo": string;
+            /**
+             * アカウントの検索 (WebFinger)
+             */
+            "webfinger": string;
+            /**
+             * アカウントの情報 (actor)
+             */
+            "actor": string;
+            /**
+             * 署名付きの取得
+             */
+            "authorized-fetch": string;
+            /**
+             * 配送の受け口 (inbox)
+             */
+            "inbox": string;
+            /**
+             * 署名方式
+             */
+            "signature": string;
+            /**
+             * 直近の配送
+             */
+            "delivery": string;
+        };
+    };
+    "_remoteEmojiImport": {
+        /**
+         * 相手のサーバーからは詳細を取得できないため、カテゴリやタグは手で入力してください。
+         */
+        "unsupported": string;
+        /**
+         * 相手のサーバーから詳細を取得できませんでした。手で入力するか、時間をおいて試してください。
+         */
+        "fetchFailed": string;
+        /**
+         * スペース区切りで入力します。
+         */
+        "aliasesCaption": string;
+        /**
+         * 英数字とアンダースコアのみ、128 文字以内。
+         */
+        "nameCaption": string;
+        /**
+         * この名前はそのままでは使えません。直してからインポートしてください。
+         */
+        "invalidName": string;
+        /**
+         * 名前をそのままでは使えない絵文字が含まれています。その絵文字は個別にインポートして名前を直してください。
+         */
+        "invalidNameBulk": string;
+    };
     "_chunkedUpload": {
         /**
          * 分割アップロードの利用が許可されていません。
@@ -15933,6 +15933,10 @@ export interface Locale extends ILocale {
          * Elythiaはリモートメディアをローカルにキャッシュしない設計のため、この設定は動作しません。相手サーバーが削除したメディアの複製を保持しないこと、および他サーバー由来のコンテンツを自サーバーのストレージに保存しないことを優先しています。値はMisskeyへ戻したときのために保存されます。
          */
         "remoteMediaCache": string;
+        /**
+         * Elythiaは、ActivityPubの取得にまず署名を付け、相手が拒否したときだけ署名なしで取り直すため、この設定は動作しません。署名を求めるサーバー(Mastodonのsecure modeなど)とも、署名で不調になるサーバーとも連合できるようにしています。値はMisskeyへ戻したときのために保存されます。
+         */
+        "signToActivityPubGet": string;
     };
     "_mkgoCleanRemoteFiles": {
         /**
@@ -16548,7 +16552,7 @@ export interface Locale extends ILocale {
          */
         "enableFederation": string;
         /**
-         * 連合を有効にすると、これからの投稿やプロフィールは他のサーバーへ送られ、外部で保存・再配布されることがあります。外部から参照されたり、他のアカウントにメンションされたりすると無効に戻せません。参照の検知はこのサーバーで観測できた範囲に限られます。
+         * 連合を有効にすると、これからの投稿やプロフィールは他のサーバーへ送られ、外部で保存・再配布されることがあります。このアカウントが外部から照会されるだけでなく、他のアカウントからメンションされた場合も無効に戻せません。参照の検知はこのサーバーで観測できた範囲に限られます。
          */
         "enableWarning": string;
         /**
@@ -16600,9 +16604,45 @@ export interface Locale extends ILocale {
          */
         "confirmTurnOn": string;
         /**
+         * 連合を無効にすると、既存の投稿と予約済み投稿もローカル専用に変換されます。連合を再度有効にしても、これらは外部へ公開・配送されません。通常の未予約下書きは変換されません。この変更は元に戻せません。続けますか？
+         */
+        "confirmTurnOff": string;
+        /**
          * このアカウントは外部から参照されたため、連合を無効にできません。最初の参照: {reason} {host} ({time})
          */
         "firstReference": ParameterizedString<"reason" | "host" | "time">;
+        /**
+         * 機能導入時の移行
+         */
+        "reasonMigration": string;
+        /**
+         * WebFingerの照会
+         */
+        "reasonWebFinger": string;
+        /**
+         * Actorの取得
+         */
+        "reasonActor": string;
+        /**
+         * コレクションの取得
+         */
+        "reasonCollection": string;
+        /**
+         * 投稿の取得
+         */
+        "reasonNote": string;
+        /**
+         * 受信
+         */
+        "reasonInbox": string;
+        /**
+         * 配送
+         */
+        "reasonDelivery": string;
+        /**
+         * その他の外部参照
+         */
+        "reasonUnknown": string;
         /**
          * システムアカウントの連合設定は変更できません。
          */

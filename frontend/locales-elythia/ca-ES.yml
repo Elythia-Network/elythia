@@ -1,0 +1,43 @@
+introMisskey: "Benvingut! Elythia és un servei de microblogging descentralitzat de codi obert.\nCrea \"notes\" per compartir els teus pensaments amb tots els que t'envolten. 📡\nAmb \"reaccions\", també pots expressar ràpidament els teus sentiments sobre les notes de tothom. 👍\nExplorem un món nou! 🚀"
+poweredByMisskeyDescription: "{name} És un dels serveis (anomenats instàncies d'Elythia) que utilitzen la plataforma de codi obert <b>Elythia</b>."
+initialPasswordForSetupDescription: "Fes servir la contrasenya que has fet servir al fitxer de configuració, si tu mateix has instal·lat Elythia.\nSi fas servir una empresa d'allotjament d'Elythia, fes servir la contrasenya que t'han donat.\nSi no has posat cap contrasenya deixar l'espai en blanc."
+flagAsBotDescription: "Activa aquesta opció si el compte el controla un programa. Si s'activa, actuarà com un senyal per altres desenvolupadors per prevenir cadenes d'interacció sense fi i ajustar els paràmetres interns d'Elythia pe tractar el compte com un bot."
+useSoundOnlyWhenActive: "Reproduir sons només quan Elythia estigui actiu"
+scratchpadDescription: "El bloc de proves proporciona un entorn experimental per AiScript. Pot escriure i verificar els resultats que interactuen amb Elythia."
+sendErrorReportsDescription: "Quan s'activa, es compartirà amb Elythia informació detallada de l'error quan es trobi un problema això farà pujar la qualitat d'Elythia.\nAixò inclourà informació com la versió del SO que fas servir, el navegador web que fas servir, la teva activitat a Elythia, etc."
+goToMisskey: "Ves a Elythia"
+repositoryUrlDescription: "Si estàs fent servir Elythia tal com és (sense cap canvi al codi font), introdueix https://github.com/Elythia-Network/elythia"
+_initialTutorial:
+  _landing:
+    description: "Aquí aprendràs el bàsic per poder fer servir Elythia i les seves característiques."
+  _note:
+    description: "Les publicacions a Elythia es diuen 'Notes'. Les Notes s'ordenen cronològicament a la línia de temps i s'actualitzen de forma automàtica."
+  _timeline:
+    description1: "Elythia mostra diferents línies de temps basades en l'ús (algunes poden no estar disponibles depenent de la política del servidor)"
+  _postNote:
+    description1: "Quan públiques una nota a Elythia hi ha diferents opcions disponibles. El formulari de publicació es veu així"
+_achievements:
+  _types:
+    _client30min:
+      description: "Mantingues obert Elythia per 30 minuts"
+    _client60min:
+      description: "Mantingues Elythia obert per 60 minuts"
+    _tutorialCompleted:
+      title: "Diploma del Curs Elemental d'Elythia"
+_role:
+  _options:
+    maxFileSize_caption2: "La configuració de la mida màxima de fitxer per a tot el servidor és {max}. Per permetre la pujada de fitxers més grans, si us plau, canvieu aquesta opció al fitxer de configuració d'Elythia."
+_soundSettings:
+  driveFileDurationWarnDescription: "Els àudios molt llargs pot interrompre l'ús d'Elythia. Vols continuar?"
+_urlPreviewSetting:
+  summaryProxyDescription: "La vista prèvia es genera fent servir Summaly proxy, no la genera el mateix Elythia."
+_bootErrors:
+  otherOption4: "Iniciar Elythia en mode segur"
+_serverSetupWizard:
+  installCompleted: "La instal·lació d'Elythia ha finalitzat!"
+  howWillYouUseMisskey: "Com es fa servir Elythia?"
+_followApproval:
+  title: ""
+  remoteDescription: ""
+  description: ""
+  autoAcceptDescription: ""

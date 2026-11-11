@@ -1,0 +1,41 @@
+introMisskey: "歡迎！Elythia 是一個開放原始碼且去中心化的社群網路服務。\n發布「貼文」向身邊的人分享您的想法！📡\n利用「反應」表達您對貼文的感覺！👍\n讓我們一起探索新的世界吧！🚀"
+poweredByMisskeyDescription: "{name}是開放原始碼平臺 <b>Elythia</b> 的伺服器之一。"
+initialPasswordForSetupDescription: "如果您自己安裝了 Elythia，請使用您在設定檔中輸入的密碼。\n如果您使用 Elythia 的託管服務之類的服務，請使用提供的密碼。\n如果您尚未設定密碼，請將其留空並繼續。"
+flagAsBotDescription: "如果本帳戶是由程式控制，請啟用此選項。啟用後，會作為標示幫助其他開發者防止機器人之間產生無限互動的行為，並會調整 Elythia 內部系統將本帳戶識別為機器人。"
+useSoundOnlyWhenActive: "僅在 Elythia 於前景運作時發出音效"
+scratchpadDescription: "AiScript 控制臺為 AiScript 的實驗環境。您可以在此編寫、執行和確認程式碼與 Elythia 互動的結果。"
+goToMisskey: "往 Elythia"
+repositoryUrlDescription: "如果存在可公開取得原始碼的儲存庫，請輸入其 URL。 如果您按原樣使用 Elythia（不對原始碼進行任何更改），請輸入 https://github.com/Elythia-Network/elythia。"
+_initialAccountSetting:
+  youCanContinueTutorial: "您可以繼續學習如何使用{name}(Elythia)，也可以就此打住，立即開始使用。"
+_initialTutorial:
+  _landing:
+    description: "在這裡您可以查看 Elythia 的基本使用方法和功能。"
+  _note:
+    description: "在Elythia上發布的內容稱為「貼文」。貼文在時間軸上按時間順序排列，並即時更新。"
+  _timeline:
+    description1: "Elythia根據使用方式提供了多個時間軸（伺服器可能會將部份時間軸停用）。"
+  _postNote:
+    description1: "在Elythia上發布貼文時，可以設定各種選項。發布表單如下所示。"
+  _done:
+    description: "這裡介紹的功能只是其中的一小部分。要了解更多有關如何使用Elythia的資訊，請瀏覽{link}。"
+_achievements:
+  _types:
+    _notes1:
+      flavor: "祝您的 Elythia 生活愉快！"
+    _login1000:
+      flavor: "感謝您使用 Elythia！"
+    _tutorialCompleted:
+      title: "Elythia新手講座 結業證書"
+_role:
+  _options:
+    maxFileSize_caption2: "伺服器整體的最大檔案大小設定為 {max}。若要允許上傳更大的檔案，請在 Elythia 設定檔中放寬此設定。"
+_soundSettings:
+  driveFileDurationWarnDescription: "使用長音效檔可能會影響 Elythia 的使用體驗。仍要使用此檔案嗎？"
+_urlPreviewSetting:
+  summaryProxyDescription: "使用摘要代理程式而不是 Elythia 本身產生預覽。"
+_bootErrors:
+  otherOption4: "以安全模式啟動 Elythia"
+_serverSetupWizard:
+  installCompleted: "Elythia 的安裝已經完成了！"
+  howWillYouUseMisskey: "您打算如何使用 Elythia？\n"
