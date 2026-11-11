@@ -81,6 +81,10 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# ja-JP の語は en-US にもある (#4047)。無い語は英語の UI でも日本語のまま出る。
 	# 例外は scripts/locale-coverage-allowlist.tsv (本家の翻訳待ちの語だけ)
 	cd frontend && node --test scripts/check-locale-coverage.test.mjs && node scripts/check-locale-coverage.mjs
+	# Elythia の語が本家の語を書き換える・消すのは、locales-elythia/overrides.tsv に
+	# あるものだけ (#4071)。本家のファイルが本家と同じかは、本家が要るので upstream-check で見る
+	cd frontend && node --test scripts/check-locale-overrides.test.mjs && node scripts/check-locale-overrides.mjs
+	cd frontend && node --test scripts/check-locale-upstream.test.mjs
 	# 足したルートに spec の宣言があるか (#4035)。tests/playwright の node_modules が要る
 	$(MAKE) playwright-route-check
 	# 設定のページが prefer.model で扱う端末の設定のキーに、設定の表の行があるか (#4056)
@@ -1462,7 +1466,10 @@ upstream-fetch: ## UPSTREAM_MISSKEY_VERSION の本家を .cache/misskey/<版> �
 # 本家を読むテストが skip されずに通ることを見る。本家を取得する
 # apicompat.yml が回す (本家を読まない `make gates` には入れない)。
 # paramdef-genはnodeとfrontend/node_modules (TypeScriptとajv)も使う。
-upstream-check: ## golden と本家を読むテストが UPSTREAM_MISSKEY_VERSION の本家と一致するか検査
+upstream-check: ## golden と本家を読むテストと frontend/locales が UPSTREAM_MISSKEY_VERSION の本家と一致するか検査
+	# frontend/locales は本家のまま持つ。Elythia の語は frontend/locales-elythia に置く (#4071)。
+	# 安く済むので先に回す (後ろに置くと、前の段で落ちたときに見えなくなる)
+	node frontend/scripts/check-locale-upstream.mjs $(UPSTREAM_DIR)/locales
 	$(MAKE) shapecheck-gen
 	git diff --exit-code -- internal/entitycompat/testdata
 	$(MAKE) paramdef-gen
