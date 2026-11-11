@@ -176,6 +176,17 @@ jobs:
       - name: en-US locale coverage
         run: node scripts/check-locale-coverage.mjs
 
+      - name: check-locale-overrides self test
+        run: node --test scripts/check-locale-overrides.test.mjs
+
+      # Elythia の語が本家の語を書き換える・消すのは、一覧にあるものだけ (#4071)
+      - name: Locale overrides
+        run: node scripts/check-locale-overrides.mjs
+
+      # 本家のファイルとの比較そのものは、本家を取得する apicompat (make upstream-check) で回す
+      - name: check-locale-upstream self test
+        run: node --test scripts/check-locale-upstream.test.mjs
+
       # frontend の全ルートが、どこかの Playwright spec に対応付いているか (#4035)。
       # spec の一覧は playwright の `test --list` に解かせるので、tests/playwright の
       # 依存を入れる (ブラウザは要らない)。frontend だけを変えた PR でも spec の書き
