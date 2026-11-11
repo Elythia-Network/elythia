@@ -24,6 +24,11 @@ INBOUND_CONCURRENCY = int(os.environ.get("INBOUND_CONCURRENCY", "128"))
 # seed.json から各 stack の target_note_uri を読んで faker に objects map を
 # 渡す。#1158 の handleAnnounce async 化の効果を計測するときに announce 指定。
 INBOUND_ACTIVITY_TYPE = os.environ.get("INBOUND_ACTIVITY_TYPE", "create")
+# 計測の前に、投稿者ごとに 1 件ずつ送って受信側を落ち着かせる (#4138)。seed の
+# 後に app を再起動するので、Elythia は鍵のキャッシュが空のまま始まり、投稿者
+# ごとに最初の 1 件で公開鍵を取りに行く (本家は keyId で DB から引くので取りに
+# 行かない)。下準備をしないと、その取得を Elythia の計測だけに含めてしまう。
+INBOUND_WARMUP = os.environ.get("INBOUND_WARMUP", "1") != "0"
 POLL_INTERVAL_S = 0.1
 DRAIN_TIMEOUT_S = 600.0
 FAKER_URL = os.environ["FAKER_URL"]
@@ -41,13 +46,38 @@ INBOX_URLS = {
 }
 
 
+def sender_actors(seed: dict[str, Any], requested: str = "") -> int:
+    """How many faker actors the seed registered on the receivers.
+
+    A seed.json written before #4138 has no count. Its one actor has no number
+    (`bench-sender`), and the faker no longer serves it, so it cannot be used.
+    `requested` is INBOUND_ACTORS given to the inbound run; the count is decided
+    at seed time, so a different value only gets a warning.
+    """
+    count = int(seed.get("faker", {}).get("actors", 0))
+    if count < 1:
+        raise ValueError(
+            "seed.json has no faker actors (written before #4138, or the seed skipped them); "
+            "run make queue-bench-down and make queue-bench-seed again"
+        )
+    if requested and requested.strip() != str(count):
+        print(
+            f"warning: INBOUND_ACTORS={requested} is ignored; the seed registered {count} actors. "
+            "Run make queue-bench-down and seed with INBOUND_ACTORS to change it.",
+            flush=True,
+        )
+    return count
+
+
 def faker_send(targets: list[str], count: int, concurrency: int,
-               activity_type: str, objects: dict[str, str]) -> dict[str, Any]:
+               activity_type: str, objects: dict[str, str],
+               actors: int = 1) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "targets": targets,
         "count": count,
         "concurrency": concurrency,
         "activityType": activity_type,
+        "actors": actors,
     }
     if activity_type == "announce":
         payload["objects"] = objects
@@ -100,6 +130,45 @@ def drain_one(stack: str, info: dict[str, Any], expected: int,
     }
 
 
+def send_and_drain(seed: dict[str, Any], targets: list[str], count: int, activity_type: str,
+                   objects: dict[str, str], actors: int) -> tuple[dict[str, Any], float, dict[str, dict[str, Any]]]:
+    """Send count activities to every target and wait until each receiver drains them."""
+    # faker.send は同期的に blast 完了まで待つ。一方で receiver の inbox
+    # ジョブは送出と同時にエンキューされ始めるので、receiver 側の drain
+    # 監視は faker 呼び出しと並行で行う必要がある。並行 thread で立ち
+    # 上げる。send_done event を共有して、drain 判定が faker 完了前に
+    # 早期 break しないようにする (#564 Devin BUG-1)。
+    drain_results: dict[str, dict[str, Any]] = {}
+    send_done = threading.Event()
+
+    def drain_thread(stack: str, info: dict[str, Any]) -> None:
+        drain_results[stack] = drain_one(stack, info, count, send_done)
+
+    threads = [
+        threading.Thread(target=drain_thread, args=(stack, info))
+        for stack, info in seed["stacks"].items()
+    ]
+    for t in threads:
+        t.start()
+
+    send_start = time.monotonic()
+    try:
+        send_resp = faker_send(targets, count, INBOUND_CONCURRENCY, activity_type, objects, actors)
+    finally:
+        # 送信が失敗しても drain の thread を待たせ続けない
+        send_done.set()
+    send_elapsed = time.monotonic() - send_start
+    print(
+        f"faker send done in {send_elapsed:.2f}s "
+        f"(presign {send_resp['preSignMs']:.0f}ms, total {send_resp['totalMs']:.0f}ms)",
+        flush=True,
+    )
+
+    for t in threads:
+        t.join()
+    return send_resp, send_elapsed, drain_results
+
+
 def main() -> int:
     """Run the inbound bench against every stack declared in seed.json.
 
@@ -107,6 +176,7 @@ def main() -> int:
       0 — bench completed successfully (results written to /results/inbound.json)
       2 — announce mode requested but seed.json is missing target_note_uri
           for one or more stacks (= caller must re-run `make queue-bench-seed`)
+      3 — the warm-up was not delivered to every receiver (#4138)
 
     Other non-zero exit codes propagate from sys.exit / uncaught exceptions
     (httpx errors / JSON decode failures / I/O errors) without explicit
@@ -116,6 +186,9 @@ def main() -> int:
         seed = json.load(f)
 
     targets = [INBOX_URLS[stack] for stack in seed["stacks"].keys()]
+    # 送る投稿者は seed が受信側に登録した数に揃える (#4138)。登録していない
+    # 投稿者から送ると、受信側が投稿者を取りに行く経路を測ってしまう
+    actors = sender_actors(seed, os.environ.get("INBOUND_ACTORS", ""))
 
     # announce mode: target inbox URL → 受信側 local note URI へのマップを
     # seed.json から作る。target_note_uri が欠けている stack があると
@@ -145,44 +218,27 @@ def main() -> int:
     print(
         f"firing faker: {len(targets)} targets x {INBOUND_COUNT} count "
         f"({INBOUND_COUNT*len(targets)} total) @ concurrency={INBOUND_CONCURRENCY} "
-        f"activityType={INBOUND_ACTIVITY_TYPE}",
+        f"activityType={INBOUND_ACTIVITY_TYPE} actors={actors}",
         flush=True,
     )
 
-    # faker.send は同期的に blast 完了まで待つ。一方で receiver の inbox
-    # ジョブは送出と同時にエンキューされ始めるので、receiver 側の drain
-    # 監視は faker 呼び出しと並行で行う必要がある。並行 thread で立ち
-    # 上げる。send_done event を共有して、drain 判定が faker 完了前に
-    # 早期 break しないようにする (#564 Devin BUG-1)。
-    drain_results: dict[str, dict[str, Any]] = {}
-    send_done = threading.Event()
+    warmup: dict[str, Any] | None = None
+    if INBOUND_WARMUP:
+        print(f"warm-up: 1 activity from each of {actors} actors", flush=True)
+        w_send, w_elapsed, w_drain = send_and_drain(seed, targets, actors, "create", {}, actors)
+        warmup = {"send": w_send, "send_elapsed_s": w_elapsed, "drain": w_drain}
+        # 下準備が届いていないと、計測が鍵の取得を含んだままになる
+        failed = [s for s in w_send.get("stats", []) if s.get("ok") != s.get("sent")]
+        if failed:
+            print(f"error: warm-up was not delivered: {failed}", flush=True)
+            return 3
 
-    def drain_thread(stack: str, info: dict[str, Any]) -> None:
-        drain_results[stack] = drain_one(stack, info, INBOUND_COUNT, send_done)
-
-    threads = [
-        threading.Thread(target=drain_thread, args=(stack, info))
-        for stack, info in seed["stacks"].items()
-    ]
-    for t in threads:
-        t.start()
-
-    # send 開始
-    send_start = time.monotonic()
-    send_resp = faker_send(targets, INBOUND_COUNT, INBOUND_CONCURRENCY,
-                           INBOUND_ACTIVITY_TYPE, objects)
-    send_elapsed = time.monotonic() - send_start
-    send_done.set()
-    print(
-        f"faker send done in {send_elapsed:.2f}s "
-        f"(presign {send_resp['preSignMs']:.0f}ms, total {send_resp['totalMs']:.0f}ms)",
-        flush=True,
-    )
-
-    for t in threads:
-        t.join()
+    send_resp, send_elapsed, drain_results = send_and_drain(
+        seed, targets, INBOUND_COUNT, INBOUND_ACTIVITY_TYPE, objects, actors)
 
     out = {
+        "actors": actors,
+        "warmup": warmup,
         "send": send_resp,
         "send_elapsed_s": send_elapsed,
         "drain": drain_results,

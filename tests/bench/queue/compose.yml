@@ -192,8 +192,9 @@ services:
       TS_URL: https://ts
       FAKER_URL: http://faker:8081
       FAKER_HOST: faker
-      FAKER_BASE_HTTPS: https://faker
       OUTBOUND_FOLLOWERS: "${OUTBOUND_FOLLOWERS:-100}"
+      # 受信の計測で活動を送る投稿者の数 (#4138)。driver は seed.json から読む
+      INBOUND_ACTORS: "${INBOUND_ACTORS:-1000}"
       QUEUE_BENCH_STACKS: "${QUEUE_BENCH_STACKS:-mkq,ts}"
       QUEUE_BENCH_SEED_FAKER: "${QUEUE_BENCH_SEED_FAKER:-1}"
       QUEUE_BENCH_DELIVERY: "${QUEUE_BENCH_DELIVERY:-0}"
@@ -255,6 +256,10 @@ services:
       # create (default) または announce。announce は seed が生成した
       # target_note_uri を faker に渡して Announce 経路の bench を回す。
       INBOUND_ACTIVITY_TYPE: "${INBOUND_ACTIVITY_TYPE:-create}"
+      # 人数は seed で決まる。違う値を渡すと警告だけ出す (#4138)
+      INBOUND_ACTORS: "${INBOUND_ACTORS:-}"
+      # 計測の前に投稿者ごとに 1 件ずつ送って受信側を落ち着かせる。0 で外す (#4138)
+      INBOUND_WARMUP: "${INBOUND_WARMUP:-1}"
       REDIS_MKQ_HOST: redis-mkq
       REDIS_TS_HOST: redis-ts
     volumes:

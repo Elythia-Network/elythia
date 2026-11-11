@@ -8,10 +8,11 @@
 //
 //   - HTTPS on :443 — serves the AP actor JSON and key material so a
 //     receiver can fetch them if it ever wants to (we also pre-seed
-//     receiver DBs to avoid the round-trip in steady state).
+//     receiver DBs to avoid the round-trip in steady state). Every
+//     `/users/bench-sender-<n>` is an actor; they share one key pair.
 //   - HTTP control API on :8081 — `/send` triggers a pre-sign + blast
 //     run against the supplied target inbox URLs and returns aggregate
-//     timing.
+//     timing, and `/actors?count=N` lists the first N actors for seeding.
 package main
 
 import (
@@ -34,15 +35,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-)
 
-const (
-	defaultActorPath = "/users/bench-sender"
-	keyIDFragment    = "#main-key"
+	"github.com/elythia-network/elythia/tests/bench/queue/faker/actors"
 )
 
 type config struct {
@@ -56,11 +55,8 @@ type config struct {
 
 type faker struct {
 	cfg        config
-	actorURI   string
-	keyID      string
 	privKey    *rsa.PrivateKey
 	pubPEM     string
-	actorJSON  []byte
 	httpClient *http.Client
 }
 
@@ -99,31 +95,6 @@ func newFaker(cfg config) (*faker, error) {
 		return nil, err
 	}
 
-	actorURI := "https://" + cfg.hostname + defaultActorPath
-	keyID := actorURI + keyIDFragment
-
-	actor := map[string]any{
-		"@context": []any{
-			"https://www.w3.org/ns/activitystreams",
-			"https://w3id.org/security/v1",
-		},
-		"type":              "Person",
-		"id":                actorURI,
-		"preferredUsername": "bench-sender",
-		"name":              "Queue Bench Sender",
-		"inbox":             actorURI + "/inbox",
-		"outbox":            actorURI + "/outbox",
-		"publicKey": map[string]any{
-			"id":           keyID,
-			"owner":        actorURI,
-			"publicKeyPem": pub,
-		},
-	}
-	actorJSON, err := json.Marshal(actor)
-	if err != nil {
-		return nil, err
-	}
-
 	// Receiver側 verify がボトルネックになる構成なので sender 側は大量に
 	// keep-alive コネクションを張りっぱなしにして TLS handshake のコスト
 	// を sender 側に被せない。
@@ -137,11 +108,8 @@ func newFaker(cfg config) (*faker, error) {
 	}
 	return &faker{
 		cfg:        cfg,
-		actorURI:   actorURI,
-		keyID:      keyID,
 		privKey:    priv,
 		pubPEM:     pub,
-		actorJSON:  actorJSON,
 		httpClient: &http.Client{Transport: tr, Timeout: 30 * time.Second},
 	}, nil
 }
@@ -176,8 +144,10 @@ func encodePublicPEM(pub *rsa.PublicKey) string {
 
 func (f *faker) runHTTPS() {
 	mux := http.NewServeMux()
-	mux.HandleFunc(defaultActorPath, f.handleActor)
-	mux.HandleFunc("/.well-known/webfinger", f.handleWebfinger)
+	// 1 人から 1 万件を送ると、受信側で同じ利用者の行への書き込みが行ロックの
+	// 順番待ちになり、処理の速さではなく順番待ちを測ってしまうので、送り手を
+	// 複数の投稿者に分ける (#4138)
+	actors.Routes(mux, f.cfg.hostname, f.pubPEM)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -188,33 +158,14 @@ func (f *faker) runHTTPS() {
 	}
 }
 
-func (f *faker) handleActor(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/activity+json")
-	_, _ = w.Write(f.actorJSON)
-}
-
-func (f *faker) handleWebfinger(w http.ResponseWriter, r *http.Request) {
-	resource := r.URL.Query().Get("resource")
-	expected := "acct:bench-sender@" + f.cfg.hostname
-	if resource != expected {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	resp := map[string]any{
-		"subject": resource,
-		"links": []map[string]any{
-			{"rel": "self", "type": "application/activity+json", "href": f.actorURI},
-		},
-	}
-	w.Header().Set("Content-Type", "application/jrd+json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
 // sendRequest is the input to /send.
 type sendRequest struct {
 	Targets     []string `json:"targets"`     // inbox URLs
 	Count       int      `json:"count"`       // requests per target (total = count*len(targets))
 	Concurrency int      `json:"concurrency"` // parallel workers per target
+	// Actors is how many actors send the activities: activity i is sent by
+	// actor i % Actors. The receivers must have the same actors seeded.
+	Actors int `json:"actors,omitempty"`
 
 	// ActivityType selects payload shape:
 	//   "" / "create"  → Create(Note) (default、後方互換)
@@ -250,6 +201,7 @@ func (f *faker) runControl() {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/send", f.handleSend)
+	mux.HandleFunc("/actors", f.handleActors)
 	srv := &http.Server{Addr: f.cfg.ctrlAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Printf("faker control listening on %s", f.cfg.ctrlAddr)
 	if err := srv.ListenAndServe(); err != nil {
@@ -270,11 +222,46 @@ func (f *faker) handleSend(w http.ResponseWriter, r *http.Request) {
 	if req.Concurrency <= 0 {
 		req.Concurrency = 64
 	}
+	if req.Actors <= 0 {
+		req.Actors = 1
+	}
+	if req.Actors > actors.Max {
+		http.Error(w, fmt.Sprintf("actors must be at most %d", actors.Max), http.StatusBadRequest)
+		return
+	}
 
 	resp, err := f.runSend(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+type actorInfo struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Inbox    string `json:"inbox"`
+	KeyID    string `json:"keyId"`
+}
+
+type actorsResponse struct {
+	PublicKeyPem string      `json:"publicKeyPem"`
+	Actors       []actorInfo `json:"actors"`
+}
+
+// handleActors lists actors 0..count-1, so that the seed can register them on the receivers.
+func (f *faker) handleActors(w http.ResponseWriter, r *http.Request) {
+	count, err := strconv.Atoi(r.URL.Query().Get("count"))
+	if err != nil || count <= 0 || count > actors.Max {
+		http.Error(w, fmt.Sprintf("count must be 1..%d", actors.Max), http.StatusBadRequest)
+		return
+	}
+	resp := actorsResponse{PublicKeyPem: f.pubPEM, Actors: make([]actorInfo, count)}
+	for n := range count {
+		uri := actors.URI(f.cfg.hostname, n)
+		resp.Actors[n] = actorInfo{ID: uri, Username: actors.Name(n), Inbox: uri + "/inbox", KeyID: actors.KeyID(f.cfg.hostname, n)}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -383,6 +370,9 @@ func (f *faker) preSign(req sendRequest) (map[string][]signedReq, error) {
 
 func (f *faker) buildSigned(req sendRequest, target string, index int) (signedReq, error) {
 	now := time.Now().UTC()
+	sender := actors.For(index, req.Actors)
+	actorURI := actors.URI(f.cfg.hostname, sender)
+	keyID := actors.KeyID(f.cfg.hostname, sender)
 	pub := []string{"https://www.w3.org/ns/activitystreams#Public"}
 
 	// Activity type を req.ActivityType で分岐。default は Create。
@@ -402,29 +392,29 @@ func (f *faker) buildSigned(req sendRequest, target string, index int) (signedRe
 		// 1 件目以降が誤って drop される可能性がある。
 		tHash := sha256.Sum256([]byte(target))
 		announceID := fmt.Sprintf("%s/activities/announce-%d-%s-%d",
-			f.actorURI, time.Now().UnixNano(), hex.EncodeToString(tHash[:4]), index)
+			actorURI, time.Now().UnixNano(), hex.EncodeToString(tHash[:4]), index)
 		activity = map[string]any{
 			"@context":  []any{"https://www.w3.org/ns/activitystreams"},
 			"id":        announceID,
 			"type":      "Announce",
-			"actor":     f.actorURI,
+			"actor":     actorURI,
 			"object":    objectURI,
 			"to":        pub,
 			"published": now.Format(time.RFC3339),
 		}
 	case "", "create":
-		noteID := fmt.Sprintf("%s/notes/bench-%d-%d", f.actorURI, time.Now().UnixNano(), index)
+		noteID := fmt.Sprintf("%s/notes/bench-%d-%d", actorURI, time.Now().UnixNano(), index)
 		activityID := noteID + "/activity"
 		activity = map[string]any{
 			"@context": []any{"https://www.w3.org/ns/activitystreams"},
 			"id":       activityID,
 			"type":     "Create",
-			"actor":    f.actorURI,
+			"actor":    actorURI,
 			"to":       pub,
 			"object": map[string]any{
 				"id":           noteID,
 				"type":         "Note",
-				"attributedTo": f.actorURI,
+				"attributedTo": actorURI,
 				"to":           pub,
 				"content":      fmt.Sprintf("queue-bench note %d", index),
 				"published":    now.Format(time.RFC3339),
@@ -460,7 +450,7 @@ func (f *faker) buildSigned(req sendRequest, target string, index int) (signedRe
 	}
 	signature := fmt.Sprintf(
 		`keyId="%s",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="%s"`,
-		f.keyID, base64.StdEncoding.EncodeToString(sig),
+		keyID, base64.StdEncoding.EncodeToString(sig),
 	)
 
 	return signedReq{

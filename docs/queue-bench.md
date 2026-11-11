@@ -33,9 +33,38 @@ Windows checkoutでComposeが`gen-certs.sh`を直接実行するときは、work
 
 `faker` (Go HTTPS, AP HTTP signature 直接) → 各 receiver inbox に signed activity を blast。
 
-- 各 receiver に faker actor を pubkey 込みで pre-seed (外部 fetch 排除)
+- 各 receiver に faker の投稿者 (既定 1,000 人) を pubkey 込みで、取得済み (`lastFetchedAt` を seed の時刻) として pre-seed する。活動 i は投稿者 `i % 人数` が送る
+- 計測の前に、投稿者ごとに 1 件ずつ送る下準備 (warm-up) をする (`INBOUND_WARMUP=0` で外す)。seed の後に app を再起動するので、Elythia は鍵のキャッシュが空のまま始まり、投稿者ごとに最初の 1 件で公開鍵を取りに行く。本家は keyId で DB から鍵を引くので取りに行かない。下準備をしないと、その取得を Elythia の計測だけに含めてしまう。下準備の結果は `inbound.json` の `warmup` に別に残す
 - `faker` は **pre-sign 並列化** で sender 側を律速から外し、receiver の verify+enqueue が bottleneck になるよう設計
 - 計測: faker → receiver の RPS (= 受信→200 までの rate) と post-send drain time
+
+#### 送り手の投稿者の数 (`INBOUND_ACTORS`、#4138)
+
+**既定は 1,000 人** (10,000 件なら 1 人あたり 10 件)。seed が受信側に登録する人数で、driver は `seed.json` の `faker.actors` を読んで faker に渡すので、seed のときに決める。inbound のときに違う値を渡しても、警告を出して seed の人数で送る。#4138 より前の `seed.json` (人数が無い) では inbound は止まるので、seed を流し直す。
+
+- `make queue-bench-seed` (既定 1,000 人)
+- `INBOUND_ACTORS=1 make queue-bench-seed` (1 人から全件)
+
+**人数を変えるときは、先に `make queue-bench-down` で DB を消す。** seed は同じ DB に 2 回入れると一意制約で落ちる (投稿者の URI とユーザー名は同じで、id だけが毎回変わる)。
+
+**1 人から 1 万件を送る条件は、処理の速さではなく行ロックの順番待ちを測ってしまう。** 受信側はリモートの投稿を取り込むたびに投稿者の `notesCount` を増やす (#3928。本家と同じ) ので、同じ投稿者の行への `UPDATE` が 1 本ずつ順番待ちになる。実際の連合では投稿は多くの投稿者に分かれて届くので、既定を 1,000 人にした。1 人に集中する場面 (1 つのアカウントやリレーからまとめて届く) を見たいときだけ `INBOUND_ACTORS=1` で測る。Announce 経路は、全員が seed の作った同じノートを Announce するので、投稿者を分けても対象のノートの行への集中は残る。
+
+実測 (2026-11-12、develop `b0a63db423` の mkq の image、Create 経路、10,000 件 × 2 target、concurrency 128、下準備あり):
+
+| 送り手 | Stack | Effective rps | Drain after send |
+|---|---|---|---|
+| 1,000 人 (1 回目) | mk-go (mkq) | 7250.2 | 13.07s |
+| 1,000 人 (1 回目) | Misskey TS | 2052.7 | 9.94s |
+| 1,000 人 (2 回目) | mk-go (mkq) | 7569.7 | 15.16s |
+| 1,000 人 (2 回目) | Misskey TS | 2321.5 | 9.32s |
+| 1 人 | mk-go (mkq) | 5248.2 | 49.66s |
+| 1 人 | Misskey TS | 2679.9 | 8.49s |
+
+- mkq の drain は、1 人から送ると 3 倍以上かかる。1 人の条件で処理が詰まっている間、inbox の worker 16 本のうち 15 本が `userRepository.IncrementNotesCount` で待っていた (goroutine の一覧で確認)
+- 1,000 人の条件の mkq の受信の rps は TS の 3.3〜3.5 倍
+- TS の drain は、計測限界 (下) のとおり queue depth を観測できていないので参考値
+- 下準備 (投稿者ごとに 1 件) の drain は、mkq 2.5〜2.7s、TS 1.4〜1.5s
+- 同じ日の同じ mkq の image の outbound: mk-go (mkq) 4.36s (2294.9 jobs/s)、Misskey TS 78.14s (128.0 jobs/s)
 
 #### Activity type (`INBOUND_ACTIVITY_TYPE`)
 
@@ -64,7 +93,7 @@ make queue-bench-down
 make queue-bench-up
 make queue-bench-delivery-outbound
 
-# 4a) inbound 計測 (default: Create 経路)
+# 4a) inbound 計測 (default: Create 経路、送り手は seed で登録した投稿者)
 make queue-bench-inbound
 
 # 4b) inbound 計測 (Announce 経路、#1158 等で利用)
@@ -89,6 +118,8 @@ make queue-bench-down
 - `inbound-announce-before.json` — Announce 経路の参考値 (PR #1158 適用前、2026-05-24 / #1163)
 - `inbound-announce-after.json` — Announce 経路の参考値 (PR #1158 適用後、2026-05-21)
 - `queue-report.md` — markdown 比較表
+
+**#4138 より前の inbound の値 (下の Announce 経路の参考値を含む) は、1 人から全件を送り、下準備をしない条件のもの。** 今の既定 (1,000 人、下準備あり) とは比べられない。
 
 ### Announce 経路 reference 値 (PR #1158 マージ後、2026-05-21)
 
@@ -140,7 +171,7 @@ queue-bench orchestration の startup 非決定性 (複数 stack の並列起動
 
 inbound bench で TS instance を sender に使うと、TS 側の deliver throughput が上限になり、receiver inbox 性能を測れない。faker は Misskey 実装非依存の Go HTTPS server で:
 
-- 固定 RSA-2048 keypair + 固定 actor URI (`https://faker/users/bench-sender`)
+- 固定 RSA-2048 keypair を全投稿者で共用し、投稿者 n の URI は `https://faker/users/bench-sender-<n>` (`keyId` は投稿者ごと)。番号と URI は `tests/bench/queue/faker/actors` が決め、seed は faker の `/actors?count=N` で一覧を受け取って登録する
 - HTTP signature 計算は **bench 開始前に並列で pre-sign**
 - send phase は単純な HTTP POST blast で sender 側がボトルネックにならない
 
