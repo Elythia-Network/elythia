@@ -303,6 +303,8 @@ func TestStatus(t *testing.T) {
 	assert.Equal(t, "op-1", got.Maintenance.OpID)
 	require.Len(t, got.Processes, 1)
 	assert.Equal(t, "a", got.Processes[0].ID)
+	// 同じ出力の中で、日時の書式を揃える (#4131)。
+	testutil.AssertUpstreamDates(t, h.stdout.Bytes(), "startedAt", "updatedAt")
 }
 
 // TestStatus_JudgeView checks what status shows from the judge: who judges,

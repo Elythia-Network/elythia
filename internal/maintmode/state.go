@@ -150,15 +150,15 @@ func (s *State) Holding() bool {
 // OpenConns / InFlight / Error are shown by `elythia maintenance status` and
 // are never used to judge that the database has been let go.
 type ProcReport struct {
-	ID        string    `json:"id"`
-	Role      string    `json:"role"`
-	Version   string    `json:"version"`
-	Commit    string    `json:"commit"`
-	State     string    `json:"state"`
-	OpenConns int       `json:"openConns"`
-	InFlight  int64     `json:"inFlight"`
-	Error     string    `json:"error"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string      `json:"id"`
+	Role      string      `json:"role"`
+	Version   string      `json:"version"`
+	Commit    string      `json:"commit"`
+	State     string      `json:"state"`
+	OpenConns int         `json:"openConns"`
+	InFlight  int64       `json:"inFlight"`
+	Error     string      `json:"error"`
+	UpdatedAt jsdate.Time `json:"updatedAt"`
 }
 
 // Store reads and writes the maintenance state in Redis.
@@ -437,7 +437,7 @@ func (s *Store) notify(ctx context.Context) {
 // Report writes the report of one process with ProcTTL.
 func (s *Store) Report(ctx context.Context, r ProcReport) error {
 	if r.UpdatedAt.IsZero() {
-		r.UpdatedAt = time.Now()
+		r.UpdatedAt = jsdate.NewTime(time.Now())
 	}
 	key := s.ProcKey(r.ID)
 	// 全部の欄を毎回書くので、前の報告の欄は残らない。
@@ -450,7 +450,7 @@ func (s *Store) Report(ctx context.Context, r ProcReport) error {
 		"openConns": strconv.Itoa(r.OpenConns),
 		"inFlight":  strconv.FormatInt(r.InFlight, 10),
 		"error":     r.Error,
-		"updatedAt": formatTime(r.UpdatedAt),
+		"updatedAt": formatTime(r.UpdatedAt.Time),
 	})
 	pipe.Expire(ctx, key, ProcTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -489,7 +489,7 @@ func (s *Store) Reports(ctx context.Context) ([]ProcReport, error) {
 			OpenConns: openConns,
 			InFlight:  inFlight,
 			Error:     m["error"],
-			UpdatedAt: parseTime(m["updatedAt"]),
+			UpdatedAt: jsdate.NewTime(parseTime(m["updatedAt"])),
 		})
 	}
 	if err := iter.Err(); err != nil {

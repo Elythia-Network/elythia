@@ -75,7 +75,7 @@ func TestMaintenance_ReportStaysFreshWhileStopping(t *testing.T) {
 	first := report(t, store).UpdatedAt
 	require.Eventually(t, func() bool {
 		r := report(t, store)
-		return r.State == maintmode.ProcDraining && r.UpdatedAt.After(first)
+		return r.State == maintmode.ProcDraining && r.UpdatedAt.After(first.Time)
 	}, 2*time.Second, 10*time.Millisecond, "止めている間に報告が更新されない")
 	close(block)
 	require.Eventually(t, func() bool { return report(t, store).State == maintmode.ProcDrained },
