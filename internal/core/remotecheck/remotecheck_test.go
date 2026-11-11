@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
 	"github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -394,8 +395,8 @@ func TestRun_Delivery(t *testing.T) {
 		status  selfcheck.Status
 	}{
 		{"breaker open", &deliveryhealth.BreakerState{Open: true, ConsecutiveFailures: 5}, &deliveryhealth.HostHealth{Success: 3}, selfcheck.StatusFail},
-		{"throttled", &deliveryhealth.BreakerState{ThrottledUntil: &until}, &deliveryhealth.HostHealth{Success: 3}, selfcheck.StatusWarn},
-		{"draining", &deliveryhealth.BreakerState{ReservedUntil: &until}, &deliveryhealth.HostHealth{Success: 3}, selfcheck.StatusWarn},
+		{"throttled", &deliveryhealth.BreakerState{ThrottledUntil: jsdate.NewTimePtr(&until)}, &deliveryhealth.HostHealth{Success: 3}, selfcheck.StatusWarn},
+		{"draining", &deliveryhealth.BreakerState{ReservedUntil: jsdate.NewTimePtr(&until)}, &deliveryhealth.HostHealth{Success: 3}, selfcheck.StatusWarn},
 		{"no deliveries", nil, nil, selfcheck.StatusSkip},
 		{"all failed", nil, &deliveryhealth.HostHealth{Failure: 4, LastError: &deliveryhealth.LastError{Message: "boom"}}, selfcheck.StatusFail},
 		{"some failed", nil, &deliveryhealth.HostHealth{Success: 4, Failure: 1}, selfcheck.StatusWarn},

@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // stubDeliveryHealth records the window it was asked for so the clamping and
@@ -53,6 +55,7 @@ func TestFederationDeliveryHealth_ReturnsHosts(t *testing.T) {
 			Host: "a.example", Success: 10, Failure: 2,
 			ByClass:      map[deliveryhealth.OutcomeClass]int64{deliveryhealth.ClassSuccess: 10},
 			LatencyP50Ms: 100, LatencyP95Ms: 500,
+			LastError: &deliveryhealth.LastError{At: jsdate.NewTime(time.Date(2026, 10, 1, 9, 0, 0, 123_456_789, time.FixedZone("JST", 9*60*60))), Class: deliveryhealth.ClassServerError},
 		}},
 		evicted: 3,
 	}
@@ -67,6 +70,8 @@ func TestFederationDeliveryHealth_ReturnsHosts(t *testing.T) {
 	assert.Equal(t, int64(2), got.Hosts[0].Failure)
 	// 上限で捨てたホスト数を出すのは、運用者が上限の妥当性を判断できるようにするため。
 	assert.Equal(t, int64(3), got.EvictedHosts)
+	// 日時は本家の書式で出す (#4091)。
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "at")
 }
 
 // body 無しでも既定の窓で応答する (管理画面が引数なしで叩く)。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/core/fedrule"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -69,7 +70,7 @@ func (s *ruleHitsStub) Counts(context.Context) (map[string]int64, error) {
 }
 func (s *ruleHitsStub) Samples(_ context.Context, ruleID string, _ int) ([]fedrule.Hit, error) {
 	return []fedrule.Hit{{RuleID: ruleID, Host: "spam.example", Subject: "https://spam.example/n/1", Kind: "Note",
-		At: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}}, nil
+		At: jsdate.NewTime(time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC))}}, nil
 }
 func (s *ruleHitsStub) Forget(context.Context, string) error { return nil }
 
@@ -109,7 +110,7 @@ func TestFederationRules_CreateListUpdateDelete(t *testing.T) {
 
 	rec = doPost(h.FederationRuleHits, `{"ruleId":"`+ruleID+`"}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `[{"ruleId":"`+ruleID+`","host":"spam.example","subject":"https://spam.example/n/1","kind":"Note","applied":false,"at":"2026-09-29T00:00:00Z"}]`, rec.Body.String())
+	assert.JSONEq(t, `[{"ruleId":"`+ruleID+`","host":"spam.example","subject":"https://spam.example/n/1","kind":"Note","applied":false,"at":"2026-09-29T00:00:00.000Z"}]`, rec.Body.String())
 
 	rec = doPost(h.FederationRuleUpdate, `{"ruleId":"`+ruleID+`","name":"ads2","mode":"enforce","target":"note","hosts":["spam.example"],"reject":true}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

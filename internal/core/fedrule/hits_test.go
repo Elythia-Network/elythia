@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
@@ -25,10 +26,10 @@ func TestHitStore(t *testing.T) {
 	s.SetClockForTest(func() time.Time { return now })
 
 	hits := []Hit{
-		{RuleID: "a", Host: "x.example", Subject: "s1", Kind: "Note", At: now.Add(-25 * time.Hour)}, // 窓の外
-		{RuleID: "a", Host: "x.example", Subject: "s2", Kind: "Note", At: now.Add(-3 * time.Hour)},
-		{RuleID: "a", Host: "x.example", Subject: "s3", Kind: "Note", Applied: true, At: now},
-		{RuleID: "b", Host: "y.example", Subject: "s4", Kind: "Follow", At: now},
+		{RuleID: "a", Host: "x.example", Subject: "s1", Kind: "Note", At: jsdate.NewTime(now.Add(-25 * time.Hour))}, // 窓の外
+		{RuleID: "a", Host: "x.example", Subject: "s2", Kind: "Note", At: jsdate.NewTime(now.Add(-3 * time.Hour))},
+		{RuleID: "a", Host: "x.example", Subject: "s3", Kind: "Note", Applied: true, At: jsdate.NewTime(now)},
+		{RuleID: "b", Host: "y.example", Subject: "s4", Kind: "Follow", At: jsdate.NewTime(now)},
 	}
 	require.NoError(t, s.write(ctx, hits))
 
@@ -48,7 +49,7 @@ func TestHitStore(t *testing.T) {
 	// 保持は MaxSamples 件まで。
 	var many []Hit
 	for i := 0; i < MaxSamples+10; i++ {
-		many = append(many, Hit{RuleID: "c", At: now})
+		many = append(many, Hit{RuleID: "c", At: jsdate.NewTime(now)})
 	}
 	require.NoError(t, s.write(ctx, many))
 	samples, err = s.Samples(ctx, "c", 1000)
@@ -69,7 +70,7 @@ func TestHitStore(t *testing.T) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	s.Start(runCtx)
-	s.Record(Hit{RuleID: "d", Host: strings.Repeat("h", 1000), Subject: strings.Repeat("あ", 1000), Kind: "Note", At: now})
+	s.Record(Hit{RuleID: "d", Host: strings.Repeat("h", 1000), Subject: strings.Repeat("あ", 1000), Kind: "Note", At: jsdate.NewTime(now)})
 	require.Eventually(t, func() bool {
 		got, _ := s.Samples(ctx, "d", 0)
 		return len(got) == 1

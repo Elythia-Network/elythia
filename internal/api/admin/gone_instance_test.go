@@ -41,7 +41,7 @@ func TestFederationGoneInstances(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `[
 		{"host":"a.example","suspendedAt":null,"followers":2,"following":1,"followRequests":0},
-		{"host":"b.example","suspendedAt":"2026-09-01T00:00:00Z","followers":0,"following":0,"followRequests":3}
+		{"host":"b.example","suspendedAt":"2026-09-01T00:00:00.000Z","followers":0,"following":0,"followRequests":3}
 	]`, rec.Body.String())
 }
 

@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 type stubBreaker struct {
@@ -36,8 +38,11 @@ func TestFederationDeliveryHealth_ShowsBreakers(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	h.SetDeliveryHealthProvider(&stubDeliveryHealth{})
 	opened := time.Unix(1_790_000_000, 0).UTC()
+	// 状態は Redis のミリ秒から time.UnixMilli で組み直すので、ロケーションはローカル。
+	later := time.Unix(1_790_000_100, 123_000_000).In(time.FixedZone("JST", 9*60*60))
 	h.SetDeliveryBreaker(&stubBreaker{list: []deliveryhealth.BreakerState{{
-		Host: "down.example", Open: true, ConsecutiveFailures: 7, OpenedAt: &opened, ProbeIntervalSec: 120,
+		Host: "down.example", Open: true, ConsecutiveFailures: 7, OpenedAt: jsdate.NewTimePtr(&opened), ProbeIntervalSec: 120,
+		NextProbeAt: jsdate.NewTimePtr(&later), ThrottledUntil: jsdate.NewTimePtr(&later), ReservedUntil: jsdate.NewTimePtr(&later),
 	}}})
 
 	rec := doPost(h.FederationDeliveryHealth, `{}`, adminUser)
@@ -50,6 +55,8 @@ func TestFederationDeliveryHealth_ShowsBreakers(t *testing.T) {
 	assert.Equal(t, "down.example", got.Breakers[0].Host)
 	assert.True(t, got.Breakers[0].Open)
 	assert.Equal(t, 7, got.Breakers[0].ConsecutiveFailures)
+	// 日時は本家の書式で出す (#4091)。
+	testutil.AssertUpstreamDates(t, rec.Body.Bytes(), "openedAt", "nextProbeAt", "throttledUntil", "reservedUntil")
 }
 
 // ブレーカーが無い構成でも、telemetry が無い構成でも、空配列で返す (null だと

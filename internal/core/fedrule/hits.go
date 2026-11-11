@@ -142,7 +142,7 @@ func (s *HitStore) write(ctx context.Context, hits []Hit) error {
 	pipe := s.rdb.Pipeline()
 	keys := map[string]bool{}
 	for _, h := range hits {
-		key := s.countKey(h.At)
+		key := s.countKey(h.At.Time)
 		keys[key] = true
 		pipe.HIncrBy(ctx, key, h.RuleID, 1)
 		if encoded, err := json.Marshal(h); err == nil {

@@ -12,6 +12,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 // newStopTestStore returns a HitStore on an in-process Redis, so the write
@@ -46,7 +48,7 @@ func requireNoLoop(t *testing.T, msg string) {
 // queue or writes it.
 func assertStaysQueued(t *testing.T, s *HitStore, ruleID string) {
 	t.Helper()
-	s.Record(Hit{RuleID: ruleID, At: time.Now()})
+	s.Record(Hit{RuleID: ruleID, At: jsdate.NewTime(time.Now())})
 	time.Sleep(100 * time.Millisecond)
 	assert.Len(t, s.queue, 1, "a loop took the hit off the queue")
 	samples, err := s.Samples(context.Background(), ruleID, 0)
@@ -61,7 +63,7 @@ func TestHitStore_StopStopsTheLoop(t *testing.T) {
 	requireNoLoop(t, "前提: ほかのテストのloopが残っていない")
 	s := newStopTestStore(t)
 	s.Start(context.Background())
-	s.Record(Hit{RuleID: "before", At: time.Now()})
+	s.Record(Hit{RuleID: "before", At: jsdate.NewTime(time.Now())})
 	require.Eventually(t, func() bool {
 		got, _ := s.Samples(context.Background(), "before", 0)
 		return len(got) == 1

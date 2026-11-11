@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/misc/keyword"
 	"github.com/elythia-network/elythia/internal/model"
 )
@@ -71,12 +72,12 @@ func (d Decision) Any() bool {
 
 // Hit is one rule matching one activity or note.
 type Hit struct {
-	RuleID  string    `json:"ruleId"`
-	Host    string    `json:"host"`
-	Subject string    `json:"subject"`
-	Kind    string    `json:"kind"`
-	Applied bool      `json:"applied"`
-	At      time.Time `json:"at"`
+	RuleID  string      `json:"ruleId"`
+	Host    string      `json:"host"`
+	Subject string      `json:"subject"`
+	Kind    string      `json:"kind"`
+	Applied bool        `json:"applied"`
+	At      jsdate.Time `json:"at"`
 }
 
 // compiledRule is a rule prepared for evaluation.

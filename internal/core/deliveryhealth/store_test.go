@@ -9,6 +9,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elythia-network/elythia/internal/misc/jsdate"
 )
 
 func newTestStore(t *testing.T) (*Store, *miniredis.Miniredis) {
@@ -28,7 +30,7 @@ func TestStore_FlushAndQueryRoundTrip(t *testing.T) {
 		ByClass: map[OutcomeClass]int64{ClassSuccess: 10, ClassServerError: 2},
 		Latency: [latencyBucketCount]int64{0: 8, 3: 4},
 		LastError: &LastError{
-			At: time.Unix(1_700_000_000, 0).UTC(), Class: ClassServerError,
+			At: jsdate.NewTime(time.Unix(1_700_000_000, 0).UTC()), Class: ClassServerError,
 			Status: 503, Message: "boom",
 		},
 	}}))
