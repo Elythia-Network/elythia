@@ -133,10 +133,11 @@ func TestFilesCreate_RecordsRequestIPAndHeaders(t *testing.T) {
 	mr.Meta = &model.Meta{ID: "x", EnableIPLogging: true}
 	h.SetMetaRepo(mr)
 	c, rec := newMultipartReq(t, "ip.txt", "hello", nil)
-	// echo.Context の RealIP() は X-Forwarded-For / X-Real-IP / RemoteAddr
-	// の順で resolve される。test では RemoteAddr が "192.0.2.1:1234" 形式
-	// だが、明示的に X-Forwarded-For をセットして確実性を上げる。
-	c.Request().Header.Set("X-Forwarded-For", "203.0.113.7")
+	// IPExtractor を設定していない echo の RealIP() は、v4.16.3 から接続元
+	// (RemoteAddr) だけを見て転送ヘッダーを読まない。記録される IP は
+	// RemoteAddr で与え、X-Forwarded-For はヘッダーの保存を見るために別の値にする。
+	c.Request().RemoteAddr = "203.0.113.7:1234"
+	c.Request().Header.Set("X-Forwarded-For", "198.51.100.9")
 	c.Request().Header.Set("X-Custom-Test", "marker-value")
 	// credential 系 header (= deny-list で除外されるべき)。
 	c.Request().Header.Set("Authorization", "Bearer secret-token-XYZ")
@@ -161,7 +162,7 @@ func TestFilesCreate_RecordsRequestIPAndHeaders(t *testing.T) {
 	require.NoError(t, json.Unmarshal(got.RequestHeaders, &headers))
 	assert.Equal(t, "marker-value", headers["X-Custom-Test"])
 	// 通常 header (X-Forwarded-For 等) は保存される。
-	assert.NotEmpty(t, headers["X-Forwarded-For"])
+	assert.Equal(t, "198.51.100.9", headers["X-Forwarded-For"])
 
 	// credential 系は deny-list で除外され保存されない (mk-go 独自 hardening)。
 	// Go の http.Header は MIME canonical で保存するので key は "Authorization"

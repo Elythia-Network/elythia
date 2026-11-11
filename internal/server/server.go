@@ -773,9 +773,11 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	e.Binder = &apiBinder{}
 
 	// trustProxyからIPExtractorを構成。詳細は buildIPExtractor のコメント。
-	// **常に設定する。** 未設定のまま残すと Echo の RealIP は XFF の最左を
-	// 無条件に信頼するので、trustProxy の解釈に失敗した / 空だったときに
-	// 誰でも IP を詐称できる状態へ倒れる (以前はそうなっていた)。
+	// **常に設定する。** echo v4.16.3 より前は、未設定だと RealIP が XFF の最左を
+	// 無条件に信頼し、trustProxy の解釈に失敗した / 空だったときに誰でも IP を
+	// 詐称できた (以前はそうなっていた)。v4.16.3 からは接続元だけを見るので、
+	// 未設定だと TCP では全員が前段 proxy のアドレスに、UDS では空文字になり、
+	// rate limit と IP の記録が壊れる。
 	trustedNets, err := config.ParseTrustProxy(cfg.TrustProxy)
 	if err != nil {
 		return nil, fmt.Errorf("server: %w", err)
