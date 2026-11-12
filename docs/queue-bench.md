@@ -6,6 +6,17 @@
 > harness からも外してある。下の実測表のうち日付が #2985 より前のものには asynq 行が
 > 残っているが、**当時測った値の記録**であって現在再現できる構成ではない。
 
+## 本家の動かし方 (#4140)
+
+**比べているのは、既定の設定どうしではなく、流量の上限を外したエンジンどうし。** 本家は設定が無くても inbox を 32 件/秒、deliver を 128 件/秒に絞る (`QueueProcessorService.ts` の `inboxJobPerSec ?? 32` / `deliverJobPerSec ?? 128`) が、Elythia は設定が無ければ絞らない (この違いは #4141)。絞ったまま測ると上限の値が出るだけなので、`tests/bench/queue/common/ts.yml` で両方を 100000 にして外している。
+
+- **本家は `NODE_ENV: production` で動かす。** production 以外では TypeORM がすべての SQL をログに書き、本家だけが遅くなる ([bench-compare.md](bench-compare.md) と同じ理由)。上限を外した条件で 2,000 件を受けた実測では、development 265.7 件/秒、production 301.0 件/秒だった
+- **seed が、相手のサーバー (`blackhole` と `faker`。照合用の受信機へ配るときはその host も) を両方の stack の `instance` に先に登録する。** 本家は初めての相手へのジョブが同時に走ると `instance` の行の作成が競合し、一意制約の違反で失敗して再試行 (最初は約 60 秒後) に回る (`FederatedInstanceService.fetchOrRegister`)。登録しなかった初回の outbound では、1 万件のうち 121 件がそうなって drain が 72.43s に延び、行ができた 2 回目は 8.72s だった
+- **probe は driver ごとの key で queue を読む。** mkq は `bull:<queue>`、本家は `<redis の接頭辞>:queue:<queue>:<queue>` (本家は `<redis の接頭辞>:queue:<queue>` を BullMQ の prefix にし、BullMQ がその後ろに queue の名前を足す。redis の接頭辞は `redisForJobQueue.prefix`、書かなければ `url` の host (ポートを含む)。`redisForJobQueue` の節が無ければ `redis` の節の設定を使う。ベンチでは `ts`)。queue の `meta` の key が無ければ、driver は送信や投稿を始める前に止まる。#4140 より前は本家も `bull:` で読んでいて、本家の深さは常に 0 だった
+- **seed が、本家の API の利用者ごとの制限を外す。** production では本家の制限が効き、`notes/create` は 1 時間に 300 件までなので、seed の 1 件と合わせて、1 回に 100 件投稿する outbound は 1 時間に 3 回目 (301 件目) で 429 になる。Elythia はベンチでは `MK_DISABLEENDPOINTRATELIMITS` で外しているので、本家も [bench-compare.md](bench-compare.md) と同じく基本ロールの `rateLimitFactor` を 0 にする (両方の stack の `meta.policies` に入れる。Elythia は 0 を制限なしとは扱わないが、環境変数で外しているので影響しない)。2026-11-12 の実測では、seed の 1 件と outbound 3 回の計 301 件を 1 時間のうちに投稿して、429 は出なかった
+
+**#4140 より前に立てた stack は、`make queue-bench-down` から始め直す。** `NODE_ENV` と `ts.yml` は app を作り直さないと効かず、`instance` の行と `rateLimitFactor` は seed を流し直さないと入らない。seed は同じ DB に 2 回入れると落ちる (下の送り手の節)。古い stack のままだと、本家が上限で絞られたままだったり、相手のサーバーが未登録で初回の再試行の待ちを含んだりして、本家の値が処理の速さを表さない
+
 ## 計測対象
 
 ### Outbound (deliver job throughput)
@@ -49,7 +60,20 @@ Windows checkoutでComposeが`gen-certs.sh`を直接実行するときは、work
 
 **1 人から 1 万件を送る条件は、処理の速さではなく行ロックの順番待ちを測ってしまう。** 受信側はリモートの投稿を取り込むたびに投稿者の `notesCount` を増やす (#3928。本家と同じ) ので、同じ投稿者の行への `UPDATE` が 1 本ずつ順番待ちになる。実際の連合では投稿は多くの投稿者に分かれて届くので、既定を 1,000 人にした。1 人に集中する場面 (1 つのアカウントやリレーからまとめて届く) を見たいときだけ `INBOUND_ACTORS=1` で測る。Announce 経路は、全員が seed の作った同じノートを Announce するので、投稿者を分けても対象のノートの行への集中は残る。
 
-実測 (2026-11-12、develop `b0a63db423` の mkq の image、Create 経路、10,000 件 × 2 target、concurrency 128、下準備あり):
+実測 (2026-11-12、#4140 の後、develop `b0a63db423` の mkq の image (運営者の環境で作ったので、同梱でないプラグインを含む。#4138 の実測も同じ image)、Create 経路、10,000 件 × 2 target、concurrency 128、送り手 1,000 人、下準備あり。本家は上 ([本家の動かし方](#本家の動かし方-4140)) の条件):
+
+| 回 | Stack | Effective rps | Drain after send | Peak queue depth |
+|---|---|---|---|---|
+| 1 回目 | mk-go (mkq) | 6071.6 | 16.78s | 9559 |
+| 1 回目 | Misskey TS | 1815.7 | 32.14s | 8863 |
+| 2 回目 | mk-go (mkq) | 6304.9 | 18.79s | 9617 |
+| 2 回目 | Misskey TS | 2169.9 | 31.72s | 9007 |
+
+- 受信の rps は mkq が TS の 2.9〜3.3 倍。drain (送信を始めてから queue が空になるまで。faker の事前の署名と送信の時間を含む) は TS が mkq の 1.7〜1.9 倍。drain には、両方に共通の事前の署名 (4.74s / 4.81s。この間は 1 件も届かない) が入っているので、それを引くと 1.9〜2.3 倍
+- 下準備 (投稿者ごとに 1 件) の drain は、mkq 1.91〜2.94s、TS 3.43〜4.94s
+- 同じ日の同じ条件の outbound (3 回): mk-go (mkq) 4.07s / 4.09s / 4.07s (2455.1 / 2445.6 / 2458.8 jobs/s)、Misskey TS 8.94s / 8.67s / 8.73s (1118.9 / 1152.8 / 1145.0 jobs/s)
+
+下は #4138 の時点の実測。**本家は #4140 より前の条件** (流量の上限あり、development、probe が TS の queue を読めない) で動いていた。TS の drain は送信が終わった時刻とほぼ同じ値で、処理の時間ではない。TS の rps も development の値。**mkq の列も、上の表とは比べられない。** 2 つの stack は同じホストで同時に測る (計測限界を参照) ので、当時は絞られて手の空いていた TS のぶんの CPU を、mkq が使えていた可能性がある。上の表で mkq の rps が #4138 の表より平均で約 16% 低いのは、このためと考えている。ただし CPU は測っておらず、片方の stack だけで測ってもいない。mkq の image は同じで、#4140 の途中の実測 (本家の上限を外した後) でも平均で約 15% 下がっていた。1 回ごとのばらつきは ±10% ほどある (下の #1158 の節)。今も有効なのは、同じ条件の中での mkq の 1 人と 1,000 人の比較だけ。
 
 | 送り手 | Stack | Effective rps | Drain after send |
 |---|---|---|---|
@@ -61,10 +85,9 @@ Windows checkoutでComposeが`gen-certs.sh`を直接実行するときは、work
 | 1 人 | Misskey TS | 2679.9 | 8.49s |
 
 - mkq の drain は、1 人から送ると 3 倍以上かかる。1 人の条件で処理が詰まっている間、inbox の worker 16 本のうち 15 本が `userRepository.IncrementNotesCount` で待っていた (goroutine の一覧で確認)
-- 1,000 人の条件の mkq の受信の rps は TS の 3.3〜3.5 倍
-- TS の drain は、計測限界 (下) のとおり TS の queue を観測できていないので参考値。送信が終わった時刻とほぼ同じになる
-- 下準備 (投稿者ごとに 1 件) の drain は、mkq 2.5〜2.7s。TS (1.4〜1.5s) は同じ理由で参考値で、TS の下準備の処理が計測の始まりまでに片付いていることは保証されない
-- 同じ日の同じ mkq の image の outbound: mk-go (mkq) 4.36s (2294.9 jobs/s)、Misskey TS 78.14s (128.0 jobs/s)
+- 1,000 人の条件の mkq の受信の rps は TS の 3.3〜3.5 倍 (TS は #4140 より前の条件。今の倍率は上の表)
+- 下準備 (投稿者ごとに 1 件) の drain は、mkq 2.5〜2.7s
+- 同じ日の同じ mkq の image の outbound: mk-go (mkq) 4.36s (2294.9 jobs/s)。同じときの Misskey TS 78.14s (128.0 jobs/s) は、TS の deliver の既定の上限 (128 件/秒、1 万件で 78.1s) そのものを測っていた (#4140)
 
 #### Activity type (`INBOUND_ACTIVITY_TYPE`)
 
@@ -121,6 +144,8 @@ make queue-bench-down
 
 **#4138 より前の inbound の値 (下の Announce 経路の参考値を含む) は、1 人から全件を送り、下準備をしない条件のもの。** 今の既定 (1,000 人、下準備あり) とは比べられない。
 
+**#4140 より前の Misskey TS の値は、処理の速さを表していない。** TS は流量の上限 (inbox 32 件/秒、deliver 128 件/秒) が効いたまま、development で動いていた。probe は TS の queue を読めていなかったので、TS の Drain は送信が終わった時刻とほぼ同じ値で、Peak queue depth の 0 は観測できなかったことを表す。TS の rps も development の値。下の表の TS の値は、当時の記録としてだけ残す。
+
 ### Announce 経路 reference 値 (PR #1158 マージ後、2026-05-21)
 
 **当時の 3-way 構成での実測** (asynq driver は #2985 で削除済み)。
@@ -130,13 +155,13 @@ make queue-bench-down
 |---|---|---|---|---|---|
 | mk-go (asynq) | 3.66s | 2729.9 | 47.15s | 9827 | 受信→202 まで 3 秒台 |
 | mk-go (mkq) | 3.46s | 2891.3 | 63.43s | 9912 | 同上 |
-| Misskey TS | 10.46s | 956.4 | 18.08s | 0 | worker が send と同期処理 |
+| Misskey TS | 10.46s | 956.4 | 18.08s | 0 | (Drain と Peak は観測できていない。#4140) |
 
 観測:
 
 - mk-go (asynq/mkq) は **TS の 2.9x** の send-side throughput (Create 経路の 3.0x と同水準)
 - Announce 経路は Create 経路と比べて -4〜-12% (HTTP signature verify + target note resolve + renote create の overhead)
-- mk-go は peak depth 9800+ まで queue を積んで worker が drain (47-63s)、TS は send と同期で peak=0
+- mk-go は peak depth 9800+ まで queue を積んで worker が drain (47-63s)。当時は「TS は send と同期で peak=0」と読んでいたが、TS の queue を probe が読めていなかっただけだった (#4140)。#4140 の後の実測 (Create 経路) では、TS も inbound で peak depth 8863〜9007 まで積む
 
 ### PR #1158 before/after 比較 (#1163 で実施、2026-05-24)
 
@@ -177,8 +202,11 @@ inbound bench で TS instance を sender に使うと、TS 側の deliver throug
 
 ### 計測限界
 
-- **TS の queue は probe から見えていない。** probe は `bull:<queue>:wait` などを読むが、本家の queue は `queue:<queue>` (設定によってはその前に prefix が付く) を BullMQ の prefix にしていて、key の名前が違う (`packages/backend/src/queue/const.ts` の `baseQueueOptions`)。そのため TS の peak depth は常に 0 で、drain は送信の終了とほぼ同じ時刻になる。TS の drain と、下準備の後に TS の queue が空になったかは確かめられない
-- inbound で receiver workers が即処理する場合も、queue depth は polling 粒度 (100ms) では peak ≈ 0 に見える。実効 throughput は faker.send rps が真の receiver ingest+process rate
+- **2 つの stack は同じホストで同時に動き、inbound は両方へ同時に送る。** 一方が速く処理すると、もう一方が使える CPU が減る。値は「同じホストを分け合ったときの速さ」で、1 つだけ動かしたときの速さではない
+- **probe の key の組み立ては、本家の queue の接頭辞に依存する。** `ts.yml` の `url` の host (ポートを含む) を変えるか、`redisForJobQueue` の節を消すか、`redis` / `redisForJobQueue` に `prefix` を書いたら、`queue_probe.py` の `TS_REDIS_PREFIX` も直す (`test_queue_probe.py` が `url` と突き合わせている)。食い違うと queue の `meta` が見つからず、driver は送信や投稿を始める前に止まる
+- inbound で receiver workers が即処理する場合、queue depth は polling 粒度 (100ms) では peak ≈ 0 に見える。そのときの drain は polling 粒度より細かくは測れない
+- inbound の drain は、両方の stack への送信が終わるまで終わらない (faker は両方へ同時に送り、全体の終わりを待つ)。速い stack の drain は、遅い stack への送信の時間より短くならない
+- drain は queue が空になった時刻で、ジョブの成否は見ない。再試行を使い切って failed に移ったジョブも「空」に数える
 - outbound は blackhole hits (delivered count) が primary signal なので polling race の影響を受けない
 
 ### Federation flag 注意
