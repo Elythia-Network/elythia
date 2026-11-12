@@ -23,8 +23,8 @@ operator は以下の knob を YAML で握る:
 ```yaml
 deliverJobConcurrency: 16      # default
 inboxJobConcurrency:   16
-deliverJobPerSec:      128
-inboxJobPerSec:        128
+deliverJobPerSec:      128     # 例。未設定なら上限なし (#4141)
+inboxJobPerSec:        128     # 例。未設定なら上限なし
 deliverJobMaxAttempts: 12
 inboxJobMaxAttempts:    8
 redisForJobQueue.poolSize: <cores * 10>

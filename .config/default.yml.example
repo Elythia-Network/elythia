@@ -430,6 +430,9 @@ id: 'aidx'
 # jobs/sec no matter how many workers that queue runs, and it holds
 # across processes. Do not divide by the worker count.
 # See docs/configuration.md.
+# NOTE: the values below are upstream Misskey's defaults, not mk-go's.
+# mk-go sets no rate limit for a queue whose key is unset, while upstream
+# applies them even when unset (see docs/divergence/config.md).
 #deliverJobPerSec: 128
 #inboxJobPerSec: 32
 #relationshipJobPerSec: 64

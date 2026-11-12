@@ -158,9 +158,15 @@ id: 'aidx'
 #   ┌─────────────────────┐
 #───┘ Job queue settings └──────────────────────────────────────
 
+# NOTE: the *JobConcurrency values below are upstream Misskey's, not
+# mk-go's. mk-go defaults to deliver=16 / inbox=16 / relationship=4 workers
+# (see docs/configuration.md).
 #deliverJobConcurrency: 128
 #inboxJobConcurrency: 16
 
+# NOTE: the *JobPerSec values below are upstream Misskey's defaults. mk-go
+# sets no rate limit for a queue whose key is unset (see
+# docs/divergence/config.md).
 #deliverJobPerSec: 128
 #inboxJobPerSec: 32
 
