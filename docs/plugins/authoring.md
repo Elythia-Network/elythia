@@ -932,6 +932,7 @@ host.preview.register({
 受け取れる。`presentation` は `automatic`（既定）、`manual`、`disabled` のどれかを
 返す関数で、manualならユーザーが押すまで取得せず、disabledならproviderを呼ばない。
 再試行はホスト側のボタンから行われる。`manualLabel` は手動表示ボタンの文言を指定する。
+`disabled`では安全な元URLリンクを表示し、既存URLカードの取得も行わない。標準URLカードを残して展開操作を待つ場合は`manual`を使う。manualでは標準URLカードと展開ボタンを表示し、押された後にproviderを取得する。
 
 ### 貼り付け変換
 

@@ -760,7 +760,7 @@ async function onPaste(ev: ClipboardEvent) {
 	if (props.mock) return;
 	if (ev.clipboardData == null) return;
 	if (textareaEl.value == null) return;
-	if (posting.value || posted.value || textAreaReadOnly.value || textareaEl.value.disabled || textareaEl.value.readOnly || imeText.value !== '' || justEndedComposition.value) return;
+	if (posting.value || posted.value || textAreaReadOnly.value || textareaEl.value.disabled || textareaEl.value.readOnly) return;
 
 	let pastedFiles: File[] = [];
 	for (const { item, i } of Array.from(ev.clipboardData.items, (data, x) => ({ item: data, i: x }))) {
@@ -779,9 +779,11 @@ async function onPaste(ev: ClipboardEvent) {
 		uploader.addFiles(pastedFiles);
 		return;
 	}
+	if (imeText.value !== '') return;
 
 	const rawPaste = ev.clipboardData.getData('text');
-	const transformedPaste = transformPastedText(rawPaste, {
+	const composing = justEndedComposition.value;
+	const transformedPaste: ReturnType<typeof transformPastedText> = composing ? { text: rawPaste } : transformPastedText(rawPaste, {
 		isPreferenceEnabled: key => {
 			const value = (prefer.s as Record<string, unknown>)[key];
 			return typeof value === 'boolean' ? value : undefined;
@@ -799,7 +801,7 @@ async function onPaste(ev: ClipboardEvent) {
 	};
 	const insertPastedText = () => {
 		const textarea = textareaEl.value;
-		if (textarea == null || posting.value || posted.value || textAreaReadOnly.value || textarea.disabled || textarea.readOnly || imeText.value !== '' || justEndedComposition.value) return false;
+		if (textarea == null || posting.value || posted.value || textAreaReadOnly.value || textarea.disabled || textarea.readOnly || imeText.value !== '') return false;
 		insertTextAtCursor(textarea, paste);
 		notifyPasteTransform();
 		return true;

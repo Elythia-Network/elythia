@@ -2059,6 +2059,82 @@ func TestEffectivePolicy_ActiveAssignmentsAreNonNilForAnonymous(t *testing.T) {
 	assert.Empty(t, request.ActiveAssignments)
 }
 
+func TestEffectivePolicy_UncheckedConditionalFailureRetainsProviderPrioritySemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		nativeValue   bool
+		providerValue bool
+	}{
+		{name: "provider denial remains effective", nativeValue: true, providerValue: false},
+		{name: "priority two provider allow overrides native priority zero", nativeValue: false, providerValue: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, roleRepo, assignRepo, _ := newTestService(t)
+			roleRepo.Roles["manual"] = &model.Role{
+				ID: "manual", Target: model.RoleTargetManual,
+				Policies: datatypes.JSON([]byte(fmt.Sprintf(`{"canPublicNote":{"useDefault":false,"priority":0,"value":%t}}`, tc.nativeValue))),
+			}
+			roleRepo.Roles["conditional"] = &model.Role{
+				ID: "conditional", Target: model.RoleTargetConditional,
+				CondFormula: datatypes.JSON([]byte(`{"type":"isBot"}`)),
+			}
+			assign(t, assignRepo, "u1", "manual")
+			svc.SetUserRepo(&errorUserRepo{
+				MockUserRepository: testutil.NewMockUserRepository(),
+				err:                errors.New("conditional user lookup unavailable"),
+			})
+			var providerCalls atomic.Int32
+			registerProvider(t, svc, "priority", []string{"canPublicNote"}, func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+				providerCalls.Add(1)
+				return []plugin.EffectivePolicyContribution{{Key: "canPublicNote", Priority: 2, Value: tc.providerValue}}, nil
+			})
+
+			unchecked := svc.GetUserPolicies("u1")
+			assert.Equal(t, tc.providerValue, unchecked["canPublicNote"], "unchecked consumers preserve provider priority behavior")
+			assert.Equal(t, int32(1), providerCalls.Load())
+
+			checked, err := svc.GetUserPoliciesChecked("u1")
+			require.Error(t, err)
+			assert.Equal(t, tc.nativeValue, checked["canPublicNote"], "checked consumers use native roles and report incomplete conditional inputs")
+			assert.Equal(t, int32(1), providerCalls.Load(), "checked resolution suppresses providers for incomplete inputs")
+		})
+	}
+}
+
+func TestEffectivePolicy_UncheckedConditionalFailureDoesNotCachePartialProviderResult(t *testing.T) {
+	svc, roleRepo, assignRepo, _ := newTestService(t)
+	roleRepo.Roles["manual"] = &model.Role{ID: "manual", Target: model.RoleTargetManual}
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON([]byte(`{"type":"isBot"}`)),
+	}
+	assign(t, assignRepo, "u1", "manual")
+	svc.SetUserRepo(&errorUserRepo{
+		MockUserRepository: testutil.NewMockUserRepository(),
+		err:                errors.New("temporary conditional user lookup failure"),
+	})
+	var providerCalls atomic.Int32
+	var roleIDs [][]string
+	registerProvider(t, svc, "partial-input", []string{"canSearchNotes"}, func(_ context.Context, req plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+		call := providerCalls.Add(1)
+		roleIDs = append(roleIDs, append([]string(nil), req.RoleIDs...))
+		return []plugin.EffectivePolicyContribution{{Key: "canSearchNotes", Priority: 2, Value: call > 1}}, nil
+	})
+
+	first := svc.GetUserPolicies("u1")
+	assert.Equal(t, false, first["canSearchNotes"])
+	assert.Equal(t, int32(1), providerCalls.Load(), "unchecked partial inputs preserve the provider call")
+
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.Users["u1"] = &model.User{ID: "u1", IsBot: false}
+	svc.SetUserRepo(userRepo)
+	second := svc.GetUserPolicies("u1")
+	assert.Equal(t, true, second["canSearchNotes"], "recovered inputs must not reuse a result produced from the partial snapshot")
+	assert.Equal(t, int32(2), providerCalls.Load())
+	require.Len(t, roleIDs, 2)
+	assert.Equal(t, roleIDs[0], roleIDs[1], "the test exercises identical role-ID cache keys before and after recovery")
+}
+
 func TestEffectivePolicy_ActiveAssignmentsExcludeExpiredAssignments(t *testing.T) {
 	svc, roleRepo, assignRepo, _ := newTestService(t)
 	roleRepo.Roles["r1"] = &model.Role{ID: "r1", Name: "A", Target: model.RoleTargetManual}

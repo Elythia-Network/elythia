@@ -73,7 +73,7 @@ func TestResolvePolicyProviderCachedSupersedesStaleFlightWithoutWaiting(t *testi
 	}
 	done := make(chan struct{})
 	go func() {
-		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 		close(done)
 	}()
 
@@ -178,7 +178,7 @@ func TestResolvePolicyProviderCachedSupersededTokenWaiterSkipsResolver(t *testin
 	key := policyProviderCacheKey{userID: "u1"}
 	done := make(chan struct{})
 	go func() {
-		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 		close(done)
 	}()
 
@@ -243,7 +243,7 @@ func TestResolvePolicyProviderCachedReclaimsUserEpochAfterLastFlight(t *testing.
 		runtime: runtime,
 	}
 
-	_, ok := resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+	_, ok := resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 	assert.True(t, ok)
 	assert.NotContains(t, runtime.userEpoch, "u1")
 }
@@ -538,30 +538,30 @@ func TestCheckedPoliciesReportConditionalRoleLookupFailureWithoutLosingManualDen
 	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
 	roleRepo.Roles["manual"] = &model.Role{
 		ID: "manual", Target: model.RoleTargetManual,
-		Policies: datatypes.JSON(`{"canCreateChannel":{"useDefault":false,"priority":0,"value":false}}`),
+		Policies: datatypes.JSON(`{"canPublicNote":{"useDefault":false,"priority":0,"value":false}}`),
 	}
 	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
 	assignRepo.Assignments["u1:manual"] = &model.RoleAssignment{ID: "a1", UserID: "u1", RoleID: "manual"}
 	userRepo := testutil.NewMockUserRepository()
 	userRepo.FindErr = errors.New("user lookup unavailable")
 	svc.SetUserRepo(userRepo)
-	providerCalled := false
+	var providerCalls atomic.Int32
 	require.NoError(t, svc.RegisterEffectivePolicyProvider("partial-role-input", plugin.EffectivePolicyRegistration{
-		Keys: []string{"canCreateChannel"},
+		Keys: []string{"canPublicNote"},
 		Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
-			providerCalled = true
-			return []plugin.EffectivePolicyContribution{{Key: "canCreateChannel", Priority: 2, Value: true}}, nil
+			providerCalls.Add(1)
+			return []plugin.EffectivePolicyContribution{{Key: "canPublicNote", Priority: 2, Value: true}}, nil
 		},
 	}))
 
 	unchecked := svc.GetUserPolicies("u1")
-	assert.Equal(t, false, unchecked["canCreateChannel"], "legacy resolution must retain an assigned manual denial")
-	assert.False(t, providerCalled, "providers must not treat partial conditional-role inputs as complete")
+	assert.Equal(t, true, unchecked["canPublicNote"], "legacy unchecked resolution keeps its priority-2 provider contribution")
+	assert.Equal(t, int32(1), providerCalls.Load(), "unchecked resolution must preserve pre-existing provider evaluation")
 
 	checked, err := svc.GetUserPoliciesChecked("u1")
 	require.Error(t, err, "conditional role lookup failure must reach checked authorization")
-	assert.Equal(t, false, checked["canCreateChannel"], "checked fallback should retain the assigned manual role")
-	assert.False(t, providerCalled)
+	assert.Equal(t, false, checked["canPublicNote"], "checked fallback should retain the assigned manual denial")
+	assert.Equal(t, int32(1), providerCalls.Load(), "checked resolution must suppress providers on incomplete conditional inputs")
 }
 
 func TestConditionalRoleLookupFailureDoesNotCachePartialSnapshot(t *testing.T) {
@@ -865,9 +865,9 @@ func TestPolicyProviderCacheKeySeparatesAssignmentIdentities(t *testing.T) {
 	first := plugin.EffectivePolicyRequest{UserID: "u1", ActiveAssignments: []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a1"}}}
 	second := plugin.EffectivePolicyRequest{UserID: "u1", ActiveAssignments: []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a2"}}}
 
-	firstResult, ok := resolvePolicyProviderCached(provider, first)
+	firstResult, ok := resolvePolicyProviderCached(provider, first, false)
 	require.True(t, ok)
-	secondResult, ok := resolvePolicyProviderCached(provider, second)
+	secondResult, ok := resolvePolicyProviderCached(provider, second, false)
 	require.True(t, ok)
 
 	assert.Equal(t, true, firstResult[0].Value)

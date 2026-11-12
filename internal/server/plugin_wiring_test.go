@@ -2,11 +2,13 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -263,17 +265,48 @@ func TestWritePluginBlobAppliesDeadlineThroughWWWAuthenticate(t *testing.T) {
 }
 
 func TestWrapPluginHandlerAppliesBlobDeadlineThroughMiddleware(t *testing.T) {
-	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	e := echo.New()
-	e.Use(middleware.WWWAuthenticate())
-	e.POST("/blob", wrapPluginHandler(func(plugin.Request) (any, error) {
-		return plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Minute}, nil
-	}, nil))
+	body := bytes.Repeat([]byte("plugin blob payload\n"), 100)
+	for _, acceptGzip := range []bool{false, true} {
+		name := "without gzip"
+		if acceptGzip {
+			name = "through gzip"
+		}
+		t.Run(name, func(t *testing.T) {
+			inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			e := echo.New()
+			e.Use(gzipMiddleware())
+			e.Use(middleware.WWWAuthenticate())
+			e.POST("/blob", wrapPluginHandler(func(plugin.Request) (any, error) {
+				return plugin.Blob{ContentType: "application/octet-stream", Body: body, WriteTimeout: time.Minute}, nil
+			}, nil))
 
-	e.ServeHTTP(inner, httptest.NewRequest(http.MethodPost, "/blob", nil))
-	assert.False(t, inner.deadline.IsZero(), "plugin Blob deadline must survive host adapter and middleware")
-	assert.Equal(t, "mp4", inner.Body.String())
-	assert.Equal(t, "video/mp4", inner.Header().Get("Content-Type"))
+			req := httptest.NewRequest(http.MethodPost, "/blob", nil)
+			if acceptGzip {
+				req.Header.Set(echo.HeaderAcceptEncoding, "gzip")
+			}
+			start := time.Now()
+			e.ServeHTTP(inner, req)
+
+			assert.False(t, inner.deadline.IsZero(), "plugin Blob deadline must survive host adapter and middleware")
+			assert.False(t, inner.deadline.Before(start.Add(time.Minute)))
+			assert.False(t, inner.deadline.After(time.Now().Add(time.Minute)))
+			assert.Equal(t, http.StatusOK, inner.Code)
+			assert.Equal(t, "application/octet-stream", inner.Header().Get(echo.HeaderContentType))
+
+			if acceptGzip {
+				assert.Equal(t, "gzip", inner.Header().Get(echo.HeaderContentEncoding))
+				reader, err := gzip.NewReader(inner.Body)
+				require.NoError(t, err)
+				decoded, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				require.NoError(t, reader.Close())
+				assert.Equal(t, body, decoded, "the compressed Blob must retain its original body")
+			} else {
+				assert.Empty(t, inner.Header().Get(echo.HeaderContentEncoding))
+				assert.Equal(t, body, inner.Body.Bytes())
+			}
+		})
+	}
 }
 
 func TestWritePluginBlobRejectsDeadlineWhenWriterCannotEnforceIt(t *testing.T) {
