@@ -21,6 +21,8 @@ def load(module: str) -> Any:
     psycopg_stub = types.ModuleType("psycopg")
     queue_probe_stub = types.ModuleType("queue_probe")
     queue_probe_stub.DriverKind = str
+    queue_probe_stub.QueueProbe = object
+    queue_probe_stub.TS_REDIS_PREFIX = "ts"
     queue_probe_stub.make_probe = lambda *args, **kwargs: None
     environment = {
         "REDIS_MKQ_HOST": "redis-mkq",
@@ -203,6 +205,29 @@ class DriverTests(unittest.TestCase):
                 patch("sys.stdout", io.StringIO()):
             self.assertEqual(driver.main(), 3)
 
+    def test_main_stops_when_the_warmup_does_not_drain(self) -> None:
+        calls: list[int] = []
+
+        def fake_send(targets: list[str], count: int, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            calls.append(count)
+            return {"preSignMs": 0, "totalMs": 0, "stats": []}
+
+        seed_json = json.dumps({"faker": {"actors": 5}, "stacks": {"mkq": {}, "ts": {}}})
+
+        def fake_open(path: str, mode: str = "r", *args: Any, **kwargs: Any) -> io.StringIO:
+            return io.StringIO(seed_json) if path == "/state/seed.json" else io.StringIO()
+
+        def drain(stack: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return {"timed_out": stack == "ts"}
+
+        with patch("builtins.open", fake_open), \
+                patch.object(driver, "faker_send", fake_send), \
+                patch.object(driver, "drain_one", drain), \
+                patch("sys.stdout", io.StringIO()):
+            self.assertEqual(driver.main(), 3)
+        # 計測の送信はしない
+        self.assertEqual(calls, [5])
+
     def test_main_can_skip_the_warmup(self) -> None:
         calls: list[int] = []
 
@@ -222,6 +247,29 @@ class DriverTests(unittest.TestCase):
                 patch("sys.stdout", io.StringIO()):
             self.assertEqual(driver.main(), 0)
         self.assertEqual(calls, [driver.INBOUND_COUNT])
+
+    def test_send_and_drain_stops_before_sending_when_a_queue_is_missing(self) -> None:
+        sent: list[int] = []
+
+        def missing(stack: str) -> None:
+            if stack == "ts":
+                raise RuntimeError("[ts] queue not found")
+
+        with patch.object(driver, "inbox_probe", missing), \
+                patch.object(driver, "faker_send", lambda *a, **k: sent.append(1)):
+            with self.assertRaises(RuntimeError):
+                driver.send_and_drain({"stacks": {"mkq": {}, "ts": {}}}, [], 10, "create", {}, 1)
+        self.assertEqual(sent, [])
+
+    def test_inbox_probe_passes_the_misskey_redis_prefix(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        with patch.object(driver, "make_probe", lambda *args: calls.append(args)):
+            driver.inbox_probe("ts")
+            driver.inbox_probe("mkq")
+        self.assertEqual(calls, [
+            ("ts", "bullmq", "redis-ts", "inbox", "ts"),
+            ("mkq", "mkq", "redis-mkq", "inbox", ""),
+        ])
 
     def test_faker_send_passes_the_actors(self) -> None:
         sent: dict[str, Any] = {}

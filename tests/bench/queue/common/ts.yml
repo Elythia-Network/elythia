@@ -31,3 +31,10 @@ allowedPrivateNetworks:
   - 172.16.0.0/12
   - 192.168.0.0/16
   - 10.0.0.0/8
+
+# 本家は書かなければ inbox を 32 件/秒、deliver を 128 件/秒に絞る
+# (QueueProcessorService.ts の `inboxJobPerSec ?? 32` / `deliverJobPerSec ?? 128`)。
+# Elythia は書かなければ絞らないので、絞ったままでは上限の値を測ることになる
+# (#4140)。エンジンどうしを比べるため、届かない大きさにして外す
+inboxJobPerSec: 100000
+deliverJobPerSec: 100000

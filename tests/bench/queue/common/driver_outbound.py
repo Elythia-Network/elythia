@@ -26,16 +26,17 @@ import httpx
 
 from delivery_manifest import build_deliveries, created_note_id
 from delivery_result import throughput_result
-from queue_probe import DriverKind, make_probe
+from queue_probe import TS_REDIS_PREFIX, DriverKind, QueueProbe, make_probe
 
 OUTBOUND_NOTES = int(os.environ.get("OUTBOUND_NOTES", "100"))
 POLL_INTERVAL_S = 0.05
 DRAIN_TIMEOUT_S = 240.0
 BLACKHOLE_URL = os.environ.get("BLACKHOLE_URL", "http://blackhole")
 
-STACK_PROBES: dict[str, tuple[DriverKind, str]] = {
-    "mkq": ("mkq", os.environ["REDIS_MKQ_HOST"]),
-    "ts": ("bullmq", os.environ["REDIS_TS_HOST"]),
+# (driver の種類, Redis のホスト, 本家の redis の接頭辞)。接頭辞は本家だけが使う (#4140)
+STACK_PROBES: dict[str, tuple[DriverKind, str, str]] = {
+    "mkq": ("mkq", os.environ["REDIS_MKQ_HOST"], ""),
+    "ts": ("bullmq", os.environ["REDIS_TS_HOST"], TS_REDIS_PREFIX),
 }
 
 
@@ -152,10 +153,15 @@ def post_notes_async(url: str, token: str, count: int, done: threading.Event,
     done.set()
 
 
-def run_stack(stack: str, info: dict[str, Any]) -> dict[str, Any]:
+def deliver_probe(stack: str) -> QueueProbe:
+    kind, redis_host, redis_prefix = STACK_PROBES[stack]
+    return make_probe(stack, kind, redis_host, "deliver", redis_prefix)
+
+
+def run_stack(stack: str, info: dict[str, Any], probe: QueueProbe | None = None) -> dict[str, Any]:
     print(f"[{stack}] outbound bench starting...", flush=True)
-    kind, redis_host = STACK_PROBES[stack]
-    probe = make_probe(stack, kind, redis_host, "deliver")
+    if probe is None:
+        probe = deliver_probe(stack)
 
     follower_count = info["follower_count"]
     expected_jobs = OUTBOUND_NOTES * follower_count
@@ -312,10 +318,14 @@ def main() -> int:
     with open("/state/seed.json") as f:
         seed = json.load(f)
 
+    # キューが見つからないときは投稿する前に止める (#4140)。stack を順に測るので、
+    # 後の stack で止まると先の stack の投稿と配送が無駄になり、結果も残らない
+    probes = {stack: deliver_probe(stack) for stack in seed["stacks"]}
+
     results = {}
     delivery_preparation_failed = False
     for stack, info in seed["stacks"].items():
-        results[stack] = run_stack(stack, info)
+        results[stack] = run_stack(stack, info, probes[stack])
         delivery_preparation_failed |= bool(results[stack].get("deliveryPreparationError"))
 
     out_path = "/results/outbound.json"

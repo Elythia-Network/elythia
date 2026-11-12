@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import os
 import sys
@@ -21,6 +22,8 @@ def load_driver():
     httpx_stub.post = lambda *args, **kwargs: None
     queue_probe_stub = types.ModuleType("queue_probe")
     queue_probe_stub.DriverKind = str
+    queue_probe_stub.QueueProbe = object
+    queue_probe_stub.TS_REDIS_PREFIX = "ts"
     queue_probe_stub.make_probe = lambda *args, **kwargs: None
     environment = {
         "REDIS_MKQ_HOST": "redis-mkq",
@@ -51,6 +54,37 @@ class InlineThread:
 
     def join(self) -> None:
         pass
+
+
+class OutboundProbeTests(unittest.TestCase):
+    def test_run_stack_reads_the_misskey_queue_under_its_redis_prefix(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+
+        def missing(*args: Any) -> None:
+            calls.append(args)
+            raise RuntimeError("queue not found")
+
+        # キューが見つからなければ、ノートを投稿する前に止まる
+        with patch.object(driver, "make_probe", missing), \
+                patch.object(driver, "post_notes_async", side_effect=AssertionError("posted")):
+            with self.assertRaises(RuntimeError):
+                driver.run_stack("ts", {"follower_count": 1, "url": "https://ts", "token": "t"})
+        self.assertEqual(calls[0][1:], ("bullmq", driver.STACK_PROBES["ts"][1], "deliver", "ts"))
+
+
+class OutboundMainTests(unittest.TestCase):
+    def test_main_stops_before_posting_when_a_queue_is_missing(self) -> None:
+        seed_json = json.dumps({"stacks": {"mkq": {}, "ts": {}}})
+
+        def missing(stack: str) -> None:
+            if stack == "ts":
+                raise RuntimeError("[ts] queue not found")
+
+        with patch("builtins.open", lambda path, *a, **k: io.StringIO(seed_json)), \
+                patch.object(driver, "deliver_probe", missing), \
+                patch.object(driver, "run_stack", side_effect=AssertionError("measured")):
+            with self.assertRaises(RuntimeError):
+                driver.main()
 
 
 class OutboundDeliveryTests(unittest.TestCase):
