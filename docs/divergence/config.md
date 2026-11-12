@@ -128,6 +128,18 @@ Elythia は、値が設定されて 0 より大きいときだけ上限を設け
 
 本家から移る運営者は、`*JobPerSec` を書いていない設定ファイルのままだと流量が変わる。たとえば受信が一度に多く届くと、本家は 32 件/秒に抑えて処理するが、Elythia は inbox の worker (既定は 16) が空く限りすぐに処理するので、DB にかかる負荷の形が変わる。本家と同じ流量にしたいなら、上の値を設定ファイルに明示して書く (yml にキーが無いと `MK_*` の環境変数だけでは効かない。[configuration.md](../configuration.md#環境変数オーバーライド))。値は queue ごとに 1 本の Redis キーで数えるので、worker 数やプロセス数で割らずにそのまま書く ([configuration.md](../configuration.md))。キューのベンチ ([queue-bench.md](../queue-bench.md)) は、エンジンどうしを比べるために本家の上限を外して測っている (#4140)。
 
+**webhook の配送は、本家と流量の決まり方が違う (#4148)。** 本家 2026.10.1 は、ユーザーの webhook (`userWebhookDeliver`) とシステムの webhook (`systemWebhookDeliver`) を別の queue に分け、それぞれに worker の数と同じ値の流量の上限を、設定では変えられない定数で設ける (`QueueProcessorService.ts`)。
+
+| | 本家 | Elythia |
+|---|---|---|
+| ユーザーの webhook | `userWebhookDeliver` queue。worker 64、64 件/秒 | `webhook` queue の `webhook:user`。上限なし |
+| システムの webhook | `systemWebhookDeliver` queue。worker 16、16 件/秒 | `webhook` queue の `webhook:system`。上限なし |
+| worker の数 (プロセスごと) | 上の 64 と 16 (変えられない)。件数の上限は queue 単位なので、プロセスを増やしても 64 件/秒と 16 件/秒のまま | 2 つで合わせて 4 (`defaultQueueConcurrency`)。設定のキーは無く、`jobQueueAutoScale` を有効にしたときだけ伸縮する |
+| 流量の上限の設定 | 無い (定数) | 無い (`<queue>JobPerSec` は deliver / inbox / relationship だけ) |
+
+- **流量は、件数の上限ではなく worker の数で決まる。** 4 は、#1375 で hot な queue (inbox / deliver) を厚く、低頻度の queue を薄く配る既定にしたときの値 (それ以前の mkq の既定は 16 ÷ 6 queue で 2)。#1375 は本家の値を基準にしつつ、deliver を本家の 128 ではなく 16 に抑えた理由として「worker の数がおおむね Redis の接続の数になる」ことを挙げているが、webhook を本家の 64 にしなかった個別の理由の記録は無い。`jobQueueAutoScale` が無効 (既定) でプロセスが 1 つのとき、Elythia の流量はおおむね「4 ÷ 1 件あたりの処理時間」件/秒で、1 件あたりの時間には送り先の応答の待ちが入る (タイムアウトは本家と同じ 5 秒、#3263)。そのため、ユーザーの webhook は 1 件の平均が 62.5ms 未満、システムの webhook は 250ms 未満のときだけ本家の上限を超え、ふつうのインターネット越しの送り先では本家より流量が小さい。送り先がすべてタイムアウトすると、Elythia は 0.8 件/秒、本家 (これもプロセスが 1 つのとき) はユーザーの webhook で 12.8 件/秒 (64 ÷ 5) になる。queue を回すプロセス (役割を指定しないプロセスと `MK_ONLY_QUEUE` のプロセス。`MK_ONLY_SERVER` のプロセスは数えない) が N 個あると、Elythia の流量も閾値も N 倍になる
+- **2 つの種類が同じ worker を取り合う。** 本家は別々に数えるが、Elythia では、ユーザーの webhook がたくさん積まれると、通報などのシステムの webhook が後回しになる。1 つの queue にまとめた理由の記録は見つからなかった (webhook の配送を最初に実装した時点、asynq を直接使っていた頃からこの形)
+
 再試行は **Elythia の方が手厚い**。upstream は `attempts` を設定しないので単発試行で終わり、失敗した実体は failed job として残るだけで自動復旧しない。Elythia は指数バックオフ付きで 4 回まで再試行する (object storage の一時的な 5xx / タイムアウトは待てば回復するため)。queue 自体が使えないときは同期削除にフォールバックし、実体を取りこぼさない。
 
 **job の data の形は Elythia 固有** (BullMQ の HASH の field の構成・job 名・opts は upstream と同じ)。#3614 より前の data は `{"type": <task type>, "body": <payload の base64>}` で、配送 (`ap:deliver`) と受信 (`ap:inbox`) の payload の中の本文 (activity) もさらに base64 なので、Redis に本文の約 1.86 倍で載っていた (2.8KB の配送で data が 5,231 バイト)。#3614 で base64 にしない形を足し、**2 段に分けて出した**。2.1.0 は**読む側だけ**で、積む job は以前の形のまま。**2.1.0 の次の版から新しい形で積む。**
