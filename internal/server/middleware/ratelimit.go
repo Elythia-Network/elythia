@@ -37,7 +37,9 @@ type EndpointLimit struct {
 	// **正当なモデレーターの照会が窓のあいだ 429 になる**。
 	//
 	// IP 照会の上限が守りたいのは「認証済みの利用者による濫用」で、そちらは
-	// user bucket が押さえる。未認証は権限検査が 403 で落として何も開示しないので、
+	// user bucket が押さえる。ロールの rateLimitFactor が 0 以下でも、この
+	// endpoint 群では user bucket を factor 1.0 で数える (#4143、`resolveActors`)。
+	// 未認証は権限検査が 403 で落として何も開示しないので、
 	// IP bucket はこの endpoint 群では**守るものが無く、締め出しだけを生む**。
 	//
 	// 既定 (false) では今までどおり両方を見る — auth 系のように**未認証の試行
@@ -200,6 +202,8 @@ func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 			actors := rl.resolveActors(c)
 			if limit.UserBucketOnly {
 				actors = dropIPActors(actors)
+			} else {
+				actors = dropFactorExemptActors(actors)
 			}
 			if len(actors) == 0 {
 				return next(c)
@@ -330,7 +334,10 @@ func RequireIPRateLimit(rl *RateLimiter, endpoint string) echo.MiddlewareFunc {
 // (factor=1.0) が並ぶ。未認証では IP 由来 actor のみ。
 type rateLimitActor struct {
 	key    string  // bucket 識別子 (userID そのまま / "ip-<hash>" 等)
-	factor float64 // Max scaling 係数 (>0、1.0 で base、>1 で緩和、<1 で厳格)
+	factor float64 // Max scaling 係数 (>0、1.0 で base、>1 で厳格、<1 で緩和)
+	// factorExempt marks a user bucket whose role sets rateLimitFactor to 0 or
+	// below. Only UserBucketOnly endpoints count it (#4143).
+	factorExempt bool
 }
 
 // resolveActors returns all bucket actors that should be checked for this
@@ -341,14 +348,24 @@ func (rl *RateLimiter) resolveActors(c echo.Context) []rateLimitActor {
 	if user := GetUser(c); user != nil {
 		// user.ID は ULID で `ip-` prefix と衝突しないので prefix なしで
 		// そのまま bucket key にする (既存 Redis state との互換性維持)。
-		actors = append(actors, rateLimitActor{
-			key:    user.ID,
-			factor: rl.userFactor(user.ID),
-		})
+		actor := rateLimitActor{key: user.ID, factor: rl.userFactor(user.ID)}
+		if actor.factor <= 0 {
+			// 本家と同じく、rateLimitFactor が 0 以下のロールの利用者には、利用者
+			// ごとの制限を掛けない (#4143)。運営者がロールで明示して外したもので、
+			// TS 版で付けたロールを移行後もそのまま効かせる。IP bucket は下で
+			// 今までどおり掛ける。
+			// **UserBucketOnly の endpoint だけは factor 1.0 で数える。** IP 照会と
+			// 連合先の疎通の診断 (#3106 / #3055) は、本家に無いか本家では上限の無い
+			// endpoint に、管理者やモデレーターにも上限を置くために Elythia が足した
+			// もので、IP bucket も使わないので、外すと何も数えなくなる。印を付けて
+			// Middleware で選ぶ。
+			actor = rateLimitActor{key: user.ID, factor: 1.0, factorExempt: true}
+		}
+		actors = append(actors, actor)
 		// 認証済でも IP bucket を併用 (#606 item 2)。NAT 配下の正当ユーザーは
 		// 同一 IP で複数 user として扱われるが、auth 系 endpoint は 1h/60 程度
-		// と緩いので実害は小さい (個別 user の rate-limit は userID bucket で
-		// 守られる)。
+		// と緩いので実害は小さい (個別 user の rate-limit は、factor が 0 以下で
+		// なければ userID bucket で守られる)。
 		// **プロセス内の呼び出しは IP バケットを使わない。** プラグインの
 		// `AsUser` は実在しない `127.0.0.1` を名乗るので、そのままだと全利用者が
 		// 単一のバケットを取り合い、1 人の操作で他の全員が 429 になる。
@@ -370,6 +387,19 @@ func (rl *RateLimiter) resolveActors(c echo.Context) []rateLimitActor {
 	return []rateLimitActor{{key: ipHash(c.RealIP()), factor: 1.0}}
 }
 
+// dropFactorExemptActors removes the user buckets of users whose role sets
+// rateLimitFactor to 0 or below.
+func dropFactorExemptActors(actors []rateLimitActor) []rateLimitActor {
+	out := actors[:0:0]
+	for _, a := range actors {
+		if a.factorExempt {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // dropIPActors removes IP-derived buckets, leaving only user buckets.
 //
 // **`ipHash` が付ける `ip-` prefix で判別する。** user bucket は ULID をそのまま
@@ -386,7 +416,8 @@ func dropIPActors(actors []rateLimitActor) []rateLimitActor {
 }
 
 // userFactor returns the rateLimitFactor from the user's role policies.
-// 未配線 / 値不正 / 0 以下なら 1.0 (= 影響なし) で返す。
+// A value of 0 or below is returned as is and means no per-user limit.
+// 未配線 / 未設定 / 数でない値 (NaN を含む) なら 1.0 (= 影響なし) で返す。
 func (rl *RateLimiter) userFactor(userID string) float64 {
 	if rl.policyProvider == nil {
 		return 1.0
@@ -398,13 +429,11 @@ func (rl *RateLimiter) userFactor(userID string) float64 {
 	}
 	switch v := raw.(type) {
 	case float64:
-		if v > 0 {
+		if !math.IsNaN(v) {
 			return v
 		}
 	case int:
-		if v > 0 {
-			return float64(v)
-		}
+		return float64(v)
 	}
 	return 1.0
 }
@@ -413,7 +442,9 @@ func (rl *RateLimiter) userFactor(userID string) float64 {
 // RateLimiterService.limit() の `max: limitation.max / factor` (#2106 N28)。
 // rateLimitFactor は**除数**で、値が大きいほど実効 max が小さくなる
 // (= role policy で締める) — 例 factor=3(300%) で 1/3 に厳格化、factor=0.3(30%) で
-// 約 3.3x に緩和。factor=1.0 / 不正値 (<=0またはNaN) は base そのまま。結果は最低 1 に
+// 約 3.3x に緩和。factor=1.0 / 0 以下 / NaN は base そのまま (利用者の bucket の
+// 0 以下は resolveActors が 1.0 にし、Middleware が UserBucketOnly 以外では外すので、
+// ここへは来ない)。結果は最低 1 に
 // クランプ (factor 過大の事故で全 user が瞬時に 429 を食らうのを防ぐ)。
 func scaledMax(base int, factor float64) int {
 	if factor <= 0 || factor == 1.0 || math.IsNaN(factor) {
@@ -429,7 +460,7 @@ func scaledMax(base int, factor float64) int {
 // scaledMinInterval multiplies the base minInterval window by factor, mirroring
 // upstream RateLimiterService の `duration: limitation.minInterval * factor`
 // (#2106 N28)。rateLimitFactor は乗数で、factor が大きいほど window が長くなり
-// (= 連投間隔が厳しくなる)、小さいほど緩む。factor=1.0 / 不正値は base そのまま。
+// (= 連投間隔が厳しくなる)、小さいほど緩む。factor=1.0 / 0 以下 / NaN は base そのまま。
 // 正方向の duration overflow は実質的な無期限拒否を避けるため base へ戻す。
 func scaledMinInterval(base time.Duration, factor float64) time.Duration {
 	if factor <= 0 || factor == 1.0 || math.IsNaN(factor) {

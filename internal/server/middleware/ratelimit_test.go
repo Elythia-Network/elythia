@@ -317,15 +317,15 @@ func TestMiddleware_PolicyProviderScalesMax(t *testing.T) {
 	assert.Equal(t, 300, store.calls[1].Max, "IP bucket は factor 適用外")
 }
 
-// factor が 0 / 負 / 不正型なら 1.0 (= base) に fallback
+// factor が未設定 / 数でない値なら 1.0 (= base) に fallback
 func TestMiddleware_PolicyProviderInvalidFactor(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		policy stubPolicy
 	}{
-		{"zero", stubPolicy{factor: 0}},
-		{"negative", stubPolicy{factor: -1}},
 		{"missing", stubPolicy{}},
+		{"string", stubPolicy{factor: "0"}},
+		{"nan", stubPolicy{factor: math.NaN()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &mockLimitStore{
@@ -338,18 +338,101 @@ func TestMiddleware_PolicyProviderInvalidFactor(t *testing.T) {
 			rl.SetPolicyProvider(tc.policy)
 			e, h := setupEcho(rl)
 			doRequest(e, rl.Middleware(), h, "/api/notes/create", &model.User{ID: "u"})
-			require.GreaterOrEqual(t, len(store.calls), 1)
+			require.Len(t, store.calls, 2)
+			assert.Equal(t, "u:notes/create", store.calls[0].Key)
 			assert.Equal(t, 300, store.calls[0].Max, "不正 factor は 1.0 fallback")
 		})
 	}
 }
 
-// stubPolicy は PolicyProvider のテスト double。factor=0 なら policies map
+// 本家の ApiCallService.ts は factor > 0 のときだけ制限を検査するので、0 以下の
+// ロールの利用者には利用者ごとの制限が掛からない (#4143)。IP bucket は残す。
+func TestMiddleware_NonPositiveFactorSkipsUserBucket(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		factor any
+	}{
+		{"zero float", 0.0},
+		{"zero int", 0},
+		{"negative float", -1.0},
+		{"negative int", -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limits := map[string]*EndpointLimit{
+				"notes/create": {Duration: time.Hour, Max: 300, MinInterval: time.Second},
+			}
+
+			store := &mockLimitStore{
+				results: []mockResult{{Info: LimitInfo{Remaining: 10}}, {Info: LimitInfo{Remaining: 10}}},
+			}
+			rl := NewRateLimiter(store, true, limits)
+			rl.SetPolicyProvider(stubPolicy{factor: tc.factor})
+			e, h := setupEcho(rl)
+			rec := doRequest(e, rl.Middleware(), h, "/api/notes/create", &model.User{ID: "vip"})
+			assert.Equal(t, http.StatusOK, rec.Code)
+			require.Len(t, store.calls, 2, "IP bucket の minInterval と duration だけを見る")
+			for _, call := range store.calls {
+				assert.True(t, strings.HasPrefix(call.Key, ipBucketPrefix), "user bucket を数えない: %s", call.Key)
+			}
+
+			// IP bucket が無ければ、何も数えずに通す
+			store = &mockLimitStore{}
+			rl = NewRateLimiter(store, false, limits)
+			rl.SetPolicyProvider(stubPolicy{factor: tc.factor})
+			e, h = setupEcho(rl)
+			rec = doRequest(e, rl.Middleware(), h, "/api/notes/create", &model.User{ID: "vip"})
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Empty(t, store.calls)
+		})
+	}
+}
+
+// UserBucketOnly の endpoint (IP 照会 #3106、疎通の診断 #3055) は本家に上限が
+// 無く、IP bucket も使わないので、factor が 0 以下でも user bucket を factor 1.0
+// で数える (#4143)。外すと何も数えなくなる。
+func TestMiddleware_NonPositiveFactorKeepsUserBucketOnlyLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		factor any
+	}{
+		{"zero", 0},
+		{"negative", -0.5},
+	} {
+		for _, enableIP := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/ip=%v", tc.name, enableIP), func(t *testing.T) {
+				store := &mockLimitStore{results: []mockResult{{Info: LimitInfo{Remaining: 0, ResetMs: time.Now().Add(time.Minute).UnixMilli()}}}}
+				limits := map[string]*EndpointLimit{
+					"admin/ip/accounts": {Duration: time.Hour, Max: 120, UserBucketOnly: true},
+				}
+				rl := NewRateLimiter(store, enableIP, limits)
+				rl.SetPolicyProvider(stubPolicy{factor: tc.factor})
+				e, h := setupEcho(rl)
+				rec := doRequest(e, rl.Middleware(), h, "/api/admin/ip/accounts", &model.User{ID: "mod"})
+				assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+				require.Len(t, store.calls, 1)
+				assert.Equal(t, "mod:admin/ip/accounts", store.calls[0].Key)
+				assert.Equal(t, 120, store.calls[0].Max, "factor 1.0 で数える")
+			})
+		}
+	}
+
+	// 実際の表でも、5 本は UserBucketOnly のまま
+	for _, endpoint := range []string{
+		"admin/ip/accounts", "admin/ip/related-accounts", "admin/ip/lookup-log",
+		"admin/get-user-ips", "admin/federation/check-host",
+	} {
+		limit, ok := DefaultEndpointLimits[endpoint]
+		require.True(t, ok, endpoint)
+		assert.True(t, limit.UserBucketOnly, endpoint)
+	}
+}
+
+// stubPolicy は PolicyProvider のテスト double。factor が nil なら policies map
 // に rateLimitFactor を含めない (= 「未設定」を再現)。
-type stubPolicy struct{ factor float64 }
+type stubPolicy struct{ factor any }
 
 func (s stubPolicy) GetUserPolicies(_ string) map[string]any {
-	if s.factor == 0 {
+	if s.factor == nil {
 		return map[string]any{}
 	}
 	return map[string]any{"rateLimitFactor": s.factor}
