@@ -254,7 +254,7 @@ Misskey TS の `users/show` は **自インスタンスで観測した範囲** �
 
 ### inbox processor の verify-in-worker 化 (#565)
 
-upstream は HTTP handler の中で AP signature verify を同期実行するため、悪意ある unsigned activity が手前で増えると HTTP 受信スループットが低下する。Elythia は HTTP handler は body + signature header だけを payload に詰めて 202 即返し、signature verify / host block / instance touch / chart hook を inbox worker (queue processor) 側で実行することで HTTP 受信 rps が **TS の 2.6-2.8x** (queue-bench で確認)。
+upstream は HTTP handler の中で AP signature verify を同期実行するため、悪意ある unsigned activity が手前で増えると HTTP 受信スループットが低下する。Elythia は HTTP handler は body + signature header だけを payload に詰めて 202 即返し、signature verify / host block / instance touch / chart hook を inbox worker (queue processor) 側で実行することで HTTP 受信 rps が **TS の 2.6-2.8x** (queue-bench で確認。当時は本家を development で動かし、送り手は 1 人だった。今の条件 (#4138 / #4140 の後、本家 2026.10.1) では 2.9〜3.3 倍で、[queue-bench.md](queue-bench.md) を参照)。
 
 ### mkq driver (#571 audit / #2985)
 
