@@ -116,6 +116,18 @@ cron の多重実行防止は **job option ではなく mkq の job ID 設計**�
 
 `objectStorage` の worker 数だけは upstream の 16 に対し Elythia は 4。実体削除は S3 への I/O 待ちが主で 1 worker あたりの効率が良く、一括削除の並列度を job 数で稼ぐ設計でもないため、`deliver` と同じ理由 (worker 数 ≒ Redis 接続数) で抑えている。
 
+**流量の上限 (`<queue>JobPerSec`) は、設定しなければ設けない (#4141)。** 本家は設定が無くても上限を設ける (2026.10.1 の `QueueProcessorService.ts`)。
+
+| queue | 本家の既定 | Elythia の既定 |
+|---|---|---|
+| `deliver` | 128 件/秒 (`deliverJobPerSec ?? 128`) | 上限なし |
+| `inbox` | 32 件/秒 (`inboxJobPerSec ?? 32`) | 上限なし |
+| `relationship` | 64 件/秒 (`relationshipJobPerSec ?? 64`) | 上限なし |
+
+Elythia は、値が設定されて 0 より大きいときだけ上限を設ける (`internal/server/queue_factory.go` の `perQueueRatesFromConfig`)。これらの設定は #495 (deliver)・#534 (inbox)・#2403 (relationship) で効くようにしたが、どれも未設定は上限なしのままにした (#495 を閉じた PR #531 は「config 未設定時の挙動は従来どおり」としている)。本家の既定に揃えるかどうかを決めた記録は無い。
+
+本家から移る運営者は、`*JobPerSec` を書いていない設定ファイルのままだと流量が変わる。たとえば受信が一度に多く届くと、本家は 32 件/秒に抑えて処理するが、Elythia は inbox の worker (既定は 16) が空く限りすぐに処理するので、DB にかかる負荷の形が変わる。本家と同じ流量にしたいなら、上の値を設定ファイルに明示して書く (yml にキーが無いと `MK_*` の環境変数だけでは効かない。[configuration.md](../configuration.md#環境変数オーバーライド))。値は queue ごとに 1 本の Redis キーで数えるので、worker 数やプロセス数で割らずにそのまま書く ([configuration.md](../configuration.md))。キューのベンチ ([queue-bench.md](../queue-bench.md)) は、エンジンどうしを比べるために本家の上限を外して測っている (#4140)。
+
 再試行は **Elythia の方が手厚い**。upstream は `attempts` を設定しないので単発試行で終わり、失敗した実体は failed job として残るだけで自動復旧しない。Elythia は指数バックオフ付きで 4 回まで再試行する (object storage の一時的な 5xx / タイムアウトは待てば回復するため)。queue 自体が使えないときは同期削除にフォールバックし、実体を取りこぼさない。
 
 **job の data の形は Elythia 固有** (BullMQ の HASH の field の構成・job 名・opts は upstream と同じ)。#3614 より前の data は `{"type": <task type>, "body": <payload の base64>}` で、配送 (`ap:deliver`) と受信 (`ap:inbox`) の payload の中の本文 (activity) もさらに base64 なので、Redis に本文の約 1.86 倍で載っていた (2.8KB の配送で data が 5,231 バイト)。#3614 で base64 にしない形を足し、**2 段に分けて出した**。2.1.0 は**読む側だけ**で、積む job は以前の形のまま。**2.1.0 の次の版から新しい形で積む。**
