@@ -2196,6 +2196,28 @@ func TestGetUserPolicies_FractionalBaseSizePoliciesAreKept(t *testing.T) {
 	assert.Equal(t, 2, p["pinLimit"], "other int keys are still rounded")
 }
 
+// 基本ポリシー (meta) の rateLimitFactor の小数も切り捨てない (#4143)。本家の
+// 管理画面は 0.1 刻みで入れられる。切り捨てると 0.5 が 0 になり、0 は利用者ごとの
+// 制限を外す値なので、緩めたつもりの設定で制限そのものが消える。
+func TestGetUserPolicies_FractionalBaseRateLimitFactorIsKept(t *testing.T) {
+	svc, roleRepo, assignRepo, metaRepo := newTestService(t)
+	metaRepo.Meta = &model.Meta{ID: "x", Policies: datatypes.JSON([]byte(`{"rateLimitFactor": 0.5}`))}
+	assert.Equal(t, 0.5, svc.GetUserPolicies("nobody")["rateLimitFactor"])
+
+	// ロールの値との集約は、小数の base でも最大を取る (本家の Math.max)
+	roleRepo.Roles["r1"] = &model.Role{
+		ID: "r1", Name: "Strict",
+		Policies: datatypes.JSON([]byte(`{
+			"rateLimitFactor": {"useDefault": false, "priority": 0, "value": 2}
+		}`)),
+	}
+	assignRepo.Assignments["user1:r1"] = &model.RoleAssignment{ID: "a1", UserID: "user1", RoleID: "r1"}
+	assert.Equal(t, 2, svc.GetUserPolicies("user1")["rateLimitFactor"])
+
+	merged := role.MergeMetaPolicies([]byte(`{"rateLimitFactor":0.3}`))
+	assert.Equal(t, 0.3, merged["rateLimitFactor"])
+}
+
 // 基本が小数でも、ロールで付けた値が集約で勝つ (#3489)。base が float64 のとき
 // int の分岐に入らず、ロールの値を捨てていた形 (#3484 の作業中に出た回帰)。
 func TestGetUserPolicies_FractionalBaseDoesNotHideRoleValue(t *testing.T) {
