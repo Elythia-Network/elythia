@@ -15,10 +15,12 @@ import (
 
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/elythia-network/elythia/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/datatypes"
 )
 
 func TestAcquirePolicyProviderTokenRejectsExpiredContext(t *testing.T) {
@@ -508,6 +510,15 @@ func newInternalServiceWithCountingRepo(t *testing.T) (*Service, *testutil.MockR
 	return NewService(roleRepo, assignRepo, metaRepo, idGen), roleRepo, assignRepo
 }
 
+type failingRoleListRepository struct {
+	repository.RoleRepository
+	err error
+}
+
+func (r failingRoleListRepository) List() ([]*model.Role, error) {
+	return nil, r.err
+}
+
 // 1 回の ListByUser から roles と activeAssignments が同時に得られる。
 func TestResolveUserRoleSnapshotReadsOnceAndReturnsBoth(t *testing.T) {
 	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
@@ -521,6 +532,84 @@ func TestResolveUserRoleSnapshotReadsOnceAndReturnsBoth(t *testing.T) {
 	assert.Equal(t, "r1", snapshot.roles[0].ID)
 	assert.Equal(t, []activeRoleAssignment{{roleID: "r1", assignmentID: "a1"}}, snapshot.activeAssignments)
 	assert.Equal(t, 1, assignRepo.calls, "roles と activeAssignments は 1 回の読取から共に作られる")
+}
+
+func TestCheckedPoliciesReportConditionalRoleLookupFailureWithoutLosingManualDeny(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["manual"] = &model.Role{
+		ID: "manual", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON(`{"canCreateChannel":{"useDefault":false,"priority":0,"value":false}}`),
+	}
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	assignRepo.Assignments["u1:manual"] = &model.RoleAssignment{ID: "a1", UserID: "u1", RoleID: "manual"}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("user lookup unavailable")
+	svc.SetUserRepo(userRepo)
+	providerCalled := false
+	require.NoError(t, svc.RegisterEffectivePolicyProvider("partial-role-input", plugin.EffectivePolicyRegistration{
+		Keys: []string{"canCreateChannel"},
+		Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			providerCalled = true
+			return []plugin.EffectivePolicyContribution{{Key: "canCreateChannel", Priority: 2, Value: true}}, nil
+		},
+	}))
+
+	unchecked := svc.GetUserPolicies("u1")
+	assert.Equal(t, false, unchecked["canCreateChannel"], "legacy resolution must retain an assigned manual denial")
+	assert.False(t, providerCalled, "providers must not treat partial conditional-role inputs as complete")
+
+	checked, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "conditional role lookup failure must reach checked authorization")
+	assert.Equal(t, false, checked["canCreateChannel"], "checked fallback should retain the assigned manual role")
+	assert.False(t, providerCalled)
+}
+
+func TestConditionalRoleLookupFailureDoesNotCachePartialSnapshot(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["manual"] = &model.Role{ID: "manual", Target: model.RoleTargetManual}
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+		Policies:    datatypes.JSON(`{"canCreateChannel":{"useDefault":false,"priority":1,"value":false}}`),
+	}
+	assignRepo.Assignments["u1:manual"] = &model.RoleAssignment{ID: "a1", UserID: "u1", RoleID: "manual"}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("temporary user lookup failure")
+	userRepo.Users["u1"] = &model.User{ID: "u1", IsBot: true}
+	svc.SetUserRepo(userRepo)
+
+	_, firstErr := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, firstErr)
+	userRepo.FindErr = nil
+	policies, secondErr := svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, secondErr, "a failed conditional snapshot must not be cached")
+	assert.Equal(t, false, policies["canCreateChannel"], "the recovered conditional role should now apply")
+}
+
+func TestCheckedPoliciesReportConditionalRoleListFailure(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+	}
+	svc.roleRepo = failingRoleListRepository{RoleRepository: roleRepo, err: errors.New("role list unavailable")}
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must not resolve against an incomplete conditional-role list")
+}
+
+func TestCheckedPoliciesReportMissingConditionalRoleUser(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must report unavailable conditional-role user lookup")
+}
+
+func TestCheckedPoliciesReportNilConditionalRoleUser(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	svc.SetUserRepo(testutil.NewMockUserRepository())
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must report a missing user when a conditional role needs evaluation")
 }
 
 // warm cache は 0 query で両方を返す。**片方だけ返さない。**

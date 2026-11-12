@@ -234,6 +234,78 @@ func TestPluginRequest_UnauthenticatedIsNotModerator(t *testing.T) {
 
 // --- Blob ---
 
+type blobWriteDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+	setErr   error
+}
+
+func (w *blobWriteDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return w.setErr
+}
+
+func TestWritePluginBlobAppliesDeadlineThroughWWWAuthenticate(t *testing.T) {
+	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	e := echo.New()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	start := time.Now()
+	handler := middleware.WWWAuthenticate()(func(c echo.Context) error {
+		return writePluginBlob(c, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: 30 * time.Second})
+	})
+
+	require.NoError(t, handler(ctx))
+	require.False(t, inner.deadline.IsZero(), "deadline must reach the underlying response writer")
+	assert.False(t, inner.deadline.Before(start.Add(30*time.Second)))
+	assert.False(t, inner.deadline.After(time.Now().Add(30*time.Second)))
+	assert.Equal(t, "mp4", inner.Body.String())
+	assert.Equal(t, "video/mp4", inner.Header().Get("Content-Type"))
+}
+
+func TestWrapPluginHandlerAppliesBlobDeadlineThroughMiddleware(t *testing.T) {
+	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	e := echo.New()
+	e.Use(middleware.WWWAuthenticate())
+	e.POST("/blob", wrapPluginHandler(func(plugin.Request) (any, error) {
+		return plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Minute}, nil
+	}, nil))
+
+	e.ServeHTTP(inner, httptest.NewRequest(http.MethodPost, "/blob", nil))
+	assert.False(t, inner.deadline.IsZero(), "plugin Blob deadline must survive host adapter and middleware")
+	assert.Equal(t, "mp4", inner.Body.String())
+	assert.Equal(t, "video/mp4", inner.Header().Get("Content-Type"))
+}
+
+func TestWritePluginBlobRejectsDeadlineWhenWriterCannotEnforceIt(t *testing.T) {
+	e := echo.New()
+	inner := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Second})
+
+	require.Error(t, err, "a bounded Blob must not be written when its deadline cannot be enforced")
+	assert.Empty(t, inner.Body.String(), "the Blob body must not be sent without the deadline")
+}
+
+func TestWritePluginBlobRejectsWhenWriterDeadlineSetterFails(t *testing.T) {
+	e := echo.New()
+	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder(), setErr: errors.New("deadline unavailable")}
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Second})
+
+	require.Error(t, err)
+	assert.Empty(t, inner.Body.String(), "the Blob body must not be sent after deadline setup fails")
+}
+
+func TestWritePluginBlobRejectsNegativeDeadlineBeforeWriting(t *testing.T) {
+	e := echo.New()
+	inner := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: -time.Second})
+
+	require.Error(t, err)
+	assert.Empty(t, inner.Body.String())
+}
+
 // バイナリ応答は JSON エンコードせずそのまま書く。画像プロキシの用途。
 func TestWrapPluginHandler_Blob(t *testing.T) {
 	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}

@@ -4,16 +4,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/vue';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/vue';
 import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { components } from '@/components/index.js';
 import { directives } from '@/directives/index.js';
+import { prefer } from '@/preferences.js';
 import MkPluginUrlPreview from '@/components/MkPluginUrlPreview.vue';
 import {
 	_resetPreviewsForTest,
+	_resetPasteTransformsForTest,
 	launchServerPlugins,
 	resolvePreviewProvider,
+	transformPastedText,
 	type PluginDefinition,
+	type PreviewContext,
 	type PreviewInput,
 	type PreviewProvider,
 } from '@/plugin-api.js';
@@ -61,6 +65,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetPreviewsForTest();
+	_resetPasteTransformsForTest();
 	fetchMock.resetMocks();
 	cleanup();
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -176,7 +181,7 @@ describe('preview provider coordinator', () => {
 	const source = { kind: 'note' as const, noteId: 'note-1' };
 
 	function renderPreview(props: Record<string, unknown> = {}) {
-		fetchMock.mockOnceIf(request => new URL(request.url).pathname === '/url', () => ({
+		fetchMock.mockIf(request => new URL(request.url).pathname === '/url', () => ({
 			status: 200,
 			body: JSON.stringify({
 				url: urlInput.href,
@@ -287,6 +292,108 @@ describe('preview provider coordinator', () => {
 		await waitFor(() => expect(result.getByText('provider: note-1:loaded')).toBeTruthy());
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test('manual presentation waits for a click and reports manual state to the provider', async () => {
+		const load = vi.fn(async (_input, context) => `manual:${context.manual}`);
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			manualLabel: 'Show preview',
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await waitFor(() => expect(result.getByRole('button', { name: 'Show preview' })).toBeTruthy());
+		expect(load).not.toHaveBeenCalled();
+		await fireEvent.click(result.getByRole('button', { name: 'Show preview' }));
+		await waitFor(() => expect(result.getByText('provider: manual:true')).toBeTruthy());
+		expect(load).toHaveBeenCalledTimes(1);
+	});
+
+	test('manual native fallback does not also render a bare link when actions are hidden', async () => {
+		const load = vi.fn(async () => 'unexpected');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false, showActions: false });
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+		expect(load).not.toHaveBeenCalled();
+		expect(result.container.querySelector('a[rel="nofollow noopener noreferrer"]')).toBeNull();
+	});
+
+	test('presentation receives a named existing preference through its context', async () => {
+		const presentation = vi.fn((_input: PreviewInput, context: PreviewContext) => context.preferenceValue ? 'automatic' as const : 'disabled' as const);
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			preferenceKey: 'alwaysConfirmFollow',
+			presentation,
+		}))]);
+
+		renderPreview({ detail: false });
+		await waitFor(() => expect(presentation).toHaveBeenCalled());
+		expect(presentation.mock.calls.some(([, context]) => context.preferenceValue === prefer.s.alwaysConfirmFollow)).toBe(true);
+	});
+
+	test('preference object replacement invalidates a settled provider result', async () => {
+		const reactivePreference = prefer.r.mutingEmojis;
+		const originalPreference = reactivePreference.value as string[];
+		const load = vi.fn(async (_input, context) => String((context.preferenceValue as unknown[]).length));
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			preferenceKey: 'mutingEmojis',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		try {
+			await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+			const replacement = [...originalPreference];
+			expect(replacement).toEqual(originalPreference);
+			expect(replacement).not.toBe(originalPreference);
+			reactivePreference.value = replacement;
+			await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+			expect(result.getByText(`provider: ${replacement.length}`)).toBeTruthy();
+		} finally {
+			reactivePreference.value = originalPreference;
+		}
+	});
+
+	test('disabled presentation retains a safe source link and does not load', async () => {
+		const load = vi.fn(async () => 'unexpected');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			presentation: () => 'disabled',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await nextTick();
+		expect(load).not.toHaveBeenCalled();
+		expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href);
+	});
+
+	test('manual provider failure can be retried explicitly', async () => {
+		const load = vi.fn()
+			.mockRejectedValueOnce(new Error('load failed'))
+			.mockResolvedValueOnce('recovered');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			manualLabel: 'Show preview',
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await fireEvent.click(await result.findByRole('button', { name: 'Show preview' }));
+		await waitFor(() => expect(result.getByRole('button', { name: /retry|again/i })).toBeTruthy());
+		await fireEvent.click(result.getByRole('button', { name: /retry|again/i }));
+		await waitFor(() => expect(result.getByText('provider: recovered')).toBeTruthy());
+		expect(load).toHaveBeenCalledTimes(2);
 	});
 
 	test('loads a timeline provider only after its card enters the viewport', async () => {
@@ -639,5 +746,45 @@ describe('preview provider coordinator', () => {
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(renderAttempts).toHaveBeenCalledTimes(1);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('post form paste transforms', () => {
+	test('applies transforms in stable namespaced order and respects preferences', async () => {
+		const calls: string[] = [];
+		let localizedNotification = 'old language';
+		await launchServerPlugins([
+			{
+				name: 'z-plugin',
+				setup(host) {
+					host.postForm.registerPasteTransform('trim', text => { calls.push('z'); return text.trim(); }, { notification: () => localizedNotification });
+					host.postForm.registerPasteTransform('disabled', text => { calls.push('disabled'); return `bad:${text}`; }, { enabledPreferenceKey: 'pasteTransformEnabled' });
+				},
+			},
+			{
+				name: 'a-plugin',
+				setup(host) { host.postForm.registerPasteTransform('prefix', text => { calls.push('a'); return `a:${text}`; }); },
+			},
+		]);
+
+		localizedNotification = 'Trimmed pasted text';
+		expect(transformPastedText(' value ', {
+			isPreferenceEnabled: key => key === 'pasteTransformEnabled' ? false : undefined,
+		})).toEqual({ text: 'a: value', notification: 'Trimmed pasted text' });
+		expect(calls).toEqual(['a', 'z']);
+	});
+
+	test('keeps the previous text when a transform fails or returns a promise', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		await launchServerPlugins([{
+			name: 'broken',
+			setup(host) {
+				host.postForm.registerPasteTransform('throws', () => { throw new Error('private clipboard text'); });
+				host.postForm.registerPasteTransform('async', (() => Promise.reject(new Error('async failure'))) as never);
+			},
+		}]);
+
+		expect(transformPastedText('secret')).toEqual({ text: 'secret' });
+		expect(warn.mock.calls.flat().join(' ')).not.toContain('secret');
 	});
 });

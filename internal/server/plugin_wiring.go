@@ -104,6 +104,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			// 口を渡すと、他のプラグインの値を名指しで読めてしまう。
 			secrets: s.pluginSecretService().ForPlugin(def.Name),
 		}
+		if s.roleService != nil {
+			pctx.policyResolver = s.roleService
+		}
 
 		// ストレージはロールに関係なく渡す。Routes からも Jobs からも使うため。
 		//
@@ -207,6 +210,9 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			group := api.Group(pluginRoutePrefix+def.Name, middleware.RejectAppToken())
 			if needsRoutes {
 				r := &pluginRouter{group: group, roles: s.pluginRoles}
+				if s.roleService != nil {
+					r.policyResolver = s.roleService
+				}
 				if err := def.Routes(pctx, r); err != nil {
 					return fmt.Errorf("plugin %q: ルート登録に失敗しました: %w", def.Name, err)
 				}
@@ -396,19 +402,20 @@ func requestHostFor(rawURL string) string {
 // --- Context ---
 
 type pluginContext struct {
-	name       string
-	logger     *slog.Logger
-	api        plugin.API
-	storage    plugin.Storage
-	config     plugin.Config
-	secrets    plugin.Secrets
-	peer       plugin.Peer
-	queue      plugin.Queue
-	accounts   plugin.Accounts
-	httpClient *http.Client
-	goGate     *pluginGoGate
-	goStart    func(func())
-	background *bgwork.Group
+	name           string
+	logger         *slog.Logger
+	api            plugin.API
+	storage        plugin.Storage
+	config         plugin.Config
+	policyResolver pluginCheckedRolePolicyProvider
+	secrets        plugin.Secrets
+	peer           plugin.Peer
+	queue          plugin.Queue
+	accounts       plugin.Accounts
+	httpClient     *http.Client
+	goGate         *pluginGoGate
+	goStart        func(func())
+	background     *bgwork.Group
 }
 
 func (c *pluginContext) Name() string            { return c.name }
@@ -416,6 +423,19 @@ func (c *pluginContext) Logger() *slog.Logger    { return c.logger }
 func (c *pluginContext) API() plugin.API         { return c.api }
 func (c *pluginContext) Storage() plugin.Storage { return c.storage }
 func (c *pluginContext) Config() plugin.Config   { return c.config }
+
+func (c *pluginContext) CheckedUserRolePolicies(userID string, keys ...string) (map[string]any, error) {
+	if userID == "" || c.policyResolver == nil {
+		return nil, errors.New("checked user role policy lookup is unavailable")
+	}
+	policies, err := c.policyResolver.GetUserPoliciesCheckedForKeys(userID, keys...)
+	if err != nil {
+		return nil, err
+	}
+	return projectCheckedRolePolicies(policies, keys...), nil
+}
+
+var _ plugin.CheckedUserRolePolicyContext = (*pluginContext)(nil)
 
 // Accounts は **常に非 nil** (Peer / Queue と同じ理由)。テストなどで
 // pluginContext を直接組んだときも、呼ぶとエラーを返す実装に倒す。
@@ -760,9 +780,14 @@ func (c *pluginContext) startGo(fn func(context.Context)) {
 
 // --- Router ---
 
+type pluginCheckedRolePolicyProvider interface {
+	GetUserPoliciesCheckedForKeys(string, ...string) (map[string]any, error)
+}
+
 type pluginRouter struct {
-	group *echo.Group
-	roles middleware.RoleChecker
+	group          *echo.Group
+	roles          middleware.RoleChecker
+	policyResolver pluginCheckedRolePolicyProvider
 	// err holds the first registration failure (pluginJobs と同じ方針)。
 	err error
 }
@@ -772,7 +797,7 @@ func (r *pluginRouter) GET(path string, h plugin.Handler) {
 		r.err = fmt.Errorf("パス %q は mk-go の予約です (_ で始まるパスは使えません)", path)
 		return
 	}
-	r.group.GET(path, wrapPluginHandler(h, r.roles))
+	r.group.GET(path, wrapPluginHandler(h, r.roles, r.policyResolver))
 }
 
 func (r *pluginRouter) POST(path string, h plugin.Handler) {
@@ -780,7 +805,7 @@ func (r *pluginRouter) POST(path string, h plugin.Handler) {
 		r.err = fmt.Errorf("パス %q は mk-go の予約です (_ で始まるパスは使えません)", path)
 		return
 	}
-	r.group.POST(path, wrapPluginHandler(h, r.roles))
+	r.group.POST(path, wrapPluginHandler(h, r.roles, r.policyResolver))
 }
 
 // reservedPluginPath reports whether mk-go owns this path.
@@ -797,9 +822,13 @@ func reservedPluginPath(path string) bool {
 // エラーはhost-ownedのStatusErrorまたはcoded status errorのときだけメッセージを
 // 返す。素のerrorを返すとプラグインの内部事情 (DBのエラー文字列など) がそのまま
 // 外に出るため、ログにだけ残して汎用メッセージを返す。
-func wrapPluginHandler(h plugin.Handler, roles middleware.RoleChecker) echo.HandlerFunc {
+func wrapPluginHandler(h plugin.Handler, roles middleware.RoleChecker, policyResolvers ...pluginCheckedRolePolicyProvider) echo.HandlerFunc {
+	var policyResolver pluginCheckedRolePolicyProvider
+	if len(policyResolvers) > 0 {
+		policyResolver = policyResolvers[0]
+	}
 	return func(c echo.Context) error {
-		res, err := h(&pluginRequest{c: c, roles: roles})
+		res, err := h(&pluginRequest{c: c, roles: roles, policyResolver: policyResolver})
 		if err != nil {
 			se, code := plugin.ExtractStatusError(err)
 			if se != nil {
@@ -848,6 +877,15 @@ func wrapPluginHandler(h plugin.Handler, roles middleware.RoleChecker) echo.Hand
 // octet-stream に落ちるので、ブラウザでは表示ではなくダウンロードになる。
 // denylist にしないのは、危険な型を数え上げる形が必ず漏れるため。
 func writePluginBlob(c echo.Context, b plugin.Blob) error {
+	if b.WriteTimeout < 0 {
+		return errors.New("plugin blob write timeout must not be negative")
+	}
+	if b.WriteTimeout > 0 {
+		deadline := time.Now().Add(b.WriteTimeout)
+		if err := http.NewResponseController(c.Response().Writer).SetWriteDeadline(deadline); err != nil {
+			return fmt.Errorf("set plugin blob write deadline: %w", err)
+		}
+	}
 	ct := b.ContentType
 	if ct == "" {
 		ct = echo.MIMEOctetStream
@@ -867,7 +905,8 @@ func writePluginBlob(c echo.Context, b plugin.Blob) error {
 // --- Request ---
 
 type pluginRequest struct {
-	c echo.Context
+	c              echo.Context
+	policyResolver pluginCheckedRolePolicyProvider
 	// roles は権限判定に使う。未配線なら常に false を返す (画面は出ても
 	// API は通らない、という安全側に倒す)。
 	roles middleware.RoleChecker
@@ -907,6 +946,35 @@ func (r *pluginRequest) IsAdministrator() bool {
 		return false
 	}
 	return r.roles.IsAdministrator(id)
+}
+
+// CheckedRolePolicies returns only the requested effective role policies. Lookup
+// errors propagate so plugins can fail closed when authorization is uncertain.
+func (r *pluginRequest) CheckedRolePolicies(keys ...string) (map[string]any, error) {
+	id := r.UserID()
+	if id == "" {
+		return nil, errors.New("checked role policies require authentication")
+	}
+	if r.policyResolver == nil {
+		return nil, errors.New("checked role policy lookup is unavailable")
+	}
+	policies, err := r.policyResolver.GetUserPoliciesCheckedForKeys(id, keys...)
+	if err != nil {
+		return nil, err
+	}
+	return projectCheckedRolePolicies(policies, keys...), nil
+}
+
+var _ plugin.CheckedRolePolicyRequest = (*pluginRequest)(nil)
+
+func projectCheckedRolePolicies(policies map[string]any, keys ...string) map[string]any {
+	projected := make(map[string]any, len(keys))
+	for _, key := range keys {
+		if value, ok := policies[key]; ok {
+			projected[key] = value
+		}
+	}
+	return projected
 }
 
 // --- API ---

@@ -232,12 +232,20 @@ func (s *Service) resolvePolicies(userID string, providerKeys map[string]struct{
 		// **1 回の読取から roles と activeAssignments を共に得る。** repository が読めない
 		// ときは activeAssignments を空で埋めた snapshot を渡さず、provider を起動する
 		// 前に checked error にする。
-		snapshot, err := s.resolveUserRoleSnapshot(userID)
-		if err != nil {
-			return s.applyServerCaps(base), fmt.Errorf("role: effective policy inputs: %w", err)
+		snapshot, roleErr := s.resolveUserRoleSnapshot(userID)
+		if roleErr != nil {
+			return s.applyServerCaps(base), fmt.Errorf("role: effective policy inputs: %w", roleErr)
 		}
 		roles = snapshot.roles
 		activeAssignments = snapshot.activeAssignments
+		if snapshot.conditionalErr != nil {
+			// Conditional roles can contribute both permits and denials. A partial
+			// native role set is returned for the existing unchecked fallback, but
+			// providers must not observe it as a complete policy input.
+			providers = nil
+			conditionalErr := fmt.Errorf("role: conditional policy inputs: %w", snapshot.conditionalErr)
+			defer func() { err = joinBasePolicyError(conditionalErr, err) }()
+		}
 	}
 	if len(roles) == 0 && len(providers) == 0 {
 		return s.applyServerCaps(base), nil

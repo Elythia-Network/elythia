@@ -30,7 +30,7 @@ make build          # または docker build / make uds-build
 
 `plugins/` を走査して自動的に取り込む。フラグやマニフェストの編集は不要。
 
-各プラグインは**独立した Go module**（`go.mod` を持つ）である必要がある。持たない場合はビルド時にエラーになる。
+各サーバープラグインは**独立した Go module**（`go.mod` を持つ）である必要がある。持たない場合はビルド時にエラーになる。例外として、Go側のcallbackを持たない `frontendOnly: true` のプラグインは Go module なしでフロントだけを組み込める。
 
 ### Docker の場合
 

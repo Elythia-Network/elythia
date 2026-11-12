@@ -3,6 +3,7 @@ package role
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"math"
@@ -298,6 +299,7 @@ func cloneRoles(roles []*model.Role) []*model.Role {
 type userRoleSnapshot struct {
 	roles             []*model.Role
 	activeAssignments []activeRoleAssignment
+	conditionalErr    error
 }
 
 // clone は cache entry と呼び出し側のどちらかが他の変更を観測しないよう値を複製
@@ -306,6 +308,7 @@ func (s userRoleSnapshot) clone() userRoleSnapshot {
 	return userRoleSnapshot{
 		roles:             cloneRoles(s.roles),
 		activeAssignments: cloneActiveRoleAssignments(s.activeAssignments),
+		conditionalErr:    s.conditionalErr,
 	}
 }
 
@@ -572,10 +575,9 @@ func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, erro
 	// formula 評価で絞り込む。assigned roles と matched conditional の和集合
 	// を返す。upstream TS の getUserRoles と同じ順 (assigned が先)。
 	//
-	// roleRepo / userRepo どちらかが未配線なら、conditional 評価は skip して
-	// assigned のみを返す (= 旧挙動)。test 経路で userRepo 未注入のケースに
-	// 配慮した soft-fail。
-	condRoles := s.evaluateConditionalRoles(userID, assignedRoles)
+	// 条件付きロールの入力を確認できないときも、既存の GetUserRoles 向けに
+	// 手動割当ロールの結果は返す。ただし、その不完全な snapshot は cache しない。
+	condRoles, conditionalErr := s.evaluateConditionalRoles(userID, assignedRoles)
 	roles := append(assignedRoles, condRoles...)
 
 	// #2106 S5: cache 失効を「TTL」と「最も早い assignment expiresAt」の min にする。
@@ -591,9 +593,9 @@ func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, erro
 		}
 	}
 
-	snapshot := userRoleSnapshot{roles: roles, activeAssignments: activeAssignments}
+	snapshot := userRoleSnapshot{roles: roles, activeAssignments: activeAssignments, conditionalErr: conditionalErr}
 	s.userRoleCacheMu.Lock()
-	if s.allUserRoleEpoch == allEpoch && s.userRoleEpoch[userID] == userEpoch {
+	if conditionalErr == nil && s.allUserRoleEpoch == allEpoch && s.userRoleEpoch[userID] == userEpoch {
 		s.userRoleCache[userID] = &roleCacheEntry{snapshot: snapshot.clone(), expiresAt: cacheExpiry}
 	}
 	s.userRoleCacheMu.Unlock()
@@ -714,18 +716,13 @@ func (s *Service) GetUserAssign(userID, roleID string, at time.Time) (*model.Rol
 }
 
 // evaluateConditionalRoles returns the subset of `target=conditional`
-// roles whose `condFormula` evaluates to true for the user. Best-effort:
-// when prerequisites are missing (no userRepo wired, role list fetch
-// fails, user lookup fails, formula JSON malformed) we return nil so
-// callers fall back to assigned roles only. Matches upstream TS where
-// evalCond swallows all errors as false.
-func (s *Service) evaluateConditionalRoles(userID string, assigned []*model.Role) []*model.Role {
-	if s.userRepo == nil {
-		return nil
-	}
+// roles whose `condFormula` evaluates to true for the user. Repository lookup
+// failures are returned separately so checked policy consumers can fail closed;
+// legacy callers may keep using the assigned-role fallback.
+func (s *Service) evaluateConditionalRoles(userID string, assigned []*model.Role) ([]*model.Role, error) {
 	allRoles, err := s.listRolesCached()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list roles for conditional evaluation: %w", err)
 	}
 	// 早期 short-circuit: conditional role が 1 つも無いなら user fetch を
 	// 省略する (= upstream TS と同 optimization)。これで大多数のインスタンス
@@ -738,11 +735,17 @@ func (s *Service) evaluateConditionalRoles(userID string, assigned []*model.Role
 		}
 	}
 	if !hasCond {
-		return nil
+		return nil, nil
+	}
+	if s.userRepo == nil {
+		return nil, errors.New("conditional role user lookup is unavailable")
 	}
 	user, err := s.userRepo.FindByID(userID)
-	if err != nil || user == nil {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("lookup user for conditional evaluation: %w", err)
+	}
+	if user == nil {
+		return nil, errors.New("conditional role user lookup returned no user")
 	}
 	matched := make([]*model.Role, 0)
 	for _, r := range allRoles {
@@ -751,7 +754,8 @@ func (s *Service) evaluateConditionalRoles(userID string, assigned []*model.Role
 		}
 		var formula CondFormula
 		// CondFormula は datatypes.JSON。未設定だと "{}" が入っていて
-		// type が空文字列のため EvalCond で false に倒れる。
+		// type が空文字列のため EvalCond で false に倒れる。既存挙動と同じく
+		// malformed JSON はこのロールだけ不一致として扱う。
 		if err := json.Unmarshal(r.CondFormula, &formula); err != nil {
 			continue
 		}
@@ -759,7 +763,7 @@ func (s *Service) evaluateConditionalRoles(userID string, assigned []*model.Role
 			matched = append(matched, r)
 		}
 	}
-	return matched
+	return matched, nil
 }
 
 // isRootUser checks if the user is the root user.
