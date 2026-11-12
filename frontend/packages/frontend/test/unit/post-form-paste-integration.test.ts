@@ -177,26 +177,25 @@ describe('MkPostForm paste transform integration', () => {
 		expect(testState.toast).not.toHaveBeenCalled();
 	});
 
-	test('keeps canceled quote paste raw immediately after composition ends', async () => {
-		const transform = vi.fn((text: string) => `${text}!`);
+	test('transforms and notifies for text pasted after compositionend without waiting for keyup', async () => {
+		const transform = vi.fn((text: string) => text.replace('?utm_source=tracking', ''));
 		await launchServerPlugins([{
 			name: 'example',
 			setup(host) { host.postForm.registerPasteTransform('transform', transform, { notification: () => 'transformed' }); },
 		}]);
-		testState.confirm.mockResolvedValue({ canceled: true });
 		const view = await mountPostForm();
 		const textarea = view.getByTestId('post-form-text') as HTMLTextAreaElement;
 		textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
-		const raw = `${window.location.origin}/notes/quoted-note`;
+		const raw = 'https://example.com/post?utm_source=tracking';
 		const event = makePasteEvent(raw);
 		textarea.dispatchEvent(event);
 		await flush();
 
 		expect(event.defaultPrevented).toBe(true);
-		expect(testState.confirm).toHaveBeenCalledOnce();
-		expect(transform).not.toHaveBeenCalled();
-		expect(textarea.value).toBe(raw);
-		expect(testState.toast).not.toHaveBeenCalled();
+		expect(testState.confirm).not.toHaveBeenCalled();
+		expect(transform).toHaveBeenCalledWith(raw);
+		expect(textarea.value).toBe('https://example.com/post');
+		expect(testState.toast).toHaveBeenCalledWith('transformed');
 	});
 
 	test('keeps long text on the existing attach-as-file path after composition ends', async () => {
@@ -216,9 +215,9 @@ describe('MkPostForm paste transform integration', () => {
 
 		expect(event.defaultPrevented).toBe(true);
 		expect(testState.confirm).toHaveBeenCalledOnce();
-		expect(transform).not.toHaveBeenCalled();
+		expect(transform).toHaveBeenCalledWith(raw);
 		expect(testState.addFiles).toHaveBeenCalledOnce();
-		expect(await (testState.addFiles.mock.calls[0][0][0] as File).text()).toBe(raw);
-		expect(testState.toast).not.toHaveBeenCalled();
+		expect(await (testState.addFiles.mock.calls[0][0][0] as File).text()).toBe(`${raw}!`);
+		expect(testState.toast).toHaveBeenCalledWith('transformed');
 	});
 });

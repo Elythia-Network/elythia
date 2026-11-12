@@ -11,11 +11,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 		:url="url"
 		:detail="detail"
 		:compact="compact"
-		:showActions="showActions && !showManualAction"
+		:showActions="showActions && !manualFallbackPending"
 	/>
 	<button
 		v-if="showManualAction"
 		type="button"
+		:disabled="!canPresent"
 		class="_button"
 		:class="$style.manualButton"
 		@click="activateManualPreview"
@@ -25,6 +26,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<button
 		v-else-if="showRetryAction"
 		type="button"
+		:disabled="!canPresent"
 		class="_button"
 		:class="$style.manualButton"
 		@click="retryProviderLoad"
@@ -57,7 +59,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onErrorCaptured, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onErrorCaptured, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import MkUrlPreview from '@/components/MkUrlPreview.vue';
 import { i18n } from '@/i18n.js';
 import { resolvePreviewProvider } from '@/plugin-api.js';
@@ -127,13 +129,6 @@ const presentation = computed(() => {
 });
 const canPresent = computed(() => props.source != null && props.revealed && active.value && inViewport.value && safeHref.value != null &&
 	(selectedProvider.value?.requiresDetail !== true || props.detail));
-const showManualAction = computed(() => selectedProvider.value != null && presentation.value === 'manual' && canPresent.value && !manualActivated.value && props.showActions);
-const showNativeFallback = computed(() => selectedProvider.value != null && safeHref.value != null && (
-	(presentation.value === 'manual' && canPresent.value && !manualActivated.value) ||
-	(loadState.value === 'error' && selectedProvider.value.presentation != null && canPresent.value)
-));
-const showRetryAction = computed(() => selectedProvider.value != null && loadState.value === 'error' && selectedProvider.value.presentation != null && props.showActions &&
-	(presentation.value !== 'disabled') && canPresent.value);
 const mayLoad = computed(() => selectedProvider.value != null && canPresent.value && presentation.value !== 'disabled' &&
 	(presentation.value !== 'manual' || manualActivated.value));
 
@@ -154,8 +149,43 @@ function sameLoadKey(left: PreviewLoadKey | null, right: PreviewLoadKey): boolea
 	return left != null && left.length === right.length && left.every((value, index) => Object.is(value, right[index]));
 }
 
+const nativeFallbackEligible = computed(() => selectedProvider.value != null && safeHref.value != null && props.revealed && props.source != null &&
+	(selectedProvider.value?.requiresDetail !== true || props.detail) && (
+	(presentation.value === 'manual' && !manualActivated.value) ||
+	(loadState.value === 'error' && selectedProvider.value?.presentation != null && presentation.value !== 'disabled')
+));
+const nativeFallbackOwnerKey = computed<PreviewLoadKey>(() => [
+	registration.value,
+	registration.value?.id ?? '',
+	props.url,
+	props.source?.noteId ?? '',
+	props.detail,
+	preferenceValue.value,
+	props.revealed,
+	manualActivated.value,
+	providerRetryAttempt.value,
+]);
+const presentedNativeFallbackKey = shallowRef<PreviewLoadKey | null>(null);
+watch(
+	() => [nativeFallbackOwnerKey.value, nativeFallbackEligible.value, canPresent.value] as const,
+	([key, eligible, present], previous) => {
+		if (previous != null && !sameLoadKey(previous[0], key)) presentedNativeFallbackKey.value = null;
+		if (eligible && present) presentedNativeFallbackKey.value = key;
+	},
+	{ immediate: true, flush: 'sync' },
+);
+const showNativeFallback = computed(() => nativeFallbackEligible.value && (
+	canPresent.value || sameLoadKey(presentedNativeFallbackKey.value, nativeFallbackOwnerKey.value)
+));
+const manualFallbackPending = computed(() => presentation.value === 'manual' && !manualActivated.value);
+const ownsNativeFallback = computed(() => sameLoadKey(presentedNativeFallbackKey.value, nativeFallbackOwnerKey.value));
+const showManualAction = computed(() => selectedProvider.value != null && manualFallbackPending.value && props.showActions &&
+	(canPresent.value || ownsNativeFallback.value));
+const showRetryAction = computed(() => selectedProvider.value != null && loadState.value === 'error' && selectedProvider.value.presentation != null && props.showActions &&
+	presentation.value !== 'disabled' && (canPresent.value || ownsNativeFallback.value));
+
 function activateManualPreview(): void {
-	if (!showManualAction.value) return;
+	if (!showManualAction.value || !canPresent.value) return;
 	manualActivated.value = true;
 }
 

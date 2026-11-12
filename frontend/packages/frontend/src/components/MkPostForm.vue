@@ -782,8 +782,7 @@ async function onPaste(ev: ClipboardEvent) {
 	if (imeText.value !== '') return;
 
 	const rawPaste = ev.clipboardData.getData('text');
-	const composing = justEndedComposition.value;
-	const transformedPaste: ReturnType<typeof transformPastedText> = composing ? { text: rawPaste } : transformPastedText(rawPaste, {
+	const transformedPaste = transformPastedText(rawPaste, {
 		isPreferenceEnabled: key => {
 			const value = (prefer.s as Record<string, unknown>)[key];
 			return typeof value === 'boolean' ? value : undefined;

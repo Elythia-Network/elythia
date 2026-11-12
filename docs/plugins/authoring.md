@@ -602,7 +602,7 @@ instance/server capはplugin集約の後に適用する。`chunkedUploadMaxConcu
 
 `Resolve`は、明示的なinvalidationの間は`UserID`、sorted active `RoleIDs`、`ActiveAssignments`だけで結果が決まる純粋関数として実装する。時刻、request固有情報、未通知の外部状態へ依存してはならない。**同じ`RoleIDs`でも`ActiveAssignments`が違えば結果が違ってもよい**ので、hostはproviderごとの成功結果cache keyにassignment IDを含める（付け外し / 再割り当ての直後に前の結果を返さないため）。cacheはoperator設定`effectivePolicyProviderCacheEntries`（既定10000件、providerごと）のLRUであり、eviction時は同じ入力を再解決する。
 
-plugin独自の書き込みでpolicy入力が変わった場合は、永続化のcommit成功後にだけ`inv.InvalidateUser`または`inv.InvalidateRole`を呼ぶ。失敗結果はcacheしない。in-flightの古いnative role/provider結果はinvalidation後のrequestへ返さず、cacheにも戻さない。conditional roleの対象userはassignment rowから列挙できないため、role invalidationは全userのrole/policy cacheを保守的に破棄する。匿名（空`UserID`）にはper-user invalidationが無いため、匿名結果に影響する状態変更では`InvalidateRole`を使う。
+plugin独自の書き込みでpolicy入力が変わった場合は、永続化のcommit成功後にだけ`inv.InvalidateUser`または`inv.InvalidateRole`を呼ぶ。provider失敗の結果はcacheしない。in-flightの古いnative role/provider結果はinvalidation後のrequestへ返さず、cacheにも戻さない。conditional roleの対象userはassignment rowから列挙できないため、role invalidationは全userのrole/policy cacheを保守的に破棄する。匿名（空`UserID`）にはper-user invalidationが無いため、匿名結果に影響する状態変更では`InvalidateRole`を使う。
 
 ## 設定
 
@@ -959,6 +959,8 @@ HTTP routeでは `plugin.CheckedRolePolicyRequest`、バックグラウンド処
 `plugin.CheckedUserRolePolicyContext` に型アサーションして使う。指定したpolicy keyだけが
 返り、認可に関わるroleやproviderの解決に失敗した場合はerrorになる。認可判断に使うときは
 errorを許可扱いせず、fail closedにすること。
+
+条件付きロール評価の入力取得に失敗したsnapshotは、DB読み出しの連続を抑えるため最大1秒だけnegative cacheされる（best-effort）。negative cacheは既存role cache mapの最大1024件までで、上限中は新しいerror entryを保存しないため、連続するDB読み出しが発生する場合がある。checked resolverはcache hitでも元の入力エラーを返し、providerを実行しない。入力が回復すればcache expiry後に再試行し、`InvalidateUser` / `InvalidateRole`による明示的な無効化はすぐ反映される。部分入力から得たprovider出力はcacheされない。
 
 ```go
 checked, ok := req.(plugin.CheckedRolePolicyRequest)

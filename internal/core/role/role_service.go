@@ -242,6 +242,14 @@ const (
 // (#300 3-5)。
 const roleCacheTTL = 5 * time.Minute
 
+// conditionalRoleErrorCacheTTL briefly caches conditional-role lookup errors
+// to bound repeated repository reads while allowing recovery checks promptly.
+const conditionalRoleErrorCacheTTL = time.Second
+
+// maxConditionalRoleErrorCacheEntries caps the existing role-cache map size
+// when admitting new conditional-error entries. Successful snapshots keep their policy.
+const maxConditionalRoleErrorCacheEntries = 1024
+
 // roleCacheEntry は per-user の roles snapshot + 失効時刻。
 type roleCacheEntry struct {
 	// snapshot は roles と activeAssignments の組。**1 回の ListByUser から共に
@@ -576,7 +584,8 @@ func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, erro
 	// を返す。upstream TS の getUserRoles と同じ順 (assigned が先)。
 	//
 	// 条件付きロールの入力を確認できないときも、既存の GetUserRoles 向けに
-	// 手動割当ロールの結果は返す。ただし、その不完全な snapshot は cache しない。
+	// 手動割当ロールの結果は返す。不完全な snapshot は短い TTL で保持し、
+	// checked consumer へ conditionalErr をそのまま伝える。
 	condRoles, conditionalErr := s.evaluateConditionalRoles(userID, assignedRoles)
 	roles := append(assignedRoles, condRoles...)
 
@@ -586,17 +595,39 @@ func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, erro
 	// role/policy として効き続けてしまう (upstream は getUserAssigns で read 毎に
 	// expiresAt を再 filter)。entry を soonest expiry で drop すれば、次 read が
 	// 再 fetch して DB filter が期限切れ assignment を除外する。
-	cacheExpiry := time.Now().Add(roleCacheTTL)
+	now := time.Now()
+	cacheExpiry := now.Add(roleCacheTTL)
 	for _, a := range assignments {
 		if a.ExpiresAt != nil && a.ExpiresAt.Before(cacheExpiry) {
 			cacheExpiry = *a.ExpiresAt
 		}
 	}
+	if conditionalErr != nil {
+		errorExpiry := now.Add(conditionalRoleErrorCacheTTL)
+		if errorExpiry.Before(cacheExpiry) {
+			cacheExpiry = errorExpiry
+		}
+	}
 
 	snapshot := userRoleSnapshot{roles: roles, activeAssignments: activeAssignments, conditionalErr: conditionalErr}
 	s.userRoleCacheMu.Lock()
-	if conditionalErr == nil && s.allUserRoleEpoch == allEpoch && s.userRoleEpoch[userID] == userEpoch {
-		s.userRoleCache[userID] = &roleCacheEntry{snapshot: snapshot.clone(), expiresAt: cacheExpiry}
+	if s.allUserRoleEpoch == allEpoch && s.userRoleEpoch[userID] == userEpoch {
+		mayPublish := true
+		if conditionalErr != nil {
+			existing := s.userRoleCache[userID]
+			if existing != nil &&
+				time.Now().Before(existing.expiresAt) && existing.snapshot.conditionalErr == nil {
+				// A slower failed lookup must not overwrite a newer successful snapshot.
+				mayPublish = false
+			}
+			if existing == nil && len(s.userRoleCache) >= maxConditionalRoleErrorCacheEntries {
+				// Negative caching is best-effort once the bounded error-key budget is full.
+				mayPublish = false
+			}
+		}
+		if mayPublish {
+			s.userRoleCache[userID] = &roleCacheEntry{snapshot: snapshot.clone(), expiresAt: cacheExpiry}
+		}
 	}
 	s.userRoleCacheMu.Unlock()
 	return snapshot.clone(), nil
