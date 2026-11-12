@@ -837,7 +837,7 @@ r.POST("/admin/stats", func(req plugin.Request) (any, error) {
 
 ### レート制限は一律の既定値
 
-本体の per-endpoint テーブルはプラグインのパスを持たないので、**登録したルートには一律の既定の上限が掛かる**（`internal/server/middleware/ratelimit_defs.go` の `PluginRouteDefaultLimit`、10 分に 600 回）。数えるのはルート（パスの型）ごとに、本体の endpoint と同じ単位（ログインしていれば利用者とIP、していなければIP）。超えると本体と同じ 429 `RATE_LIMIT_EXCEEDED` になる。`plugin.Router` には上限を宣言する口が無いので、ルートごとに値を変えることはできない。peer の受け口（`_peer`）には掛からない（専用の上限がある）。管理者が `disableEndpointRateLimits` で本体の上限を切ると、これも切れる。
+本体の per-endpoint テーブルはプラグインのパスを持たないので、**登録したルートには一律の既定の上限が掛かる**（`internal/server/middleware/ratelimit_defs.go` の `PluginRouteDefaultLimit`、10 分に 600 回）。数えるのはルート（パスの型）ごとに、本体の endpoint と同じ単位（ログインしていれば利用者とIP、していなければIP。ロールの `rateLimitFactor` が 0 以下の利用者は、本家と同じく利用者では数えずIPだけで数える。#4143）。超えると本体と同じ 429 `RATE_LIMIT_EXCEEDED` になる。`plugin.Router` には上限を宣言する口が無いので、ルートごとに値を変えることはできない。peer の受け口（`_peer`）には掛からない（専用の上限がある）。管理者が `disableEndpointRateLimits` で本体の上限を切ると、これも切れる。
 
 **`r.GET` で登録したルートは HEAD にも応える**（本家の Fastify と同じ。#3925）。`plugin.Request` はメソッドを持たないので、handler は HEAD を見分けられず、GET と同じく最後まで動く（返した本文は本体が捨てる）。状態を変える処理は GET に置かず、POST にする。
 
