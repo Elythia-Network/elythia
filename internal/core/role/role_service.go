@@ -1294,18 +1294,25 @@ func (s *Service) applyMetaBasePolicies(base map[string]any) error {
 	return nil
 }
 
-// fractionalPolicyKeys are int-typed base policies whose consumers read them
-// through PolicyNumber, so a fractional value is kept as float64 instead of
-// being truncated by coerceToBaseType (#3489).
+// fractionalPolicyKeys are int-typed base policies whose consumers accept a
+// float64 (through PolicyNumber, or the rate limiter's own type switch), so a
+// fractional value is kept as float64 instead of being truncated by
+// coerceToBaseType (#3489).
 //
 // 切り捨てると 0.5 が 0 になり、drive の size policy では「保存できない」に
 // 変わる (本家は 0.5MB まで通す)。role に付けた値は maxNumber が小数のまま
 // 渡すので、consumer はもともと float64 を受けられる。他の int の key は
 // `.(int)` で読む consumer があるので、今の丸めを保つ。集約 (aggregatePolicyValues)
 // も同じ key だけ float64 の base を数値として扱う。
+//
+// rateLimitFactor も同じ (#4143)。本家の管理画面は 0.3 から 0.1 刻みで入れられ、
+// 初回のウィザードも基本ロールに 0.3 や 1.25 のような小数を書く。切り捨てると 0.3 が
+// 0 になり、0 は利用者ごとのレート制限を外す値なので、緩めたつもりの設定で制限
+// そのものが消える。
 var fractionalPolicyKeys = map[string]bool{
 	"maxFileSizeMb":   true,
 	"driveCapacityMb": true,
+	"rateLimitFactor": true,
 }
 
 // coerceBasePolicy is coerceToBaseType that keeps finite fractional values of
