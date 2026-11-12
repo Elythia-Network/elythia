@@ -720,6 +720,32 @@ func TestConditionalRoleErrorCacheBoundsUniqueUserKeys(t *testing.T) {
 	})
 }
 
+func TestConditionalRoleErrorIsNotCachedWhenSharedRoleCacheIsFull(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+	}
+	for i := range maxConditionalRoleErrorCacheEntries {
+		userID := fmt.Sprintf("warm-user-%d", i)
+		svc.userRoleCache[userID] = &roleCacheEntry{
+			snapshot:  userRoleSnapshot{roles: []*model.Role{}},
+			expiresAt: time.Now().Add(time.Hour),
+		}
+	}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("temporary conditional user lookup failure")
+	svc.SetUserRepo(userRepo)
+
+	for range 2 {
+		_, err := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, err, "saturation must not turn a checked input failure into success")
+	}
+	assert.Equal(t, 2, assignRepo.calls, "a new error key is not cached when the shared map is full")
+	assert.NotContains(t, svc.userRoleCache, "u1")
+	assert.Len(t, svc.userRoleCache, maxConditionalRoleErrorCacheEntries)
+}
+
 func TestConditionalRoleErrorCannotOverwriteNewerSuccessfulSnapshot(t *testing.T) {
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := &atomicCountingInternalAssignmentRepo{MockRoleAssignmentRepository: testutil.NewMockRoleAssignmentRepository(roleRepo)}

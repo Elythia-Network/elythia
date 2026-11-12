@@ -960,7 +960,7 @@ HTTP routeでは `plugin.CheckedRolePolicyRequest`、バックグラウンド処
 返り、認可に関わるroleやproviderの解決に失敗した場合はerrorになる。認可判断に使うときは
 errorを許可扱いせず、fail closedにすること。
 
-条件付きロール評価の入力取得に失敗したsnapshotは、DB読み出しの連続を抑えるため最大1秒だけnegative cacheされる（best-effort）。negative cacheは既存role cache mapの最大1024件までで、上限中は新しいerror entryを保存しないため、連続するDB読み出しが発生する場合がある。checked resolverはcache hitでも元の入力エラーを返し、providerを実行しない。入力が回復すればcache expiry後に再試行し、`InvalidateUser` / `InvalidateRole`による明示的な無効化はすぐ反映される。部分入力から得たprovider出力はcacheされない。
+条件付きロール評価の入力取得に失敗したsnapshotは、DB読み出しの連続を抑えるため最大1秒だけnegative cacheされる（best-effort）。成功分を含むrole cache全体が1024件以上なら、新しいerror entryは保存しない。既存キーの更新は許可される。飽和時は読み直しが残る場合がある。checked resolverはcache hitでも元の入力エラーを返し、providerを実行しない。入力が回復すればcache expiry後に再試行し、`InvalidateUser` / `InvalidateRole`による明示的な無効化はすぐ反映される。部分入力から得たprovider出力はcacheされない。
 
 ```go
 checked, ok := req.(plugin.CheckedRolePolicyRequest)
