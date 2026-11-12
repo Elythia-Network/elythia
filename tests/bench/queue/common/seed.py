@@ -2,8 +2,9 @@
 
 Creates per-stack local users + admin tokens, inserts synthetic followers
 (pointing at blackhole by default or an isolated delivery receiver when
-enabled), inserts the faker actors as remote users for inbound bench, and
-writes the bundle to /state/seed.json for subsequent driver runs.
+enabled), inserts the faker actors as remote users for inbound bench,
+registers those remote hosts as known instances, and writes the bundle to
+/state/seed.json for subsequent driver runs.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import string
 import sys
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import psycopg
@@ -116,6 +118,33 @@ def enable_federation(stack: str, db_host: str) -> None:
             )
 
 
+def lift_rate_limit_rows(cur: Any) -> None:
+    """Turn off the per-user API rate limits through the base role policy.
+
+    本家は production では API の利用者ごとの制限が効き、notes/create は 1 時間に
+    300 件まで (#4140)。outbound は 1 回に 100 件投稿するので、1 時間に 3 回目で
+    429 になる。Elythia はベンチでは MK_DISABLEENDPOINTRATELIMITS で外している
+    ので、本家も bench-compare と同じく基本ロールの rateLimitFactor を 0 にする。
+    meta は app を再起動すると読み直される (queue-bench-seed が再起動する)。
+    """
+    cur.execute(
+        """
+        UPDATE meta SET policies = policies || '{"rateLimitFactor": 0}'::jsonb
+        RETURNING 1
+        """
+    )
+    if len(cur.fetchall()) != 1:
+        raise RuntimeError("could not turn off the rate limits: meta has no single row")
+
+
+def lift_rate_limits(stack: str, db_host: str) -> None:
+    print(f"  [{stack}] setting rateLimitFactor=0...", flush=True)
+    with psycopg.connect(host=db_host, user=DB_USER, password=DB_PASS, dbname=DB_NAME) as conn:
+        with conn.cursor() as cur:
+            lift_rate_limit_rows(cur)
+        conn.commit()
+
+
 def insert_fixture_followers(stack: str, db_host: str, local_user_id: str, count: int,
                              inbox_base: str = "http://blackhole") -> list[dict[str, str]]:
     """Insert N remote follower users that point at a local fixture, then
@@ -160,6 +189,42 @@ def insert_fixture_followers(stack: str, db_host: str, local_user_id: str, count
                 followers.append({"id": fid, "uri": uri, "inbox": inbox})
     print(f"  [{stack}] inserted {len(followers)} followers", flush=True)
     return followers
+
+
+def fixture_hosts(receiver_url: str, faker_host: str) -> list[str]:
+    """Remote hosts the bench talks to: follower users, their inboxes, and the faker."""
+    hosts = {"blackhole", urlparse(receiver_url).hostname or ""}
+    if faker_host:
+        hosts.add(faker_host)
+    hosts.discard("")
+    return sorted(hosts)
+
+
+def insert_fixture_instance_rows(cur: Any, hosts: list[str]) -> None:
+    """Register the remote hosts in the instance table, as servers already known.
+
+    本家は初めての相手に配送・受信するとき instance の行を作るが、同じ相手への
+    ジョブが同時に走ると作成が競合し、一意制約の違反で失敗して再試行 (最初は
+    約 60 秒後) に回る (#4140)。実測では初回の outbound で 1 万件のうち 121 件が
+    そうなり、drain が 8.7 秒から 72.4 秒に延びた。実際の連合で同時に届く相手の
+    多くは既に知っているサーバーなので、両方の stack に先に登録しておく。
+    """
+    cur.executemany(
+        """
+        INSERT INTO instance (id, host, "firstRetrievedAt")
+        VALUES (%s, %s, now())
+        ON CONFLICT DO NOTHING
+        """,
+        [(aidx_id("in"), host) for host in hosts],
+    )
+
+
+def insert_fixture_instances(stack: str, db_host: str, hosts: list[str]) -> None:
+    print(f"  [{stack}] registering remote hosts: {', '.join(hosts)}", flush=True)
+    with psycopg.connect(host=db_host, user=DB_USER, password=DB_PASS, dbname=DB_NAME) as conn:
+        with conn.cursor() as cur:
+            insert_fixture_instance_rows(cur, hosts)
+        conn.commit()
 
 
 def fetch_faker_actors(count: int) -> dict[str, Any]:
@@ -303,10 +368,12 @@ def main() -> int:
                 target_note_uri = f"{url}/notes/{note_id}"
 
         enable_federation(stack, info["db_host"])
+        lift_rate_limits(stack, info["db_host"])
         receiver_url = DELIVERY_RECEIVERS[stack] if DELIVERY_MODE else "http://blackhole"
         followers = insert_fixture_followers(
             stack, info["db_host"], user_id, OUTBOUND_FOLLOWERS, receiver_url,
         )
+        insert_fixture_instances(stack, info["db_host"], fixture_hosts(receiver_url, FAKER_HOST if faker else ""))
         faker_actor_count = (
             insert_faker_actors(stack, info["db_host"], faker)
             if faker

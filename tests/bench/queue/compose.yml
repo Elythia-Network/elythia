@@ -153,7 +153,9 @@ services:
   app-ts:
     image: misskey/misskey:2026.10.1
     environment:
-      NODE_ENV: development
+      # production 以外では TypeORM がすべての SQL をログに書き、本家だけが
+      # 遅くなる (docs/bench-compare.md と同じ理由、#4140)
+      NODE_ENV: production
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres-ts: { condition: service_healthy }

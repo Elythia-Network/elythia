@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from queue_probe import DriverKind, make_probe
+from queue_probe import TS_REDIS_PREFIX, DriverKind, QueueProbe, make_probe
 
 INBOUND_COUNT = int(os.environ.get("INBOUND_COUNT", "10000"))
 INBOUND_CONCURRENCY = int(os.environ.get("INBOUND_CONCURRENCY", "128"))
@@ -33,9 +33,10 @@ POLL_INTERVAL_S = 0.1
 DRAIN_TIMEOUT_S = 600.0
 FAKER_URL = os.environ["FAKER_URL"]
 
-STACK_PROBES: dict[str, tuple[DriverKind, str]] = {
-    "mkq": ("mkq", os.environ["REDIS_MKQ_HOST"]),
-    "ts": ("bullmq", os.environ["REDIS_TS_HOST"]),
+# (driver の種類, Redis のホスト, 本家の redis の接頭辞)。接頭辞は本家だけが使う (#4140)
+STACK_PROBES: dict[str, tuple[DriverKind, str, str]] = {
+    "mkq": ("mkq", os.environ["REDIS_MKQ_HOST"], ""),
+    "ts": ("bullmq", os.environ["REDIS_TS_HOST"], TS_REDIS_PREFIX),
 }
 
 # Receiver hostname → inbox URL に変換するためのマップ。faker は `target` に
@@ -87,10 +88,13 @@ def faker_send(targets: list[str], count: int, concurrency: int,
     return r.json()
 
 
-def drain_one(stack: str, info: dict[str, Any], expected: int,
+def inbox_probe(stack: str) -> QueueProbe:
+    kind, redis_host, redis_prefix = STACK_PROBES[stack]
+    return make_probe(stack, kind, redis_host, "inbox", redis_prefix)
+
+
+def drain_one(stack: str, probe: QueueProbe, expected: int,
               send_done: threading.Event) -> dict[str, Any]:
-    kind, redis_host = STACK_PROBES[stack]
-    probe = make_probe(stack, kind, redis_host, "inbox")
 
     samples: list[dict[str, float]] = []
     deadline = time.monotonic() + DRAIN_TIMEOUT_S
@@ -141,13 +145,14 @@ def send_and_drain(seed: dict[str, Any], targets: list[str], count: int, activit
     drain_results: dict[str, dict[str, Any]] = {}
     send_done = threading.Event()
 
-    def drain_thread(stack: str, info: dict[str, Any]) -> None:
-        drain_results[stack] = drain_one(stack, info, count, send_done)
+    # キューが見つからないときは送る前に止める。thread の中で落ちると、その
+    # stack の結果が欠けたまま他の stack の計測だけが進む
+    probes = {stack: inbox_probe(stack) for stack in seed["stacks"]}
 
-    threads = [
-        threading.Thread(target=drain_thread, args=(stack, info))
-        for stack, info in seed["stacks"].items()
-    ]
+    def drain_thread(stack: str) -> None:
+        drain_results[stack] = drain_one(stack, probes[stack], count, send_done)
+
+    threads = [threading.Thread(target=drain_thread, args=(stack,)) for stack in seed["stacks"]]
     for t in threads:
         t.start()
 
@@ -176,7 +181,8 @@ def main() -> int:
       0 — bench completed successfully (results written to /results/inbound.json)
       2 — announce mode requested but seed.json is missing target_note_uri
           for one or more stacks (= caller must re-run `make queue-bench-seed`)
-      3 — the warm-up was not delivered to every receiver (#4138)
+      3 — the warm-up was not delivered to every receiver (#4138), or a
+          receiver did not drain it (#4140)
 
     Other non-zero exit codes propagate from sys.exit / uncaught exceptions
     (httpx errors / JSON decode failures / I/O errors) without explicit
@@ -231,6 +237,11 @@ def main() -> int:
         failed = [s for s in w_send.get("stats", []) if s.get("ok") != s.get("sent")]
         if failed:
             print(f"error: warm-up was not delivered: {failed}", flush=True)
+            return 3
+        # 下準備のジョブが残ったまま進むと、その処理を計測に含めてしまう (#4140)
+        stuck = sorted(stack for stack, d in w_drain.items() if d.get("timed_out"))
+        if stuck:
+            print(f"error: warm-up did not drain on {stuck}", flush=True)
             return 3
 
     send_resp, send_elapsed, drain_results = send_and_drain(
