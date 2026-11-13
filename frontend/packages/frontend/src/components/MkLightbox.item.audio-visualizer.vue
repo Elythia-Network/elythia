@@ -23,7 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		:class="$style.visualizer"
 		v-bind="$attrs"
 	></canvas>
-	<div v-if="!isPlaying" :class="$style.playIconWrapper">
+	<div v-if="!isPlaying && !loadFailed" :class="$style.playIconWrapper">
 		<div :class="$style.playIcon">
 			<i class="ti ti-player-play"></i>
 		</div>
@@ -54,6 +54,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	(ev: 'loadedmetadata'): void;
+	(ev: 'loadError'): void;
 }>();
 
 const audioEl = useTemplateRef('audioEl');
@@ -351,6 +352,8 @@ const audioElKey = computed(() => `${crossOriginMode.value}\n${props.content.url
 let hasLoadedMetadata = false;
 /** 現在の要素に対して再生が要求されたか */
 let isPlayRequested = false;
+/** CORS無しで読み直しても読めなかったか。失敗の表示と再生アイコンが重ならないように隠す (#4150) */
+const loadFailed = ref(false);
 
 function onLoadedMetadata() {
 	hasLoadedMetadata = true;
@@ -363,7 +366,13 @@ function onLoadError() {
 	// (本当に壊れているファイルなら再試行も失敗し、同じエラー状態に落ち着く)。
 	// ただしメタデータまで読めていたならCORSは通過済みなので、再生中のネットワーク断や
 	// デコード失敗を拾ってフォールバックしてしまわないようにする
-	if (crossOriginMode.value !== 'anonymous' || hasLoadedMetadata) return;
+	if (hasLoadedMetadata) return;
+	// CORS無しでも読めなかったなら、再試行の余地は無い。親に伝えないと読み込み中の表示が残る (#4150)
+	if (crossOriginMode.value !== 'anonymous') {
+		loadFailed.value = true;
+		emit('loadError');
+		return;
+	}
 
 	// 読み込み前に失敗しているので再生位置は0のまま。再生の要求だけ引き継げばよい
 	resumeAfterReloadUrl = isPlayRequested ? props.content.url : null;

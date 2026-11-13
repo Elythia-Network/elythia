@@ -31,6 +31,7 @@ repositoryUrlDescription: "If you are using Elythia as is (without any changes t
 nightMeteorEffect: "Night Sky Meteors"
 nightMeteorEffectDescription: "At night (8 PM to 4 AM) while a dark theme is in use, meteors occasionally streak across the screen. They do not appear while the seasonal screen effect is showing."
 reactableRemoteReaction: "Allow piggybacking on reactions"
+failedToLoadMedia: "Failed to load the file, or this browser cannot display or play its format"
 _followApproval:
   groupTitle: "Follow approval"
   inactiveDescription: "All follows require approval, so the period-based settings do not apply. They apply again once you stop requiring approval for follows."
