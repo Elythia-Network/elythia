@@ -84,8 +84,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 #
 # DB のバックアップを取る image。`docker build --target backup` で作る。本体の image
 # (下の runtime) は distroless で pg_dump を持たないので、postgres の公式 image に
-# elythia を足す。**pg_dump の版を DB のサーバーと揃えるため**で、DB と同じ
-# postgres:18-alpine を使う (古い pg_dump は新しいサーバーから取れない)。
+# elythia を足す。**pg_dump のメジャーバージョンを DB のサーバーと揃えるため**で、DB と
+# 同じタグ (postgres:18-alpine) を digest で固定して使う (古い pg_dump は新しいサーバー
+# から取れない)。
 #
 # builder とは別の stage でビルドする。builder は frontend/ の node_modules が無いと
 # 落ちるが、バックアップの image に frontend は要らない。命令は builder と同じ並びに
@@ -107,8 +108,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -tags nodynamic -trimpath -ldflags="-s -w $REVISION_LDFLAGS" -o /out/bin/elythia ./cmd/elythia
 
 # digest で固定する (理由は builder と同じ)。DB のサーバーの版を上げたら、ここも
-# 同じメジャーバージョンへ上げる。
-FROM postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395 AS backup
+# 同じか新しい版へ上げる。マイナー版でも、DB のサーバーより古いと、確かめるときに
+# dump を使い捨ての PostgreSQL へ戻せないことがある (#4152、docs/backup.md)。
+FROM postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95 AS backup
 # pg_bigm を入れておく。UDS の構成の DB (deploy/postgres-bigm) は pg_bigm 入りで、
 # CREATE EXTENSION した DB の dump を戻すには、戻す側にも拡張が要る。verify (#3459) は
 # この image の中で使い捨ての PostgreSQL に戻すので、無いと CREATE EXTENSION pg_bigm で

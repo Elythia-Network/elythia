@@ -19,7 +19,10 @@ name: mk-playwright
 
 services:
   postgres:
-    image: postgres:18-alpine
+    # バックアップの image (Dockerfile の backup stage) と同じ digest に揃える。固定しないと、
+    # 本家がマイナー版を出したときに、バックアップの spec がその版と image の版のずれで
+    # PR と関係なく落ちる (#4152)。backup stage を上げたら手で揃える
+    image: postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95
     environment:
       POSTGRES_DB: misskey
       POSTGRES_USER: misskey

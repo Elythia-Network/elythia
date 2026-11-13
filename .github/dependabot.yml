@@ -32,8 +32,8 @@ updates:
       - /tests/bench/ab
       # 本番の DB の image。ルートの Dockerfile の backup stage と同じ digest に揃える
       # 決まりなので、ここに無いと backup stage だけが上がる (#3369)。
-      # tests/bench/ab/compose.yml の postgres は compose なのでこの ecosystem では
-      # 上がらない。backup stage を上げたら手で揃える。
+      # tests/bench/ab/compose.yml と tests/playwright の compose の postgres は compose
+      # なのでこの ecosystem では上がらない。backup stage を上げたら手で揃える (#4152)。
       - /deploy/postgres-bigm
     schedule:
       interval: weekly
