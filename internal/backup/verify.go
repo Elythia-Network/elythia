@@ -98,7 +98,8 @@ func failf(format string, args ...any) error {
 // the generation has no meta.json, the storage could not be read, the
 // identity does not match, a program could not be run, the temporary
 // directory is short of space, the throwaway server lacks an extension the
-// dump needs, or the options are incomplete. verify.json is not written in
+// dump needs or is older than the server the dump was taken from and cannot
+// restore the dump, or the options are incomplete. verify.json is not written in
 // those cases, so an earlier result stays as it was.
 //
 // Once every stage has a verdict, verify.json is written even when the
@@ -735,6 +736,38 @@ func closeGorm(db *gorm.DB) {
 	}
 }
 
+// olderServerError returns an environment error when pg_restore rejected
+// the dump and the dump was taken from a newer PostgreSQL server than the
+// throwaway one q is connected to, and nil otherwise. A meta.json without the
+// version (0) is not checked. It is also an environment error when the
+// version of the throwaway server cannot be read.
+//
+// マイナー版が上がっただけでも、新しいサーバーの dump は古いサーバーに戻せないことが
+// ある (18.7 は列に pg_attver を付け、18.6 は ALTER COLUMN ... SET (pg_attver=...) を
+// 断る。#4152)。そのまま世代の欠陥にすると、中身に問題の無い世代が戻せないと記録
+// される。戻す前に比べて止めると、戻せる版のずれ (ほとんどのマイナー版) まで止まり、
+// DB の版を固定していない構成では本家がマイナー版を出すたびに確かめられなくなるので、
+// pg_restore が断ったときだけ見る。
+//
+// 文面に pg_restore の誤りを入れない。環境の誤りは daemon の失敗の通知でそのまま外へ
+// 送られるが、pg_restore の誤りには戻そうとした行の値が入りうる (docs/backup.md の
+// 通知)。全文は logProgramFailure がログに残している。
+func olderServerError(ctx context.Context, q Queryer, meta Meta) error {
+	if meta.PostgresVersionNum == 0 {
+		return nil
+	}
+	var num int
+	var version string
+	if err := q.QueryRow(ctx, "SELECT current_setting('server_version_num')::int, current_setting('server_version')").Scan(&num, &version); err != nil {
+		return fmt.Errorf("backup verify: pg_restore rejected the dump (details in the log), and the version of the throwaway server could not be read: %w", err)
+	}
+	if meta.PostgresVersionNum <= num {
+		return nil
+	}
+	return fmt.Errorf("backup verify: pg_restore rejected the dump (details in the log), which was taken from PostgreSQL %s, newer than the throwaway server (%s); "+
+		"run verify with PostgreSQL %s or later (update the backup image)", meta.PostgresVersion, version, meta.PostgresVersion)
+}
+
 // checkExtensions fails when the throwaway server cannot install an
 // extension that meta.json records, so that pg_restore would stop at its
 // CREATE EXTENSION.
@@ -789,7 +822,13 @@ func (v *verifier) restorable(ctx context.Context, srv SandboxServer, conn *pgx.
 			"--no-owner", "--no-privileges", "--exit-on-error",
 		}
 		if err := v.opts.Sandbox.Run(ctx, SandboxCmd{Program: "pg_restore", Args: args, Stdin: r}); err != nil {
-			return programVerdict(ctx, "pg_restore", err)
+			verr := programVerdict(ctx, "pg_restore", err)
+			if se := (*stageError)(nil); errors.As(verr, &se) {
+				if env := olderServerError(ctx, conn, v.meta); env != nil {
+					return env
+				}
+			}
+			return verr
 		}
 		return nil
 	})
