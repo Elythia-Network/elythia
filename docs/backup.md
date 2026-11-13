@@ -179,7 +179,7 @@ sudo chown 70:70 /etc/elythia/backup-integrity.key && sudo chmod 600 /etc/elythi
 
 どの構成でも、設定ファイル(本体と同じもの)に`backup:`の節を書いてから呼ぶ。書き方は`.config/default.yml.example`の末尾にある。
 
-**`pg_dump`のメジャーバージョンは、DBのサーバーより古くてはいけない。** 古い`pg_dump`は新しいサーバーから取れない。バックアップ用のimage(`Dockerfile`のtarget `backup`)は、DBと同じ`postgres:18-alpine`に`elythia`を足したもので、版が揃う。
+**`pg_dump`のメジャーバージョンは、DBのサーバーより古くてはいけない。** 古い`pg_dump`は新しいサーバーから取れない。バックアップ用のimage(`Dockerfile`のtarget `backup`)は、digestで固定した`postgres:18-alpine`に`elythia`を足したもので、メジャーバージョンはDBと揃う。**マイナー版は揃うとは限らない。** 配布の`docker-compose.yml`のDBは`postgres:18-alpine`を固定していないので、`backup`サービス(バックアップ用のimage)より新しいマイナー版になりうる。UDSの構成のDB(`deploy/postgres-bigm`)は、バックアップ用のimageと同じdigestに固定してある。取ることはできるが、[確かめる](#確かめる)ときに戻せないことがある(#4152)。
 
 **imageを作るときは`MKGO_COMMIT`を渡す。** `meta.json`の`elythiaCommit`に入る。Dockerfileの中ではgitを呼べないので、渡さないと空になる。
 
@@ -245,6 +245,8 @@ elythia backup list -config .config/default.yml -json   # JSONで出す
 
 引数は世代のID(`20261010T040000Z`の形)か`latest`。`latest`は`meta.json`のある世代のうち最も新しいものを選ぶ(`meta.json`の無い、取っている途中か取るのに失敗した世代は選ばない)。最も新しい世代の`meta.json`が読めない(壊れている、知らない`formatVersion`など)ときは、古い世代へ下がらずにエラーで止まる。下がると「最新を確かめた」と誤解するため。古い世代を確かめるときはIDで指定する。全ての段が通れば終了コード0、1つでも通らなければ1を返す。フラグ(`-config`)は世代の指定より前に書く。
 
+**使い捨てのPostgreSQLは、取ったときのDBのサーバーと同じか、それより新しい版にする。** マイナー版が上がっただけでも、新しいサーバーのdumpは古いサーバーに戻せないことがある(18.7のサーバーは列に`pg_attver`を付け、18.6はそれを戻せない。#4152)。戻す段(`restorable`)で`pg_restore`がdumpを断ったときに、`meta.json`の`postgresVersionNum`が使い捨てのPostgreSQLの版より新しければ、世代の欠陥ではなく環境の誤りとして止める(戻せる版のずれなら、そのまま確かめる)。止まったら、バックアップ用のimageをDBの版以上のものに上げる(Elythiaを更新する)。DBのマイナー版を下げて合わせない。Elythiaが新しいマイナー版に追いつくまでの間に止まらないようにする確実な方法は、DBのimageをバックアップ用のimageと同じdigestに固定すること(UDSの構成は既定でそうなっている)。追いつく前に止まったときは、`Dockerfile`のtarget `backup`の`FROM`をDBと同じか新しい版のdigestに上げて、バックアップ用のimageを作り直す。
+
 **`initdb` / `pg_ctl` / `pg_restore`が要る。** 本体のimageはdistrolessで、これらが無い。バックアップ用のimageで動かす。`initdb`はrootでは動かないので、root以外のユーザーで実行する(バックアップ用のimageは`postgres`で動く)。同梱のmigrationの番号と比べるので、作業ディレクトリに`migration/`が要る(imageでは`/app`)。
 
 ### compose(TCP)
@@ -268,7 +270,7 @@ docker compose -f compose.uds.yaml run --rm --no-deps backup verify latest
 
 ### バイナリ直接実行
 
-DBのサーバーと同じメジャーバージョンの`initdb` / `pg_ctl` / `pg_restore`があるホストで、リポジトリ(または`migration/`のある場所)を作業ディレクトリにして呼ぶ。PATHに無い、または版の違うものが先に見つかるときは、`backup.tools.initdb` / `pgCtl` / `pgRestore`にパスを書く。
+DBのサーバーと同じか、それより新しい版の`initdb` / `pg_ctl` / `pg_restore`があるホストで、リポジトリ(または`migration/`のある場所)を作業ディレクトリにして呼ぶ。PATHに無い、または版の違うものが先に見つかるときは、`backup.tools.initdb` / `pgCtl` / `pgRestore`にパスを書く。
 
 ```bash
 elythia backup verify -config .config/default.yml latest
@@ -332,6 +334,7 @@ DBに拡張(pg_bigmなど)を入れているときは、このホストのPostgr
   - 一時ディレクトリの空きが足りない、書き込みに失敗した(`ENOSPC`など)
   - `pg_restore` / `initdb` / `pg_ctl`を動かせない(パスが無い、実行できない、シグナルで止まった)。`initdb`や`pg_ctl start`が失敗した
   - `meta.json`の`extensions`の拡張が使い捨てのPostgreSQLに無い
+  - 戻す段で`pg_restore`がdumpを断り、使い捨てのPostgreSQLが`meta.json`の`postgresVersionNum`(取ったときのDBのサーバー)より古い(#4152)
   - 途中で止められた(`Ctrl-C`や`SIGTERM`)
 - **世代の欠陥として`verify.json`に書くのは、世代の中身が原因のときだけ。** 大きさやsha256の食い違い、復号の失敗(暗号文の欠けや改ざん)、`pg_restore`がdumpを拒んだとき、行数や管理表の食い違い
 - **鍵の不一致は、保存物を最後まで読んで大きさとsha256が`meta.json`と一致したときだけ環境の誤りにする。** ageは、ヘッダが壊れたときも鍵が合わないときと同じエラーを返すので、エラーだけでは見分けられない。保存物が取ったときのままなら鍵の誤り、食い違えば世代の欠陥にする
