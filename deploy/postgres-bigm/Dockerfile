@@ -24,7 +24,7 @@
 # **base image も digest で固定する** (CLAUDE.md Section 8、ルートの Dockerfile の
 # backup stage と同じ値)。floating tag だと、同じ Dockerfile から別の中身の image が
 # できる。上げるときは backup stage と一緒に上げる。
-FROM postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+FROM postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95
 
 # 上げるときは、ルートの Dockerfile の backup stage (バックアップを戻す側) も同じ値にする。
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71

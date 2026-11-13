@@ -30,7 +30,7 @@ name: mk-bench-ab
 
 services:
   postgres:
-    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+    image: postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95
     # 落ちたら DB ごと捨てる使い捨てのスタックなので、クラッシュ時の安全は要らない
     command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
     environment:
