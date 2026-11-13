@@ -78,6 +78,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 							:alt="content.file?.comment ?? undefined"
 							draggable="false"
 							@load="originalContentLoaded = true"
+							@error="onOriginalContentError"
 						>
 						<video
 							v-else-if="content.type === 'video'"
@@ -90,14 +91,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 							:controls="prefer.s.useNativeUiForVideoAudioPlayer"
 							playsinline
 							@loadedmetadata="onVideoLoadedMetadata"
+							@error="onOriginalContentError"
 							@click.stop="onMediaClick"
 						></video>
-						<div v-if="content.type === 'video' && !prefer.s.useNativeUiForVideoAudioPlayer && !isMediaPlaying" :class="$style.playIconWrapper">
+						<div v-if="content.type === 'video' && !prefer.s.useNativeUiForVideoAudioPlayer && !isMediaPlaying && !originalContentLoadFailed" :class="$style.playIconWrapper">
 							<div :class="$style.playIcon">
 								<i class="ti ti-player-play"></i>
 							</div>
 						</div>
-						<div v-if="content.type === 'audio' && prefer.s.useNativeUiForVideoAudioPlayer" :class="$style.audioRoot">
+						<div v-if="content.type === 'audio' && prefer.s.useNativeUiForVideoAudioPlayer" v-show="!originalContentLoadFailed" :class="$style.audioRoot">
 							<audio
 								ref="audioEl"
 								:src="content.url"
@@ -105,6 +107,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 								:class="$style.audio"
 								controls
 								@loadedmetadata="originalContentLoaded = true"
+								@error="onOriginalContentError"
 							></audio>
 						</div>
 						<XAudioVisualizer
@@ -116,11 +119,31 @@ SPDX-License-Identifier: AGPL-3.0-only
 							:volume="volume"
 							@click.stop="onMediaClick"
 							@loadedmetadata="originalContentLoaded = true"
+							@loadError="onOriginalContentError"
 						/>
 					</template>
 
-					<div v-if="activated && (!originalContentLoaded || (isMediaControlledByMisskey && isMediaPlaying && (!isMediaReady || !isMediaActuallyPlaying)))" :class="$style.loading">
+					<div v-if="activated && !originalContentLoadFailed && (!originalContentLoaded || (isMediaControlledByMisskey && isMediaPlaying && (!isMediaReady || !isMediaActuallyPlaying)))" :class="$style.loading" data-testid="lightbox-loading">
 						<MkLoading/>
+					</div>
+					<!--
+						読み込み中の表示と同じく、開く・閉じる・スワイプの動きに乗せるためにtransformerの中に置く。
+						そのままだとリンクのpointerdownでmainElがポインタを捕捉し、クリックがmainElへ送られて
+						タブが開かずにライトボックスが閉じるので、リンクではジェスチャのイベントを止める (#4150)
+					-->
+					<div v-if="activated && originalContentLoadFailed" :class="$style.loadFailed" data-testid="lightbox-load-failed">
+						<i class="ti ti-alert-triangle" :class="$style.loadFailedIcon"></i>
+						<div>{{ i18n.ts.failedToLoadMedia }}</div>
+						<a
+							:href="content.url"
+							target="_blank"
+							rel="noopener"
+							class="_link"
+							:class="$style.loadFailedLink"
+							@pointerdown.stop
+							@touchstart.passive.stop
+							@click.stop
+						>{{ i18n.ts.openInNewTab }}</a>
 					</div>
 				</template>
 			</div>
@@ -138,7 +161,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	</div>
 
 	<div :class="[$style.footer, { [$style.infoShowing]: infoShowing && !isZooming }]">
-		<div v-if="isMediaControlledByMisskey && !hide" :class="$style.mediaControl">
+		<div v-if="isMediaControlledByMisskey && !hide && !originalContentLoadFailed" :class="$style.mediaControl">
 			<XControl v-if="mediaEl != null" ref="mediaControl" v-model:volume="volume" :externalVolumeControl="isVolumeHandledByVisualizer"/>
 		</div>
 	</div>
@@ -260,6 +283,9 @@ const mediaEl = computed<HTMLVideoElement | HTMLAudioElement | null>(() => {
 provide(DI.mkLightboxItemMediaEl, mediaEl);
 
 const originalContentLoaded = ref(false);
+// 読み込みに失敗したことを表す。成功のイベントしか見ていないと、再生できない形式などで
+// 読み込み中の表示が出たままになり、待てばよいのか分からなくなるため (#4150)
+const originalContentLoadFailed = ref(false);
 const thumbnailContentLoaded = ref(false);
 const enableTransition = ref(false);
 const infoShowing = ref(false);
@@ -303,6 +329,14 @@ const videoAspectRatio = ref<number | null>(
 		? props.content.width / props.content.height
 		: null
 );
+
+// 読み込めた後の失敗 (再生中の通信の切断など) は、読み込みの失敗としては扱わない。
+// 隠して表示し直した後に、外した古い要素の失敗が遅れて届くことがあるので、それも無視する
+function onOriginalContentError(ev?: Event) {
+	if (originalContentLoaded.value) return;
+	if (ev?.target instanceof Element && !ev.target.isConnected) return;
+	originalContentLoadFailed.value = true;
+}
 
 function onVideoLoadedMetadata() {
 	originalContentLoaded.value = true;
@@ -869,7 +903,7 @@ function animateFromSourceToNeutral() {
 	});
 }
 
-watch([thumbnailContentLoaded, originalContentLoaded], () => {
+watch([thumbnailContentLoaded, originalContentLoaded, originalContentLoadFailed], () => {
 	animateFromSourceToNeutral();
 }, { once: true });
 
@@ -877,6 +911,11 @@ watch([rootEl, hide], ([newRootEl, isHidden]) => {
 	if (newRootEl == null || !isHidden) return;
 	animateFromSourceToNeutral();
 }, { immediate: true });
+
+// 隠してから表示し直すとメディアの要素が作り直されて読み直すので、前の失敗を持ち越さない
+watch(hide, (isHidden) => {
+	if (!isHidden) originalContentLoadFailed.value = false;
+});
 
 watch(props.content, (newContent) => {
 	hide.value = shouldHideInGallery(newContent);
@@ -1108,6 +1147,34 @@ defineExpose({
 	display: grid;
 	place-items: center;
 	pointer-events: none;
+}
+
+.loadFailed {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 16px;
+	box-sizing: border-box;
+	text-align: center;
+	color: #fff;
+	text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+	pointer-events: none;
+}
+
+.loadFailedIcon {
+	font-size: 2em;
+}
+
+.loadFailedLink {
+	pointer-events: auto;
 }
 
 .transformer {

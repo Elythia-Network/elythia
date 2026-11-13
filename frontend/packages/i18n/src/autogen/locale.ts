@@ -13661,6 +13661,10 @@ export interface Locale extends ILocale {
      * リアクションの相乗りをできるようにする
      */
     "reactableRemoteReaction": string;
+    /**
+     * 読み込みに失敗したか、このブラウザでは表示・再生できない形式です
+     */
+    "failedToLoadMedia": string;
     "_abuseReportForm": {
         /**
          * 違反カテゴリ
