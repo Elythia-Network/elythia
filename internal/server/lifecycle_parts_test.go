@@ -171,7 +171,6 @@ var lifecyclePartTypes = map[string]string{
 	"inboxHealth":                 "*deliveryhealth.Service",
 	"hashtagService":              "*hashtag.Service",
 	"retentionAggregateAtStartup": "<nil>",
-	"paramShadowRecorder":         "*paramshadow.Recorder",
 	"emojiInvalidationQueue":      "*repository.EmojiInvalidationQueue",
 	"userCacheLink":               "<nil>",
 	"serverStatsPub":              "*stream.ServerStatsPublisher",
@@ -200,11 +199,11 @@ func assertPartTypes(t *testing.T, s *Server) {
 // partsNotFromValue has to see across the combinations. It is the lower
 // bound of the check: a check that inspects nothing reports nothing as well.
 //
-// 値を持つ部品の名前のすべて。両方のroleの組の12個と、プラグインの組が開く2つの
+// 値を持つ部品の名前のすべて。両方のroleの組の11個と、プラグインの組が開く2つの
 // store。
 var valuePartsInspected = []string{
 	"fedRuleHits", "metadataRefresher", "instanceTouchBuffer", "sigCapBuffer", "instanceCounterBuffer",
-	"deliveryHealth", "inboxHealth", "hashtagService", "paramShadowRecorder", "emojiInvalidationQueue",
+	"deliveryHealth", "inboxHealth", "hashtagService", "emojiInvalidationQueue",
 	"serverStatsPub", "queueStatsPub", "pluginStorage:lifecyclea", "pluginStorage:lifecycleb",
 }
 
@@ -333,7 +332,6 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 		name        string
 		role        config.ProcessRole
 		noInspector bool
-		noShadow    bool
 		plugins     []string
 		want        []string
 	}{
@@ -343,7 +341,7 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
 				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub", "queueStatsPub",
 			},
 		},
@@ -353,7 +351,7 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer",
-				"hashtagService", "paramShadowRecorder",
+				"hashtagService",
 				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub", "queueStatsPub",
 			},
 		},
@@ -363,7 +361,7 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
 				"emojiInvalidationQueue", "userCacheLink",
 			},
 		},
@@ -374,19 +372,8 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer",
-				"hashtagService", "paramShadowRecorder",
+				"hashtagService",
 				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub",
-			},
-		},
-		{
-			name:     "both roles with param shadow disabled",
-			role:     config.RoleBoth,
-			noShadow: true,
-			want: []string{
-				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
-				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
-				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub", "queueStatsPub",
 			},
 		},
 		{
@@ -396,20 +383,19 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
 				"emojiInvalidationQueue", "userCacheLink", "serverStatsPub", "queueStatsPub",
 				"pluginStorage:lifecyclea", "pluginStorage:lifecycleb",
 			},
 		},
 		{
-			name:     "queue role with plugin storage and param shadow disabled",
-			role:     config.RoleQueue,
-			noShadow: true,
-			plugins:  []string{"lifecyclea"},
+			name:    "queue role with plugin storage",
+			role:    config.RoleQueue,
+			plugins: []string{"lifecyclea"},
 			want: []string{
 				"pollExpiryWorker", "fedRuleHits", "metadataRefresher", "instanceTouchBuffer",
 				"sigCapBuffer", "reactionFlushWorker", "instanceCounterBuffer", "deliveryHealth",
-				"inboxHealth", "hashtagService", "retentionAggregateAtStartup", "paramShadowRecorder",
+				"inboxHealth", "hashtagService", "retentionAggregateAtStartup",
 				"emojiInvalidationQueue", "userCacheLink", "pluginStorage:lifecyclea",
 			},
 		},
@@ -443,7 +429,6 @@ func TestNewServer_ShutdownStopsThePartsInTheirOrder(t *testing.T) {
 			case config.RoleQueue:
 				t.Setenv(config.EnvOnlyQueue, "1")
 			}
-			cfg.DisableParamShadow = tt.noShadow
 			var defs []plugin.Definition
 			openStorage := noopStorage
 			if len(tt.plugins) > 0 {

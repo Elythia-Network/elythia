@@ -3,17 +3,14 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/labstack/echo/v4"
@@ -21,11 +18,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
-	"github.com/elythia-network/elythia/internal/model"
-	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/elythia-network/elythia/plugin"
 )
@@ -57,71 +51,16 @@ func captureDefaultLog(t *testing.T) *syncBuffer {
 	return buf
 }
 
-// countedExample is the upstream endpoint the tests below count only, by
-// taking it out of the enforced endpoints of the server (enforcedExcept).
-//
-// #3888 で admin/update-meta も本家に揃えたので、数えるだけの本家の endpoint は
-// reset-db だけになった。reset-db の宣言は properties: {} で、判定が分かれる入力を
-// 作れず、テストのサーバー (TestMode) では実際に DB を消す。テストの中だけで
-// 対象の一覧から外した admin/update-meta を、数えるだけの例に使う。
-const countedExample = "admin/update-meta"
-
-// enforcedExcept returns the enforced endpoints (enforcedEndpoints) without
-// name, for Server.paramEnforced. name must be enforced, or the test would
-// count an endpoint that is counted anyway.
-func enforcedExcept(t *testing.T, name string) []string {
-	t.Helper()
-	enforced := enforcedEndpoints(t)
-	require.Contains(t, enforced, name)
-	out := slices.DeleteFunc(slices.Clone(enforced), func(n string) bool { return n == name })
-	require.Len(t, out, len(enforced)-1)
-	return out
-}
-
-// TestParamShadowMiddlewareDisabled checks that disableParamShadow stops
-// only the counting: the enforced endpoints still reject with upstream's 400
-// (#3742), and the other upstream endpoints are neither validated nor
-// counted.
-func TestParamShadowMiddlewareDisabled(t *testing.T) {
-	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{DisableParamShadow: true, ParamShadowLogSeconds: 3600}, paramEnforced: enforcedExcept(t, countedExample)}
-	mw := s.paramShadowMiddleware()
-	require.NotNil(t, mw)
-
-	e := echo.New()
-	api := apiRoutes{e.Group("/api")}
-	api.Use(mw)
-	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
-	api.POST("/clips/show", ok)
-	api.POST("/admin/update-meta", ok)
-	serve := func(target, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		return rec
-	}
-	rec := serve("/api/clips/show", `{"clipId":"a-b"}`)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"param":"#/properties/clipId/format"`)
-	assert.Equal(t, http.StatusNoContent, serve("/api/admin/update-meta", `{"themeColor":"#fff"}`).Code)
-
-	require.NoError(t, s.lifecycle.stopAll(context.Background()))
-	assert.NotContains(t, logs.String(), "paramshadow divergence")
-	assert.NotContains(t, logs.String(), "admin/update-meta")
-}
-
 // TestParamShadowRunsAfterTheRouteMiddleware pins the wiring of
 // apiRoutes: the group middleware enables the validation, and it runs after
-// the route's own middleware (a request the route denies is not counted) for
-// POST, Match and GET, and only for upstream endpoints. The shutdown hook
-// writes the counts.
+// the route's own middleware (a request the route denies gets the route's
+// answer, not the validator's 400) for POST, Match and GET, and only for the
+// endpoints with a paramDef. It adds no lifecycle part.
 func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
-	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 3600}, paramEnforced: enforcedExcept(t, countedExample)}
+	s := &Server{config: &config.Config{}}
 	mw := s.paramShadowMiddleware()
 	require.NotNil(t, mw)
-	require.Equal(t, []string{"paramShadowRecorder"}, s.lifecycle.names())
+	require.Empty(t, s.lifecycle.names())
 
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
@@ -143,11 +82,12 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/admin/update-meta", `{"themeColor":"#fff"}`))
-	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"text":""}`))
-	// 数えるだけのallowGetのendpointは、#3865でfederation/instancesも本家に揃えた
-	// ので、もう無い。Match(GETとPOST)の登録は、本家に揃えたfederation/instancesが
-	// どちらでも検証して拒否することで、GETの登録はcharts/notesで確かめる。
+	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/admin/update-meta", `{"themeColor":"#fff"}`))
+	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/admin/update-meta", `{"themeColor":"#ffffff"}`))
+	// routeのmiddlewareが断るリクエストは、宣言から外れる本文でも検証に届かない。
+	assert.Equal(t, http.StatusUnauthorized, serve(http.MethodPost, "/api/notes/create", `{"visibility":"x"}`))
+	// Match(GETとPOST)の登録はfederation/instancesが、GETの登録はcharts/notesが、
+	// どちらでも検証して拒否することで確かめる。
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodGet, "/api/federation/instances?limit=0", ""))
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/federation/instances", `{"limit":101}`))
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodGet, "/api/federation/instances?x=1", ""))
@@ -156,19 +96,6 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, serve(http.MethodPost, "/api/elythia-only", `{"a":1}`))
 	// requireObjectBody は検証の内側で答える(検証器も#/typeで拒否するので一致)。
 	assert.Equal(t, http.StatusBadRequest, serve(http.MethodPost, "/api/admin/update-meta", `null`))
-
-	require.NoError(t, s.lifecycle.stopAll(context.Background()))
-	out := logs.String()
-	for _, want := range []string{
-		`"endpoint":"admin/update-meta","kind":"rejected_handler_ok","schemaPath":"#/properties/themeColor/pattern"`,
-		`"msg":"paramshadow summary"`,
-		`"agreed":1,"diverged":1,"skipped":0`,
-	} {
-		assert.Contains(t, out, want)
-	}
-	assert.NotContains(t, out, `"endpoint":"notes/create"`, "a request the route denied was validated")
-	assert.NotContains(t, out, "elythia-only")
-	assert.NotContains(t, out, `"endpoint":"federation/instances"`, "an enforced endpoint was counted")
 }
 
 func TestWithParamShadowWithoutTheGroupMiddleware(t *testing.T) {
@@ -179,25 +106,15 @@ func TestWithParamShadowWithoutTheGroupMiddleware(t *testing.T) {
 	assert.True(t, called)
 }
 
-// newParamShadowServers builds two real servers (PostgreSQL) on one Redis,
-// one without the param shadow validation and one with it. The second is
-// built after the log capture starts, so its counts go to the capture. opts
-// change the config of both.
-func newParamShadowServers(t *testing.T, opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
-	t.Helper()
-	return newParamShadowServersSetup(t, nil, opts...)
-}
-
-// newParamShadowServersSetup is newParamShadowServers with beforeSetup
-// functions applied to both servers.
-func newParamShadowServersSetup(t *testing.T, beforeSetup []func(*Server), opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
+// newParamServer builds a real server (PostgreSQL) on a miniredis.
+func newParamServer(t *testing.T) *Server {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
 	redisPort, err := strconv.Atoi(mr.Port())
 	require.NoError(t, err)
-	return newParamShadowServersOn(t, redisClient, config.RedisOptions{Host: mr.Host(), Port: redisPort}, beforeSetup, opts...)
+	return newParamServerOn(t, redisClient, config.RedisOptions{Host: mr.Host(), Port: redisPort}, nil)
 }
 
 // newRealRedis starts a Redis container for t and returns a client on it and
@@ -217,9 +134,10 @@ func newRealRedis(t *testing.T) (*redis.Client, config.RedisOptions) {
 	return tr.Client, config.RedisOptions{Host: tr.Host(), Port: tr.Port()}
 }
 
-// newParamShadowServersOn is newParamShadowServersSetup on the Redis
-// redisClient talks to (described by redisOptions for the queue driver).
-func newParamShadowServersOn(t *testing.T, redisClient *redis.Client, redisOptions config.RedisOptions, beforeSetup []func(*Server), opts ...func(*config.Config)) (off, on *Server, logs *syncBuffer) {
+// newParamServerOn is newParamServer on the Redis redisClient talks to
+// (described by redisOptions for the queue driver), with beforeSetup
+// functions applied to the server.
+func newParamServerOn(t *testing.T, redisClient *redis.Client, redisOptions config.RedisOptions, beforeSetup []func(*Server), opts ...func(*config.Config)) *Server {
 	t.Helper()
 	t.Setenv(config.EnvOnlyServer, "1")
 	t.Setenv(config.EnvOnlyQueue, "")
@@ -227,190 +145,19 @@ func newParamShadowServersOn(t *testing.T, redisClient *redis.Client, redisOptio
 		Default: redisClient, Pubsub: redisClient, JobQueue: redisClient,
 		Timelines: redisClient, Reactions: redisClient,
 	}
-	build := func(disable bool) *Server {
-		cfg := &config.Config{
-			URL: "http://example.test", Host: "example.test", Hostname: "example.test",
-			Scheme: "http", WsScheme: "ws", ID: "aidx", TestMode: true,
-			Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
-			RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
-			DisableParamShadow: disable, ParamShadowLogSeconds: 3600,
-		}
-		for _, opt := range opts {
-			opt(cfg)
-		}
-		srv, err := newServer(cfg, serverIntegrationDB, redisClients, plugin.Registered(), nil, beforeSetup...)
-		require.NoError(t, err)
-		return srv
+	cfg := &config.Config{
+		URL: "http://example.test", Host: "example.test", Hostname: "example.test",
+		Scheme: "http", WsScheme: "ws", ID: "aidx", TestMode: true,
+		Redis: redisOptions, RedisForPubsub: redisOptions, RedisForJobQueue: redisOptions,
+		RedisForTimelines: redisOptions, RedisForReactions: redisOptions,
 	}
-	off = build(true)
-	t.Cleanup(func() { require.NoError(t, off.Shutdown(context.Background())) })
-	logs = captureDefaultLog(t)
-	on = build(false)
-	return off, on, logs
-}
-
-// TestParamShadowChangesNoResponse sends representative requests, including
-// ones the validator and the handler judge differently, to a server with the
-// validation and one without, and compares the answers. It also checks that
-// the server with the validation counted them, so the comparison is not
-// vacuous.
-func TestParamShadowChangesNoResponse(t *testing.T) {
-	if serverIntegrationDB == nil {
-		t.Skip("PostgreSQL unavailable")
+	for _, opt := range opts {
+		opt(cfg)
 	}
-	db := serverIntegrationDB
-	const userID, token = "pshadow-user", "pshadowtoken0001"
-	const adminID, adminToken = "pshadow-admin", "pshadowadmintok1"
-	const adminRoleID, adminAssignID = "pshadow-admin-role", "pshadow-admin-assign"
-	// 数えるだけの例は admin/update-meta に置く (下の requests)。受理する入力は
-	// meta を書き換えるので、流す前の行へ戻す。
-	// meta の行は起動時か最初の読み込みで作られる。-shuffle でこのテストがパッケージの
-	// 最初の方に回ると、まだ行が無いので、読む前に作っておく (#3994 で順序が変わって表に出た)。
-	_, err := repository.NewMetaRepository(db).Fetch()
+	srv, err := newServer(cfg, serverIntegrationDB, redisClients, plugin.Registered(), nil, beforeSetup...)
 	require.NoError(t, err)
-	var metaBefore []string
-	require.NoError(t, db.Raw(`SELECT row_to_json(m)::text FROM meta m ORDER BY id`).Scan(&metaBefore).Error)
-	require.Len(t, metaBefore, 1)
-	var metaCols []string
-	require.NoError(t, db.Raw(`SELECT column_name FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name = 'meta' AND column_name <> 'id' ORDER BY column_name`).Scan(&metaCols).Error)
-	require.NotEmpty(t, metaCols)
-	quoted := make([]string, len(metaCols))
-	for i, c := range metaCols {
-		quoted[i] = `"` + c + `"`
-	}
-	cleanup := func() {
-		require.NoError(t, db.Exec(`UPDATE meta SET (`+strings.Join(quoted, ", ")+`) = (SELECT `+strings.Join(quoted, ", ")+
-			` FROM json_populate_record(NULL::meta, ?::json))`, metaBefore[0]).Error)
-		require.NoError(t, db.Exec(`DELETE FROM note WHERE "userId" = ?`, userID).Error)
-		require.NoError(t, db.Exec(`DELETE FROM role_assignment WHERE id = ?`, adminAssignID).Error)
-		require.NoError(t, db.Exec(`DELETE FROM role WHERE id = ?`, adminRoleID).Error)
-		require.NoError(t, db.Where("id IN ?", []string{userID, adminID}).Delete(&model.User{}).Error)
-	}
-	cleanup()
-	t.Cleanup(cleanup)
-	tok, adminTok := token, adminToken
-	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
-		ID: userID, Username: "pshadow", UsernameLower: "pshadow", Token: &tok,
-	}))
-	require.NoError(t, repository.NewUserRepository(db).Create(&model.User{
-		ID: adminID, Username: "pshadowadmin", UsernameLower: "pshadowadmin", Token: &adminTok,
-	}))
-	now := time.Now()
-	require.NoError(t, db.Create(&model.Role{
-		ID: adminRoleID, Name: "pshadow-admin-role", UpdatedAt: now, LastUsedAt: now, IsAdministrator: true,
-	}).Error)
-	require.NoError(t, db.Create(&model.RoleAssignment{ID: adminAssignID, UserID: adminID, RoleID: adminRoleID}).Error)
-
-	off, on, logs := newParamShadowServersSetup(t, []func(*Server){func(s *Server) {
-		s.paramEnforced = enforcedExcept(t, countedExample)
-	}})
-
-	type request struct {
-		method, path, body string
-		auth               bool
-		// mutates: the request changes the DB, so the two answers can differ
-		// in ids and dates; only the status and the error code are compared.
-		// An authenticated request to admin/* is sent as the administrator.
-		mutates bool
-	}
-	requests := []request{
-		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","fileIds":[]}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","visibility":""}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":""}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"hello"}`, false, true},
-		// 数えるだけの例は、このテストの中だけで対象の一覧から外した
-		// admin/update-meta に置く (countedExample。#3888 で本家に揃えた)。
-		// pinnedUsers の要素の型の誤りは、検証を通らないと handler が 500 を返す。
-		// remoteNotesCleaning* の 1.5 は、本家の宣言は通し、handler は 400 にする。
-		{http.MethodPost, "/api/admin/update-meta", `{"themeColor":"影の検証"}`, true, true},
-		{http.MethodPost, "/api/admin/update-meta", `{"pinnedUsers":[1]}`, true, true},
-		{http.MethodPost, "/api/admin/update-meta", `{"remoteNotesCleaningExpiryDaysForEachNotes":1.5}`, true, true},
-		{http.MethodPost, "/api/admin/update-meta", `{"disableRegistration":"yes"}`, true, true},
-		{http.MethodPost, "/api/admin/update-meta", "{\"name\":\"\\ud800\"}", true, true},
-		{http.MethodPost, "/api/i", `{}`, true, false},
-		// 本家に揃えた endpoint は、検証を止めた server でも同じ応答になる (宣言から
-		// 外れる値は同じに拒否し、宣言を満たす値は同じに通す)。先頭の notes/create の
-		// 例も #3884 から、i/update の例も #3886 から、本家に揃えた endpoint の例に
-		// なった。
-		{http.MethodPost, "/api/i/notifications", `{"limit":0}`, true, false},
-		{http.MethodPost, "/api/i/update", `{"isCat":null}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"name":""}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"avatarId":"abc-def"}`, true, true},
-		{http.MethodPost, "/api/i/update", `{"description":null}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","poll":{"choices":["a","b"],"expiredAfter":1e4}}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","replyId":"abc-def"}`, true, true},
-		{http.MethodPost, "/api/notes/create", `{"text":"a","cw":1e400}`, true, true},
-		{http.MethodPost, "/api/notes/create", `null`, true, true},
-		{http.MethodPost, "/api/notes/create", "{\"text\":\"\\ud800\"}", true, true},
-		{http.MethodGet, "/api/charts/notes?span=day&limit=x", "", false, false},
-		{http.MethodGet, "/api/charts/notes?span=day&limit=2", "", false, false},
-		{http.MethodGet, "/api/federation/instances", "", false, false},
-	}
-	send := func(srv *Server, r request) *httptest.ResponseRecorder {
-		var req *http.Request
-		if r.method == http.MethodGet {
-			req = httptest.NewRequest(r.method, r.path, nil)
-		} else {
-			req = httptest.NewRequest(r.method, r.path, strings.NewReader(r.body))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		}
-		if r.auth {
-			bearer := token
-			if strings.HasPrefix(r.path, "/api/admin/") {
-				bearer = adminToken
-			}
-			req.Header.Set(echo.HeaderAuthorization, "Bearer "+bearer)
-		}
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
-	errorCode := func(b []byte) string {
-		var env struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(b, &env)
-		return env.Error.Code
-	}
-	for _, r := range requests {
-		a, b := send(off, r), send(on, r)
-		name := r.method + " " + r.path + " " + r.body
-		assert.Equal(t, a.Code, b.Code, name)
-		for _, h := range []string{"Date", "X-Request-Id"} {
-			a.Header().Del(h)
-			b.Header().Del(h)
-		}
-		assert.Equal(t, a.Header(), b.Header(), name)
-		if r.mutates {
-			assert.Equal(t, errorCode(a.Body.Bytes()), errorCode(b.Body.Bytes()), name)
-			continue
-		}
-		assert.Equal(t, a.Body.String(), b.Body.String(), name)
-	}
-
-	require.NoError(t, on.Shutdown(context.Background()))
-	out := logs.String()
-	for _, want := range []string{
-		`"endpoint":"admin/update-meta","kind":"rejected_handler_ok","schemaPath":"#/properties/themeColor/pattern"`,
-		`"endpoint":"admin/update-meta","kind":"rejected_handler_other_error","schemaPath":"#/properties/pinnedUsers/items/type"`,
-		`"endpoint":"admin/update-meta","kind":"accepted_handler_invalid_param","schemaPath":""`,
-		`"endpoint":"admin/update-meta","kind":"param_mismatch","schemaPath":"#/properties/disableRegistration/type"`,
-		`"msg":"paramshadow summary"`,
-		`"skipped":0`,
-	} {
-		assert.Contains(t, out, want)
-	}
-	// 対になっていないサロゲートの escape は飛ばさず、U+FFFD に置き換えて検証する
-	// (2026-10-31 の監査)。
-	assert.NotContains(t, out, "lone_surrogate")
-	assert.NotContains(t, out, token)
-	assert.NotContains(t, out, adminToken)
-	assert.NotContains(t, out, "影の検証")
-	assert.NotContains(t, out, `"endpoint":"i/update"`, "an enforced endpoint was counted")
+	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })
+	return srv
 }
 
 // apiRegistrationAllowed are the /api registrations that bypass apiRoutes'
@@ -455,7 +202,8 @@ var apiBypassingRegistration = regexp.MustCompile(
 // この列挙は網羅ではない。
 //
 // goldenのendpointをこれらの形へ移すと、TestAPICompatDoc_MatchesRouterと
-// TestParamShadowChangesNoResponseが落とす。
+// TestEnforcedEndpointsMatchTheCorpusが落とす(後者は、paramDefが{}の2件では
+// 落ちない。docs/gates.md)。
 //
 // **許可した登録は、書いてあるファイルでだけ許す (#3697)。** ルートの登録を
 // routes_<領域>.goへ分けたので、catchallを別のファイル(登録の関数の中など)へ
@@ -510,91 +258,4 @@ func TestAPIBypassingRegistrationPattern(t *testing.T) {
 	} {
 		assert.False(t, apiBypassingRegistration.MatchString(line), line)
 	}
-}
-
-// blockingSummaryHandler blocks the goroutine that writes the paramshadow
-// summary until release is closed.
-type blockingSummaryHandler struct {
-	slog.Handler
-	writing chan struct{}
-	release chan struct{}
-	once    *sync.Once
-}
-
-func (h blockingSummaryHandler) Handle(ctx context.Context, r slog.Record) error {
-	if r.Message == "paramshadow summary" {
-		h.once.Do(func() { close(h.writing) })
-		<-h.release
-	}
-	return h.Handler.Handle(ctx, r)
-}
-
-// TestParamShadowSummaryIsWrittenOffTheRequest pins that the periodic
-// summary is written by the generation's background group, not by the
-// request that found the interval passed (#3677 review L-2): the request
-// completes while the summary is still being written.
-func TestParamShadowSummaryIsWrittenOffTheRequest(t *testing.T) {
-	h := blockingSummaryHandler{
-		Handler: slog.NewJSONHandler(&syncBuffer{}, nil),
-		writing: make(chan struct{}), release: make(chan struct{}), once: &sync.Once{},
-	}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(h))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New(), paramEnforced: enforcedExcept(t, countedExample)}
-	mw := s.paramShadowMiddleware()
-	e := echo.New()
-	api := apiRoutes{e.Group("/api")}
-	api.Use(mw)
-	api.POST("/admin/update-meta", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/update-meta", strings.NewReader(`{"themeColor":"#ffffff"}`))
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		e.ServeHTTP(httptest.NewRecorder(), req)
-	}
-	send()
-	time.Sleep(1100 * time.Millisecond)
-	done := make(chan struct{})
-	go func() { send(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		close(h.release)
-		t.Fatal("the request waited for the summary to be written")
-	}
-	select {
-	case <-h.writing:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the summary was not written")
-	}
-	close(h.release)
-	s.background.Stop(context.Background())
-}
-
-// TestParamShadowSummaryAfterTheGenerationStopped pins that once the
-// background group is stopping, the summary is written by the request
-// itself without the group counting it as dropped work (#3677 review 2 L-1).
-func TestParamShadowSummaryAfterTheGenerationStopped(t *testing.T) {
-	logs := captureDefaultLog(t)
-	s := &Server{config: &config.Config{ParamShadowLogSeconds: 1}, background: bgwork.New(), paramEnforced: enforcedExcept(t, countedExample)}
-	mw := s.paramShadowMiddleware()
-	e := echo.New()
-	api := apiRoutes{e.Group("/api")}
-	api.Use(mw)
-	api.POST("/admin/update-meta", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	send := func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/update-meta", strings.NewReader(`{"themeColor":"#ffffff"}`))
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		e.ServeHTTP(httptest.NewRecorder(), req)
-	}
-	send()
-	s.background.Stop(context.Background())
-	time.Sleep(1100 * time.Millisecond)
-	send()
-	assert.Zero(t, s.background.Dropped(), "the summary was counted as dropped work")
-	out := logs.String()
-	assert.NotContains(t, out, "background work dropped")
-	assert.Contains(t, out, `"msg":"paramshadow summary"`)
-	assert.Contains(t, out, `"agreed":2`)
 }

@@ -88,17 +88,6 @@ port: 3000
 # Disable HSTS header (default: false).
 #disableHsts: true
 
-# Run upstream Misskey's paramDef validation in front of the API handlers
-# without acting on it, and log how often its verdict and the handler's
-# answer disagree (default: enabled). The log holds endpoint names, schema
-# paths and counts, never a value. The endpoints aligned with upstream
-# (every endpoint with a paramDef, upstream's or Elythia's own, but the
-# test-only reset-db) are validated and rejected regardless of this setting.
-# See docs/param-shadow.md.
-#disableParamShadow: false
-# Interval of the summary written to the log, in seconds (default: 600).
-#paramShadowLogSeconds: 600
-
 # Enable internal IP-based rate limiting (default: true).
 # Required for unauthenticated endpoints (signup / signin / reset-password)
 # to be rate-limited at all — otherwise spam / brute-force protection only

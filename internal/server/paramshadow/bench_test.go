@@ -1,16 +1,13 @@
 package paramshadow
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -45,10 +42,7 @@ func benchEcho(b *testing.B, eps map[string]paramschema.Endpoint, endpoint strin
 	e := echo.New()
 	var mws []echo.MiddlewareFunc
 	if shadow {
-		// 1件あたりの費用を測るので、予算は外す(続けて流すと予算に当たり、
-		// ほとんどの件を飛ばした値になる)。
-		mws = append(mws, Middleware(eps, NewRecorder(slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour),
-			WithBudget(1e9, time.Hour)))
+		mws = append(mws, Middleware(eps))
 	}
 	// handlerはbodyを読み切って200を返すだけにし、差を検証の分にする。
 	e.POST("/api/"+endpoint, func(c echo.Context) error {
@@ -104,129 +98,16 @@ func TestBenchRequestsAreAccepted(t *testing.T) {
 		if e := eps[r.endpoint].Schema.Validate(in.data); e != nil {
 			t.Errorf("%s: %v", r.endpoint, e)
 		}
-	}
-}
-
-// worstBodies are the bodies that cost the decode the most per byte, around
-// the two limits: arrays of empty objects (and an object of many keys) in an
-// unknown key, padded with spaces to their size.
-func worstBodies() []struct{ name, body string } {
-	arr := func(objs, size int) string {
-		b := `{"text":"a","x":[{}` + strings.Repeat(",{}", objs-1) + `]}`
-		return b + strings.Repeat(" ", max(0, size-len(b)))
-	}
-	// {"text":"a","x":[ ... ]} の外側のトークンは7。{}は1つで2。
-	atValues := (DefaultMaxValues - 7) / 2
-	keys := func(n int) string {
-		var b strings.Builder
-		b.WriteString(`{"text":"a","x":{`)
-		for i := range n {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			fmt.Fprintf(&b, `"k%05d":0`, i)
-		}
-		b.WriteString(`}}`)
-		return b.String()
-	}
-	// 外側のトークンは7、キーと値で2。
-	atKeys := (DefaultMaxValues - 7) / 2
-	return []struct{ name, body string }{
-		{"values-at-limit", arr(atValues, 0)},
-		{"keys-at-limit", keys(atKeys)},
-		{"values-at-limit-padded", arr(atValues, DefaultMaxBody)},
-		{"values-over-limit", arr(atValues+1, 0)},
-		{"size-at-limit", arr((DefaultMaxBody-21)/3, DefaultMaxBody)},
-		{"size-over-limit", arr((DefaultMaxBody-21)/3, DefaultMaxBody+1)},
-		{"1MiB", arr((1<<20-64)/3, 1<<20-64)},
-	}
-}
-
-// BenchmarkShadowWorstCase measures worstBodies with and without the
-// validation. The heaviest one validated is at the token limit; the others
-// are counted as too_many_values or too_large without decoding.
-func BenchmarkShadowWorstCase(b *testing.B) {
-	eps, err := paramschema.Upstream()
-	if err != nil {
-		b.Fatal(err)
-	}
-	for _, c := range worstBodies() {
-		for _, shadow := range []bool{false, true} {
-			name := c.name + "/off"
-			if shadow {
-				name = c.name + "/on"
-			}
-			b.Run(name, func(b *testing.B) {
-				e := benchEcho(b, eps, "notes/create", shadow)
-				b.ReportAllocs()
-				b.SetBytes(int64(len(c.body)))
-				for b.Loop() {
-					req := httptest.NewRequest(http.MethodPost, "/api/notes/create", strings.NewReader(c.body))
-					req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-					e.ServeHTTP(httptest.NewRecorder(), req)
-				}
-			})
+		// 上限を超えるbodyは検証せずに通すので、測っても検証の費用にならない。
+		if len(r.body) > DefaultMaxBody || tooManyValues([]byte(r.body), DefaultMaxValues) {
+			t.Errorf("%s: the body is over the limits and is not validated", r.endpoint)
 		}
 	}
 }
 
-// TestWorstBodiesHitTheLimits keeps BenchmarkShadowWorstCase honest: each
-// body lands on the side of the limits its name says.
-func TestWorstBodiesHitTheLimits(t *testing.T) {
-	want := map[string]string{
-		"values-at-limit": "", "keys-at-limit": "", "values-at-limit-padded": "",
-		"values-over-limit": SkipTooManyValues, "size-at-limit": SkipTooManyValues,
-		"size-over-limit": SkipTooLarge, "1MiB": SkipTooLarge,
-	}
-	for _, c := range worstBodies() {
-		var got string
-		switch {
-		case len(c.body) > DefaultMaxBody:
-			got = SkipTooLarge
-		case tooManyValues([]byte(c.body), DefaultMaxValues):
-			got = SkipTooManyValues
-		}
-		if got != want[c.name] {
-			t.Errorf("%s (%d bytes): %q, want %q", c.name, len(c.body), got, want[c.name])
-		}
-		if !json.Valid([]byte(c.body)) {
-			t.Errorf("%s is not JSON", c.name)
-		}
-	}
-}
-
-// BenchmarkCountTokens compares the byte scanner of tooManyValues with
-// json.Decoder.Token on 64KiB bodies.
-func BenchmarkCountTokens(b *testing.B) {
-	for _, c := range worstBodies() {
-		if c.name != "size-at-limit" && c.name != "values-at-limit-padded" {
-			continue
-		}
-		body := []byte(c.body)
-		b.Run(c.name+"/scanner", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				tooManyValues(body, DefaultMaxValues)
-			}
-		})
-		b.Run(c.name+"/decoder-token", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				dec := json.NewDecoder(bytes.NewReader(body))
-				dec.UseNumber()
-				for n := 0; n <= DefaultMaxValues; n++ {
-					if _, err := dec.Token(); err != nil {
-						break
-					}
-				}
-			}
-		})
-	}
-}
-
-// enforcedWorstBodies are the costliest bodies an enforced endpoint
-// (clips/notes) validates, around its token limit DefaultEnforcedMaxValues,
-// and the costliest string body: \u escapes up to DefaultEnforcedMaxBody.
+// enforcedWorstBodies are the costliest bodies clips/notes validates, around
+// the token limit DefaultMaxValues, and the costliest string body: \u
+// escapes up to DefaultMaxBody.
 func enforcedWorstBodies() []struct{ name, body string } {
 	arr := func(objs int) string {
 		return `{"clipId":"a","x":[{}` + strings.Repeat(",{}", objs-1) + `]}`
@@ -248,19 +129,19 @@ func enforcedWorstBodies() []struct{ name, body string } {
 		return head + strings.Repeat(`\u3042`, (size-len(head)-len(tail))/6) + tail
 	}
 	// {"clipId":"a","x":[ ... ]} の外側のトークンは7。
-	at := (DefaultEnforcedMaxValues - 7) / 2
+	at := (DefaultMaxValues - 7) / 2
 	return []struct{ name, body string }{
 		{"values-at-limit", arr(at)},
 		{"keys-at-limit", keys(at)},
 		{"values-over-limit", arr(at + 1)},
-		{"escaped-string-at-limit", escaped(DefaultEnforcedMaxBody)},
-		{"escaped-string-64KiB", escaped(DefaultMaxBody)},
+		{"escaped-string-at-limit", escaped(DefaultMaxBody)},
+		{"escaped-string-64KiB", escaped(64 << 10)},
 	}
 }
 
 // BenchmarkEnforcedWorstCase measures enforcedWorstBodies on clips/notes
-// with and without the middleware. The enforced endpoint has neither the
-// budget nor the slots, so its cost per request is bounded by the limits
+// with and without the middleware. The validation has neither a budget nor
+// a concurrency limit, so its cost per request is bounded by the limits
 // alone (#3742).
 func BenchmarkEnforcedWorstCase(b *testing.B) {
 	eps, err := paramschema.Upstream()
@@ -277,7 +158,7 @@ func BenchmarkEnforcedWorstCase(b *testing.B) {
 				e := echo.New()
 				var mws []echo.MiddlewareFunc
 				if on {
-					mws = append(mws, Middleware(eps, &fakeSink{}, WithEnforced("clips/notes")))
+					mws = append(mws, Middleware(eps))
 				}
 				e.POST("/api/clips/notes", func(c echo.Context) error {
 					_, _ = io.Copy(io.Discard, c.Request().Body)
@@ -299,7 +180,7 @@ func BenchmarkEnforcedWorstCase(b *testing.B) {
 // honest: each body lands on the side of the limits its name says.
 func TestEnforcedWorstBodiesHitTheLimits(t *testing.T) {
 	for _, c := range enforcedWorstBodies() {
-		over := tooManyValues([]byte(c.body), DefaultEnforcedMaxValues) || len(c.body) > DefaultEnforcedMaxBody
+		over := tooManyValues([]byte(c.body), DefaultMaxValues) || len(c.body) > DefaultMaxBody
 		if over != (strings.Contains(c.name, "over") || strings.Contains(c.name, "64KiB")) || !json.Valid([]byte(c.body)) {
 			t.Errorf("%s (%d bytes): over the limits %v", c.name, len(c.body), over)
 		}
@@ -309,7 +190,7 @@ func TestEnforcedWorstBodiesHitTheLimits(t *testing.T) {
 		for _, size := range []struct {
 			tag  string
 			size int
-		}{{"at-limit", DefaultEnforcedMaxBody}, {"64KiB", DefaultMaxBody}} {
+		}{{"at-limit", DefaultMaxBody}, {"64KiB", 64 << 10}} {
 			if strings.HasPrefix(c.name, "escaped-string-") && strings.Contains(c.name, size.tag) &&
 				(len(c.body) > size.size || len(c.body) <= size.size-6) {
 				t.Errorf("%s is %d bytes, want just under %d", c.name, len(c.body), size.size)

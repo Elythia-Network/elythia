@@ -210,10 +210,6 @@ type Server struct {
 	// 数える照合のテストは名前解決を数えられない。テストがbeforeSetupで、数えて
 	// 拒否するresolverを入れる(#3369)。本番の組み立ては入れない。
 	outboundLookup func(ctx context.Context, host string) ([]net.IPAddr, error)
-	// paramEnforcedは、本家と同じ400で拒否するendpointの一覧。nilなら
-	// paramEnforcedEndpoints(宣言の全部)。本家の残りのendpoint(reset-db)では数えるだけの
-	// 検証を試せないので、影の検証のテストがbeforeSetupで差し替える(#3888)。
-	paramEnforced []string
 	// reactionCountWriter は世代のリアクションの書き込み先 (#3663)。テストが
 	// 取りこぼしたプロセスの状態を作るために読む。
 	reactionCountWriter *corereaction.SwitchableWriter

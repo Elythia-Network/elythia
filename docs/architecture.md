@@ -145,12 +145,12 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 |---|---|
 | `apierr` | Misskey 互換のエラーコード/UUID 定義 |
 | `pagination` | sinceId/untilId/sinceDate/untilDate の正規化 |
-| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。Elythiaが本家の外で受ける値は`elythia_overlays.json`に宣言し、`Effective`が本家の`paramDef`に足すことしかできない形で重ねる(#3865)。`internal/server/paramshadow`がhandlerの前で走らせる。本家かElythiaの宣言のあるendpointの全部(テストのモードでだけ登録する`reset-db`を除く)では拒否に使い(#3742から#3888で広げ、#3890で宣言から決める形にした)、それ以外の本家のendpoint(テストのモードでだけ登録する`reset-db`だけ)では、検証だけを走らせてhandlerと判定が分かれた件数を数える(#3677) |
+| `paramschema` | 本家の`paramDef`(引数のJSON Schema)で、本家のajvと同じ判定・同じ最初のエラー・同じdefaultの挿入をする検証器(#3673)。Elythiaが本家の外で受ける値は`elythia_overlays.json`に宣言し、`Effective`が本家の`paramDef`に足すことしかできない形で重ねる(#3865)。`internal/server/paramshadow`がhandlerの前で走らせる。本家かElythiaの宣言のあるendpointの全部(テストのモードでだけ登録する`reset-db`を除く)では拒否に使う(#3742から#3888で広げ、#3890で宣言から決める形にした)。#4172までは、拒否に載せる前の本家のendpointで、検証だけを走らせてhandlerと判定が分かれた件数を数えていた(#3677) |
 | `optional` | JSON の null/absent を区別する Nullable 型 |
 | `notehide` | per-viewer の hideNote ゲートを全 REST に一律適用（TS は各 pack 内 `hideNote`） |
 | `userrelation` | viewer 視点の relation block (isFollowing 等) 解決 |
 | `middleware` (**`internal/server/middleware`**。`internal/api/` 配下ではない) | 認証 / rate limit / WWW-Authenticate / Cache-Control |
-| `paramshadow` (**`internal/server/paramshadow`**) | 本家の`paramDef`での検証をhandlerの前で走らせる。本家に揃えたendpoint(`reset-db`を除く、本家かElythiaの宣言のあるendpointの全部。#3890)では本家と同じ400で拒否し(#3742)、それ以外(本家のendpointでは`reset-db`だけ)では応答を変えずに、判定が分かれた件数をログに出す(#3677、[param-shadow.md](param-shadow.md)) |
+| `paramshadow` (**`internal/server/paramshadow`**) | 本家の`paramDef`での検証をhandlerの前で走らせ、宣言から外れるリクエストを本家と同じ400で拒否する(#3742)。対象は`reset-db`を除く、本家かElythiaの宣言のあるendpointの全部(#3890、[param-shadow.md](param-shadow.md))。名前は、判定が分かれた件数を数えていた頃(#3677)のままで、数える経路は#4172で消した |
 
 ### 3.2 `internal/core/` — ビジネスロジック（≈50 パッケージ）
 
@@ -2214,7 +2214,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 「世代の停止」の手順2)。#3715で、登録の関数の名前を`add…`に揃えた(下の「登録の形」)。#3717で、値を持つ
 残りの3つの部品(`fedRuleHits`・`hashtagService`・`paramShadowRecorder`)に停止の口を足して値から作る登録へ
 移し、closureで停止を渡す登録(`addPart`・`addPartWithStart`)を本番のコードから消した(下の「登録の形」と
-「closureのまま残した4つ」)。
+「closureのまま残した4つ」)。#4172で、`paramShadowRecorder`を部品ごと消した。
 
 - 項目は名前・止める値 (`part`)・起動 (`func()`。起動するものが無い部品はnil)・停止
   (`func(context.Context)`) を持つ。`part` は停止が働きかける値 (バッファ・publisher・service・
@@ -2222,16 +2222,15 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   値を止めたかをテストが確かめるために持つ
 - 一覧は `Server.lifecycle` が値で持つ (テストが組む `Server` のリテラルでも、ゼロ値が空の一覧として
   使える)。登録はどれも `Server` のメソッド (下の表の6つ) を通し、起動と停止も `s.lifecycle` から回す
-  (`paramShadowMiddleware` と `dbBackedStorage` は `w` を受け取らない)。コンテナにも同じ一覧を指す
+  (`dbBackedStorage` は `w` を受け取らない)。コンテナにも同じ一覧を指す
   `wiring.lifecycle` があったが、誰も読まないまま残っていたので #3808 で消した (4.2)
 - **構築では起動しない(#3703)。** 登録は部品と起動・停止を一覧に足すだけで、起動は
   `StartBackground`が一覧の順に呼ぶ(下の「起動」)。`StartBackground`自身が起動するもの(queueの
   worker・autoscale・scheduler・chartの保存のloop)は、下の一覧の外の停止の段(`queue`・`chart`)と
   対になっていて、一覧には入れていない
 - **名前は、部品を持つ変数の名前にする** (`setupRoutes()` の局所変数か、`Server` のフィールド)。
-  例外は 3 つで、起動時に 1 回だけ走る retention の集計は `retentionAggregateAtStartup`
-  (変数 `retentionSvc` は集計の service で、止めるのは起動時の 1 回の実行だけ)、param shadow の
-  記録は `paramShadowRecorder` (`param_shadow.go` の変数名は `rec` で、部品が分からない)、プラグインの
+  例外は 2 つで、起動時に 1 回だけ走る retention の集計は `retentionAggregateAtStartup`
+  (変数 `retentionSvc` は集計の service で、止めるのは起動時の 1 回の実行だけ)、プラグインの
   store は `pluginStorage:<プラグイン名>` (プラグインごとに 1 つ開く) にした
 - **名前が空・停止が nil・名前の重複は、構築の失敗にする** (`constructionError`)。その場で panic
   しないのは、プラグインの名前のように実行時の値から作る名前があるため。重複した部品も一覧に
@@ -2247,7 +2246,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `s.addStartCloser(ctx, name, part)` | `Start(ctx)` + `Close()` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | `Close()`。停止の ctx は捨てる | `instanceTouchBuffer`・`sigCapBuffer`・`instanceCounterBuffer` |
 | `s.addStartStopper(ctx, name, part)` | `Start(ctx)` + `Stop(ctx)` | `StartBackground`で`Start(ctx)`(ctxは登録で渡したもの) | 停止の ctx を渡して `Stop(ctx)` | `fedRuleHits`・`deliveryHealth`・`inboxHealth`・`emojiInvalidationQueue` |
 | `s.addPlainStartStopper(name, part)` | `Start()` + `Stop()` | `StartBackground`で`Start()` | `Stop()`。停止の ctx は捨てる | `serverStatsPub`・`queueStatsPub` |
-| `s.addCloser(name, part)` | `Close(ctx)` | しない | 停止の ctx を渡して `Close(ctx)` | `metadataRefresher`・`hashtagService`・`paramShadowRecorder` |
+| `s.addCloser(name, part)` | `Close(ctx)` | しない | 停止の ctx を渡して `Close(ctx)` | `metadataRefresher`・`hashtagService` |
 | `s.addErrCloser(name, part)` | `Close() error` | しない | `Close()`。エラーと停止の ctx は捨てる (エラーを捨てるのは前の hook と同じ) | `pluginStorage:<名前>` (`setupRoutes()` の外の `dbBackedStorage` で登録する) |
 | `s.addWorker(name, run)` | 値を持たない (関数を渡す) | `StartBackground`で`run`をgoroutineで回す | ctx を切り、`run` が返るのを待つ。起動していなければ待たずに返す | 下の worker の 4 つ |
 
@@ -2269,13 +2268,13 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 |---|---|---|
 | `pollExpiryWorker`・`reactionFlushWorker`・`retentionAggregateAtStartup`・`userCacheLink` | `addWorker(name, run)` が関数を goroutine で回し、ctx を切って返るのを待つ。止める値が無い | nil |
 
-#3717で移した3つは、前のclosureの中身を部品のメソッドへ移した。止め方は変えていない。
+#3717で移した3つは、前のclosureの中身を部品のメソッドへ移した。止め方は変えていない。`paramShadowRecorder`は#4172で部品ごと消した。
 
 | 名前 | 足した口 | 中身(前のclosureと同じ) |
 |---|---|---|
 | `fedRuleHits` | `HitStore.Stop(ctx)` | `Start`の中で作ったctxを切る。goroutineは待たない。前は組み立てが自分でcancelするctxを`Start`に渡し、それを切っていた |
 | `hashtagService` | `Service.Close(ctx)` | `Shutdown(ctx)`を呼び、エラーなら前と同じ文面(`hashtag service shutdown timed out`)と属性(`err`)で警告を出す |
-| `paramShadowRecorder` | `Recorder.Close(ctx)` | `Flush()`を呼ぶ。ctxは使わない |
+| `paramShadowRecorder` | `Recorder.Close(ctx)` | `Flush()`を呼ぶ。ctxは使わない(#4172で部品ごと削除) |
 
 - `HitStore`は、`Start`の中で作ったctxのcancelをmutexの下で持つ。`Stop`はmutexの下で停止の印を立てて
   cancelを取り出し、mutexの外で呼ぶ。`Start`より先に呼んでも、2回呼んでも、nilの`HitStore`でも安全で、
@@ -2288,18 +2287,18 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 停止が別の値を指しうる形に戻るため。#3717で本番からclosureの登録を消したが、一覧へ直接足す
 `lifecycle.add`・`addWithStart`は値と停止を別々に受けるので、型だけでは防げない。一覧の項目は、
 値から作る登録を経たかの印(`fromValue`)を持つ。`TestNewServer_ShutdownStopsThePartsInTheirOrder`が
-7つの組で、`part`がnilでない部品のうち印の無いものを落とす(`partsNotFromValue`)。違反の文には、
+6つの組で、`part`がnilでない部品のうち印の無いものを落とす(`partsNotFromValue`)。違反の文には、
 形の判定(テストの`valueShape`)で、その値を受ける登録の名前を添える。形を満たさない値も落とす
 (停止の口を足して、値から作る登録へ移す)。
 違反が0件なのが正常な検査なので、下限を置く。検査が値を持つ部品を見たことを、名前の一覧
-(`valuePartsInspected`。両方のroleの組の12個と、プラグインの組の2つのstoreで14個)で、どれかの組で
+(`valuePartsInspected`。両方のroleの組の11個と、プラグインの組の2つのstoreで13個)で、どれかの組で
 見たことを確かめる。一覧に無い名前で値を持つ部品が出ても落とす(下限が古くならないように)。
-組をまたぐこの検査は、7つの組が全部走ったときだけ行う
+組をまたぐこの検査は、6つの組が全部走ったときだけ行う
 (`-run`で組を絞ったときは、関係の無い失敗を出さないように省く)。
 #3717の前は、`addPart`で登録した部品のうち形を満たすものだけを落とす検査で、理由付きの許可リスト
 (`addPartShapeAllowlist`。#3717の時点で空)を持っていた。形を満たさない値をclosureで登録しても落ちなかった。
 形の判定は、`TestValueShape_ClassifiesThePartTypes`が型の名前を並べて固定する。
-値から作る13個の部品の型は12(`deliveryHealth`と`inboxHealth`は同じ型)で、どれも形を満たす。
+値から作る12個の部品の型は11(`deliveryHealth`と`inboxHealth`は同じ型)で、どれも形を満たす。
 値の無いworkerは満たさない。部品の型にメソッドを足して形が変わると、ここが落ちる。
 判定が知る形の一覧 (`valueShapes`) は、`TestValueShapes_CoverEveryRegistrationFromValue` が
 `internal/server` の非テストの全ファイル (`git ls-files` で列挙) を構文木で読み、`addFromValue` を呼ぶ
@@ -2318,11 +2317,11 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 ような、値と停止で別の部品を指す誤りを書けた。同じ型どうし (`deliveryHealth` と `inboxHealth`) では、
 型の表のテストでも落とせなかった。#3701 の後は次のとおり。
 
-- **値から作る13個(#3717の後。#3705の後は10個)は、値と停止が別の部品を指す誤りを書けない。** 停止は渡した値そのものから作る。
+- **値から作る12個(#4172の後。#3717の後は13個、#3705の後は10個)は、値と停止が別の部品を指す誤りを書けない。** 停止は渡した値そのものから作る。
   起動も同じ値に対して呼ぶので、値と起動が別の部品を指す誤りも書けない
 - **同じ値を 2 回渡す誤りは、テストが落とす。** 例えば `s.addStartStopper(ctx, "inboxHealth", deliveryHealth)`
   と書くと、値が起動と停止を決めるので、`inboxHealth` は起動も停止もされない。同じ型なので型の表では
-  落ちないが、`TestNewServer_ShutdownStopsThePartsInTheirOrder` が 7 つの組で、nil でない `part` どうしが
+  落ちないが、`TestNewServer_ShutdownStopsThePartsInTheirOrder` が 6 つの組で、nil でない `part` どうしが
   互いに異なる値であること (同一性) を見て落とす
 - **名前と値の入れ替えは落とせない。** `deliveryHealth` の名前に `inboxHealth` を、`inboxHealth` の名前に
   `deliveryHealth` を渡す形は、同じ型で値も 2 つとも異なるので、どのテストも落ちない (使い捨ての変異で、
@@ -2351,15 +2350,14 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | 9 | `inboxHealth` | `addStartStopper` | ○ | `Stop(ctx)` | queue role |
 | 10 | `hashtagService` | `addCloser` | | `Close(ctx)`。`Shutdown(ctx)`で in-flight の集計を待ち (#727)、時間切れなら警告を出す | 常に |
 | 11 | `retentionAggregateAtStartup` | `addWorker` | ○ | 1 と同じ | queue role |
-| 12 | `paramShadowRecorder` | `addCloser` | | `Close(ctx)`。`Flush()`で最後の要約を書く | 本家の paramDef を読めたとき (#3742 から、`disableParamShadow` でも登録する) |
-| 13 | `emojiInvalidationQueue` | `addStartStopper` | ○ | `Stop(ctx)`。ctxを切り、`Run`が溜まった分を送って返るのを待つ | 常に |
-| 14 | `userCacheLink` | `addWorker` | ○ | 1 と同じ | 常に |
-| 15 | `serverStatsPub` | `addPlainStartStopper` | ○ | `Stop()` | server role |
-| 16 | `queueStatsPub` | `addPlainStartStopper` | ○ | `Stop()` | server role で、queueInspector があるとき |
-| 17〜 | `pluginStorage:<名前>` | `addErrCloser` | | `Close()` (DB のプールを閉じる) | 有効なプラグインごと (`newServer` が DB の store を開くとき。本番の経路)。プラグインの順 |
+| 12 | `emojiInvalidationQueue` | `addStartStopper` | ○ | `Stop(ctx)`。ctxを切り、`Run`が溜まった分を送って返るのを待つ | 常に |
+| 13 | `userCacheLink` | `addWorker` | ○ | 1 と同じ | 常に |
+| 14 | `serverStatsPub` | `addPlainStartStopper` | ○ | `Stop()` | server role |
+| 15 | `queueStatsPub` | `addPlainStartStopper` | ○ | `Stop()` | server role で、queueInspector があるとき |
+| 16〜 | `pluginStorage:<名前>` | `addErrCloser` | | `Close()` (DB のプールを閉じる) | 有効なプラグインごと (`newServer` が DB の store を開くとき。本番の経路)。プラグインの順 |
 
-「常に」は role と設定に関係なく登録するもの。両方の role (既定) では 1〜16 がすべて、server role
-では 2〜7・10・12〜16、queue role では 1〜14 が並ぶ。`deliveryBreaker` は停止を持たないので、
+「常に」は role と設定に関係なく登録するもの。両方の role (既定) では 1〜15 がすべて、server role
+では 2〜7・10・12〜15、queue role では 1〜13 が並ぶ。`deliveryBreaker` は停止を持たないので、
 有無で並びは変わらない。
 
 **起動(#3703)。** `StartBackground`は次の順に起動する。本番の経路(Supervisor)は「構築 →
@@ -2429,7 +2427,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 | `emojiInvalidationQueue` | `Stop(ctx)`は起動していなければ`Run`を待たずに、溜まった分を同期で送って返る(#3705。バッファの`Close()`と同じ扱い)。送るのは締め切り(`drainTimeout`、2秒)と停止のctxの期限の早いほうまでで、1件ごとに送る前に見る。送信中の1件はpublishの側のtimeout(2秒)まで待つので、最悪で約4秒かかる(`router.go`のコメントの「最悪約4秒」と同じ) |
 | `fedRuleHits` | `Stop(ctx)`は`Start`の中で作ったctxをcancelするだけ。起動していなければcancelするものも待つgoroutineも無く、停止の印を立てるだけ(#3717。後の`Start`はloopを立てない) |
 | worker の 4 つ(`addWorker`) | 停止はctxをcancelし、起動していなければ`done`を待たずに返る。`done`は起動しないと閉じないので、待つと停止のctxの期限まで固まる(後始末は`context.Background()`で止めるので、永久に返らない) |
-| 起動を持たない部品(`metadataRefresher`・`hashtagService`・`paramShadowRecorder`・`pluginStorage:<名前>`) | 起動するものが無い。停止は#3703の前と同じ |
+| 起動を持たない部品(`metadataRefresher`・`hashtagService`・`pluginStorage:<名前>`) | 起動するものが無い。停止は#3703の前と同じ |
 
 **意図して変えた動き(#3703)。**
 
@@ -2439,8 +2437,8 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
   `retentionAggregateAtStartup`(登録ユーザーと最近のユーザーを読み、その日の行をINSERTする)、
   `pollExpiryWorker`の1回目の走査(`poll`のSELECT)が消えた
 - 本番の経路では、12個の起動が構築中のほかの副作用(起動時のDBの文、Redisの購読、ログ)より後になる。
-  `serve`のログでは、`retentionAggregateAtStartup`が書くgormのログが、構築の途中のログ(param shadow
-  の行の前)から、構築の最後のログ(frontendの警告)の後へ動いた。`pollExpiryWorker`の最初の走査も
+  `serve`のログでは、`retentionAggregateAtStartup`が書くgormのログが、構築の途中のログ(当時の param shadow
+  の起動の行の前。この行は#4172で消えた)から、構築の最後のログ(frontendの警告)の後へ動いた。`pollExpiryWorker`の最初の走査も
   構築の後になったので、構築の途中で作ったpollEndedの通知が配線の途中のnotificationServiceを
   通ることは無くなった(`wiring_streaming.go`の`notificationService.SetMainStreamPublisher`の行のコメント。#3901より前は`router.go`)
 - 構築の失敗の後始末では、起動していない部品を止める(上の表)
@@ -2632,10 +2630,10 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 `lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_startonce_test.go`・`lifecycle_stop_test.go`・`lifecycle_steps_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
 
 - **名前の並びと登録の条件。** `TestNewServer_ShutdownStopsThePartsInTheirOrder` が、role (両方・
-  server・queue) と設定 (queueInspector の有無、`disableParamShadow`、DB の store を持つプラグインの
-  有無) の 7 つの組で、一覧の名前の並びを固定する。`StopBackground` が一覧の停止の関数を、その順に、
+  server・queue) と設定 (queueInspector の有無、DB の store を持つプラグインの
+  有無) の 6 つの組で、一覧の名前の並びを固定する。`StopBackground` が一覧の停止の関数を、その順に、
   停止の ctx を渡して全部呼ぶことも見る
-- **起動の順と回数(#3703)。** 同じテストが7つの組で、構築の後に一覧の起動の印(`lifecycle.started`)が
+- **起動の順と回数(#3703)。** 同じテストが6つの組で、構築の後に一覧の起動の印(`lifecycle.started`)が
   立っていないことと、`StartBackground`を2回呼んでも、起動を持つ部品(表`partsStartedByStartBackground`の13個のうち、その組で
   登録されるもの)が一覧の順に1回ずつ起動されることを見る。起動を持つ部品の集合が表とずれても落ちる
 - **構築だけでは部品が動かないこと(#3703)。** 一覧の起動を差し替えて見る上の検査は、一覧を通らずに構築の
@@ -2657,7 +2655,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   名前が別の種類の値を持つ取り違え (`serverStatsPub` に `hashtagService` を渡すなど) は落ちるが、
   **同じ型の部品どうしの名前の取り違えは落とせない**。`deliveryHealth` と `inboxHealth` はどちらも
   `*deliveryhealth.Service` で、`addWorker` の 4 つはどれも nil。値と停止の取り違えは、
-  値から作る13個では書けない(上の「同じ型どうしの取り違えを書く余地が無くなった範囲」)
+  値から作る12個では書けない(上の「同じ型どうしの取り違えを書く余地が無くなった範囲」)
 - **値の同一性と、登録の経路。** 同じテストが、nil でない `part` どうしが互いに異なる値であることと、
   nilでない`part`を持つ部品がすべて値から作る登録を経ていること(上の`partsNotFromValue`の検査。#3717)を
   見る。値は同一性で比べるのでポインタに限り、**ポインタでない値を持つ部品は、それだけで落ちる** (値の型の部品を足すときは、
@@ -2676,11 +2674,10 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   `pluginStorage:<名前>` (閉じた後は DB のプールに Ping できない)。停止が ctx を無視する退行が
   入ると hashtag の worker を待ち続けるので、`StopBackground` を 10 秒で打ち切って落とす
 - **それ以外の部品** (`pollExpiryWorker`・`fedRuleHits`・`metadataRefresher`・`reactionFlushWorker`・
-  `deliveryHealth`・`inboxHealth`・`retentionAggregateAtStartup`・`paramShadowRecorder`・
+  `deliveryHealth`・`inboxHealth`・`retentionAggregateAtStartup`・
   `emojiInvalidationQueue`・`userCacheLink`・`serverStatsPub`・`queueStatsPub`) は、その名前の停止の
   関数が呼ばれることまでしか見ていない。停止の関数が名前どおりの値を止めているかは、外から観測する
-  口が無く、テストしていない (`paramShadowRecorder` の停止が要約を書くことは
-  `TestParamShadowRunsAfterTheRouteMiddleware` が別に見る)。`emojiInvalidationQueue`の`Start`/`Stop`
+  口が無く、テストしていない。`emojiInvalidationQueue`の`Start`/`Stop`
   そのものの動き(起動の前に積んだ分を起動の後に送る、起動していない`Stop`が`Run`を待たずに溜まった
   分を締め切りか停止のctxの期限まで送る、2回目の`Start`/`Stop`と止めた後の`Start`は何もしない)は、
   `internal/repository`の`TestEmojiInvalidationQueue_*`が見る(#3705)。#3717で足した停止の口そのものの
@@ -2689,8 +2686,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   終わらせ、その後の記録を書かないこと、`Start`を2回呼んだときも両方を止めること、`Stop`の後の`Start`が
   loopを立てないこと、`Start`と並行に呼んでもloopが残らないこと(`-race`)、nilとRedisの無い`HitStore`で
   何もしないことを見る。`internal/core/hashtag`の`TestService_Close_*`が、書き込み中のworkerがctxより
-  長いと警告を出し、ctx内に終われば待って何も出さないことを、`internal/server/paramshadow`の
-  `TestRecorderCloseFlushes`が、`Close`が要約を書くことを見る
+  長いと警告を出し、ctx内に終われば待って何も出さないことを見る
 - 後始末が一覧を順に回し、起動していないworkerを待って固まらないことは
   `TestNewServer_FailedConstructionStopsTheRegisteredParts`、重複で構築が
   失敗することは `TestNewServer_DuplicatePartFailsTheConstruction` が見る。値と停止を別々に受ける
@@ -2746,7 +2742,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 #3699 の前後で同じ動きであることは、次のように確かめた (道具はコミットしていない)。
 
 - 停止の順: #3699 の前の `registerShutdownHook` に、登録した呼び出し元の行を記録する使い捨ての
-  変更を当て、8 つの組 (上のテストの 7 つの組に、両方の role で queueInspector が無い組を足したもの。
+  変更を当て、8 つの組 (当時 (#3699) の上のテストの 7 つの組に、両方の role で queueInspector が無い組を足したもの。
   プラグインの組はどちらも 2 つのプラグインで) で、`StopBackground` が hook を呼んだ順を記録した。行と名前の対応表で名前に
   直すと、どの組も #3699 の後の名前の並びと一致した。停止にかかった時間も、どの組も 10ms 未満で
   前後に差は無かった
@@ -2869,7 +2865,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   違った。コメント以外のソースは名前の置き換えだけなので、どの組でも動きは変わらない
 - `elythia dump-routes`: 出力(ルート)と起動ログは前後で一致した。前の木を2回流して揺れないことも
   確かめた
-- 部品の名前と、起動と停止の順は、`TestNewServer_ShutdownStopsThePartsInTheirOrder`の7つの組の表を
+- 部品の名前と、起動と停止の順は、`TestNewServer_ShutdownStopsThePartsInTheirOrder`の当時の7つの組の表を
   変えずに通った。workerのgoroutineをスタックの関数名で数える`TestNewServer_ConstructionStartsNoPart`の
   印(`server.(*Server).addWorker.func`)は、前の名前に戻すと落ちる
 - 4.1の道具の数は変わらない。後から入れる辺は96、呼び出しが離れている辺は659で、前後で同じだった
@@ -2938,7 +2934,7 @@ setupRoutes()
   (`CachedEmojiRepository.Invalidate()` は一覧だけを捨てる、`RelationCache.InvalidateAll()` は他の
   プロセスにも通知する)、そのままでは 1 つの口として扱えない。既存のメソッドと精密な無効化
   (`metaUpdated` の購読など) は置き換えずに残す
-- **名前を `Flush` にしない。** `paramshadow.Recorder.Flush()` やリアクションのバッファ (`corereaction` の
+- **名前を `Flush` にしない。** リアクションのバッファ (`corereaction` の
   `bufferedWriter.Flush`) では、`Flush` は
   「溜めた分を書き出す」という逆の意味で使われている
 - **由来** (`cacheOrigin`) は DB・設定・外部・ファイルの 4 つ。どの元が変わったときに捨てるべきかを

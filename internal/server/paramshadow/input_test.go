@@ -55,8 +55,8 @@ func TestReadBodyLimit(t *testing.T) {
 			t.Errorf("%d bytes: handler reads %d bytes", n, len(got))
 		}
 	}
-	if DefaultMaxBody != 65536 {
-		t.Errorf("DefaultMaxBody = %d; the docs say 64KiB", DefaultMaxBody)
+	if DefaultMaxBody != 16384 {
+		t.Errorf("DefaultMaxBody = %d; the docs say 16KiB", DefaultMaxBody)
 	}
 }
 
@@ -196,8 +196,8 @@ func TestTooManyValues(t *testing.T) {
 			t.Errorf("tooManyValues(%s, %d) = %v, want %v", tt.body, tt.max, got, tt.want)
 		}
 	}
-	if DefaultMaxValues != 4096 {
-		t.Errorf("DefaultMaxValues = %d; the docs say 4096", DefaultMaxValues)
+	if DefaultMaxValues != 256 {
+		t.Errorf("DefaultMaxValues = %d; the docs say 256", DefaultMaxValues)
 	}
 }
 
@@ -296,7 +296,7 @@ func TestReadBodyAllocatesOnceWithContentLength(t *testing.T) {
 	body := strings.Repeat("a", 40000)
 	allocs := testing.AllocsPerRun(20, func() {
 		req := httptest.NewRequest(http.MethodPost, "/api/x", strings.NewReader(body))
-		data, _, _ := readBody(req, DefaultMaxBody)
+		data, _, _ := readBody(req, 64<<10)
 		if len(data) != len(body) || cap(data) > len(body)+1+bytes.MinRead {
 			t.Fatalf("len %d cap %d", len(data), cap(data))
 		}
@@ -353,7 +353,7 @@ func TestReadBodyDoesNotReadOverContentLength(t *testing.T) {
 // read into one buffer of max+1+MinRead, and that one over max is still
 // found too large with the whole body left for the handler.
 func TestReadBodyUnknownLength(t *testing.T) {
-	const max = DefaultMaxBody
+	const max = 64 << 10
 	body := strings.Repeat("a", 60000)
 	newReq := func(b string) *http.Request {
 		req := httptest.NewRequest(http.MethodPost, "/api/x", strings.NewReader(b))

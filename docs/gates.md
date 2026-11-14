@@ -190,7 +190,11 @@ group を値として使う形 (`registerX(api.Group)` のように関数へ渡�
 プラグインのルートを登録する `s.setupPlugins(api.Group, …)` (`router.go`) だけにある。
 
 本家の golden にある endpoint をこれらの形へ移すと、`TestAPICompatDoc_MatchesRouter` と
-`TestParamShadowChangesNoResponse` が別の理由で落とす (#3677 の敵対的レビュー 2 周目で実測)。
+`TestEnforcedEndpointsMatchTheCorpus` が別の理由で落とす (前者は #3677 の敵対的レビュー 2 周目で
+実測。後者は #4172 で、`clips/show` の登録を `api.Group.POST` へ移して実測した。`withParamShadow`
+が外れる点は上の形と同じ)。ただし後者は、`paramDef` が `{}` の 2 件 (`reversi/invitations`、
+`admin/captcha/current`) では落ちない。corpus に拒否の入力が無いためである。#4172 より前は、
+消した `TestParamShadowChangesNoResponse` が落としていた。
 `collectRoutes` の型で引く方式へ寄せることも検討した。ただし `collectRoutes` は受け手の名前が
 `api` なら /api の group そのものとみなすので、`apiRoutes` と `*echo.Group` を区別しない。
 `*echo.Group` 型の引数 (上の 1 つ目) も /api と結び付けない。どちらも足すと

@@ -407,7 +407,7 @@ func enforcedEndpoints(t *testing.T) []string {
 // TestEnforcedEndpointsAreDeclared checks paramEnforcedEndpoints: every
 // endpoint with a paramDef, upstream's or Elythia's own
 // (elythia_paramdefs.json, #3869), compiles and is enforced, but
-// paramCountedOnlyEndpoints, which must name upstream endpoints. Whether every
+// paramUnvalidatedEndpoints, which must name upstream endpoints. Whether every
 // route has a paramDef is TestAPIRoutesHaveParamDefs.
 func TestEnforcedEndpointsAreDeclared(t *testing.T) {
 	up, err := paramschema.Upstream()
@@ -435,19 +435,19 @@ func TestEnforcedEndpointsAreDeclared(t *testing.T) {
 	for _, name := range []string{"notes/create", "charts/notes", "admin/update-meta", "admin/queue/jobs", "admin/backup/list", "i/federation"} {
 		require.Contains(t, enforced, name)
 	}
-	// 数えるだけの一覧には、本家の宣言のある名前だけを、拒否の対象から外して置く。
+	// 検証しない一覧には、本家の宣言のある名前だけを、拒否の対象から外して置く。
 	// 使われなくなった名前を残さない。
-	var counted []string
+	var unvalidated []string
 	for name := range eff {
 		if !slices.Contains(enforced, name) {
-			counted = append(counted, name)
+			unvalidated = append(unvalidated, name)
 		}
 	}
-	slices.Sort(counted)
-	assert.Equal(t, slices.Sorted(slices.Values(paramCountedOnlyEndpoints)), counted, "the endpoints that are only counted")
-	for _, name := range paramCountedOnlyEndpoints {
+	slices.Sort(unvalidated)
+	assert.Equal(t, slices.Sorted(slices.Values(paramUnvalidatedEndpoints)), unvalidated, "the endpoints that are not validated")
+	for _, name := range paramUnvalidatedEndpoints {
 		_, ok := up[name]
-		assert.True(t, ok, "paramCountedOnlyEndpoints has %s, which is not an upstream endpoint", name)
+		assert.True(t, ok, "paramUnvalidatedEndpoints has %s, which is not an upstream endpoint", name)
 	}
 }
 
@@ -717,7 +717,7 @@ func TestEnforcedEndpointsMatchTheCorpus(t *testing.T) {
 		return nil, &net.DNSError{Err: "name resolution refused in the test", Name: host, IsNotFound: true}
 	}
 	redisClient, redisOptions := newRealRedis(t)
-	_, on, _ := newParamShadowServersOn(t, redisClient, redisOptions, []func(*Server){func(s *Server) {
+	on := newParamServerOn(t, redisClient, redisOptions, []func(*Server){func(s *Server) {
 		s.selfCheckRunner = diag
 		s.remoteChecker = diag
 		s.outboundLookup = countingLookup
@@ -1576,7 +1576,7 @@ func TestEnforcedGETMatchesUpstream(t *testing.T) {
 	if serverIntegrationDB == nil {
 		t.Skip("PostgreSQL unavailable")
 	}
-	_, on, _ := newParamShadowServers(t)
+	on := newParamServer(t)
 
 	const castID = "0b5f1631-7c1a-41a6-b399-cce335f34d85"
 	const ajvID = "3d81ceae-475f-4600-b2a8-2bc116157532"

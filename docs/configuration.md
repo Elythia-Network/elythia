@@ -45,8 +45,6 @@ cp .config/docker.yml.example .config/docker.yml
 | `mediaProxyConcurrency` | int | `GOMAXPROCS / 2` (最低 1) | media proxy の画像処理 (decode/resize/encode) を同時に何本走らせてよいか (#3032)。**ピークメモリの上限**にあたる — 同時に走る本数がそのまま同時に確保される中間バッファの本数になり、内蔵プロキシは API サーバーと同じプロセスなのでそれがインスタンス全体の RSS になる。8 core で AVIF を c=8 流したときの peak RSS の実測は枠 1 → 131MB / 2 → 409MB / 4 → 636MB / 8 → 995MB / 無制限 → 959MB、同条件の jpg→avatar スループットは 30.7 / 45.5 / 63.9 / 71.2 / 71.6 rps。既定は peak RSS -34% をスループット -11% で買う点。枠が 5 秒空かなければ 503 (`?fallback` 指定時はダミー画像) で落とす。0 以下は既定値扱い |
 | `enableIpRateLimit` | bool | `true` | IPベースのレート制限を有効化 |
 | `disableEndpointRateLimits` | bool | `false` | per-endpoint rate limit table 全体を無効化。Misskey TS の `NODE_ENV=development` 相当で、ベンチマーク等で公正比較する用途専用。**本番で絶対に使わない** |
-| `disableParamShadow` | bool | `false` | 本家の`paramDef`での引数の検証を、応答を変えずに走らせ、handlerと判定が分かれた件数をログに出すのを止める (#3677)。本家に揃えたendpoint (`reset-db`を除く、本家かElythiaの宣言のあるendpointの全部。#3742〜#3888で広げ、#3890で宣言から決める形にした) の検証は止めない。数え方と見方は [docs/param-shadow.md](param-shadow.md) |
-| `paramShadowLogSeconds` | int | `600` | 上の件数の要約をログに出す間隔 (秒)。0 以下は既定に戻す |
 | `pidFile` | string | - | PIDファイルパス |
 | `testMode` | bool | `false` | テスト用エンドポイント(/api/reset-db)を有効化。**本番で絶対に使わない** |
 | `enablePprof` | bool | `false` | `/debug/pprof/*` ハンドラを公開。ローカルプロファイリング専用。**本番で絶対に使わない**。`MK_ENABLEPPROF`で上書き可。診断のためどうしても一時的に有効化する場合は、reverse proxy 側で`/debug`を落としてからにする (`deploy/uds/nginx/mkgo.conf`と[deployment.md](deployment.md)のnginx例はどちらも404にしてある)。取得はUDSへ直接 (`curl --unix-socket`)。 |
@@ -344,8 +342,6 @@ Elythia 側のマイグレーションには含めていない。pgroonga 拡張
 | `MK_PLUGINSECRETKEY` | `pluginSecretKey` |
 | `MK_TESTMODE` | `testMode` |
 | `MK_DISABLEENDPOINTRATELIMITS` | `disableEndpointRateLimits` |
-| `MK_DISABLEPARAMSHADOW` | `disableParamShadow` |
-| `MK_PARAMSHADOWLOGSECONDS` | `paramShadowLogSeconds` |
 | `MK_BCRYPTCOST` | `bcryptCost` |
 | `MK_CROSSORIGINOPENERPOLICY` | `crossOriginOpenerPolicy` |
 | `MK_NOTEHOOKCONCURRENCY` | `noteHookConcurrency` |
