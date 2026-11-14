@@ -138,6 +138,8 @@ dumpから戻す方法は、DBの大きさに比例して止まる時間が延�
 
 **[pg_bigm](#pg_bigm-日本語の部分一致検索を高速化)などの拡張を入れたDBは、戻す先のサーバーにも同じ拡張が要る。** dumpは`CREATE EXTENSION`を含むので、拡張の無いサーバー(素の`postgres:18-alpine`)へは戻らない。戻す前に止まる。バックアップ用のimageにpg_bigmが入っているのは`backup verify`のためで、戻す先はDBのサーバー(UDS構成なら`deploy/postgres-bigm`のimage)になる。拡張を作るにはsuperuserが要ることがある。
 
+**戻す先のサーバーは、バックアップを取ったときのDBのサーバーと同じか、新しい版にする。** マイナー版が上がっただけでも、新しいサーバーのdumpは古いサーバーに戻せないことがある(18.7のサーバーは列に`pg_attver`を付け、18.6はそれを戻せない。#4152)。戻せる版のずれのほうが多いので、戻す前には比べない。`pg_restore`が落ちたときに、メタ情報の`postgresVersionNum`が戻す先のサーバーより新しければ、取ったときの版と戻す先のサーバーの版、戻す先のサーバーを取ったときの版以上に上げる手立てを、誤りの先頭に出す(#4155)。`pg_restore`は1つのトランザクションで動くので、ほかの失敗と同じく何も残らない。止まったら、戻す先のサーバーの版を上げてから流し直す。
+
 dumpは、戻す前に一時ファイルへ落とす(暗号化した世代は復号したもの。持ち主だけが読める0600で作る)。`backup`サービスではコンテナの`/tmp`に置くので、dumpの大きさの空きが要る。別の場所に置くときは`-tmp-dir <ディレクトリ>`を渡す。一時ファイルは終わったときと中断(`SIGINT` / `SIGTERM`)のときに消すが、`SIGKILL`やOOMで落ちたときは残る。**バイナリを直接実行すると、ホストの`/tmp`に平文のdumpが残りうる。** 利用者のtokenや秘密鍵が入るので、暗号化したディスクの上のディレクトリを`-tmp-dir`で渡すか、落ちたときに`elythia-restore-*.pgc`を消す。
 
 **戻すのはDBだけで、ドライブのファイル(ローカルの`drive-files`とオブジェクトストレージ)は戻らない。** [DBのバックアップ](backup.md)はファイルを含まないため。バックアップより後に消したファイルは、戻したDBに行があるのに中身が無く、画像が切れる。バックアップより後に上げたファイルは、DBに行が無いまま保存先に残り、どこからも指されない。ファイルも同じ時点へ揃えたいときは、保存先の側(オブジェクトストレージのversioningやスナップショットなど)で戻す。
@@ -206,7 +208,7 @@ docker compose start backup-daemon
 
 UDS構成は、`app`を`mkgo`に読み替え(`backup-daemon`はそのまま)、`docker compose`に`-f compose.uds.yaml`を付ける(`docker compose -f compose.uds.yaml run --rm --no-deps backup restore ...`)。`compose.uds.yaml.example`の`backup`サービスは、DBのソケット(`pg_sock`)と、Redisの後始末のためにvalkeyのソケット(`valkey_sock`)をmountしている。`compose.uds.yaml`に複製しているなら、`valkey_sock`の行も足す。`mkgo`は起動のたびに`elythia migrate`を流す(`deploy/uds/mkgo-entrypoint.sh`)が、戻すときに当て終えているので、何も起きない。
 
-バイナリ直接実行では、サーバーと、常駐させているなら`elythia backup daemon`を止めてから(daemonは確かめ終わってから再開する)、`pg_restore`があるホストで、本体と同じ設定ファイルを渡して流す。`pg_restore`の版は、バックアップを取った`pg_dump`以上で、DBのサーバー以下にする(バックアップを取った`pg_dump`も戻す先のサーバーも18なら、18の`pg_restore`)。`pg_restore`の場所は`backup.tools.pgRestore`で変えられる。
+バイナリ直接実行では、サーバーと、常駐させているなら`elythia backup daemon`を止めてから(daemonは確かめ終わってから再開する)、`pg_restore`があるホストで、本体と同じ設定ファイルを渡して流す。`pg_restore`の版は、バックアップを取った`pg_dump`以上で、DBのサーバー以下にする(バックアップを取った`pg_dump`も戻す先のサーバーも18なら、18の`pg_restore`)。戻す先のサーバーは、バックアップを取ったときのDBのサーバーと同じか新しい版にする(マイナー版も含む。[戻すときに行うこと](#戻すときに行うこと)の後の説明)。`pg_restore`の場所は`backup.tools.pgRestore`で変えられる。
 
 ```bash
 sudo systemctl stop elythia

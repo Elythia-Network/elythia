@@ -711,3 +711,29 @@ func TestResolveLatestSkipsUnsignedWithKey(t *testing.T) {
 	_, err = r.readMeta(ctx, "20261002T000000Z")
 	require.NoError(t, err, "ID を明示すれば署名の無い世代も読む")
 }
+
+// TestExplainRestoreFailureKeepsErrorWhenVersionUnreadable: when the version
+// of the target server cannot be read after pg_restore failed, the failure
+// is returned unchanged. A meta.json without the version, or a canceled
+// restore, does not query the server (#4155).
+func TestExplainRestoreFailureKeepsErrorWhenVersionUnreadable(t *testing.T) {
+	var out bytes.Buffer
+	r := &Restorer{Out: &out}
+	failed := errors.New("backup: pg_restore: exit status 1")
+	q := errQueryer{err: errors.New("conn closed")}
+
+	assert.Same(t, failed, r.explainRestoreFailure(context.Background(), q, Meta{PostgresVersionNum: 180007}, failed))
+	assert.Contains(t, out.String(), "could not compare the server version with the backup: conn closed")
+
+	out.Reset()
+	assert.Same(t, failed, r.explainRestoreFailure(context.Background(), q, Meta{}, failed))
+	assert.Empty(t, out.String())
+	assert.Same(t, failed, r.explainEmptyRestoreFailure(context.Background(), "unused", Meta{}, failed))
+
+	// 中止で落ちたときは、比べずに警告も出さない。
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.Same(t, failed, r.explainRestoreFailure(canceled, q, Meta{PostgresVersionNum: 180007}, failed))
+	assert.Same(t, failed, r.explainEmptyRestoreFailure(canceled, "unused", Meta{PostgresVersionNum: 180007}, failed))
+	assert.Empty(t, out.String())
+}
