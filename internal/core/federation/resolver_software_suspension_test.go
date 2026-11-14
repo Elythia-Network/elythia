@@ -228,7 +228,7 @@ func newSpellingChecker(t *testing.T) *federation.SuspendedChecker {
 	t.Helper()
 	instances := testutil.NewMockInstanceRepository()
 	name, ver := "misskey", "2024.10.0"
-	for i, host := range []string{"susp.example", idnhost.Puny("例え.example"), "port.example:8443", "remote.example"} {
+	for i, host := range []string{"susp.example", idnhost.Puny("例え.example"), "port.example:8443", "remote.example", "[2001:db8::1]", "a%.example"} {
 		require.NoError(t, instances.Create(&model.Instance{ID: fmt.Sprintf("i%d", i), Host: host, SoftwareName: &name, SoftwareVersion: &ver}))
 	}
 	meta := testutil.NewMockMetaRepository()
@@ -294,6 +294,13 @@ func TestInboxSuspendedChecker_NormalizesHostSpelling(t *testing.T) {
 		"other.example":      false,
 		"susp.example/x":     false,
 		"":                   false,
+		// inbox の keyId から取ったホストは、IPv6 の zone を `%` のまま持つ (#4186)
+		"[2001:db8::1%z]":     true,
+		"[2001:db8::1%z]:443": true,
+		"[2001:db8::2%z]":     false,
+		"[2001:db8::1%z]:abc": false,
+		"a%.example:443":      true,
+		"A%.example.":         true,
 	} {
 		assert.Equal(t, want, c.IsSuspended(host), host)
 	}

@@ -72,6 +72,16 @@ func TestPunyHostPort_KeepsIPv6Brackets(t *testing.T) {
 	}
 }
 
+// 保存するホストも、IPv6 の zone を落とした形にそろえる (#4186)
+func TestHostFromURI_DropsIPv6Zone(t *testing.T) {
+	got, err := hostFromURI("https://[2001:db8::1%25z]/users/x")
+	require.NoError(t, err)
+	assert.Equal(t, "[2001:db8::1]", got)
+	got, err = hostFromURI("https://[fe80::1%25en0]:8443/users/x")
+	require.NoError(t, err)
+	assert.Equal(t, "[fe80::1]:8443", got)
+}
+
 // NormalizeGateHost は host を取り出せない入力で "" を返すこと。呼び出し側
 // (queue の hostFromInbox) は "" を「判定できない」として扱う。
 func TestNormalizeGateHost(t *testing.T) {

@@ -79,6 +79,7 @@ func FuzzNormalizeGateHost(f *testing.F) {
 		"https://remote.example:8443/inbox", "https://例え.テスト/", "https://xn--r8jz45g.xn--zckzah/",
 		"https://[::1]:8080/", "https://[::ffff:1.2.3.4]/", "https://u:p@remote.example/", "https://REMOTE.EXAMPLE./",
 		"https://%45.example/", "https://remote.example:0/", "remote.example", "//remote.example/", "https://", "",
+		"//%25", "https://remote.example%25/", "https://[2001:db8::1%25z]/", "https://[fe80::1%25en0]:8443/",
 	} {
 		f.Add(s)
 	}
@@ -98,12 +99,9 @@ func FuzzNormalizeGateHost(f *testing.F) {
 		if err != nil {
 			t.Fatalf("%q gave %q but does not parse: %v", in, host, err)
 		}
-		// 既定のポートを剥がすかはスキームで決まるので、同じスキームで組み直す
-		prefix := "//"
-		if u.Scheme != "" {
-			prefix = u.Scheme + "://"
-		}
-		again := NormalizeGateHost(prefix + host + "/")
+		// 既定のポートを剥がすかはスキームで決まるので、同じスキームで組み直す。
+		// 文字列をつなぐと、ホスト名に残った `%` が URL として読めなくなる (#4186)
+		again := NormalizeGateHost((&url.URL{Scheme: u.Scheme, Host: host, Path: "/"}).String())
 		if again != host {
 			t.Fatalf("not idempotent: %q -> %q -> %q", in, host, again)
 		}

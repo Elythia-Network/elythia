@@ -2,6 +2,7 @@
 package idnhost
 
 import (
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -129,8 +130,18 @@ func RepairLegacyPuny(host string) string {
 // suffix 一致をすり抜ける。
 //
 // 非既定ポート (`:8443`) は別 host のまま残す (upstream も同じ)。
+//
+// An IPv6 literal with a zone (`[2001:db8::1%25z]`) loses the zone and is
+// written in the netip form (`0db8` becomes `db8`).
 func HostPort(u *url.URL) string {
-	host := Puny(u.Hostname())
+	host := u.Hostname()
+	// 外へつなぐ safehttp は、直接つなぐとき、解決したアドレスを zone の無い形
+	// (IP.String()) で接続先に組むので、zone は接続先を変えない。残すと同じ
+	// 接続先が別のホストとして扱われ、一覧の照合から外れる (#4186)。
+	if addr, err := netip.ParseAddr(host); err == nil && addr.Zone() != "" {
+		host = addr.WithZone("").String()
+	}
+	host = Puny(host)
 	// IPv6 リテラルは authority では `[::1]` の形で現れるが `Hostname()` が
 	// bracket を外す。戻さないと `::1` + port が `::1:8443` になり、host 部に
 	// コロンを含むだけの値と見分けが付かなくなる。
