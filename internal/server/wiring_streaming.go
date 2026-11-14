@@ -58,6 +58,7 @@ type streamingDeps struct {
 	keypairExtraRepo             repository.UserKeypairExtraRepository
 	instanceRepo                 repository.InstanceRepository
 	antennaRepo                  repository.AntennaRepository
+	pollVoteRepo                 repository.PollVoteRepository
 	clipRepo                     repository.ClipRepository
 	userListRepo                 repository.UserListRepository
 	reversiRepo                  repository.ReversiRepository
@@ -134,6 +135,7 @@ func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *st
 	keypairExtraRepo := d.keypairExtraRepo
 	instanceRepo := d.instanceRepo
 	antennaRepo := d.antennaRepo
+	pollVoteRepo := d.pollVoteRepo
 	clipRepo := d.clipRepo
 	userListRepo := d.userListRepo
 	reversiRepo := d.reversiRepo
@@ -385,6 +387,7 @@ func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *st
 	// 対戦・chat、stats) は、setter を呼んだのと同じ名前から渡す。
 	registerStreamChannels(streamRegistry, builtinStreamChannels(streamChannelDeps{
 		antennas:     antennaRepo,
+		pollVotes:    pollVoteRepo,
 		userLists:    userListRepo,
 		clips:        clipRepo,
 		roles:        roleService,

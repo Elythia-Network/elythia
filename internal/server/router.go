@@ -2259,6 +2259,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		keypairExtraRepo:             keypairExtraRepo,
 		instanceRepo:                 instanceRepo,
 		antennaRepo:                  antennaRepo,
+		pollVoteRepo:                 pollVoteRepo,
 		clipRepo:                     clipRepo,
 		userListRepo:                 userListRepo,
 		reversiRepo:                  reversiRepo,
