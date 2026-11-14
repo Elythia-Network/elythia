@@ -16,7 +16,7 @@ name: mk-queue-bench-autoscale
 
 services:
   certs:
-    image: alpine:3.21
+    image: alpine:3.24
     command:
       - sh
       - -c
