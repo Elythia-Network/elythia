@@ -7257,6 +7257,88 @@ func TestIngestNote_QuoteUrlFallback(t *testing.T) {
 	assert.Equal(t, "quoted1", *got.RenoteID)
 }
 
+// quoteInlineContent is a Mastodon quote body: "RE: <url>" before the text.
+const quoteInlineContent = `<p class=\"quote-inline\">RE: <a href=\"https://remote.example/notes/quoted\">https://remote.example/notes/quoted</a></p><p>見て</p>`
+
+// TestIngestNote_QuoteDropsQuoteInline: when the quote is attached, the
+// "RE: <url>" of the body is dropped (upstream 2026.11.0 #18063, #4164). When
+// the quote is not attached (a followers-only target), it stays so that the
+// body keeps the hint that it was a quote (docs/divergence/federation.md).
+func TestIngestNote_QuoteDropsQuoteInline(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		visibility model.NoteVisibility
+		wantText   string
+		wantRenote bool
+	}{
+		{name: "attached", visibility: model.NoteVisibilityPublic, wantText: "見て", wantRenote: true},
+		{name: "not attached", visibility: model.NoteVisibilityFollowers, wantText: "RE: https://remote.example/notes/quoted\n\n見て"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := testutil.NewMockUserRepository()
+			noteRepo := testutil.NewMockNoteRepository()
+			quotedURI := "https://remote.example/notes/quoted"
+			noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu", UserHost: strPtr("remote.example"), Visibility: tt.visibility}
+			urls := activitypub.NewURLBuilder("https://example.com")
+			idGen, _ := id.NewGenerator("aidx")
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
+
+			body := `{ "@context": "https://www.w3.org/ns/activitystreams",
+				"id": "https://remote.example/notes/q1",
+				"type": "Note",
+				"attributedTo": "https://remote.example/users/alice",
+				"content": "` + quoteInlineContent + `",
+				"quoteUrl": "https://remote.example/notes/quoted",
+				"to": ["https://www.w3.org/ns/activitystreams#Public"]
+			}`
+			got, err := r.IngestNote([]byte(body))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRenote, got.RenoteID != nil)
+			require.NotNil(t, got.Text)
+			assert.Equal(t, tt.wantText, *got.Text)
+		})
+	}
+}
+
+// TestUpdateRemoteNote_QuoteDropsQuoteInline: an edit of a note whose quote
+// is attached drops the "RE: <url>" too; one without a quote keeps it (#4164).
+func TestUpdateRemoteNote_QuoteDropsQuoteInline(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		renoteID *string
+		wantText string
+	}{
+		{name: "quote attached", renoteID: strPtr("quoted1"), wantText: "見て"},
+		{name: "no quote", wantText: "RE: https://remote.example/notes/quoted\n\n見て"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := testutil.NewMockUserRepository()
+			noteRepo := testutil.NewMockNoteRepository()
+			uri := "https://remote.example/notes/n1"
+			host := "remote.example"
+			original := "original"
+			noteRepo.Notes["n1"] = &model.Note{
+				ID: "n1", URI: &uri, UserID: "alice-id", UserHost: &host, Text: &original, RenoteID: tt.renoteID,
+			}
+			urls := activitypub.NewURLBuilder("https://example.com")
+			idGen, _ := id.NewGenerator("aidx")
+			r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{}, idGen)
+
+			body := `{ "@context": "https://www.w3.org/ns/activitystreams",
+				"id": "https://remote.example/notes/n1",
+				"type": "Note",
+				"attributedTo": "https://remote.example/users/alice",
+				"content": "` + quoteInlineContent + `",
+				"quoteUrl": "https://remote.example/notes/quoted"
+			}`
+			got, err := r.UpdateRemoteNote([]byte(body), "")
+			require.NoError(t, err)
+			require.NotNil(t, got.Text)
+			assert.Equal(t, tt.wantText, *got.Text)
+		})
+	}
+}
+
 // quote URI が未知 (DB 未取り込み) なら fetch して取り込み、renote 紐付けする。
 func TestIngestNote_QuoteFetchesUnknownTarget(t *testing.T) {
 	repo := testutil.NewMockUserRepository()

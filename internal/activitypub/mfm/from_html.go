@@ -3,6 +3,7 @@ package mfm
 import (
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -17,6 +18,21 @@ var urlRegex = regexp.MustCompile(`^https?://[\w/:%#@$&?!()\[\]~.,=+\-]+$`)
 // FromHTML converts HTML (typically from an ActivityPub note `content` field)
 // into MFM markup. TS MfmService.fromHtml() と同等の変換を行う。
 func FromHTML(s string) string {
+	return fromHTML(s, false)
+}
+
+// FromHTMLWithoutQuoteInline is FromHTML for a note whose quote is attached:
+// it first drops the top-level `.quote-inline` element that holds a link (the
+// "RE: <url>" that Mastodon and others put before the body of a quote).
+//
+// 本家 2026.11.0 (#18063) の fromHtml の hasQuote と同じく、直下の要素のうち `<a>` を
+// 含む最初の `.quote-inline` を 1 つだけ除く (#4164)。引用はノートに付くので、
+// 本文に URL が残ると同じものが二重に出る。
+func FromHTMLWithoutQuoteInline(s string) string {
+	return fromHTML(s, true)
+}
+
+func fromHTML(s string, dropQuoteInline bool) string {
 	if s == "" {
 		return ""
 	}
@@ -30,9 +46,51 @@ func FromHTML(s string) string {
 		return s
 	}
 
+	if dropQuoteInline {
+		removeQuoteInline(doc)
+	}
+
 	var b strings.Builder
 	walkChildren(doc, &b)
 	return strings.TrimSpace(b.String())
+}
+
+// removeQuoteInline removes the first child of <body> that has the class
+// `quote-inline` and contains an <a>.
+func removeQuoteInline(doc *html.Node) {
+	body := findElement(doc, atom.Body)
+	if body == nil {
+		return
+	}
+	for c := body.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && hasClass(c, "quote-inline") && findElement(c, atom.A) != nil {
+			body.RemoveChild(c)
+			return
+		}
+	}
+}
+
+// findElement returns the first element of type a in n or its descendants.
+func findElement(n *html.Node, a atom.Atom) *html.Node {
+	if n.Type == html.ElementNode && n.DataAtom == a {
+		return n
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if found := findElement(c, a); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// hasClass reports whether the class attribute of n holds the token class.
+func hasClass(n *html.Node, class string) bool {
+	for _, attr := range n.Attr {
+		if attr.Namespace == "" && attr.Key == "class" && slices.Contains(strings.Fields(attr.Val), class) {
+			return true
+		}
+	}
+	return false
 }
 
 // walkChildren は子ノードを順に処理する。
