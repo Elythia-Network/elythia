@@ -891,11 +891,12 @@ UDS_CONFIG=deploy/uds/config/default.yml
 # (Dockerfile.bundled の後で 1.4GiB、Dockerfile.mkgo の後で 405MiB)。
 #
 # **専用のビルダーでビルドするのは mkgo だけ。** postgres (deploy/postgres-bigm) など
-# 他のサービスは既定のビルダーのまま。専用のビルダーは dockerd の image store を
-# 見ずに FROM をレジストリから引き直すので、base を digest で固定していない
-# postgres:18-alpine だと最初のビルドで新しい base を取りに行き、image が変わる。
-# 次の `up -d` で本番の PostgreSQL のコンテナが作り直される。既定のビルダーは
-# 手元の base とキャッシュを使うので、従来どおり image は変わらない。
+# 他のサービスは既定のビルダーのまま。専用のビルダーは dockerd の image store と
+# キャッシュを見ない。postgres-bigm の base は digest で固定しているが、最初の
+# ビルドで RUN の層 (apk add と pg_bigm のビルド) を作り直すので、image が変わり
+# うる。変われば、次の `up -d` で本番の PostgreSQL のコンテナが作り直される。
+# 既定のビルダーは手元のキャッシュを使うので、キャッシュを消していなければ、従来
+# どおり image は変わらない。
 #
 # - 初回だけ作る。最初のビルドはキャッシュが空なので時間がかかる
 # - 同じビルダーで別のビルドが走っているときに止めると、そちらも止まる
