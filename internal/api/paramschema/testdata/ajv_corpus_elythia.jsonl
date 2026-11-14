@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.10.1","ajv":"8.20.0","paramdefsSha256":"248b8de38f13b8523aaeb0bd53e8b5193a29667472f99e0df3ba4c21a03dda2b","elythiaParamdefsSha256":"984eb91ad7c7af6e9ec8babc6b8416f386eb391e223a3ea62d92a49e222f0e90","cases":3887}
+{"misskeyVersion":"2026.11.0","ajv":"8.20.0","paramdefsSha256":"8e9d75274b84160bd15122d93e5662877ff8eb088ad349388bd505938f4834ef","elythiaParamdefsSha256":"984eb91ad7c7af6e9ec8babc6b8416f386eb391e223a3ea62d92a49e222f0e90","cases":3887}
 {"ep":"admin/backup/delete"}
 {"in":{"password":"hello","id":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}

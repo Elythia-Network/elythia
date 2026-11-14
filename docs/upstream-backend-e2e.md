@@ -62,10 +62,10 @@ make upstream-e2e-down
 - `pnpm --filter misskey-js build` — `misskey-js` は exports が `built/` を指すので、
   ビルドしないと `test/e2e/**` の `import ... from 'misskey-js/entities.js'` が解決できない。
   frontend まで含む `pnpm build` (5-10 分) は e2e には不要なので呼ばない
-- `.config/test.yml` の設置と `NODE_ENV=test pnpm --filter backend compile-config` —
-  本家の `loadConfig()` は YAML ではなく `built/.config.json` を読む (ランタイムに
-  js-yaml を含めないため)。生成しておかないと globalSetup が
-  「Compiled configuration file not found」で落ちる
+- `.config/test.yml` の設置 — `NODE_ENV=test` のとき、本家の `loadConfig()` がこの YAML を
+  そのまま読む。本家 2026.10.x には YAML を `built/.config.json` に事前に変換する
+  `compile-config` があり、生成しておかないと globalSetup が落ちたが、2026.11.0 で戻された
+  ので要らない (#4164)
 
 `make upstream-e2e-test` は `built/elythia` を先にビルドし、vitest 設定をコピーした後に
 期待 DTO patch を実行する。patch は local user に `'on'` を固定期待値として追加し、

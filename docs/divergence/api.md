@@ -372,6 +372,7 @@ upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` �
 | `federation/show-instance` / `federation/instances` | `isInboxSuspended` | そのインスタンスが受信を拒否するソフトウェアに当たるか (#3362)。`isSuspended` / `suspensionState` は配送の停止だけを表す本家の意味のまま変えない |
 | `admin/show-user` | `managedByPlugin` | そのアカウントを管理しているプラグインの名前 (#3468)。普通のアカウントは `null`。**upstream にはプラグインが管理するアカウントという概念自体が無い。** 管理するアカウントには誰もログインできないので、運営者が管理画面でそれを見分けるのに使う |
 | `i` / `i/update` / main stream の `meUpdated` (MeDetailed) | `followApprovalAction` | フォローの止め方 (#3466)。`silentRequest` / `silentFollow` のときだけ出し、既定の `request` (本家と同じ動き) では key ごと出さない。本家の e2e (`users.ts`) が MeDetailed の key の過不足を完全一致で見るため。同じ MeDetailed の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` は本家 2026.10.1 の項目で、本家と同じく未設定でも `null` で必ず出す (#3809)。frontend は保存した値を `$i` へ自分で書き戻す (`meUpdated` は部分更新なので、欠けた `followApprovalAction` は前の値のまま残る) |
+| `i/2fa/register` | `qr` | 2 段階認証の登録用の QR コード (`otpauth://` の URL を描いた PNG の data URL)。**本家 2026.11.0 (#18100) は応答から消し**、frontend が `url` から手元で QR コードを作るようにしたが、Elythia は返し続ける (#4164)。REST API は追加だけの方針で、既存の項目を消さないため (`qr` を読む古いクライアントや、本家 2026.10.1 までの frontend が動き続ける)。本家の宣言 (`upstream_paramdefs.json`) から消えたので、`/api.json` には載らない |
 
 ### 1-1c. リクエストパラメータの additive
 

@@ -4,7 +4,7 @@
 # 書いておく (#3373)。単体で使われても project 名がディレクトリ名にならない。
 #
 # spec は upstream Misskey TS の API 互換挙動を期待値として書いている。
-# 本 overlay は backend を `misskey/misskey:2026.10.1` に置き換えて、上流の
+# 本 overlay は backend を `misskey/misskey:2026.11.0` に置き換えて、上流の
 # 真の挙動で spec が pass することを baseline として確認する。
 # (mk-go 単体 stack は tests/playwright/compose.yml、両者で同 spec が
 # pass = drop-in 互換が保証される、という設計。例外は、Elythia で足した
@@ -28,10 +28,10 @@ name: mk-playwright
 services:
   mkgo:
     # mk-go の追従先と同じ版に揃える。spec の selector は mk-go 同梱
-    # frontend (本家 2026.10.1 を取り込んだもの) 基準で書かれているので、ここが古いと
+    # frontend (本家 2026.11.0 を取り込んだもの) 基準で書かれているので、ここが古いと
     # UI spec が TS 側だけ落ちる (#2276)。MisskeyVersion を上げるときは
     # この tag も一緒に上げること。
-    image: misskey/misskey:2026.10.1
+    image: misskey/misskey:2026.11.0
     build: !reset null
     environment:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
@@ -45,13 +45,12 @@ services:
       # 使う (= 実 production と同 build)。spec が verify する API shape /
       # UI 動作には影響しない。
       NODE_ENV: test
-      # ただし upstream の scripts/compile_config.js は NODE_ENV==='test' の
-      # とき `.config/test.yml` を読みに行く。ここで mount しているのは
-      # default.yml だけなので、指定が無いと config が compile されないまま
-      # `built/.config.json` 不在で migration が落ちて container が exit 1
-      # する (= stack 起動失敗)。MISSKEY_CONFIG_YML があれば NODE_ENV に
-      # 関係なくそのファイルを読むので、rate limit 無効化の意図を保ったまま
-      # config を解決できる (#2276)。
+      # ただし upstream の loadConfig() は NODE_ENV==='test' のとき
+      # `.config/test.yml` を読みに行く。ここで mount しているのは
+      # default.yml だけなので、指定が無いと config が見つからずに migration が
+      # 落ちて container が exit 1 する (= stack 起動失敗)。MISSKEY_CONFIG_YML が
+      # あれば NODE_ENV に関係なくそのファイルを読むので、rate limit 無効化の
+      # 意図を保ったまま config を解決できる (#2276)。
       MISSKEY_CONFIG_YML: default.yml
     volumes:
       # mk-go base と config を共有 (instance.yml は両 backend 互換)。

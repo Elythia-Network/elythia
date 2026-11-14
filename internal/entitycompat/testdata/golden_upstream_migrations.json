@@ -347,5 +347,6 @@
   "AutoArchiveAnnouncements1783913268595",
   "HashtagTableDefaults1784899839024",
   "UserProfilePasswordComment1790477603333",
-  "FollowApprovalByAccountAge1791109435844"
+  "FollowApprovalByAccountAge1791109435844",
+  "FixMetaMigratedConfigColumnDefaults1794385801836"
 ]
