@@ -1,0 +1,7 @@
+# govulncheck が「Your code is affected」と報告するが、Elythia には当たらない脆弱性 (#4176)。
+# 列は ID・module・理由 (タブ区切り)。理由には、なぜ当たらないかを、どの経路で確かめたかと一緒に書く。
+# 結果に出てこなくなった行は tools/vulncheckgate が落とすので、消すこと。
+#
+# echo v4 の 2 件は、echo の advisory (GHSA) では v4.16.3 で直っていて、Elythia は v4.16.3 を使う。Go の脆弱性 DB (vuln.go.dev) が v4 の修正版を記録していないので、govulncheck は echo の関数を呼んでいるだけで該当と報告する (DB に v4 の関数の情報も無い)。DB に修正版が載れば、この行は unused で落ちるので、そのときに消す。
+GO-2026-6872	github.com/labstack/echo/v4	GHSA-246p-cpwv-v3jq (CVE-2026-118653)。echo の advisory では v4.16.3 で修正済み (patched 4.16.3) で、Elythia は v4.16.3 を使う。Echo#IPExtractor が未設定のとき Context.RealIP が X-Forwarded-For / X-Real-IP を信じていた問題で、4.16.3 からは接続元だけを見る。Elythia はそもそも唯一の echo のインスタンス (internal/server/server.go の echo.New) に、trustProxy から作る IPExtractor (buildIPExtractor) を必ず設定し、echo の RateLimiter middleware も使わない
+GO-2026-6875	github.com/labstack/echo/v4	GHSA-99jh-6h7p-pp36 (CVE-2026-118651)。echo の advisory では v4.16.3 で修正済み (patched 4.16.3) で、Elythia は v4.16.3 を使う。echo の Proxy middleware が、受け取った X-Real-IP を上流へ転送していた問題。Elythia はそもそも echo の Proxy middleware を使わない (使う echo の middleware は BodyLimit・CORS・Gzip・Recover・RequestID・RequestLogger。開発時の vite への転送は net/http/httputil の ReverseProxy を直接使う)

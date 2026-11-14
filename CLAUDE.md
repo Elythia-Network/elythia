@@ -244,7 +244,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `ci.yml` lint | push / PR | ○ | vet / gofmt / actionlint / golangci-lint / テストfixtureのID重複 |
 | `ci.yml` plugin-tests | push / PR | | 同梱プラグインのテスト、`authoring.md`のスニペットのコンパイル |
 | `frontend` | push / PR | ○ | `frontend/`の検査(10 workspaceのeslint、typecheck、SPDX、Elythiaのファイルのimport、en-USの語の抜け、Elythiaの語が書き換える本家の語の一覧、日本語の直書き、ルートとPlaywrightのspecの対応付け、設定のページの`prefer.model`のキーとPlaywrightの設定の表の対応付け、管理画面の`admin/update-meta`のキーとロールのポリシーのキーとPlaywrightの管理画面の表の対応付け、locale、本番ビルド、vitest)、絵文字の正規表現。frontendに関係しない変更ではlintとtestをskipし、集約jobの`frontend`だけが成功する |
-| `ci.yml` vulncheck | push / PR | | govulncheck、`go.mod`とDockerfileのGoの版の一致 |
+| `ci.yml` vulncheck | push / PR | | govulncheck(`make vulncheck`。`tools/vulncheckgate/allow.tsv`との突き合わせ)、`go.mod`とDockerfileのGoの版の一致 |
 | `dependency-review` | PR | | PRが持ち込む依存の既知脆弱性 |
 | `codeql` | PR / push / 週1回 | | Goとworkflowの静的解析 |
 | `dropin-e2e` | PR(paths限定) | | TS→mkの切替(往路)、TSへ戻す復路の測定、実Misskey / Mastodonとの連合など5シナリオ |
@@ -309,6 +309,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-14: `vulncheck`をMakefileの`make vulncheck`から呼び、govulncheckの結果を許可の一覧と突き合わせるようにしたので、Section 8の行を直した (#4176) → [docs/ci.md](docs/ci.md)
 - 2026-11-14: Claude Code以外のコーディングエージェントも読めるよう、このファイルを指すシンボリックリンク`AGENTS.md`を置き、冒頭と読み方の節を直した (#4167)
 - 2026-11-11: `make frontend-check`とCIの`frontend`に、画面の文言を日本語で直書きしていないかの検査を足したので、Section 3とSection 8の行に足した (#4070) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)
 - 2026-11-11: Elythiaのlocaleの語を`frontend/locales-elythia`へ分け、本家の語の書き換えの一覧の検査と、`frontend/locales`が本家と同じかの検査を足したので、Section 3の`make frontend-check`の行と、Section 8の`frontend`と`apicompat`の行に足した (#4071) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)

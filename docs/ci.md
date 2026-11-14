@@ -99,7 +99,7 @@ PR を出すと十数個の check が走る。**どれが何を見ていて、�
 
 | check | workflow | 見ているもの | 実測 | 手元での再現 |
 |---|---|---|---|---|
-| `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 + Go version の pin 整合 | 1 min | `GOOS=linux govulncheck ./...` |
+| `vulncheck` | CI | 依存・Go stdlib の**到達可能な**既知脆弱性 (許可の一覧に載せたものを除く) + Go version の pin 整合 | 1 min | `make vulncheck` |
 | `review` | Dependency review | PR が**新しく持ち込む**依存に既知の脆弱性が無いか (base と head の差分を比較、high 以上で失敗) | 未計測 | 手元では回せない (GitHub の advisory DB を引く) |
 | `analyze (go)` / `analyze (actions)` | CodeQL | **自分のコード**の静的解析 (Go の全 module と workflow の式) | 未計測 | 手元では回せない (CodeQL CLI が要る)。Code scanning alerts で見る |
 | `plugin-tests` | CI | 同梱プラグインのテスト (別 module なので `go list ./...` に入らない) | 1 min | `make plugin-test` |
@@ -307,28 +307,41 @@ base image を `golang:1.27.1-alpine@sha256:<digest>` のように **tag と dig
 (`docker buildx imagetools inspect golang:<ver>-alpine` の Digest 行)。digest だけの更新は
 dependabot の `docker` が出す。
 
-**govulncheck の検出** — 手元で同じコマンドを回す。
+**govulncheck の検出** — 手元で `make vulncheck` を回す (CI も同じ target を呼ぶ)。
+govulncheck の版は Makefile に 1 つだけ置き、`GOOS=linux`・`GOWORK=off`・toolchain の固定
+(`go.mod` の版) もこの target が持つ (#4176)。`GOOS=linux` を付けるのは、実際にデプロイするのが
+Linux だから。付けないと host 依存の package load エラーで解析が空振りしうる。toolchain を
+固定しないと、govulncheck 自身が古い toolchain でビルドされ、`package requires newer Go version`
+で解析できない。
 
-```
-go install golang.org/x/vuln/cmd/govulncheck@latest
-GOOS=linux "$(go env GOPATH)/bin/govulncheck" ./...
-```
+govulncheck の JSON を `tools/vulncheckgate` が読み、**呼び出しが到達可能なもの** (テキストの
+出力の「Your code is affected」) を `tools/vulncheckgate/allow.tsv` と突き合わせる。一覧に無い
+ものが 1 件でもあれば落ち、一覧の行が結果に出てこなくなっても落ちる (使われなくなった除外を
+残さない)。import しているだけの脆弱性は落ちない。
 
-`GOOS=linux` を付けるのは、実際にデプロイするのが Linux だから。付けないと host 依存の
-package load エラーで解析が空振りしうる。**ローカルの `go` が古いと govulncheck 自身が
-古い toolchain でビルドされ、`package requires newer Go version` で解析できない。**
-その場合は `GOTOOLCHAIN=go1.27.1 go install ...` のように明示してビルドし直す。
+**抑制するより直すこと。** 一覧に載せるのは、脆弱性 DB (vuln.go.dev) に使っている版の修正が
+載っておらず、Elythia に当たらないことを確かめたものだけで、理由の欄に「どの経路で当たらないか」
+を書く。今載っているのは echo v4 の 2 件 (GO-2026-6872・GO-2026-6875) で、echo の advisory
+(GHSA) ではどちらも v4.16.3 で直っていて、Elythia は v4.16.3 を使う。DB が v4 の修正版を
+記録していないので、govulncheck は echo の関数を呼んでいるだけで該当と報告する (DB に v4 の
+関数の情報も無い)。DB に修正版が載れば、その行は unused で落ちるので、そのときに消す。理由の
+詳細は `allow.tsv` の行にある。一覧は ID ごとに 1 行で、1 つの脆弱性を 2 つの module で許可する
+ことはできない (そうなったら道具を直す)。
 
-検出されるのは**呼び出しが到達可能なもの**だけで、import しているだけの脆弱性は落ちない。
-無視リストを育てずに運用できる設計なので、**抑制するより直すこと**。対応は原則 2 つ。
+落ちたときのログには、該当した module と版、修正版 (`fixed in`)、呼び出しの経路の例が出る。
+同じ脆弱性が複数の module に出るとき (echo の v4 と v5 など) は module ごとに判定し、許可の一覧の
+module と違う module で呼んでいれば落ちる。全部の経路を見るなら、手元で govulncheck をテキストの
+出力で回す。`make vulncheck` と同じく、ホストの向けにビルドしてから `GOOS=linux` で動かす
+(`GOWORK=off GOTOOLCHAIN=go<go.mod の版> GOBIN=/tmp/gvc go install golang.org/x/vuln/cmd/govulncheck@<Makefile の版>`
+の後に `GOWORK=off GOOS=linux /tmp/gvc/govulncheck ./...`)。対応は原則 2 つ。
 
-- 依存モジュール → `go get <module>@<fixed>` で修正版へ。**修正版の指定は govulncheck の
-  `Fixed in:` をそのまま使う。** 同じモジュールに複数の脆弱性があると必要な版が別々で、
+- 依存モジュール → `go get <module>@<fixed>` で修正版へ。**修正版の指定は、ログの
+  `fixed in` (govulncheck の `Fixed in:`) をそのまま使う。** 同じモジュールに複数の脆弱性があると必要な版が別々で、
   一番低い版に上げても残ることがある
 - Go stdlib → `go mod edit -go=<patch>` と Dockerfile の builder tag を上げる (`git grep -n 'FROM golang:'` で全て拾う)
 
 新しい CVE が公開されると、**コードを変えていない PR でも落ちる**。これは required check に
-していない理由でもある。落ちたときは自分の変更が原因とは限らないので、まず `Found in:` の
+していない理由でもある。落ちたときは自分の変更が原因とは限らないので、まず `found in` の
 モジュールが PR で触ったものかを見ること。
 
 ### `analyze (go)` / `analyze (actions)` が落ちたとき
@@ -595,9 +608,9 @@ checkout / setup-go を除くと step は実行順に 3 つ。**required job な
 
 #### `vulncheck`ジョブ
 
-- `GOOS=linux govulncheck ./...` で依存と Go stdlib の**到達可能な**既知脆弱性を検出する。実際にデプロイするのは Linux なので `GOOS` を明示する (未指定だと host 依存の package load エラーで空振りしうる)。
+- `make vulncheck` で、依存と Go stdlib の**到達可能な**既知脆弱性を検出する。govulncheck の版は Makefile に 1 つだけ置く (#4176 より前は `@latest` を入れていた)。実際にデプロイするのは Linux なので `GOOS=linux` を明示する (未指定だと host 依存の package load エラーで空振りしうる)。
 - あわせて `go.mod` の `go` directive と、golang image を使う**全ての** tracked な Dockerfile (`Dockerfile` / `Dockerfile.bundled` / `deploy/uds/Dockerfile.mkgo` / `tests/` の検証用) の builder tag が同じ patch version を指していることを検査する。govulncheck が見るのは `go.mod` 側だけなので、**Dockerfile だけ古いと CI は緑のまま配る image が脆弱になる**。builder を floating tag (`golang:1.27-alpine`) に戻さないこと (pull 時期で stdlib の patch が変わり、再現可能な形で「既知脆弱性を含まない」と言えない)。配る Dockerfile の base image は tag と digest の併記 (`golang:1.27.1-alpine@sha256:...`) で固定しており、この検査は tag 側で版を照合する。
-- 検出は import しているだけのものを含まず、**呼び出しが到達可能なもの**に限られる。無視リストを育てずに運用できるので、抑制ではなく更新で直す。修正版は govulncheck の `Fixed in:` に従うこと (同一モジュールに複数の脆弱性があると必要な版が別々で、低い方に上げても残る)。
+- 検出は import しているだけのものを含まず、**呼び出しが到達可能なもの**に限られる。抑制ではなく更新で直す。脆弱性 DB に修正が載っておらず Elythia に当たらないものだけを、理由付きで `tools/vulncheckgate/allow.tsv` に載せる (#4176。上の「`vulncheck` が落ちたとき」)。修正版はログの `fixed in` (govulncheck の `Fixed in:`) に従うこと (同一モジュールに複数の脆弱性があると必要な版が別々で、低い方に上げても残る)。
 - PR の required check には**含めない**。新規 CVE の公開でコードを変えていない PR でも落ちるため。
 - 導入は #2387。通常テストが全て緑の状態で到達可能な脆弱性が 11 件残っており、既存の check では捕まらない領域だったため追加した。
 
