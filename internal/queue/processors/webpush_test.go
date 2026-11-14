@@ -162,24 +162,30 @@ func TestWebPushProcessor_Success(t *testing.T) {
 	assert.NotNil(t, envelope["body"])
 }
 
+// TestWebPushProcessor_GoneDeletesSubscription: 410 and, since upstream
+// 2026.11.0 (#18104), 404 delete the subscription (#4164).
 func TestWebPushProcessor_GoneDeletesSubscription(t *testing.T) {
-	sender := &stubWebPushSender{status: http.StatusGone}
-	subs := map[string][]*model.SwSubscription{
-		"u1": {
-			{ID: "s1", UserID: "u1", Endpoint: "https://push.example/1", Auth: "a", PublicKey: "p"},
-		},
+	for _, status := range []int{http.StatusGone, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			sender := &stubWebPushSender{status: status}
+			subs := map[string][]*model.SwSubscription{
+				"u1": {
+					{ID: "s1", UserID: "u1", Endpoint: "https://push.example/1", Auth: "a", PublicKey: "p"},
+				},
+			}
+			p, repo := newProcessor(t, sender, metaWithVAPID(), subs)
+
+			payload := queue.WebPushPayload{UserID: "u1", Type: webpush.TypeReadAllNotifications}
+			// sendReadMessage=false by default — readAllNotifications はスキップされるので
+			// ここでは notification タイプで検証する
+			payload.Type = webpush.TypeNotification
+			payload.Body, _ = json.Marshal(map[string]any{"type": "follow"})
+
+			err := p.Handle(context.Background(), taskFromPayload(t, payload))
+			require.NoError(t, err)
+			assert.Equal(t, []string{"u1:https://push.example/1"}, repo.deleteCalled)
+		})
 	}
-	p, repo := newProcessor(t, sender, metaWithVAPID(), subs)
-
-	payload := queue.WebPushPayload{UserID: "u1", Type: webpush.TypeReadAllNotifications}
-	// sendReadMessage=false by default — readAllNotifications はスキップされるので
-	// ここでは notification タイプで 410 を検証する
-	payload.Type = webpush.TypeNotification
-	payload.Body, _ = json.Marshal(map[string]any{"type": "follow"})
-
-	err := p.Handle(context.Background(), taskFromPayload(t, payload))
-	require.NoError(t, err)
-	assert.Equal(t, []string{"u1:https://push.example/1"}, repo.deleteCalled)
 }
 
 func TestWebPushProcessor_MultipleSubscribers_PartialGone(t *testing.T) {
@@ -283,7 +289,7 @@ func TestWebPushProcessor_DeliverErrorLogged(t *testing.T) {
 	p, repo := newProcessor(t, sender, metaWithVAPID(), subs)
 	payload := queue.WebPushPayload{UserID: "u1", Type: webpush.TypeNotification}
 	err := p.Handle(context.Background(), taskFromPayload(t, payload))
-	require.NoError(t, err) // errors are swallowed; only 410 triggers deletion
+	require.NoError(t, err) // errors are swallowed; only 410 / 404 trigger deletion
 	assert.Empty(t, repo.deleteCalled)
 }
 
