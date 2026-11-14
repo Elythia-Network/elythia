@@ -817,9 +817,9 @@ const (
 	replyGateHybrid
 
 	// replyGateLocal is the localTimeline semantics. upstream `local-timeline`
-	// は authenticated viewer 限定で reply を gate し、`!this.withReplies && !
-	// this.following[note.userId]?.withReplies` のとき 3 escape hatch を判定する
-	// (= anonymous は anyway pass-through、つまり global と同じ)。
+	// は connect param の `withReplies` だけで reply を gate し、anonymous viewer にも
+	// かける (`!this.withReplies` のとき 3 escape hatch を判定する。本家 2026.11.0
+	// #18086、#4164)。
 	replyGateLocal
 
 	// replyGateGlobal disables reply filtering entirely. upstream
@@ -874,16 +874,16 @@ func replyGateAllows(note *notePayload, viewerID string, snap map[string]bool, p
 	// 自分の reply は followee snapshot や withReplies 設定に依存せず常に pass。
 	isMe := viewerID != "" && note.UserID == viewerID
 
-	// localTimeline / hybridTimeline は anonymous viewer に対して reply gate
-	// を一切かけない (upstream `if (note.reply && this.user && ...)` の
-	// `this.user` 条件相当)。upstream hybrid-timeline は requireCredential=true
-	// なので「anonymous hybrid」状態は upstream に存在しないが、mk-go は legacy
-	// 互換で anonymous viewer にも hybrid 購読を許しており、その場合 followee
-	// snapshot を一切持たない (snap=nil)。default 分岐に落とすと selfThread 以外
-	// の reply が全て drop されて旧 mk-go (`WithReplies=true → 全 pass`) より
-	// 厳しい挙動になるので、anonymous local と同じく pass-through に倒す。
-	// homeTimeline は Init で anonymous 自体を no-op にするのでここには来ない。
-	if (mode == replyGateLocal || mode == replyGateHybrid) && viewerID == "" {
+	// hybridTimeline は anonymous viewer に対して reply gate を一切かけない。
+	// upstream hybrid-timeline は requireCredential=true なので「anonymous hybrid」
+	// 状態は upstream に存在しないが、mk-go は legacy 互換で anonymous viewer にも
+	// hybrid 購読を許しており、その場合 followee snapshot を一切持たない (snap=nil)。
+	// default 分岐に落とすと selfThread 以外の reply が全て drop されて旧 mk-go
+	// (`WithReplies=true → 全 pass`) より厳しい挙動になるので、pass-through に倒す。
+	// localTimeline は upstream 2026.11.0 (#18086) から anonymous にも reply gate を
+	// かけるので、ここでは抜けない (#4164)。homeTimeline は Init で anonymous 自体を
+	// no-op にするのでここには来ない。
+	if mode == replyGateHybrid && viewerID == "" {
 		return true
 	}
 
@@ -940,10 +940,13 @@ func replyGateAllows(note *notePayload, viewerID string, snap map[string]bool, p
 		return replyToMe || selfThread || isMentioned
 
 	case replyGateLocal:
-		// local-timeline は anonymous で reply gate 不要、authenticated 時のみ
-		// `!this.withReplies && !following[note.userId].withReplies` → 3 escape
-		// hatch + isMentioned で pass。isMentioned は mk-go 独自 (#1195)。
-		if !followeeWithReplies && !paramWithReplies {
+		// upstream 2026.11.0 (#18086) の local-timeline は `!this.withReplies` だけで
+		// reply gate をかけ、anonymous viewer にもかける。フォロー先ごとの withReplies
+		// は見なくなった (以前は見ていたので、withReplies: false で connect しても
+		// フォロー先の返信が流れていた。#4164)。anonymous は replyToMe と isMentioned
+		// が成り立たないので、残る escape hatch は selfThread だけ。isMentioned は
+		// mk-go 独自 (#1195)。
+		if !paramWithReplies {
 			return replyToMe || selfThread || isMentioned
 		}
 		return true

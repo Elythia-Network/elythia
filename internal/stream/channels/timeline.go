@@ -48,9 +48,9 @@ func (c *LocalTimelineChannel) Init(params json.RawMessage) error {
 }
 
 // OnRedisEvent forwards a JSON-encoded note payload as a `note` event.
-// reply の表示可否は upstream `local-timeline.ts` に揃え (#1063)、認証済み
-// viewer に対してのみ followee.withReplies / connect param withReplies /
-// 3 escape hatch を OR で評価する。
+// reply の表示可否は upstream `local-timeline.ts` に揃え (#1063)、connect param の
+// withReplies だけで判定し、未ログインの viewer にもかける (withReplies が無ければ
+// 3 escape hatch で通す。本家 2026.11.0 #18086、#4164)。
 func (c *LocalTimelineChannel) OnRedisEvent(payload []byte) {
 	viewerID := viewerIDFromCtx(c.ctx)
 	// payload は配信1回につき1回だけ解析し、各判定はその結果を読む (#3986)。
