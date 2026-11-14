@@ -162,6 +162,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<template #footer>
 		<div v-if="isEditMode" :class="$style.footer">
 			<MkButton primary rounded @click="moveFilesBulk()"><i class="ti ti-folder-symlink"></i> {{ i18n.ts.move }}...</MkButton>
+			<span :class="$style.footerCount" data-testid="drive-selected-count">{{ i18n.tsx.nFilesSelected({ n: selectedFiles.length }) }}</span>
+			<MkButton rounded :disabled="selectedFiles.length === 0" data-testid="drive-unselect-all" @click="unselectAllFiles()"><i class="ti ti-x"></i> {{ i18n.ts.unselectAll }}</MkButton>
 		</div>
 	</template>
 </MkStickyContainer>
@@ -233,6 +235,18 @@ const isRootSelected = ref(false);
 watch(selectedFiles, () => {
 	emit('changeSelectedFiles', selectedFiles.value);
 }, { deep: true });
+
+// 編集モードを切ったら選択を解除する (#4158)。ファイルを選ぶダイアログでは、選んだ
+// ファイルが選んだ結果そのものなので残す。
+watch(isEditMode, (enabled) => {
+	if (!enabled && props.select !== 'file') {
+		unselectAllFiles();
+	}
+});
+
+function unselectAllFiles() {
+	selectedFiles.value = [];
+}
 
 watch([selectedFolders, isRootSelected], () => {
 	emit('changeSelectedFolders', isRootSelected.value ? [null, ...selectedFolders.value] : selectedFolders.value);
@@ -593,12 +607,17 @@ async function moveFilesBulk() {
 
 	if (canceled) return;
 
+	const moved = [...selectedFiles.value];
 	await os.apiWithDialog('drive/files/move-bulk', {
-		fileIds: selectedFiles.value.map(f => f.id),
+		fileIds: moved.map(f => f.id),
 		folderId: folders[0] ? folders[0].id : null,
 	});
 
-	globalEvents.emit('driveFilesUpdated', selectedFiles.value.map(x => ({
+	// 移動したら選択を解除する (#4158)。今のフォルダへ移した (動かなかった) ときも、
+	// 操作は終わったので残さない。
+	unselectAllFiles();
+
+	globalEvents.emit('driveFilesUpdated', moved.map(x => ({
 		...x,
 		folderId: folders[0] ? folders[0].id : null,
 		folder: folders[0] ?? null,
@@ -716,6 +735,18 @@ useGlobalEvent('driveFileCreated', (file) => {
 });
 
 useGlobalEvent('driveFilesUpdated', (files) => {
+	// 編集モードで別のフォルダへ移ったファイルは、選択から外す (#4158)。外さないと、
+	// 一覧から消えた後も見えないまま選択に残り、次の移動で一緒に動いてしまう。フォルダへの
+	// ドラッグ&ドロップはこの経路で知らされる。今のフォルダと比べないのは、選択がフォルダを
+	// またいで残り、別のフォルダで選んだファイルの名前の変更などでも外れてしまうため。
+	if (isEditMode.value) {
+		const selectedFolderIds = new Map(selectedFiles.value.map(f => [f.id, f.folderId]));
+		const moved = new Set(files.filter(f => selectedFolderIds.has(f.id) && selectedFolderIds.get(f.id) !== f.folderId).map(f => f.id));
+		if (moved.size > 0) {
+			selectedFiles.value = selectedFiles.value.filter(f => !moved.has(f.id));
+		}
+	}
+
 	for (const f of files) {
 		if (filesPaginator.items.value.some(x => x.id === f.id)) {
 			if (f.folderId === (folder.value?.id ?? null)) {
@@ -732,6 +763,12 @@ useGlobalEvent('driveFilesUpdated', (files) => {
 });
 
 useGlobalEvent('driveFilesDeleted', (files) => {
+	// 消したファイルは選択から外す (#4158)。
+	const deleted = new Set(files.map(f => f.id));
+	if (selectedFiles.value.some(f => deleted.has(f.id))) {
+		selectedFiles.value = selectedFiles.value.filter(f => !deleted.has(f.id));
+	}
+
 	for (const f of files) {
 		filesPaginator.removeItem(f.id);
 	}
@@ -898,11 +935,19 @@ onBeforeUnmount(() => {
 }
 
 .footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
 	padding: 8px 16px;
 	font-size: 90%;
 	-webkit-backdrop-filter: var(--MI-blur, blur(8px));
 	backdrop-filter: var(--MI-blur, blur(8px));
 	background-color: color(from var(--MI_THEME-bg) srgb r g b / 0.85);
+}
+
+.footerCount {
+	opacity: 0.7;
 }
 
 .empty {

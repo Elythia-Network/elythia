@@ -31,6 +31,8 @@ nightMeteorEffect: "夜空の流れ星"
 nightMeteorEffectDescription: "夜（20時〜翌4時）にダークテーマを使っているとき、ときどき画面に流れ星が流れます。季節に応じた画面の演出が出ている間は流れません。"
 reactableRemoteReaction: "リアクションの相乗りをできるようにする"
 failedToLoadMedia: "読み込みに失敗したか、このブラウザでは表示・再生できない形式です"
+nFilesSelected: "{n}件を選択中"
+unselectAll: "選択を解除"
 _followApproval:
   title: "新しいアカウントからのフォローを制限する"
   autoAcceptDescription: "フォローを承認制にしている場合や、新しいアカウントからのフォローを制限する場合にも、あなたがフォローしている相手は自動承認します。"
