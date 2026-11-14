@@ -176,7 +176,7 @@ func (p *WebPushProcessor) Handle(ctx context.Context, t driver.Task) error {
 }
 
 // errGone is a sentinel reported by deliverOne when the push service returns
-// 410 Gone (subscription permanently expired / revoked).
+// 410 Gone or 404 Not Found (subscription permanently expired / revoked).
 var errGone = errors.New("push endpoint gone")
 
 func (p *WebPushProcessor) deliverOne(
@@ -209,7 +209,9 @@ func (p *WebPushProcessor) deliverOne(
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
-	case resp.StatusCode == http.StatusGone:
+	// 本家 2026.11.0 (#18104) から 404 でも購読を消す。購読を失った endpoint に 404 を返す
+	// プッシュサービスがあり、410 だけを見ていると送り続けてしまう (#4164)。
+	case resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound:
 		return errGone
 	default:
 		return fmt.Errorf("push endpoint status %d", resp.StatusCode)
