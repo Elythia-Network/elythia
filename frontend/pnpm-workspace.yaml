@@ -72,13 +72,16 @@ overrides:
   # 本家が追従したら外す。braces (<=3.0.3) と sprintf-js (<=1.1.3) は修正版が無いので残る。
   # http-cache-semantics は advisory の範囲が <=4.2.0 で修正版の指定が無く、作者は挙動を
   # 仕様どおりとして直していない。4.3.0 は該当の処理を変えていないが、範囲から外れるので上げる。
+  # fastify と fast-uri は、medium / low の advisory の修正版へ上げている(Dependabot alerts)。
+  # fastify は @misskey-dev/summaly の型の参照から入るだけで、どちらも実行時には使わない。
   '@xmldom/xmldom@0.9.10': 0.9.12
   axios@<1.20.0: 1.20.0
   brace-expansion@<1.1.20: 1.1.21
   brace-expansion@>=2.0.0 <2.1.6: 2.1.7
   brace-expansion@>=4.0.0 <5.0.11: 5.0.12
-  fast-uri@<3.1.7: 3.1.8
-  fastify@<5.12.2: 5.12.5
+  fast-uri@<3.1.9: 3.1.9
+  fast-uri@>=4.0.0 <4.2.3: 4.2.3
+  fastify@<5.12.6: 5.12.6
   find-my-way@<9.7.0: 9.9.0
   http-cache-semantics@<4.3.0: 4.3.0
   immutable@<5.1.8: 5.1.9
