@@ -10,9 +10,9 @@ import { miLocalStorage } from '@/local-storage.js';
 import { isSameScope, PreferencesManager } from '@/preferences/manager.js';
 import { store } from '@/store.js';
 import { $i } from '@/i.js';
+import { TypedBroadcastChannel as BroadcastChannel } from '@/utility/typed-broadcast-channel.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { TAB_ID } from '@/tab-id.js';
-import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
 
 // クラウド同期用グループ名
 const syncGroup = 'default';
@@ -107,7 +107,7 @@ let latestPreferencesUpdate: {
 	timestamp: number;
 } | null = null;
 
-const preferencesChannel = new TypedBroadcastChannel<{
+const preferencesChannel = new BroadcastChannel<{
 	type: 'preferencesUpdate';
 	tabId: string;
 	timestamp: number;
@@ -125,7 +125,8 @@ prefer.on('committed', () => {
 	});
 });
 
-preferencesChannel.addEventListener('message', (msg) => {
+preferencesChannel.addEventListener('message', (ev) => {
+	const msg = ev.data;
 	if (msg.type === 'preferencesUpdate') {
 		if (msg.tabId === TAB_ID) return;
 		if (latestPreferencesUpdate != null) {

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
+import { TypedBroadcastChannel as BroadcastChannel } from '@/utility/typed-broadcast-channel.js';
 
-export const reloadChannel = new TypedBroadcastChannel<string | null>('reload');
+export const reloadChannel = new BroadcastChannel<string | null>('reload');
 
 // BroadcastChannelを用いて、クライアントが一斉にreloadするようにします。
 export function unisonReload(path?: string) {

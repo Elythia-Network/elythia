@@ -21,7 +21,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 						</MkSwitch>
 					</SearchMarker>
 
-					<SearchMarker :keywords="['follow', 'request', 'approval', 'age', 'local', 'remote']">
+					<SearchMarker
+						:keywords="[
+							'follow', 'request', 'approval', 'age',
+							i18n.ts._followApproval.local,
+							i18n.ts._followApproval.localDescription,
+							i18n.ts._followApproval.remote,
+							i18n.ts._followApproval.remoteDescription,
+						]"
+					>
 						<FormSlot>
 							<template #label><SearchLabel>{{ i18n.ts._followApproval.title }}</SearchLabel></template>
 							<div class="_gaps_m">

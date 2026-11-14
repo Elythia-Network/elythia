@@ -27,13 +27,13 @@ const props = defineProps<{
 	navigationBehavior?: MkABehavior;
 }>();
 
-const canonical = props.host === localHost ? `@${props.username}` : `@${props.username}@${toUnicode(props.host)}`;
+const canonical = computed(() => (props.host === localHost ? `@${props.username}` : `@${props.username}@${toUnicode(props.host)}`));
 
-const url = `/${canonical}`;
+const url = computed(() => `/${canonical.value}`);
 
-const isMe = $i && (
+const isMe = computed(() => $i != null && (
 	`@${props.username}@${toUnicode(props.host)}`.toLowerCase() === `@${$i.username}@${toUnicode(localHost)}`.toLowerCase()
-);
+));
 
 /**
  * Avatar URL for the mention chip (#2908).

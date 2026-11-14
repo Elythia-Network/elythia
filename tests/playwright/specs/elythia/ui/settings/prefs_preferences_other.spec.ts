@@ -35,6 +35,11 @@ test.describe('settings: preferences (Other)', () => {
       },
     },
     {
+      // 本家 2026.11.0 で増えた (#4164)。既定はオンなので、切る向きで確かめる
+      key: 'autoplayEmbededPlayerOfUrlPreview', route: ROUTE, control: { kind: 'switch', on: false }, value: false,
+      effect: { skip: 'URL プレビューの埋め込みのプレイヤー (YouTube など) を開いたときに、自動で再生するかを埋め込みの URL の引数で渡す (utility/url-preview.ts)。プレイヤーを持つ URL の要約は外部のサイトから取るので、隔離した環境では作れない' },
+    },
+    {
       key: 'enableSeasonalScreenEffect', route: ROUTE, control: { kind: 'switch', on: true }, value: true,
       effect: { skip: '起動時に、月 (と hemisphere) で決まる季節だけ雪か桜の WebGL2 の canvas を足す (boot/main-boot.ts → utility/seasonal-screen-effect.ts)。時刻に依存する' },
     },

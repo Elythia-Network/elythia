@@ -1,11 +1,7 @@
 /*
- * SPDX-FileCopyrightText: Elythia-Network
+ * SPDX-FileCopyrightText: syuilo and misskey-project
  * SPDX-License-Identifier: AGPL-3.0-only
  */
-
-// Elythia: テーマのコード (JSON5) の解析を theme.ts から分けた (#3613)。theme.ts は起動時に
-// 必ず読まれるので、そこに json5 を置くと、テーマを入れる操作のためだけのライブラリ
-// (gzip で約 10KB) を全員が起動時に読むことになる。
 
 import JSON5 from 'json5';
 import { validateTheme } from './theme.js';

@@ -13,9 +13,9 @@ import { $i } from '@/i.js';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { get, set } from '@/utility/idb-proxy.js';
 import { store } from '@/store.js';
+import { TypedBroadcastChannel as BroadcastChannel } from '@/utility/typed-broadcast-channel.js';
 import { deepClone } from '@/utility/clone.js';
 import { deepMerge } from '@/utility/merge.js';
-import { TypedBroadcastChannel } from '@/utility/broadcast-channel.js';
 
 type StateDef = Record<string, {
 	where: 'account' | 'device' | 'deviceAccount';
@@ -56,7 +56,7 @@ export class Pizzax<T extends StateDef> {
 	 */
 	public readonly r: ReactiveState<T>;
 
-	private pizzaxChannel: TypedBroadcastChannel<PizzaxChannelMessage<T>>;
+	private pizzaxChannel: BroadcastChannel<PizzaxChannelMessage<T>>;
 
 	// 簡易的にキューイングして占有ロックとする
 	private currentIdbJob: Promise<unknown> = Promise.resolve();
@@ -76,7 +76,7 @@ export class Pizzax<T extends StateDef> {
 		this.registryCacheKeyName = $i ? `pizzax::${key}::cache::${$i.id}` : '';
 		this.def = def;
 
-		this.pizzaxChannel = new TypedBroadcastChannel(`pizzax::${key}`);
+		this.pizzaxChannel = new BroadcastChannel(`pizzax::${key}`);
 
 		this.s = {} as State<T>;
 		this.r = {} as ReactiveState<T>;
@@ -127,7 +127,8 @@ export class Pizzax<T extends StateDef> {
 			}
 		}
 
-		this.pizzaxChannel.addEventListener('message', ({ where, key, value, userId }) => {
+		this.pizzaxChannel.addEventListener('message', (ev) => {
+			const { where, key, value, userId } = ev.data;
 			// アカウント変更すればunisonReloadが効くため、このreturnが発火することは
 			// まずないと思うけど一応弾いておく
 			if (where === 'deviceAccount' && !($i && userId !== $i.id)) return;
