@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/model"
@@ -242,4 +243,22 @@ func TestObjectStorageProcessor_HandleDeleteFile_LocalBackend(t *testing.T) {
 	err := p.HandleDeleteFile(context.Background(), deleteFileTask(t, "abc.webp"))
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "not configured"))
+}
+
+// TestObjectStorageProcessor_HandleCleanRemoteFiles_DeletesTheLocalCopyOfAMigratedFile
+// covers a cached remote file the local-to-object-storage migration copied
+// (#4180): turning it into a link row must remove the local copy too.
+func TestObjectStorageProcessor_HandleCleanRemoteFiles_DeletesTheLocalCopyOfAMigratedFile(t *testing.T) {
+	at := time.Now()
+	repo := &fakeRemoteFileCleaner{batches: [][]*model.DriveFile{{
+		{ID: "f1", AccessKey: strptr("migrated"), ThumbnailAccessKey: strptr("migrated-thumb"), ObjectStorageMigratedAt: &at},
+		{ID: "f2", AccessKey: strptr("direct")},
+	}}}
+	object := &fakeObjectStorage{}
+	local := &fakeObjectStorage{}
+	p := processors.NewObjectStorageProcessor(object, local, repo)
+
+	require.NoError(t, p.HandleCleanRemoteFiles(context.Background(), driver.RawTask{}))
+	assert.Equal(t, []string{"migrated", "migrated-thumb", "direct"}, object.keys())
+	assert.Equal(t, []string{"migrated", "migrated-thumb"}, local.keys())
 }

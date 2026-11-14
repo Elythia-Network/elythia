@@ -294,6 +294,22 @@
 			},
 			"meta": {}
 		},
+		"admin/drive/object-storage-migration/start": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
+		"admin/drive/object-storage-migration/status": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
 		"admin/drive/usage": {
 			"paramDef": {
 				"type": "object",

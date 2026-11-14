@@ -39,6 +39,18 @@ const TaskTypeObjectStorageDeleteFile = "objectStorage:deleteFile"
 // `cleanRemoteFiles` job: 1 本の job が内部でバッチ削除を回す (#2325)。
 const TaskTypeCleanRemoteFiles = "objectStorage:cleanRemoteFiles"
 
+// TaskTypeMigrateLocalDriveFiles is the task type of one batch of copying
+// locally stored drive files to object storage (#4180). Elythia-only: each
+// job copies a batch and enqueues the next one with the cursor.
+const TaskTypeMigrateLocalDriveFiles = "objectStorage:migrateLocalDriveFiles"
+
+// MigrateLocalDriveFilesPayload names the migration run (Token) and the
+// cursor (the files after AfterID are copied next).
+type MigrateLocalDriveFilesPayload struct {
+	Token   string `json:"token"`
+	AfterID string `json:"afterId"`
+}
+
 // ObjectStorageDeleteFilePayload identifies the object to remove.
 //
 // upstream の job data も `{ key }` の 1 field だけで、どの backend から消すかは

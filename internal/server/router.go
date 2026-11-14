@@ -1808,6 +1808,25 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// scheduledNotePostFailed (= 失敗) を user の通知 stream に発火する。
 	postScheduledNoteProcessor.SetNotifier(notificationService)
 
+	// ローカルに置いたドライブのファイルをオブジェクトストレージへ写す (#4180)。
+	// lock に Redis を使うので、postScheduledNote と同じくここで作る。
+	// queue の client が無い構成では、開始を断る (nil のポインタを interface に入れない)。
+	var driveStorageMigrationEnq coredrive.StorageMigrationEnqueuer
+	if s.queueClient != nil {
+		driveStorageMigrationEnq = s.queueClient
+	}
+	driveStorageMigrator := coredrive.NewStorageMigrator(repository.NewDriveStorageMigrationRepository(s.db),
+		localDriveStorage, driveStorage, driveStorageMigrationEnq,
+		coredrive.NewRedisStorageMigrationLock(s.redis.Default, s.config.Redis.KeyPrefix()))
+	driveStorageMigrationProcessor := processors.NewDriveStorageMigrationProcessor(driveStorageMigrator)
+	// 移す処理の実行中にローカルの行を消すと、並行して写した分が孤児になりうるので、
+	// 削除がオブジェクトストレージの写しも消せるようにする。lock を読めないときは
+	// 実行中とみなす (無いキーを消すジョブが積まれるだけ)。
+	driveService.SetStorageMigrationRunning(func() bool {
+		running, err := driveStorageMigrator.Running(context.Background())
+		return err != nil || running
+	})
+
 	// API の handler (#3694)。作るのは buildHandlers (wiring_handlers.go) で、ここでは
 	// 今までと同じ名前の別名を置く。呼ぶ位置は、移した handler の中で最初に作っていた
 	// usersHandler の位置。移した handler は作るだけで副作用を持たないので、作る位置が
@@ -2393,6 +2412,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		clean:                   cleanGenericProcessor,
 		chunkedUploadGC:         chunkedUploadGCProcessor,
 		objectStorage:           objectStorageProcessor,
+		driveStorageMigration:   driveStorageMigrationProcessor,
 		reactionFlush:           flushProcessor,
 		deleteAccount:           deleteAccountProcessor,
 		unfollow:                unfollowProcessor,
@@ -2728,6 +2748,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 自動では消さないので、残っていること自体を見えるようにする。
 	s.warnOrphanPluginData(context.Background(), registeredPlugins)
 	// admin/server-plugins (#2497) が返すスナップショットと残存データ検査。
+	adminHandler.SetDriveStorageMigrator(driveStorageMigrator)
 	adminHandler.SetServerPlugins(serverPluginInfos(registeredPlugins, s.config.Plugins))
 	adminHandler.SetPluginOrphanSchemas(s.pluginOrphanSchemaLister(registeredPlugins))
 

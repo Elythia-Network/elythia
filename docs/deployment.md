@@ -704,7 +704,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 143
+  ok    database     接続 ok / migration version 144
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
   ok    pg-stat-statements 使っていない (shared_preload_libraries に無い)
   ok    root user    meta.rootUserId 設定済み
@@ -1282,9 +1282,13 @@ upstream以外の設定はTCP構成と同じ。同梱の`deploy/uds/nginx/mkgo.c
 
 ### 有効化前に保存したファイル
 
-オブジェクトストレージを有効にする前にアップロードされたファイルは、`drive_file.storedInternal = true` としてローカル FS (`./drive-files`) に残る。**これらは移動されない。** Elythia は有効化後もこの列を見て配信元を切り替えるので、既存ファイルはそのまま表示できる。
+オブジェクトストレージを有効にする前にアップロードされたファイルは、`drive_file.storedInternal = true` としてローカル FS (`./drive-files`) に残る。**有効にしただけでは移動されない。** Elythia は有効化後もこの列を見て配信元を切り替えるので、既存ファイルはそのまま表示できる。
 
-したがって、有効化したあともローカルの `drive-files` を消してはいけない。まとめてオブジェクトストレージへ移す機能は未提供。
+**管理 API の `admin/drive/object-storage-migration/start` (管理者だけ、#4180) で、これらをまとめてオブジェクトストレージへ写せる。** ジョブで 50 件ずつ流し、進み具合と失敗は `admin/drive/object-storage-migration/status` で読む。写したファイルは `storedInternal = false` になり、`url` の列は `/files/<アクセスキー>` のまま変えないので、連合先に残っている古い URL も同じ URL で配信され続ける。管理画面のボタンは #4184 で足す。
+
+- **写すだけで、ローカルの実体は消さない。** 確かめてからローカルを消す処理は #4181 / #4182 で足す予定で、それまでは有効化したあともローカルの `drive-files` を消してはいけない。写した後にファイルを消すと (ドライブの画面・API での削除、管理画面の掃除、リモートのキャッシュの片付け、インスタンスのファイルの一括削除)、ローカルの写しも一緒に消える。行だけを消す経路 (アカウントの削除など) では、以前と同じくオブジェクトストレージの実体もローカルの写しも残る
+- **写したファイルは TS 版の Misskey では読めない** (`/files/` が 204 になる。[migration-from-ts.md](migration-from-ts.md#戻らなくなったもの))。ローカルへ戻す処理は #4183 で足す予定で、それまでは TS へ戻すなら写す前の DB のバックアップから戻すしかない。写す前に DB のバックアップを取ること
+- 失敗したファイルは記録して飛ばし、もう一度 start すると取り直す。実行の途中でジョブが止まっても、最長 10 分で実行中の印が外れ、もう一度 start すれば残りから続く。オブジェクトストレージのキューが詰まり、次のジョブが動き出すまでに 10 分を超えたときも、その実行は止まる (ログに `the storage migration lock is no longer held` が出る)。もう一度 start すればよい
 
 ### 無効化に戻す場合
 

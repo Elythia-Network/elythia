@@ -282,6 +282,9 @@ type Service struct {
 	// objectDeleteEnqueuer は object storage の実体削除を queue に逃がす
 	// (#2325)。nil なら従来どおり同期削除にフォールバックする。
 	objectDeleteEnqueuer ObjectDeleteEnqueuer
+	// storageMigrationRunning reports whether the local-to-object-storage
+	// migration (#4180) is running. nil means never.
+	storageMigrationRunning func() bool
 	// mediaSlots は画像 / 動画処理の同時実行枠。**構築時に必ず埋める**
 	// (`NewService`)。nil のまま使うと枠が無いのと同じになる。
 	mediaSlots *semaphore.Weighted
@@ -387,7 +390,55 @@ func (s *Service) deleteFileObjects(f *model.DriveFile) error {
 			_ = del(*key)
 		}
 	}
+	// 本体を消せなかったときは行が残るので、写しも残す (消すと、移す処理がこの後で
+	// 写した行が実体を失いうる)。
+	if primaryErr == nil {
+		s.deleteMigrationCopies(f)
+	}
 	return primaryErr
+}
+
+// HasMigratedLocalCopy reports whether f was copied to object storage by the
+// local-to-object-storage migration (#4180), which leaves the local copy in
+// place. Deleting such a file must delete the local copy too, or nothing
+// points at it any more.
+func HasMigratedLocalCopy(f *model.DriveFile) bool {
+	return f != nil && !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil
+}
+
+// deleteMigrationCopies removes the copies the local-to-object-storage
+// migration (#4180) leaves on the other storage. Best effort.
+//
+//   - 移したファイル (objectStorageMigratedAt がある) は、移した後もローカルに写しが
+//     残る。行を消すとローカルの写しは誰も指さなくなり、確かめてから消す処理 (#4182)
+//     の対象にも入らないので、ここで消す
+//   - ローカルの行でも、移す処理が並行して写し終えていれば、オブジェクトストレージに
+//     写しがある (この削除が行を読んだ後に、移す処理が印を付けた場合)。どの記録にも
+//     残らない孤児になるので、移す処理の実行中は消すジョブを積む。無いキーを消しても
+//     失敗にはならない。実行中でなければ積まない (本家と同じく、ローカルの行の削除で
+//     オブジェクトストレージには触れない)。積んだジョブが写しの Put より先に動き、その
+//     後で印が付いてから行が消えると写しが残る (数ミリ秒の窓で、塞がない)
+func (s *Service) deleteMigrationCopies(f *model.DriveFile) {
+	keys := []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey}
+	switch {
+	case HasMigratedLocalCopy(f) && s.localStorage != nil:
+		for _, key := range keys {
+			if key != nil && *key != "" {
+				if err := s.localStorage.Delete(*key); err != nil {
+					slog.Warn("drive: delete the local copy of a migrated file", "fileId", f.ID, "err", err)
+				}
+			}
+		}
+	case f.StoredInternal && s.objectDeleteEnqueuer != nil && s.storageMigrationRunning != nil &&
+		!StorageIsLocal(s.storage) && s.storageMigrationRunning():
+		for _, key := range keys {
+			if key != nil && *key != "" {
+				if err := s.objectDeleteEnqueuer.EnqueueDeleteObjectStorageFile(*key); err != nil {
+					slog.Warn("drive: enqueue the delete of a possible migration copy", "fileId", f.ID, "err", err)
+				}
+			}
+		}
+	}
 }
 
 // objectDeleter picks the deletion strategy for f.
@@ -406,6 +457,12 @@ func (s *Service) objectDeleter(f *model.DriveFile) func(string) error {
 		}
 	}
 	return s.storageFor(f).Delete
+}
+
+// SetStorageMigrationRunning wires the probe deleteMigrationCopies uses to
+// tell whether the local-to-object-storage migration is running (#4180).
+func (s *Service) SetStorageMigrationRunning(running func() bool) {
+	s.storageMigrationRunning = running
 }
 
 // SetFolderStreamingPublisher attaches the drive-channel publisher for folder
@@ -1771,6 +1828,9 @@ func (s *Service) DeleteAllByHost(host string) (int64, error) {
 	for _, f := range files {
 		if derr := s.deleteFileObjects(f); derr != nil {
 			slog.Warn("drive: delete-all-by-host storage delete failed", "host", host, "fileId", f.ID, "err", derr)
+			// 本体を消せなくても、この後で行は必ず消える。deleteFileObjects は本体の
+			// 失敗では写しを残すので、ここで消す (残すと誰も指さない写しになる)。
+			s.deleteMigrationCopies(f)
 		}
 		// usedRemote / instanceChart 等の使用量を per-file で減算する。
 		if s.chartHook != nil {

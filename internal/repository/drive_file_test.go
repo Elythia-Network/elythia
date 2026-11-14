@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
@@ -543,6 +544,9 @@ func TestDriveFileRepository_DeleteOrphansAndRemoteCache(t *testing.T) {
 	remoteCache.Size = 4096
 	rcKey := "rc1-access-key"
 	remoteCache.AccessKey = &rcKey
+	// オブジェクトストレージへ写した印 (#4180) も、倒すときに消える。
+	migratedAt := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	remoteCache.ObjectStorageMigratedAt = &migratedAt
 	linkOnly := newTestDriveFile("lo1", user.ID, "md5lo", nil)
 	linkOnly.IsLink = true
 	linkOnly.UserHost = &host
@@ -580,6 +584,7 @@ func TestDriveFileRepository_DeleteOrphansAndRemoteCache(t *testing.T) {
 	assert.Nil(t, got.AccessKey, "実体が消えた後も古い /files URL が生きている")
 	assert.Nil(t, got.ThumbnailURL)
 	assert.Nil(t, got.WebpublicURL)
+	assert.Nil(t, got.ObjectStorageMigratedAt, "link 行が写した件数と戻す対象に残る")
 
 	_, err = repo.FindByID(linkOnly.ID)
 	assert.NoError(t, err, "isLink=true の link-only は保持される")

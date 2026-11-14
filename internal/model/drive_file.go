@@ -1,6 +1,10 @@
 package model
 
-import "gorm.io/datatypes"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
 
 // DriveFile represents the `drive_file` table.
 type DriveFile struct {
@@ -31,6 +35,10 @@ type DriveFile struct {
 	IsLink             bool           `gorm:"column:isLink;default:false" json:"isLink"`
 	RequestHeaders     datatypes.JSON `gorm:"column:requestHeaders;type:jsonb;default:'{}'" json:"requestHeaders"`
 	RequestIP          *string        `gorm:"column:requestIp;type:varchar(128)" json:"requestIp"`
+	// ObjectStorageMigratedAt is when the local-to-object-storage migration
+	// copied the file (#4180). Nil for files that were never migrated,
+	// including those uploaded to object storage directly. Elythia-only.
+	ObjectStorageMigratedAt *time.Time `gorm:"column:objectStorageMigratedAt" json:"-"`
 
 	// Relations
 	User   *User        `gorm:"foreignKey:UserID" json:"user,omitempty"`

@@ -140,6 +140,10 @@ func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announce
 	// mk-go 独自 (#3053)。インスタンス全体のドライブ使用量と内訳。upstream は
 	// per-user の `driveCapacityMb` しか持たず、合計を出す口が無い。
 	api.POST("/admin/drive/usage", adminHandler.DriveUsage, middleware.RequireModerator(roleService), middleware.RequireScope("read:admin:drive"))
+	// Elythia 独自 (#4180)。ローカルに置いたファイルをオブジェクトストレージへ写す。
+	// 全ファイルの置き場所を変えるので、オブジェクトストレージの設定と同じく管理者だけ。
+	api.POST("/admin/drive/object-storage-migration/start", adminHandler.DriveStorageMigrationStart, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
+	api.POST("/admin/drive/object-storage-migration/status", adminHandler.DriveStorageMigrationStatus, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:drive"))
 	api.POST("/admin/emoji/add-aliases-bulk", adminHandler.EmojiAddAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
 	api.POST("/admin/emoji/copy", adminHandler.EmojiCopy, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
 	// mk-go 独自 (#2698)。リモート絵文字のインポート時に、AP では運ばれない

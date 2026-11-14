@@ -23,6 +23,7 @@ import type {
 	BubbleVersusReportReason,
 	DatabaseHealthReport,
 	DeliveryOutcomeClass,
+	DriveObjectStorageMigrationStatus,
 	DriveUsage,
 	EmojiApplication,
 	EmojiApplicationPendingLimit,
@@ -142,6 +143,15 @@ export type ElythiaEndpoints = {
 	'admin/database-health': {
 		req: Misskey.entities.EmptyRequest;
 		res: DatabaseHealthReport;
+	};
+	'admin/drive/object-storage-migration/start': {
+		/** Copies the locally stored drive files to object storage in the background (#4180). */
+		req: Misskey.entities.EmptyRequest;
+		res: undefined;
+	};
+	'admin/drive/object-storage-migration/status': {
+		req: Misskey.entities.EmptyRequest;
+		res: DriveObjectStorageMigrationStatus;
 	};
 	'admin/drive/usage': {
 		req: {

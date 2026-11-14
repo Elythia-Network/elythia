@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/stretchr/testify/assert"
@@ -108,4 +109,24 @@ func TestDriveCleanup_FallsBackToInlineWhenEnqueueFails(t *testing.T) {
 	rec := doPost(h.DriveCleanup, `{}`, adminUser)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, []string{"ak1"}, sd.deleted)
+}
+
+// オブジェクトストレージへ写したファイル (#4180) は、ローカルにも写しが残っている。
+// cleanup で行を消すときは、ローカルの写しも消す。
+func TestDriveCleanup_DeletesTheLocalCopyOfAMigratedFile(t *testing.T) {
+	ak, tk := "ak1", "tk1"
+	at := time.Now()
+	h, _ := setupDriveFileHandler(t,
+		&model.DriveFile{ID: "o1", UserID: nil, AccessKey: &ak, ThumbnailAccessKey: &tk, ObjectStorageMigratedAt: &at},
+	)
+	h.SetStorageDeleter(&stubStorageDeleter{})
+	local := &stubStorageDeleter{}
+	h.SetLocalStorageDeleter(local)
+	enq := &stubObjectStorageEnqueuer{}
+	h.SetObjectStorageEnqueuer(enq)
+
+	rec := doPost(h.DriveCleanup, `{}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, []string{"ak1", "tk1"}, enq.keys)
+	assert.Equal(t, []string{"ak1", "tk1"}, local.deleted)
 }

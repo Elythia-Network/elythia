@@ -66,3 +66,10 @@ func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// isForeignKeyViolation reports whether err is a foreign key violation
+// (23503): the row the value points at does not exist.
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
