@@ -226,3 +226,33 @@ func TestFromHTML(t *testing.T) {
 		})
 	}
 }
+
+// TestFromHTMLWithoutQuoteInline: for a note whose quote is attached, the
+// first top-level `.quote-inline` holding a link is dropped (upstream
+// 2026.11.0 #18063, #4164). FromHTML keeps it (#362).
+func TestFromHTMLWithoutQuoteInline(t *testing.T) {
+	const quote = `<p class="quote-inline">RE: <a href="https://example.com/notes/id">https://example.com/notes/id</a></p><p>Note Content</p>`
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{name: "quote", html: quote, want: "Note Content"},
+		{
+			name: "real mastodon toot",
+			html: `<p class="quote-inline">RE: <a href="https://remote.example/@alice/117512985585506708" target="_blank" rel="nofollow noopener" translate="no"><span class="invisible">https://</span><span class="ellipsis">remote.example/@alice/11</span><span class="invisible">7512985585506708</span></a></p><p>ここに引用先を挿入</p>`,
+			want: "ここに引用先を挿入",
+		},
+		{name: "class among others", html: `<p class="x quote-inline">RE: <a href="https://example.com/n">u</a></p><p>body</p>`, want: "body"},
+		{name: "only the first one", html: `<p class="quote-inline">RE: <a href="https://example.com/a">a</a></p><p class="quote-inline">RE: <a href="https://example.com/b">b</a></p><p>body</p>`, want: "RE: [b](https://example.com/b)\n\nbody"},
+		{name: "without a link it stays", html: `<p class="quote-inline">RE: nothing</p><p>body</p>`, want: "RE: nothing\n\nbody"},
+		{name: "nested deeper it stays", html: `<div><p class="quote-inline">RE: <a href="https://example.com/n">u</a></p></div><p>body</p>`, want: "RE: [u](https://example.com/n)\n\nbody"},
+		{name: "no quote-inline", html: `<p>plain</p>`, want: "plain"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FromHTMLWithoutQuoteInline(tt.html))
+		})
+	}
+	assert.Equal(t, "RE: https://example.com/notes/id\n\nNote Content", FromHTML(quote))
+}

@@ -216,6 +216,7 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceH
 	fields := map[string]any{}
 	// IngestNoteと同じ3段フォールバックでtext抽出
 	var newText string
+	fromContent := false
 	if apNote.Source != nil &&
 		apNote.Source.MediaType == "text/x.misskeymarkdown" &&
 		apNote.Source.Content != "" {
@@ -225,9 +226,15 @@ func (r *Resolver) UpdateRemoteNote(body []byte, actorURI string, inboundSourceH
 		newText = remoteText(apNote.MisskeyContent.String(), 0)
 	} else if apNote.Content != "" {
 		newText = mfm.FromHTML(apNote.Content)
+		fromContent = true
 	}
 	// 保存するのは切った本文、判定と hashtag は全文 (create 経路と同じ)。
 	storedText := storedRemoteNoteText(newText)
+	// 引用が付いているノートなら、本文の「RE: <URL>」を除いて保存する (create 経路と
+	// 同じ、#4164)。編集では引用を付け替えないので、付いているかは既存の行で見る。
+	if fromContent && existing.RenoteID != nil && (apNote.MisskeyQuote != "" || apNote.QuoteURL != "") {
+		storedText = storedRemoteNoteText(mfm.FromHTMLWithoutQuoteInline(apNote.Content))
+	}
 	// CW は**下の fields 反映より前に**決める。禁止語の判定を「更新後の値」で
 	// 行うために先に要るが、判定は `existing` を書き換える前に済ませたい
 	// (弾く場合は in-memory の note も無傷で返す)。
