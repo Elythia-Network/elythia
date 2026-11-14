@@ -395,6 +395,63 @@ func TestRestoreStopConditions(t *testing.T) {
 		noLeftovers(t)
 	})
 
+	// 取ったときより新しいサーバーの dump を戻して pg_restore が落ちたら、版のずれと
+	// 手立てを前に足す (#4155)。片付けは今と変わらず、戻せるなら版がずれていても戻す。
+	t.Run("pg_restore fails on a backup from a newer server", func(t *testing.T) {
+		admin := pg.connect(t, rsSuperUser, rsSuperPass, "postgres")
+		var num int
+		var version string
+		require.NoError(t, admin.QueryRow(ctx, `SELECT current_setting('server_version_num')::int, current_setting('server_version')`).Scan(&num, &version))
+		_ = admin.Close(ctx)
+		full := storage.objs[Key(rsGenID, meta.DumpFile)]
+		take := func(id string, versionNum int, truncate bool) {
+			rsTakeBackup(t, pg, storage, rsAppDB, id, rsBackupOptions{mutateMeta: func(m *Meta) {
+				m.PostgresVersionNum, m.PostgresVersion = versionNum, "99.1"
+			}})
+			if truncate {
+				storage.objs[Key(id, DumpFile)] = full[:len(full)/2]
+				rsRehash(t, storage, id)
+			}
+		}
+		hint := "the backup was taken from PostgreSQL 99.1, newer than the target server (" + version + "); upgrade the target server to PostgreSQL 99.1 or later"
+
+		take("20261010T071000Z", num+1, true)
+		o := swap
+		o.ID = "20261010T071000Z"
+		_, err := super.Restore(ctx, o)
+		require.ErrorContains(t, err, hint)
+		assert.Contains(t, err.Error(), "or later, then restore again: backup: pg_restore: exit status")
+		noLeftovers(t)
+
+		// 同じ版なら、今までどおり pg_restore の誤りだけを返す。
+		take("20261010T072000Z", num, true)
+		o.ID = "20261010T072000Z"
+		_, err = super.Restore(ctx, o)
+		require.ErrorContains(t, err, "backup: pg_restore: exit status")
+		assert.NotContains(t, err.Error(), "newer than the target server")
+		noLeftovers(t)
+
+		// 空の DB へ戻す形では、戻す先の DB に繋いで比べる。何も残らない。
+		pg.exec(t, "postgres", "CREATE DATABASE newer_empty")
+		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE IF EXISTS newer_empty WITH (FORCE)") })
+		empty := RestoreOptions{ID: "20261010T071000Z", Mode: RestoreEmpty, Database: "newer_empty", Confirm: "newer_empty"}
+		_, err = super.Restore(ctx, empty)
+		require.ErrorContains(t, err, hint)
+		conn := pg.connect(t, rsSuperUser, rsSuperPass, "newer_empty")
+		assert.Equal(t, int64(0), rsCount(t, conn, `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'`))
+		_ = conn.Close(ctx)
+
+		// 版がずれていても、pg_restore が受ければ戻す。
+		take("20261010T073000Z", num+1, false)
+		empty.ID = "20261010T073000Z"
+		_, err = super.Restore(ctx, empty)
+		require.NoError(t, err)
+		conn = pg.connect(t, rsSuperUser, rsSuperPass, "newer_empty")
+		assert.Equal(t, int64(1), rsCount(t, conn, `SELECT count(*) FROM note`))
+		_ = conn.Close(ctx)
+		noLeftovers(t)
+	})
+
 	t.Run("replace and undo", func(t *testing.T) {
 		pg.exec(t, "postgres", "CREATE DATABASE swap_a", "CREATE DATABASE swap_b")
 		require.NoError(t, super.ReplaceDatabase(ctx, "", "swap_a", "swap_a_old", "swap_b"))

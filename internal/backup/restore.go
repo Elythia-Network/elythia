@@ -715,6 +715,9 @@ func (r *Restorer) CheckNoConnections(ctx context.Context, maintenance, database
 // dbname. In the swap mode it first creates dbname with the encoding and
 // locale recorded in the backup (Meta.DatabaseLocale) and the owner of
 // opts.Database, and drops it again when pg_restore fails. In the empty mode dbname must be opts.Database.
+// When pg_restore fails and the backup was taken from a newer PostgreSQL
+// server than the target one, the error starts with that and how to fix it
+// (#4155).
 func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts RestoreOptions, dbname string) error {
 	if opts.Mode == RestoreEmpty && dbname != opts.Database {
 		return fmt.Errorf("backup: the empty mode restores into %q, not %q", opts.Database, dbname)
@@ -726,7 +729,10 @@ func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts Rest
 	}
 	defer cleanup()
 	if opts.Mode == RestoreEmpty {
-		return r.pgRestore(ctx, dbname, dump)
+		if err := r.pgRestore(ctx, dbname, dump); err != nil {
+			return r.explainEmptyRestoreFailure(ctx, dbname, plan.Meta, err)
+		}
+		return nil
 	}
 	admin, err := r.connect(ctx, maintenanceDB(opts.MaintenanceDB))
 	if err != nil {
@@ -753,9 +759,50 @@ func (r *Restorer) RestoreInto(ctx context.Context, plan *RestorePlan, opts Rest
 		if _, derr := admin.Exec(context.Background(), dropDatabaseSQL(dbname)); derr != nil {
 			r.logf("warning: could not drop %s: %v", dbname, derr)
 		}
-		return err
+		return r.explainRestoreFailure(ctx, admin, plan.Meta, err)
 	}
 	return nil
+}
+
+// explainEmptyRestoreFailure is explainRestoreFailure for the empty mode,
+// which has no maintenance connection: it connects to dbname.
+func (r *Restorer) explainEmptyRestoreFailure(ctx context.Context, dbname string, meta Meta, err error) error {
+	if meta.PostgresVersionNum == 0 || ctx.Err() != nil {
+		return err
+	}
+	conn, cerr := r.connect(ctx, dbname)
+	if cerr != nil {
+		r.logf("warning: could not compare the server version with the backup: %v", cerr)
+		return err
+	}
+	defer conn.Close(context.Background())
+	return r.explainRestoreFailure(ctx, conn, meta, err)
+}
+
+// explainRestoreFailure adds to a pg_restore failure (err) that the backup
+// was taken from a newer PostgreSQL server than the target one q is
+// connected to, and how to fix it. It returns err unchanged when the target
+// is not older, its version cannot be read, or ctx is done.
+//
+// マイナー版が上がっただけでも、新しいサーバーの dump は古いサーバーに戻せないことが
+// ある (18.7 の dump を 18.6 へ戻すと pg_attver で落ちる。#4152 / #4155)。障害対応の
+// 最中に pg_restore の誤りだけを見ても版のずれだと分からないので、手立てを前に出す。
+// 先に比べて止めないのは、戻せる版のずれ (ほとんどのマイナー版) まで止めてしまうため。
+func (r *Restorer) explainRestoreFailure(ctx context.Context, q Queryer, meta Meta, err error) error {
+	// 中止で落ちたときは比べられないので、紛らわしい警告を出さずにそのまま返す。
+	if ctx.Err() != nil {
+		return err
+	}
+	newer, version, verr := dumpNewerThanServer(ctx, q, meta)
+	if verr != nil {
+		r.logf("warning: could not compare the server version with the backup: %v", verr)
+		return err
+	}
+	if !newer {
+		return err
+	}
+	return fmt.Errorf("backup: the backup was taken from PostgreSQL %s, newer than the target server (%s); "+
+		"upgrade the target server to PostgreSQL %s or later, then restore again: %w", meta.PostgresVersion, version, meta.PostgresVersion, err)
 }
 
 // VerifyRestored compares the row counts of dbname with the backup

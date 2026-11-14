@@ -753,19 +753,31 @@ func closeGorm(db *gorm.DB) {
 // 送られるが、pg_restore の誤りには戻そうとした行の値が入りうる (docs/backup.md の
 // 通知)。全文は logProgramFailure がログに残している。
 func olderServerError(ctx context.Context, q Queryer, meta Meta) error {
-	if meta.PostgresVersionNum == 0 {
-		return nil
-	}
-	var num int
-	var version string
-	if err := q.QueryRow(ctx, "SELECT current_setting('server_version_num')::int, current_setting('server_version')").Scan(&num, &version); err != nil {
+	newer, version, err := dumpNewerThanServer(ctx, q, meta)
+	if err != nil {
 		return fmt.Errorf("backup verify: pg_restore rejected the dump (details in the log), and the version of the throwaway server could not be read: %w", err)
 	}
-	if meta.PostgresVersionNum <= num {
+	if !newer {
 		return nil
 	}
 	return fmt.Errorf("backup verify: pg_restore rejected the dump (details in the log), which was taken from PostgreSQL %s, newer than the throwaway server (%s); "+
 		"run verify with PostgreSQL %s or later (update the backup image)", meta.PostgresVersion, version, meta.PostgresVersion)
+}
+
+// dumpNewerThanServer reports whether meta was taken from a newer
+// PostgreSQL server than the one q is connected to, with that server's
+// server_version. A meta.json without the version (0) is never newer, and
+// the server is not queried.
+func dumpNewerThanServer(ctx context.Context, q Queryer, meta Meta) (bool, string, error) {
+	if meta.PostgresVersionNum == 0 {
+		return false, "", nil
+	}
+	var num int
+	var version string
+	if err := q.QueryRow(ctx, "SELECT current_setting('server_version_num')::int, current_setting('server_version')").Scan(&num, &version); err != nil {
+		return false, "", err
+	}
+	return meta.PostgresVersionNum > num, version, nil
 }
 
 // checkExtensions fails when the throwaway server cannot install an
