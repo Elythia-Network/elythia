@@ -365,6 +365,19 @@ func (r *driveFileRepository) ListByUser(userID string, folderID *string, anyFol
 	default:
 		order = paginationOrder(sinceID, untilID, "id")
 	}
+	// ルート (`"folderId" IS NULL`) を id の順に読むときは、並べ方に folderId を足す。
+	// IS NULL は等値の条件として扱われないので、id だけだと (userId, folderId, id) の
+	// index の並びを使えず、主キーを逆順に読んで filter する計画になって、ファイルの
+	// 多い利用者で一覧が遅くなる (本家 2026.11.0 #18129、#4164)。folderId は全行 NULL
+	// なので、並びは変わらない。
+	if !anyFolder && folderID == nil {
+		switch order {
+		case "id DESC":
+			order = `"folderId" DESC, id DESC`
+		case "id ASC":
+			order = `"folderId" ASC, id ASC`
+		}
+	}
 	if err := q.Order(order).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}

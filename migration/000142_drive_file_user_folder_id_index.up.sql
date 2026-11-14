@@ -1,0 +1,13 @@
+-- #4164: ドライブのファイル一覧を (userId, folderId, id) の index で読めるようにする。
+--
+-- 本家の drive/files は、フォルダを指定しない (ルートの) 一覧を `"folderId" IS NULL` で
+-- 絞って id の順に並べる。IS NULL は等値の条件として扱われないので、id だけで並べると
+-- この index の並びを使えず、主キーを逆順に読んで filter する計画になり、ファイルの多い
+-- 利用者で一覧が開けなくなる (本家 2026.11.0 #18129)。本家と同じく並べ方に folderId を
+-- 足し (internal/repository/drive_file.go)、その並びを持つ index を張る。
+--
+-- 名前と列は本家の `drive-user-folder-id-index` (1581708415836) と同じ。TS 版から移した
+-- DB には既にあるので IF NOT EXISTS で何もしない。Elythia が作った DB には無かった。
+-- `drive_file` は大きくなりうるので CONCURRENTLY で書き込みを止めずに作る。失敗したときの
+-- 回復は docs/deployment.md の「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_55720b33a61a7c806a8215b825" ON "drive_file" ("userId", "folderId", "id");
