@@ -870,6 +870,9 @@ func resolve(src *Source) (*Config, error) {
 	if err := validateProxyURL("proxySmtp", src.ProxySMTP, smtpProxySchemes); err != nil {
 		return nil, err
 	}
+	if err := validateJobConcurrency(src); err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		Version:     MisskeyVersion,
@@ -1123,6 +1126,29 @@ var (
 	httpProxySchemes = []string{"http", "https", "socks5", "socks5h"}
 	smtpProxySchemes = []string{"http", "https", "socks5", "socks5h"}
 )
+
+// validateJobConcurrency rejects a negative `<queue>JobConcurrency`. Zero
+// (or unset) keeps meaning "the default, or auto-scale when enabled".
+//
+// 負の値は使われずに既定の数になるのに、自動調整 (jobQueueAutoScale) の対象からは
+// 外れる (対象は未設定か 0 のときだけ) ので、書いた値とも既定とも違う動きになる。
+// 本家 2026.11.0 (#18081) も不正な値なら起動を止める (#4164)。本家は 0 でも止めるが、
+// Elythia では 0 を「未設定・自動」として受ける (docs/divergence/config.md)。
+func validateJobConcurrency(src *Source) error {
+	for _, c := range []struct {
+		key string
+		v   *int
+	}{
+		{"deliverJobConcurrency", src.DeliverJobConcurrency},
+		{"inboxJobConcurrency", src.InboxJobConcurrency},
+		{"relationshipJobConcurrency", src.RelationshipJobConcurrency},
+	} {
+		if c.v != nil && *c.v < 0 {
+			return fmt.Errorf("%s は 0 以上にしてください (%d でした。0 か未設定なら既定の数か自動調整になります)", c.key, *c.v)
+		}
+	}
+	return nil
+}
 
 // validateProxyURL rejects a proxy setting the consumer cannot use.
 //
