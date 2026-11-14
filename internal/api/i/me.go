@@ -207,9 +207,8 @@ func (h *Handler) me(c echo.Context, allowSecrets bool) error {
 // 消えてしまう。
 func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies map[string]any, roles []any) {
 	policies = role.DefaultPolicies()
+	isAdmin, isMod = h.roleFlags(userID)
 	if h.roleProvider != nil {
-		isAdmin = h.roleProvider.IsAdministrator(userID)
-		isMod = h.roleProvider.IsModerator(userID)
 		policies = h.roleProvider.GetUserPolicies(userID)
 		if rs, err := h.roleProvider.GetUserRoles(userID); err == nil {
 			// 公開ロールだけを表示順に並べる (#3240)。本家 UserEntityService も
@@ -246,6 +245,15 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 	return isAdmin, isMod, policies, roles
 }
 
+// roleFlags resolves isAdmin / isModerator of MeDetailed for the given user
+// (false for both when the role provider is unwired).
+func (h *Handler) roleFlags(userID string) (isAdmin bool, isMod bool) {
+	if h.roleProvider == nil {
+		return false, false
+	}
+	return h.roleProvider.IsAdministrator(userID), h.roleProvider.IsModerator(userID)
+}
+
 // meDetailedWithUnread packs a MeDetailed for self-view stream/return paths
 // (i/update, meUpdated) and enriches it with authoritative unread values via
 // fillUnreadFields. Raw PackMeDetailed would emit the struct defaults
@@ -253,6 +261,7 @@ func (h *Handler) rolePayload(userID string) (isAdmin bool, isMod bool, policies
 // which the frontend's updateCurrentAccount would merge into `$i`,
 // clobbering the real badge/unread state. Going through fillUnreadFields keeps
 // those fields correct on every path (the same shape /api/i returns).
+// isAdmin / isModerator are filled the same way as /api/i (#4168).
 func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profile *model.UserProfile) map[string]any {
 	me := h.entityPacker.PackMeDetailed(u, profile, h.idGen)
 	// packer は movedTo / alsoKnownAs を null のまま残すので、/api/i (Me) と同じく利用者の ID に
@@ -263,6 +272,13 @@ func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profi
 	resp := map[string]any{}
 	_ = json.Unmarshal(b, &resp)
 	h.fillUnreadFields(ctx, u, resp)
+	// isAdmin / isModerator は packer が role を知らず false のまま出すので、/api/i と
+	// 同じ値で埋める。meUpdated (フォロー申請の受信や 2FA の変更で流れる) は frontend が
+	// `$i` に merge して保存するので、false のままだと管理者・モデレーターのメニューから
+	// コントロールパネルが消え、保存された値で読み込み直すと管理画面が 404 になる (#4168)。
+	isAdmin, isMod := h.roleFlags(u.ID)
+	resp["isAdmin"] = isAdmin
+	resp["isModerator"] = isMod
 	// policies / roles はここでは足さない。この helper は meUpdated
 	// (ストリーミングの部分更新) でも使われ、そこに policies を混ぜると
 	// frontend の updateCurrentAccount が `$i.policies` を空で clobber
