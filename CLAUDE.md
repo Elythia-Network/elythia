@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-このファイルは、このリポジトリで作業するClaude Code(と、それを使う人)のためのルール集です。
+このファイルは、このリポジトリで作業するClaude Codeなどのコーディングエージェント(と、それを使う人)のためのルール集です。`AGENTS.md`はこのファイルへのシンボリックリンクで、`AGENTS.md`を読むエージェントにも同じ規則が届きます(#4167)。
 
 ## このプロジェクトについて
 
@@ -19,6 +19,7 @@
 - **Section 0**の約10項目は必ず守ってください。以降の節は、その詳細と、踏むと壊れる罠です
 - 各ルールには理由を1文だけ付けています。経緯や実測値は、リンク先の`docs/`にあります
 - 関係するファイルを読むと、`.claude/rules/`から「先にこの`docs/`を読む」という指示が出ます(例: `*_test.go`を読むと`docs/testing.md`)。指示が出たら従ってください。指示はファイルを読んだときにだけ出るので、**新しいファイルを一から作るときは出ないことがあります**。そのときは、Section 4 / 7 / 8 / 9のリンク先を自分で開いてください。それ以外の`docs/`も、必要なときに自分で開いてください
+- **`.claude/rules/`の指示は、Claude Codeにしか出ません。** ほかのエージェントは、ファイルを読む前に、そのファイルに関係する`.claude/rules/`の規則(どのファイルに当たるかは各規則の冒頭にある)と、そこから案内される`docs/`を自分で開いてください
 - セクション番号(1〜10)は、コードやdocから「CLAUDE.md Section N」の形で参照されています。**番号を変えないでください**
 - 運営者の手元の運用(本番環境など)に固有の話は、gitignore済みの`CLAUDE.local.md`に分けてあります。無くても作業できます
 
@@ -308,6 +309,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-14: Claude Code以外のコーディングエージェントも読めるよう、このファイルを指すシンボリックリンク`AGENTS.md`を置き、冒頭と読み方の節を直した (#4167)
 - 2026-11-11: `make frontend-check`とCIの`frontend`に、画面の文言を日本語で直書きしていないかの検査を足したので、Section 3とSection 8の行に足した (#4070) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)
 - 2026-11-11: Elythiaのlocaleの語を`frontend/locales-elythia`へ分け、本家の語の書き換えの一覧の検査と、`frontend/locales`が本家と同じかの検査を足したので、Section 3の`make frontend-check`の行と、Section 8の`frontend`と`apicompat`の行に足した (#4071) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)
 - 2026-11-10: 前のリリースで作ったDBを今のコードが引き継げるかを確かめる`upgrade` workflowを足したので、Section 8の表に1行を足した (#4123) → [docs/testing.md](docs/testing.md#前のリリースからの更新-4123)
