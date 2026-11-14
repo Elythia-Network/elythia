@@ -9,7 +9,7 @@
 #   goroutine-pre.pb.gz / goroutine-post.pb.gz
 #   cpu-<scenario>.pb.gz                    — CPU profile for each k6 scenario
 #
-# busybox の wget だけで動かす (alpine:3.21 に最初から入っている)。
+# busybox の wget だけで動かす (alpine:3.24 に最初から入っている)。
 # `apk add curl` を経由しないので、ネット越しのパッケージ取得失敗で bench
 # パイプライン全体が block する事故を避ける (Devin #501 FLAG-2)。
 #

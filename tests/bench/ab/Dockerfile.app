@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOWORK=off go build -tags nodynamic -trimpath -ldflags="-s -w" -o /out/elythia ./cmd/elythia
 
-FROM alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # wget は healthcheck 用
 RUN apk add --no-cache ca-certificates tzdata wget

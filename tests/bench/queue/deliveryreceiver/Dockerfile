@@ -8,6 +8,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w" -o /out/deliveryreceiver ./tests/bench/queue/deliveryreceiver
 
-FROM alpine:3.21
+FROM alpine:3.24
 COPY --from=builder /out/deliveryreceiver /usr/local/bin/deliveryreceiver
 ENTRYPOINT ["/usr/local/bin/deliveryreceiver"]
