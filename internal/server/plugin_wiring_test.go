@@ -869,6 +869,59 @@ func TestSetupPlugins_RoutesAreNamespaced(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+func TestSetupPlugins_CheckedPolicyResolversReachContextAndRoute(t *testing.T) {
+	const policyKey = "canSearchNotes"
+	svc, _, _ := newEffectivePolicyTestService(t)
+
+	var contextPolicies map[string]any
+	var contextErr error
+	def := plugin.Definition{
+		Name:       "checked-policy",
+		APIVersion: plugin.APIVersion,
+		EffectivePolicies: func(plugin.Context, plugin.EffectivePolicyInvalidator) (plugin.EffectivePolicyRegistration, error) {
+			return plugin.EffectivePolicyRegistration{
+				Keys: []string{policyKey},
+				Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+					return []plugin.EffectivePolicyContribution{{Key: policyKey, Priority: 1, Value: false}}, nil
+				},
+			}, nil
+		},
+		Routes: func(ctx plugin.Context, r plugin.Router) error {
+			checkedContext, ok := ctx.(plugin.CheckedUserRolePolicyContext)
+			if !ok {
+				return errors.New("checked role policy context is unavailable")
+			}
+			contextPolicies, contextErr = checkedContext.CheckedUserRolePolicies("u1", policyKey)
+			r.GET("/checked", func(req plugin.Request) (any, error) {
+				checkedRequest, ok := req.(plugin.CheckedRolePolicyRequest)
+				if !ok {
+					return nil, errors.New("checked role policy request is unavailable")
+				}
+				return checkedRequest.CheckedRolePolicies(policyKey)
+			})
+			return nil
+		},
+	}
+
+	s, api := newPluginTestServer(config.RoleServer)
+	s.roleService = svc
+	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(string(middleware.UserContextKey), &model.User{ID: "u1"})
+			return next(c)
+		}
+	})
+	require.NoError(t, s.setupPlugins(api, []plugin.Definition{def}, noopStorage))
+
+	require.NoError(t, contextErr)
+	assert.Equal(t, map[string]any{policyKey: false}, contextPolicies, "setupPlugins must wire the preparation context to the role service")
+
+	rec := httptest.NewRecorder()
+	s.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/plugin/checked-policy/checked", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"canSearchNotes":false}`, rec.Body.String(), "setupPlugins must wire the registered route to the role service")
+}
+
 type recordingPluginStorage struct {
 	events *[]string
 }

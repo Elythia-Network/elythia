@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-FileCopyrightText: Elythia-Network
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 

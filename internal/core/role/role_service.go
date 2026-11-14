@@ -617,11 +617,11 @@ func (s *Service) resolveUserRoleSnapshot(userID string) (userRoleSnapshot, erro
 			existing := s.userRoleCache[userID]
 			if existing != nil &&
 				time.Now().Before(existing.expiresAt) && existing.snapshot.conditionalErr == nil {
-				// A slower failed lookup must not overwrite a newer successful snapshot.
+				// 遅れて完了した失敗取得で、新しい成功スナップショットを上書きしない。
 				mayPublish = false
 			}
 			if existing == nil && len(s.userRoleCache) >= maxConditionalRoleErrorCacheEntries {
-				// Negative caching is best-effort once the bounded error-key budget is full.
+				// 共通 cache の上限に達した場合、新しいキーの失敗結果は negative cache しない。
 				mayPublish = false
 			}
 		}

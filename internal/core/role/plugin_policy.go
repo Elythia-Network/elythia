@@ -244,13 +244,12 @@ func (s *Service) resolvePolicies(userID string, providerKeys map[string]struct{
 		activeAssignments = snapshot.activeAssignments
 		if snapshot.conditionalErr != nil {
 			if failOnMetaError {
-				// Checked consumers must not let providers observe an incomplete role set.
+				// checked 経路では、不完全なロール集合を provider に渡さない。
 				providers = nil
 				conditionalErr := fmt.Errorf("role: conditional policy inputs: %w", snapshot.conditionalErr)
 				defer func() { err = joinBasePolicyError(conditionalErr, err) }()
 			} else {
-				// Keep legacy unchecked provider evaluation, isolated from complete-input
-				// cache entries and flights.
+				// 従来の未checked経路は維持し、完全な入力の cache / flight とは分離する。
 				partialInputs = true
 			}
 		}
