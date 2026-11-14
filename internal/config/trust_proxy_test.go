@@ -137,3 +137,31 @@ func TestLoad_ProxyURLValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_JobConcurrencyValidation: a negative `<queue>JobConcurrency` stops
+// the startup with the key named; zero and positive values are accepted (#4164).
+func TestLoad_JobConcurrencyValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{name: "unset", yaml: ""},
+		{name: "zero means default", yaml: "deliverJobConcurrency: 0\n"},
+		{name: "positive", yaml: "inboxJobConcurrency: 8\n"},
+		{name: "negative deliver", yaml: "deliverJobConcurrency: -1\n", wantErr: "deliverJobConcurrency"},
+		{name: "negative inbox", yaml: "inboxJobConcurrency: -4\n", wantErr: "inboxJobConcurrency"},
+		{name: "negative relationship", yaml: "relationshipJobConcurrency: -2\n", wantErr: "relationshipJobConcurrency"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTestConfig(t, testYAML+"\n"+tt.yaml))
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

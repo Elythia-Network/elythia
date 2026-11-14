@@ -71,6 +71,8 @@ driver が入れ替わったことに気付けず、予約投稿の可否やレ�
 inbox が黙って消える。**新ビルドは起動を拒むので後から捌けない** — 切り替え前に
 **旧ビルドでそのキーが空になるまで回す**しかない。
 
+**同時実行数 (`deliverJobConcurrency` / `inboxJobConcurrency` / `relationshipJobConcurrency`) が負の値なら起動しない (#4164)。** upstream 2026.11.0 (#18081) と同じく、書き間違いに気付けるよう止める。**0 は受ける** (upstream は 1 未満を全て拒む)。Elythia では 0 を「未設定」と同じく既定の数、自動調整 (`jobQueueAutoScale`) を有効にしていればその対象として扱ってきたので、0 を書いた設定を起動できなくしないため。
+
 upstream は用途ごとに **10 queue** に分けるが、Elythia は **8 queue** に集約している (`internal/queue/driver/mkqdriver` の `QueueNames`)。処理する仕事は同じで、束ね方だけが違う。
 
 | upstream の queue | Elythia の実体 |
