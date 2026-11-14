@@ -172,11 +172,6 @@ type GridItem = {
 	host: string;
 };
 
-// Elythia: 行の色のクラスはテンプレートの $style から受け取る (useCssModule を使わない)。
-// 本番のビルドでは rollup-plugin-unwind-css-module-class-name がテンプレートの $style.xxx を
-// 固定の文字列に置き換え、描画関数に `_ctx.$style` の参照が残らないので CSS Modules の表を
-// 外す。script の useCssModule() はその空の表を読み、クラスが undefined になって行に色が
-// 付かなかった (#3955)。開発時と vitest ではこの処理が走らないので気付けない
 function setupGrid(rowClass: { changedRow: string }): GridSetting {
 	return {
 		row: {

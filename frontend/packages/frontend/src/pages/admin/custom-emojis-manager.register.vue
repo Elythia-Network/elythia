@@ -108,11 +108,6 @@ type GridItem = {
 	type: string | null;
 };
 
-// Elythia: 行の色のクラスはテンプレートの $style から受け取る (useCssModule を使わない)。
-// 本番のビルドでは rollup-plugin-unwind-css-module-class-name がテンプレートの $style.xxx を
-// 固定の文字列に置き換え、描画関数に `_ctx.$style` の参照が残らないので CSS Modules の表を
-// 外す。script の useCssModule() はその空の表を読み、クラスが undefined になって行に色が
-// 付かなかった (#3955)。開発時と vitest ではこの処理が走らないので気付けない
 function setupGrid(rowClass: { violationRow: string }): GridSetting {
 	const required = validators.required();
 	const regex = validators.regex(/^[a-zA-Z0-9_]+$/);
@@ -373,8 +368,6 @@ onMounted(async () => {
 
 <style module lang="scss">
 .violationRow {
-	/* MkGrid の行の背景 (.mk_grid_border .mk_grid_tbody .mk_grid_tr:nth-child(...)) より詳細度が低く、
-	   そのままでは負けて色が付かない。ほかの 2 つの一覧と同じく !important を付ける (#3955) */
 	background-color: var(--MI_THEME-infoWarnBg) !important;
 }
 

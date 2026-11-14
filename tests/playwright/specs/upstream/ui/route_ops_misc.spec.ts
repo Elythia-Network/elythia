@@ -59,7 +59,8 @@ test.describe('UI: route operations (misc)', () => {
     const me = await freshUser(request, 'pwqr');
     await signinWithState(page, request, baseURL!, me);
     await gotoRoute(page, baseURL!, '/qr');
-    await expect(pageBody(page).locator('canvas').first(), 'QR が描かれない').toBeVisible({ timeout: 15_000 });
+    // 本家 2026.11.0 から QR は canvas ではなく、etiket/qr が作る SVG をそのまま描く (#4164)
+    await expect(pageBody(page).locator('svg').first(), 'QR が描かれない').toBeVisible({ timeout: 15_000 });
     await expect(pageBody(page).getByText(`@${me.username}@${new URL(baseURL!).host}`).first(), '自分の acct が出ない').toBeVisible();
   });
 

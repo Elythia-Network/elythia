@@ -34,6 +34,29 @@ misskeyApi('admin/other', { notMeta: 1 });
   assert.deepEqual(r.unresolved, ['somethingElse']);
 });
 
+test('extractMetaKeys resolves a variable built in the same script', () => {
+  const source = `<script lang="ts" setup>
+function getSettings() {
+	return { enableEmail: a, smtpHost: b };
+}
+function branchy() {
+	if (x) return { notThis: 1 };
+	return { norThis: 1 };
+}
+const fixed = { objectMail: c };
+function save() {
+	const settings = getSettings();
+	os.apiWithDialog('admin/update-meta', settings);
+	os.apiWithDialog('admin/update-meta', fixed);
+	const other = branchy();
+	os.apiWithDialog('admin/update-meta', other);
+}
+</script>`;
+  const r = extractMetaKeys(source, true, () => null);
+  assert.deepEqual(r.keys, ['enableEmail', 'smtpHost', 'objectMail']);
+  assert.deepEqual(r.unresolved, ['other']);
+});
+
 test('definitionKeys collects the keys of the object literals inside a declaration', () => {
   const source = `export const registrationModePatch = {
   open: { disableRegistration: false, approvalRequiredForSignup: false },

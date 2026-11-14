@@ -14,8 +14,6 @@ import { swLang } from '@/scripts/lang.js';
 import { MAINTENANCE_CACHE, keepCacheOnActivate, maintenanceAwareNavigation } from '@/scripts/maintenance.js';
 import type { MaintenanceStore } from '@/scripts/maintenance.js';
 import * as swos from '@/scripts/operations.js';
-import { registerStaticRoutes } from '@/scripts/routes.js';
-import type { RouteInstallEvent } from '@/scripts/routes.js';
 
 // Elythia: メンテナンスの画面を覚えておく先 (#3463)。
 const MAINTENANCE_MARK_KEY = 'elythia-maintenance-at';
@@ -79,15 +77,30 @@ async function offlineContentHTML() {
 
 globalThis.addEventListener('install', (ev) => {
 	// 次の問題が発生するため、ServiceWorkerAutoPreload をオプトアウトする必要がある
+	// ルールを1つでも登録すればオプトアウトされる
 	// https://issues.chromium.org/issues/466790291
-	// Elythia: 規則はナビゲーションだけを fetch-event に回し、残りを network に送る形にした (#3613)
-	// doc: https://developer.mozilla.org/en-US/docs/Web/API/InstallEvent/addRoutes
-	const routes = registerStaticRoutes(ev as unknown as RouteInstallEvent, (init) => {
+	if ('addRoutes' in ev) {
+		// doc: https://developer.mozilla.org/en-US/docs/Web/API/InstallEvent/addRoutes
+		const addRoutes = (rules: unknown) => (ev.addRoutes as (rules: unknown) => Promise<void>).call(ev, rules);
+
 		// doc: https://developer.mozilla.org/ja/docs/Web/API/URLPattern
-		// @ts-expect-error 実験的なAPIなので型定義がない
-		return new URLPattern(init);
-	});
-	if (routes) ev.waitUntil(routes);
+		const anyUrl = new URLPattern({});
+		const urlEndsWithSlash = new URLPattern({ pathname: '*/', search: '' });
+
+		ev.waitUntil(addRoutes([
+			{ condition: { requestMode: 'navigate' }, source: 'fetch-event' },
+			// fetchハンドラーはURLが/で終わるリクエストもHTMLとして扱う (クエリが付くと/では終わらない)
+			{ condition: { urlPattern: urlEndsWithSlash }, source: 'fetch-event' },
+			// ルールは先に一致したものが優先されるので、これは上記以外のすべてに当たる
+			{ condition: { urlPattern: anyUrl }, source: 'network' },
+		]).catch(() => addRoutes({
+			// 上記のルールを受け付けないブラウザでも、オプトアウトは維持する
+			condition: { urlPattern: anyUrl },
+			source: 'fetch-event',
+		})).catch(() => {
+			// ルールの登録に失敗してもインストールは止めない
+		}));
+	}
 });
 
 globalThis.addEventListener('activate', ev => {

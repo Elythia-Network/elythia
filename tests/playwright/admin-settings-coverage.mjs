@@ -126,7 +126,7 @@ export function extractMetaKeys(source, vue, resolve) {
       if (ts.isCallExpression(node) && node.arguments.length >= 2
         && ts.isStringLiteralLike(node.arguments[0]) && node.arguments[0].text === 'admin/update-meta') {
         const arg = node.arguments[1];
-        const lit = literalKeys(arg, file);
+        const lit = literalKeys(arg, file) ?? (ts.isIdentifier(arg) ? localKeys(arg.text, file) : null);
         if (lit != null) keys.push(...lit);
         else {
           const base = ts.isElementAccessExpression(arg) && ts.isIdentifier(arg.expression) ? arg.expression.text : ts.isIdentifier(arg) ? arg.text : null;
@@ -140,6 +140,51 @@ export function extractMetaKeys(source, vue, resolve) {
     visit(file);
   }
   return { keys, unresolved };
+}
+
+/**
+ * Resolves the keys of `name` declared in the same script: `const name = { ... }`,
+ * or `const name = f()` where `f` is a function of the same script that
+ * returns an object literal. Returns null when it cannot.
+ *
+ * 本家 2026.11.0 の email-settings.vue は、保存する設定を関数 (getSettings) で組み立てて
+ * 変数に入れてから admin/update-meta に渡す (#4164)。同じファイルの中で閉じる形は、
+ * RESOLVED_ARGS に書かずにここで読む。
+ *
+ * @param {string} name
+ * @param {import('typescript').SourceFile} file
+ * @returns {string[] | null}
+ */
+function localKeys(name, file) {
+  /** @type {import('typescript').Expression | null} */
+  let init = null;
+  /** @type {Map<string, import('typescript').FunctionDeclaration>} */
+  const functions = new Map();
+  /** @param {import('typescript').Node} node */
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name && node.initializer) init = node.initializer;
+    if (ts.isFunctionDeclaration(node) && node.name != null) functions.set(node.name.text, node);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (init == null) return null;
+  const direct = literalKeys(init, file);
+  if (direct != null) return direct;
+  if (!ts.isCallExpression(init) || !ts.isIdentifier(init.expression) || init.arguments.length > 0) return null;
+  const fn = functions.get(init.expression.text);
+  if (fn?.body == null) return null;
+  // return が 1 つだけで、オブジェクトのリテラルを返す関数に限る (分岐で中身が変わると数え漏らす)
+  /** @type {import('typescript').ReturnStatement[]} */
+  const returns = [];
+  /** @param {import('typescript').Node} node */
+  const collect = (node) => {
+    if (ts.isReturnStatement(node)) returns.push(node);
+    // 中の関数の return は数えない
+    if (!ts.isFunctionLike(node)) ts.forEachChild(node, collect);
+  };
+  ts.forEachChild(fn.body, collect);
+  if (returns.length !== 1 || returns[0].expression == null) return null;
+  return literalKeys(returns[0].expression, file);
 }
 
 /**
