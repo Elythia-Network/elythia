@@ -8,6 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -148,6 +149,18 @@ func (h *Handler) deleteFileStorageObjects(c echo.Context, f *model.DriveFile) {
 		if err := deleter.Delete(*key); err != nil {
 			slog.WarnContext(c.Request().Context(), "drive cleanup: storage delete failed (object may be orphaned)",
 				"fileId", f.ID, "err", err)
+		}
+	}
+	// オブジェクトストレージへ写したファイル (#4180) は、ローカルにも写しが残っている。
+	// 行を消すと誰も指さなくなるので、ローカルからも消す。
+	if coredrive.HasMigratedLocalCopy(f) && h.localStorageDeleter != nil {
+		for _, key := range []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey} {
+			if key != nil && *key != "" {
+				if err := h.localStorageDeleter.Delete(*key); err != nil {
+					slog.WarnContext(c.Request().Context(), "drive cleanup: delete the local copy of a migrated file",
+						"fileId", f.ID, "err", err)
+				}
+			}
 		}
 	}
 }

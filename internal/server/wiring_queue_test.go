@@ -152,6 +152,7 @@ func TestBuiltinQueueHandlersBindTheExpectedMethods(t *testing.T) {
 		queue.TaskTypeChunkedUploadGC:         "(*ChunkedUploadGCProcessor).Handle",
 		queue.TaskTypeObjectStorageDeleteFile: "(*ObjectStorageProcessor).HandleDeleteFile",
 		queue.TaskTypeCleanRemoteFiles:        "(*ObjectStorageProcessor).HandleCleanRemoteFiles",
+		queue.TaskTypeMigrateLocalDriveFiles:  "(*DriveStorageMigrationProcessor).Handle",
 		queue.TaskTypeReactionFlush:           "(*ReactionFlushProcessor).Handle",
 		queue.TaskTypeDeleteAccount:           "(*DeleteAccountProcessor).Handle",
 		queue.TaskTypeUnfollow:                "(*UnfollowProcessor).Handle",

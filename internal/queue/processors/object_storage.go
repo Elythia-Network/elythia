@@ -164,4 +164,15 @@ func (p *ObjectStorageProcessor) deleteObjects(f *model.DriveFile) {
 				"fileId", f.ID, "err", err)
 		}
 	}
+	// オブジェクトストレージへ写したファイル (#4180) は、ローカルにも写しが残っている。
+	// 行を link 行へ倒すと誰も指さなくなるので、ローカルからも消す。
+	if coredrive.HasMigratedLocalCopy(f) && p.local != nil {
+		for _, key := range []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey} {
+			if key != nil && *key != "" {
+				if err := p.local.Delete(*key); err != nil {
+					slog.Warn("cleanRemoteFiles: delete the local copy of a migrated file", "fileId", f.ID, "err", err)
+				}
+			}
+		}
+	}
 }

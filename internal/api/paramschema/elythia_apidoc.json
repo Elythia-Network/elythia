@@ -202,6 +202,29 @@
 				}
 			}
 		},
+		"admin/drive/object-storage-migration/start": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:drive"
+			},
+			"doc": {}
+		},
+		"admin/drive/object-storage-migration/status": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "read:admin:drive"
+			},
+			"doc": {
+				"res": {
+					"type": "object",
+					"optional": false,
+					"nullable": false,
+					"ref": "DriveObjectStorageMigrationStatus"
+				}
+			}
+		},
 		"admin/drive/usage": {
 			"meta": {
 				"requireCredential": true,
@@ -4850,6 +4873,73 @@
 					"type": "boolean",
 					"optional": false,
 					"nullable": false
+				}
+			}
+		},
+		"DriveObjectStorageMigrationStatus": {
+			"type": "object",
+			"properties": {
+				"objectStorageEnabled": {
+					"type": "boolean",
+					"optional": false,
+					"nullable": false
+				},
+				"running": {
+					"type": "string",
+					"optional": false,
+					"nullable": true,
+					"enum": [
+						"migrate",
+						null
+					]
+				},
+				"localFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"migratedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"failedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"failures": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DriveObjectStorageMigrationFailure"
+					}
+				}
+			}
+		},
+		"DriveObjectStorageMigrationFailure": {
+			"type": "object",
+			"properties": {
+				"fileId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"error": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"failedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
 				}
 			}
 		}

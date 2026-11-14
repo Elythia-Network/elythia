@@ -3,6 +3,7 @@ package drive_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -125,4 +126,111 @@ func TestDeleteAllByHost_EnqueuesObjectStorageDeletes(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 	assert.Equal(t, []string{"a1", "t1", "w1"}, enq.keys)
 	assert.Empty(t, storage.deleted)
+}
+
+// TestDelete_MigratedFileAlsoDeletesTheLocalCopy covers a file the
+// local-to-object-storage migration copied (#4180): its local copy stays
+// after the migration, and deleting the file removes it too.
+func TestDelete_MigratedFileAlsoDeletesTheLocalCopy(t *testing.T) {
+	f := objectStoredFile()
+	at := time.Now()
+	f.ObjectStorageMigratedAt = &at
+	svc, _, enq, repo := svcWithEnqueuer(t, f)
+	local := &countingStorage{LocalStorage: drive.NewLocalStorage(t.TempDir(), "")}
+	svc.SetLocalStorage(local)
+
+	require.NoError(t, svc.Delete(&model.User{ID: "u1"}, "f1"))
+
+	assert.Equal(t, []string{"a1", "t1", "w1"}, enq.keys)
+	assert.Equal(t, []string{"a1", "t1", "w1"}, local.deleted, "the local copy of a migrated file stayed")
+	assert.Empty(t, repo.Files)
+}
+
+// TestDelete_LocalFileDuringMigrationAlsoDeletesTheCopy covers a local row
+// deleted while the migration runs: the migration may have copied it after
+// the delete read the row, so the delete also removes the object storage
+// copy. While no migration runs, it does not (as upstream).
+func TestDelete_LocalFileDuringMigrationAlsoDeletesTheCopy(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		f := objectStoredFile()
+		f.StoredInternal = true
+		svc, storage, enq, _ := svcWithEnqueuer(t, f)
+		svc.SetStorageMigrationRunning(func() bool { return running })
+
+		require.NoError(t, svc.Delete(&model.User{ID: "u1"}, "f1"))
+
+		assert.Equal(t, []string{"a1", "t1", "w1"}, storage.deleted, "running=%v", running)
+		if running {
+			assert.Equal(t, []string{"a1", "t1", "w1"}, enq.keys)
+		} else {
+			assert.Empty(t, enq.keys)
+		}
+	}
+}
+
+// failingDeleteStorage fails every delete.
+type failingDeleteStorage struct{ *drive.LocalStorage }
+
+func (failingDeleteStorage) Delete(string) error { return errors.New("disk error") }
+
+// TestDelete_FailedLocalDeleteKeepsTheCopy covers a local row whose delete
+// fails while the migration runs: the row stays, so the object storage copy
+// the migration may make next must not be deleted by a queued job.
+func TestDelete_FailedLocalDeleteKeepsTheCopy(t *testing.T) {
+	f := objectStoredFile()
+	f.StoredInternal = true
+	repo := testutil.NewMockDriveFileRepository()
+	repo.Files[f.ID] = f
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	svc := drive.NewService(repo, testutil.NewMockDriveFolderRepository(),
+		failingDeleteStorage{drive.NewLocalStorage(t.TempDir(), "")}, idGen, nil, nil, nil, nil)
+	enq := &recordingObjectDeleteEnqueuer{}
+	svc.SetObjectDeleteEnqueuer(enq)
+	svc.SetStorageMigrationRunning(func() bool { return true })
+
+	require.Error(t, svc.Delete(&model.User{ID: "u1"}, "f1"))
+	assert.Empty(t, enq.keys)
+	assert.Contains(t, repo.Files, "f1")
+}
+
+func TestHasMigratedLocalCopy(t *testing.T) {
+	at := time.Now()
+	for _, tt := range []struct {
+		name string
+		f    *model.DriveFile
+		want bool
+	}{
+		{"nil", nil, false},
+		{"migrated", &model.DriveFile{ObjectStorageMigratedAt: &at}, true},
+		{"never migrated", &model.DriveFile{}, false},
+		{"local", &model.DriveFile{StoredInternal: true, ObjectStorageMigratedAt: &at}, false},
+		{"link", &model.DriveFile{IsLink: true, ObjectStorageMigratedAt: &at}, false},
+	} {
+		assert.Equal(t, tt.want, drive.HasMigratedLocalCopy(tt.f), tt.name)
+	}
+}
+
+// TestDeleteAllByHost_FailedDeleteStillDeletesTheLocalCopy covers the purge
+// of a host's files: it deletes the rows even when an object delete fails,
+// so the local copy of a migrated file must go too, or nothing points at it.
+func TestDeleteAllByHost_FailedDeleteStillDeletesTheLocalCopy(t *testing.T) {
+	f := objectStoredFile()
+	host := "remote.example"
+	f.UserHost = &host
+	at := time.Now()
+	f.ObjectStorageMigratedAt = &at
+	repo := testutil.NewMockDriveFileRepository()
+	repo.Files[f.ID] = f
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	svc := drive.NewService(repo, testutil.NewMockDriveFolderRepository(),
+		failingDeleteStorage{drive.NewLocalStorage(t.TempDir(), "")}, idGen, nil, nil, nil, nil)
+	local := &countingStorage{LocalStorage: drive.NewLocalStorage(t.TempDir(), "")}
+	svc.SetLocalStorage(local)
+
+	n, err := svc.DeleteAllByHost(host)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, []string{"a1", "t1", "w1"}, local.deleted)
 }

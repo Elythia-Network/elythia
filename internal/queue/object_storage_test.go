@@ -152,3 +152,26 @@ func TestClient_EnqueueUnfollowBulkDelayed_AggregatesErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 2, rec.calls, "1 件失敗しても残りを試みる")
 }
+
+func TestClient_EnqueueMigrateLocalDriveFiles(t *testing.T) {
+	rec := &payloadRecordingClient{}
+	c := queue.NewClient(&stubDriver{client: rec})
+	defer func() { _ = c.Close() }()
+
+	require.NoError(t, c.EnqueueMigrateLocalDriveFiles("tok", "f9"))
+	assert.Equal(t, queue.TaskTypeMigrateLocalDriveFiles, rec.lastTaskType)
+	assert.Equal(t, queue.ObjectStorageQueueName, rec.lastOpts.Queue)
+	var got queue.MigrateLocalDriveFilesPayload
+	require.NoError(t, json.Unmarshal(rec.lastPayload, &got))
+	assert.Equal(t, queue.MigrateLocalDriveFilesPayload{Token: "tok", AfterID: "f9"}, got)
+	// バッチ自体の失敗 (DB や Redis の障害) は、待って再試行する。再試行の待ちの合計
+	// (1 + 2 + 4 分) は、移す処理の lock の期限 (10 分、core/drive の
+	// storageMigrationLockTTL) より短くする。長いと、再試行を待つ間に lock が切れ、
+	// 再試行したジョブが自分の実行を見失う。
+	assert.Equal(t, 3, rec.lastOpts.MaxRetry)
+	assert.Equal(t, driver.BackoffExponential, rec.lastOpts.BackoffType)
+	assert.Equal(t, time.Minute, rec.lastOpts.BackoffDelay)
+
+	rec.err = errors.New("redis down")
+	assert.ErrorIs(t, c.EnqueueMigrateLocalDriveFiles("tok", ""), rec.err)
+}

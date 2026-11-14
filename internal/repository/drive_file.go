@@ -742,6 +742,9 @@ var linkifyUpdates = map[string]any{
 	"accessKey":          nil,
 	"thumbnailAccessKey": nil,
 	"webpublicAccessKey": nil,
+	// オブジェクトストレージへ写した印 (#4180) も消す。link 行には実体が無いので、
+	// 写した件数にも、戻す処理 (#4183) の対象にも入れない。
+	"objectStorageMigratedAt": nil,
 }
 
 func (r *driveFileRepository) ExpireRemoteCache() (int64, error) {
