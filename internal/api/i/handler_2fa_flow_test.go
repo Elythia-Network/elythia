@@ -465,3 +465,35 @@ func TestTwoFAPasswordLess_FailureIsNotReportedAsSuccess(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, rec.Code,
 		"書き込みに失敗したら 500 を返すこと")
 }
+
+// TestPublishMeUpdated_CarriesRoleFlags: meUpdated (sent on follow requests,
+// 2FA changes and so on) carries the real isAdmin / isModerator, not the
+// packer's false. The frontend merges it into `$i`, so false hid the control
+// panel from admins and moderators (#4168). policies stays out (#1240).
+func TestPublishMeUpdated_CarriesRoleFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name             string
+		admin, moderator bool
+	}{
+		{name: "admin", admin: true, moderator: true},
+		{name: "moderator", moderator: true},
+		{name: "neither"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, repo := newExtraHandler(t)
+			setupUserWithPassword(repo, "u1", "pass")
+			h.roleProvider = &stubRoleProvider{admin: tt.admin, moderator: tt.moderator}
+			pub := &stubIMainStreamPublisher{}
+			h.SetMainStreamPublisher(pub)
+
+			h.PublishMeUpdated("u1")
+			require.Len(t, pub.calls, 1)
+			assert.Equal(t, "meUpdated", pub.calls[0].eventType)
+			body, ok := pub.calls[0].body.(map[string]any)
+			require.True(t, ok, "meUpdated の本文が map でない: %T", pub.calls[0].body)
+			assert.Equal(t, tt.admin, body["isAdmin"])
+			assert.Equal(t, tt.moderator, body["isModerator"])
+			assert.NotContains(t, body, "policies")
+		})
+	}
+}
