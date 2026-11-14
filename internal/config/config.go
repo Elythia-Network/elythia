@@ -20,8 +20,8 @@ var MkGoVersion = "2.1.0"
 
 // MisskeyVersion is the compatible Misskey version. Override at build time via:
 //
-//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MisskeyVersion=2026.10.1"
-var MisskeyVersion = "2026.10.1"
+//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MisskeyVersion=2026.11.0"
+var MisskeyVersion = "2026.11.0"
 
 // MkGoCommit is the source revision this binary was built from (short hash).
 //

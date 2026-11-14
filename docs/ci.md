@@ -475,7 +475,7 @@ git ls-remote https://github.com/actions/checkout 'refs/tags/v7*'
 
 - `frontend/built/*` (#3379 より前の版では `third_party/misskey/built/*`) — 過去の docker build が root 所有で残っていることがある
 - `frontend/packages/*/built` — 同上。`i18n` / `misskey-bubble-game` が無いと frontend の型が通らない
-- `built/.config.json` / `built/meta.json` — 本家の `loadConfig()` が読む生成物
+- `built/meta.json` — 本家の `loadConfig()` が読む生成物 (本家 2026.10.x の `built/.config.json` は 2026.11.0 で要らなくなった)
 
 CI はまっさらな環境なので、手元にある生成物が要件を隠す。新しく CI に載せる workflow は
 **その PR 自身の paths に含めて、PR 上で発火させて確認する**こと。

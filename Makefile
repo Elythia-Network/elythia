@@ -1586,17 +1586,17 @@ upstream-sync-lock: ## frontend/pnpm-lock.yaml を package.json から作り直�
 #  - misskey-js: exports が built/ を指すのでビルドしないと test/e2e が import できない。
 #    frontend まで含む `pnpm build` (5-10 分) は e2e には不要なので呼ばない。
 #  - .config/test.yml: 本家の utils.ts / setup が loadConfig() 経由で読む (port 等)。
-#  - compile-config: loadConfig() は YAML ではなく built/.config.json を読むので、
-#    NODE_ENV=test で .config/test.yml から生成しておく必要がある。
-#  - build-pre: loadConfig() は built/meta.json も readFileSync する (無いと ENOENT)。
+#    NODE_ENV=test なら loadConfig() はこの YAML をそのまま読む。本家 2026.10.x には
+#    YAML を built/.config.json に事前に変換する compile-config があったが、2026.11.0 で
+#    戻された (#4164) ので、生成は要らない。
+#  - build-pre: loadConfig() は built/meta.json を readFileSync する (無いと ENOENT)。
 #    frontend の manifest は existsSync 判定なので無くてよい。
 upstream-e2e-deps: upstream-fetch ## 本家 backend e2e に必要な本家側の依存を用意 (初回のみ)
 	cd $(UPSTREAM_E2E_MISSKEY) && \
 		pnpm install --frozen-lockfile && \
 		pnpm build-pre && \
 		pnpm --filter misskey-js build && \
-		cp .github/misskey/test.yml .config/ && \
-		NODE_ENV=test pnpm --filter backend compile-config
+		cp .github/misskey/test.yml .config/
 
 upstream-e2e-up: ## 本家 backend e2e 用の PostgreSQL / Redis を起動
 	docker compose -f $(UPSTREAM_E2E_COMPOSE) up -d --wait
