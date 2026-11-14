@@ -498,13 +498,9 @@ jobs:
             }
             END { exit bad }'
 
-      # 実際にデプロイするのは Linux なので GOOS=linux で解析する。既定のまま
-      # だと host 依存の package load エラーで解析が空振りしうる。
-      #
-      # 検出は「呼び出しが到達可能なもの」に限られる (import しているだけの
-      # 脆弱性は落とさない)。到達可能なものだけを落とすので、無視リストを
-      # 育てずに運用できる。
+      # govulncheck の版・GOOS=linux・許可の一覧との突き合わせは make vulncheck が
+      # 持つ (#4176)。落とすのは「呼び出しが到達可能なもの」のうち、
+      # tools/vulncheckgate/allow.tsv に理由付きで載せていないものと、一覧の
+      # 使われなくなった行。import しているだけの脆弱性は落とさない。
       - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          GOOS=linux "$(go env GOPATH)/bin/govulncheck" ./...
+        run: make vulncheck

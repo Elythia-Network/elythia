@@ -555,6 +555,31 @@ golangci-lint: ## golangci-lint (errcheck / govet / ineffassign / staticcheck)
 	gover=$$(awk '/^go [0-9]/ {print $$2; exit}' go.mod); \
 	GOWORK=off GOTOOLCHAIN=go$$gover go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --timeout 10m
 
+.PHONY: vulncheck
+vulncheck: ## 依存と Go の標準ライブラリの既知の脆弱性を govulncheck で検査 (CI の vulncheck job)
+	# **版を固定する。** CI は以前 `@latest` を入れていて、手元と CI で別の版が
+	# 動きえた (#4176)。CI もこの target を呼ぶので、版の定義はここ 1 箇所だけ。
+	#
+	# **許可の一覧と突き合わせる。** 関数まで届いた脆弱性 (テキストの出力の
+	# 「Your code is affected」) のうち、tools/vulncheckgate/allow.tsv に理由付きで
+	# 載せたものだけを通す。一覧に無いものと、結果に出てこなくなった一覧の行で落ちる。
+	# 一覧に載せるのは、脆弱性 DB に使っている版の修正が載っておらず、Elythia に当たらないことを確かめたものだけ
+	# (docs/ci.md の「vulncheck が落ちたとき」)。
+	#
+	# GOOS=linux は、実際に配るのが Linux だから。解析の対象にだけ効かせるため、
+	# govulncheck 自身はホストの向けにビルドしてから GOOS=linux で動かす
+	# (`GOOS=linux go run` は Linux 以外のホストで exec format error になる)。
+	# GOWORK=off・生成物の退避・toolchain の固定は golangci-lint と同じ理由
+	# (上の target のコメント)。
+	@set -e; \
+	gen=cmd/elythia/plugins_generated.go; bak=""; tmp=$$(mktemp -d); out="$$tmp/govulncheck.json"; \
+	if [ -f "$$gen" ]; then bak=$$(mktemp); cp -p "$$gen" "$$bak"; rm -f "$$gen"; fi; \
+	trap 'rm -rf "$$tmp"; if [ -n "$$bak" ]; then cp -p "$$bak" "$$gen"; rm -f "$$bak"; fi' EXIT INT TERM; \
+	gover=$$(awk '/^go [0-9]/ {print $$2; exit}' go.mod); \
+	GOWORK=off GOTOOLCHAIN=go$$gover GOBIN="$$tmp" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0; \
+	GOWORK=off GOTOOLCHAIN=go$$gover GOOS=linux "$$tmp/govulncheck" -format json ./... > "$$out"; \
+	GOWORK=off go run ./tools/vulncheckgate -allow tools/vulncheckgate/allow.tsv "$$out"
+
 .PHONY: actionlint
 actionlint: ## GitHub Actions の workflow を検査
 	# CodeQL の `actions` クエリが見るのは script injection などの**セキュリティ**で、
