@@ -13665,6 +13665,14 @@ export interface Locale extends ILocale {
      * 読み込みに失敗したか、このブラウザでは表示・再生できない形式です
      */
     "failedToLoadMedia": string;
+    /**
+     * {n}件を選択中
+     */
+    "nFilesSelected": ParameterizedString<"n">;
+    /**
+     * 選択を解除
+     */
+    "unselectAll": string;
     "_abuseReportForm": {
         /**
          * 違反カテゴリ
