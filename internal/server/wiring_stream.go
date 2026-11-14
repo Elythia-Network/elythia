@@ -120,6 +120,7 @@ func buildStream(
 // "name: name" line elsewhere does not also match this literal.
 type streamChannelDeps struct {
 	antennas     repository.AntennaRepository
+	pollVotes    repository.PollVoteRepository
 	userLists    repository.UserListRepository
 	clips        repository.ClipRepository
 	roles        *corerole.Service
@@ -169,7 +170,7 @@ func builtinStreamChannels(d streamChannelDeps) []streamChannel {
 		{"main", channels.NewMain, credentialed},
 		{"drive", channels.NewDrive, credentialed},
 		{"hashtag", channels.NewHashtag, anyone},
-		{"antenna", channels.NewAntennaFactory(d.antennas).New, credentialed},
+		{"antenna", channels.NewAntennaFactory(d.antennas, d.pollVotes).New, credentialed},
 		{"channel", channels.NewChannelTimeline, anyone},
 		// userList は membership lookup を渡して per-member withReplies gate を有効化 (#2020)。
 		{"userList", channels.NewUserListFactory(d.userLists).New, anyone},

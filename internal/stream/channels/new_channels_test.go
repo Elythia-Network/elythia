@@ -97,7 +97,7 @@ func newAntennaCh(ctx stream.ChannelContext, ownerID string) stream.Channel {
 	owners := &stubAntennaOwners{byID: map[string]*model.Antenna{
 		"a1": {ID: "a1", UserID: ownerID},
 	}}
-	return NewAntennaFactory(owners).New(ctx)
+	return NewAntennaFactory(owners, nil).New(ctx)
 }
 
 // interface conformance checks
@@ -379,7 +379,7 @@ func TestAntenna_UnknownAntennaRejected(t *testing.T) {
 // subscription rather than silently opening the gate.
 func TestAntenna_NilOwnersFailClosed(t *testing.T) {
 	ctx := newCtx(&model.User{ID: "alice"})
-	ch := NewAntennaFactory(nil).New(ctx)
+	ch := NewAntennaFactory(nil, nil).New(ctx)
 	err := ch.Init(json.RawMessage(`{"antennaId":"a1"}`))
 	assert.ErrorIs(t, err, stream.ErrInvalidParams)
 	assert.Empty(t, ctx.subs)
@@ -389,7 +389,7 @@ func TestAntenna_NilOwnersFailClosed(t *testing.T) {
 func TestAntenna_LookupErrorRejected(t *testing.T) {
 	ctx := newCtx(&model.User{ID: "alice"})
 	owners := &stubAntennaOwners{err: errAntennaLookup}
-	ch := NewAntennaFactory(owners).New(ctx)
+	ch := NewAntennaFactory(owners, nil).New(ctx)
 	err := ch.Init(json.RawMessage(`{"antennaId":"a1"}`))
 	assert.ErrorIs(t, err, stream.ErrInvalidParams)
 	assert.Empty(t, ctx.subs)
@@ -1254,4 +1254,73 @@ func TestUserList_ConcurrentSnapshotAndNote(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// stubPollVotes records the lookups and returns votes for the viewer.
+type stubPollVotes struct {
+	votes map[string][]int
+	calls [][]string
+}
+
+func (s *stubPollVotes) FindByUserAndNoteIDs(_ string, noteIDs []string) (map[string][]int, error) {
+	s.calls = append(s.calls, noteIDs)
+	return s.votes, nil
+}
+
+// TestAntenna_MarksViewerPollVotes: the antenna channel marks the viewer's
+// votes on the note's poll and on its renote's / reply's poll, followed
+// recursively (upstream 2026.11.0 #18056, #4164). A note without a poll does not query votes, and a
+// note the viewer did not vote on is sent unchanged.
+func TestAntenna_MarksViewerPollVotes(t *testing.T) {
+	owners := &stubAntennaOwners{byID: map[string]*model.Antenna{"a1": {ID: "a1", UserID: "alice"}}}
+	poll := `"poll":{"multiple":false,"expiresAt":null,"choices":[{"text":"a","votes":1,"isVoted":false},{"text":"b","votes":0,"isVoted":false}]}`
+	isVoted := func(t *testing.T, poll any) []bool {
+		t.Helper()
+		var out []bool
+		for _, c := range poll.(map[string]any)["choices"].([]any) {
+			out = append(out, c.(map[string]any)["isVoted"].(bool))
+		}
+		return out
+	}
+	sent := func(t *testing.T, votes *stubPollVotes, payload string) (map[string]any, []byte) {
+		t.Helper()
+		ctx := newCtx(&model.User{ID: "alice"})
+		ch := NewAntennaFactory(owners, votes).New(ctx)
+		require.NoError(t, ch.Init(json.RawMessage(`{"antennaId":"a1"}`)))
+		ch.OnRedisEvent([]byte(payload))
+		require.Len(t, ctx.sentBody, 1)
+		raw := []byte(ctx.sentBody[0].(json.RawMessage))
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(raw, &got))
+		return got, raw
+	}
+
+	t.Run("own poll", func(t *testing.T) {
+		votes := &stubPollVotes{votes: map[string][]int{"n1": {0}}}
+		got, _ := sent(t, votes, `{"id":"n1","userId":"author","visibility":"public",`+poll+`}`)
+		assert.Equal(t, []bool{true, false}, isVoted(t, got["poll"]))
+		assert.Equal(t, [][]string{{"n1"}}, votes.calls)
+	})
+	t.Run("renote poll", func(t *testing.T) {
+		votes := &stubPollVotes{votes: map[string][]int{"r1": {1}}}
+		got, _ := sent(t, votes, `{"id":"n1","userId":"author","visibility":"public","text":"q","renoteId":"r1","renote":{"id":"r1","userId":"other","visibility":"public",`+poll+`}}`)
+		assert.Equal(t, []bool{false, true}, isVoted(t, got["renote"].(map[string]any)["poll"]))
+	})
+	t.Run("quote inside a renote", func(t *testing.T) {
+		// 本家と同じく renote / reply を再帰的にたどる (#4164)。
+		votes := &stubPollVotes{votes: map[string][]int{"q1": {1}}}
+		got, _ := sent(t, votes, `{"id":"n1","userId":"author","visibility":"public","renoteId":"r1","renote":{"id":"r1","userId":"other","visibility":"public","text":"q","renoteId":"q1","renote":{"id":"q1","userId":"third","visibility":"public",`+poll+`}}}`)
+		assert.Equal(t, []bool{false, true}, isVoted(t, got["renote"].(map[string]any)["renote"].(map[string]any)["poll"]))
+		assert.Equal(t, [][]string{{"q1"}}, votes.calls)
+	})
+	t.Run("not voted is sent unchanged", func(t *testing.T) {
+		payload := `{"id":"n1","userId":"author","visibility":"public",` + poll + `}`
+		_, raw := sent(t, &stubPollVotes{votes: map[string][]int{}}, payload)
+		assert.JSONEq(t, payload, string(raw))
+	})
+	t.Run("no poll does not query", func(t *testing.T) {
+		votes := &stubPollVotes{votes: map[string][]int{"n1": {0}}}
+		sent(t, votes, `{"id":"n1","userId":"author","visibility":"public","poll":null}`)
+		assert.Empty(t, votes.calls)
+	})
 }
