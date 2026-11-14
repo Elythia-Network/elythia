@@ -15,8 +15,8 @@ import (
 
 // MkGoVersion is the mk-go version. Override at build time via:
 //
-//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MkGoVersion=2.1.0"
-var MkGoVersion = "2.1.0"
+//	go build -ldflags "-X github.com/elythia-network/elythia/internal/config.MkGoVersion=2.2.0"
+var MkGoVersion = "2.2.0"
 
 // MisskeyVersion is the compatible Misskey version. Override at build time via:
 //
