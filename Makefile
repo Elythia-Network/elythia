@@ -801,7 +801,7 @@ dropin-frontend-swap-test: ## TS-A → mk-A 切替まで含む frontend e2e
 # 以前は upstream の Dockerfile の `ARG NODE_VERSION` (`26.4.0-trixie` の形で、版と
 # distro の両方を持つ) から取っていた (#2921) が、#3379 で本家の Dockerfile は
 # 取り込まなくなった。版は CI (`node-version-file`) と同じ .node-version を見て、
-# distro は upstream 2026.10.0 の Dockerfile と同じ trixie を置く。本家の版を上げた
+# distro は upstream の Dockerfile と同じ trixie を置く (2026.11.0 で確かめた)。本家の版を上げた
 # ときは、本家の Dockerfile の distro が変わっていないかを確かめる。
 # recipe の中で読む — `$(shell ...)` は使わない (REVISION_LDFLAGS の理由)。
 #
