@@ -76,6 +76,10 @@ type wwwAuthWriter struct {
 	direct    bool
 }
 
+// Unwrap lets http.ResponseController reach writer capabilities such as
+// SetWriteDeadline through this response middleware.
+func (w *wwwAuthWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *wwwAuthWriter) WriteHeader(code int) {
 	if w.buffering || w.direct {
 		return

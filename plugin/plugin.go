@@ -323,3 +323,10 @@ type Context interface {
 	// pool を使ってエラーになる (#3661)。
 	GoContext(fn func(context.Context))
 }
+
+// CheckedUserRolePolicyContext is an optional Context extension for background
+// jobs that must re-check authorization for the account that queued the work.
+type CheckedUserRolePolicyContext interface {
+	Context
+	CheckedUserRolePolicies(userID string, keys ...string) (map[string]any, error)
+}

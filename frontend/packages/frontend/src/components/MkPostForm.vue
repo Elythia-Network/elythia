@@ -154,6 +154,7 @@ import { emojiPicker } from '@/utility/emoji-picker.js';
 import { mfmFunctionPicker } from '@/utility/mfm-function-picker.js';
 import { prefer } from '@/preferences.js';
 import { getPluginHandlers } from '@/plugin.js';
+import { transformPastedText } from '@/plugin-api.js';
 import { DI } from '@/di.js';
 import { globalEvents } from '@/events.js';
 import { checkDragDataType, getDragData } from '@/drag-and-drop.js';
@@ -757,6 +758,7 @@ async function onPaste(ev: ClipboardEvent) {
 	if (props.mock) return;
 	if (ev.clipboardData == null) return;
 	if (textareaEl.value == null) return;
+	if (posting.value || posted.value || textAreaReadOnly.value || textareaEl.value.disabled || textareaEl.value.readOnly) return;
 
 	let pastedFiles: File[] = [];
 	for (const { item, i } of Array.from(ev.clipboardData.items, (data, x) => ({ item: data, i: x }))) {
@@ -775,11 +777,38 @@ async function onPaste(ev: ClipboardEvent) {
 		uploader.addFiles(pastedFiles);
 		return;
 	}
+	if (imeText.value !== '') return;
 
-	const paste = ev.clipboardData.getData('text');
+	const rawPaste = ev.clipboardData.getData('text');
+	const transformedPaste = transformPastedText(rawPaste, {
+		isPreferenceEnabled: key => {
+			const value = (prefer.s as Record<string, unknown>)[key];
+			return typeof value === 'boolean' ? value : undefined;
+		},
+	});
+	const paste = transformedPaste.text;
+	const pasteChanged = paste !== rawPaste;
+	const notifyPasteTransform = () => {
+		if (!transformedPaste.notification) return;
+		try {
+			os.toast(transformedPaste.notification);
+		} catch {
+			// A toast failure must not undo or interrupt the paste.
+		}
+	};
+	const insertPastedText = () => {
+		const textarea = textareaEl.value;
+		if (textarea == null || posting.value || posted.value || textAreaReadOnly.value || textarea.disabled || textarea.readOnly || imeText.value !== '') return false;
+		insertTextAtCursor(textarea, paste);
+		notifyPasteTransform();
+		return true;
+	};
+	let quoteAttached = false;
+	let quotePromptPrevented = false;
 
 	if (!renoteTargetNote.value && !quoteId.value && paste.startsWith(url + '/notes/')) {
 		ev.preventDefault();
+		quotePromptPrevented = true;
 
 		const { canceled } = await os.confirm({
 			type: 'info',
@@ -787,11 +816,16 @@ async function onPaste(ev: ClipboardEvent) {
 		});
 
 		if (canceled) {
-			insertTextAtCursor(textareaEl.value, paste);
+			insertPastedText();
 			return;
 		}
+		if (textareaEl.value == null || posting.value || posted.value || textAreaReadOnly.value || textareaEl.value.disabled || textareaEl.value.readOnly) return;
 
-		quoteId.value = paste.substring(url.length).match(/^\/notes\/(.+?)\/?$/)?.[1] ?? null;
+		const noteId = paste.substring(url.length).match(/^\/notes\/(.+?)\/?$/)?.[1] ?? null;
+		if (noteId != null) {
+			quoteId.value = noteId;
+			quoteAttached = true;
+		}
 	}
 
 	if (paste.length > 1000) {
@@ -803,13 +837,21 @@ async function onPaste(ev: ClipboardEvent) {
 		});
 
 		if (canceled) {
-			insertTextAtCursor(textareaEl.value, paste);
+			insertPastedText();
 			return;
 		}
+		if (textareaEl.value == null || posting.value || posted.value || textAreaReadOnly.value || textareaEl.value.disabled || textareaEl.value.readOnly) return;
 
 		const fileName = formatTimeString(new Date(), pastedFileName).replace(/{{number}}/g, '0');
 		const file = new File([paste], `${fileName}.txt`, { type: 'text/plain' });
 		uploader.addFiles([file]);
+		notifyPasteTransform();
+		return;
+	}
+
+	if ((pasteChanged || quotePromptPrevented) && !quoteAttached) {
+		ev.preventDefault();
+		insertPastedText();
 	}
 }
 

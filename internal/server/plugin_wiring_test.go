@@ -2,11 +2,13 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -233,6 +235,109 @@ func TestPluginRequest_UnauthenticatedIsNotModerator(t *testing.T) {
 }
 
 // --- Blob ---
+
+type blobWriteDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+	setErr   error
+}
+
+func (w *blobWriteDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return w.setErr
+}
+
+func TestWritePluginBlobAppliesDeadlineThroughWWWAuthenticate(t *testing.T) {
+	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	e := echo.New()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	start := time.Now()
+	handler := middleware.WWWAuthenticate()(func(c echo.Context) error {
+		return writePluginBlob(c, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: 30 * time.Second})
+	})
+
+	require.NoError(t, handler(ctx))
+	require.False(t, inner.deadline.IsZero(), "deadline must reach the underlying response writer")
+	assert.False(t, inner.deadline.Before(start.Add(30*time.Second)))
+	assert.False(t, inner.deadline.After(time.Now().Add(30*time.Second)))
+	assert.Equal(t, "mp4", inner.Body.String())
+	assert.Equal(t, "video/mp4", inner.Header().Get("Content-Type"))
+}
+
+func TestWrapPluginHandlerAppliesBlobDeadlineThroughMiddleware(t *testing.T) {
+	body := bytes.Repeat([]byte("plugin blob payload\n"), 100)
+	for _, acceptGzip := range []bool{false, true} {
+		name := "without gzip"
+		if acceptGzip {
+			name = "through gzip"
+		}
+		t.Run(name, func(t *testing.T) {
+			inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			e := echo.New()
+			e.Use(gzipMiddleware())
+			e.Use(middleware.WWWAuthenticate())
+			e.POST("/blob", wrapPluginHandler(func(plugin.Request) (any, error) {
+				return plugin.Blob{ContentType: "application/octet-stream", Body: body, WriteTimeout: time.Minute}, nil
+			}, nil))
+
+			req := httptest.NewRequest(http.MethodPost, "/blob", nil)
+			if acceptGzip {
+				req.Header.Set(echo.HeaderAcceptEncoding, "gzip")
+			}
+			start := time.Now()
+			e.ServeHTTP(inner, req)
+
+			assert.False(t, inner.deadline.IsZero(), "plugin Blob deadline must survive host adapter and middleware")
+			assert.False(t, inner.deadline.Before(start.Add(time.Minute)))
+			assert.False(t, inner.deadline.After(time.Now().Add(time.Minute)))
+			assert.Equal(t, http.StatusOK, inner.Code)
+			assert.Equal(t, "application/octet-stream", inner.Header().Get(echo.HeaderContentType))
+
+			if acceptGzip {
+				assert.Equal(t, "gzip", inner.Header().Get(echo.HeaderContentEncoding))
+				reader, err := gzip.NewReader(inner.Body)
+				require.NoError(t, err)
+				decoded, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				require.NoError(t, reader.Close())
+				assert.Equal(t, body, decoded, "the compressed Blob must retain its original body")
+			} else {
+				assert.Empty(t, inner.Header().Get(echo.HeaderContentEncoding))
+				assert.Equal(t, body, inner.Body.Bytes())
+			}
+		})
+	}
+}
+
+func TestWritePluginBlobRejectsDeadlineWhenWriterCannotEnforceIt(t *testing.T) {
+	e := echo.New()
+	inner := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Second})
+
+	require.Error(t, err, "a bounded Blob must not be written when its deadline cannot be enforced")
+	assert.Empty(t, inner.Body.String(), "the Blob body must not be sent without the deadline")
+}
+
+func TestWritePluginBlobRejectsWhenWriterDeadlineSetterFails(t *testing.T) {
+	e := echo.New()
+	inner := &blobWriteDeadlineRecorder{ResponseRecorder: httptest.NewRecorder(), setErr: errors.New("deadline unavailable")}
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: time.Second})
+
+	require.Error(t, err)
+	assert.Empty(t, inner.Body.String(), "the Blob body must not be sent after deadline setup fails")
+}
+
+func TestWritePluginBlobRejectsNegativeDeadlineBeforeWriting(t *testing.T) {
+	e := echo.New()
+	inner := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
+	err := writePluginBlob(ctx, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: -time.Second})
+
+	require.Error(t, err)
+	assert.Empty(t, inner.Body.String())
+}
 
 // バイナリ応答は JSON エンコードせずそのまま書く。画像プロキシの用途。
 func TestWrapPluginHandler_Blob(t *testing.T) {
@@ -762,6 +867,59 @@ func TestSetupPlugins_RoutesAreNamespaced(t *testing.T) {
 	rec = httptest.NewRecorder()
 	s.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plugin/gameinfo/refresh", nil))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestSetupPlugins_CheckedPolicyResolversReachContextAndRoute(t *testing.T) {
+	const policyKey = "canSearchNotes"
+	svc, _, _ := newEffectivePolicyTestService(t)
+
+	var contextPolicies map[string]any
+	var contextErr error
+	def := plugin.Definition{
+		Name:       "checked-policy",
+		APIVersion: plugin.APIVersion,
+		EffectivePolicies: func(plugin.Context, plugin.EffectivePolicyInvalidator) (plugin.EffectivePolicyRegistration, error) {
+			return plugin.EffectivePolicyRegistration{
+				Keys: []string{policyKey},
+				Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+					return []plugin.EffectivePolicyContribution{{Key: policyKey, Priority: 1, Value: false}}, nil
+				},
+			}, nil
+		},
+		Routes: func(ctx plugin.Context, r plugin.Router) error {
+			checkedContext, ok := ctx.(plugin.CheckedUserRolePolicyContext)
+			if !ok {
+				return errors.New("checked role policy context is unavailable")
+			}
+			contextPolicies, contextErr = checkedContext.CheckedUserRolePolicies("u1", policyKey)
+			r.GET("/checked", func(req plugin.Request) (any, error) {
+				checkedRequest, ok := req.(plugin.CheckedRolePolicyRequest)
+				if !ok {
+					return nil, errors.New("checked role policy request is unavailable")
+				}
+				return checkedRequest.CheckedRolePolicies(policyKey)
+			})
+			return nil
+		},
+	}
+
+	s, api := newPluginTestServer(config.RoleServer)
+	s.roleService = svc
+	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(string(middleware.UserContextKey), &model.User{ID: "u1"})
+			return next(c)
+		}
+	})
+	require.NoError(t, s.setupPlugins(api, []plugin.Definition{def}, noopStorage))
+
+	require.NoError(t, contextErr)
+	assert.Equal(t, map[string]any{policyKey: false}, contextPolicies, "setupPlugins must wire the preparation context to the role service")
+
+	rec := httptest.NewRecorder()
+	s.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/plugin/checked-policy/checked", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"canSearchNotes":false}`, rec.Body.String(), "setupPlugins must wire the registered route to the role service")
 }
 
 type recordingPluginStorage struct {

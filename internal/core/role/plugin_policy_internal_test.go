@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,14 +12,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/elythia-network/elythia/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/datatypes"
 )
 
 func TestAcquirePolicyProviderTokenRejectsExpiredContext(t *testing.T) {
@@ -71,7 +75,7 @@ func TestResolvePolicyProviderCachedSupersedesStaleFlightWithoutWaiting(t *testi
 	}
 	done := make(chan struct{})
 	go func() {
-		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 		close(done)
 	}()
 
@@ -176,7 +180,7 @@ func TestResolvePolicyProviderCachedSupersededTokenWaiterSkipsResolver(t *testin
 	key := policyProviderCacheKey{userID: "u1"}
 	done := make(chan struct{})
 	go func() {
-		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+		resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 		close(done)
 	}()
 
@@ -241,7 +245,7 @@ func TestResolvePolicyProviderCachedReclaimsUserEpochAfterLastFlight(t *testing.
 		runtime: runtime,
 	}
 
-	_, ok := resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"})
+	_, ok := resolvePolicyProviderCached(provider, plugin.EffectivePolicyRequest{UserID: "u1"}, false)
 	assert.True(t, ok)
 	assert.NotContains(t, runtime.userEpoch, "u1")
 }
@@ -498,6 +502,32 @@ func (r *countingInternalAssignmentRepo) ListByUser(userID string) ([]*model.Rol
 	return r.MockRoleAssignmentRepository.ListByUser(userID)
 }
 
+type atomicCountingInternalAssignmentRepo struct {
+	*testutil.MockRoleAssignmentRepository
+	calls atomic.Int32
+}
+
+func (r *atomicCountingInternalAssignmentRepo) ListByUser(userID string) ([]*model.RoleAssignment, error) {
+	r.calls.Add(1)
+	return r.MockRoleAssignmentRepository.ListByUser(userID)
+}
+
+type conditionalErrorRaceUserRepo struct {
+	*testutil.MockUserRepository
+	calls        atomic.Int32
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (r *conditionalErrorRaceUserRepo) FindByID(userID string) (*model.User, error) {
+	if r.calls.Add(1) == 1 {
+		close(r.firstStarted)
+		<-r.releaseFirst
+		return nil, errors.New("late conditional user lookup failure")
+	}
+	return &model.User{ID: userID, IsBot: false}, nil
+}
+
 func newInternalServiceWithCountingRepo(t *testing.T) (*Service, *testutil.MockRoleRepository, *countingInternalAssignmentRepo) {
 	t.Helper()
 	roleRepo := testutil.NewMockRoleRepository()
@@ -506,6 +536,15 @@ func newInternalServiceWithCountingRepo(t *testing.T) (*Service, *testutil.MockR
 	metaRepo.Meta = &model.Meta{ID: "x"}
 	idGen, _ := id.NewGenerator("aidx")
 	return NewService(roleRepo, assignRepo, metaRepo, idGen), roleRepo, assignRepo
+}
+
+type failingRoleListRepository struct {
+	repository.RoleRepository
+	err error
+}
+
+func (r failingRoleListRepository) List() ([]*model.Role, error) {
+	return nil, r.err
 }
 
 // 1 回の ListByUser から roles と activeAssignments が同時に得られる。
@@ -521,6 +560,253 @@ func TestResolveUserRoleSnapshotReadsOnceAndReturnsBoth(t *testing.T) {
 	assert.Equal(t, "r1", snapshot.roles[0].ID)
 	assert.Equal(t, []activeRoleAssignment{{roleID: "r1", assignmentID: "a1"}}, snapshot.activeAssignments)
 	assert.Equal(t, 1, assignRepo.calls, "roles と activeAssignments は 1 回の読取から共に作られる")
+}
+
+func TestCheckedPoliciesReportConditionalRoleLookupFailureWithoutLosingManualDeny(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["manual"] = &model.Role{
+		ID: "manual", Target: model.RoleTargetManual,
+		Policies: datatypes.JSON(`{"canPublicNote":{"useDefault":false,"priority":0,"value":false}}`),
+	}
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	assignRepo.Assignments["u1:manual"] = &model.RoleAssignment{ID: "a1", UserID: "u1", RoleID: "manual"}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("user lookup unavailable")
+	svc.SetUserRepo(userRepo)
+	var providerCalls atomic.Int32
+	require.NoError(t, svc.RegisterEffectivePolicyProvider("partial-role-input", plugin.EffectivePolicyRegistration{
+		Keys: []string{"canPublicNote"},
+		Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			providerCalls.Add(1)
+			return []plugin.EffectivePolicyContribution{{Key: "canPublicNote", Priority: 2, Value: true}}, nil
+		},
+	}))
+
+	unchecked := svc.GetUserPolicies("u1")
+	assert.Equal(t, true, unchecked["canPublicNote"], "legacy unchecked resolution keeps its priority-2 provider contribution")
+	assert.Equal(t, int32(1), providerCalls.Load(), "unchecked resolution must preserve pre-existing provider evaluation")
+
+	checked, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "conditional role lookup failure must reach checked authorization")
+	assert.Equal(t, false, checked["canPublicNote"], "checked fallback should retain the assigned manual denial")
+	assert.Equal(t, int32(1), providerCalls.Load(), "checked resolution must suppress providers on incomplete conditional inputs")
+}
+
+func TestCheckedConditionalRoleErrorCacheHitSkipsProviderAndAssignmentRead(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+	}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("temporary conditional user lookup failure")
+	svc.SetUserRepo(userRepo)
+	var providerCalls atomic.Int32
+	require.NoError(t, svc.RegisterEffectivePolicyProvider("checked-negative-cache", plugin.EffectivePolicyRegistration{
+		Keys: []string{"canSearchNotes"},
+		Resolve: func(context.Context, plugin.EffectivePolicyRequest) ([]plugin.EffectivePolicyContribution, error) {
+			providerCalls.Add(1)
+			return []plugin.EffectivePolicyContribution{{Key: "canSearchNotes", Priority: 2, Value: true}}, nil
+		},
+	}))
+
+	for range 2 {
+		_, err := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, err, "a cached conditional input failure remains visible to checked callers")
+	}
+	assert.Equal(t, 1, assignRepo.calls, "the error-bearing snapshot bounds assignment reads")
+	assert.Equal(t, int32(0), providerCalls.Load(), "checked resolution never invokes providers for incomplete inputs")
+}
+
+func TestConditionalRoleLookupFailureUsesOneSecondNegativeCache(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+		roleRepo.Roles["conditional"] = &model.Role{
+			ID: "conditional", Target: model.RoleTargetConditional,
+			CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+			Policies:    datatypes.JSON(`{"canCreateChannel":{"useDefault":false,"priority":1,"value":false}}`),
+		}
+		userRepo := testutil.NewMockUserRepository()
+		userRepo.FindErr = errors.New("temporary user lookup failure")
+		userRepo.Users["u1"] = &model.User{ID: "u1", IsBot: true}
+		svc.SetUserRepo(userRepo)
+
+		_, firstErr := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, firstErr)
+		assert.Equal(t, 1, assignRepo.calls)
+
+		userRepo.FindErr = nil
+		_, cachedErr := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, cachedErr, "the cached error snapshot must keep checked resolution fail closed")
+		assert.Equal(t, 1, assignRepo.calls, "the negative cache bounds repeated assignment reads")
+
+		time.Sleep(conditionalRoleErrorCacheTTL)
+		policies, recoveredErr := svc.GetUserPoliciesChecked("u1")
+		require.NoError(t, recoveredErr, "a recovered repository is retried after the short error TTL")
+		assert.Equal(t, false, policies["canCreateChannel"], "the recovered conditional role should now apply")
+		assert.Equal(t, 2, assignRepo.calls)
+	})
+}
+
+func TestConditionalRoleErrorCacheCanBeInvalidatedImmediately(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("temporary user lookup failure")
+	userRepo.Users["u1"] = &model.User{ID: "u1", IsBot: false}
+	svc.SetUserRepo(userRepo)
+
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err)
+	userRepo.FindErr = nil
+	svc.InvalidateUserRoleCache("u1")
+
+	_, err = svc.GetUserPoliciesChecked("u1")
+	require.NoError(t, err, "explicit invalidation bypasses the negative cache TTL")
+	assert.Equal(t, 2, assignRepo.calls)
+}
+
+func TestConditionalRoleErrorCacheExpiresAtEarliestAssignment(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+		roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+		expiresAt := time.Now().Add(250 * time.Millisecond)
+		assignRepo.Assignments["u1:manual"] = &model.RoleAssignment{
+			ID: "a1", UserID: "u1", RoleID: "manual", ExpiresAt: &expiresAt,
+			Role: &model.Role{ID: "manual", Target: model.RoleTargetManual},
+		}
+		userRepo := testutil.NewMockUserRepository()
+		userRepo.FindErr = errors.New("temporary user lookup failure")
+		svc.SetUserRepo(userRepo)
+
+		_, err := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, err)
+		entry := svc.userRoleCache["u1"]
+		require.NotNil(t, entry)
+		assert.Equal(t, expiresAt, entry.expiresAt, "the negative TTL must not outlive an active assignment")
+
+		time.Sleep(250 * time.Millisecond)
+		_, err = svc.GetUserPoliciesChecked("u1")
+		require.Error(t, err)
+		assert.Equal(t, 2, assignRepo.calls, "expiry at the assignment boundary forces a new snapshot")
+	})
+}
+
+func TestConditionalRoleErrorCacheBoundsUniqueUserKeys(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+		roleRepo.Roles["conditional"] = &model.Role{
+			ID: "conditional", Target: model.RoleTargetConditional,
+			CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+		}
+		userRepo := testutil.NewMockUserRepository()
+		userRepo.FindErr = errors.New("temporary conditional user lookup failure")
+		svc.SetUserRepo(userRepo)
+
+		for i := range maxConditionalRoleErrorCacheEntries + 1 {
+			userID := fmt.Sprintf("error-user-%d", i)
+			snapshot, err := svc.resolveUserRoleSnapshot(userID)
+			require.NoError(t, err)
+			require.Error(t, snapshot.conditionalErr)
+		}
+		assert.Len(t, svc.userRoleCache, maxConditionalRoleErrorCacheEntries,
+			"unique conditional failures must not grow the shared role cache beyond its error-key budget")
+
+		calls := assignRepo.calls
+		cached, err := svc.resolveUserRoleSnapshot("error-user-0")
+		require.NoError(t, err)
+		require.Error(t, cached.conditionalErr)
+		assert.Equal(t, calls, assignRepo.calls, "existing negative entries remain usable at the capacity limit")
+	})
+}
+
+func TestConditionalRoleErrorIsNotCachedWhenSharedRoleCacheIsFull(t *testing.T) {
+	svc, roleRepo, assignRepo := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+	}
+	for i := range maxConditionalRoleErrorCacheEntries {
+		userID := fmt.Sprintf("warm-user-%d", i)
+		svc.userRoleCache[userID] = &roleCacheEntry{
+			snapshot:  userRoleSnapshot{roles: []*model.Role{}},
+			expiresAt: time.Now().Add(time.Hour),
+		}
+	}
+	userRepo := testutil.NewMockUserRepository()
+	userRepo.FindErr = errors.New("temporary conditional user lookup failure")
+	svc.SetUserRepo(userRepo)
+
+	for range 2 {
+		_, err := svc.GetUserPoliciesChecked("u1")
+		require.Error(t, err, "saturation must not turn a checked input failure into success")
+	}
+	assert.Equal(t, 2, assignRepo.calls, "a new error key is not cached when the shared map is full")
+	assert.NotContains(t, svc.userRoleCache, "u1")
+	assert.Len(t, svc.userRoleCache, maxConditionalRoleErrorCacheEntries)
+}
+
+func TestConditionalRoleErrorCannotOverwriteNewerSuccessfulSnapshot(t *testing.T) {
+	roleRepo := testutil.NewMockRoleRepository()
+	assignRepo := &atomicCountingInternalAssignmentRepo{MockRoleAssignmentRepository: testutil.NewMockRoleAssignmentRepository(roleRepo)}
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x"}
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	svc := NewService(roleRepo, assignRepo, metaRepo, idGen)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	userRepo := &conditionalErrorRaceUserRepo{
+		MockUserRepository: testutil.NewMockUserRepository(),
+		firstStarted:       make(chan struct{}),
+		releaseFirst:       make(chan struct{}),
+	}
+	svc.SetUserRepo(userRepo)
+
+	firstDone := make(chan userRoleSnapshot, 1)
+	go func() {
+		snapshot, _ := svc.resolveUserRoleSnapshot("u1")
+		firstDone <- snapshot
+	}()
+	<-userRepo.firstStarted
+
+	newer, err := svc.resolveUserRoleSnapshot("u1")
+	require.NoError(t, err)
+	require.NoError(t, newer.conditionalErr)
+	close(userRepo.releaseFirst)
+	older := <-firstDone
+	require.Error(t, older.conditionalErr)
+
+	cached, err := svc.resolveUserRoleSnapshot("u1")
+	require.NoError(t, err)
+	require.NoError(t, cached.conditionalErr, "a late failure must not replace a warm successful snapshot")
+	assert.Equal(t, int32(2), userRepo.calls.Load())
+	assert.Equal(t, int32(2), assignRepo.calls.Load())
+}
+
+func TestCheckedPoliciesReportConditionalRoleListFailure(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{
+		ID: "conditional", Target: model.RoleTargetConditional,
+		CondFormula: datatypes.JSON(`{"type":"isBot"}`),
+	}
+	svc.roleRepo = failingRoleListRepository{RoleRepository: roleRepo, err: errors.New("role list unavailable")}
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must not resolve against an incomplete conditional-role list")
+}
+
+func TestCheckedPoliciesReportMissingConditionalRoleUser(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must report unavailable conditional-role user lookup")
+}
+
+func TestCheckedPoliciesReportNilConditionalRoleUser(t *testing.T) {
+	svc, roleRepo, _ := newInternalServiceWithCountingRepo(t)
+	roleRepo.Roles["conditional"] = &model.Role{ID: "conditional", Target: model.RoleTargetConditional, CondFormula: datatypes.JSON(`{"type":"isBot"}`)}
+	svc.SetUserRepo(testutil.NewMockUserRepository())
+	_, err := svc.GetUserPoliciesChecked("u1")
+	require.Error(t, err, "checked policies must report a missing user when a conditional role needs evaluation")
 }
 
 // warm cache は 0 query で両方を返す。**片方だけ返さない。**
@@ -776,9 +1062,9 @@ func TestPolicyProviderCacheKeySeparatesAssignmentIdentities(t *testing.T) {
 	first := plugin.EffectivePolicyRequest{UserID: "u1", ActiveAssignments: []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a1"}}}
 	second := plugin.EffectivePolicyRequest{UserID: "u1", ActiveAssignments: []plugin.ActiveRoleAssignment{{RoleID: "r1", AssignmentID: "a2"}}}
 
-	firstResult, ok := resolvePolicyProviderCached(provider, first)
+	firstResult, ok := resolvePolicyProviderCached(provider, first, false)
 	require.True(t, ok)
-	secondResult, ok := resolvePolicyProviderCached(provider, second)
+	secondResult, ok := resolvePolicyProviderCached(provider, second, false)
 	require.True(t, ok)
 
 	assert.Equal(t, true, firstResult[0].Value)

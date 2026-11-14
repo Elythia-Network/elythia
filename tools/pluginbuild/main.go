@@ -86,6 +86,8 @@ type manifest struct {
 	// フロントのバンドルにも入らない。同梱サンプルの既定値や、今はビルド
 	// できないプラグインの一時退避に使う。
 	Disabled bool `yaml:"disabled"`
+	// FrontendOnly declares a frontend plugin without a Go module or runtime registration.
+	FrontendOnly bool `yaml:"frontendOnly"`
 }
 
 // discovered is one plugin found under plugins/.
@@ -98,6 +100,8 @@ type discovered struct {
 	// disabled records the marker's disabled flag (only reachable when an
 	// include option covers the plugin; otherwise it never gets this far).
 	disabled bool
+	// frontendOnly plugins are included in frontend generation only.
+	frontendOnly bool
 }
 
 // include controls which disabled plugins are still built.
@@ -171,15 +175,26 @@ func run(root, pluginDir string, inc include) error {
 		return nil
 	}
 
-	goVersion, err := goDirective(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(workPath, []byte(renderWorkspace(found, goVersion)), 0o644); err != nil {
-		return fmt.Errorf("go.work を書けません: %w", err)
-	}
-	if err := os.WriteFile(genPath, []byte(renderRegistration(found)), 0o644); err != nil {
-		return fmt.Errorf("%s を書けません: %w", generatedFile, err)
+	backend := backendPlugins(found)
+	if len(backend) == 0 {
+		// frontend-only plugin では、古い Go 登録や workspace を残さない。
+		if err := removeIfExists(genPath); err != nil {
+			return err
+		}
+		if err := removeIfExists(workPath); err != nil {
+			return err
+		}
+	} else {
+		goVersion, err := goDirective(filepath.Join(root, "go.mod"))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(workPath, []byte(renderWorkspace(backend, goVersion)), 0o644); err != nil {
+			return fmt.Errorf("go.work を書けません: %w", err)
+		}
+		if err := os.WriteFile(genPath, []byte(renderRegistration(backend)), 0o644); err != nil {
+			return fmt.Errorf("%s を書けません: %w", generatedFile, err)
+		}
 	}
 
 	if err := writeFrontend(root, found); err != nil {
@@ -207,8 +222,21 @@ func formatDiscovered(p discovered) string {
 	if p.disabled {
 		note = ", disabled だが明示指定で含めた"
 	}
+	if p.frontendOnly {
+		return fmt.Sprintf("pluginbuild: dir=%s name=%s (frontend-only%s)", p.dir, p.name, note)
+	}
 	return fmt.Sprintf("pluginbuild: dir=%s name=%s (%s, frontend=%t%s)",
 		p.dir, p.name, p.modulePath, p.hasFrontend, note)
+}
+
+func backendPlugins(plugins []discovered) []discovered {
+	out := make([]discovered, 0, len(plugins))
+	for _, p := range plugins {
+		if !p.frontendOnly {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // writeFrontend generates the files the frontend's Vite build reads.
@@ -375,9 +403,25 @@ func discover(root, pluginDir string, inc include) ([]discovered, error) {
 				dir, m.APIVersion, plugin.APIVersion)
 		}
 
-		// **go.mod を必須にする。** 無いと mk-go と同一モジュールになり、Go の
-		// internal ルール上 internal/ が見えてしまう。plugin/ だけを公開面と
-		// する設計 (#2476) がここで静かに崩れる。
+		name := m.Name
+		if name == "" {
+			name = e.Name()
+		}
+		_, ferr := os.Stat(filepath.Join(dir, frontendEntry))
+		if m.FrontendOnly {
+			if ferr != nil {
+				return nil, fmt.Errorf("%s: frontendOnly は %s が必要です", dir, frontendEntry)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return nil, fmt.Errorf("%s: frontendOnly プラグインに go.mod は置けません", dir)
+			} else if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("%s/go.mod を確認できません: %w", dir, err)
+			}
+			found = append(found, discovered{dir: rel, name: name, hasFrontend: true, disabled: m.Disabled, frontendOnly: true})
+			continue
+		}
+
+		// **backend plugin は go.mod を必須にする。** `internal/` の境界を保つ。
 		modPath, err := modulePath(filepath.Join(dir, "go.mod"))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", dir, err)
@@ -386,16 +430,7 @@ func discover(root, pluginDir string, inc include) ([]discovered, error) {
 			return nil, fmt.Errorf("%s: %w", dir, err)
 		}
 
-		name := m.Name
-		if name == "" {
-			name = e.Name()
-		}
-		_, ferr := os.Stat(filepath.Join(dir, frontendEntry))
-		found = append(found, discovered{
-			dir: rel, modulePath: modPath, name: name,
-			hasFrontend: ferr == nil,
-			disabled:    m.Disabled,
-		})
+		found = append(found, discovered{dir: rel, modulePath: modPath, name: name, hasFrontend: ferr == nil, disabled: m.Disabled})
 	}
 
 	// ディレクトリ名で並べる。順序が環境依存だとビルドの再現性が失われる。

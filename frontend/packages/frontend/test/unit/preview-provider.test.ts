@@ -4,16 +4,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/vue';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/vue';
 import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { components } from '@/components/index.js';
 import { directives } from '@/directives/index.js';
+import { prefer } from '@/preferences.js';
 import MkPluginUrlPreview from '@/components/MkPluginUrlPreview.vue';
 import {
 	_resetPreviewsForTest,
+	_resetPasteTransformsForTest,
 	launchServerPlugins,
 	resolvePreviewProvider,
+	transformPastedText,
 	type PluginDefinition,
+	type PreviewContext,
 	type PreviewInput,
 	type PreviewProvider,
 } from '@/plugin-api.js';
@@ -61,6 +65,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetPreviewsForTest();
+	_resetPasteTransformsForTest();
 	fetchMock.resetMocks();
 	cleanup();
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -176,7 +181,7 @@ describe('preview provider coordinator', () => {
 	const source = { kind: 'note' as const, noteId: 'note-1' };
 
 	function renderPreview(props: Record<string, unknown> = {}) {
-		fetchMock.mockOnceIf(request => new URL(request.url).pathname === '/url', () => ({
+		fetchMock.mockIf(request => new URL(request.url).pathname === '/url', () => ({
 			status: 200,
 			body: JSON.stringify({
 				url: urlInput.href,
@@ -289,6 +294,108 @@ describe('preview provider coordinator', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	test('manual presentation waits for a click and reports manual state to the provider', async () => {
+		const load = vi.fn(async (_input, context) => `manual:${context.manual}`);
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			manualLabel: 'Show preview',
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await waitFor(() => expect(result.getByRole('button', { name: 'Show preview' })).toBeTruthy());
+		expect(load).not.toHaveBeenCalled();
+		await fireEvent.click(result.getByRole('button', { name: 'Show preview' }));
+		await waitFor(() => expect(result.getByText('provider: manual:true')).toBeTruthy());
+		expect(load).toHaveBeenCalledTimes(1);
+	});
+
+	test('manual native fallback does not also render a bare link when actions are hidden', async () => {
+		const load = vi.fn(async () => 'unexpected');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false, showActions: false });
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+		expect(load).not.toHaveBeenCalled();
+		expect(result.container.querySelector('a[rel="nofollow noopener noreferrer"]')).toBeNull();
+	});
+
+	test('presentation receives a named existing preference through its context', async () => {
+		const presentation = vi.fn((_input: PreviewInput, context: PreviewContext) => context.preferenceValue ? 'automatic' as const : 'disabled' as const);
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			preferenceKey: 'alwaysConfirmFollow',
+			presentation,
+		}))]);
+
+		renderPreview({ detail: false });
+		await waitFor(() => expect(presentation).toHaveBeenCalled());
+		expect(presentation.mock.calls.some(([, context]) => context.preferenceValue === prefer.s.alwaysConfirmFollow)).toBe(true);
+	});
+
+	test('preference object replacement invalidates a settled provider result', async () => {
+		const reactivePreference = prefer.r.mutingEmojis;
+		const originalPreference = reactivePreference.value as string[];
+		const load = vi.fn(async (_input, context) => String((context.preferenceValue as unknown[]).length));
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			preferenceKey: 'mutingEmojis',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		try {
+			await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+			const replacement = [...originalPreference];
+			expect(replacement).toEqual(originalPreference);
+			expect(replacement).not.toBe(originalPreference);
+			reactivePreference.value = replacement;
+			await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+			expect(result.getByText(`provider: ${replacement.length}`)).toBeTruthy();
+		} finally {
+			reactivePreference.value = originalPreference;
+		}
+	});
+
+	test('disabled presentation retains a safe source link and does not load', async () => {
+		const load = vi.fn(async () => 'unexpected');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			presentation: () => 'disabled',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await nextTick();
+		expect(load).not.toHaveBeenCalled();
+		expect(result.getByRole('link').getAttribute('href')).toBe(urlInput.href);
+	});
+
+	test('manual provider failure can be retried explicitly', async () => {
+		const load = vi.fn()
+			.mockRejectedValueOnce(new Error('load failed'))
+			.mockResolvedValueOnce('recovered');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			manualLabel: 'Show preview',
+			presentation: () => 'manual',
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await fireEvent.click(await result.findByRole('button', { name: 'Show preview' }));
+		await waitFor(() => expect(result.getByRole('button', { name: /retry|again/i })).toBeTruthy());
+		await fireEvent.click(result.getByRole('button', { name: /retry|again/i }));
+		await waitFor(() => expect(result.getByText('provider: recovered')).toBeTruthy());
+		expect(load).toHaveBeenCalledTimes(2);
+	});
+
 	test('loads a timeline provider only after its card enters the viewport', async () => {
 		let intersectionCallback: IntersectionObserverCallback | undefined;
 		vi.stubGlobal('IntersectionObserver', class {
@@ -382,6 +489,105 @@ describe('preview provider coordinator', () => {
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(mounted).toHaveBeenCalledTimes(1);
 		expect(unmounted).not.toHaveBeenCalled();
+	});
+
+	test.each(['manual', 'error'] as const)('keeps the native %s fallback mounted across viewport and document changes', async kind => {
+		const setViewport = controlIntersection();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const load = vi.fn(async () => 'loaded');
+		if (kind === 'error') load.mockRejectedValueOnce(new Error('provider failed'));
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			manualLabel: 'Show preview',
+			presentation: () => kind === 'manual' ? 'manual' as const : 'automatic' as const,
+			load,
+		}))]);
+
+		const result = renderPreview({ detail: false });
+		await nextTick();
+		expect(load).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBeNull();
+
+		setViewport(true);
+		await waitFor(() => expect(result.container.querySelector('a[rel="nofollow noopener"]')).not.toBeNull());
+		const nativeCard = result.container.querySelector('a[rel="nofollow noopener"]');
+		const fallbackAction = kind === 'manual'
+			? result.getByRole('button', { name: 'Show preview' })
+			: result.getByRole('button', { name: /retry/i });
+		expect(load).toHaveBeenCalledTimes(kind === 'error' ? 1 : 0);
+		const urlFetchCount = () => fetchMock.mock.calls.filter(([request]) => {
+			const value = request as string | { url?: string };
+			return new URL(typeof value === 'string' ? value : value.url ?? String(value), window.location.href).pathname === '/url';
+		}).length;
+		expect(urlFetchCount()).toBe(1);
+
+		setViewport(false);
+		await nextTick();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBe(nativeCard);
+		expect(fallbackAction.isConnected).toBe(true);
+		expect((fallbackAction as HTMLButtonElement).disabled).toBe(true);
+		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+		document.dispatchEvent(new Event('visibilitychange'));
+		await nextTick();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBe(nativeCard);
+		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+		document.dispatchEvent(new Event('visibilitychange'));
+		await nextTick();
+		setViewport(true);
+		await nextTick();
+
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBe(nativeCard);
+		expect((fallbackAction as HTMLButtonElement).disabled).toBe(false);
+		expect(urlFetchCount()).toBe(1);
+		expect(load).toHaveBeenCalledTimes(kind === 'error' ? 1 : 0);
+		if (kind === 'error') expect(warn).toHaveBeenCalledWith('[preview:example:card] load failed', expect.any(Error));
+	});
+
+	test('drops a native fallback after its source, URL, or CW owner changes while offscreen', async () => {
+		const setViewport = controlIntersection();
+		const load = vi.fn(async () => 'loaded');
+		await launchServerPlugins([plugin('example', lazyProvider({
+			requiresDetail: false,
+			presentation: () => 'manual',
+			load,
+		}))]);
+		const result = renderPreview({ detail: false });
+		const urlFetchCount = () => fetchMock.mock.calls.filter(([request]) => {
+			const value = request as string | { url?: string };
+			return new URL(typeof value === 'string' ? value : value.url ?? String(value), window.location.href).pathname === '/url';
+		}).length;
+		await nextTick();
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		setViewport(true);
+		await waitFor(() => expect(result.container.querySelector('a[rel="nofollow noopener"]')).not.toBeNull());
+		const firstNativeCard = result.container.querySelector('a[rel="nofollow noopener"]');
+		setViewport(false);
+		await nextTick();
+		await result.rerender({ url: 'https://example.com/post/2', source: { kind: 'note', noteId: 'note-2' } });
+		await nextTick();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBeNull();
+		expect(firstNativeCard?.isConnected).toBe(false);
+		expect(result.getByRole('link').getAttribute('href')).toBe('https://example.com/post/2');
+		expect(urlFetchCount()).toBe(1);
+
+		setViewport(true);
+		await waitFor(() => expect(result.container.querySelector('a[rel="nofollow noopener"]')).not.toBeNull());
+		expect(urlFetchCount()).toBe(2);
+		setViewport(false);
+		await nextTick();
+		await result.rerender({ revealed: false });
+		await nextTick();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBeNull();
+		expect(urlFetchCount()).toBe(2);
+		await result.rerender({ revealed: true });
+		await nextTick();
+		expect(result.container.querySelector('a[rel="nofollow noopener"]')).toBeNull();
+		setViewport(true);
+		await waitFor(() => expect(result.container.querySelector('a[rel="nofollow noopener"]')).not.toBeNull());
+		expect(urlFetchCount()).toBe(3);
+		expect(load).not.toHaveBeenCalled();
 	});
 
 	test('renders a provider loading card only while one bounded load is in flight', async () => {
@@ -639,5 +845,45 @@ describe('preview provider coordinator', () => {
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(renderAttempts).toHaveBeenCalledTimes(1);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('post form paste transforms', () => {
+	test('applies transforms in stable namespaced order and respects preferences', async () => {
+		const calls: string[] = [];
+		let localizedNotification = 'old language';
+		await launchServerPlugins([
+			{
+				name: 'z-plugin',
+				setup(host) {
+					host.postForm.registerPasteTransform('trim', text => { calls.push('z'); return text.trim(); }, { notification: () => localizedNotification });
+					host.postForm.registerPasteTransform('disabled', text => { calls.push('disabled'); return `bad:${text}`; }, { enabledPreferenceKey: 'pasteTransformEnabled' });
+				},
+			},
+			{
+				name: 'a-plugin',
+				setup(host) { host.postForm.registerPasteTransform('prefix', text => { calls.push('a'); return `a:${text}`; }); },
+			},
+		]);
+
+		localizedNotification = 'Trimmed pasted text';
+		expect(transformPastedText(' value ', {
+			isPreferenceEnabled: key => key === 'pasteTransformEnabled' ? false : undefined,
+		})).toEqual({ text: 'a: value', notification: 'Trimmed pasted text' });
+		expect(calls).toEqual(['a', 'z']);
+	});
+
+	test('keeps the previous text when a transform fails or returns a promise', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		await launchServerPlugins([{
+			name: 'broken',
+			setup(host) {
+				host.postForm.registerPasteTransform('throws', () => { throw new Error('private clipboard text'); });
+				host.postForm.registerPasteTransform('async', (() => Promise.reject(new Error('async failure'))) as never);
+			},
+		}]);
+
+		expect(transformPastedText('secret')).toEqual({ text: 'secret' });
+		expect(warn.mock.calls.flat().join(' ')).not.toContain('secret');
 	});
 });

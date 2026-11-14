@@ -30,6 +30,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -48,13 +49,15 @@ import (
 
 // Harness builds the fake environment a plugin sees.
 type Harness struct {
-	t           *testing.T
-	name        string
-	config      map[string]any
-	db          *sql.DB
-	api         plugin.API
-	migrate     bool
-	invalidator plugin.EffectivePolicyInvalidator
+	t                    *testing.T
+	name                 string
+	config               map[string]any
+	db                   *sql.DB
+	api                  plugin.API
+	migrate              bool
+	invalidator          plugin.EffectivePolicyInvalidator
+	checkedUserPolicies  map[string]any
+	checkedUserPolicyErr error
 
 	// peer 経路 (#2537) の記録。Handle / OnReply はプラグインが登録し、
 	// テストは DeliverPeer / DeliverPeerReply から叩く。
@@ -120,6 +123,12 @@ func (h *Harness) WithDB(db *sql.DB) *Harness {
 // mk-go の API を呼ぶプラグインは自分でフェイクを渡すこと.
 func (h *Harness) WithAPI(api plugin.API) *Harness {
 	h.api = api
+	return h
+}
+
+// WithCheckedUserRolePolicies configures background role-policy checks.
+func (h *Harness) WithCheckedUserRolePolicies(values map[string]any, err error) *Harness {
+	h.checkedUserPolicies, h.checkedUserPolicyErr = values, err
 	return h
 }
 
@@ -469,6 +478,10 @@ func (j *JobSet) lookup(name string) (plugin.JobHandler, error) {
 
 // Request describes one fake HTTP request.
 type Request struct {
+	// CheckedRolePolicies supplies the effective native policies returned by the host.
+	CheckedRolePolicies map[string]any
+	// CheckedRolePolicyError simulates a failed checked policy lookup.
+	CheckedRolePolicyError error
 	// UserID is what plugin.Request.UserID returns. 空文字は未認証。
 	UserID string
 	// Body is the raw JSON request body.
@@ -497,6 +510,7 @@ func (r Request) build() plugin.Request {
 	return &fakeRequest{
 		ctx: ctx, userID: r.UserID, body: body, params: r.Params, query: r.Query,
 		moderator: r.Moderator || r.Administrator, administrator: r.Administrator,
+		checkedRolePolicies: r.CheckedRolePolicies, checkedRolePolicyError: r.CheckedRolePolicyError,
 	}
 }
 
@@ -508,6 +522,21 @@ func (c *fakeContext) Name() string          { return c.h.name }
 func (c *fakeContext) Logger() *slog.Logger  { return slog.Default() }
 func (c *fakeContext) API() plugin.API       { return c.h.api }
 func (c *fakeContext) Config() plugin.Config { return &fakeConfig{values: c.h.config} }
+func (c *fakeContext) CheckedUserRolePolicies(userID string, keys ...string) (map[string]any, error) {
+	if userID == "" {
+		return nil, errors.New("plugintest: checked role policy lookup requires a user ID")
+	}
+	if c.h.checkedUserPolicyErr != nil {
+		return nil, c.h.checkedUserPolicyErr
+	}
+	policies := make(map[string]any, len(keys))
+	for _, key := range keys {
+		if value, ok := c.h.checkedUserPolicies[key]; ok {
+			policies[key] = value
+		}
+	}
+	return policies, nil
+}
 func (c *fakeContext) Storage() plugin.Storage {
 	return &fakeStorage{db: c.h.db}
 }
@@ -657,13 +686,15 @@ func (j *fakeJobs) Schedule(cron string, name string, payload any) {
 }
 
 type fakeRequest struct {
-	ctx           context.Context
-	userID        string
-	body          string
-	params        map[string]string
-	query         map[string]string
-	moderator     bool
-	administrator bool
+	checkedRolePolicies    map[string]any
+	checkedRolePolicyError error
+	ctx                    context.Context
+	userID                 string
+	body                   string
+	params                 map[string]string
+	query                  map[string]string
+	moderator              bool
+	administrator          bool
 }
 
 func (r *fakeRequest) Context() context.Context { return r.ctx }
@@ -672,6 +703,22 @@ func (r *fakeRequest) Param(k string) string    { return r.params[k] }
 func (r *fakeRequest) IsModerator() bool        { return r.moderator }
 func (r *fakeRequest) IsAdministrator() bool    { return r.administrator }
 func (r *fakeRequest) Query(k string) string    { return r.query[k] }
+
+func (r *fakeRequest) CheckedRolePolicies(keys ...string) (map[string]any, error) {
+	if r.userID == "" {
+		return nil, errors.New("checked role policies require authentication")
+	}
+	if r.checkedRolePolicyError != nil {
+		return nil, r.checkedRolePolicyError
+	}
+	policies := make(map[string]any, len(keys))
+	for _, key := range keys {
+		if value, ok := r.checkedRolePolicies[key]; ok {
+			policies[key] = value
+		}
+	}
+	return policies, nil
+}
 
 func (r *fakeRequest) Bind(v any) error {
 	dec := json.NewDecoder(strings.NewReader(r.body))

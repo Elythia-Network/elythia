@@ -27,6 +27,8 @@
 import { defineAsyncComponent } from 'vue';
 import type { Component } from 'vue';
 import type { entities } from 'misskey-js';
+import { FILE_TYPE_BROWSERSAFE } from '@@/js/const.js';
+import type { Content } from '@/components/MkLightbox.item.vue';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { $i } from '@/i.js';
 
@@ -49,6 +51,9 @@ export { default as MkSwitch } from '@/components/MkSwitch.vue';
 export { default as MkAvatar } from '@/components/global/MkAvatar.vue';
 export { default as MkUserName } from '@/components/global/MkUserName.vue';
 export { default as MkTime } from '@/components/global/MkTime.vue';
+// ルーターやダイアログをAPIモジュールの読み込みだけで初期化しない。
+export const MkA = defineAsyncComponent(() => import('@/components/global/MkA.vue'));
+export const MkUrl = defineAsyncComponent(() => import('@/components/global/MkUrl.vue'));
 export { default as PageWithHeader } from '@/components/global/PageWithHeader.vue';
 /**
  * サーバープラグインの秘密の値 (API キーなど) の入力欄 (Elythia #3470)。
@@ -91,17 +96,29 @@ export type PreviewInput =
 /** Runtime state available to a preview provider after it has matched. */
 export type PreviewContext = {
 	detail: boolean;
+	/** True only after the user explicitly requested a manual preview. */
+	manual?: boolean;
+	/** The current value of the provider's named preference, if any. */
+	preferenceValue?: unknown;
 	revealed: boolean;
 	active: boolean;
 	inViewport: boolean;
 	source: { kind: 'note'; noteId: string } | null;
 };
 
+export type PreviewPresentation = 'automatic' | 'manual' | 'disabled';
+
 /** A lazy preview implementation registered by a bundled server plugin. */
 export type PreviewProvider<T = unknown> = {
 	id: string;
 	priority?: number;
 	requiresDetail?: boolean;
+	/** Reads an existing native preference and exposes its value to presentation/load. */
+	preferenceKey?: string;
+	/** Chooses automatic loading, a manual action, or no preview for this context. */
+	presentation?: (input: PreviewInput, context: PreviewContext) => PreviewPresentation;
+	/** Text for the manual preview action. */
+	manualLabel?: string;
 	loadingComponent?: Component;
 	match(input: PreviewInput): boolean;
 	load(input: PreviewInput, context: PreviewContext, signal: AbortSignal): Promise<T>;
@@ -113,6 +130,42 @@ export type PreviewRegistration = {
 	id: string;
 	plugin: string;
 	provider: PreviewProvider;
+};
+
+/** A synchronous plain-text transform for text pasted into the post form. */
+export type PasteTextTransform = (text: string) => string;
+
+type PasteTextRegistration = {
+	id: string;
+	plugin: string;
+	transform: PasteTextTransform;
+	options?: PasteTextTransformOptions;
+};
+
+/** Optional native preference and notification resolved by the post form at paste time. */
+export type PasteTextTransformOptions = {
+	enabledPreferenceKey?: string;
+	/** Resolves localized feedback at paste time, after this transform changes the text. */
+	notification?: () => string;
+};
+
+export type PasteTextTransformRuntime = {
+	isPreferenceEnabled: (key: string) => boolean | undefined;
+};
+
+export type TransformedPasteText = { text: string; notification?: string };
+
+/** A fetched media Blob owned by a plugin, rather than a drive file. */
+export type PluginMediaItem = {
+	id: string;
+	type: 'image' | 'video' | 'audio';
+	blob: Blob;
+	width?: number | null;
+	height?: number | null;
+	filename?: string | null;
+	alt?: string;
+	isSensitive?: boolean;
+	initiallyRevealed?: boolean;
 };
 
 /**
@@ -256,6 +309,11 @@ export type PluginHost = {
 		register<T = unknown>(provider: PreviewProvider<T>): void;
 	};
 
+	/** Synchronous plain-text transforms for text pasted into the post form. */
+	readonly postForm: {
+		registerPasteTransform(id: string, transform: PasteTextTransform, options?: PasteTextTransformOptions): void;
+	};
+
 	/**
 	 * Calls an mk-go API endpoint.
 	 *
@@ -263,6 +321,12 @@ export type PluginHost = {
 	 * 認証は利用者のセッションがそのまま使われる。
 	 */
 	api<T = unknown>(endpoint: string, params?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<T>;
+
+	/** Fetches a Response from this plugin's root-relative API path using the host session. */
+	fetch(path: string, options?: RequestInit): Promise<Response>;
+
+	/** Opens browser-safe fetched Blobs in the host media viewer. */
+	openMedia(items: PluginMediaItem[], initialId?: string): Promise<void>;
 };
 
 export type PluginDefinition = {
@@ -295,6 +359,7 @@ export type PageRegistration = PluginPage & { plugin: string; fullPath: string }
 
 const registry = new Map<SlotName, Registration[]>();
 const previewRegistry = new Map<string, PreviewRegistration>();
+const pasteTransformRegistry = new Map<string, PasteTextRegistration>();
 
 function registerPreviewProvider<T>(plugin: string, provider: PreviewProvider<T>): void {
 	if (provider.id.length === 0 || provider.id.includes(':')) {
@@ -311,6 +376,69 @@ function registerPreviewProvider<T>(plugin: string, provider: PreviewProvider<T>
 		plugin,
 		provider: provider as PreviewProvider,
 	});
+}
+
+function registerPasteTextTransform(plugin: string, id: string, transform: PasteTextTransform, options?: PasteTextTransformOptions): void {
+	if (typeof id !== 'string' || id.length === 0 || id.includes(':')) {
+		throw new Error(`Invalid post form paste transform ID: ${id}`);
+	}
+	if (typeof transform !== 'function') {
+		throw new Error(`Post form paste transform must be a function: ${plugin}:${id}`);
+	}
+
+	const namespacedID = `${plugin}:${id}`;
+	if (pasteTransformRegistry.has(namespacedID)) {
+		throw new Error(`Post form paste transform is already registered: ${namespacedID}`);
+	}
+
+	pasteTransformRegistry.set(namespacedID, { id: namespacedID, plugin, transform, options });
+}
+
+/** Applies registered transforms in stable namespaced-ID order. */
+export function transformPastedText(text: string, runtime?: PasteTextTransformRuntime): TransformedPasteText {
+	let current = text;
+	let notification: string | undefined;
+	const registrations = [...pasteTransformRegistry.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+	for (const registration of registrations) {
+		const preferenceKey = registration.options?.enabledPreferenceKey;
+		if (preferenceKey && runtime) {
+			try {
+				if (runtime.isPreferenceEnabled(preferenceKey) === false) continue;
+			} catch {
+				// An unavailable preference uses the declared default (enabled).
+			}
+		}
+		const before = current;
+		try {
+			const transformed: unknown = registration.transform(current);
+			if (typeof transformed !== 'string') {
+				// A Promise is not supported, but consume a rejected one so a plugin
+				// cannot create an unhandled rejection while the host keeps sync paste.
+				try {
+					if (transformed !== null && (typeof transformed === 'object' || typeof transformed === 'function') && typeof (transformed as { then?: unknown }).then === 'function') {
+						void Promise.resolve(transformed).catch(() => {});
+					}
+				} catch {
+					// Ignore invalid thenables without exposing clipboard data or errors.
+				}
+				if (_DEV_) console.warn(`[plugin:post-form-paste:${registration.id}] transform returned a non-string; keeping previous text`);
+				continue;
+			}
+			current = transformed;
+			if (current !== before && notification == null && registration.options?.notification != null) {
+				try {
+					const resolvedNotification = registration.options.notification();
+					if (typeof resolvedNotification === 'string') notification = resolvedNotification;
+				} catch {
+					// Feedback is optional; never interrupt the user's paste.
+				}
+			}
+		} catch {
+			// Never log the exception: a plugin could include the pasted text in it.
+			if (_DEV_) console.warn(`[plugin:post-form-paste:${registration.id}] transform failed; keeping previous text`);
+		}
+	}
+	return { text: current, ...(notification ? { notification } : {}) };
 }
 
 /** Resolves one deterministic winner without performing provider I/O. */
@@ -370,12 +498,18 @@ function pagePath(name: string, path: string): string {
 }
 
 function buildHost(name: string): PluginHost {
+	const pluginAPIPrefix = `/api/plugin/${name}/`;
 	return {
 		name,
 		me: toSlotUser($i),
 		preview: {
 			register(provider) {
 				registerPreviewProvider(name, provider);
+			},
+		},
+		postForm: {
+			registerPasteTransform(id, transform, options) {
+				registerPasteTextTransform(name, id, transform, options);
 			},
 		},
 		slot(slotName, renderer) {
@@ -390,6 +524,64 @@ function buildHost(name: string): PluginHost {
 			// misskeyApi の型は既知のエンドポイント集合に閉じているが、
 			// プラグインのエンドポイントはそこに無い。ここで境界を吸収する。
 			return misskeyApi(endpoint as never, (params ?? {}) as never, undefined, options?.signal) as never;
+		},
+		async fetch(path, options) {
+			if ($i?.token == null || $i.token === '') throw new Error('Plugin fetch requires authentication');
+			const url = new URL(path, window.location.origin);
+			const rawPath = path.split('?')[0];
+			if (!path.startsWith(pluginAPIPrefix) || url.origin !== window.location.origin ||
+				!url.pathname.startsWith(pluginAPIPrefix) || /[%\\\s#]/.test(rawPath) || path.includes('#') ||
+				rawPath.split('/').some(segment => segment === '.' || segment === '..') || url.searchParams.has('i')) {
+				throw new Error(`Plugin fetch must stay inside ${pluginAPIPrefix}`);
+			}
+			const headers = new Headers(options?.headers);
+			headers.set('Authorization', `Bearer ${$i.token}`);
+			return window.fetch(`${url.pathname}${url.search}`, {
+				...options,
+				mode: 'same-origin',
+				credentials: 'omit',
+				redirect: 'error',
+				headers,
+			});
+		},
+		async openMedia(items, initialId) {
+			if (items.length === 0) return;
+			// URL生成より前に全件を検証し、型不一致やSVGを表示対象にしない。
+			for (const item of items) {
+				const mime = item.blob instanceof Blob ? item.blob.type.split(';')[0].trim().toLowerCase() : '';
+				if (!['image', 'video', 'audio'].includes(item.type) || !mime.startsWith(`${item.type}/`) || !FILE_TYPE_BROWSERSAFE.includes(mime)) {
+					throw new Error(`Plugin media ${item.id} has an invalid MIME type`);
+				}
+			}
+			const objectUrls: string[] = [];
+			let revoked = false;
+			const revoke = (): void => {
+				if (revoked) return;
+				revoked = true;
+				for (const url of objectUrls) URL.revokeObjectURL(url);
+			};
+			try {
+				const contents = items.map<Content>(item => {
+					const url = URL.createObjectURL(item.blob);
+					objectUrls.push(url);
+					return {
+						id: item.id, type: item.type, url, thumbnailUrl: item.type === 'image' ? url : undefined,
+						width: item.width, height: item.height, filename: item.filename, alt: item.alt,
+						isSensitive: item.isSensitive === true,
+					};
+				});
+				const os = await import('@/os.js');
+				const { dispose } = await os.popupAsyncWithDialog(import('@/components/MkLightbox.vue').then(module => module.default), {
+					defaultIndex: Math.max(0, contents.findIndex(content => content.id === initialId)),
+					contents,
+					initiallyRevealedContentIds: items.filter(item => item.initiallyRevealed === true).map(item => item.id),
+				}, {
+					closed: () => { dispose(); revoke(); },
+				});
+			} catch (err) {
+				revoke();
+				throw err;
+			}
 		},
 	};
 }
@@ -418,4 +610,9 @@ export function _resetSlotsForTest(): void {
 /** Test hook: clears registered preview providers. */
 export function _resetPreviewsForTest(): void {
 	previewRegistry.clear();
+}
+
+/** Test hook: clears registered post form paste transforms. */
+export function _resetPasteTransformsForTest(): void {
+	pasteTransformRegistry.clear();
 }
