@@ -90,7 +90,7 @@ curl -i -X POST http://localhost/api/meta -H 'Content-Type: application/json' -d
 | `Dockerfile.bundled` を専用のビルダーで (参考) | +35MB (イメージの取り込み分) | 最大 4.7GiB |
 | `deploy/uds/Dockerfile.mkgo` (`make uds-build` が `mkgo` に使うもの) を専用のビルダーで、キャッシュが空の状態から | +17MB | 最大 2.37GiB、終わった後も 405MiB |
 
-**`mkgo` だけを専用のビルダーにする理由。** 専用のビルダーは dockerd の image store を見ず、`FROM` をレジストリから引き直します。`deploy/postgres-bigm/Dockerfile` の `FROM postgres:18-alpine` は digest で固定していないので、専用のビルダーでビルドすると最初の 1 回で新しい base を取りに行き、イメージが変わります。すると次の `docker compose up -d` で本番の PostgreSQL のコンテナが作り直されます。既定のビルダーは手元の base とキャッシュを使うので、イメージは変わりません。
+**`mkgo` だけを専用のビルダーにする理由。** 専用のビルダーは dockerd の image store とキャッシュを見ず、`FROM` をレジストリから引き直します。`deploy/postgres-bigm/Dockerfile` の `FROM` は digest で固定しているので base は変わりませんが、専用のビルダーでビルドすると最初の 1 回で `RUN` の層 (`apk add` と pg_bigm のビルド) を作り直すので、イメージが変わりえます。変われば、次の `docker compose up -d` で本番の PostgreSQL のコンテナが作り直されます。既定のビルダーは手元のキャッシュを使うので、キャッシュを消していなければイメージは変わりません。
 
 - **ビルダーは消さずに止めます。** 止めればメモリは全部戻り、キャッシュはビルダーの volume に残ります。`docker buildx rm` は volume ごと消すので、キャッシュも消えます。止めたビルダーは buildx では使われていないもの (inactive) に数えられるので、`docker buildx rm --all-inactive` でも消えます
 - 最初の 1 回だけビルダーを作ります。そのビルドはキャッシュが空なので時間がかかり、`mkgo` のイメージも作り直されます
