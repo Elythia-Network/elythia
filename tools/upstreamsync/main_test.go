@@ -41,6 +41,7 @@ func TestClassify(t *testing.T) {
 		{"compose_example.yml", classSkip},
 		{"CLAUDE.md", classSkip},
 		{"idea/README.md", classSkip},
+		{"docs/contributing/backend.md", classSkip},
 		// 本体の .gitignore が深さに関係なく外しているので追跡していない。
 		{"packages/frontend/.vscode/settings.json", classSkip},
 		{".vscode/settings.json", classSkip},
