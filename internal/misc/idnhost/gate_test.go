@@ -43,6 +43,10 @@ func TestMatchesBlockList(t *testing.T) {
 		{name: "ipv6 literal with port", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1]:8443", want: true},
 		{name: "ipv6 literal exact", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1]", want: true},
 		{name: "ipv6 other address", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::2]:8443", want: false},
+		// zone は接続先を変えないので、どちらの側に付いていても当てる (#4186)。
+		{name: "ipv6 zone in host", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]:8443", want: true},
+		{name: "ipv6 zone in pattern", patterns: []string{"[2001:0db8::1%en0]"}, host: "[2001:db8::1]", want: true},
+		{name: "ipv6 zone other address", patterns: []string{"[2001:db8::1%z]"}, host: "[2001:db8::2]", want: false},
 		{name: "ipv4 with port", patterns: []string{"192.0.2.1"}, host: "192.0.2.1:8443", want: true},
 		{name: "ipv4 other address with port", patterns: []string{"192.0.2.1"}, host: "192.0.2.10:8443", want: false},
 	}
@@ -65,6 +69,15 @@ func TestMatchesAllowList(t *testing.T) {
 		{name: "unrelated", patterns: []string{"good.example"}, host: "evil.example", want: false},
 		{name: "empty host", patterns: []string{"good.example"}, host: "", want: false},
 		{name: "empty pattern", patterns: []string{""}, host: "good.example", want: false},
+
+		// zone は落とすが、ポートは落とさない。壊れた括弧の値で、後ろのポートを zone
+		// として捨てない (#4186)。
+		{name: "ipv6 zone exact", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]", want: true},
+		{name: "ipv6 zone keeps port", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]:8443", want: false},
+		{name: "ipv6 zone broken bracket", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]]:8443", want: false},
+		{name: "ipv6 zone bracket inside zone", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%]:8443]", want: false},
+		{name: "ipv6 zone non-numeric port", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]:abc", want: false},
+		{name: "ipv6 zone broken pattern", patterns: []string{"[2001:db8::1%z]]:8443"}, host: "[2001:db8::1]", want: false},
 
 		// 許可側はポートを落とさない (upstream isFederationAllowedHost と同じ)。
 		{name: "non-default port is not admitted by bare entry", patterns: []string{"good.example"}, host: "good.example:8443", want: false},

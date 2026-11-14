@@ -95,5 +95,28 @@ func TestNormalizeGateHost_ColonHostThatIsNotAnIP(t *testing.T) {
 	assert.Equal(t, "", federation.NormalizeGateHost("https://[a:b]/inbox"))
 	assert.Equal(t, "", federation.NormalizeGateHost("https://::0/inbox"))
 	assert.Equal(t, "[::1]:8443", federation.NormalizeGateHost("https://[::1]:8443/inbox"))
-	assert.Equal(t, "[fe80::1%en0]", federation.NormalizeGateHost("https://[fe80::1%25en0]/"))
+	assert.Equal(t, "[fe80::1]", federation.NormalizeGateHost("https://[fe80::1%25en0]/"))
+}
+
+// IPv6 の zone は接続先を変えない (safehttp は zone の無いアドレスへつなぐ) ので、
+// zone の無い形にそろえ、一覧の照合に当てる (#4186)。ホスト名に入った `%25` は、
+// 戻した後の `%` のまま残す。空にすると、呼び出し元の多くが「判定できない」として通すので、
+// 拒否の一覧の suffix に当たらなくなる
+func TestNormalizeGateHost_PercentInHost(t *testing.T) {
+	blocked := []string{"[2001:db8::1]"}
+	for _, raw := range []string{
+		"https://[2001:db8::1%25z]/inbox",
+		"https://[2001:db8::1%25z]:443/inbox",
+		"http://[2001:DB8::1%25Z]/inbox",
+	} {
+		host := federation.NormalizeGateHost(raw)
+		assert.Equal(t, "[2001:db8::1]", host, raw)
+		assert.True(t, instance.HostMatchesAny(blocked, host), raw)
+	}
+	assert.Equal(t, "[2001:db8::1]:8443", federation.NormalizeGateHost("https://[2001:db8::1%25z]:8443/inbox"))
+	assert.Equal(t, "[::1]", federation.NormalizeGateHost("https://[::1%25a%25b]/inbox"))
+	host := federation.NormalizeGateHost("https://a%25.blocked.example/inbox")
+	assert.Equal(t, "a%.blocked.example", host)
+	assert.True(t, instance.HostMatchesAny([]string{"blocked.example"}, host))
+	assert.False(t, instance.HostMatchesAny([]string{"allowed.example"}, federation.NormalizeGateHost("https://allowed.example%25/inbox")))
 }

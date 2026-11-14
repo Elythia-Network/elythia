@@ -1,6 +1,7 @@
 package idnhost
 
 import (
+	"net/netip"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -105,6 +106,14 @@ func gateForms(s string) (full, bare string) {
 	// これを残すので、剥がさないと suffix 一致から外れる。
 	if !strings.HasPrefix(name, "[") {
 		name = strings.TrimRight(name, ".")
+	} else if strings.IndexByte(name, '%') >= 0 && strings.IndexByte(name, ']') == len(name)-1 {
+		// IPv6 の zone は接続先を変えない。HostPort は zone を落とした形を作るので、
+		// 一覧の項目や以前に保存した値の側も同じ形にそろえる (#4186)。`]` が最後の
+		// 1 文字のときだけにする。netip は zone の中身を見ないので、`[..%z]]:8443` の
+		// ような壊れた値を読むと、後ろのポートまで zone として捨ててしまう
+		if addr, err := netip.ParseAddr(strings.TrimSuffix(name[1:], "]")); err == nil {
+			name = "[" + addr.WithZone("").String() + "]"
+		}
 	}
 	if name == "" {
 		return "", ""

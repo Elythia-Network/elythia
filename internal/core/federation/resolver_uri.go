@@ -359,7 +359,8 @@ func isDefaultPortForScheme(scheme, port string) bool {
 // NormalizeGateHost returns the canonical host form used by the federation
 // gates (blockedHosts / silencedHosts / federationHosts) and by `instance.host`
 // for an absolute URL string. Returns "" when the URL has no host, or a host
-// with a colon that is not an IP literal (no connection can reach it).
+// with a colon that is not an IP literal (no connection can reach it). The
+// zone of an IPv6 literal is dropped (idnhost.HostPort).
 //
 // **配送側と取り込み側で同じ規則を使うための唯一の入口。** 別パッケージ
 // (`internal/queue/processors`) の inbox URL 解釈もここを通す — 規則を写すと

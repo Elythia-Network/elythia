@@ -173,6 +173,12 @@ func (c *SuspendedChecker) findInstance(host string) *model.Instance {
 func suspensionLookupHost(host string) string {
 	host = strings.TrimSpace(host)
 	u, err := url.Parse("https://" + host)
+	if err != nil && strings.Contains(host, "%") {
+		// inbox の keyId から取ったホスト (u.Host) は `%25` を戻した後の形で、
+		// IPv6 の zone (`[2001:db8::1%z]`) はそのままでは URL として読めない。
+		// 読めないと zone を落とせず、zone の無い形で保存した行に当たらない (#4186)
+		u, err = url.Parse("https://" + strings.ReplaceAll(host, "%", "%25"))
+	}
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return strings.ToLower(host)
 	}
