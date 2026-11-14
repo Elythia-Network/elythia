@@ -20,7 +20,6 @@ import (
 	coreinstance "github.com/elythia-network/elythia/internal/core/instance"
 	"github.com/elythia-network/elythia/internal/pluginstore"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/elythia-network/elythia/internal/server/paramshadow"
 	"github.com/elythia-network/elythia/internal/stream"
 )
 
@@ -437,9 +436,10 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		{name: "fake Close(ctx)", part: fakeCtxCloser{}, use: "addCloser"},
 		{name: "fake Close() error", part: fakeErrCloser{}, use: "addErrCloser"},
 
-		// 値から作る登録で足す13個の部品の型(12。deliveryHealthとinboxHealthは同じ型)。
+		// 値から作る登録で足す12個の部品の型(11。deliveryHealthとinboxHealthは同じ型)。
 		// pluginstore.Store だけは setupRoutes ではなく dbBackedStorage が登録する。
-		// 最後の3つは#3717で停止の口を足し、closureの登録から移した。
+		// 最後の2つは#3717で停止の口を足し、closureの登録から移した(もう1つの
+		// paramshadow.Recorderは#4172で消した)。
 		{name: "TouchBuffer", part: (*coreinstance.TouchBuffer)(nil), use: "addStartCloser"},
 		{name: "CapabilityBuffer", part: (*coreinstance.CapabilityBuffer)(nil), use: "addStartCloser"},
 		{name: "CounterBuffer", part: (*coreinstance.CounterBuffer)(nil), use: "addStartCloser"},
@@ -451,7 +451,6 @@ func TestValueShape_ClassifiesThePartTypes(t *testing.T) {
 		{name: "pluginstore.Store", part: (*pluginstore.Store)(nil), use: "addErrCloser"},
 		{name: "fedrule.HitStore", part: (*fedrule.HitStore)(nil), use: "addStartStopper"},
 		{name: "hashtag.Service", part: (*corehashtag.Service)(nil), use: "addCloser"},
-		{name: "paramshadow.Recorder", part: (*paramshadow.Recorder)(nil), use: "addCloser"},
 
 		// 値を持たない worker。
 		{name: "no value", part: nil},

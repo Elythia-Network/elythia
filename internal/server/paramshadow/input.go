@@ -1,16 +1,13 @@
 // Package paramshadow runs upstream's paramDef validation (internal/api/
-// paramschema) in front of the API handlers. For most upstream endpoints it
-// does not act on it and counts the requests where its verdict and the
-// handler's answer disagree (#3677); for the endpoints aligned with upstream
-// (WithEnforced, #3742) it answers a rejected request with upstream's 400.
+// paramschema) in front of the API handlers and answers a rejected request
+// with upstream's 400 (#3742).
 //
 // The middleware never changes what the handler reads: it reads the JSON
 // body (and puts the same bytes back), decodes its own copy and validates
-// that copy. What it records is the endpoint name, the
-// schemaPath of the validator's first error, the INVALID_PARAM info.param of
-// the handler's answer, the handler's status and error code, and the kind of
-// disagreement. It never records a value, the body, the user, the IP or the
-// token.
+// that copy. A request it cannot validate goes on to the handler.
+//
+// 名前は、検証だけを走らせて判定の分かれた件数を数えていた頃(#3677)のまま
+// にしてある。数える経路は#4172で消した。
 package paramshadow
 
 import (
@@ -25,7 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 )
 
-// Skip reasons: why a request to an upstream endpoint was not validated.
+// Skip reasons: why a request was not validated and went on to the handler.
 const (
 	// SkipNotJSON: a POST whose body is not application/json. Upstream's
 	// answer to such a body comes from fastify (no body, text/plain, an
@@ -51,42 +48,13 @@ const (
 	// params. Decoding allocates per value, so a body of many tiny values
 	// ({"x":[{},{},…]}) costs the most per byte.
 	SkipTooManyValues = "too_many_values"
-	// SkipBusy: as many validations as the limit (DefaultMaxConcurrent) were
-	// running. The request is not validated rather than made to wait.
-	SkipBusy = "busy"
-	// SkipBudget: the validation time of the recent past used up the budget
-	// (DefaultBudgetCores, DefaultBudgetBurst). The request is not validated
-	// until enough of the budget has come back.
-	SkipBudget = "budget"
 	// SkipBody: reading or decoding the body failed. JSONBodyParse has
 	// validated it, so this is not expected.
 	SkipBody = "body_error"
 )
 
 // DefaultMaxBody is the largest JSON body (and query) validated, in bytes.
-//
-// 本家のクライアントが普通に送るbodyは、これより十分に小さい(#3677で、
-// 上限まで埋めたbodyをJSONにして数えた)。notes/createは、本文3000文字を
-// すべて4バイトの絵文字にし、cw・投票10択・ファイル16個・宛先20人を付けて
-// 14,750バイト。i/updateは、名前・自己紹介1500文字を絵文字で、項目16組を
-// 上限まで埋めて22,950バイト。届かないのは、管理者がadmin/update-metaで
-// 大きな一覧を送る場合で(blockedHostsは1000件で27,057バイト、3000件で
-// 81,018バイト)、too_largeとして数える。
-const DefaultMaxBody = 64 << 10
-
-// DefaultMaxValues is the largest number of JSON tokens (each key, scalar
-// value and bracket counts as one) or query params validated.
-//
-// 64KiBに収まる正当なbodyでも、トークンの数は数千まで。#3677で数えた値は、
-// admin/update-metaのblockedHosts 2000件(54,057バイト)が2,007、i/updateの
-// ワードミュートとハードミュートを200件ずつが1,210、notes/createを上限まで
-// 埋めたものが78。64KiBいっぱいの`{}`の配列は約4.4万になり、decodeの確保の
-// 大半はここから来る(#3677のレビュー2周目M-1)。
-const DefaultMaxValues = 4096
-
-// DefaultEnforcedMaxBody is the size limit of the JSON body (and query) of
-// the endpoints that reject (WithEnforced), in bytes. A larger one goes to
-// the handler unvalidated, like SkipTooLarge.
+// A larger one goes to the handler unvalidated (SkipTooLarge).
 //
 // 1件の費用の上限を、トークンの数だけでなく大きさでも抑える。64KiBの`\u`の
 // escapeの文字列は、検証ありで1件0.52ms・311KBかかった。16KiBでは約0.14ms・
@@ -94,16 +62,17 @@ const DefaultMaxValues = 4096
 // descriptionの2048文字を4バイトの文字で埋めても約8KiB。charts/*と
 // hashtags/*はもっと小さい(項目は最大6つで、長さに上限の無い文字列は
 // charts/*のuserIdとhost、hashtags/*のqueryとtagだけ)。
-const DefaultEnforcedMaxBody = 16 << 10
+const DefaultMaxBody = 16 << 10
 
-// DefaultEnforcedMaxValues is the token limit of the endpoints that reject
-// (WithEnforced). A request over it goes to the handler unvalidated, like
-// SkipTooManyValues.
+// DefaultMaxValues is the largest number of JSON tokens (each key, scalar
+// value and bracket counts as one) or query params validated. A request over
+// it goes to the handler unvalidated (SkipTooManyValues).
 //
-// 拒否するendpointは予算と枠を通さないので、1件の費用をトークンの数で抑える
+// 検証は予算や同時に走る数の枠を通さないので、1件の費用をトークンの数で抑える
 // (#3742のレビュー1周目M-1)。正当なbodyは多くて十数トークン(clips/notesの
 // 全項目と`i`で18、charts/*で12、hashtags/usersで16)。本家のparamDefの項目の
-// 数に対して十分に大きく、decodeの確保は上限の4096より1桁以上小さくなる。
+// 数に対して十分に大きく、64KiBいっぱいの`{}`の配列(約4.4万トークン)に
+// 比べてdecodeの確保は2桁小さくなる。
 // 例外はantennas/create・updateで、本家はkeywords・excludeKeywords・usersの
 // 数に上限を持たないので、多く並べたbodyは超えうる。超えたbodyは拒否せず
 // handlerへ渡す(#3748)。flash/create・updateも、scriptが約16KiBを超えると
@@ -120,7 +89,7 @@ const DefaultEnforcedMaxBody = 16 << 10
 // admin/update-metaも、本家がblockedHostsなどの一覧の数に上限を持たず、同梱の
 // モデレーションの画面が一覧を1つずつ`i`と一緒に送るbodyでは、250行から超える
 // (#3888)。
-const DefaultEnforcedMaxValues = 256
+const DefaultMaxValues = 256
 
 // input is what upstream hands to ajv for one request, or why the request is
 // not validated.

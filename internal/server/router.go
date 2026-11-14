@@ -1471,9 +1471,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// gateが利用者を戻す。
 	api.Use(middleware.HideAppUserWithoutRead())
 	// 本家のparamDefで引数を検証する。本家かElythiaの宣言のあるendpointは、
-	// テストのモードでだけ登録するreset-dbを除いてすべて本家と同じ400で拒否し
-	// (#3742、#3890で宣言から決める形にした。paramEnforcedEndpoints)、reset-dbでは
-	// 応答を変えずに、handlerと判定が分かれた件数を数える(#3677)。検証そのものは
+	// テストのモードでだけ登録するreset-dbを除いてすべて本家と同じ400で拒否する
+	// (#3742、#3890で宣言から決める形にした。paramEnforcedEndpoints)。検証そのものは
 	// routeのmiddlewareの末尾(withParamShadow)で走る。
 	if mw := s.paramShadowMiddleware(); mw != nil {
 		api.Use(mw)
@@ -2746,7 +2745,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// clear-browser-cache — 本家が endpoint の仕組みの外で fastify.all に直接
 	// 登録する route (ApiServerService.ts)。どのメソッドでも受け、GET と POST
 	// 以外は handler が 405 を返す。endpoint ではないので、本文の検査
-	// (apiRoutes の requireObjectBody) と paramshadow の記録を通さない (#3926)。
+	// (apiRoutes の requireObjectBody) と引数の検証を通さない (#3926)。
 	api.Any("/clear-browser-cache", meta.ClearBrowserCache)
 
 	// フロントエンドの配信と SPA の catchall (#3901 で関数へ移した。呼ぶ位置と中の文の順は

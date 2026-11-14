@@ -12,9 +12,9 @@ import (
 // else has to drop, and a drop that spreads would make every process that
 // drops its caches start a storm of notifications.
 //
-// 名前を Flush にしないのは、paramshadow.Recorder やリアクションのバッファ
-// (corereaction の bufferedWriter) で Flush が「溜めた分を書き出す」という逆の
-// 意味で使われているため。
+// 名前を Flush にしないのは、リアクションのバッファ (corereaction の
+// bufferedWriter) で Flush が「溜めた分を書き出す」という逆の意味で使われて
+// いるため。
 type localCache interface {
 	DropLocal()
 }
