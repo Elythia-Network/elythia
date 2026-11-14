@@ -79,7 +79,8 @@ var (
 		".editorconfig": true, ".vsls.json": true, ".coderabbit.yaml": true,
 		"codecov.yml": true, "crowdin.yml": true, "renovate.json5": true,
 	}
-	skipDirs = []string{".github/", ".config/", ".agents/", ".claude/", ".vscode/", ".devcontainer/", "idea/"}
+	// docs/ は本家の開発者向けの文書 (2026.11.0 で CONTRIBUTING.md を分けた先。#4164)。
+	skipDirs = []string{".github/", ".config/", ".agents/", ".claude/", ".vscode/", ".devcontainer/", "idea/", "docs/"}
 	// compose.local-db.yml / compose_example.yml のような直下の compose。
 	skipComposeRe = regexp.MustCompile(`^compose[^/]*\.ya?ml$`)
 	// Elythia が frontend/ から外したもの (docs/divergence/frontend.md の #4025 / #4027)。
