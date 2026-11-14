@@ -158,11 +158,25 @@ func TestReplyShouldEmit_HomeIgnoresConnectParamWithReplies(t *testing.T) {
 	assert.False(t, replyShouldEmit(payload, "viewer", nil, true, replyGateHome))
 }
 
-func TestReplyShouldEmit_LocalAnonymousPassesAllReplies(t *testing.T) {
-	// upstream local-timeline は anonymous viewer に対して reply gate を
-	// かけない (`if (note.reply && this.user && ...)` の this.user が false)。
+// TestReplyShouldEmit_LocalAnonymousGatesReplies: since upstream 2026.11.0
+// (#18086) the local timeline gates replies for anonymous viewers too, by the
+// connect param alone. Only a reply to the author's own note passes (#4164).
+func TestReplyShouldEmit_LocalAnonymousGatesReplies(t *testing.T) {
 	payload := []byte(`{"userId":"author","replyId":"p1","reply":{"userId":"target","visibility":"public"}}`)
-	assert.True(t, replyShouldEmit(payload, "", nil, false, replyGateLocal))
+	assert.False(t, replyShouldEmit(payload, "", nil, false, replyGateLocal))
+	assert.True(t, replyShouldEmit(payload, "", nil, true, replyGateLocal))
+	selfThread := []byte(`{"userId":"author","replyId":"p1","reply":{"userId":"author","visibility":"public"}}`)
+	assert.True(t, replyShouldEmit(selfThread, "", nil, false, replyGateLocal))
+}
+
+// TestReplyShouldEmit_LocalIgnoresFolloweeWithReplies: the local timeline no
+// longer lets a followee's replies through by the per-follow withReplies
+// (upstream 2026.11.0 #18086, #4164).
+func TestReplyShouldEmit_LocalIgnoresFolloweeWithReplies(t *testing.T) {
+	payload := []byte(`{"userId":"author","replyId":"p1","reply":{"userId":"target","visibility":"public"}}`)
+	snap := map[string]bool{"author": true}
+	assert.False(t, replyShouldEmit(payload, "viewer", snap, false, replyGateLocal))
+	assert.True(t, replyShouldEmit(payload, "viewer", snap, true, replyGateLocal))
 }
 
 // #1063 follow-up: hybridTimeline は upstream で `requireCredential=true` なので
@@ -229,11 +243,12 @@ func TestReplyShouldEmit_MentionEscapeRequiresAuthenticatedViewer(t *testing.T) 
 	assert.False(t, replyShouldEmit(payload, "", snap, false, replyGateHome),
 		"home: anonymous viewer must not be escaped by empty-string mention")
 
-	// local / hybrid: anonymous は anyway pass-through (`viewerID == ""` の
-	// 早期 return)。mention escape の有無に関係なく true を返す挙動が、
-	// 空文字 mention の混入で乱れないことを pin。
-	assert.True(t, replyShouldEmit(payload, "", nil, false, replyGateLocal),
-		"local: anonymous viewer pass-through must not depend on mention escape")
+	// local: anonymous にも reply gate がかかる (#4164)。空文字 mention で
+	// escape が誤発火して pass しないことを pin。
+	assert.False(t, replyShouldEmit(payload, "", nil, false, replyGateLocal),
+		"local: anonymous viewer must not be escaped by empty-string mention")
+	// hybrid: anonymous は pass-through (`viewerID == ""` の早期 return)。
+	// mention escape の有無に関係なく true を返す挙動が乱れないことを pin。
 	assert.True(t, replyShouldEmit(payload, "", nil, false, replyGateHybrid),
 		"hybrid: anonymous viewer pass-through must not depend on mention escape")
 }
