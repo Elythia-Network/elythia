@@ -149,6 +149,11 @@ export type ElythiaEndpoints = {
 		req: Misskey.entities.EmptyRequest;
 		res: undefined;
 	};
+	'admin/drive/object-storage-migration/restore': {
+		/** Moves the migrated drive files back to the local storage in the background (#4183). */
+		req: Misskey.entities.EmptyRequest;
+		res: undefined;
+	};
 	'admin/drive/object-storage-migration/start': {
 		/** Copies the locally stored drive files to object storage in the background (#4180). */
 		req: Misskey.entities.EmptyRequest;

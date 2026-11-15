@@ -57,6 +57,8 @@ export type ParamDefChecks = [
 	Check<Equal<RequiredKeys<Req<'admin/database-health'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/purge-local'>>, never>>,
 	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/purge-local'>>, never>>,
+	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/restore'>>, never>>,
+	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/restore'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/start'>>, never>>,
 	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/start'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/status'>>, never>>,

@@ -302,6 +302,14 @@
 			},
 			"meta": {}
 		},
+		"admin/drive/object-storage-migration/restore": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
 		"admin/drive/object-storage-migration/start": {
 			"paramDef": {
 				"type": "object",

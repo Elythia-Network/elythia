@@ -210,6 +210,14 @@
 			},
 			"doc": {}
 		},
+		"admin/drive/object-storage-migration/restore": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:drive"
+			},
+			"doc": {}
+		},
 		"admin/drive/object-storage-migration/start": {
 			"meta": {
 				"requireCredential": true,
@@ -4908,6 +4916,7 @@
 						"migrate",
 						"verify",
 						"purge",
+						"restore",
 						null
 					]
 				},
@@ -4974,6 +4983,22 @@
 					"nullable": false
 				},
 				"purgeFailures": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DriveObjectStorageMigrationFailure"
+					}
+				},
+				"restoreFailedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"restoreFailures": {
 					"type": "array",
 					"optional": false,
 					"nullable": false,

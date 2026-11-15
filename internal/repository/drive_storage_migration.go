@@ -12,11 +12,12 @@ import (
 
 // The failure operations of the migration: copying local drive files to
 // object storage (#4180), verifying the copies (#4181) and deleting the
-// local copies (#4182).
+// local copies (#4182), and moving the migrated files back (#4183).
 const (
 	DriveStorageMigrationOperationMigrate = "migrate"
 	DriveStorageMigrationOperationVerify  = "verify"
 	DriveStorageMigrationOperationPurge   = "purge"
+	DriveStorageMigrationOperationRestore = "restore"
 )
 
 // DriveStorageMigrationRepository reads and writes what the
@@ -162,6 +163,44 @@ func (r *DriveStorageMigrationRepository) MarkLocalDeleted(ctx context.Context, 
 	return res.RowsAffected == 1, nil
 }
 
+// MarkRestored moves a migrated file back to the local storage (#4183): it
+// sets storedInternal and clears the marks of the migration, the
+// verification and the purge. It reports false when the file is no longer in
+// the migrated state with the migratedAt and localDeletedAt read before
+// (deleted, made a link, purged meanwhile, or already moved back).
+//
+// 移した日時とローカルを消した日時で突き合わせ、条件付きの 1 回の更新で倒す。倒した
+// 行は storedInternal が true になり、ローカルを消す処理 (#4182) の MarkLocalDeleted
+// に当たらない。逆に、読んだ後で消す処理が印を付けた (ローカルを消した) 行は倒さない。
+func (r *DriveStorageMigrationRepository) MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time) (bool, error) {
+	if !storable(id) {
+		return false, nil
+	}
+	res := migratedStored(r.db.WithContext(ctx)).
+		Where(`"id" = ? AND "objectStorageMigratedAt" = ? AND "objectStorageLocalDeletedAt" IS NOT DISTINCT FROM ?`, id, migratedAt, localDeletedAt).
+		Updates(map[string]any{"storedInternal": true, "objectStorageMigratedAt": nil,
+			"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// IsStoredLocally reports whether the file has a row stored locally (not a
+// link).
+func (r *DriveStorageMigrationRepository) IsStoredLocally(ctx context.Context, id string) (bool, error) {
+	if !storable(id) {
+		return false, nil
+	}
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&model.DriveFile{}).
+		Where(`"id" = ? AND "storedInternal" = true AND "isLink" = false`, id).
+		Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // IsMigrated reports whether the file has a row in the migrated state:
 // stored in object storage (not a link) and marked as migrated.
 func (r *DriveStorageMigrationRepository) IsMigrated(ctx context.Context, id string) (bool, error) {
@@ -249,6 +288,9 @@ type DriveStorageMigrationCounts struct {
 	LocalDeleted int64
 	// PurgeFailed is the number of files whose last purge attempt failed.
 	PurgeFailed int64
+	// RestoreFailed is the number of files whose last attempt to move back
+	// failed.
+	RestoreFailed int64
 }
 
 // Counts returns the numbers of local, migrated, verified and failed files.
@@ -275,6 +317,9 @@ func (r *DriveStorageMigrationRepository) Counts(ctx context.Context) (DriveStor
 		return c, err
 	}
 	if err := failuresOfFiles(db, DriveStorageMigrationOperationPurge).Count(&c.PurgeFailed).Error; err != nil {
+		return c, err
+	}
+	if err := failuresOfFiles(db, DriveStorageMigrationOperationRestore).Count(&c.RestoreFailed).Error; err != nil {
 		return c, err
 	}
 	return c, nil

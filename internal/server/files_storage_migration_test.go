@@ -102,7 +102,12 @@ func (r onlyFileRepo) ListPurgeable(ctx context.Context, afterID string, limit i
 	return out, nil
 }
 
-type queuedMigrationJobs struct{ jobs, verifyJobs, purgeJobs [][2]string }
+type queuedMigrationJobs struct{ jobs, verifyJobs, purgeJobs, restoreJobs [][2]string }
+
+func (q *queuedMigrationJobs) EnqueueRestoreMigratedDriveFiles(token, afterID string) error {
+	q.restoreJobs = append(q.restoreJobs, [2]string{token, afterID})
+	return nil
+}
 
 func (q *queuedMigrationJobs) EnqueuePurgeLocalDriveFiles(token, afterID string) error {
 	q.purgeJobs = append(q.purgeJobs, [2]string{token, afterID})
@@ -230,6 +235,29 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	for _, k := range []string{ak, tk, wk} {
 		_, err := local.Get(k)
 		require.ErrorIs(t, err, coredrive.ErrObjectNotFound, "the local copy %s was kept", k)
+		code, body := serve(k)
+		assert.Equal(t, http.StatusOK, code, k)
+		assert.Equal(t, "bytes of "+k, body, k)
+	}
+
+	// 戻す処理 (#4183) は、オブジェクトストレージから取ってローカルへ置き、実 DB の行を
+	// 移した日時で突き合わせて倒す。倒した後は、同じ URL でローカルから配信する。
+	require.NoError(t, m.StartRestore(ctx))
+	for i := 0; i < len(jobs.restoreJobs); i++ {
+		require.NoError(t, m.RunRestoreBatch(ctx, jobs.restoreJobs[i][0], jobs.restoreJobs[i][1]))
+	}
+	// 前の読み込みの値を残さないよう、新しい変数に読む (GORM は NULL の列で既存の
+	// ポインタを書き換えない)。
+	var back model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, id).Take(&back).Error)
+	require.True(t, back.StoredInternal, "the row was not moved back")
+	assert.Nil(t, back.ObjectStorageMigratedAt)
+	assert.Nil(t, back.ObjectStorageVerifiedAt)
+	assert.Nil(t, back.ObjectStorageLocalDeletedAt)
+	assert.Equal(t, url, back.URL, "the url column was rewritten")
+	for _, k := range []string{ak, tk, wk} {
+		// オブジェクトストレージの写しを消しても、ローカルから配信する。
+		delete(obj.byKey, k)
 		code, body := serve(k)
 		assert.Equal(t, http.StatusOK, code, k)
 		assert.Equal(t, "bytes of "+k, body, k)
