@@ -994,18 +994,24 @@ func apShowURIHost(uri string) (string, error) {
 // software listed in meta.inboxSuspendedSoftware. 解析できない URI と自ホストは
 // false (呼び出し側が別に扱う)。
 //
-// 受信を拒否するソフトウェアの判定は、**instance の行と同じ形 (punycode の小文字、
-// 既定でないポートは残す。idnhost.HostPort) にしてから引く。** Hostname() のままだと、
-// IDN 表記や既定でないポートの URI が素通りする。
+// 一覧とソフトウェアの判定は、**instance の行と同じ形 (punycode の小文字、既定で
+// ないポートは残す。idnhost.HostPort) にしてから引く。** upstream の
+// isFederationAllowedUri も、ポートを残した extractDbHost で引く。Hostname() のままだと、
+// ソフトウェアの判定 (行を完全一致で引く) は IDN 表記や既定でないポートの URI で
+// 素通りし、許可の一覧は同じホスト名の別のポートにまで広がる (#4188)。
+//
+// 自ホストの判定だけは Hostname() で見る。localHost はポートを持たない
+// config.Hostname なので、既定でないポートで動くと自分の URI を拒否してしまう。
 func (h *Handler) federationDenied(uri string) bool {
 	host, err := apShowURIHost(uri)
 	if err != nil || host == "" || host == h.localHost {
 		return false
 	}
-	if h.hostBlocker != nil && (h.hostBlocker.IsBlocked(host) || !h.hostBlocker.IsAllowed(host)) {
+	gateHost := apShowGateHost(uri)
+	if h.hostBlocker != nil && (h.hostBlocker.IsBlocked(gateHost) || !h.hostBlocker.IsAllowed(gateHost)) {
 		return true
 	}
-	return h.softwareBlocker != nil && h.softwareBlocker.IsSuspended(apShowGateHost(uri))
+	return h.softwareBlocker != nil && h.softwareBlocker.IsSuspended(gateHost)
 }
 
 // apShowGateHost returns the host of uri in the form instance rows use

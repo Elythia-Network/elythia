@@ -19,6 +19,7 @@ import (
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -1070,6 +1071,69 @@ func TestAPIShow_FederationNotAllowed(t *testing.T) {
 	h.hostBlocker, h.localHost = apShowHostBlocker{allowed: map[string]bool{}}, "local.example"
 	rec = postJSON(h.APIShow, `{"uri":"https://local.example/notes/ghost"}`)
 	assert.NotEqual(t, http.StatusForbidden, rec.Code, "自 host は federation gate で弾かない")
+}
+
+// apShowListBlocker matches hosts against lists the way instance.Service does.
+type apShowListBlocker struct {
+	blocked []string
+	allowed []string // nil = federation: all
+}
+
+func (b apShowListBlocker) IsBlocked(host string) bool {
+	return idnhost.MatchesBlockList(b.blocked, host)
+}
+func (b apShowListBlocker) IsAllowed(host string) bool {
+	if b.allowed != nil && !idnhost.MatchesAllowList(b.allowed, host) {
+		return false
+	}
+	return !idnhost.MatchesBlockList(b.blocked, host)
+}
+func (b apShowListBlocker) FederationDisabled() bool { return false }
+
+// 一覧は、upstream の extractDbHost と同じくポートを残した形で引く (#4188)。
+// Hostname() で引くと、許可の一覧が別のポートに広がる。IPv6 の 2 件は、括弧の
+// 外れた Hostname() でも一覧の照合 (gateForms) が括弧を付けてそろえるので、
+// どちらの形で引いても当たることを確かめる。
+func TestAPIShow_FederationGateUsesHostWithPort(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		blocker apShowListBlocker
+		uri     string
+		denied  bool
+	}{
+		{"allowlist does not cover another port", apShowListBlocker{allowed: []string{"good.example"}}, "https://good.example:8443/notes/1", true},
+		{"allowlist covers the default port", apShowListBlocker{allowed: []string{"good.example"}}, "https://good.example:443/notes/1", false},
+		{"allowlist entry with the port", apShowListBlocker{allowed: []string{"good.example:8443"}}, "https://good.example:8443/notes/1", false},
+		{"blocked ipv6 literal", apShowListBlocker{blocked: []string{"[2001:db8::1]"}}, "https://[2001:db8::1]/notes/1", true},
+		{"allowed ipv6 literal", apShowListBlocker{allowed: []string{"[2001:db8::1]"}}, "https://[2001:db8::1]/notes/1", false},
+		{"blocked host on another port", apShowListBlocker{blocked: []string{"blocked.example"}}, "https://blocked.example:8443/notes/1", true},
+		{"443 is not http's default port", apShowListBlocker{allowed: []string{"good.example"}}, "http://good.example:443/notes/1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, _ := newHandler(t)
+			h.hostBlocker, h.localHost = tc.blocker, "local.example"
+			h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","id":"` + tc.uri + `"}`)}, nil)
+			rec := postJSON(h.APIShow, `{"uri":"`+tc.uri+`"}`)
+			if tc.denied {
+				assert.Contains(t, rec.Body.String(), "FEDERATION_NOT_ALLOWED")
+				return
+			}
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
+	}
+
+	// 取得した文書の id が別のポートを名乗るときも、返す前の判定で止める (#3563)。
+	h, _, _, _ := newHandler(t)
+	h.hostBlocker, h.localHost = apShowListBlocker{allowed: []string{"good.example"}}, "local.example"
+	h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","id":"https://good.example:8443/notes/1"}`)}, nil)
+	rec := postJSON(h.APIShow, `{"uri":"https://good.example/notes/1"}`)
+	assert.Contains(t, rec.Body.String(), "FEDERATION_NOT_ALLOWED")
+
+	// 自ホストは、既定でないポートで動いていても拒否しない (localHost はポートを持たない)。
+	h, _, _, _ = newHandler(t)
+	h.hostBlocker, h.localHost = apShowListBlocker{allowed: []string{"other.example"}}, "local.example"
+	rec = postJSON(h.APIShow, `{"uri":"https://local.example:3000/notes/ghost"}`)
+	assert.NotContains(t, rec.Body.String(), "FEDERATION_NOT_ALLOWED")
 }
 
 // #1557 fetch できたが id 欠落 / JSON 不正 → RESPONSE_INVALID。
