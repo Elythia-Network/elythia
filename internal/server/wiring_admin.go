@@ -448,6 +448,9 @@ func (s *Server) wireAdmin(d adminDeps) (*apiadmin.Handler, *emojiapplication.Se
 		panic("admin/backup: " + err.Error())
 	}
 	backupHandler := adminbackup.NewHandler(newBackupAdminService(s.config, s.redis.Default), backupVerifier, modLogService)
+	// ドライブのファイルのローカルの実体を消す処理 (#4184) も、取り消せない操作として
+	// 同じ再認証を課す。
+	adminHandler.SetDriveStorageMigrationVerifier(backupVerifier)
 	// 画面からのリストア (#3463 (6c)) は daemon へ転送し、本体では再認証しない。本体でも
 	// 再認証すると、TOTP のコードを本体と daemon で二重に消費して落ちる。再認証を
 	// 含む全条件は daemon が DB を見て照合する。管理者と native token の確認は、本体が

@@ -131,6 +131,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 				<!-- オブジェクトストレージ無効時は分割アップロードも使えない旨を出す。 -->
 				<MkInfo v-else-if="chunkedUploadSupported">{{ i18n.ts._chunkedUpload.requiresObjectStorage }}</MkInfo>
+
+				<!-- Elythia 独自: ローカルのファイルをオブジェクトストレージへ移す・確かめる・ローカルを消す・戻す (#4184)。保存した設定で動くので、設定の欄とは別に置く。 -->
+				<XMigration/>
 			</div>
 		</SearchMarker>
 	</div>
@@ -146,6 +149,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <script lang="ts" setup>
 import { ref, computed } from 'vue';
+import XMigration from './object-storage.Migration.vue';
 import MkSwitch from '@/components/MkSwitch.vue';
 import MkInput from '@/components/MkInput.vue';
 import MkFolder from '@/components/MkFolder.vue';

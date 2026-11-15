@@ -8,8 +8,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
+	"github.com/elythia-network/elythia/internal/core/moderationlog"
+	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/model"
 )
 
@@ -27,6 +30,13 @@ type DriveStorageMigrator interface {
 // (#4180).
 func (h *Handler) SetDriveStorageMigrator(m DriveStorageMigrator) {
 	h.driveStorageMigration = m
+}
+
+// SetDriveStorageMigrationVerifier wires the strong authentication that
+// admin/drive/object-storage-migration/purge-local requires (#4184). It is
+// the verifier of admin/backup/*.
+func (h *Handler) SetDriveStorageMigrationVerifier(v *strongauth.Verifier) {
+	h.driveStorageMigrationReauth = v
 }
 
 const (
@@ -48,7 +58,7 @@ func (h *Handler) DriveStorageMigrationStart(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.Start(c.Request().Context()),
-		"admin/drive/object-storage-migration/start")
+		"admin/drive/object-storage-migration/start", moderationlog.LogMigrateDriveFilesToObjectStorage)
 }
 
 // DriveStorageMigrationVerify handles POST
@@ -62,7 +72,7 @@ func (h *Handler) DriveStorageMigrationVerify(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartVerify(c.Request().Context()),
-		"admin/drive/object-storage-migration/verify")
+		"admin/drive/object-storage-migration/verify", moderationlog.LogVerifyMigratedDriveFiles)
 }
 
 // DriveStorageMigrationPurgeLocal handles POST
@@ -71,12 +81,20 @@ func (h *Handler) DriveStorageMigrationVerify(c echo.Context) error {
 // **Elythia 独自 endpoint** (#4182)。確かめたファイルについて、消す直前にもう一度
 // 確かめてから、ローカルの実体を消すジョブを積んで、すぐに 204 を返す。進み具合は
 // status で読む。移す処理・確かめる処理と同時には走らない。
+//
+// 取り消せない操作なので、DB のバックアップ (admin/backup/*) と同じ再認証を課す
+// (#4184)。再認証は route の middleware でなく、ここ (引数の検証の後) で行う。
+// 前に置くと、形の誤った本文でも TOTP のコードを使い切ってから 400 になる (#3878)。
 func (h *Handler) DriveStorageMigrationPurgeLocal(c echo.Context) error {
-	if h.driveStorageMigration == nil {
+	if h.driveStorageMigration == nil || h.driveStorageMigrationReauth == nil {
+		// 再認証を配線し忘れたら、通さずに閉じる。
 		return apierr.JSONInternalError(c)
 	}
+	if ok, err := adminbackup.Reauthenticate(h.driveStorageMigrationReauth, c); !ok {
+		return err
+	}
 	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartPurge(c.Request().Context()),
-		"admin/drive/object-storage-migration/purge-local")
+		"admin/drive/object-storage-migration/purge-local", moderationlog.LogPurgeLocalDriveFiles)
 }
 
 // DriveStorageMigrationRestore handles POST
@@ -91,14 +109,15 @@ func (h *Handler) DriveStorageMigrationRestore(c echo.Context) error {
 		return apierr.JSONInternalError(c)
 	}
 	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartRestore(c.Request().Context()),
-		"admin/drive/object-storage-migration/restore")
+		"admin/drive/object-storage-migration/restore", moderationlog.LogRestoreMigratedDriveFiles)
 }
 
 // driveStorageMigrationStarted writes the response of starting a run.
-func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string) error {
+func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string, log moderationlog.LogType) error {
 	switch {
 	case err == nil:
-		// モデレーションのログの種類は、画面と一緒に #4184 で足す。
+		// 始めたことだけを残す (#4184)。断ったときは何も変えていないので残さない。
+		h.logModeration(c, log, map[string]any{})
 		return c.NoContent(http.StatusNoContent)
 	case errors.Is(err, coredrive.ErrStorageMigrationNotConfigured):
 		return c.JSON(http.StatusBadRequest, apierr.Error("OBJECT_STORAGE_NOT_CONFIGURED",

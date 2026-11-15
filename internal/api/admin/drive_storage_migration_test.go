@@ -141,7 +141,9 @@ func TestDriveStorageMigrationPurgeLocal(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	stub := &stubDriveStorageMigrator{}
 	h.SetDriveStorageMigrator(stub)
-	rec := doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser)
+	v, code := purgeVerifier(t)
+	h.SetDriveStorageMigrationVerifier(v)
+	rec := doNativePost(h.DriveStorageMigrationPurgeLocal, purgeBody(purgePassword, code()), purgeAdminID)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, 1, stub.purgeStarts)
 	assert.Zero(t, stub.starts)
@@ -161,7 +163,7 @@ func TestDriveStorageMigrationPurgeLocal(t *testing.T) {
 	} {
 		t.Run(tt.code, func(t *testing.T) {
 			stub.purgeErr = tt.err
-			rec := doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser)
+			rec := doNativePost(h.DriveStorageMigrationPurgeLocal, purgeBody(purgePassword, code()), purgeAdminID)
 			assert.Equal(t, tt.status, rec.Code)
 			var env struct {
 				Error struct {

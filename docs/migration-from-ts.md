@@ -319,7 +319,7 @@ Elythia のコンテナは Misskey-TS と同じ **UID/GID 991** で起動する�
 
 それでも戻す場合の手順:
 
-0. ドライブのファイルをオブジェクトストレージへ移した (#4180) なら、Elythia を動かしたまま管理 API の `admin/drive/object-storage-migration/restore` を流し、`status` の `running` が null、`migratedFiles` が 0 になるまで待つ (restore は Elythia のジョブなので、止めた後では流せない)。0 にならないファイルは `restoreFailures` を見る ([deployment.md](deployment.md#有効化前に保存したファイル))
+0. ドライブのファイルをオブジェクトストレージへ移した (#4180) なら、Elythia を動かしたまま、管理画面の「コントロールパネル → オブジェクトストレージ → ローカルのファイルの移行」の「ローカルへ戻す」(管理 API の `admin/drive/object-storage-migration/restore`) を流し、`status` の `running` が null、`migratedFiles` が 0 になるまで待つ (restore は Elythia のジョブなので、止めた後では流せない)。0 にならないファイルは `restoreFailures` を見る ([deployment.md](deployment.md#有効化前に保存したファイル))
 1. Elythiaを停止する
 2. 従来通りMisskey-TSを起動する
 
@@ -347,7 +347,7 @@ migration の注記やコードのコメントには、TS へ戻せることを�
 
 **操作を流したときにだけ戻らなくなるもの。** 復路の検証は次の操作を流さないので、上の表には載らない。
 
-- **ドライブのファイルをオブジェクトストレージへ移す処理 (#4180、親 #4179)。** 写したファイルは `storedInternal=false` になり、`url` の列は `/files/<accessKey>` のまま残る。Elythia は `/files/` でオブジェクトストレージから配信するが、TS は `storedInternal=false` かつ `isLink=false` の行を配信できず、`/files/` に 204 (`Cache-Control: max-age=86400`) を返す。連合先に残っている古い URL も同じく読めなくなり、一度 204 を返すと、戻した後も最長 1 日はキャッシュに 204 が残る。**TS へ戻す前に、移したファイルをローカルへ戻す処理 (#4183、管理 API の `admin/drive/object-storage-migration/restore`) を流し、`status` の `migratedFiles` が 0 になったことを確かめる** (`docs/deployment.md` の「有効化前に保存したファイル」)。戻した行は `storedInternal=true` になり、TS も `/files/` で配信できる。戻せずに残ったファイル (`restoreFailures`) は、TS では `/files/` が 204 になる。**ローカルの実体を消す処理 (#4182) を流した後は、restore で `migratedFiles` が 0 になるまで、写す前の DB のバックアップへ戻してはいけない。移したファイルが表示できなくなる** (ローカルの実体を消しているため)
+- **ドライブのファイルをオブジェクトストレージへ移す処理 (#4180、親 #4179)。** 写したファイルは `storedInternal=false` になり、`url` の列は `/files/<accessKey>` のまま残る。Elythia は `/files/` でオブジェクトストレージから配信するが、TS は `storedInternal=false` かつ `isLink=false` の行を配信できず、`/files/` に 204 (`Cache-Control: max-age=86400`) を返す。連合先に残っている古い URL も同じく読めなくなり、一度 204 を返すと、戻した後も最長 1 日はキャッシュに 204 が残る。**TS へ戻す前に、移したファイルをローカルへ戻す処理 (#4183。管理画面の「コントロールパネル → オブジェクトストレージ → ローカルのファイルの移行」の「ローカルへ戻す」、管理 API の `admin/drive/object-storage-migration/restore`) を流し、`status` の `migratedFiles` が 0 になったことを確かめる** (`docs/deployment.md` の「有効化前に保存したファイル」)。戻した行は `storedInternal=true` になり、TS も `/files/` で配信できる。戻せずに残ったファイル (`restoreFailures`) は、TS では `/files/` が 204 になる。**ローカルの実体を消す処理 (#4182) を流した後は、restore で `migratedFiles` が 0 になるまで、写す前の DB のバックアップへ戻してはいけない。移したファイルが表示できなくなる** (ローカルの実体を消しているため)
 
 ## drop-in 互換性の現状 (2026-05-09 時点)
 

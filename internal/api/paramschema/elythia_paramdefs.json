@@ -297,8 +297,20 @@
 		"admin/drive/object-storage-migration/purge-local": {
 			"paramDef": {
 				"type": "object",
-				"properties": {},
-				"required": []
+				"properties": {
+					"password": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string"
+					},
+					"credential": {
+						"type": "object"
+					}
+				},
+				"required": [
+					"password"
+				]
 			},
 			"meta": {}
 		},

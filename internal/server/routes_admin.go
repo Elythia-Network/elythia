@@ -145,7 +145,9 @@ func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announce
 	api.POST("/admin/drive/object-storage-migration/start", adminHandler.DriveStorageMigrationStart, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
 	api.POST("/admin/drive/object-storage-migration/status", adminHandler.DriveStorageMigrationStatus, middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:drive"))
 	api.POST("/admin/drive/object-storage-migration/verify", adminHandler.DriveStorageMigrationVerify, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
-	api.POST("/admin/drive/object-storage-migration/purge-local", adminHandler.DriveStorageMigrationPurgeLocal, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
+	// purge-local は取り消せないので、DB のバックアップと同じく、ブラウザでログインした
+	// token だけを通し (RequireSecure)、handler の中で再認証する (#4184)。
+	api.POST("/admin/drive/object-storage-migration/purge-local", adminHandler.DriveStorageMigrationPurgeLocal, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"), middleware.RequireSecure())
 	api.POST("/admin/drive/object-storage-migration/restore", adminHandler.DriveStorageMigrationRestore, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
 	api.POST("/admin/emoji/add-aliases-bulk", adminHandler.EmojiAddAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
 	api.POST("/admin/emoji/copy", adminHandler.EmojiCopy, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))

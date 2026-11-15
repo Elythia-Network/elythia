@@ -183,6 +183,13 @@ const (
 	// なく、他の操作と同じ時系列に残す。
 	LogApproveSignupApplication LogType = "approveSignupApplication"
 	LogRejectSignupApplication  LogType = "rejectSignupApplication"
+	// ドライブのファイルのオブジェクトストレージへの移行 (#4179) の 4 つの処理を始めた
+	// (#4184)。info は空。全ファイルの置き場所を変える操作なので、誰がいつ始めたかを
+	// 残す。開始だけを残し、ジョブの進み具合は status で読む。
+	LogMigrateDriveFilesToObjectStorage LogType = "migrateDriveFilesToObjectStorage"
+	LogVerifyMigratedDriveFiles         LogType = "verifyMigratedDriveFiles"
+	LogPurgeLocalDriveFiles             LogType = "purgeLocalDriveFiles"
+	LogRestoreMigratedDriveFiles        LogType = "restoreMigratedDriveFiles"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

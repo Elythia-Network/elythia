@@ -365,7 +365,7 @@ make paramdef-gen     # 本家の meta (upstream_paramdefs.json) を作り直す
 
 `TestSecureDrift`は、Misskeyの`secure: true` endpoint(password変更 / 2FA / data export-import / authorized-apps 等のaccount-security系、51件)が、Elythiaで`middleware.RequireSecure`を適用していることを検証する。
 
-**逆向きも見る (#2877)。** 本家の secure の一覧に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に一覧から消えるだけで、Elythia 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (Elythia独自のendpoint 11件。数え方: `secureStricterThanUpstream`の項目数)。
+**逆向きも見る (#2877)。** 本家の secure の一覧に無い endpoint に `RequireSecure` が付いていたら落とす。片方向のままだと、upstream が `secure` を外したとき (2026.9.0 の `i/revoke-token` がまさにそれ) に一覧から消えるだけで、Elythia 側に `RequireSecure` が残っていても緑のまま通る = サードパーティアプリから叩けるようにする変更が**機能していなくても検出できない**。意図的に厳しくする場合は `secureStricterThanUpstream` に理由付きで登録する (Elythia独自のendpoint 12件。数え方: `secureStricterThanUpstream`の項目数)。
 
 Misskeyの`secure`は「native session token のみ許可、第三者app/OAuth/MiAuth access token 不可」(ApiCallServiceの`isSecure = user != null && token == null`)。これが無いと、有効なaccess tokenを持つ第三者appがpassword変更や2FA解除を駆動できてしまう。
 

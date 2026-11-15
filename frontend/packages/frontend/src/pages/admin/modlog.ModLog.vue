@@ -113,6 +113,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<i v-else-if="(log.type as string) === 'closeDeliveryBreaker'" class="ti ti-player-play"></i>
 		<i v-else-if="(log.type as string) === 'approveSignupApplication'" class="ti ti-user-check"></i>
 		<i v-else-if="(log.type as string) === 'rejectSignupApplication'" class="ti ti-user-x"></i>
+		<!-- Elythia 独自: ドライブのファイルのオブジェクトストレージへの移行の 4 つの処理 (#4184)。 -->
+		<i v-else-if="(log.type as string) === 'migrateDriveFilesToObjectStorage'" class="ti ti-cloud-upload"></i>
+		<i v-else-if="(log.type as string) === 'verifyMigratedDriveFiles'" class="ti ti-checkup-list"></i>
+		<i v-else-if="(log.type as string) === 'purgeLocalDriveFiles'" class="ti ti-trash"></i>
+		<i v-else-if="(log.type as string) === 'restoreMigratedDriveFiles'" class="ti ti-cloud-download"></i>
 		<i v-else-if="(log.type as string) === 'createFederationRule'" class="ti ti-plus"></i>
 		<i v-else-if="(log.type as string) === 'updateFederationRule'" class="ti ti-pencil"></i>
 		<i v-else-if="(log.type as string) === 'deleteFederationRule'" class="ti ti-trash"></i>
