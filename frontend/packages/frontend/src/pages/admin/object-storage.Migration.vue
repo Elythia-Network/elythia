@@ -241,8 +241,8 @@ async function verify(): Promise<void> {
 async function purge(): Promise<void> {
 	const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts._objectStorageMigration.purgeConfirm });
 	if (canceled) return;
-	// 再認証は run の外で聞く。os.authenticateDialog は閉じるボタンで閉じると resolve しない
-	// ので、run の中で待つと busy が立ったままになり、再読み込みするまでボタンが押せなくなる。
+	// 再認証は run の外で聞き、ダイアログを開いている間は busy を立てない。#4195 で直すまで、
+	// os.authenticateDialog は×で閉じると resolve せず、run の中で待つと busy が下りなかった。
 	let auth: Elythia.BackupReauth | null;
 	try {
 		auth = await reauth();

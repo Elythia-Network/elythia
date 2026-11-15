@@ -477,6 +477,11 @@ export function authenticateDialog(): Promise<{
 			done: result => {
 				resolve(result ? { canceled: false, result } : { canceled: true, result: undefined });
 			},
+			// Elythia: ×で閉じたときも取り消しとして返す (#4195)。本家は done だけを受けるので、
+			// 待つ間に状態を立てる画面 (DB のバックアップ) が、再読み込みするまで操作できなくなる。
+			cancelled: () => {
+				resolve({ canceled: true, result: undefined });
+			},
 			closed: () => dispose(),
 		});
 	});
