@@ -44,6 +44,11 @@ type DriveFile struct {
 	// Nil until verified, and again after a failed verification or a new
 	// migration. Elythia-only.
 	ObjectStorageVerifiedAt *time.Time `gorm:"column:objectStorageVerifiedAt" json:"-"`
+	// ObjectStorageLocalDeletedAt is when the purge deleted the local copy of
+	// the migrated file after verifying it once more (#4182). It is set
+	// before the deletion, so a set value means the local copy is gone or was
+	// left behind; nil does not mean the local copy is there. Elythia-only.
+	ObjectStorageLocalDeletedAt *time.Time `gorm:"column:objectStorageLocalDeletedAt" json:"-"`
 
 	// Relations
 	User   *User        `gorm:"foreignKey:UserID" json:"user,omitempty"`

@@ -8,13 +8,13 @@
 - mk-go implemented (TS の subset): **446**
 - mk-go coverage of TS: **100.0%**
 - TS only (mk-go 未実装): **0**
-- mk-go only (TS spec 外): **116**
+- mk-go only (TS spec 外): **117**
 
 ## TS 側に存在するが mk-go で未実装 (0)
 
 (なし)
 
-## mk-go 側にしかない endpoint (116)
+## mk-go 側にしかない endpoint (117)
 
 ### GET variant 追加 (25)
 
@@ -70,7 +70,7 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/chat/rooms/unmute` |
 | POST | `/api/chat/unread-count` |
 
-### その他 mk-go 独自 / alias (76)
+### その他 mk-go 独自 / alias (77)
 
 上記カテゴリに当てはまらない mk-go 独自 endpoint。backward-compat shim や alias を含む。
 
@@ -88,6 +88,7 @@ yojo-art/cherrypick 由来の federated chat 拡張 endpoint。Misskey TS 本家
 | POST | `/api/admin/backup/take` |
 | POST | `/api/admin/backup/verify` |
 | POST | `/api/admin/database-health` |
+| POST | `/api/admin/drive/object-storage-migration/purge-local` |
 | POST | `/api/admin/drive/object-storage-migration/start` |
 | POST | `/api/admin/drive/object-storage-migration/status` |
 | POST | `/api/admin/drive/object-storage-migration/verify` |

@@ -553,6 +553,20 @@ func (c *Client) EnqueueVerifyMigratedDriveFiles(token, afterID string) error {
 	return c.inner.Enqueue(context.Background(), TaskTypeVerifyMigratedDriveFiles, body, base...)
 }
 
+// EnqueuePurgeLocalDriveFiles puts one batch of deleting the local copies of
+// the verified drive files on the queue (#4182). It retries like the
+// migration.
+func (c *Client) EnqueuePurgeLocalDriveFiles(token, afterID string) error {
+	body := mustMarshal(MigrateLocalDriveFilesPayload{Token: token, AfterID: afterID})
+	base := []driver.EnqueueOption{
+		driver.WithQueue(ObjectStorageQueueName),
+		driver.WithMaxRetry(migrateLocalDriveFilesMaxRetry),
+		driver.WithBackoff(driver.BackoffExponential, time.Minute),
+	}
+	base = append(base, c.retentionOpts(ObjectStorageQueueName)...)
+	return c.inner.Enqueue(context.Background(), TaskTypePurgeLocalDriveFiles, body, base...)
+}
+
 // EnqueueCleanRemoteFiles puts a bulk remote-cache cleanup task on the queue.
 //
 // Mirrors upstream `QueueService.createCleanRemoteFilesJob`: admin endpoint は

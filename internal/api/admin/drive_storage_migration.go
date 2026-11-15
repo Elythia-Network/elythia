@@ -18,6 +18,7 @@ import (
 type DriveStorageMigrator interface {
 	Start(ctx context.Context) error
 	StartVerify(ctx context.Context) error
+	StartPurge(ctx context.Context) error
 	Status(ctx context.Context) (coredrive.StorageMigrationStatus, error)
 }
 
@@ -33,6 +34,7 @@ const (
 	idStorageMigrationRunning       = "5f833225-1667-48ac-bc86-10ca1dfd6817"
 	idStorageMigrationNoQueue       = "5e53fbe0-6cfb-447a-9540-a6648135f4a3"
 	idStorageMigrationNoMigrated    = "81c3d7e1-144c-46fa-850d-2a5b8a9c00ef"
+	idStorageMigrationNoPurgeable   = "64fc1936-b77f-43fc-b9d6-d72cf180eed7"
 )
 
 // DriveStorageMigrationStart handles POST
@@ -62,6 +64,20 @@ func (h *Handler) DriveStorageMigrationVerify(c echo.Context) error {
 		"admin/drive/object-storage-migration/verify")
 }
 
+// DriveStorageMigrationPurgeLocal handles POST
+// /api/admin/drive/object-storage-migration/purge-local.
+//
+// **Elythia 独自 endpoint** (#4182)。確かめたファイルについて、消す直前にもう一度
+// 確かめてから、ローカルの実体を消すジョブを積んで、すぐに 204 を返す。進み具合は
+// status で読む。移す処理・確かめる処理と同時には走らない。
+func (h *Handler) DriveStorageMigrationPurgeLocal(c echo.Context) error {
+	if h.driveStorageMigration == nil {
+		return apierr.JSONInternalError(c)
+	}
+	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartPurge(c.Request().Context()),
+		"admin/drive/object-storage-migration/purge-local")
+}
+
 // driveStorageMigrationStarted writes the response of starting a run.
 func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string) error {
 	switch {
@@ -77,6 +93,9 @@ func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoi
 	case errors.Is(err, coredrive.ErrStorageMigrationNothingToVerify):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_MIGRATED_FILES",
 			"No drive file has been migrated to object storage.", idStorageMigrationNoMigrated))
+	case errors.Is(err, coredrive.ErrStorageMigrationNothingToPurge):
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_PURGEABLE_FILES",
+			"No verified drive file keeps its local copy.", idStorageMigrationNoPurgeable))
 	case errors.Is(err, coredrive.ErrStorageMigrationRunning):
 		return c.JSON(http.StatusConflict, apierr.Error("STORAGE_MIGRATION_RUNNING",
 			"A storage migration is already running.", idStorageMigrationRunning))
@@ -121,6 +140,10 @@ func (h *Handler) DriveStorageMigrationStatus(c echo.Context) error {
 		"verifiedFiles":        st.Verified,
 		"verifyFailedFiles":    st.VerifyFailed,
 		"verifyFailures":       packStorageMigrationFailures(st.VerifyFailures),
+		"purgeableFiles":       st.Purgeable,
+		"localDeletedFiles":    st.LocalDeleted,
+		"purgeFailedFiles":     st.PurgeFailed,
+		"purgeFailures":        packStorageMigrationFailures(st.PurgeFailures),
 	})
 }
 

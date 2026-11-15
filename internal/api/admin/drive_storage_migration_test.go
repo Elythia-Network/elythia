@@ -21,8 +21,15 @@ type stubDriveStorageMigrator struct {
 	starts       int
 	verifyErr    error
 	verifyStarts int
+	purgeErr     error
+	purgeStarts  int
 	status       coredrive.StorageMigrationStatus
 	statusErr    error
+}
+
+func (s *stubDriveStorageMigrator) StartPurge(context.Context) error {
+	s.purgeStarts++
+	return s.purgeErr
 }
 
 func (s *stubDriveStorageMigrator) StartVerify(context.Context) error {
@@ -123,6 +130,49 @@ func TestDriveStorageMigrationVerify(t *testing.T) {
 	}
 }
 
+func TestDriveStorageMigrationPurgeLocal(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	stub := &stubDriveStorageMigrator{}
+	h.SetDriveStorageMigrator(stub)
+	rec := doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, 1, stub.purgeStarts)
+	assert.Zero(t, stub.starts)
+	assert.Zero(t, stub.verifyStarts)
+
+	for _, tt := range []struct {
+		err    error
+		status int
+		code   string
+		id     string
+	}{
+		{coredrive.ErrStorageMigrationNotConfigured, http.StatusBadRequest, "OBJECT_STORAGE_NOT_CONFIGURED", "1b01ee55-a494-424e-8ae9-4776b15cbc30"},
+		{coredrive.ErrStorageMigrationNothingToPurge, http.StatusBadRequest, "NO_PURGEABLE_FILES", "64fc1936-b77f-43fc-b9d6-d72cf180eed7"},
+		{coredrive.ErrStorageMigrationRunning, http.StatusConflict, "STORAGE_MIGRATION_RUNNING", "5f833225-1667-48ac-bc86-10ca1dfd6817"},
+		{coredrive.ErrStorageMigrationNoQueue, http.StatusBadRequest, "JOB_QUEUE_UNAVAILABLE", "5e53fbe0-6cfb-447a-9540-a6648135f4a3"},
+		{errors.New("redis down"), http.StatusInternalServerError, "INTERNAL_ERROR", ""},
+	} {
+		t.Run(tt.code, func(t *testing.T) {
+			stub.purgeErr = tt.err
+			rec := doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser)
+			assert.Equal(t, tt.status, rec.Code)
+			var env struct {
+				Error struct {
+					Code string `json:"code"`
+					ID   string `json:"id"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+			assert.Equal(t, tt.code, env.Error.Code)
+			if tt.id != "" {
+				assert.Equal(t, tt.id, env.Error.ID)
+			} else {
+				assert.NotEmpty(t, env.Error.ID)
+			}
+		})
+	}
+}
+
 func TestDriveStorageMigrationStatus(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	at := time.Date(2026, 11, 15, 1, 2, 3, 400_000_000, time.FixedZone("JST", 9*3600))
@@ -135,6 +185,10 @@ func TestDriveStorageMigrationStatus(t *testing.T) {
 			{FileID: "f2", Operation: "verify", Error: "md5", FailedAt: at},
 			{FileID: "f3", Operation: "verify", Error: "gone", FailedAt: at},
 		},
+		Purgeable:     3,
+		LocalDeleted:  6,
+		PurgeFailed:   1,
+		PurgeFailures: []model.DriveObjectStorageMigrationFailure{{FileID: "f4", Operation: "purge", Error: "kept", FailedAt: at}},
 	}}
 	h.SetDriveStorageMigrator(stub)
 	rec := doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
@@ -142,19 +196,23 @@ func TestDriveStorageMigrationStatus(t *testing.T) {
 	assert.JSONEq(t, `{"objectStorageEnabled":true,"running":"verify","localFiles":5,"migratedFiles":7,"failedFiles":1,
 		"failures":[{"fileId":"f1","error":"boom","failedAt":"2026-11-14T16:02:03.400Z"}],
 		"verifiedFiles":4,"verifyFailedFiles":2,
-		"verifyFailures":[{"fileId":"f2","error":"md5","failedAt":"2026-11-14T16:02:03.400Z"},{"fileId":"f3","error":"gone","failedAt":"2026-11-14T16:02:03.400Z"}]}`, rec.Body.String())
+		"verifyFailures":[{"fileId":"f2","error":"md5","failedAt":"2026-11-14T16:02:03.400Z"},{"fileId":"f3","error":"gone","failedAt":"2026-11-14T16:02:03.400Z"}],
+		"purgeableFiles":3,"localDeletedFiles":6,"purgeFailedFiles":1,
+		"purgeFailures":[{"fileId":"f4","error":"kept","failedAt":"2026-11-14T16:02:03.400Z"}]}`, rec.Body.String())
 
-	stub.status = coredrive.StorageMigrationStatus{Running: coredrive.StorageMigrationOperationMigrate}
+	stub.status = coredrive.StorageMigrationStatus{Running: coredrive.StorageMigrationOperationPurge}
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":"migrate","localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
-		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[]}`, rec.Body.String())
+	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":"purge","localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
+		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[],
+		"purgeableFiles":0,"localDeletedFiles":0,"purgeFailedFiles":0,"purgeFailures":[]}`, rec.Body.String())
 
 	stub.status = coredrive.StorageMigrationStatus{}
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":null,"localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
-		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[]}`, rec.Body.String())
+		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[],
+		"purgeableFiles":0,"localDeletedFiles":0,"purgeFailedFiles":0,"purgeFailures":[]}`, rec.Body.String())
 
 	stub.statusErr = errors.New("db down")
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
@@ -166,4 +224,5 @@ func TestDriveStorageMigration_Unwired(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationStart, `{}`, adminUser).Code)
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationStatus, `{}`, adminUser).Code)
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationVerify, `{}`, adminUser).Code)
+	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser).Code)
 }
