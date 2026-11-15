@@ -54,8 +54,14 @@ const TaskTypeVerifyMigratedDriveFiles = "objectStorage:verifyMigratedDriveFiles
 // MigrateLocalDriveFilesPayload like the migration.
 const TaskTypePurgeLocalDriveFiles = "objectStorage:purgeLocalDriveFiles"
 
-// MigrateLocalDriveFilesPayload names the migration, verification or purge run
-// (Token) and the cursor (the files after AfterID are handled next).
+// TaskTypeRestoreMigratedDriveFiles is the task type of one batch of moving
+// the migrated drive files back to the local storage (#4183). Elythia-only;
+// it takes MigrateLocalDriveFilesPayload like the migration.
+const TaskTypeRestoreMigratedDriveFiles = "objectStorage:restoreMigratedDriveFiles"
+
+// MigrateLocalDriveFilesPayload names the migration, verification, purge or
+// restore run (Token) and the cursor (the files after AfterID are handled
+// next).
 type MigrateLocalDriveFilesPayload struct {
 	Token   string `json:"token"`
 	AfterID string `json:"afterId"`

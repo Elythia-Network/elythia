@@ -10,16 +10,19 @@ import (
 )
 
 // DriveStorageMigrationRunner runs one batch of the local-to-object-storage
-// migration, of its verification and of the purge (coredrive.StorageMigrator).
+// migration, of its verification, of the purge and of moving the files back
+// (coredrive.StorageMigrator).
 type DriveStorageMigrationRunner interface {
 	RunBatch(ctx context.Context, token, afterID string) error
 	RunVerifyBatch(ctx context.Context, token, afterID string) error
 	RunPurgeBatch(ctx context.Context, token, afterID string) error
+	RunRestoreBatch(ctx context.Context, token, afterID string) error
 }
 
 // DriveStorageMigrationProcessor handles objectStorage:migrateLocalDriveFiles
-// (#4180), objectStorage:verifyMigratedDriveFiles (#4181) and
-// objectStorage:purgeLocalDriveFiles (#4182).
+// (#4180), objectStorage:verifyMigratedDriveFiles (#4181),
+// objectStorage:purgeLocalDriveFiles (#4182) and
+// objectStorage:restoreMigratedDriveFiles (#4183).
 type DriveStorageMigrationProcessor struct {
 	runner DriveStorageMigrationRunner
 }
@@ -58,6 +61,16 @@ func (p *DriveStorageMigrationProcessor) HandlePurge(ctx context.Context, t driv
 		return nil
 	}
 	return p.runner.RunPurgeBatch(ctx, payload.Token, payload.AfterID)
+}
+
+// HandleRestore runs one batch of moving the migrated files back. A
+// malformed payload is dropped without retry.
+func (p *DriveStorageMigrationProcessor) HandleRestore(ctx context.Context, t driver.Task) error {
+	payload, ok := storageMigrationPayload(t)
+	if !ok {
+		return nil
+	}
+	return p.runner.RunRestoreBatch(ctx, payload.Token, payload.AfterID)
 }
 
 func storageMigrationPayload(t driver.Task) (queue.MigrateLocalDriveFilesPayload, bool) {

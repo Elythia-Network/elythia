@@ -269,6 +269,73 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 4, Verified: 3, VerifyFailed: 2,
 		Purgeable: 2, LocalDeleted: 1, PurgeFailed: 1}, c)
 
+	// 戻すと、移した・確かめた・ローカルを消した日時がすべて消え、ローカルの行になる (#4183)。
+	ok, err = repo.MarkRestored(ctx, "p2", at.Add(time.Second), nil)
+	require.NoError(t, err)
+	assert.False(t, ok, "a row migrated at another time was moved back")
+	for _, id := range []string{"lc", "missing", "a\x00b"} {
+		ok, err := repo.MarkRestored(ctx, id, at, nil)
+		require.NoError(t, err)
+		assert.False(t, ok, id)
+	}
+	// 移しただけ (ローカルを消していない) の行は、消した日時を NULL として突き合わせて戻す。
+	// 一番多い経路。条件を `= ?` にすると NULL どうしが一致せず、どの行も戻らない。
+	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil)
+	require.NoError(t, err)
+	assert.True(t, ok, "a migrated row whose local copy was not purged was not moved back")
+	local, err := repo.IsStoredLocally(ctx, "p3")
+	require.NoError(t, err)
+	require.True(t, local)
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "storedInternal" = false, "objectStorageMigratedAt" = ? WHERE "id" = 'p3'`, migratedAt["p3"]).Error)
+	// リンクに倒した行は、移した日時が残っていても戻さない。
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "isLink" = true WHERE "id" = 'p3'`).Error)
+	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil)
+	require.NoError(t, err)
+	assert.False(t, ok, "a link row was moved back")
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "isLink" = false WHERE "id" = 'p3'`).Error)
+	// ローカルを消した行も戻せ、消した日時が消える。
+	ok, err = repo.MarkLocalDeleted(ctx, "p2", migratedAt["p2"], deletedAt)
+	require.NoError(t, err)
+	require.True(t, ok)
+	// 読んだ後でローカルを消された (消した日時が読んだ値と違う) 行は倒さない。
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil)
+	require.NoError(t, err)
+	assert.False(t, ok, "a row purged after it was read was moved back")
+	local, err = repo.IsStoredLocally(ctx, "p2")
+	require.NoError(t, err)
+	assert.False(t, local)
+	var read model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, "p2").Take(&read).Error)
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], read.ObjectStorageLocalDeletedAt)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	local, err = repo.IsStoredLocally(ctx, "p2")
+	require.NoError(t, err)
+	assert.True(t, local)
+	for _, id := range []string{"missing", "a\x00b"} {
+		local, err := repo.IsStoredLocally(ctx, id)
+		require.NoError(t, err)
+		assert.False(t, local, id)
+	}
+	var p2 model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, "p2").Take(&p2).Error)
+	assert.True(t, p2.StoredInternal)
+	assert.Nil(t, p2.ObjectStorageMigratedAt)
+	assert.Nil(t, p2.ObjectStorageVerifiedAt)
+	assert.Nil(t, p2.ObjectStorageLocalDeletedAt)
+	// 戻した行には、ローカルを消す処理の印が当たらない。
+	ok, err = repo.MarkLocalDeleted(ctx, "p2", migratedAt["p2"], deletedAt)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil)
+	require.NoError(t, err)
+	assert.False(t, ok, "a row moved back twice")
+	require.NoError(t, repo.RecordFailure(ctx, "p3", DriveStorageMigrationOperationRestore, "neither", at))
+	c, err = repo.Counts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), c.RestoreFailed)
+	require.NoError(t, repo.ClearFailure(ctx, "p3", DriveStorageMigrationOperationRestore))
+
 	// 写し直すと、ローカルを消した日時も消える (写したのはローカルにあった実体)。
 	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "storedInternal" = true WHERE "id" = 'p1'`).Error)
 	ok, err = repo.MarkMigrated(ctx, "p1", at.Add(2*time.Hour))

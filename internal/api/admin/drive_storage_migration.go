@@ -19,6 +19,7 @@ type DriveStorageMigrator interface {
 	Start(ctx context.Context) error
 	StartVerify(ctx context.Context) error
 	StartPurge(ctx context.Context) error
+	StartRestore(ctx context.Context) error
 	Status(ctx context.Context) (coredrive.StorageMigrationStatus, error)
 }
 
@@ -78,6 +79,21 @@ func (h *Handler) DriveStorageMigrationPurgeLocal(c echo.Context) error {
 		"admin/drive/object-storage-migration/purge-local")
 }
 
+// DriveStorageMigrationRestore handles POST
+// /api/admin/drive/object-storage-migration/restore.
+//
+// **Elythia 独自 endpoint** (#4183)。移す処理で移したファイルを、オブジェクト
+// ストレージからローカルへ戻すジョブを積んで、すぐに 204 を返す。初めから
+// オブジェクトストレージへアップロードしたファイルは戻さない。進み具合は status で
+// 読む。他の処理と同時には走らない。
+func (h *Handler) DriveStorageMigrationRestore(c echo.Context) error {
+	if h.driveStorageMigration == nil {
+		return apierr.JSONInternalError(c)
+	}
+	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartRestore(c.Request().Context()),
+		"admin/drive/object-storage-migration/restore")
+}
+
 // driveStorageMigrationStarted writes the response of starting a run.
 func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string) error {
 	switch {
@@ -90,7 +106,8 @@ func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoi
 	case errors.Is(err, coredrive.ErrStorageMigrationNothingToDo):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_LOCAL_FILES",
 			"No drive file is stored locally.", idStorageMigrationNothingToDo))
-	case errors.Is(err, coredrive.ErrStorageMigrationNothingToVerify):
+	case errors.Is(err, coredrive.ErrStorageMigrationNothingToVerify),
+		errors.Is(err, coredrive.ErrStorageMigrationNothingToRestore):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_MIGRATED_FILES",
 			"No drive file has been migrated to object storage.", idStorageMigrationNoMigrated))
 	case errors.Is(err, coredrive.ErrStorageMigrationNothingToPurge):
@@ -144,6 +161,8 @@ func (h *Handler) DriveStorageMigrationStatus(c echo.Context) error {
 		"localDeletedFiles":    st.LocalDeleted,
 		"purgeFailedFiles":     st.PurgeFailed,
 		"purgeFailures":        packStorageMigrationFailures(st.PurgeFailures),
+		"restoreFailedFiles":   st.RestoreFailed,
+		"restoreFailures":      packStorageMigrationFailures(st.RestoreFailures),
 	})
 }
 

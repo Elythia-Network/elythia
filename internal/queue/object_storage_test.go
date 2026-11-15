@@ -215,3 +215,23 @@ func TestClient_EnqueuePurgeLocalDriveFiles(t *testing.T) {
 	rec.err = errors.New("redis down")
 	assert.ErrorIs(t, c.EnqueuePurgeLocalDriveFiles("purge-tok", ""), rec.err)
 }
+
+func TestClient_EnqueueRestoreMigratedDriveFiles(t *testing.T) {
+	rec := &payloadRecordingClient{}
+	c := queue.NewClient(&stubDriver{client: rec})
+	defer func() { _ = c.Close() }()
+
+	require.NoError(t, c.EnqueueRestoreMigratedDriveFiles("restore-tok", "f9"))
+	assert.Equal(t, queue.TaskTypeRestoreMigratedDriveFiles, rec.lastTaskType)
+	assert.Equal(t, queue.ObjectStorageQueueName, rec.lastOpts.Queue)
+	var got queue.MigrateLocalDriveFilesPayload
+	require.NoError(t, json.Unmarshal(rec.lastPayload, &got))
+	assert.Equal(t, queue.MigrateLocalDriveFilesPayload{Token: "restore-tok", AfterID: "f9"}, got)
+	// 移す処理と同じ lock を延ばすので、再試行の待ちの合計も同じく lock の期限より短くする。
+	assert.Equal(t, 3, rec.lastOpts.MaxRetry)
+	assert.Equal(t, driver.BackoffExponential, rec.lastOpts.BackoffType)
+	assert.Equal(t, time.Minute, rec.lastOpts.BackoffDelay)
+
+	rec.err = errors.New("redis down")
+	assert.ErrorIs(t, c.EnqueueRestoreMigratedDriveFiles("restore-tok", ""), rec.err)
+}

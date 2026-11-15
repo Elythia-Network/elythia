@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.11.0","ajv":"8.20.0","paramdefsSha256":"8e9d75274b84160bd15122d93e5662877ff8eb088ad349388bd505938f4834ef","elythiaParamdefsSha256":"ca8eb3f64488a41e0f91b0371d5ce7ba09cc152b66e4315ae48c3c95077c524a","cases":3919}
+{"misskeyVersion":"2026.11.0","ajv":"8.20.0","paramdefsSha256":"8e9d75274b84160bd15122d93e5662877ff8eb088ad349388bd505938f4834ef","elythiaParamdefsSha256":"d3f3155bfa3216d7d6fa4999b4d6b4f03991decae3031bce6dd3d1e916bb782e","cases":3927}
 {"ep":"admin/backup/delete"}
 {"in":{"password":"hello","id":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
@@ -512,6 +512,15 @@
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":{"unknownProperty":1},"ok":true}
 {"ep":"admin/drive/object-storage-migration/purge-local"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/drive/object-storage-migration/restore"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":[],"ok":false,"path":"#/type","msg":"must be object"}
