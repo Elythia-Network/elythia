@@ -104,16 +104,29 @@ func gateForms(s string) (full, bare string) {
 	name, port := splitGatePort(s)
 	// FQDN の末尾ドット (`evil.example.`) は同じ名前の別綴り。url.Hostname() は
 	// これを残すので、剥がさないと suffix 一致から外れる。
-	if !strings.HasPrefix(name, "[") {
-		name = strings.TrimRight(name, ".")
-	} else if strings.IndexByte(name, '%') >= 0 && strings.IndexByte(name, ']') == len(name)-1 {
-		// IPv6 の zone は接続先を変えない。HostPort は zone を落とした形を作るので、
-		// 一覧の項目や以前に保存した値の側も同じ形にそろえる (#4186)。`]` が最後の
-		// 1 文字のときだけにする。netip は zone の中身を見ないので、`[..%z]]:8443` の
-		// ような壊れた値を読むと、後ろのポートまで zone として捨ててしまう
-		if addr, err := netip.ParseAddr(strings.TrimSuffix(name[1:], "]")); err == nil {
-			name = "[" + addr.WithZone("").String() + "]"
+	switch {
+	case strings.HasPrefix(name, "["):
+		if strings.IndexByte(name, '%') >= 0 && strings.IndexByte(name, ']') == len(name)-1 {
+			// IPv6 の zone は接続先を変えない。HostPort は zone を落とした形を作るので、
+			// 一覧の項目や以前に保存した値の側も同じ形にそろえる (#4186)。`]` が最後の
+			// 1 文字のときだけにする。netip は zone の中身を見ないので、`[..%z]]:8443` の
+			// ような壊れた値を読むと、後ろのポートまで zone として捨ててしまう
+			if addr, err := netip.ParseAddr(name[1 : len(name)-1]); err == nil {
+				name = "[" + addr.WithZone("").String() + "]"
+			}
 		}
+	case strings.Count(name, ":") >= 2 && isIPv6(strings.TrimRight(name, ".")):
+		// 括弧なしで書いた IPv6 の項目 (`2001:db8::1`)。照合するホストは括弧付きの
+		// 形 (idnhost.HostPort) で来るので、綴りは変えずに括弧を付けてそろえる (#4188)。
+		// 末尾のドットは他の名前と同じく落とす。zone は HostPort と同じく、落として
+		// netip の形にする
+		name = strings.TrimRight(name, ".")
+		if addr, _ := netip.ParseAddr(name); addr.Zone() != "" {
+			name = addr.WithZone("").String()
+		}
+		name = "[" + name + "]"
+	default:
+		name = strings.TrimRight(name, ".")
 	}
 	if name == "" {
 		return "", ""
@@ -122,6 +135,12 @@ func gateForms(s string) (full, bare string) {
 		return name + ":" + port, name
 	}
 	return name, name
+}
+
+// isIPv6 reports whether s is an IPv6 address, with or without a zone.
+func isIPv6(s string) bool {
+	addr, err := netip.ParseAddr(s)
+	return err == nil && addr.Is6()
 }
 
 // splitGatePort splits `name:port` / `[v6]:port` into name and port. A value

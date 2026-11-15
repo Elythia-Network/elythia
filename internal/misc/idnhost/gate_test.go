@@ -47,6 +47,13 @@ func TestMatchesBlockList(t *testing.T) {
 		{name: "ipv6 zone in host", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]:8443", want: true},
 		{name: "ipv6 zone in pattern", patterns: []string{"[2001:0db8::1%en0]"}, host: "[2001:db8::1]", want: true},
 		{name: "ipv6 zone other address", patterns: []string{"[2001:db8::1%z]"}, host: "[2001:db8::2]", want: false},
+		// IPv6 は括弧の有無をそろえて照合する。綴りは HostPort と同じく直さず、zone が
+		// あるときだけ落として netip の形にする (#4188)。
+		{name: "ipv6 pattern without brackets", patterns: []string{"2001:db8::1"}, host: "[2001:db8::1]", want: true},
+		{name: "ipv6 pattern without brackets other address", patterns: []string{"2001:db8::1"}, host: "[2001:db8::2]", want: false},
+		{name: "ipv6 pattern without brackets with zone", patterns: []string{"2001:db8::1%z"}, host: "[2001:db8::1]:8443", want: true},
+		{name: "colons but not ipv6 keep trimming the dot", patterns: []string{"a:b:c."}, host: "a:b:c", want: true},
+		{name: "ipv6 pattern without brackets trailing dot", patterns: []string{"2001:db8::1."}, host: "[2001:db8::1]", want: true},
 		{name: "ipv4 with port", patterns: []string{"192.0.2.1"}, host: "192.0.2.1:8443", want: true},
 		{name: "ipv4 other address with port", patterns: []string{"192.0.2.1"}, host: "192.0.2.10:8443", want: false},
 	}
@@ -78,6 +85,8 @@ func TestMatchesAllowList(t *testing.T) {
 		{name: "ipv6 zone bracket inside zone", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%]:8443]", want: false},
 		{name: "ipv6 zone non-numeric port", patterns: []string{"[2001:db8::1]"}, host: "[2001:db8::1%z]:abc", want: false},
 		{name: "ipv6 zone broken pattern", patterns: []string{"[2001:db8::1%z]]:8443"}, host: "[2001:db8::1]", want: false},
+		{name: "ipv6 pattern without brackets", patterns: []string{"2001:db8::1"}, host: "[2001:db8::1]", want: true},
+		{name: "ipv6 pattern without brackets keeps port", patterns: []string{"2001:db8::1"}, host: "[2001:db8::1]:8443", want: false},
 
 		// 許可側はポートを落とさない (upstream isFederationAllowedHost と同じ)。
 		{name: "non-default port is not admitted by bare entry", patterns: []string{"good.example"}, host: "good.example:8443", want: false},
