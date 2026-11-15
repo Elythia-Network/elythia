@@ -55,6 +55,8 @@ export type ParamDefChecks = [
 	Check<Equal<RequiredKeys<Req<'admin/backup/verify'>>, 'id' | 'password'>>,
 	Check<Equal<Keys<Req<'admin/database-health'>>, never>>,
 	Check<Equal<RequiredKeys<Req<'admin/database-health'>>, never>>,
+	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/cleanup-copies'>>, never>>,
+	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/cleanup-copies'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/purge-local'>>, 'credential' | 'password' | 'token'>>,
 	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/purge-local'>>, 'password'>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/restore'>>, never>>,

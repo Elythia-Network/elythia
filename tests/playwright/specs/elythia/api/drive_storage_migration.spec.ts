@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// ドライブのファイルのオブジェクトストレージへの移行 (#4179) の 5 つの口を 2xx まで通し、
+// ドライブのファイルのオブジェクトストレージへの移行 (#4179) の 6 つの口を 2xx まで通し、
 // 応答を /api.json の宣言で照合する (#4184)。ローカルに置いたファイルを、compose.yml の minio へ
-// 移す → 確かめる → ローカルを消す → ローカルへ戻すの順に流し、そのたびに同じ URL で同じ中身を
-// 配ることを見る。
+// 移す → 確かめる → ローカルを消す → ローカルへ戻す → バケットの写しを消す (#4197) の順に流し、
+// そのたびに同じ URL で同じ中身を配ることを見る。
 //
 // 移す処理はインスタンスの全てのファイルが対象になる。ローカルを消したまま保存先を戻すと、この
 // shard の後の spec のファイルが配れなくなるので、最後に必ずローカルへ戻してから、オブジェクト
@@ -48,6 +48,7 @@ interface Status {
   verifiedFiles: number;
   purgeableFiles: number;
   localDeletedFiles: number;
+  restoredCopies: number;
 }
 
 const STATUS = 'admin/drive/object-storage-migration/status';
@@ -88,6 +89,9 @@ test.describe('drive: moving local files to object storage and back', () => {
 
   let original: Record<string, unknown> | undefined;
   let roleId: string | undefined;
+  // テストの中で消すファイル。途中で落ちたら afterAll で消す (初めからオブジェクトストレージへ
+  // 上げたファイルを残したまま無効に戻すと、その行が配れなくなる)
+  const leftovers = new Set<string>();
 
   test.beforeAll(() => {
     resetRateLimit();
@@ -102,6 +106,9 @@ test.describe('drive: moving local files to object storage and back', () => {
     try {
       // ロールは保存先と関係なく消す。下の検査で止まっても残さない
       if (roleId !== undefined) expect.soft((await callApi(ctx, 'admin/roles/delete', { i: root.token, roleId })).status()).toBe(204);
+      for (const fileId of leftovers) {
+        await callApi(ctx, 'drive/files/delete', { i: root.token, fileId });
+      }
       if (original !== undefined) {
         // 途中で落ちて移したファイルが残っていたら、保存先を戻す前にローカルへ戻す。戻さずに無効に
         // すると、ローカルを消したファイルが配れなくなる。status が読めないときも、無効にはしない
@@ -113,6 +120,11 @@ test.describe('drive: moving local files to object storage and back', () => {
         }
         // 戻せなかったファイルが残ったまま無効にすると、それが配れなくなり、後の spec に響く
         expect(st.migratedFiles, `ローカルへ戻せなかったファイル: ${JSON.stringify(st)}`).toBe(0);
+        // 戻した写しの記録が残っていたら、オブジェクトストレージが有効なうちに消す (#4197)
+        if (st.restoredCopies > 0) {
+          await callChecked(ctx, 'admin/drive/object-storage-migration/cleanup-copies', { i: root.token });
+          st = await waitIdle(ctx, root.token, st.restoredCopies);
+        }
         const restored = await callApi(ctx, 'admin/update-meta', { i: root.token, ...original, useObjectStorage: false });
         expect.soft(restored.status(), `元の値に戻せなかった: ${await restored.text()}`).toBe(204);
       }
@@ -121,16 +133,21 @@ test.describe('drive: moving local files to object storage and back', () => {
     }
   });
 
-  test('move, verify, delete the local copies, move back', async ({ request }) => {
+  test('move, verify, delete the local copies, move back, delete the copies left', async ({ request }) => {
     const root = rootFixture();
-    // オブジェクトストレージを無効のまま上げ、ローカルに置く
+    const upload = async (name: string, content: Buffer) => {
+      const up = await request.post(`${baseURL()}/api/drive/files/create`, {
+        multipart: { i: root.token, file: { name, mimeType: 'text/plain', buffer: content } },
+        failOnStatusCode: false,
+      });
+      expect(up.status(), await up.text()).toBe(200);
+      return (await up.json()) as { id: string; url: string };
+    };
+    // オブジェクトストレージを無効のまま上げ、ローカルに置く。gone は戻した後に消す
     const body = Buffer.from(randomBytes(512).toString('hex'));
-    const up = await request.post(`${baseURL()}/api/drive/files/create`, {
-      multipart: { i: root.token, file: { name: 'pw-migration.txt', mimeType: 'text/plain', buffer: body } },
-      failOnStatusCode: false,
-    });
-    expect(up.status(), await up.text()).toBe(200);
-    const file = (await up.json()) as { id: string; url: string };
+    const file = await upload('pw-migration.txt', body);
+    const gone = await upload('pw-migration-gone.txt', Buffer.from(randomBytes(64).toString('hex')));
+    leftovers.add(gone.id);
 
     const beforeResp = await callApi(request, 'admin/meta', { i: root.token });
     expect(beforeResp.ok(), 'admin/meta を読めなかった').toBe(true);
@@ -143,6 +160,10 @@ test.describe('drive: moving local files to object storage and back', () => {
     expect(st.objectStorageEnabled).toBe(true);
     expect(st.localFiles).toBeGreaterThan(0);
     const files = st.localFiles;
+    // 初めからオブジェクトストレージへ上げたファイル。移す・戻す・写しを消すのどれにも入らない
+    const directBody = Buffer.from(randomBytes(64).toString('hex'));
+    const direct = await upload('pw-migration-direct.txt', directBody);
+    leftovers.add(direct.id);
 
     // 移す。url は変わらず、同じ中身を配る
     await callChecked(request, 'admin/drive/object-storage-migration/start', { i: root.token });
@@ -179,5 +200,29 @@ test.describe('drive: moving local files to object storage and back', () => {
     st = await waitIdle(request, root.token, files);
     expect(st.migratedFiles, '移したファイルが残った').toBe(0);
     expect((await fetchFile(request, file.url)).equals(body)).toBe(true);
+
+    // 戻したファイルの写しはバケットに残り、記録される (#4197)。戻した後にファイルを消すと、
+    // その写しも消して記録を外す (テキストのファイルはサムネイルが無いので 1 件)
+    expect(st.restoredCopies).toBeGreaterThan(0);
+    const copiesBefore = st.restoredCopies;
+    await expectApiOk(request, 'drive/files/delete', { i: root.token, fileId: gone.id });
+    leftovers.delete(gone.id);
+    await expect.poll(async () => (await callChecked<Status>(request, STATUS, { i: root.token })).restoredCopies,
+      { message: '消したファイルの写しの記録が残った', timeout: 30_000 }).toBe(copiesBefore - 1);
+
+    // 初めから上げたファイルの url はバケットの URL なので、アクセスキー (url の最後) で /files/ から読む
+    const directKey = new URL(direct.url).pathname.split('/').pop()!;
+    const directURL = `${baseURL()}/files/${directKey}`;
+    expect((await fetchFile(request, directURL)).equals(directBody)).toBe(true);
+
+    // 写しを消す。戻したファイルはローカルから、初めから上げたファイルはオブジェクトストレージから
+    // 同じ URL で配り続ける
+    await callChecked(request, 'admin/drive/object-storage-migration/cleanup-copies', { i: root.token });
+    st = await waitIdle(request, root.token, copiesBefore);
+    expect(st.restoredCopies, '写しの記録が残った').toBe(0);
+    expect((await fetchFile(request, file.url)).equals(body)).toBe(true);
+    expect((await fetchFile(request, directURL)).equals(directBody), '初めから上げたファイルが消えた').toBe(true);
+    await expectApiOk(request, 'drive/files/delete', { i: root.token, fileId: direct.id });
+    leftovers.delete(direct.id);
   });
 });

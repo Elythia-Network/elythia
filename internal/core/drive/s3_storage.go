@@ -80,6 +80,12 @@ func (s *S3Storage) objectKey(accessKey string) string {
 	return s.prefix + "/" + accessKey
 }
 
+// ObjectLocation returns where the object with accessKey is: the bucket and
+// the object key with the prefix (#4197).
+func (s *S3Storage) ObjectLocation(accessKey string) string {
+	return s.bucket + "/" + s.objectKey(accessKey)
+}
+
 // publicURL returns the public URL for the given accessKey.
 func (s *S3Storage) publicURL(accessKey string) string {
 	key := s.objectKey(accessKey)

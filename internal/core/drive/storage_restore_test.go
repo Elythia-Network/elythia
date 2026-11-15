@@ -371,7 +371,7 @@ func TestStorageRestoreSkipsARowChangedWhileReading(t *testing.T) {
 	require.NoError(t, f.local.Delete("ak-a1"))
 	dst := &hookStorage{Storage: f.dst, onGet: func(key string) {
 		if key == "ak-a1" {
-			_, _ = f.repo.MarkRestored(ctx, "a1", *f.repo.file("a1").ObjectStorageMigratedAt, nil)
+			_, _ = f.repo.MarkRestored(ctx, "a1", *f.repo.file("a1").ObjectStorageMigratedAt, nil, nil)
 		}
 	}}
 	m := NewStorageMigrator(f.repo, f.local, dst, f.enq, f.lock)

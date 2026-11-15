@@ -36,6 +36,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<template #key>{{ i18n.ts._objectStorageMigration.localDeletedFiles }}</template>
 				<template #value>{{ number(status.localDeletedFiles) }}</template>
 			</MkKeyValue>
+			<MkKeyValue data-testid="object-storage-migration-restored-copies">
+				<template #key>{{ i18n.ts._objectStorageMigration.restoredCopies }}</template>
+				<template #value>{{ number(status.restoredCopies) }}</template>
+			</MkKeyValue>
 		</div>
 
 		<div class="_buttons">
@@ -43,6 +47,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<MkButton data-testid="object-storage-migration-verify" :disabled="!canVerify" @click="verify"><i class="ti ti-checkup-list"></i> {{ i18n.ts._objectStorageMigration.verify }}</MkButton>
 			<MkButton data-testid="object-storage-migration-purge" danger :disabled="!canPurge" @click="purge"><i class="ti ti-trash"></i> {{ i18n.ts._objectStorageMigration.purge }}</MkButton>
 			<MkButton data-testid="object-storage-migration-restore" :disabled="!canRestore" @click="restore"><i class="ti ti-cloud-download"></i> {{ i18n.ts._objectStorageMigration.restore }}</MkButton>
+			<MkButton data-testid="object-storage-migration-cleanup" :disabled="!canCleanup" @click="cleanup"><i class="ti ti-cloud-x"></i> {{ i18n.ts._objectStorageMigration.cleanup }}</MkButton>
 		</div>
 		<MkInfo v-if="status != null && status.purgeableFiles > 0 && !hasSecondFactor">{{ i18n.ts._objectStorageMigration.purgeNeedsTwoFactor }}</MkInfo>
 
@@ -51,8 +56,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<template #label>{{ list.label }}</template>
 				<template #suffix>{{ number(list.count) }}</template>
 				<div class="_gaps_s">
-					<div v-for="f in list.failures" :key="f.fileId" :class="$style.failure">
-						<span class="_monospace">{{ f.fileId }}</span>
+					<div v-for="f in list.failures" :key="f.id" :class="$style.failure">
+						<span class="_monospace">{{ f.id }}</span>
 						<span>{{ f.error }}</span>
 						<MkTime :time="f.failedAt"/>
 					</div>
@@ -108,6 +113,7 @@ const canMigrate = computed(() => (idle.value?.localFiles ?? 0) > 0);
 const canVerify = computed(() => (idle.value?.migratedFiles ?? 0) > 0);
 const canPurge = computed(() => (idle.value?.purgeableFiles ?? 0) > 0 && hasSecondFactor.value);
 const canRestore = computed(() => (idle.value?.migratedFiles ?? 0) > 0);
+const canCleanup = computed(() => (idle.value?.restoredCopies ?? 0) > 0);
 
 const runningLabel = computed(() => {
 	switch (status.value?.running) {
@@ -115,6 +121,7 @@ const runningLabel = computed(() => {
 		case 'verify': return i18n.ts._objectStorageMigration.verifying;
 		case 'purge': return i18n.ts._objectStorageMigration.purging;
 		case 'restore': return i18n.ts._objectStorageMigration.restoring;
+		case 'cleanup': return i18n.ts._objectStorageMigration.cleaningUp;
 		default: return '';
 	}
 });
@@ -122,11 +129,14 @@ const runningLabel = computed(() => {
 const failureLists = computed(() => {
 	const s = status.value;
 	if (s == null) return [];
+	const byFile = (failures: Elythia.DriveObjectStorageMigrationFailure[]) => failures.map(f => ({ id: f.fileId, error: f.error, failedAt: f.failedAt }));
 	return [
-		{ key: 'migrate', label: i18n.ts._objectStorageMigration.migrateFailures, count: s.failedFiles, failures: s.failures },
-		{ key: 'verify', label: i18n.ts._objectStorageMigration.verifyFailures, count: s.verifyFailedFiles, failures: s.verifyFailures },
-		{ key: 'purge', label: i18n.ts._objectStorageMigration.purgeFailures, count: s.purgeFailedFiles, failures: s.purgeFailures },
-		{ key: 'restore', label: i18n.ts._objectStorageMigration.restoreFailures, count: s.restoreFailedFiles, failures: s.restoreFailures },
+		{ key: 'migrate', label: i18n.ts._objectStorageMigration.migrateFailures, count: s.failedFiles, failures: byFile(s.failures) },
+		{ key: 'verify', label: i18n.ts._objectStorageMigration.verifyFailures, count: s.verifyFailedFiles, failures: byFile(s.verifyFailures) },
+		{ key: 'purge', label: i18n.ts._objectStorageMigration.purgeFailures, count: s.purgeFailedFiles, failures: byFile(s.purgeFailures) },
+		{ key: 'restore', label: i18n.ts._objectStorageMigration.restoreFailures, count: s.restoreFailedFiles, failures: byFile(s.restoreFailures) },
+		// 写しの失敗はキーで出す。ファイルは消されていることがある (#4197)。
+		{ key: 'cleanup', label: i18n.ts._objectStorageMigration.cleanupFailures, count: s.cleanupFailedCopies, failures: s.cleanupFailures.map(f => ({ id: f.key, error: f.error, failedAt: f.failedAt })) },
 	];
 });
 
@@ -155,6 +165,7 @@ function errorText(err: unknown): string {
 		case 'NO_LOCAL_FILES': return i18n.ts._objectStorageMigration.noLocalFiles;
 		case 'NO_MIGRATED_FILES': return i18n.ts._objectStorageMigration.noMigratedFiles;
 		case 'NO_PURGEABLE_FILES': return i18n.ts._objectStorageMigration.noPurgeableFiles;
+		case 'NO_RESTORED_COPIES': return i18n.ts._objectStorageMigration.noRestoredCopies;
 		case 'STORAGE_MIGRATION_RUNNING': return i18n.ts._objectStorageMigration.alreadyRunning;
 		case 'JOB_QUEUE_UNAVAILABLE': return i18n.ts._objectStorageMigration.queueUnavailable;
 		case 'TWO_FACTOR_REQUIRED': return i18n.ts._objectStorageMigration.purgeNeedsTwoFactor;
@@ -259,6 +270,12 @@ async function restore(): Promise<void> {
 	const { canceled } = await os.confirm({ type: 'question', text: i18n.ts._objectStorageMigration.restoreConfirm });
 	if (canceled) return;
 	await run(() => misskeyApi('admin/drive/object-storage-migration/restore', {}));
+}
+
+async function cleanup(): Promise<void> {
+	const { canceled } = await os.confirm({ type: 'warning', text: i18n.ts._objectStorageMigration.cleanupConfirm });
+	if (canceled) return;
+	await run(() => misskeyApi('admin/drive/object-storage-migration/cleanup-copies', {}));
 }
 
 /**

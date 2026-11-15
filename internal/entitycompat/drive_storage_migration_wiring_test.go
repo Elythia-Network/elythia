@@ -25,6 +25,16 @@ func TestDriveStorageMigratorIsWired(t *testing.T) {
 			"running, err := driveStorageMigrator.Running(context.Background()) "+
 			"return err != nil || running })",
 		"移す処理の実行中にローカルの行を消すと、並行して写した分がオブジェクトストレージに孤児として残る (#4180)")
+	// 配線し忘れると、ローカルへ戻したファイルを消しても、バケットの写しが残る (#4197)。
+	assertWired(t, serverPkg,
+		"driveService.SetRestoredCopyReleaser(driveStorageMigrator)",
+		"ローカルへ戻したファイルを消しても、バケットの写しが残り、public-read なら取れ続ける (#4197)")
+	assertWired(t, serverPkg,
+		"objectStorageProcessor.SetRestoredCopyReleaser(driveStorageMigrator)",
+		"リモートのファイルの掃除で消したファイルの、バケットの写しが残る (#4197)")
+	assertWired(t, serverPkg,
+		"adminHandler.SetRestoredCopyReleaser(driveStorageMigrator)",
+		"管理画面の掃除で消したファイルの、バケットの写しが残る (#4197)")
 	// 再認証を配線し忘れると、purge-local は 500 で閉じる (#4184)。
 	assertWired(t, serverPkg,
 		"adminHandler.SetDriveStorageMigrationVerifier(backupVerifier)",
@@ -54,4 +64,8 @@ func TestDriveStorageMigrationRoutesAreRegistered(t *testing.T) {
 		`api.POST("/admin/drive/object-storage-migration/restore", adminHandler.DriveStorageMigrationRestore, `+
 			`middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))`,
 		"戻す処理を管理者以外が始められる、あるいは 404 になる (#4183)")
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
+		`api.POST("/admin/drive/object-storage-migration/cleanup-copies", adminHandler.DriveStorageMigrationCleanupCopies, `+
+			`middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))`,
+		"写しを消す処理を管理者以外が始められる、あるいは 404 になる (#4197)")
 }

@@ -168,6 +168,9 @@ type Handler struct {
 	// objectStorageEnqueuer は bulk drive cleanup の実体削除を queue へ
 	// 逃がす (#2325)。nil なら従来どおり handler 内で同期削除する。
 	objectStorageEnqueuer ObjectStorageEnqueuer
+	// restoredCopies deletes the copies a file moved back to the local storage
+	// left in object storage, when the bulk cleanups delete the file (#4197).
+	restoredCopies RestoredCopyReleaser
 	// captchaVerifierFactory builds a one-off captcha.Verifier for
 	// admin/captcha/save verification. nil uses the real providers; tests
 	// inject a stub to avoid external HTTP calls.
@@ -727,6 +730,19 @@ func (h *Handler) SetLocalStorageDeleter(s StorageDeleter) {
 // synchronous in-request deletion.
 func (h *Handler) SetObjectStorageEnqueuer(e ObjectStorageEnqueuer) {
 	h.objectStorageEnqueuer = e
+}
+
+// RestoredCopyReleaser deletes the copies a drive file moved back to the
+// local storage left in object storage (coredrive.StorageMigrator, #4197).
+type RestoredCopyReleaser interface {
+	ReleaseRestoredCopies(ctx context.Context, fileID string)
+}
+
+// SetRestoredCopyReleaser wires what deletes the copies a deleted file left
+// in object storage when it was moved back (#4197). Optional — nil leaves
+// the copies to the cleanup of the migration.
+func (h *Handler) SetRestoredCopyReleaser(r RestoredCopyReleaser) {
+	h.restoredCopies = r
 }
 
 // SetStorageDeleter wires the object-storage backend so bulk drive cleanups can

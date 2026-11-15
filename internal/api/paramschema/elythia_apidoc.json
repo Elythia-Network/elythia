@@ -202,6 +202,14 @@
 				}
 			}
 		},
+		"admin/drive/object-storage-migration/cleanup-copies": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:drive"
+			},
+			"doc": {}
+		},
 		"admin/drive/object-storage-migration/purge-local": {
 			"meta": {
 				"requireCredential": true,
@@ -4918,6 +4926,7 @@
 						"verify",
 						"purge",
 						"restore",
+						"cleanup",
 						null
 					]
 				},
@@ -5009,12 +5018,60 @@
 						"nullable": false,
 						"ref": "DriveObjectStorageMigrationFailure"
 					}
+				},
+				"restoredCopies": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"cleanupFailedCopies": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"cleanupFailures": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DriveObjectStorageMigrationCopyFailure"
+					}
 				}
 			}
 		},
 		"DriveObjectStorageMigrationFailure": {
 			"type": "object",
 			"properties": {
+				"fileId": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "id"
+				},
+				"error": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
+				"failedAt": {
+					"type": "string",
+					"optional": false,
+					"nullable": false,
+					"format": "date-time"
+				}
+			}
+		},
+		"DriveObjectStorageMigrationCopyFailure": {
+			"type": "object",
+			"properties": {
+				"key": {
+					"type": "string",
+					"optional": false,
+					"nullable": false
+				},
 				"fileId": {
 					"type": "string",
 					"optional": false,

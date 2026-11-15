@@ -38,6 +38,7 @@ func driveStorageMigrationDB(t *testing.T) *gorm.DB {
 	db := storageMigDB
 	reset := func() {
 		require.NoError(t, db.Exec(`DELETE FROM "drive_object_storage_migration_failure"`).Error)
+		require.NoError(t, db.Exec(`DELETE FROM "drive_object_storage_restored_copy"`).Error)
 		require.NoError(t, db.Exec(`DELETE FROM "drive_file"`).Error)
 	}
 	reset()
@@ -270,17 +271,17 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 		Purgeable: 2, LocalDeleted: 1, PurgeFailed: 1}, c)
 
 	// 戻すと、移した・確かめた・ローカルを消した日時がすべて消え、ローカルの行になる (#4183)。
-	ok, err = repo.MarkRestored(ctx, "p2", at.Add(time.Second), nil)
+	ok, err = repo.MarkRestored(ctx, "p2", at.Add(time.Second), nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok, "a row migrated at another time was moved back")
 	for _, id := range []string{"lc", "missing", "a\x00b"} {
-		ok, err := repo.MarkRestored(ctx, id, at, nil)
+		ok, err := repo.MarkRestored(ctx, id, at, nil, nil)
 		require.NoError(t, err)
 		assert.False(t, ok, id)
 	}
 	// 移しただけ (ローカルを消していない) の行は、消した日時を NULL として突き合わせて戻す。
 	// 一番多い経路。条件を `= ?` にすると NULL どうしが一致せず、どの行も戻らない。
-	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil)
+	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil, nil)
 	require.NoError(t, err)
 	assert.True(t, ok, "a migrated row whose local copy was not purged was not moved back")
 	local, err := repo.IsStoredLocally(ctx, "p3")
@@ -289,7 +290,7 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "storedInternal" = false, "objectStorageMigratedAt" = ? WHERE "id" = 'p3'`, migratedAt["p3"]).Error)
 	// リンクに倒した行は、移した日時が残っていても戻さない。
 	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "isLink" = true WHERE "id" = 'p3'`).Error)
-	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil)
+	ok, err = repo.MarkRestored(ctx, "p3", migratedAt["p3"], nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok, "a link row was moved back")
 	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "isLink" = false WHERE "id" = 'p3'`).Error)
@@ -298,7 +299,7 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	// 読んだ後でローカルを消された (消した日時が読んだ値と違う) 行は倒さない。
-	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil)
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok, "a row purged after it was read was moved back")
 	local, err = repo.IsStoredLocally(ctx, "p2")
@@ -306,7 +307,7 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 	assert.False(t, local)
 	var read model.DriveFile
 	require.NoError(t, db.Where(`"id" = ?`, "p2").Take(&read).Error)
-	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], read.ObjectStorageLocalDeletedAt)
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], read.ObjectStorageLocalDeletedAt, nil)
 	require.NoError(t, err)
 	assert.True(t, ok)
 	local, err = repo.IsStoredLocally(ctx, "p2")
@@ -327,7 +328,7 @@ func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
 	ok, err = repo.MarkLocalDeleted(ctx, "p2", migratedAt["p2"], deletedAt)
 	require.NoError(t, err)
 	assert.False(t, ok)
-	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil)
+	ok, err = repo.MarkRestored(ctx, "p2", migratedAt["p2"], nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok, "a row moved back twice")
 	require.NoError(t, repo.RecordFailure(ctx, "p3", DriveStorageMigrationOperationRestore, "neither", at))
@@ -401,4 +402,134 @@ func TestDriveStorageMigrationRepository_Failures(t *testing.T) {
 	c, err = repo.Counts(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), c.Failed)
+}
+
+// 戻した写しの記録 (#4197): 行を倒すのと同じトランザクションで残し、写し直したら外す。
+func TestDriveStorageMigrationRepository_RestoredCopies(t *testing.T) {
+	ctx := context.Background()
+	db := driveStorageMigrationDB(t)
+	repo := NewDriveStorageMigrationRepository(db)
+	at := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"r1", "r2"} {
+		storageMigFile(t, db, id, true, false)
+		ok, err := repo.MarkMigrated(ctx, id, at)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	copies := func(id, location string) []model.DriveObjectStorageRestoredCopy {
+		var out []model.DriveObjectStorageRestoredCopy
+		for _, k := range []string{"ak-", "tk-"} {
+			out = append(out, model.DriveObjectStorageRestoredCopy{Key: k + id, FileID: id, Location: location + "/" + k + id, RestoredAt: at})
+		}
+		return out
+	}
+	count := func() (int64, int64) {
+		t.Helper()
+		c, err := repo.Counts(ctx)
+		require.NoError(t, err)
+		return c.RestoredCopies, c.CleanupFailed
+	}
+
+	// 倒せなかった (移した日時が違う) ときは記録しない。
+	ok, err := repo.MarkRestored(ctx, "r1", at.Add(time.Second), nil, copies("r1", "b"))
+	require.NoError(t, err)
+	require.False(t, ok)
+	n, _ := count()
+	assert.Zero(t, n, "copies were recorded for a row that was not moved back")
+
+	ok, err = repo.MarkRestored(ctx, "r1", at, nil, copies("r1", "b"))
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = repo.MarkRestored(ctx, "r2", at, nil, copies("r2", "b"))
+	require.NoError(t, err)
+	require.True(t, ok)
+	n, failed := count()
+	assert.EqualValues(t, 4, n)
+	assert.Zero(t, failed)
+
+	got, err := repo.ListRestoredCopies(ctx, "", 3)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, []string{"ak-r1", "ak-r2", "tk-r1"}, []string{got[0].Key, got[1].Key, got[2].Key})
+	got, err = repo.ListRestoredCopies(ctx, "tk-r1", 3)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "tk-r2", got[0].Key)
+	assert.Equal(t, "r2", got[0].FileID)
+	assert.Equal(t, "b/tk-r2", got[0].Location)
+	of, err := repo.ListRestoredCopiesOfFile(ctx, "r1")
+	require.NoError(t, err)
+	assert.Len(t, of, 2)
+	for _, bad := range []string{"a\x00b"} {
+		got, err := repo.ListRestoredCopies(ctx, bad, 3)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+		of, err := repo.ListRestoredCopiesOfFile(ctx, bad)
+		require.NoError(t, err)
+		assert.Empty(t, of)
+	}
+
+	// 失敗は場所が一致する記録にだけ残る。
+	require.NoError(t, repo.RecordRestoredCopyFailure(ctx, "ak-r1", "elsewhere/ak-r1", "x", at))
+	_, failed = count()
+	assert.Zero(t, failed, "a failure was recorded on a copy at another location")
+	require.NoError(t, repo.RecordRestoredCopyFailure(ctx, "ak-r1", "b/ak-r1", "s3 down", at))
+	_, failed = count()
+	assert.EqualValues(t, 1, failed)
+	fails, err := repo.ListRestoredCopyFailures(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, fails, 1)
+	require.NotNil(t, fails[0].Error)
+	assert.Equal(t, "s3 down", *fails[0].Error)
+
+	// 削除も場所が一致する記録だけ。
+	require.NoError(t, repo.DeleteRestoredCopy(ctx, "tk-r1", "elsewhere/tk-r1"))
+	n, _ = count()
+	assert.EqualValues(t, 4, n, "a record at another location was deleted")
+	require.NoError(t, repo.DeleteRestoredCopy(ctx, "tk-r1", "b/tk-r1"))
+	n, _ = count()
+	assert.EqualValues(t, 3, n)
+
+	// もう一度移して戻すと、同じキーの記録を今の場所で置き換え、失敗も消す。まず移し直すと、
+	// そのファイルの記録が外れる (写し直した写しが配信する実体になる)。
+	ok, err = repo.MarkMigrated(ctx, "r1", at.Add(time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	of, err = repo.ListRestoredCopiesOfFile(ctx, "r1")
+	require.NoError(t, err)
+	assert.Empty(t, of, "the records of a file migrated again were kept")
+	of, err = repo.ListRestoredCopiesOfFile(ctx, "r2")
+	require.NoError(t, err)
+	assert.Len(t, of, 2, "the records of another file were dropped")
+	found, err := repo.FindDriveFile(ctx, "r1")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.False(t, found.StoredInternal)
+	// 古い記録が残っている (移し直す前の世代の DB など) ところへ戻すと、置き換える。
+	require.NoError(t, db.Create(&model.DriveObjectStorageRestoredCopy{Key: "ak-r1", FileID: "r1", Location: "old/ak-r1", RestoredAt: at,
+		Error: ptrString("old failure"), FailedAt: &at}).Error)
+	ok, err = repo.MarkRestored(ctx, "r1", at.Add(time.Hour), nil, copies("r1", "c"))
+	require.NoError(t, err)
+	require.True(t, ok)
+	of, err = repo.ListRestoredCopiesOfFile(ctx, "r1")
+	require.NoError(t, err)
+	require.Len(t, of, 2)
+	assert.Equal(t, "c/ak-r1", of[0].Location)
+	assert.Nil(t, of[0].Error, "the old failure was kept")
+	assert.Nil(t, of[0].FailedAt)
+	found, err = repo.FindDriveFile(ctx, "r1")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.True(t, found.StoredInternal)
+	for _, id := range []string{"missing", "a\x00b"} {
+		found, err := repo.FindDriveFile(ctx, id)
+		require.NoError(t, err)
+		assert.Nil(t, found, id)
+	}
+
+	// ファイルの行を消しても、記録は残る (写しはバケットに残るので、消す手掛かりを失わない)。
+	require.NoError(t, db.Exec(`DELETE FROM "drive_file" WHERE "id" = 'r2'`).Error)
+	of, err = repo.ListRestoredCopiesOfFile(ctx, "r2")
+	require.NoError(t, err)
+	assert.Len(t, of, 2, "deleting the file dropped the records of its copies")
 }

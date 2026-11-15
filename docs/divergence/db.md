@@ -10,7 +10,7 @@
 
 もう 1 つは、インスタンスごとのチャートのリクエスト数 (`__chart__instance` / `__chart_day__instance` の `___requests_failed` / `___requests_succeeded` / `___requests_received`) で、本家の `smallint` (`range: 'small'`) を `000138` で `integer` に広げた (#3873)。本家は 32767 が上限で、大きなサーバーとの間の 1 日の数が頭打ちになる。上限で止める処理 (本家 2026.9.1) は Elythia にもあり、上限が `integer` の範囲になっただけで、API の応答の形は変わらない。TS へ戻したときの扱いは [TS版からの移行](../migration-from-ts.md#misskey-tsへのロールバック) にある。
 
-### 2-1. Elythia 独自テーブル (24)
+### 2-1. Elythia 独自テーブル (25)
 
 | テーブル | 由来 | 理由 |
 |---|---|---|
@@ -34,6 +34,7 @@
 | `bubble_game_versus_record` | Elythia 独自 | バブルゲームの 1:1 対戦の記録 (#3232)。対戦そのもの (#3228) が upstream に無い。1 局 1 行で、両者の得点・理由・エンジンの版・操作の記録・公開の意思を持つ。**報告が届いた時点で書く** — 時間切れは両者の報告がそろうまで終局しないので先に来た側の記録を置く場所が要り、Redis には大きな記録を置かない方針 (#3230) のため DB に置く。**両者が公開にした対局だけ**を参加者以外 (ログイン済み・ブロック関係に無い人) に見せる — 相手の盤面と得点も一緒に出るので、片方の意思だけでは公開しない。`user` への FK は `ON DELETE CASCADE` で、**どちらかが退会したら相手の履歴からも消える**。終局から 30 日で定期処理が消す。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `plugin_secret` | Elythia 独自 | サーバープラグインの秘密の値 (API キーなど、#3470)。設定ファイルの `pluginSecretKey` で暗号化 (AES-256-GCM、鍵は HKDF-SHA256 で導出) した暗号文だけを置き、平文の列は持たない — DB のバックアップと一緒に値が漏れないようにするため。暗号文はプラグイン名と値の名前に結び付けてある (AAD) ので、行の名前を書き換えても別の値としては読めない。**プラグインの schema (`plugin_<name>`) ではなく `public` に置く** — プラグインの schema はプラグイン自身が自由に読み書きする場所なので。鍵を失うと読めなくなり、管理画面から入れ直す ([plugins/operating.md](../plugins/operating.md#秘密の値))。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `drive_object_storage_migration_failure` | Elythia 独自 | ローカルに置いたドライブのファイルをオブジェクトストレージへ写す処理 (#4180)、写したファイルを確かめる処理 (#4181)、ローカルの実体を消す処理 (#4182)、ローカルへ戻す処理 (#4183) で、失敗したファイルと理由 (`operation` で見分ける)。1 件の失敗で全体を止めないので、ここに残して管理画面に出し、次に流したときに取り直す。成功したら行を消し、ファイルを消せば FK の CASCADE で行も消える。TS は未知のテーブルを無視する |
+| `drive_object_storage_restored_copy` | Elythia 独自 | ローカルへ戻す処理 (#4183) で戻したファイルが、オブジェクトストレージに残した写しの記録 (#4197)。本体・サムネイル・webpublic のキーごとに 1 行で、戻したときの場所 (バケットと、prefix を含めたオブジェクトのキー) を持つ。管理画面の「写しを消す」と、戻した後に利用者がファイルを消したときに、どの写しを消してよいかをここで決める。消すときの設定で同じ場所にならない写しは、別の場所を消さないよう消さずに失敗として残す。**`drive_file` への FK は張らない** — ファイルを消しても写しはバケットに残るので、行を消すと消す手掛かりが無くなる。もう一度移したファイルの行は、写し直した写しが配信する実体になるので外す。TS は未知のテーブルを無視する |
 | `silent_follow` | Elythia 独自 | フォローの止め方を「静かに成立させる」(`user_profile.followApprovalAction` = `silentFollow`、#3466) にした人へ、通知を出さずに成立させたフォローの記録。受け手が `following/silent/list` で後から確かめる。`(followeeId, followerId)` で 1 組 1 行にまとめ、同じ人がまた来たら `id` (= 日時) を書き換える。**フォローが解除されても消さない** — 確かめたいのは「誰が来たか」なので。`user` への FK は両方 `ON DELETE CASCADE`。TS は未知のテーブルを無視する。**純正へは還元できない行** (止め方そのものが upstream に無い) |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。Elythia はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` を Redis stream を舐めずに解決する (`isSpecified` の行の有無。`isMentioned` も書き込むが読む経路は無く、`hasUnreadMentions` は通知の stream から mention / reply を探して求める)。upstream legacy 版にある `noteChannelId` は Elythia の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 350 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |

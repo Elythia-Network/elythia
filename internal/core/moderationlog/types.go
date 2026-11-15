@@ -190,6 +190,8 @@ const (
 	LogVerifyMigratedDriveFiles         LogType = "verifyMigratedDriveFiles"
 	LogPurgeLocalDriveFiles             LogType = "purgeLocalDriveFiles"
 	LogRestoreMigratedDriveFiles        LogType = "restoreMigratedDriveFiles"
+	// ローカルへ戻したファイルがバケットに残した写しを消す処理を始めた (#4197)。info は空。
+	LogCleanupRestoredDriveFileCopies LogType = "cleanupRestoredDriveFileCopies"
 )
 
 // UserInfo builds the standard {userId, userUsername, userHost} info

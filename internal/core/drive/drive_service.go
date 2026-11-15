@@ -285,6 +285,9 @@ type Service struct {
 	// storageMigrationRunning reports whether the local-to-object-storage
 	// migration (#4180) is running. nil means never.
 	storageMigrationRunning func() bool
+	// restoredCopies deletes the copies a file moved back to the local storage
+	// left in object storage (#4197). nil means never.
+	restoredCopies RestoredCopyReleaser
 	// mediaSlots は画像 / 動画処理の同時実行枠。**構築時に必ず埋める**
 	// (`NewService`)。nil のまま使うと枠が無いのと同じになる。
 	mediaSlots *semaphore.Weighted
@@ -356,6 +359,19 @@ type ObjectDeleteEnqueuer interface {
 	EnqueueDeleteObjectStorageFile(key string) error
 }
 
+// RestoredCopyReleaser deletes the copies a drive file moved back to the
+// local storage left in object storage (#4197). StorageMigrator implements
+// it.
+type RestoredCopyReleaser interface {
+	ReleaseRestoredCopies(ctx context.Context, fileID string)
+}
+
+// SetRestoredCopyReleaser attaches what deletes the copies a deleted file
+// left in object storage when it was moved back (#4197).
+func (s *Service) SetRestoredCopyReleaser(r RestoredCopyReleaser) {
+	s.restoredCopies = r
+}
+
 // SetObjectDeleteEnqueuer attaches the queue client used to delete object
 // storage objects asynchronously. Optional — nil keeps inline deletion.
 func (s *Service) SetObjectDeleteEnqueuer(e ObjectDeleteEnqueuer) {
@@ -419,6 +435,13 @@ func HasMigratedLocalCopy(f *model.DriveFile) bool {
 //     オブジェクトストレージには触れない)。積んだジョブが写しの Put より先に動き、その
 //     後で印が付いてから行が消えると写しが残る (数ミリ秒の窓で、塞がない)
 func (s *Service) deleteMigrationCopies(f *model.DriveFile) {
+	// ローカルへ戻したファイル (#4183) の写しはバケットに残っている。どの写しかは記録に
+	// あるので、記録のある行だけ消す (#4197)。管理画面の掃除と違い、行を消す前に消す。
+	// 1 件ずつ消す経路で、行の削除が失敗するのは DB の障害のときだけなので、消そうとした
+	// ファイルの写しが先に無くなるだけになる。
+	if f.StoredInternal && !f.IsLink && s.restoredCopies != nil {
+		s.restoredCopies.ReleaseRestoredCopies(context.Background(), f.ID)
+	}
 	keys := []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey}
 	switch {
 	case HasMigratedLocalCopy(f) && s.localStorage != nil:

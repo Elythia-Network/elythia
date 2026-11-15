@@ -47,6 +47,7 @@ export type {
 	DatabaseTableStat,
 	DeliveryBreakerState,
 	DeliveryOutcomeClass,
+	DriveObjectStorageMigrationCopyFailure,
 	DriveObjectStorageMigrationFailure,
 	DriveObjectStorageMigrationStatus,
 	DriveUsage,

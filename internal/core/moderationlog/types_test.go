@@ -80,6 +80,7 @@ func TestLogTypeValues(t *testing.T) {
 		{LogVerifyMigratedDriveFiles, "verifyMigratedDriveFiles"},
 		{LogPurgeLocalDriveFiles, "purgeLocalDriveFiles"},
 		{LogRestoreMigratedDriveFiles, "restoreMigratedDriveFiles"},
+		{LogCleanupRestoredDriveFileCopies, "cleanupRestoredDriveFileCopies"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {

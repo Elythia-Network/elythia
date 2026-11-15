@@ -22,7 +22,7 @@ import { coversRoutes, gotoRoute } from '../../../fixtures/ui_route';
 
 type Status = {
   objectStorageEnabled: boolean;
-  running: 'migrate' | 'verify' | 'purge' | 'restore' | null;
+  running: 'migrate' | 'verify' | 'purge' | 'restore' | 'cleanup' | null;
   localFiles: number;
   migratedFiles: number;
   failedFiles: number;
@@ -36,13 +36,17 @@ type Status = {
   purgeFailures: { fileId: string; error: string; failedAt: string }[];
   restoreFailedFiles: number;
   restoreFailures: { fileId: string; error: string; failedAt: string }[];
+  restoredCopies: number;
+  cleanupFailedCopies: number;
+  cleanupFailures: { key: string; fileId: string; error: string; failedAt: string }[];
 };
 
 function status(over: Partial<Status>): Status {
   return {
     objectStorageEnabled: true, running: null, localFiles: 0, migratedFiles: 0, failedFiles: 0, failures: [],
     verifiedFiles: 0, verifyFailedFiles: 0, verifyFailures: [], purgeableFiles: 0, localDeletedFiles: 0,
-    purgeFailedFiles: 0, purgeFailures: [], restoreFailedFiles: 0, restoreFailures: [], ...over,
+    purgeFailedFiles: 0, purgeFailures: [], restoreFailedFiles: 0, restoreFailures: [],
+    restoredCopies: 0, cleanupFailedCopies: 0, cleanupFailures: [], ...over,
   };
 }
 
@@ -51,6 +55,7 @@ const START = {
   verify: 'admin/drive/object-storage-migration/verify',
   purge: 'admin/drive/object-storage-migration/purge-local',
   restore: 'admin/drive/object-storage-migration/restore',
+  cleanup: 'admin/drive/object-storage-migration/cleanup-copies',
 } as const;
 
 /**
@@ -121,10 +126,11 @@ test.describe('admin: object storage migration panel', () => {
   }
 
   for (const tc of [
-    { name: 'object storage is not configured', body: status({ objectStorageEnabled: false, localFiles: 3, migratedFiles: 3, purgeableFiles: 3 }), enabled: [] },
-    { name: 'an operation runs', body: status({ running: 'verify', localFiles: 3, migratedFiles: 3, purgeableFiles: 3 }), enabled: [] },
+    { name: 'object storage is not configured', body: status({ objectStorageEnabled: false, localFiles: 3, migratedFiles: 3, purgeableFiles: 3, restoredCopies: 3 }), enabled: [] },
+    { name: 'an operation runs', body: status({ running: 'verify', localFiles: 3, migratedFiles: 3, purgeableFiles: 3, restoredCopies: 3 }), enabled: [] },
     { name: 'only local files', body: status({ localFiles: 3 }), enabled: ['migrate'] },
     { name: 'everything moved', body: status({ migratedFiles: 3 }), enabled: ['verify', 'restore'] },
+    { name: 'copies left after moving back', body: status({ localFiles: 3, restoredCopies: 3 }), enabled: ['migrate', 'cleanup'] },
   ] as const) {
     test(`buttons: ${tc.name}`, coversRoutes('/admin/object-storage'), async ({ page, baseURL }) => {
       await stub(page, tc.body);
@@ -170,6 +176,36 @@ test.describe('admin: object storage migration panel', () => {
     // ボタンが戻るのは応答の後なので、取り消した側が送っていれば、ここまでに数えられている
     await expect(button(page, 'migrate')).toBeEnabled();
     expect(sent[START.migrate], 'the move started although it was cancelled').toHaveLength(1);
+  });
+
+  test('deleting the copies left asks first and lists the failures by key', coversRoutes('/admin/object-storage'), async ({ page, baseURL }) => {
+    const sent = await stub(page, status({
+      localFiles: 3, restoredCopies: 3, cleanupFailedCopies: 1,
+      cleanupFailures: [{ key: 'pw-copy-key', fileId: 'pw-copy-file', error: 'settings changed', failedAt: '2026-11-15T00:00:00.000Z' }],
+    }));
+    await signinAdmin(page, baseURL!, rootFixture());
+    await gotoRoute(page, baseURL!, '/admin/object-storage');
+    await openPanel(page);
+
+    // 写しの失敗はキーで出す (ファイルは消されていることがある)
+    await page.getByText('Copies that could not be deleted').click();
+    await expect(page.getByText('pw-copy-key')).toBeVisible();
+    await expect(page.getByText('pw-copy-file')).toHaveCount(0);
+
+    const confirm = 'This deletes the copies the files moved back left in object storage';
+    await button(page, 'cleanup').click();
+    await expect(page.getByText(confirm)).toBeVisible();
+    await page.getByTestId('modal-dialog-cancel').click();
+    await expect(page.getByText(confirm)).toHaveCount(0);
+
+    await button(page, 'cleanup').click();
+    const started = page.waitForRequest((r) => new URL(r.url()).pathname === `/api/${START.cleanup}`);
+    await page.getByTestId('modal-dialog-ok').click();
+    await started;
+    await expectSent(sent, START.cleanup, 1);
+    // ボタンが戻るのは応答の後なので、取り消した側が送っていれば、ここまでに数えられている
+    await expect(button(page, 'cleanup')).toBeEnabled();
+    expect(sent[START.cleanup], 'the cleanup started although it was cancelled').toHaveLength(1);
   });
 
   test('a refused start shows why', coversRoutes('/admin/object-storage'), async ({ page, baseURL }) => {

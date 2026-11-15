@@ -19,7 +19,13 @@ type recordingMigrationRunner struct {
 	verifyCalls  [][2]string
 	purgeCalls   [][2]string
 	restoreCalls [][2]string
+	cleanupCalls [][2]string
 	err          error
+}
+
+func (r *recordingMigrationRunner) RunCleanupBatch(_ context.Context, token, afterKey string) error {
+	r.cleanupCalls = append(r.cleanupCalls, [2]string{token, afterKey})
+	return r.err
 }
 
 func (r *recordingMigrationRunner) RunRestoreBatch(_ context.Context, token, afterID string) error {
@@ -106,6 +112,28 @@ func TestDriveStorageMigrationProcessor_HandlePurge(t *testing.T) {
 		require.NoError(t, p.HandlePurge(context.Background(), driver.RawTask{TypeName: queue.TaskTypePurgeLocalDriveFiles, Body: []byte(b)}))
 	}
 	assert.Empty(t, r.purgeCalls)
+}
+
+func TestDriveStorageMigrationProcessor_HandleCleanup(t *testing.T) {
+	body, err := json.Marshal(queue.MigrateLocalDriveFilesPayload{Token: "cleanup-tok", AfterID: "key9"})
+	require.NoError(t, err)
+	task := driver.RawTask{TypeName: queue.TaskTypeCleanupRestoredDriveFileCopies, Body: body}
+
+	r := &recordingMigrationRunner{}
+	p := processors.NewDriveStorageMigrationProcessor(r)
+	require.NoError(t, p.HandleCleanup(context.Background(), task))
+	assert.Equal(t, [][2]string{{"cleanup-tok", "key9"}}, r.cleanupCalls)
+	assert.Empty(t, r.calls)
+	assert.Empty(t, r.restoreCalls)
+
+	r.err = errors.New("db down")
+	assert.ErrorIs(t, p.HandleCleanup(context.Background(), task), r.err)
+
+	r.cleanupCalls = nil
+	for _, b := range []string{`not json`, `{"afterId":"x"}`} {
+		require.NoError(t, p.HandleCleanup(context.Background(), driver.RawTask{TypeName: queue.TaskTypeCleanupRestoredDriveFileCopies, Body: []byte(b)}))
+	}
+	assert.Empty(t, r.cleanupCalls)
 }
 
 func TestDriveStorageMigrationProcessor_HandleRestore(t *testing.T) {

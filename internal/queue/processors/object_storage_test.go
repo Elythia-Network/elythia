@@ -262,3 +262,35 @@ func TestObjectStorageProcessor_HandleCleanRemoteFiles_DeletesTheLocalCopyOfAMig
 	assert.Equal(t, []string{"migrated", "migrated-thumb", "direct"}, object.keys())
 	assert.Equal(t, []string{"migrated", "migrated-thumb"}, local.keys())
 }
+
+type recordingCopyReleaser struct{ ids []string }
+
+func (r *recordingCopyReleaser) ReleaseRestoredCopies(_ context.Context, fileID string) {
+	r.ids = append(r.ids, fileID)
+}
+
+// ローカルへ戻したキャッシュのファイル (#4183) を link 行へ倒すときは、記録した写しも消す
+// (#4197)。オブジェクトストレージの行には当てない。
+func TestObjectStorageProcessor_HandleCleanRemoteFiles_ReleasesTheRestoredCopies(t *testing.T) {
+	repo := &fakeRemoteFileCleaner{batches: [][]*model.DriveFile{{
+		{ID: "f1", StoredInternal: true, AccessKey: strptr("restored")},
+		{ID: "f2", AccessKey: strptr("direct")},
+	}}}
+	p := processors.NewObjectStorageProcessor(&fakeObjectStorage{}, &fakeObjectStorage{}, repo)
+	r := &recordingCopyReleaser{}
+	p.SetRestoredCopyReleaser(r)
+	require.NoError(t, p.HandleCleanRemoteFiles(context.Background(), driver.RawTask{}))
+	assert.Equal(t, []string{"f1"}, r.ids)
+}
+
+// 行を link 行へ倒せなかったときは写しを消さない。
+func TestObjectStorageProcessor_HandleCleanRemoteFiles_KeepsTheRestoredCopiesWhenTheRowsStay(t *testing.T) {
+	repo := &fakeRemoteFileCleaner{batches: [][]*model.DriveFile{{
+		{ID: "f1", StoredInternal: true, AccessKey: strptr("restored")},
+	}}, deleteErr: errors.New("db down")}
+	p := processors.NewObjectStorageProcessor(&fakeObjectStorage{}, &fakeObjectStorage{}, repo)
+	r := &recordingCopyReleaser{}
+	p.SetRestoredCopyReleaser(r)
+	require.Error(t, p.HandleCleanRemoteFiles(context.Background(), driver.RawTask{}))
+	assert.Empty(t, r.ids)
+}

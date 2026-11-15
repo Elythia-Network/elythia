@@ -25,8 +25,15 @@ type stubDriveStorageMigrator struct {
 	purgeStarts   int
 	restoreErr    error
 	restoreStarts int
+	cleanupErr    error
+	cleanupStarts int
 	status        coredrive.StorageMigrationStatus
 	statusErr     error
+}
+
+func (s *stubDriveStorageMigrator) StartCleanup(context.Context) error {
+	s.cleanupStarts++
+	return s.cleanupErr
 }
 
 func (s *stubDriveStorageMigrator) StartRestore(context.Context) error {
@@ -225,9 +232,59 @@ func TestDriveStorageMigrationRestore(t *testing.T) {
 	}
 }
 
+func TestDriveStorageMigrationCleanupCopies(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	stub := &stubDriveStorageMigrator{}
+	h.SetDriveStorageMigrator(stub)
+	repo := attachModLog(t, h)
+	rec := doPost(h.DriveStorageMigrationCleanupCopies, `{}`, adminUser)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, 1, stub.cleanupStarts)
+	assert.Zero(t, stub.restoreStarts)
+	assert.Zero(t, stub.purgeStarts)
+	require.Eventually(t, func() bool { return len(repo.Snapshot()) == 1 }, 500*time.Millisecond, 5*time.Millisecond)
+	assert.Equal(t, "cleanupRestoredDriveFileCopies", repo.Snapshot()[0].Type)
+
+	for _, tt := range []struct {
+		err    error
+		status int
+		code   string
+		id     string
+	}{
+		{coredrive.ErrStorageMigrationNotConfigured, http.StatusBadRequest, "OBJECT_STORAGE_NOT_CONFIGURED", "1b01ee55-a494-424e-8ae9-4776b15cbc30"},
+		{coredrive.ErrStorageMigrationNothingToCleanUp, http.StatusBadRequest, "NO_RESTORED_COPIES", "dde90589-c70e-4790-9f99-68fd6e78cc09"},
+		{coredrive.ErrStorageMigrationRunning, http.StatusConflict, "STORAGE_MIGRATION_RUNNING", "5f833225-1667-48ac-bc86-10ca1dfd6817"},
+		{coredrive.ErrStorageMigrationNoQueue, http.StatusBadRequest, "JOB_QUEUE_UNAVAILABLE", "5e53fbe0-6cfb-447a-9540-a6648135f4a3"},
+		{errors.New("redis down"), http.StatusInternalServerError, "INTERNAL_ERROR", ""},
+	} {
+		t.Run(tt.code, func(t *testing.T) {
+			stub.cleanupErr = tt.err
+			rec := doPost(h.DriveStorageMigrationCleanupCopies, `{}`, adminUser)
+			assert.Equal(t, tt.status, rec.Code)
+			var env struct {
+				Error struct {
+					Code string `json:"code"`
+					ID   string `json:"id"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+			assert.Equal(t, tt.code, env.Error.Code)
+			if tt.id != "" {
+				assert.Equal(t, tt.id, env.Error.ID)
+			} else {
+				assert.NotEmpty(t, env.Error.ID)
+			}
+		})
+	}
+	// 断ったときはログに残さない。
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, repo.Snapshot(), 1)
+}
+
 func TestDriveStorageMigrationStatus(t *testing.T) {
 	h, _, _, _ := newTestHandler(t)
 	at := time.Date(2026, 11, 15, 1, 2, 3, 400_000_000, time.FixedZone("JST", 9*3600))
+	cleanupErr := "settings changed"
 	stub := &stubDriveStorageMigrator{status: coredrive.StorageMigrationStatus{
 		ObjectStorageEnabled: true, Running: coredrive.StorageMigrationOperationVerify, Local: 5, Migrated: 7, Failed: 1,
 		Failures:     []model.DriveObjectStorageMigrationFailure{{FileID: "f1", Operation: "migrate", Error: "boom", FailedAt: at}},
@@ -243,6 +300,13 @@ func TestDriveStorageMigrationStatus(t *testing.T) {
 		PurgeFailures:   []model.DriveObjectStorageMigrationFailure{{FileID: "f4", Operation: "purge", Error: "kept", FailedAt: at}},
 		RestoreFailed:   2,
 		RestoreFailures: []model.DriveObjectStorageMigrationFailure{{FileID: "f5", Operation: "restore", Error: "neither", FailedAt: at}},
+		RestoredCopies:  9,
+		CleanupFailed:   1,
+		CleanupFailures: []model.DriveObjectStorageRestoredCopy{
+			{Key: "ak-f6", FileID: "f6", Location: "bucket/ak-f6", RestoredAt: at, Error: &cleanupErr, FailedAt: &at},
+			// 失敗していない記録は一覧に出さない。
+			{Key: "ak-f7", FileID: "f7", Location: "bucket/ak-f7", RestoredAt: at},
+		},
 	}}
 	h.SetDriveStorageMigrator(stub)
 	rec := doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
@@ -253,15 +317,17 @@ func TestDriveStorageMigrationStatus(t *testing.T) {
 		"verifyFailures":[{"fileId":"f2","error":"md5","failedAt":"2026-11-14T16:02:03.400Z"},{"fileId":"f3","error":"gone","failedAt":"2026-11-14T16:02:03.400Z"}],
 		"purgeableFiles":3,"localDeletedFiles":6,"purgeFailedFiles":1,
 		"purgeFailures":[{"fileId":"f4","error":"kept","failedAt":"2026-11-14T16:02:03.400Z"}],
-		"restoreFailedFiles":2,"restoreFailures":[{"fileId":"f5","error":"neither","failedAt":"2026-11-14T16:02:03.400Z"}]}`, rec.Body.String())
+		"restoreFailedFiles":2,"restoreFailures":[{"fileId":"f5","error":"neither","failedAt":"2026-11-14T16:02:03.400Z"}],
+		"restoredCopies":9,"cleanupFailedCopies":1,
+		"cleanupFailures":[{"key":"ak-f6","fileId":"f6","error":"settings changed","failedAt":"2026-11-14T16:02:03.400Z"}]}`, rec.Body.String())
 
-	stub.status = coredrive.StorageMigrationStatus{Running: coredrive.StorageMigrationOperationRestore}
+	stub.status = coredrive.StorageMigrationStatus{Running: coredrive.StorageMigrationOperationCleanup}
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":"restore","localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
+	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":"cleanup","localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
 		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[],
 		"purgeableFiles":0,"localDeletedFiles":0,"purgeFailedFiles":0,"purgeFailures":[],
-		"restoreFailedFiles":0,"restoreFailures":[]}`, rec.Body.String())
+		"restoreFailedFiles":0,"restoreFailures":[],"restoredCopies":0,"cleanupFailedCopies":0,"cleanupFailures":[]}`, rec.Body.String())
 
 	stub.status = coredrive.StorageMigrationStatus{}
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
@@ -269,7 +335,7 @@ func TestDriveStorageMigrationStatus(t *testing.T) {
 	assert.JSONEq(t, `{"objectStorageEnabled":false,"running":null,"localFiles":0,"migratedFiles":0,"failedFiles":0,"failures":[],
 		"verifiedFiles":0,"verifyFailedFiles":0,"verifyFailures":[],
 		"purgeableFiles":0,"localDeletedFiles":0,"purgeFailedFiles":0,"purgeFailures":[],
-		"restoreFailedFiles":0,"restoreFailures":[]}`, rec.Body.String())
+		"restoreFailedFiles":0,"restoreFailures":[],"restoredCopies":0,"cleanupFailedCopies":0,"cleanupFailures":[]}`, rec.Body.String())
 
 	stub.statusErr = errors.New("db down")
 	rec = doPost(h.DriveStorageMigrationStatus, `{}`, adminUser)
@@ -283,4 +349,5 @@ func TestDriveStorageMigration_Unwired(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationVerify, `{}`, adminUser).Code)
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationPurgeLocal, `{}`, adminUser).Code)
 	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationRestore, `{}`, adminUser).Code)
+	assert.Equal(t, http.StatusInternalServerError, doPost(h.DriveStorageMigrationCleanupCopies, `{}`, adminUser).Code)
 }

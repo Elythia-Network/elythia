@@ -88,6 +88,10 @@ func TestClient_EnqueueRouting(t *testing.T) {
 			return c.EnqueueRestoreMigratedDriveFiles("restore-tok", "")
 		}, queue.TaskTypeRestoreMigratedDriveFiles, queue.ObjectStorageQueueName},
 
+		{"cleanupRestoredDriveFileCopies", func(c *queue.Client) error {
+			return c.EnqueueCleanupRestoredDriveFileCopies("cleanup-tok", "")
+		}, queue.TaskTypeCleanupRestoredDriveFileCopies, queue.ObjectStorageQueueName},
+
 		// 以下は task type の接頭辞と queue が一致しないが現状維持 (上記 doc 参照)。
 		{"postScheduledNote", func(c *queue.Client) error {
 			return c.EnqueuePostScheduledNote(queue.PostScheduledNotePayload{NoteDraftID: "d1"})
