@@ -63,4 +63,33 @@ test.describe('admin: backups', () => {
       await cleanupApi(request, 'admin/roles/delete', { i: root.token, roleId });
     }
   });
+
+  test('closing the re-authentication keeps the page usable', coversRoutes('/admin/backups'), async ({ page, request, baseURL }) => {
+    const root = rootFixture();
+    const admin = await signupUser(request, randomUsername('pwbk'), DEFAULT_TEST_PASSWORD);
+    const roleId = await assignRole(request, root, admin.id, { isAdministrator: true });
+    try {
+      const { secret } = await expectApiOk(request, 'i/2fa/register', { i: admin.token, password: DEFAULT_TEST_PASSWORD }) as { secret: string };
+      await expectApiOk(request, 'i/2fa/done', { i: admin.token, token: authenticator.generate(secret) });
+
+      await page.addInitScript(() => {
+        window.localStorage.setItem('modifiedVersionMustProminentlyOfferInAgplV3Section13Read', 'true');
+      });
+      await signinWithState(page, request, baseURL!, admin);
+      await gotoRoute(page, baseURL!, '/admin/backups');
+
+      // ×で閉じたら、待っていた操作は取り消され、ボタンは押せる状態に戻る (#4195)
+      await page.getByTestId('backups-show').click();
+      await expect(page.getByTestId('password-dialog-password')).toBeVisible();
+      await page.getByTestId('modal-window-close').click();
+      await expect(page.getByTestId('password-dialog-password')).toHaveCount(0);
+      await expect(page.getByTestId('backups-show')).toBeEnabled();
+
+      // もう一度押せば、再認証のダイアログがまた出る
+      await page.getByTestId('backups-show').click();
+      await expect(page.getByTestId('password-dialog-password')).toBeVisible();
+    } finally {
+      await cleanupApi(request, 'admin/roles/delete', { i: root.token, roleId });
+    }
+  });
 });
