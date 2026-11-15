@@ -33,7 +33,7 @@
 | `ip_lookup_log` | Elythia 独自 | IP とアカウントの対応を**誰がいつ引いたか**の記録 (#3106)。`admin/ip/*` は upstream に無い口 (#3104 / #3105) なので、その監査も upstream には無い。**`moderation_log` に入れない** — あちらは保持期間を持たず永久に残るのに、この記録に入るのは**照会に使った IP そのもの**で、IP とアカウントの対応と同じだけ機密性がある。`moderation_log` 全体に保持期間を入れると無関係な記録まで消えるので、専用テーブルを分けて 90 日で刈る (`user_ip` と同じ長さだが理由は別で、定数も別)。**結果そのものは記録しない** — 残すのは件数だけで、候補に出たアカウントや一致した IP は書かない (書くとこの表が第 2 の「IP とアカウントの対応」になる)。`user` への FK は張らない — 照会した人を消しても記録は残るのが監査として正しい (`signup_application` と同じ方針)。**純正へは還元できない行** (照会という機能自体が upstream に無い)。 |
 | `bubble_game_versus_record` | Elythia 独自 | バブルゲームの 1:1 対戦の記録 (#3232)。対戦そのもの (#3228) が upstream に無い。1 局 1 行で、両者の得点・理由・エンジンの版・操作の記録・公開の意思を持つ。**報告が届いた時点で書く** — 時間切れは両者の報告がそろうまで終局しないので先に来た側の記録を置く場所が要り、Redis には大きな記録を置かない方針 (#3230) のため DB に置く。**両者が公開にした対局だけ**を参加者以外 (ログイン済み・ブロック関係に無い人) に見せる — 相手の盤面と得点も一緒に出るので、片方の意思だけでは公開しない。`user` への FK は `ON DELETE CASCADE` で、**どちらかが退会したら相手の履歴からも消える**。終局から 30 日で定期処理が消す。TS は未知のテーブルを無視する。**純正へは還元できない行** |
 | `plugin_secret` | Elythia 独自 | サーバープラグインの秘密の値 (API キーなど、#3470)。設定ファイルの `pluginSecretKey` で暗号化 (AES-256-GCM、鍵は HKDF-SHA256 で導出) した暗号文だけを置き、平文の列は持たない — DB のバックアップと一緒に値が漏れないようにするため。暗号文はプラグイン名と値の名前に結び付けてある (AAD) ので、行の名前を書き換えても別の値としては読めない。**プラグインの schema (`plugin_<name>`) ではなく `public` に置く** — プラグインの schema はプラグイン自身が自由に読み書きする場所なので。鍵を失うと読めなくなり、管理画面から入れ直す ([plugins/operating.md](../plugins/operating.md#秘密の値))。TS は未知のテーブルを無視する。**純正へは還元できない行** |
-| `drive_object_storage_migration_failure` | Elythia 独自 | ローカルに置いたドライブのファイルをオブジェクトストレージへ写す処理 (#4180) と、写したファイルを確かめる処理 (#4181) で、失敗したファイルと理由 (`operation` で見分ける)。1 件の失敗で全体を止めないので、ここに残して管理画面に出し、次に流したときに取り直す。成功したら行を消し、ファイルを消せば FK の CASCADE で行も消える。TS は未知のテーブルを無視する |
+| `drive_object_storage_migration_failure` | Elythia 独自 | ローカルに置いたドライブのファイルをオブジェクトストレージへ写す処理 (#4180)、写したファイルを確かめる処理 (#4181)、ローカルの実体を消す処理 (#4182) で、失敗したファイルと理由 (`operation` で見分ける)。1 件の失敗で全体を止めないので、ここに残して管理画面に出し、次に流したときに取り直す。成功したら行を消し、ファイルを消せば FK の CASCADE で行も消える。TS は未知のテーブルを無視する |
 | `silent_follow` | Elythia 独自 | フォローの止め方を「静かに成立させる」(`user_profile.followApprovalAction` = `silentFollow`、#3466) にした人へ、通知を出さずに成立させたフォローの記録。受け手が `following/silent/list` で後から確かめる。`(followeeId, followerId)` で 1 組 1 行にまとめ、同じ人がまた来たら `id` (= 日時) を書き換える。**フォローが解除されても消さない** — 確かめたいのは「誰が来たか」なので。`user` への FK は両方 `ON DELETE CASCADE`。TS は未知のテーブルを無視する。**純正へは還元できない行** (止め方そのものが upstream に無い) |
 | `note_unread` | 準・独自 | upstream DB にも legacy 遺物として残るが 2026.7.0 の `models/` に entity は無く参照 0 件。Elythia はこれを実用し `/api/i` の `hasUnreadSpecifiedNotes` を Redis stream を舐めずに解決する (`isSpecified` の行の有無。`isMentioned` も書き込むが読む経路は無く、`hasUnreadMentions` は通知の stream から mention / reply を探して求める)。upstream legacy 版にある `noteChannelId` は Elythia の定義に無い (TS 製 DB では `CREATE TABLE IF NOT EXISTS` が no-op なので実害なし) |
 | `migrations` | drop-in 互換 | TypeORM の bookkeeping。Elythia 由来 DB に TS を後から繋いだ時に migration を再実行させないための seed。name は本家と同じ `ClassName+timestamp` 形式で 350 件を保持する (#2244 で短縮形から是正)。漏れは `TestMigrationSeed_CoversUpstream` が CI で検出する |
@@ -41,9 +41,9 @@
 
 `__chart__*` / `__chart_day__*` 24 テーブルは独自ではない (upstream では `models/` ではなく `core/chart/charts/entities/` で定義されるため、`models/` だけを見ると誤検出する)。
 
-### 2-2. 独自カラム (41 = 実使用 38 + 未使用の残存 3)
+### 2-2. 独自カラム (42 = 実使用 39 + 未使用の残存 3)
 
-うち **Elythia が実際に読み書きするのは 38 件** (cherrypick 由来 3 + Elythia 独自 35)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。`user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (#3466 で本家 PR 17998 から先に取り込んだ列) と `announcement` の `autoArchiveAt` (#3809) は、本家 2026.10.1 に同じ列が入ったので独自ではなくなった。
+うち **Elythia が実際に読み書きするのは 39 件** (cherrypick 由来 3 + Elythia 独自 36)。残り 3 件は fresh な Elythia DB に列だけ残る未使用列で、#2243 で依存を外した。`user_profile` の `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (#3466 で本家 PR 17998 から先に取り込んだ列) と `announcement` の `autoArchiveAt` (#3809) は、本家 2026.10.1 に同じ列が入ったので独自ではなくなった。
 
 | テーブル | カラム | 由来 | 理由 |
 |---|---|---|---|
@@ -58,7 +58,8 @@
 | `user` | `managedByPlugin` | Elythia 独自 | プラグインが管理するアカウント (#3468) のプラグイン名。NULL は普通のアカウント。埋まっているアカウントには本体がどの経路からもログインさせず、ネイティブトークンをプロセス内の呼び出しでだけ受け付ける ([security.md](security.md) §6)。**TS はこの列を認識しない**ため、TS へ戻すと普通のアカウントとして扱われ、トークンも外から使えるようになる (パスワードは持たないので、パスワードではログインできないまま) |
 | `user_profile` | `followApprovalAction` | Elythia 独自 | 作られてから `followApprovalLocalSeconds` / `followApprovalRemoteSeconds` (本家と同じ列) に満たないアカウントからのフォローの止め方 (#3466)。`request` (既定、本家と同じ) / `silentRequest` / `silentFollow`。`NOT NULL DEFAULT 'request'` なので、TS から移ってきた行も本家と同じ動きになる。TS はこの列を読まない |
 | `drive_file` | `objectStorageMigratedAt` | Elythia 独自 | ローカルに置いたファイルを、移す処理 (#4180) でオブジェクトストレージへ写した日時。初めからオブジェクトストレージへアップロードしたファイルは NULL のまま。戻す処理 (#4183 で足す予定) は、この列のある行だけを戻す。値の無い列なので、足しても表を書き直さない。TS は未知の列を無視するが、写したファイルは `storedInternal=false` なので TS では `/files/` が 204 になる ([migration-from-ts.md](../migration-from-ts.md#戻らなくなったもの)) |
-| `drive_file` | `objectStorageVerifiedAt` | Elythia 独自 | 写したファイルを確かめる処理 (#4181) で、オブジェクトストレージの実体が読め、大きさと md5 が記録と一致した日時。一致しなかったときと、もう一度写したときは NULL に戻す。ローカルを消す処理 (#4182 で足す予定) は、この列のある行だけのローカルの実体を消す。値の無い列なので、足しても表を書き直さない。TS は未知の列を無視する |
+| `drive_file` | `objectStorageVerifiedAt` | Elythia 独自 | 写したファイルを確かめる処理 (#4181) で、オブジェクトストレージの実体が読め、大きさと md5 が記録と一致した日時。一致しなかったときと、もう一度写したときは NULL に戻す。ローカルを消す処理 (#4182) は、この列のある行だけのローカルの実体を、消す直前にもう一度確かめてから消す。値の無い列なので、足しても表を書き直さない。TS は未知の列を無視する |
+| `drive_file` | `objectStorageLocalDeletedAt` | Elythia 独自 | ローカルを消す処理 (#4182) が、消す直前にもう一度確かめてから、ローカルの実体を消した日時。写し直したとき・行をリンクに倒すとき・戻す処理 (#4183 で足す予定) で NULL に戻す。日時を入れてから実体を消すので、日時があってもローカルが消しそびれて残っていることがある。逆に、NULL でもローカルがあるとは限らない (消す前の世代の DB のバックアップへ戻したときなど)。戻す処理は、ローカルの実体の有無と、本体の md5 を確かめてから使う (サムネイルと webpublic は行に md5 が無い)。値の無い列なので、足しても表を書き直さない。TS は未知の列を無視する |
 | `user` | `isRoot` | Elythia 独自 | upstream は system_account 移行で DROP 済み。`role.Service.isRootUser` の fallback に必要 |
 | `meta` | `proxyAccountId` | Elythia 独自 | 同じく upstream は DROP 済み。`admin/update-proxy-account` が書き込む |
 | `note_favorite` | `createdAt` | Elythia 独自 | upstream は `deleteCreatedAt` で DROP 済み。`/api/i/favorites` の response 要件で復活 |

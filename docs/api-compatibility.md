@@ -313,7 +313,7 @@ Go側のマイグレーション (000001〜) はTS版テーブルに対して原
 | `bubble_game_versus_record` | バブルゲームの対戦の記録 (#3232) | `000105` |
 | `plugin_secret` | サーバープラグインの秘密の値。暗号文だけを置く (#3470) | `000119` |
 | `silent_follow` | 通知を出さずに成立させたフォローの記録 (#3466) | `000120` |
-| `drive_object_storage_migration_failure` | ドライブのファイルをオブジェクトストレージへ写す処理と、写したファイルを確かめる処理の失敗の記録 (#4180 / #4181) | `000144` |
+| `drive_object_storage_migration_failure` | ドライブのファイルをオブジェクトストレージへ写す処理・写したファイルを確かめる処理・ローカルの実体を消す処理の失敗の記録 (#4180 / #4181 / #4182) | `000144` |
 
 Elythia の migration が作るテーブルは 124。上記 21 件と golang-migrate 台帳の
 `schema_migrations` を除く **102 はすべて upstream にも存在する** (TypeORM 台帳の

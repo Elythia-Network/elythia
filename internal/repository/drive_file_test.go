@@ -548,6 +548,7 @@ func TestDriveFileRepository_DeleteOrphansAndRemoteCache(t *testing.T) {
 	migratedAt := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
 	remoteCache.ObjectStorageMigratedAt = &migratedAt
 	remoteCache.ObjectStorageVerifiedAt = &migratedAt
+	remoteCache.ObjectStorageLocalDeletedAt = &migratedAt
 	linkOnly := newTestDriveFile("lo1", user.ID, "md5lo", nil)
 	linkOnly.IsLink = true
 	linkOnly.UserHost = &host
@@ -587,6 +588,7 @@ func TestDriveFileRepository_DeleteOrphansAndRemoteCache(t *testing.T) {
 	assert.Nil(t, got.WebpublicURL)
 	assert.Nil(t, got.ObjectStorageMigratedAt, "link 行が写した件数と戻す対象に残る")
 	assert.Nil(t, got.ObjectStorageVerifiedAt, "link 行が確かめた件数とローカルを消す対象に残る")
+	assert.Nil(t, got.ObjectStorageLocalDeletedAt, "link 行がローカルを消した件数に残る")
 
 	_, err = repo.FindByID(linkOnly.ID)
 	assert.NoError(t, err, "isLink=true の link-only は保持される")

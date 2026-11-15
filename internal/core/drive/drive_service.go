@@ -400,8 +400,8 @@ func (s *Service) deleteFileObjects(f *model.DriveFile) error {
 
 // HasMigratedLocalCopy reports whether f was copied to object storage by the
 // local-to-object-storage migration (#4180), which leaves the local copy in
-// place. Deleting such a file must delete the local copy too, or nothing
-// points at it any more.
+// place until the purge (#4182) deletes it. Deleting such a file must delete
+// the local copy too, or nothing points at it any more.
 func HasMigratedLocalCopy(f *model.DriveFile) bool {
 	return f != nil && !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil
 }
@@ -409,9 +409,9 @@ func HasMigratedLocalCopy(f *model.DriveFile) bool {
 // deleteMigrationCopies removes the copies the local-to-object-storage
 // migration (#4180) leaves on the other storage. Best effort.
 //
-//   - 移したファイル (objectStorageMigratedAt がある) は、移した後もローカルに写しが
-//     残る。行を消すとローカルの写しは誰も指さなくなり、確かめてから消す処理 (#4182)
-//     の対象にも入らないので、ここで消す
+//   - 移したファイル (objectStorageMigratedAt がある) は、ローカルを消す処理 (#4182)
+//     を流すまでローカルに写しが残る。行を消すとローカルの写しは誰も指さなくなり、
+//     消す処理の対象にも入らないので、ここで消す (消した後なら、無いファイルを消すだけ)
 //   - ローカルの行でも、移す処理が並行して写し終えていれば、オブジェクトストレージに
 //     写しがある (この削除が行を読んだ後に、移す処理が印を付けた場合)。どの記録にも
 //     残らない孤児になるので、移す処理の実行中は消すジョブを積む。無いキーを消しても

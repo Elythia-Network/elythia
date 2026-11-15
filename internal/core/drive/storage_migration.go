@@ -29,12 +29,16 @@ var (
 	// ErrStorageMigrationNothingToVerify is returned by StartVerify when no
 	// file has been migrated.
 	ErrStorageMigrationNothingToVerify = errors.New("drive: no file has been migrated")
+	// ErrStorageMigrationNothingToPurge is returned by StartPurge when no
+	// verified file keeps its local copy.
+	ErrStorageMigrationNothingToPurge = errors.New("drive: no verified file keeps its local copy")
 )
 
 // The operations of a storage migration run, reported by Status.
 const (
 	StorageMigrationOperationMigrate = "migrate"
 	StorageMigrationOperationVerify  = "verify"
+	StorageMigrationOperationPurge   = "purge"
 )
 
 // verifyTokenPrefix starts the token of a verification run. The lock holds
@@ -44,10 +48,16 @@ const (
 // 前後で実行中だったもの) も、移す処理として読める。
 const verifyTokenPrefix = "verify-"
 
+// purgeTokenPrefix starts the token of a purge run (#4182).
+const purgeTokenPrefix = "purge-"
+
 // operationOfToken returns the operation of the run token names.
 func operationOfToken(token string) string {
-	if strings.HasPrefix(token, verifyTokenPrefix) {
+	switch {
+	case strings.HasPrefix(token, verifyTokenPrefix):
 		return StorageMigrationOperationVerify
+	case strings.HasPrefix(token, purgeTokenPrefix):
+		return StorageMigrationOperationPurge
 	}
 	return StorageMigrationOperationMigrate
 }
@@ -74,6 +84,8 @@ type StorageMigrationRepository interface {
 	MarkMigrated(ctx context.Context, id string, at time.Time) (bool, error)
 	ListMigrated(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error)
 	SetVerified(ctx context.Context, id string, migratedAt time.Time, at *time.Time) (bool, error)
+	ListPurgeable(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error)
+	MarkLocalDeleted(ctx context.Context, id string, migratedAt, at time.Time) (bool, error)
 	IsMigrated(ctx context.Context, id string) (bool, error)
 	RecordFailure(ctx context.Context, fileID, operation, msg string, at time.Time) error
 	ClearFailure(ctx context.Context, fileID, operation string) error
@@ -86,6 +98,7 @@ type StorageMigrationRepository interface {
 type StorageMigrationEnqueuer interface {
 	EnqueueMigrateLocalDriveFiles(token, afterID string) error
 	EnqueueVerifyMigratedDriveFiles(token, afterID string) error
+	EnqueuePurgeLocalDriveFiles(token, afterID string) error
 }
 
 // StorageMigrationLock marks that a migration is running. The token names
@@ -129,12 +142,21 @@ type StorageMigrationStatus struct {
 	// VerifyFailures are the most recent verification failures, newest
 	// first.
 	VerifyFailures []model.DriveObjectStorageMigrationFailure
+	// Purgeable, LocalDeleted and PurgeFailed count the verified files whose
+	// local copy has not been deleted, the files whose local copy was
+	// deleted, and the files whose last purge attempt failed (#4182).
+	Purgeable    int64
+	LocalDeleted int64
+	PurgeFailed  int64
+	// PurgeFailures are the most recent purge failures, newest first.
+	PurgeFailures []model.DriveObjectStorageMigrationFailure
 }
 
 // StorageMigrator copies the drive files stored locally to object storage
-// (#4180). It only copies: the local files stay, and the url columns keep
-// pointing at /files/<accessKey>, which serves the file from object storage
-// once storedInternal is false.
+// (#4180), verifies the copies (#4181) and deletes the local copies of the
+// verified files (#4182). Copying leaves the local files in place, and the
+// url columns keep pointing at /files/<accessKey>, which serves the file
+// from object storage once storedInternal is false.
 type StorageMigrator struct {
 	repo    StorageMigrationRepository
 	local   Storage
@@ -142,6 +164,8 @@ type StorageMigrator struct {
 	enq     StorageMigrationEnqueuer
 	lock    StorageMigrationLock
 	now     func() time.Time
+	// onFUSE reports whether a directory is on a FUSE file system.
+	onFUSE func(dir string) (bool, error)
 }
 
 // NewStorageMigrator constructs a StorageMigrator. local is the local storage
@@ -149,7 +173,7 @@ type StorageMigrator struct {
 // MetaStorage); the migration copies only while primary resolves to object
 // storage.
 func NewStorageMigrator(repo StorageMigrationRepository, local, primary Storage, enq StorageMigrationEnqueuer, lock StorageMigrationLock) *StorageMigrator {
-	return &StorageMigrator{repo: repo, local: local, primary: primary, enq: enq, lock: lock, now: time.Now}
+	return &StorageMigrator{repo: repo, local: local, primary: primary, enq: enq, lock: lock, now: time.Now, onFUSE: onFUSE}
 }
 
 // objectStorage returns the object storage files are copied to, or nil when
@@ -198,6 +222,26 @@ func (m *StorageMigrator) StartVerify(ctx context.Context) error {
 		return ErrStorageMigrationNothingToVerify
 	}
 	return m.begin(ctx, verifyTokenPrefix, m.enq.EnqueueVerifyMigratedDriveFiles)
+}
+
+// StartPurge starts a purge run (#4182): it takes the lock and enqueues the
+// first job. The lock is the one of the migration, so the purge never runs
+// with the migration or the verification.
+func (m *StorageMigrator) StartPurge(ctx context.Context) error {
+	if m.enq == nil {
+		return ErrStorageMigrationNoQueue
+	}
+	if m.objectStorage() == nil {
+		return ErrStorageMigrationNotConfigured
+	}
+	c, err := m.repo.Counts(ctx)
+	if err != nil {
+		return fmt.Errorf("drive: count purgeable files: %w", err)
+	}
+	if c.Purgeable == 0 {
+		return ErrStorageMigrationNothingToPurge
+	}
+	return m.begin(ctx, purgeTokenPrefix, m.enq.EnqueuePurgeLocalDriveFiles)
 }
 
 // begin takes the lock for a new token starting with prefix and enqueues the
@@ -252,6 +296,39 @@ func (m *StorageMigrator) RunVerifyBatch(ctx context.Context, token, afterID str
 	})
 }
 
+// RunPurgeBatch deletes the local copies of up to storageMigrationBatch
+// verified files whose id is greater than afterID (#4182), then enqueues the
+// next job, or releases the lock when no file is left. A file that does not
+// match right before the deletion keeps its local copy and is recorded. An
+// error means the job should be retried.
+func (m *StorageMigrator) RunPurgeBatch(ctx context.Context, token, afterID string) error {
+	return m.runBatch(ctx, token, afterID, storageMigrationRun{
+		// 実行の初め (1 本目のジョブ) に 1 回だけ、lock を確かめた後で調べる。ジョブごとに
+		// 番兵を置くと、バージョニングを有効にしたバケットに番兵の版が溜まる。
+		precheck: func(ctx context.Context, dst Storage) (bool, error) {
+			if afterID != "" {
+				return true, nil
+			}
+			refuse, err := m.localIsObjectStorage(dst)
+			if err != nil {
+				return false, fmt.Errorf("drive: probe the local storage: %w", err)
+			}
+			if refuse != "" {
+				// ローカルを消すとオブジェクトストレージの実体も消える構成。消さずに止める。
+				slog.Error("drive: refusing to delete the local copies of the drive files", "reason", refuse)
+				return false, m.lock.Release(ctx, token)
+			}
+			return true, nil
+		},
+		list: m.repo.ListPurgeable,
+		each: func(ctx context.Context, dst Storage, f *model.DriveFile) error {
+			return m.purgeFile(ctx, dst, f, token)
+		},
+		operation: repository.DriveStorageMigrationOperationPurge,
+		enqueue:   m.enq.EnqueuePurgeLocalDriveFiles,
+	})
+}
+
 // storageMigrationRun is what one operation does in runBatch.
 type storageMigrationRun struct {
 	// list returns the next files of the operation after afterID.
@@ -260,6 +337,76 @@ type storageMigrationRun struct {
 	each      func(ctx context.Context, dst Storage, f *model.DriveFile) error
 	operation string
 	enqueue   func(token, afterID string) error
+	// precheck, when set, runs once the lock is confirmed and before the files
+	// are listed. It reports whether to go on; when it does not, it has dealt
+	// with the lock itself.
+	precheck func(ctx context.Context, dst Storage) (bool, error)
+}
+
+// errStorageMigrationLockLost is returned by a file handler that found its
+// run no longer holds the lock. runBatch stops the job without recording a
+// failure.
+var errStorageMigrationLockLost = errors.New("the storage migration lock is no longer held by this run")
+
+// localIsObjectStorage reports why deleting a local copy could delete the
+// object in dst too, or "" when it found no reason: the local storage is on
+// a FUSE file system (a bucket mounted with rclone or s3fs), or an object
+// put to dst under a probe key replaces the local file of that key (the
+// object storage serves the local directory).
+//
+// 番兵は「オブジェクトストレージに無いことを読む」形にしない。S3 は ListBucket の
+// 権限が無いと無いキーにも 403 を返すので、最小の権限の構成で流せなくなる。置く・
+// 消すの権限は移す処理と削除でもともと要る。マウントの構成は、書き込みを遅らせて
+// 届けるもの (rclone の write-back) があり番兵では見分けられないので、FUSE で断る。
+func (m *StorageMigrator) localIsObjectStorage(dst Storage) (string, error) {
+	if ls, ok := m.local.(*LocalStorage); ok {
+		fuse, err := m.onFUSE(ls.rootDir)
+		if err != nil {
+			return "", err
+		}
+		if fuse {
+			return "the local storage is on a FUSE file system (a mounted bucket?)", nil
+		}
+	}
+	token, err := newMigrationToken()
+	if err != nil {
+		return "", err
+	}
+	key := "elythia-purge-probe-" + token
+	localBody, objectBody := "local "+key, "object "+key
+	if _, err := m.local.Put(key, strings.NewReader(localBody)); err != nil {
+		// 書き込みの途中で失敗しても、作りかけのファイルが残りうる。
+		if derr := m.local.Delete(key); derr != nil {
+			slog.Warn("drive: delete the purge probe from the local storage", "key", key, "err", derr)
+		}
+		return "", err
+	}
+	defer func() {
+		if err := m.local.Delete(key); err != nil {
+			slog.Warn("drive: delete the purge probe from the local storage", "key", key, "err", err)
+		}
+	}()
+	if _, err := dst.Put(key, strings.NewReader(objectBody)); err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := dst.Delete(key); err != nil {
+			slog.Warn("drive: delete the purge probe from the object storage", "key", key, "err", err)
+		}
+	}()
+	rc, err := m.local.Get(key)
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		return "", err
+	}
+	if string(b) != localBody {
+		return "the object storage serves the local drive files", nil
+	}
+	return "", nil
 }
 
 func (m *StorageMigrator) runBatch(ctx context.Context, token, afterID string, run storageMigrationRun) error {
@@ -281,6 +428,11 @@ func (m *StorageMigrator) runBatch(ctx context.Context, token, afterID string, r
 		slog.Warn("drive: object storage was turned off; stopping the storage migration")
 		return m.lock.Release(ctx, token)
 	}
+	if run.precheck != nil {
+		if ok, err := run.precheck(ctx, dst); err != nil || !ok {
+			return err
+		}
+	}
 	files, err := run.list(ctx, afterID, storageMigrationBatch)
 	if err != nil {
 		return fmt.Errorf("drive: list files to %s: %w", run.operation, err)
@@ -298,6 +450,10 @@ func (m *StorageMigrator) runBatch(ctx context.Context, token, afterID string, r
 			return nil
 		}
 		if err := run.each(ctx, dst, f); err != nil {
+			if errors.Is(err, errStorageMigrationLockLost) {
+				slog.Info("drive: the storage migration lock is no longer held by this run; stopping", "afterId", f.ID)
+				return nil
+			}
 			var retry *storageMigrationRetry
 			if errors.As(err, &retry) {
 				// ファイルの問題ではなく DB に書けなかった。失敗として残して先へ進むと、
@@ -419,6 +575,61 @@ func (m *StorageMigrator) verifyFile(ctx context.Context, dst Storage, f *model.
 		return &storageMigrationRetry{err: fmt.Errorf("record the verification: %w", serr)}
 	}
 	return err
+}
+
+// purgeFile deletes the local copies of a verified file (#4182): the file,
+// its thumbnail and its webpublic variant. It compares the copies in dst
+// with the row once more first, as verifyFile does; when they do not match
+// or cannot be read, it clears the verified mark and keeps the local copies.
+//
+// 確かめてから消すまでの間にも、オブジェクトストレージの写しは消えたり壊れたりしうる
+// (ライフサイクルのルール、手作業の削除など)。ローカルを消すと取り戻せないので、
+// 消す直前にもう一度確かめる。
+func (m *StorageMigrator) purgeFile(ctx context.Context, dst Storage, f *model.DriveFile, token string) error {
+	if f.ObjectStorageMigratedAt == nil || f.ObjectStorageVerifiedAt == nil {
+		return errors.New("the file has not been verified")
+	}
+	if err := m.compareFile(dst, f); err != nil {
+		if _, serr := m.repo.SetVerified(ctx, f.ID, *f.ObjectStorageMigratedAt, nil); serr != nil {
+			return &storageMigrationRetry{err: fmt.Errorf("clear the verification: %w", serr)}
+		}
+		return fmt.Errorf("the local copy was kept: %w", err)
+	}
+	// 確かめるのに時間がかかる (大きなファイルは全部読む) ので、消す前に lock を延ばし
+	// 直す。期限が切れて別の処理 (戻す処理 #4183 など) が始まっていたら、消さずに止める。
+	// 確かめている間に期限が切れただけ (誰も持っていない) なら取り直して続ける。取り
+	// 直さないと、読むのに期限を超える大きなファイルが毎回先頭で止め、先へ進めない。
+	if ok, err := m.lock.Extend(ctx, token, storageMigrationLockTTL); err != nil {
+		return &storageMigrationRetry{err: fmt.Errorf("extend the storage migration lock: %w", err)}
+	} else if !ok {
+		if ok, err := m.lock.Acquire(ctx, token, storageMigrationLockTTL); err != nil {
+			return &storageMigrationRetry{err: fmt.Errorf("take the storage migration lock again: %w", err)}
+		} else if !ok {
+			slog.Warn("drive: another run took the storage migration lock while the purge compared a file", "fileId", f.ID)
+			return errStorageMigrationLockLost
+		}
+	}
+	// 消した日時を先に入れ、入れられた (行が確かめたときのまま移した状態にある) ときだけ
+	// 消す。消すのに失敗しても、日時が入ってローカルが残るだけで、戻す処理はオブジェクト
+	// ストレージから取り直す (安全な側に倒れる)。逆の順で日時を入れそびれると、ローカルが
+	// 無いのに日時の無い行が残る。
+	marked, err := m.repo.MarkLocalDeleted(ctx, f.ID, *f.ObjectStorageMigratedAt, m.now())
+	if err != nil {
+		return &storageMigrationRetry{err: fmt.Errorf("record the deletion: %w", err)}
+	}
+	if !marked {
+		// 確かめてから今までの間に、消された・リンクに倒された・写し直された行。
+		return nil
+	}
+	for _, k := range []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey} {
+		if k == nil || *k == "" {
+			continue
+		}
+		if err := m.local.Delete(*k); err != nil {
+			return fmt.Errorf("delete %s from the local storage (the row is marked as deleted): %w", *k, err)
+		}
+	}
+	return nil
 }
 
 // compareFile returns why the copies in dst do not match the row, or nil.
@@ -544,6 +755,7 @@ func (m *StorageMigrator) Status(ctx context.Context) (StorageMigrationStatus, e
 	}
 	st.Local, st.Migrated, st.Failed = c.Local, c.Migrated, c.Failed
 	st.Verified, st.VerifyFailed = c.Verified, c.VerifyFailed
+	st.Purgeable, st.LocalDeleted, st.PurgeFailed = c.Purgeable, c.LocalDeleted, c.PurgeFailed
 	st.Failures, err = m.repo.ListFailures(ctx, repository.DriveStorageMigrationOperationMigrate, storageMigrationFailureLimit)
 	if err != nil {
 		return st, fmt.Errorf("drive: list failures: %w", err)
@@ -551,6 +763,10 @@ func (m *StorageMigrator) Status(ctx context.Context) (StorageMigrationStatus, e
 	st.VerifyFailures, err = m.repo.ListFailures(ctx, repository.DriveStorageMigrationOperationVerify, storageMigrationFailureLimit)
 	if err != nil {
 		return st, fmt.Errorf("drive: list verification failures: %w", err)
+	}
+	st.PurgeFailures, err = m.repo.ListFailures(ctx, repository.DriveStorageMigrationOperationPurge, storageMigrationFailureLimit)
+	if err != nil {
+		return st, fmt.Errorf("drive: list purge failures: %w", err)
 	}
 	return st, nil
 }

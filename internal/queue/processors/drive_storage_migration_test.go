@@ -17,7 +17,13 @@ import (
 type recordingMigrationRunner struct {
 	calls       [][2]string
 	verifyCalls [][2]string
+	purgeCalls  [][2]string
 	err         error
+}
+
+func (r *recordingMigrationRunner) RunPurgeBatch(_ context.Context, token, afterID string) error {
+	r.purgeCalls = append(r.purgeCalls, [2]string{token, afterID})
+	return r.err
 }
 
 func (r *recordingMigrationRunner) RunVerifyBatch(_ context.Context, token, afterID string) error {
@@ -72,4 +78,26 @@ func TestDriveStorageMigrationProcessor_HandleVerify(t *testing.T) {
 		require.NoError(t, p.HandleVerify(context.Background(), driver.RawTask{TypeName: queue.TaskTypeVerifyMigratedDriveFiles, Body: []byte(b)}))
 	}
 	assert.Empty(t, r.verifyCalls)
+}
+
+func TestDriveStorageMigrationProcessor_HandlePurge(t *testing.T) {
+	body, err := json.Marshal(queue.MigrateLocalDriveFilesPayload{Token: "purge-tok", AfterID: "f9"})
+	require.NoError(t, err)
+	task := driver.RawTask{TypeName: queue.TaskTypePurgeLocalDriveFiles, Body: body}
+
+	r := &recordingMigrationRunner{}
+	p := processors.NewDriveStorageMigrationProcessor(r)
+	require.NoError(t, p.HandlePurge(context.Background(), task))
+	assert.Equal(t, [][2]string{{"purge-tok", "f9"}}, r.purgeCalls)
+	assert.Empty(t, r.calls)
+	assert.Empty(t, r.verifyCalls)
+
+	r.err = errors.New("db down")
+	assert.ErrorIs(t, p.HandlePurge(context.Background(), task), r.err)
+
+	r.purgeCalls = nil
+	for _, b := range []string{`not json`, `{"afterId":"x"}`} {
+		require.NoError(t, p.HandlePurge(context.Background(), driver.RawTask{TypeName: queue.TaskTypePurgeLocalDriveFiles, Body: []byte(b)}))
+	}
+	assert.Empty(t, r.purgeCalls)
 }

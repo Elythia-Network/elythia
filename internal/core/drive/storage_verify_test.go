@@ -336,8 +336,16 @@ func (r *failingVerifyFailuresRepo) ListFailures(ctx context.Context, op string,
 // objects in readFail.
 type erroringStorage struct {
 	Storage
-	fail     map[string]bool
-	readFail map[string]bool
+	fail       map[string]bool
+	readFail   map[string]bool
+	deleteFail map[string]bool
+}
+
+func (s *erroringStorage) Delete(key string) error {
+	if s.deleteFail[key] {
+		return errInjected
+	}
+	return s.Storage.Delete(key)
 }
 
 func (s *erroringStorage) Get(key string) (io.ReadCloser, error) {

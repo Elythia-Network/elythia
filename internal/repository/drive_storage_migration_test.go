@@ -168,7 +168,7 @@ func TestDriveStorageMigrationRepository_Verify(t *testing.T) {
 	}
 	c, err := repo.Counts(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 3, Verified: 2}, c)
+	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 3, Verified: 2, Purgeable: 2}, c)
 
 	// 一致しなかったら印を消す。
 	ok, err = repo.SetVerified(ctx, "m2", *got[1].ObjectStorageMigratedAt, nil)
@@ -198,6 +198,85 @@ func TestDriveStorageMigrationRepository_Verify(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, "m2", list[0].FileID)
+}
+
+func TestDriveStorageMigrationRepository_Purge(t *testing.T) {
+	ctx := context.Background()
+	db := driveStorageMigrationDB(t)
+	repo := NewDriveStorageMigrationRepository(db)
+	for _, id := range []string{"p3", "p1", "p2", "nv", "lc"} {
+		storageMigFile(t, db, id, true, false)
+	}
+	at := time.Date(2026, 11, 15, 0, 0, 0, 123456789, time.UTC)
+	for _, id := range []string{"p1", "p2", "p3", "nv"} {
+		ok, err := repo.MarkMigrated(ctx, id, at)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	files, err := repo.ListMigrated(ctx, "", 10)
+	require.NoError(t, err)
+	migratedAt := map[string]time.Time{}
+	for _, f := range files {
+		migratedAt[f.ID] = *f.ObjectStorageMigratedAt
+		if f.ID != "nv" {
+			ok, err := repo.SetVerified(ctx, f.ID, *f.ObjectStorageMigratedAt, &at)
+			require.NoError(t, err)
+			require.True(t, ok)
+		}
+	}
+
+	// 確かめた行だけを id 順に返す。確かめていない行とローカルの行は返さない。
+	got, err := repo.ListPurgeable(ctx, "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"p1", "p2"}, []string{got[0].ID, got[1].ID})
+	got, err = repo.ListPurgeable(ctx, "p2", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "p3", got[0].ID)
+	got, err = repo.ListPurgeable(ctx, "a\x00b", 10)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	c, err := repo.Counts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), c.Purgeable)
+
+	deletedAt := at.Add(time.Hour)
+	ok, err := repo.MarkLocalDeleted(ctx, "p1", migratedAt["p1"], deletedAt)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	// 同じ実行のジョブが重なっても、消した日時を上書きしない。
+	ok, err = repo.MarkLocalDeleted(ctx, "p1", migratedAt["p1"], deletedAt.Add(time.Hour))
+	require.NoError(t, err)
+	assert.False(t, ok)
+	// 移した日時が違う (写し直された) 行と、移していない行には書かない。
+	ok, err = repo.MarkLocalDeleted(ctx, "p2", at.Add(time.Second), deletedAt)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	for _, id := range []string{"lc", "missing", "a\x00b"} {
+		ok, err := repo.MarkLocalDeleted(ctx, id, at, deletedAt)
+		require.NoError(t, err)
+		assert.False(t, ok, id)
+	}
+	got, err = repo.ListPurgeable(ctx, "", 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"p2", "p3"}, []string{got[0].ID, got[1].ID}, "a purged row was listed again")
+
+	require.NoError(t, repo.RecordFailure(ctx, "p2", DriveStorageMigrationOperationPurge, "kept", at))
+	require.NoError(t, repo.RecordFailure(ctx, "p3", DriveStorageMigrationOperationVerify, "x", at))
+	require.NoError(t, repo.RecordFailure(ctx, "nv", DriveStorageMigrationOperationVerify, "y", at))
+	c, err = repo.Counts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 4, Verified: 3, VerifyFailed: 2,
+		Purgeable: 2, LocalDeleted: 1, PurgeFailed: 1}, c)
+
+	// 写し直すと、ローカルを消した日時も消える (写したのはローカルにあった実体)。
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "storedInternal" = true WHERE "id" = 'p1'`).Error)
+	ok, err = repo.MarkMigrated(ctx, "p1", at.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	var p1 model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, "p1").Take(&p1).Error)
+	assert.Nil(t, p1.ObjectStorageLocalDeletedAt)
 }
 
 func TestDriveStorageMigrationRepository_Failures(t *testing.T) {

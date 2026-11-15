@@ -11,10 +11,12 @@ import (
 )
 
 // The failure operations of the migration: copying local drive files to
-// object storage (#4180) and verifying the copies (#4181).
+// object storage (#4180), verifying the copies (#4181) and deleting the
+// local copies (#4182).
 const (
 	DriveStorageMigrationOperationMigrate = "migrate"
 	DriveStorageMigrationOperationVerify  = "verify"
+	DriveStorageMigrationOperationPurge   = "purge"
 )
 
 // DriveStorageMigrationRepository reads and writes what the
@@ -67,7 +69,9 @@ func (r *DriveStorageMigrationRepository) MarkMigrated(ctx context.Context, id s
 	res := r.db.WithContext(ctx).Model(&model.DriveFile{}).
 		Where(`"id" = ? AND "storedInternal" = true AND "isLink" = false`, id).
 		// 写し直した実体は確かめ直すまで信用しないので、確かめた日時を消す (#4181)。
-		Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at, "objectStorageVerifiedAt": nil})
+		// 写したのはローカルにあった実体なので、ローカルを消した日時も消す (#4182)。
+		Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at,
+			"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -111,6 +115,47 @@ func (r *DriveStorageMigrationRepository) SetVerified(ctx context.Context, id st
 	res := migratedStored(r.db.WithContext(ctx)).
 		Where(`"id" = ? AND "objectStorageMigratedAt" = ?`, id, migratedAt).
 		Update("objectStorageVerifiedAt", at)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// ListPurgeable returns up to limit verified files whose local copy has not
+// been deleted, with id greater than afterID, in id order (#4182).
+func (r *DriveStorageMigrationRepository) ListPurgeable(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	if !storable(afterID) {
+		return nil, nil
+	}
+	q := purgeable(r.db.WithContext(ctx))
+	if afterID != "" {
+		q = q.Where(`"id" > ?`, afterID)
+	}
+	var out []model.DriveFile
+	if err := q.Order(`"id" ASC`).Limit(limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// purgeable selects the migrated files that were verified and whose local
+// copy has not been deleted: the rows the purge handles.
+func purgeable(db *gorm.DB) *gorm.DB {
+	return migratedStored(db).
+		Where(`"objectStorageVerifiedAt" IS NOT NULL AND "objectStorageLocalDeletedAt" IS NULL`)
+}
+
+// MarkLocalDeleted records that the local copy of a migrated file was deleted
+// at at. It reports false when the file is no longer in the migrated state
+// with the migratedAt read before (deleted, made a link, migrated again or
+// migrated back), or its local copy was already marked as deleted.
+func (r *DriveStorageMigrationRepository) MarkLocalDeleted(ctx context.Context, id string, migratedAt, at time.Time) (bool, error) {
+	if !storable(id) {
+		return false, nil
+	}
+	res := migratedStored(r.db.WithContext(ctx)).
+		Where(`"id" = ? AND "objectStorageMigratedAt" = ? AND "objectStorageLocalDeletedAt" IS NULL`, id, migratedAt).
+		Update("objectStorageLocalDeletedAt", at)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -196,6 +241,14 @@ type DriveStorageMigrationCounts struct {
 	Verified int64
 	// VerifyFailed is the number of files whose last verification failed.
 	VerifyFailed int64
+	// Purgeable is the number of verified files whose local copy has not been
+	// deleted.
+	Purgeable int64
+	// LocalDeleted is the number of migrated files whose local copy was
+	// deleted.
+	LocalDeleted int64
+	// PurgeFailed is the number of files whose last purge attempt failed.
+	PurgeFailed int64
 }
 
 // Counts returns the numbers of local, migrated, verified and failed files.
@@ -208,14 +261,20 @@ func (r *DriveStorageMigrationRepository) Counts(ctx context.Context) (DriveStor
 	if err := db.Raw(`SELECT
 		count(*) FILTER (WHERE "storedInternal" = true AND "isLink" = false) AS "local",
 		count(*) FILTER (WHERE "objectStorageMigratedAt" IS NOT NULL) AS "migrated",
-		count(*) FILTER (WHERE "objectStorageVerifiedAt" IS NOT NULL) AS "verified"
-		FROM "drive_file"`).Row().Scan(&c.Local, &c.Migrated, &c.Verified); err != nil {
+		count(*) FILTER (WHERE "objectStorageVerifiedAt" IS NOT NULL) AS "verified",
+		count(*) FILTER (WHERE "storedInternal" = false AND "isLink" = false AND "objectStorageMigratedAt" IS NOT NULL
+			AND "objectStorageVerifiedAt" IS NOT NULL AND "objectStorageLocalDeletedAt" IS NULL) AS "purgeable",
+		count(*) FILTER (WHERE "objectStorageLocalDeletedAt" IS NOT NULL) AS "localDeleted"
+		FROM "drive_file"`).Row().Scan(&c.Local, &c.Migrated, &c.Verified, &c.Purgeable, &c.LocalDeleted); err != nil {
 		return c, err
 	}
 	if err := failuresOfFiles(db, DriveStorageMigrationOperationMigrate).Count(&c.Failed).Error; err != nil {
 		return c, err
 	}
 	if err := failuresOfFiles(db, DriveStorageMigrationOperationVerify).Count(&c.VerifyFailed).Error; err != nil {
+		return c, err
+	}
+	if err := failuresOfFiles(db, DriveStorageMigrationOperationPurge).Count(&c.PurgeFailed).Error; err != nil {
 		return c, err
 	}
 	return c, nil

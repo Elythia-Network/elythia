@@ -171,6 +171,40 @@ func (r *memMigrationRepo) SetVerified(_ context.Context, id string, migratedAt 
 	return false, nil
 }
 
+func (r *memMigrationRepo) ListPurgeable(_ context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var out []model.DriveFile
+	for _, f := range r.files {
+		if !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil && f.ObjectStorageVerifiedAt != nil &&
+			f.ObjectStorageLocalDeletedAt == nil && f.ID > afterID {
+			out = append(out, f)
+		}
+	}
+	slices.SortFunc(out, func(a, b model.DriveFile) int { return strings.Compare(a.ID, b.ID) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *memMigrationRepo) MarkLocalDeleted(_ context.Context, id string, migratedAt, at time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.files {
+		f := &r.files[i]
+		if f.ID == id && !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil && f.ObjectStorageMigratedAt.Equal(migratedAt) &&
+			f.ObjectStorageLocalDeletedAt == nil {
+			f.ObjectStorageLocalDeletedAt = &at
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *memMigrationRepo) IsMigrated(_ context.Context, id string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -223,6 +257,12 @@ func (r *memMigrationRepo) Counts(context.Context) (repository.DriveStorageMigra
 		if f.ObjectStorageVerifiedAt != nil {
 			c.Verified++
 		}
+		if !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil && f.ObjectStorageVerifiedAt != nil && f.ObjectStorageLocalDeletedAt == nil {
+			c.Purgeable++
+		}
+		if f.ObjectStorageLocalDeletedAt != nil {
+			c.LocalDeleted++
+		}
 	}
 	for _, f := range r.failures {
 		switch f.Operation {
@@ -230,6 +270,8 @@ func (r *memMigrationRepo) Counts(context.Context) (repository.DriveStorageMigra
 			c.Failed++
 		case repository.DriveStorageMigrationOperationVerify:
 			c.VerifyFailed++
+		case repository.DriveStorageMigrationOperationPurge:
+			c.PurgeFailed++
 		}
 	}
 	return c, nil
@@ -303,7 +345,31 @@ type recordingMigrationEnqueuer struct {
 	jobs []migrationJob
 	// verifyJobs are the jobs of the verification (#4181).
 	verifyJobs []migrationJob
-	err        error
+	// purgeJobs are the jobs of the purge (#4182).
+	purgeJobs []migrationJob
+	err       error
+}
+
+func (e *recordingMigrationEnqueuer) EnqueuePurgeLocalDriveFiles(token, afterID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.err != nil {
+		return e.err
+	}
+	e.purgeJobs = append(e.purgeJobs, migrationJob{token, afterID})
+	return nil
+}
+
+// popPurge removes and returns the oldest purge job.
+func (e *recordingMigrationEnqueuer) popPurge() (migrationJob, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.purgeJobs) == 0 {
+		return migrationJob{}, false
+	}
+	j := e.purgeJobs[0]
+	e.purgeJobs = e.purgeJobs[1:]
+	return j, true
 }
 
 func (e *recordingMigrationEnqueuer) EnqueueVerifyMigratedDriveFiles(token, afterID string) error {
@@ -754,6 +820,13 @@ func (r *failingMigrationRepo) SetVerified(ctx context.Context, id string, migra
 		return false, err
 	}
 	return r.memMigrationRepo.SetVerified(ctx, id, migratedAt, at)
+}
+
+func (r *failingMigrationRepo) MarkLocalDeleted(ctx context.Context, id string, migratedAt, at time.Time) (bool, error) {
+	if err := r.err("MarkLocalDeleted"); err != nil {
+		return false, err
+	}
+	return r.memMigrationRepo.MarkLocalDeleted(ctx, id, migratedAt, at)
 }
 
 func (r *failingMigrationRepo) RecordFailure(ctx context.Context, fileID, op, msg string, at time.Time) error {

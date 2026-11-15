@@ -905,12 +905,12 @@ export type DriveUsageKind = 'attachment' | 'avatar' | 'banner' | 'emoji' | 'oth
 
 export type DriveUsageOrigin = 'local' | 'remote';
 
-/** The result of `admin/drive/object-storage-migration/status` (#4180, #4181). */
+/** The result of `admin/drive/object-storage-migration/status` (#4180, #4181, #4182). */
 export type DriveObjectStorageMigrationStatus = {
 	/** Whether object storage is configured, so files have somewhere to go. */
 	objectStorageEnabled: boolean;
 	/** The operation running now, or null when none is. */
-	running: 'migrate' | 'verify' | null;
+	running: 'migrate' | 'verify' | 'purge' | null;
 	/** Files still stored locally. */
 	localFiles: number;
 	/** Files the migration copied to object storage. */
@@ -925,9 +925,17 @@ export type DriveObjectStorageMigrationStatus = {
 	verifyFailedFiles: number;
 	/** The most recent verification failures, newest first (at most 100). */
 	verifyFailures: DriveObjectStorageMigrationFailure[];
+	/** Verified files whose local copy has not been deleted. */
+	purgeableFiles: number;
+	/** Migrated files whose local copy was deleted. */
+	localDeletedFiles: number;
+	/** Files whose last purge attempt failed. A mismatch keeps the local copy; a failed deletion may leave part of it. */
+	purgeFailedFiles: number;
+	/** The most recent purge failures, newest first (at most 100). */
+	purgeFailures: DriveObjectStorageMigrationFailure[];
 };
 
-/** A file the migration could not copy or verify. */
+/** A file the migration could not copy, verify or purge. */
 export type DriveObjectStorageMigrationFailure = {
 	fileId: string;
 	error: string;

@@ -202,6 +202,14 @@
 				}
 			}
 		},
+		"admin/drive/object-storage-migration/purge-local": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:drive"
+			},
+			"doc": {}
+		},
 		"admin/drive/object-storage-migration/start": {
 			"meta": {
 				"requireCredential": true,
@@ -4899,6 +4907,7 @@
 					"enum": [
 						"migrate",
 						"verify",
+						"purge",
 						null
 					]
 				},
@@ -4939,6 +4948,32 @@
 					"nullable": false
 				},
 				"verifyFailures": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DriveObjectStorageMigrationFailure"
+					}
+				},
+				"purgeableFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"localDeletedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"purgeFailedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"purgeFailures": {
 					"type": "array",
 					"optional": false,
 					"nullable": false,

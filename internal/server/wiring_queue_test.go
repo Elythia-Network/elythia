@@ -154,6 +154,7 @@ func TestBuiltinQueueHandlersBindTheExpectedMethods(t *testing.T) {
 		queue.TaskTypeCleanRemoteFiles:         "(*ObjectStorageProcessor).HandleCleanRemoteFiles",
 		queue.TaskTypeMigrateLocalDriveFiles:   "(*DriveStorageMigrationProcessor).Handle",
 		queue.TaskTypeVerifyMigratedDriveFiles: "(*DriveStorageMigrationProcessor).HandleVerify",
+		queue.TaskTypePurgeLocalDriveFiles:     "(*DriveStorageMigrationProcessor).HandlePurge",
 		queue.TaskTypeReactionFlush:            "(*ReactionFlushProcessor).Handle",
 		queue.TaskTypeDeleteAccount:            "(*DeleteAccountProcessor).Handle",
 		queue.TaskTypeUnfollow:                 "(*UnfollowProcessor).Handle",

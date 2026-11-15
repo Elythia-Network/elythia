@@ -144,6 +144,11 @@ export type ElythiaEndpoints = {
 		req: Misskey.entities.EmptyRequest;
 		res: DatabaseHealthReport;
 	};
+	'admin/drive/object-storage-migration/purge-local': {
+		/** Deletes the local copies of the verified drive files in the background, verifying each once more first (#4182). */
+		req: Misskey.entities.EmptyRequest;
+		res: undefined;
+	};
 	'admin/drive/object-storage-migration/start': {
 		/** Copies the locally stored drive files to object storage in the background (#4180). */
 		req: Misskey.entities.EmptyRequest;

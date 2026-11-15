@@ -88,7 +88,26 @@ func (r onlyFileRepo) ListMigrated(ctx context.Context, afterID string, limit in
 	return out, nil
 }
 
-type queuedMigrationJobs struct{ jobs, verifyJobs [][2]string }
+func (r onlyFileRepo) ListPurgeable(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	files, err := r.DriveStorageMigrationRepository.ListPurgeable(ctx, "", 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.DriveFile
+	for _, f := range files {
+		if f.ID == r.id && f.ID > afterID && len(out) < limit {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+type queuedMigrationJobs struct{ jobs, verifyJobs, purgeJobs [][2]string }
+
+func (q *queuedMigrationJobs) EnqueuePurgeLocalDriveFiles(token, afterID string) error {
+	q.purgeJobs = append(q.purgeJobs, [2]string{token, afterID})
+	return nil
+}
 
 func (q *queuedMigrationJobs) EnqueueMigrateLocalDriveFiles(token, afterID string) error {
 	q.jobs = append(q.jobs, [2]string{token, afterID})
@@ -200,9 +219,17 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	obj.byKey[ak] = "bytes of " + ak
 	require.NotNil(t, verify().ObjectStorageVerifiedAt)
 
-	// ローカルの実体を消しても、同じ URL でオブジェクトストレージから配信する。
+	// 消す処理 (#4182) がローカルの実体を消しても、同じ URL でオブジェクトストレージから
+	// 配信する。消した日時は実 DB の移した日時で突き合わせて入る。
+	require.NoError(t, m.StartPurge(ctx))
+	for i := 0; i < len(jobs.purgeJobs); i++ {
+		require.NoError(t, m.RunPurgeBatch(ctx, jobs.purgeJobs[i][0], jobs.purgeJobs[i][1]))
+	}
+	require.NoError(t, db.Where(`"id" = ?`, id).Take(&f).Error)
+	require.NotNil(t, f.ObjectStorageLocalDeletedAt, "the deletion was not recorded")
 	for _, k := range []string{ak, tk, wk} {
-		require.NoError(t, local.Delete(k))
+		_, err := local.Get(k)
+		require.ErrorIs(t, err, coredrive.ErrObjectNotFound, "the local copy %s was kept", k)
 		code, body := serve(k)
 		assert.Equal(t, http.StatusOK, code, k)
 		assert.Equal(t, "bytes of "+k, body, k)
