@@ -145,8 +145,11 @@ export type ElythiaEndpoints = {
 		res: DatabaseHealthReport;
 	};
 	'admin/drive/object-storage-migration/purge-local': {
-		/** Deletes the local copies of the verified drive files in the background, verifying each once more first (#4182). */
-		req: Misskey.entities.EmptyRequest;
+		/**
+		 * Deletes the local copies of the verified drive files in the background, verifying each once more first (#4182).
+		 * It requires the re-authentication of `admin/backup/*` (#4184).
+		 */
+		req: BackupReauth;
 		res: undefined;
 	};
 	'admin/drive/object-storage-migration/restore': {

@@ -68,6 +68,16 @@ func subject(c echo.Context) strongauth.Subject {
 // 形の誤った本文でも TOTP のコードを使い切ってから 400 になる。本家の i/2fa/* と
 // 同じく、検証を先にする (#3878)。
 func reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
+	return Reauthenticate(v, c)
+}
+
+// Reauthenticate checks the strong authentication of the request as
+// admin/backup/* does: administrators only, native session tokens only, 2FA
+// or a passkey registered, and the re-authentication in the body
+// (`password` and either `token` or `credential`). When the request may not
+// proceed, it writes the response and returns false. Other admin endpoints
+// doing an irreversible operation use it too (#4184).
+func Reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
 	req := c.Request()
 	var body []byte
 	if req.Body != nil {
@@ -136,7 +146,7 @@ type RefusalResponse struct {
 func Refusal(err error, suspended bool) RefusalResponse {
 	var se *strongauth.Error
 	if !errors.As(err, &se) {
-		slog.Error("admin/backup: unexpected auth error", "err", err)
+		slog.Error("strongauth: unexpected auth error", "err", err)
 		return RefusalResponse{Status: http.StatusInternalServerError, Body: apierr.InternalError()}
 	}
 	switch se.Reason {
@@ -175,7 +185,7 @@ func Refusal(err error, suspended bool) RefusalResponse {
 		return RefusalResponse{Status: http.StatusBadRequest, Body: apierr.Error("PASSKEY_UNAVAILABLE",
 			"No passkey is registered, or passkeys are not available on this server.", idPasskeyUnavailable)}
 	default:
-		slog.Error("admin/backup: authentication unavailable", "err", err)
+		slog.Error("strongauth: authentication unavailable", "err", err)
 		return RefusalResponse{Status: http.StatusServiceUnavailable, Body: apierr.ErrorWithKind("AUTHENTICATION_UNAVAILABLE",
 			"Authentication is temporarily unavailable. Please try again later.", idAuthUnavailable, apierr.KindServer), RetryAfter: "10"}
 	}

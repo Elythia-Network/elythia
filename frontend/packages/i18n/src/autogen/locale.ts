@@ -11855,6 +11855,22 @@ export interface Locale extends ILocale {
          * 連合のルールを削除
          */
         "deleteFederationRule": string;
+        /**
+         * ドライブのファイルをオブジェクトストレージへ移す処理を開始
+         */
+        "migrateDriveFilesToObjectStorage": string;
+        /**
+         * オブジェクトストレージへ移したファイルを確かめる処理を開始
+         */
+        "verifyMigratedDriveFiles": string;
+        /**
+         * 確かめたファイルのローカルの削除を開始
+         */
+        "purgeLocalDriveFiles": string;
+        /**
+         * オブジェクトストレージへ移したファイルをローカルへ戻す処理を開始
+         */
+        "restoreMigratedDriveFiles": string;
     };
     "_fileViewer": {
         /**
@@ -17243,5 +17259,139 @@ export interface Locale extends ILocale {
          * 稼働時間
          */
         "uptime": string;
+    };
+    "_objectStorageMigration": {
+        /**
+         * ローカルのファイルの移行
+         */
+        "title": string;
+        /**
+         * オブジェクトストレージを有効にする前にローカルへ保存したドライブのファイルを、オブジェクトストレージへ移します。ファイルのURLは変わりません。移す → 確かめる → ローカルを消すの順に進め、元に戻すときは「ローカルへ戻す」を使います。保存した設定で動くので、設定を変えたら先に保存してください。
+         */
+        "description": string;
+        /**
+         * オブジェクトストレージが設定されていません。設定を保存してから操作してください。
+         */
+        "notConfigured": string;
+        /**
+         * 処理を実行中です。終わるまで、ほかの操作はできません。
+         */
+        "running": string;
+        /**
+         * ローカルにあるファイル
+         */
+        "localFiles": string;
+        /**
+         * 移したファイル
+         */
+        "migratedFiles": string;
+        /**
+         * 確かめたファイル
+         */
+        "verifiedFiles": string;
+        /**
+         * ローカルを消せるファイル
+         */
+        "purgeableFiles": string;
+        /**
+         * ローカルを消したファイル
+         */
+        "localDeletedFiles": string;
+        /**
+         * オブジェクトストレージへ移す
+         */
+        "migrate": string;
+        /**
+         * 移したファイルを確かめる
+         */
+        "verify": string;
+        /**
+         * 確かめたファイルのローカルを消す
+         */
+        "purge": string;
+        /**
+         * ローカルへ戻す
+         */
+        "restore": string;
+        /**
+         * 移しています
+         */
+        "migrating": string;
+        /**
+         * 確かめています
+         */
+        "verifying": string;
+        /**
+         * ローカルを消しています
+         */
+        "purging": string;
+        /**
+         * ローカルへ戻しています
+         */
+        "restoring": string;
+        /**
+         * 移せなかったファイル
+         */
+        "migrateFailures": string;
+        /**
+         * 確かめられなかったファイル
+         */
+        "verifyFailures": string;
+        /**
+         * ローカルを消せなかったファイル
+         */
+        "purgeFailures": string;
+        /**
+         * ローカルへ戻せなかったファイル
+         */
+        "restoreFailures": string;
+        /**
+         * ローカルを消すには、二段階認証（TOTP）かパスキーを登録してください。
+         */
+        "purgeNeedsTwoFactor": string;
+        /**
+         * ローカルにあるファイルがありません。
+         */
+        "noLocalFiles": string;
+        /**
+         * 移したファイルがありません。
+         */
+        "noMigratedFiles": string;
+        /**
+         * ローカルを消せるファイルがありません。先に確かめてください。
+         */
+        "noPurgeableFiles": string;
+        /**
+         * 別の処理を実行中です。終わってから操作してください。
+         */
+        "alreadyRunning": string;
+        /**
+         * ジョブキューが使えないため、開始できません。
+         */
+        "queueUnavailable": string;
+        /**
+         * ローカルを消すには、パスワードを設定してください。
+         */
+        "passwordNotSet": string;
+        /**
+         * いまは再認証ができません。しばらく待ってからもう一度試してください。
+         */
+        "authenticationUnavailable": string;
+        /**
+         * ローカルのファイルをオブジェクトストレージへ移します。移したファイルは、TS版のMisskeyへ戻すと読めなくなります。TS版へ戻すときは、先に「ローカルへ戻す」を実行してください。移す前に、データベースのバックアップを取ってください。続けますか？
+         */
+        "migrateConfirm": string;
+        /**
+         * 移したファイルをすべてオブジェクトストレージから読み、大きさとハッシュを確かめます。ファイルの合計の大きさの分だけ、オブジェクトストレージからの読み出しの転送量（プロバイダによっては料金）がかかります。続けますか？
+         */
+        "verifyConfirm": string;
+        /**
+         * 確かめたファイルの、ローカルの実体を消します。消したローカルの実体は取り戻せず、オブジェクトストレージが唯一の保存先になります。消した後にオブジェクトストレージを無効にしたり設定を変えたりすると、移したファイルが表示できなくなります。消した後は、「ローカルへ戻す」を終えるまで、移す前に取ったデータベースのバックアップへ戻さないでください。続けますか？
+         */
+        "purgeConfirm": string;
+        /**
+         * 移したファイルをオブジェクトストレージからローカルへ戻します。ローカルに、戻すファイルを置ける空きが必要です。オブジェクトストレージの実体は消しません。続けますか？
+         */
+        "restoreConfirm": string;
     };
 }

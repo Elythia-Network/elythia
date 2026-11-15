@@ -25,6 +25,10 @@ func TestDriveStorageMigratorIsWired(t *testing.T) {
 			"running, err := driveStorageMigrator.Running(context.Background()) "+
 			"return err != nil || running })",
 		"移す処理の実行中にローカルの行を消すと、並行して写した分がオブジェクトストレージに孤児として残る (#4180)")
+	// 再認証を配線し忘れると、purge-local は 500 で閉じる (#4184)。
+	assertWired(t, serverPkg,
+		"adminHandler.SetDriveStorageMigrationVerifier(backupVerifier)",
+		"admin/drive/object-storage-migration/purge-local が 500 を返す (#4184)")
 }
 
 // route の登録と権限も固定する。perm-check は本家の golden にある endpoint しか
@@ -44,7 +48,7 @@ func TestDriveStorageMigrationRoutesAreRegistered(t *testing.T) {
 		"確かめる処理を管理者以外が始められる、あるいは 404 になる (#4181)")
 	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/drive/object-storage-migration/purge-local", adminHandler.DriveStorageMigrationPurgeLocal, `+
-			`middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))`,
+			`middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"), middleware.RequireSecure())`,
 		"ローカルの実体を消す処理を管理者以外が始められる、あるいは 404 になる (#4182)")
 	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
 		`api.POST("/admin/drive/object-storage-migration/restore", adminHandler.DriveStorageMigrationRestore, `+

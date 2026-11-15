@@ -14,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/procstats"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/core/signup"
+	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -202,6 +203,9 @@ type Handler struct {
 	// driveStorageMigration は、ローカルのファイルをオブジェクトストレージへ写す
 	// 処理 (#4180)。未配線なら admin/drive/object-storage-migration/* は 500 を返す。
 	driveStorageMigration DriveStorageMigrator
+	// driveStorageMigrationReauth は、ローカルを消す処理 (purge-local) の再認証
+	// (#4184)。admin/backup/* と同じ strongauth。
+	driveStorageMigrationReauth *strongauth.Verifier
 	// signupApplications は承認制の登録の審査面 (#2555)。未配線なら該当
 	// endpoint は 503 を返す。
 	signupApplications SignupApplicationReviewer

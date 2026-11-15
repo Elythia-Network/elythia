@@ -206,6 +206,7 @@
 			"meta": {
 				"requireCredential": true,
 				"requireAdmin": true,
+				"secure": true,
 				"kind": "write:admin:drive"
 			},
 			"doc": {}
