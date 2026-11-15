@@ -39,6 +39,11 @@ type DriveFile struct {
 	// copied the file (#4180). Nil for files that were never migrated,
 	// including those uploaded to object storage directly. Elythia-only.
 	ObjectStorageMigratedAt *time.Time `gorm:"column:objectStorageMigratedAt" json:"-"`
+	// ObjectStorageVerifiedAt is when the verification found the migrated
+	// file readable in object storage with the recorded size and md5 (#4181).
+	// Nil until verified, and again after a failed verification or a new
+	// migration. Elythia-only.
+	ObjectStorageVerifiedAt *time.Time `gorm:"column:objectStorageVerifiedAt" json:"-"`
 
 	// Relations
 	User   *User        `gorm:"foreignKey:UserID" json:"user,omitempty"`

@@ -44,8 +44,13 @@ const TaskTypeCleanRemoteFiles = "objectStorage:cleanRemoteFiles"
 // job copies a batch and enqueues the next one with the cursor.
 const TaskTypeMigrateLocalDriveFiles = "objectStorage:migrateLocalDriveFiles"
 
-// MigrateLocalDriveFilesPayload names the migration run (Token) and the
-// cursor (the files after AfterID are copied next).
+// TaskTypeVerifyMigratedDriveFiles is the task type of one batch of verifying
+// the drive files the migration copied to object storage (#4181).
+// Elythia-only; it takes MigrateLocalDriveFilesPayload like the migration.
+const TaskTypeVerifyMigratedDriveFiles = "objectStorage:verifyMigratedDriveFiles"
+
+// MigrateLocalDriveFilesPayload names the migration or verification run
+// (Token) and the cursor (the files after AfterID are handled next).
 type MigrateLocalDriveFilesPayload struct {
 	Token   string `json:"token"`
 	AfterID string `json:"afterId"`

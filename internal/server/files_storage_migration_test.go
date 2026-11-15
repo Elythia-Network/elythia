@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"strings"
@@ -72,10 +74,29 @@ func (r onlyFileRepo) ListLocal(ctx context.Context, afterID string, limit int) 
 	return out, nil
 }
 
-type queuedMigrationJobs struct{ jobs [][2]string }
+func (r onlyFileRepo) ListMigrated(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	files, err := r.DriveStorageMigrationRepository.ListMigrated(ctx, "", 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.DriveFile
+	for _, f := range files {
+		if f.ID == r.id && f.ID > afterID && len(out) < limit {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+type queuedMigrationJobs struct{ jobs, verifyJobs [][2]string }
 
 func (q *queuedMigrationJobs) EnqueueMigrateLocalDriveFiles(token, afterID string) error {
 	q.jobs = append(q.jobs, [2]string{token, afterID})
+	return nil
+}
+
+func (q *queuedMigrationJobs) EnqueueVerifyMigratedDriveFiles(token, afterID string) error {
+	q.verifyJobs = append(q.verifyJobs, [2]string{token, afterID})
 	return nil
 }
 
@@ -100,7 +121,8 @@ func (l *soloLock) Release(_ context.Context, token string) error {
 	return nil
 }
 
-func (l *soloLock) Held(context.Context) (bool, error) { return l.holder != "", nil }
+func (l *soloLock) Held(context.Context) (bool, error)     { return l.holder != "", nil }
+func (l *soloLock) Holder(context.Context) (string, error) { return l.holder, nil }
 
 // TestFilesServesTheSameURLAfterTheStorageMigration pins the premise of
 // #4180: the migration leaves the url columns alone, and /files/<accessKey>
@@ -121,8 +143,9 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	clean()
 	t.Cleanup(clean)
 	url := "https://example.test/files/" + ak
+	sum := md5.Sum([]byte("bytes of " + ak))
 	require.NoError(t, db.Create(&model.DriveFile{
-		ID: id, MD5: "0123456789abcdef0123456789abcdef", Name: "a.png", Type: "image/png", Size: 4,
+		ID: id, MD5: hex.EncodeToString(sum[:]), Name: "a.png", Type: "image/png", Size: len("bytes of " + ak),
 		StoredInternal: true, URL: url, AccessKey: &ak, ThumbnailAccessKey: &tk, WebpublicAccessKey: &wk,
 	}).Error)
 
@@ -158,6 +181,24 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	require.False(t, f.StoredInternal, "the row was not migrated")
 	require.NotNil(t, f.ObjectStorageMigratedAt)
 	assert.Equal(t, url, f.URL, "the url column was rewritten")
+
+	// 確かめる処理 (#4181) は、実 DB の移した日時で行を突き合わせ、確かめた日時を入れる。
+	verify := func() model.DriveFile {
+		t.Helper()
+		jobs.verifyJobs = nil
+		require.NoError(t, m.StartVerify(ctx))
+		for i := 0; i < len(jobs.verifyJobs); i++ {
+			require.NoError(t, m.RunVerifyBatch(ctx, jobs.verifyJobs[i][0], jobs.verifyJobs[i][1]))
+		}
+		var got model.DriveFile
+		require.NoError(t, db.Where(`"id" = ?`, id).Take(&got).Error)
+		return got
+	}
+	require.NotNil(t, verify().ObjectStorageVerifiedAt, "the matching copy was not marked as verified")
+	obj.byKey[ak] = "broken!" + obj.byKey[ak]
+	assert.Nil(t, verify().ObjectStorageVerifiedAt, "the broken copy kept the verified mark")
+	obj.byKey[ak] = "bytes of " + ak
+	require.NotNil(t, verify().ObjectStorageVerifiedAt)
 
 	// ローカルの実体を消しても、同じ URL でオブジェクトストレージから配信する。
 	for _, k := range []string{ak, tk, wk} {

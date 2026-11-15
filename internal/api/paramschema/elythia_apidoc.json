@@ -225,6 +225,14 @@
 				}
 			}
 		},
+		"admin/drive/object-storage-migration/verify": {
+			"meta": {
+				"requireCredential": true,
+				"requireAdmin": true,
+				"kind": "write:admin:drive"
+			},
+			"doc": {}
+		},
 		"admin/drive/usage": {
 			"meta": {
 				"requireCredential": true,
@@ -4890,6 +4898,7 @@
 					"nullable": true,
 					"enum": [
 						"migrate",
+						"verify",
 						null
 					]
 				},
@@ -4909,6 +4918,27 @@
 					"nullable": false
 				},
 				"failures": {
+					"type": "array",
+					"optional": false,
+					"nullable": false,
+					"items": {
+						"type": "object",
+						"optional": false,
+						"nullable": false,
+						"ref": "DriveObjectStorageMigrationFailure"
+					}
+				},
+				"verifiedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"verifyFailedFiles": {
+					"type": "integer",
+					"optional": false,
+					"nullable": false
+				},
+				"verifyFailures": {
 					"type": "array",
 					"optional": false,
 					"nullable": false,

@@ -113,6 +113,93 @@ func TestDriveStorageMigrationRepository_ListAndMark(t *testing.T) {
 	}
 }
 
+func TestDriveStorageMigrationRepository_Verify(t *testing.T) {
+	ctx := context.Background()
+	db := driveStorageMigrationDB(t)
+	repo := NewDriveStorageMigrationRepository(db)
+	for _, id := range []string{"m3", "m1", "m2", "lc"} {
+		storageMigFile(t, db, id, true, false)
+	}
+	storageMigFile(t, db, "s3", false, false) // 初めからオブジェクトストレージ
+	// マイクロ秒より下の端数は PostgreSQL が丸める。突き合わせは DB から読んだ値で行う。
+	at := time.Date(2026, 11, 15, 0, 0, 0, 123456789, time.UTC)
+	for _, id := range []string{"m1", "m2", "m3"} {
+		ok, err := repo.MarkMigrated(ctx, id, at)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+
+	// 写した行だけを id 順に返す。ローカルの行と初めからオブジェクトストレージの行は返さない。
+	got, err := repo.ListMigrated(ctx, "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"m1", "m2"}, []string{got[0].ID, got[1].ID})
+	got, err = repo.ListMigrated(ctx, "m2", 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "m3", got[0].ID)
+	got, err = repo.ListMigrated(ctx, "a\x00b", 10)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	// 移した日時を持っていても、ローカルにある行 (戻した直後など) は確かめない。
+	storageMigFile(t, db, "mb", true, false)
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "objectStorageMigratedAt" = ? WHERE "id" = 'mb'`, at).Error)
+	got, err = repo.ListMigrated(ctx, "m3", 10)
+	require.NoError(t, err)
+	assert.Empty(t, got, "a row stored locally was listed for the verification")
+	require.NoError(t, db.Exec(`DELETE FROM "drive_file" WHERE "id" = 'mb'`).Error)
+
+	// DB から読んだ移した日時で突き合わせられる (精度の丸めで外れない)。
+	got, err = repo.ListMigrated(ctx, "", 10)
+	require.NoError(t, err)
+	verifiedAt := at.Add(time.Hour)
+	for _, f := range got[:2] {
+		ok, err := repo.SetVerified(ctx, f.ID, *f.ObjectStorageMigratedAt, &verifiedAt)
+		require.NoError(t, err)
+		assert.True(t, ok, f.ID)
+	}
+	// 移した日時が違えば (確かめている間に写し直された) 書かない。
+	ok, err := repo.SetVerified(ctx, "m3", at.Add(time.Second), &verifiedAt)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	for _, id := range []string{"lc", "s3", "missing", "a\x00b"} {
+		ok, err := repo.SetVerified(ctx, id, at, &verifiedAt)
+		require.NoError(t, err)
+		assert.False(t, ok, id)
+	}
+	c, err := repo.Counts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 3, Verified: 2}, c)
+
+	// 一致しなかったら印を消す。
+	ok, err = repo.SetVerified(ctx, "m2", *got[1].ObjectStorageMigratedAt, nil)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	var m2 model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, "m2").Take(&m2).Error)
+	assert.Nil(t, m2.ObjectStorageVerifiedAt)
+
+	// 写し直すと、確かめた印は消える。
+	require.NoError(t, db.Exec(`UPDATE "drive_file" SET "storedInternal" = true WHERE "id" = 'm1'`).Error)
+	ok, err = repo.MarkMigrated(ctx, "m1", at.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	var m1 model.DriveFile
+	require.NoError(t, db.Where(`"id" = ?`, "m1").Take(&m1).Error)
+	assert.Nil(t, m1.ObjectStorageVerifiedAt, "a new copy kept the mark of the old one")
+
+	// 確かめる処理の失敗は、移す処理の失敗とは別に数える。
+	require.NoError(t, repo.RecordFailure(ctx, "m2", DriveStorageMigrationOperationVerify, "md5", at))
+	require.NoError(t, repo.RecordFailure(ctx, "m3", DriveStorageMigrationOperationMigrate, "x", at))
+	require.NoError(t, repo.RecordFailure(ctx, "lc", DriveStorageMigrationOperationMigrate, "y", at))
+	c, err = repo.Counts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, DriveStorageMigrationCounts{Local: 1, Migrated: 3, Failed: 2, VerifyFailed: 1}, c)
+	list, err := repo.ListFailures(ctx, DriveStorageMigrationOperationVerify, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "m2", list[0].FileID)
+}
+
 func TestDriveStorageMigrationRepository_Failures(t *testing.T) {
 	ctx := context.Background()
 	db := driveStorageMigrationDB(t)

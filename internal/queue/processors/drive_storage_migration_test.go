@@ -15,8 +15,14 @@ import (
 )
 
 type recordingMigrationRunner struct {
-	calls [][2]string
-	err   error
+	calls       [][2]string
+	verifyCalls [][2]string
+	err         error
+}
+
+func (r *recordingMigrationRunner) RunVerifyBatch(_ context.Context, token, afterID string) error {
+	r.verifyCalls = append(r.verifyCalls, [2]string{token, afterID})
+	return r.err
 }
 
 func (r *recordingMigrationRunner) RunBatch(_ context.Context, token, afterID string) error {
@@ -44,4 +50,26 @@ func TestDriveStorageMigrationProcessor_Handle(t *testing.T) {
 		require.NoError(t, p.Handle(context.Background(), driver.RawTask{TypeName: queue.TaskTypeMigrateLocalDriveFiles, Body: []byte(b)}))
 	}
 	assert.Empty(t, r.calls)
+	assert.Empty(t, r.verifyCalls)
+}
+
+func TestDriveStorageMigrationProcessor_HandleVerify(t *testing.T) {
+	body, err := json.Marshal(queue.MigrateLocalDriveFilesPayload{Token: "verify-tok", AfterID: "f9"})
+	require.NoError(t, err)
+	task := driver.RawTask{TypeName: queue.TaskTypeVerifyMigratedDriveFiles, Body: body}
+
+	r := &recordingMigrationRunner{}
+	p := processors.NewDriveStorageMigrationProcessor(r)
+	require.NoError(t, p.HandleVerify(context.Background(), task))
+	assert.Equal(t, [][2]string{{"verify-tok", "f9"}}, r.verifyCalls)
+	assert.Empty(t, r.calls, "the verification ran a migration batch")
+
+	r.err = errors.New("db down")
+	assert.ErrorIs(t, p.HandleVerify(context.Background(), task), r.err)
+
+	r.verifyCalls = nil
+	for _, b := range []string{`not json`, `{"afterId":"x"}`} {
+		require.NoError(t, p.HandleVerify(context.Background(), driver.RawTask{TypeName: queue.TaskTypeVerifyMigratedDriveFiles, Body: []byte(b)}))
+	}
+	assert.Empty(t, r.verifyCalls)
 }
