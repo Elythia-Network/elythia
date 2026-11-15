@@ -38,4 +38,8 @@ func TestDriveStorageMigrationRoutesAreRegistered(t *testing.T) {
 		`api.POST("/admin/drive/object-storage-migration/status", adminHandler.DriveStorageMigrationStatus, `+
 			`middleware.RequireAdmin(roleService), middleware.RequireScope("read:admin:drive"))`,
 		"移す処理の状態を管理者以外が読める、あるいは 404 になる (#4180)")
+	assertRouteRegisteredBy(t, "routes_admin.go", "registerAdminRoutes",
+		`api.POST("/admin/drive/object-storage-migration/verify", adminHandler.DriveStorageMigrationVerify, `+
+			`middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))`,
+		"確かめる処理を管理者以外が始められる、あるいは 404 になる (#4181)")
 }

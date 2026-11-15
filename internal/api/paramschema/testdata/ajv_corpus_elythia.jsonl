@@ -1,4 +1,4 @@
-{"misskeyVersion":"2026.11.0","ajv":"8.20.0","paramdefsSha256":"8e9d75274b84160bd15122d93e5662877ff8eb088ad349388bd505938f4834ef","elythiaParamdefsSha256":"3a0b22190affffab3e257ab73a6f6fa4599da592d0a4604d6cc5c6ef49e94484","cases":3903}
+{"misskeyVersion":"2026.11.0","ajv":"8.20.0","paramdefsSha256":"8e9d75274b84160bd15122d93e5662877ff8eb088ad349388bd505938f4834ef","elythiaParamdefsSha256":"0fc5746a177e87a02b1832e833343ed2cd8943345b5eb4242aa8aa449274023b","cases":3911}
 {"ep":"admin/backup/delete"}
 {"in":{"password":"hello","id":"hello"},"ok":true}
 {"in":{},"ok":false,"path":"#/required","msg":"must have required property 'password'"}
@@ -521,6 +521,15 @@
 {"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":{"unknownProperty":1},"ok":true}
 {"ep":"admin/drive/object-storage-migration/status"}
+{"in":{},"ok":true}
+{"in":null,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":[],"ok":false,"path":"#/type","msg":"must be object"}
+{"in":"x","ok":false,"path":"#/type","msg":"must be object"}
+{"in":1,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":true,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":1.0,"ok":false,"path":"#/type","msg":"must be object"}
+{"in":{"unknownProperty":1},"ok":true}
+{"ep":"admin/drive/object-storage-migration/verify"}
 {"in":{},"ok":true}
 {"in":null,"ok":false,"path":"#/type","msg":"must be object"}
 {"in":[],"ok":false,"path":"#/type","msg":"must be object"}

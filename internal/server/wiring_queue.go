@@ -282,6 +282,7 @@ func builtinQueueHandlers(p queueHandlerProcs) []queueHandler {
 		{queue.TaskTypeObjectStorageDeleteFile, p.objectStorage.HandleDeleteFile},
 		{queue.TaskTypeCleanRemoteFiles, p.objectStorage.HandleCleanRemoteFiles},
 		{queue.TaskTypeMigrateLocalDriveFiles, p.driveStorageMigration.Handle},
+		{queue.TaskTypeVerifyMigratedDriveFiles, p.driveStorageMigration.HandleVerify},
 		{queue.TaskTypeReactionFlush, p.reactionFlush.Handle},
 		{queue.TaskTypeDeleteAccount, p.deleteAccount.Handle},
 		{queue.TaskTypeUnfollow, p.unfollow.Handle},

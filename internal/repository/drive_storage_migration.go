@@ -10,9 +10,12 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 )
 
-// DriveStorageMigrationOperationMigrate is the failure operation of copying
-// local drive files to object storage (#4180).
-const DriveStorageMigrationOperationMigrate = "migrate"
+// The failure operations of the migration: copying local drive files to
+// object storage (#4180) and verifying the copies (#4181).
+const (
+	DriveStorageMigrationOperationMigrate = "migrate"
+	DriveStorageMigrationOperationVerify  = "verify"
+)
 
 // DriveStorageMigrationRepository reads and writes what the
 // local-to-object-storage migration of drive files needs (#4180): the files
@@ -63,7 +66,51 @@ func (r *DriveStorageMigrationRepository) MarkMigrated(ctx context.Context, id s
 	// storedInternal を条件に入れ、並行した別の処理が先に書き換えた行を上書きしない。
 	res := r.db.WithContext(ctx).Model(&model.DriveFile{}).
 		Where(`"id" = ? AND "storedInternal" = true AND "isLink" = false`, id).
-		Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at})
+		// 写し直した実体は確かめ直すまで信用しないので、確かめた日時を消す (#4181)。
+		Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at, "objectStorageVerifiedAt": nil})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// migratedStored selects the files the migration copied whose bytes are in
+// object storage: the rows the verification reads.
+func migratedStored(db *gorm.DB) *gorm.DB {
+	return db.Model(&model.DriveFile{}).
+		Where(`"storedInternal" = false AND "isLink" = false AND "objectStorageMigratedAt" IS NOT NULL`)
+}
+
+// ListMigrated returns up to limit migrated files whose id is greater than
+// afterID, in id order. An empty afterID starts from the first file.
+func (r *DriveStorageMigrationRepository) ListMigrated(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	if !storable(afterID) {
+		return nil, nil
+	}
+	q := migratedStored(r.db.WithContext(ctx))
+	if afterID != "" {
+		q = q.Where(`"id" > ?`, afterID)
+	}
+	var out []model.DriveFile
+	if err := q.Order(`"id" ASC`).Limit(limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetVerified records the result of verifying a migrated file: at when the
+// copy matched, nil when it did not. It reports false when the file is no
+// longer in the migrated state (deleted, made a link, or migrated back).
+//
+// migratedAt は、確かめ始めたときに読んだ移した日時。確かめている間に写し直された
+// 行 (移した日時が変わる) には、古い実体を確かめた結果を書かない。
+func (r *DriveStorageMigrationRepository) SetVerified(ctx context.Context, id string, migratedAt time.Time, at *time.Time) (bool, error) {
+	if !storable(id) {
+		return false, nil
+	}
+	res := migratedStored(r.db.WithContext(ctx)).
+		Where(`"id" = ? AND "objectStorageMigratedAt" = ?`, id, migratedAt).
+		Update("objectStorageVerifiedAt", at)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -145,9 +192,13 @@ type DriveStorageMigrationCounts struct {
 	Migrated int64
 	// Failed is the number of files whose last migration attempt failed.
 	Failed int64
+	// Verified is the number of migrated files whose copy was verified.
+	Verified int64
+	// VerifyFailed is the number of files whose last verification failed.
+	VerifyFailed int64
 }
 
-// Counts returns the numbers of local, migrated and failed files.
+// Counts returns the numbers of local, migrated, verified and failed files.
 //
 // drive_file を 1 回の走査で数える。どちらの条件にも索引は無いので、2 回に分けると
 // 管理画面が状態を取り直すたびに全件を 2 回読む。
@@ -156,11 +207,15 @@ func (r *DriveStorageMigrationRepository) Counts(ctx context.Context) (DriveStor
 	db := r.db.WithContext(ctx)
 	if err := db.Raw(`SELECT
 		count(*) FILTER (WHERE "storedInternal" = true AND "isLink" = false) AS "local",
-		count(*) FILTER (WHERE "objectStorageMigratedAt" IS NOT NULL) AS "migrated"
-		FROM "drive_file"`).Row().Scan(&c.Local, &c.Migrated); err != nil {
+		count(*) FILTER (WHERE "objectStorageMigratedAt" IS NOT NULL) AS "migrated",
+		count(*) FILTER (WHERE "objectStorageVerifiedAt" IS NOT NULL) AS "verified"
+		FROM "drive_file"`).Row().Scan(&c.Local, &c.Migrated, &c.Verified); err != nil {
 		return c, err
 	}
 	if err := failuresOfFiles(db, DriveStorageMigrationOperationMigrate).Count(&c.Failed).Error; err != nil {
+		return c, err
+	}
+	if err := failuresOfFiles(db, DriveStorageMigrationOperationVerify).Count(&c.VerifyFailed).Error; err != nil {
 		return c, err
 	}
 	return c, nil

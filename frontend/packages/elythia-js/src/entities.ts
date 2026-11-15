@@ -905,12 +905,12 @@ export type DriveUsageKind = 'attachment' | 'avatar' | 'banner' | 'emoji' | 'oth
 
 export type DriveUsageOrigin = 'local' | 'remote';
 
-/** The result of `admin/drive/object-storage-migration/status` (#4180). */
+/** The result of `admin/drive/object-storage-migration/status` (#4180, #4181). */
 export type DriveObjectStorageMigrationStatus = {
 	/** Whether object storage is configured, so files have somewhere to go. */
 	objectStorageEnabled: boolean;
 	/** The operation running now, or null when none is. */
-	running: 'migrate' | null;
+	running: 'migrate' | 'verify' | null;
 	/** Files still stored locally. */
 	localFiles: number;
 	/** Files the migration copied to object storage. */
@@ -919,9 +919,15 @@ export type DriveObjectStorageMigrationStatus = {
 	failedFiles: number;
 	/** The most recent failures, newest first (at most 100). */
 	failures: DriveObjectStorageMigrationFailure[];
+	/** Migrated files whose copy was verified to match the recorded size and md5. */
+	verifiedFiles: number;
+	/** Files whose last verification failed. */
+	verifyFailedFiles: number;
+	/** The most recent verification failures, newest first (at most 100). */
+	verifyFailures: DriveObjectStorageMigrationFailure[];
 };
 
-/** A file the migration could not copy. */
+/** A file the migration could not copy or verify. */
 export type DriveObjectStorageMigrationFailure = {
 	fileId: string;
 	error: string;

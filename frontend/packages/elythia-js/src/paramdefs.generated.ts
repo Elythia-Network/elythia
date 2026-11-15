@@ -59,6 +59,8 @@ export type ParamDefChecks = [
 	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/start'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/status'>>, never>>,
 	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/status'>>, never>>,
+	Check<Equal<Keys<Req<'admin/drive/object-storage-migration/verify'>>, never>>,
+	Check<Equal<RequiredKeys<Req<'admin/drive/object-storage-migration/verify'>>, never>>,
 	Check<Equal<Keys<Req<'admin/drive/usage'>>, 'forceRecalc'>>,
 	Check<Equal<RequiredKeys<Req<'admin/drive/usage'>>, never>>,
 	Check<Equal<Keys<Req<'admin/emoji-application/approve'>>, 'applicationId'>>,

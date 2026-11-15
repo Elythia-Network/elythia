@@ -3,6 +3,8 @@ package drive
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -137,6 +139,38 @@ func (r *memMigrationRepo) MarkMigrated(_ context.Context, id string, at time.Ti
 	return false, nil
 }
 
+func (r *memMigrationRepo) ListMigrated(_ context.Context, afterID string, limit int) ([]model.DriveFile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var out []model.DriveFile
+	for _, f := range r.files {
+		if !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil && f.ID > afterID {
+			out = append(out, f)
+		}
+	}
+	slices.SortFunc(out, func(a, b model.DriveFile) int { return strings.Compare(a.ID, b.ID) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *memMigrationRepo) SetVerified(_ context.Context, id string, migratedAt time.Time, at *time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.files {
+		f := &r.files[i]
+		if f.ID == id && !f.StoredInternal && !f.IsLink && f.ObjectStorageMigratedAt != nil && f.ObjectStorageMigratedAt.Equal(migratedAt) {
+			f.ObjectStorageVerifiedAt = at
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *memMigrationRepo) IsMigrated(_ context.Context, id string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -186,10 +220,16 @@ func (r *memMigrationRepo) Counts(context.Context) (repository.DriveStorageMigra
 		if f.ObjectStorageMigratedAt != nil {
 			c.Migrated++
 		}
+		if f.ObjectStorageVerifiedAt != nil {
+			c.Verified++
+		}
 	}
 	for _, f := range r.failures {
-		if f.Operation == repository.DriveStorageMigrationOperationMigrate {
+		switch f.Operation {
+		case repository.DriveStorageMigrationOperationMigrate:
 			c.Failed++
+		case repository.DriveStorageMigrationOperationVerify:
+			c.VerifyFailed++
 		}
 	}
 	return c, nil
@@ -243,6 +283,12 @@ func (l *memMigrationLock) Held(context.Context) (bool, error) {
 	return l.holder != "", nil
 }
 
+func (l *memMigrationLock) Holder(context.Context) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.holder, nil
+}
+
 // expire drops the lock, as if its TTL ran out.
 func (l *memMigrationLock) expire() {
 	l.mu.Lock()
@@ -255,7 +301,31 @@ type migrationJob struct{ token, afterID string }
 type recordingMigrationEnqueuer struct {
 	mu   sync.Mutex
 	jobs []migrationJob
-	err  error
+	// verifyJobs are the jobs of the verification (#4181).
+	verifyJobs []migrationJob
+	err        error
+}
+
+func (e *recordingMigrationEnqueuer) EnqueueVerifyMigratedDriveFiles(token, afterID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.err != nil {
+		return e.err
+	}
+	e.verifyJobs = append(e.verifyJobs, migrationJob{token, afterID})
+	return nil
+}
+
+// popVerify removes and returns the oldest verification job.
+func (e *recordingMigrationEnqueuer) popVerify() (migrationJob, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.verifyJobs) == 0 {
+		return migrationJob{}, false
+	}
+	j := e.verifyJobs[0]
+	e.verifyJobs = e.verifyJobs[1:]
+	return j, true
 }
 
 func (e *recordingMigrationEnqueuer) EnqueueMigrateLocalDriveFiles(token, afterID string) error {
@@ -311,7 +381,22 @@ func (f *migrationFixture) addLocal(t *testing.T, id string) {
 		_, err := f.local.Put(k, strings.NewReader("body of "+k))
 		require.NoError(t, err)
 	}
-	f.repo.files = append(f.repo.files, model.DriveFile{ID: id, StoredInternal: true, AccessKey: &ak, ThumbnailAccessKey: &tk, WebpublicAccessKey: &wk})
+	sum := md5.Sum([]byte("body of " + ak))
+	f.repo.files = append(f.repo.files, model.DriveFile{ID: id, StoredInternal: true, AccessKey: &ak, ThumbnailAccessKey: &tk, WebpublicAccessKey: &wk,
+		Size: len("body of " + ak), MD5: hex.EncodeToString(sum[:])})
+}
+
+// drainVerify runs the queued verification jobs until none is left.
+func (f *migrationFixture) drainVerify(t *testing.T) {
+	t.Helper()
+	for range 1000 {
+		j, ok := f.enq.popVerify()
+		if !ok {
+			return
+		}
+		require.NoError(t, f.m.RunVerifyBatch(context.Background(), j.token, j.afterID))
+	}
+	t.Fatal("the jobs did not end")
 }
 
 // drain runs the queued jobs until none is left.
@@ -413,7 +498,7 @@ func TestStorageMigrationStartRefuses(t *testing.T) {
 		assert.Len(t, f.enq.jobs, 1)
 		st, err := f.m.Status(ctx)
 		require.NoError(t, err)
-		assert.True(t, st.Running)
+		assert.Equal(t, StorageMigrationOperationMigrate, st.Running)
 	})
 	t.Run("enqueue fails", func(t *testing.T) {
 		f := newMigrationFixture(t)
@@ -664,6 +749,13 @@ func (r *failingMigrationRepo) MarkMigrated(ctx context.Context, id string, at t
 	return r.memMigrationRepo.MarkMigrated(ctx, id, at)
 }
 
+func (r *failingMigrationRepo) SetVerified(ctx context.Context, id string, migratedAt time.Time, at *time.Time) (bool, error) {
+	if err := r.err("SetVerified"); err != nil {
+		return false, err
+	}
+	return r.memMigrationRepo.SetVerified(ctx, id, migratedAt, at)
+}
+
 func (r *failingMigrationRepo) RecordFailure(ctx context.Context, fileID, op, msg string, at time.Time) error {
 	if err := r.err("RecordFailure"); err != nil {
 		return err
@@ -701,8 +793,9 @@ func (failingMigrationLock) Acquire(context.Context, string, time.Duration) (boo
 func (failingMigrationLock) Extend(context.Context, string, time.Duration) (bool, error) {
 	return false, errInjected
 }
-func (failingMigrationLock) Release(context.Context, string) error { return errInjected }
-func (failingMigrationLock) Held(context.Context) (bool, error)    { return false, errInjected }
+func (failingMigrationLock) Release(context.Context, string) error  { return errInjected }
+func (failingMigrationLock) Held(context.Context) (bool, error)     { return false, errInjected }
+func (failingMigrationLock) Holder(context.Context) (string, error) { return "", errInjected }
 
 func TestStorageMigrationDependencyErrors(t *testing.T) {
 	ctx := context.Background()

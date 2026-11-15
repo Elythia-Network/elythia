@@ -10,13 +10,14 @@ import (
 )
 
 // DriveStorageMigrationRunner runs one batch of the local-to-object-storage
-// migration (coredrive.StorageMigrator).
+// migration and of its verification (coredrive.StorageMigrator).
 type DriveStorageMigrationRunner interface {
 	RunBatch(ctx context.Context, token, afterID string) error
+	RunVerifyBatch(ctx context.Context, token, afterID string) error
 }
 
 // DriveStorageMigrationProcessor handles objectStorage:migrateLocalDriveFiles
-// (#4180).
+// (#4180) and objectStorage:verifyMigratedDriveFiles (#4181).
 type DriveStorageMigrationProcessor struct {
 	runner DriveStorageMigrationRunner
 }
@@ -27,12 +28,31 @@ func NewDriveStorageMigrationProcessor(runner DriveStorageMigrationRunner) *Driv
 	return &DriveStorageMigrationProcessor{runner: runner}
 }
 
-// Handle runs one batch. A malformed payload is dropped without retry.
+// Handle runs one batch of the migration. A malformed payload is dropped
+// without retry.
 func (p *DriveStorageMigrationProcessor) Handle(ctx context.Context, t driver.Task) error {
-	var payload queue.MigrateLocalDriveFilesPayload
-	if err := json.Unmarshal(t.Payload(), &payload); err != nil || payload.Token == "" {
-		slog.Warn("processors: drop a malformed storage migration job", "err", err)
+	payload, ok := storageMigrationPayload(t)
+	if !ok {
 		return nil
 	}
 	return p.runner.RunBatch(ctx, payload.Token, payload.AfterID)
+}
+
+// HandleVerify runs one batch of the verification. A malformed payload is
+// dropped without retry.
+func (p *DriveStorageMigrationProcessor) HandleVerify(ctx context.Context, t driver.Task) error {
+	payload, ok := storageMigrationPayload(t)
+	if !ok {
+		return nil
+	}
+	return p.runner.RunVerifyBatch(ctx, payload.Token, payload.AfterID)
+}
+
+func storageMigrationPayload(t driver.Task) (queue.MigrateLocalDriveFilesPayload, bool) {
+	var payload queue.MigrateLocalDriveFilesPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil || payload.Token == "" {
+		slog.Warn("processors: drop a malformed storage migration job", "type", t.Type(), "err", err)
+		return payload, false
+	}
+	return payload, true
 }

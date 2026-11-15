@@ -153,6 +153,11 @@ export type ElythiaEndpoints = {
 		req: Misskey.entities.EmptyRequest;
 		res: DriveObjectStorageMigrationStatus;
 	};
+	'admin/drive/object-storage-migration/verify': {
+		/** Verifies the migrated drive files against the recorded size and md5 in the background (#4181). */
+		req: Misskey.entities.EmptyRequest;
+		res: undefined;
+	};
 	'admin/drive/usage': {
 		req: {
 			/** Ignores the cached snapshot and aggregates again. */
