@@ -581,6 +581,20 @@ func (c *Client) EnqueueRestoreMigratedDriveFiles(token, afterID string) error {
 	return c.inner.Enqueue(context.Background(), TaskTypeRestoreMigratedDriveFiles, body, base...)
 }
 
+// EnqueueCleanupRestoredDriveFileCopies puts one batch of deleting the copies
+// left in object storage by moving drive files back on the queue (#4197). It
+// retries like the migration.
+func (c *Client) EnqueueCleanupRestoredDriveFileCopies(token, afterKey string) error {
+	body := mustMarshal(MigrateLocalDriveFilesPayload{Token: token, AfterID: afterKey})
+	base := []driver.EnqueueOption{
+		driver.WithQueue(ObjectStorageQueueName),
+		driver.WithMaxRetry(migrateLocalDriveFilesMaxRetry),
+		driver.WithBackoff(driver.BackoffExponential, time.Minute),
+	}
+	base = append(base, c.retentionOpts(ObjectStorageQueueName)...)
+	return c.inner.Enqueue(context.Background(), TaskTypeCleanupRestoredDriveFileCopies, body, base...)
+}
+
 // EnqueueCleanRemoteFiles puts a bulk remote-cache cleanup task on the queue.
 //
 // Mirrors upstream `QueueService.createCleanRemoteFilesJob`: admin endpoint は

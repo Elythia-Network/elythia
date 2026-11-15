@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -66,17 +67,30 @@ func (r *DriveStorageMigrationRepository) MarkMigrated(ctx context.Context, id s
 	if !storable(id) {
 		return false, nil
 	}
-	// storedInternal を条件に入れ、並行した別の処理が先に書き換えた行を上書きしない。
-	res := r.db.WithContext(ctx).Model(&model.DriveFile{}).
-		Where(`"id" = ? AND "storedInternal" = true AND "isLink" = false`, id).
-		// 写し直した実体は確かめ直すまで信用しないので、確かめた日時を消す (#4181)。
-		// 写したのはローカルにあった実体なので、ローカルを消した日時も消す (#4182)。
-		Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at,
-			"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
-	if res.Error != nil {
-		return false, res.Error
+	var marked bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// storedInternal を条件に入れ、並行した別の処理が先に書き換えた行を上書きしない。
+		res := tx.Model(&model.DriveFile{}).
+			Where(`"id" = ? AND "storedInternal" = true AND "isLink" = false`, id).
+			// 写し直した実体は確かめ直すまで信用しないので、確かめた日時を消す (#4181)。
+			// 写したのはローカルにあった実体なので、ローカルを消した日時も消す (#4182)。
+			Updates(map[string]any{"storedInternal": false, "objectStorageMigratedAt": at,
+				"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
+		if res.Error != nil {
+			return res.Error
+		}
+		marked = res.RowsAffected == 1
+		if !marked {
+			return nil
+		}
+		// 戻した後にもう一度移したファイルは、同じキーへ写し直したので、残っていた写しが
+		// 配信する実体になる。記録を残すと、写しを消す処理 (#4197) が配信中の実体を消す。
+		return tx.Where(`"fileId" = ?`, id).Delete(&model.DriveObjectStorageRestoredCopy{}).Error
+	})
+	if err != nil {
+		return false, err
 	}
-	return res.RowsAffected == 1, nil
+	return marked, nil
 }
 
 // migratedStored selects the files the migration copied whose bytes are in
@@ -165,25 +179,124 @@ func (r *DriveStorageMigrationRepository) MarkLocalDeleted(ctx context.Context, 
 
 // MarkRestored moves a migrated file back to the local storage (#4183): it
 // sets storedInternal and clears the marks of the migration, the
-// verification and the purge. It reports false when the file is no longer in
-// the migrated state with the migratedAt and localDeletedAt read before
-// (deleted, made a link, purged meanwhile, or already moved back).
+// verification and the purge. It records copies, the copies the file leaves
+// in object storage, in the same transaction (#4197). It reports false when
+// the file is no longer in the migrated state with the migratedAt and
+// localDeletedAt read before (deleted, made a link, purged meanwhile, or
+// already moved back); the copies are not recorded then.
 //
 // 移した日時とローカルを消した日時で突き合わせ、条件付きの 1 回の更新で倒す。倒した
 // 行は storedInternal が true になり、ローカルを消す処理 (#4182) の MarkLocalDeleted
 // に当たらない。逆に、読んだ後で消す処理が印を付けた (ローカルを消した) 行は倒さない。
-func (r *DriveStorageMigrationRepository) MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time) (bool, error) {
+func (r *DriveStorageMigrationRepository) MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time, copies []model.DriveObjectStorageRestoredCopy) (bool, error) {
 	if !storable(id) {
 		return false, nil
 	}
-	res := migratedStored(r.db.WithContext(ctx)).
-		Where(`"id" = ? AND "objectStorageMigratedAt" = ? AND "objectStorageLocalDeletedAt" IS NOT DISTINCT FROM ?`, id, migratedAt, localDeletedAt).
-		Updates(map[string]any{"storedInternal": true, "objectStorageMigratedAt": nil,
-			"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
-	if res.Error != nil {
-		return false, res.Error
+	var marked bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := migratedStored(tx).
+			Where(`"id" = ? AND "objectStorageMigratedAt" = ? AND "objectStorageLocalDeletedAt" IS NOT DISTINCT FROM ?`, id, migratedAt, localDeletedAt).
+			Updates(map[string]any{"storedInternal": true, "objectStorageMigratedAt": nil,
+				"objectStorageVerifiedAt": nil, "objectStorageLocalDeletedAt": nil})
+		if res.Error != nil {
+			return res.Error
+		}
+		marked = res.RowsAffected == 1
+		if !marked || len(copies) == 0 {
+			return nil
+		}
+		// 行を倒すのと同じトランザクションで残す。別にすると、倒した後で記録に失敗したとき、
+		// 戻した行の写しがどこにも記録されずバケットに残る。同じキーの古い記録 (前に戻した
+		// ときのもの) は、今の場所と日時で置き換え、消せなかった記録も消す。
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"fileId", "location", "restoredAt", "error", "failedAt"}),
+		}).Create(&copies).Error
+	})
+	if err != nil {
+		return false, err
 	}
-	return res.RowsAffected == 1, nil
+	return marked, nil
+}
+
+// ListRestoredCopies returns up to limit recorded copies whose key is greater
+// than afterKey, in key order (#4197). An empty afterKey starts from the
+// first copy.
+func (r *DriveStorageMigrationRepository) ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if !storable(afterKey) {
+		return nil, nil
+	}
+	q := r.db.WithContext(ctx).Model(&model.DriveObjectStorageRestoredCopy{})
+	if afterKey != "" {
+		q = q.Where(`"key" > ?`, afterKey)
+	}
+	var out []model.DriveObjectStorageRestoredCopy
+	if err := q.Order(`"key" ASC`).Limit(limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListRestoredCopiesOfFile returns the recorded copies of the file (#4197).
+func (r *DriveStorageMigrationRepository) ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if !storable(fileID) {
+		return nil, nil
+	}
+	var out []model.DriveObjectStorageRestoredCopy
+	if err := r.db.WithContext(ctx).Where(`"fileId" = ?`, fileID).
+		Order(`"key" ASC`).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteRestoredCopy removes the record of the copy with key at location,
+// once the copy was deleted (#4197). A record replaced meanwhile (the file
+// was moved back again) is kept.
+func (r *DriveStorageMigrationRepository) DeleteRestoredCopy(ctx context.Context, key, location string) error {
+	if !storable(key) || !storable(location) {
+		return nil
+	}
+	return r.db.WithContext(ctx).Where(`"key" = ? AND "location" = ?`, key, location).
+		Delete(&model.DriveObjectStorageRestoredCopy{}).Error
+}
+
+// RecordRestoredCopyFailure records why the copy with key at location could
+// not be deleted (#4197).
+func (r *DriveStorageMigrationRepository) RecordRestoredCopyFailure(ctx context.Context, key, location, msg string, at time.Time) error {
+	if !storable(key) || !storable(location) {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.DriveObjectStorageRestoredCopy{}).
+		Where(`"key" = ? AND "location" = ?`, key, location).
+		Updates(map[string]any{"error": msg, "failedAt": at}).Error
+}
+
+// ListRestoredCopyFailures returns up to limit copies whose last deletion
+// failed, newest first (#4197).
+func (r *DriveStorageMigrationRepository) ListRestoredCopyFailures(ctx context.Context, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	var out []model.DriveObjectStorageRestoredCopy
+	if err := r.db.WithContext(ctx).Where(`"failedAt" IS NOT NULL`).
+		Order(`"failedAt" DESC, "key" ASC`).Limit(limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// FindDriveFile returns the file with id, or nil when there is none (#4197).
+func (r *DriveStorageMigrationRepository) FindDriveFile(ctx context.Context, id string) (*model.DriveFile, error) {
+	if !storable(id) {
+		return nil, nil
+	}
+	var f model.DriveFile
+	err := r.db.WithContext(ctx).Where(`"id" = ?`, id).Take(&f).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 // IsStoredLocally reports whether the file has a row stored locally (not a
@@ -291,6 +404,11 @@ type DriveStorageMigrationCounts struct {
 	// RestoreFailed is the number of files whose last attempt to move back
 	// failed.
 	RestoreFailed int64
+	// RestoredCopies is the number of copies left in object storage by moving
+	// files back, and CleanupFailed the number of them whose last deletion
+	// failed (#4197).
+	RestoredCopies int64
+	CleanupFailed  int64
 }
 
 // Counts returns the numbers of local, migrated, verified and failed files.
@@ -320,6 +438,10 @@ func (r *DriveStorageMigrationRepository) Counts(ctx context.Context) (DriveStor
 		return c, err
 	}
 	if err := failuresOfFiles(db, DriveStorageMigrationOperationRestore).Count(&c.RestoreFailed).Error; err != nil {
+		return c, err
+	}
+	if err := db.Raw(`SELECT count(*), count(*) FILTER (WHERE "failedAt" IS NOT NULL)
+		FROM "drive_object_storage_restored_copy"`).Row().Scan(&c.RestoredCopies, &c.CleanupFailed); err != nil {
 		return c, err
 	}
 	return c, nil

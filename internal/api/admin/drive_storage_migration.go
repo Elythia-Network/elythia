@@ -23,6 +23,7 @@ type DriveStorageMigrator interface {
 	StartVerify(ctx context.Context) error
 	StartPurge(ctx context.Context) error
 	StartRestore(ctx context.Context) error
+	StartCleanup(ctx context.Context) error
 	Status(ctx context.Context) (coredrive.StorageMigrationStatus, error)
 }
 
@@ -46,6 +47,7 @@ const (
 	idStorageMigrationNoQueue       = "5e53fbe0-6cfb-447a-9540-a6648135f4a3"
 	idStorageMigrationNoMigrated    = "81c3d7e1-144c-46fa-850d-2a5b8a9c00ef"
 	idStorageMigrationNoPurgeable   = "64fc1936-b77f-43fc-b9d6-d72cf180eed7"
+	idStorageMigrationNoCopies      = "dde90589-c70e-4790-9f99-68fd6e78cc09"
 )
 
 // DriveStorageMigrationStart handles POST
@@ -112,6 +114,25 @@ func (h *Handler) DriveStorageMigrationRestore(c echo.Context) error {
 		"admin/drive/object-storage-migration/restore", moderationlog.LogRestoreMigratedDriveFiles)
 }
 
+// DriveStorageMigrationCleanupCopies handles POST
+// /api/admin/drive/object-storage-migration/cleanup-copies.
+//
+// **Elythia 独自 endpoint** (#4197)。ローカルへ戻したファイル (#4183) がオブジェクト
+// ストレージに残した写しを消すジョブを積んで、すぐに 204 を返す。消すのは戻したときに
+// 記録した写しだけで、初めからオブジェクトストレージへアップロードしたファイルと、戻せ
+// なかったファイルの実体には触れない。進み具合は status で読む。他の処理と同時には
+// 走らない。
+//
+// ローカルを消す口と違い、再認証は求めない。消すのはローカルへ戻した後の写しで、
+// 実体はローカルにある。
+func (h *Handler) DriveStorageMigrationCleanupCopies(c echo.Context) error {
+	if h.driveStorageMigration == nil {
+		return apierr.JSONInternalError(c)
+	}
+	return h.driveStorageMigrationStarted(c, h.driveStorageMigration.StartCleanup(c.Request().Context()),
+		"admin/drive/object-storage-migration/cleanup-copies", moderationlog.LogCleanupRestoredDriveFileCopies)
+}
+
 // driveStorageMigrationStarted writes the response of starting a run.
 func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string, log moderationlog.LogType) error {
 	switch {
@@ -132,6 +153,9 @@ func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoi
 	case errors.Is(err, coredrive.ErrStorageMigrationNothingToPurge):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_PURGEABLE_FILES",
 			"No verified drive file keeps its local copy.", idStorageMigrationNoPurgeable))
+	case errors.Is(err, coredrive.ErrStorageMigrationNothingToCleanUp):
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_RESTORED_COPIES",
+			"No copy left in object storage by moving drive files back is recorded.", idStorageMigrationNoCopies))
 	case errors.Is(err, coredrive.ErrStorageMigrationRunning):
 		return c.JSON(http.StatusConflict, apierr.Error("STORAGE_MIGRATION_RUNNING",
 			"A storage migration is already running.", idStorageMigrationRunning))
@@ -182,7 +206,32 @@ func (h *Handler) DriveStorageMigrationStatus(c echo.Context) error {
 		"purgeFailures":        packStorageMigrationFailures(st.PurgeFailures),
 		"restoreFailedFiles":   st.RestoreFailed,
 		"restoreFailures":      packStorageMigrationFailures(st.RestoreFailures),
+		"restoredCopies":       st.RestoredCopies,
+		"cleanupFailedCopies":  st.CleanupFailed,
+		"cleanupFailures":      packRestoredCopyFailures(st.CleanupFailures),
 	})
+}
+
+// driveStorageMigrationCopyFailure is a copy the cleanup could not delete in
+// the status (#4197). The file of fileId may have been deleted.
+type driveStorageMigrationCopyFailure struct {
+	Key      string `json:"key"`
+	FileID   string `json:"fileId"`
+	Error    string `json:"error"`
+	FailedAt string `json:"failedAt"`
+}
+
+func packRestoredCopyFailures(in []model.DriveObjectStorageRestoredCopy) []driveStorageMigrationCopyFailure {
+	out := make([]driveStorageMigrationCopyFailure, 0, len(in))
+	for _, c := range in {
+		if c.Error == nil || c.FailedAt == nil {
+			continue
+		}
+		out = append(out, driveStorageMigrationCopyFailure{
+			Key: c.Key, FileID: c.FileID, Error: *c.Error, FailedAt: c.FailedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		})
+	}
+	return out
 }
 
 func packStorageMigrationFailures(in []model.DriveObjectStorageMigrationFailure) []driveStorageMigrationFailure {

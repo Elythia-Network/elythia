@@ -1826,6 +1826,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		running, err := driveStorageMigrator.Running(context.Background())
 		return err != nil || running
 	})
+	// ローカルへ戻したファイルを消したら、バケットに残した写しも消す (#4197)。
+	driveService.SetRestoredCopyReleaser(driveStorageMigrator)
+	objectStorageProcessor.SetRestoredCopyReleaser(driveStorageMigrator)
 
 	// API の handler (#3694)。作るのは buildHandlers (wiring_handlers.go) で、ここでは
 	// 今までと同じ名前の別名を置く。呼ぶ位置は、移した handler の中で最初に作っていた
@@ -2749,6 +2752,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	s.warnOrphanPluginData(context.Background(), registeredPlugins)
 	// admin/server-plugins (#2497) が返すスナップショットと残存データ検査。
 	adminHandler.SetDriveStorageMigrator(driveStorageMigrator)
+	adminHandler.SetRestoredCopyReleaser(driveStorageMigrator)
 	adminHandler.SetServerPlugins(serverPluginInfos(registeredPlugins, s.config.Plugins))
 	adminHandler.SetPluginOrphanSchemas(s.pluginOrphanSchemaLister(registeredPlugins))
 

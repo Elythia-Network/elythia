@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -129,4 +130,41 @@ func TestDriveCleanup_DeletesTheLocalCopyOfAMigratedFile(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, []string{"ak1", "tk1"}, enq.keys)
 	assert.Equal(t, []string{"ak1", "tk1"}, local.deleted)
+}
+
+type recordingCopyReleaser struct{ ids []string }
+
+func (r *recordingCopyReleaser) ReleaseRestoredCopies(_ context.Context, fileID string) {
+	r.ids = append(r.ids, fileID)
+}
+
+// ローカルへ戻したファイル (#4183) の写しはバケットに残っている。cleanup でローカルの行を
+// 消すときは、記録した写しも消す (#4197)。オブジェクトストレージの行には当てない。
+func TestDriveCleanup_ReleasesTheRestoredCopies(t *testing.T) {
+	ak, bk := "ak1", "bk1"
+	h, _ := setupDriveFileHandler(t,
+		&model.DriveFile{ID: "o1", UserID: nil, StoredInternal: true, AccessKey: &ak},
+		&model.DriveFile{ID: "o2", UserID: nil, AccessKey: &bk},
+	)
+	h.SetStorageDeleter(&stubStorageDeleter{})
+	h.SetLocalStorageDeleter(&stubStorageDeleter{})
+	r := &recordingCopyReleaser{}
+	h.SetRestoredCopyReleaser(r)
+	rec := doPost(h.DriveCleanup, `{}`, adminUser)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, []string{"o1"}, r.ids)
+}
+
+// 行を消せなかったときは写しを消さない。消すと、ローカルを消した行の最後の実体まで無くなる。
+func TestDriveCleanup_KeepsTheRestoredCopiesWhenTheRowsStay(t *testing.T) {
+	ak := "ak1"
+	h, repo := setupDriveFileHandler(t, &model.DriveFile{ID: "o1", UserID: nil, StoredInternal: true, AccessKey: &ak})
+	repo.DeleteByIDsErr = errors.New("db down")
+	h.SetStorageDeleter(&stubStorageDeleter{})
+	h.SetLocalStorageDeleter(&stubStorageDeleter{})
+	r := &recordingCopyReleaser{}
+	h.SetRestoredCopyReleaser(r)
+	rec := doPost(h.DriveCleanup, `{}`, adminUser)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, r.ids)
 }

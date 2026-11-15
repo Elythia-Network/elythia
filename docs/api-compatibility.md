@@ -284,9 +284,9 @@ TS版の`.config/default.yml`をそのまま使用可能。以下の設定もGo�
 
 Go側のマイグレーション (000001〜) はTS版テーブルに対して原則追加のみだが、例外が 23 件ある ([migration-from-ts.md](migration-from-ts.md#破壊的なマイグレーション))。TS版のマイグレーションで作成される全テーブルは維持される。
 
-**Elythia 固有のテーブル (upstream に対応するものが無い) は 21 件:**
+**Elythia 固有のテーブル (upstream に対応するものが無い) は 22 件:**
 
-> [divergence/db.md](divergence/db.md) §2-1 は同じものを **24** と数えている。差は 3 件で、
+> [divergence/db.md](divergence/db.md) §2-1 は同じものを **25** と数えている。差は 3 件で、
 > あちらは `note_unread` (upstream DB には legacy として残るが 2026.7.0 の `models/` に
 > entity が無く参照 0 件。Elythia はこれを実用している) と bookkeeping 2 件
 > (`migrations` / `schema_migrations`) を加える。CI の
@@ -314,8 +314,9 @@ Go側のマイグレーション (000001〜) はTS版テーブルに対して原
 | `plugin_secret` | サーバープラグインの秘密の値。暗号文だけを置く (#3470) | `000119` |
 | `silent_follow` | 通知を出さずに成立させたフォローの記録 (#3466) | `000120` |
 | `drive_object_storage_migration_failure` | ドライブのファイルをオブジェクトストレージへ写す処理・写したファイルを確かめる処理・ローカルの実体を消す処理・ローカルへ戻す処理の失敗の記録 (#4180 / #4181 / #4182 / #4183) | `000144` |
+| `drive_object_storage_restored_copy` | ローカルへ戻したファイルがオブジェクトストレージに残した写しの記録。写しを消す処理と、戻した後にファイルを消したときに使う (#4197) | `000147` |
 
-Elythia の migration が作るテーブルは 124。上記 21 件と golang-migrate 台帳の
+Elythia の migration が作るテーブルは 125。上記 22 件と golang-migrate 台帳の
 `schema_migrations` を除く **102 はすべて upstream にも存在する** (TypeORM 台帳の
 `migrations` を含む)。
 

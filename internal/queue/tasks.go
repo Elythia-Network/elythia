@@ -59,6 +59,13 @@ const TaskTypePurgeLocalDriveFiles = "objectStorage:purgeLocalDriveFiles"
 // it takes MigrateLocalDriveFilesPayload like the migration.
 const TaskTypeRestoreMigratedDriveFiles = "objectStorage:restoreMigratedDriveFiles"
 
+// TaskTypeCleanupRestoredDriveFileCopies is the task type of one batch of
+// deleting the copies the drive files moved back to the local storage left
+// in object storage (#4197). Elythia-only; it takes
+// MigrateLocalDriveFilesPayload like the migration, with the key of the last
+// copy handled as AfterID.
+const TaskTypeCleanupRestoredDriveFileCopies = "objectStorage:cleanupRestoredDriveFileCopies"
+
 // MigrateLocalDriveFilesPayload names the migration, verification, purge or
 // restore run (Token) and the cursor (the files after AfterID are handled
 // next).

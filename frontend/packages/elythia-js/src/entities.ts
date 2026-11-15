@@ -905,12 +905,12 @@ export type DriveUsageKind = 'attachment' | 'avatar' | 'banner' | 'emoji' | 'oth
 
 export type DriveUsageOrigin = 'local' | 'remote';
 
-/** The result of `admin/drive/object-storage-migration/status` (#4180 - #4183). */
+/** The result of `admin/drive/object-storage-migration/status` (#4180 - #4183, #4197). */
 export type DriveObjectStorageMigrationStatus = {
 	/** Whether object storage is configured, so files have somewhere to go. */
 	objectStorageEnabled: boolean;
 	/** The operation running now, or null when none is. */
-	running: 'migrate' | 'verify' | 'purge' | 'restore' | null;
+	running: 'migrate' | 'verify' | 'purge' | 'restore' | 'cleanup' | null;
 	/** Files still stored locally. */
 	localFiles: number;
 	/** Files the migration copied to object storage (the files `restore` moves back). */
@@ -937,6 +937,20 @@ export type DriveObjectStorageMigrationStatus = {
 	restoreFailedFiles: number;
 	/** The most recent failures to move back, newest first (at most 100). */
 	restoreFailures: DriveObjectStorageMigrationFailure[];
+	/** Copies the files moved back left in object storage (the copies `cleanup-copies` deletes). */
+	restoredCopies: number;
+	/** Copies whose last deletion failed. */
+	cleanupFailedCopies: number;
+	/** The most recent copies that could not be deleted, newest first (at most 100). */
+	cleanupFailures: DriveObjectStorageMigrationCopyFailure[];
+};
+
+/** A copy left by moving a file back that could not be deleted (#4197). The file may have been deleted. */
+export type DriveObjectStorageMigrationCopyFailure = {
+	key: string;
+	fileId: string;
+	error: string;
+	failedAt: string;
 };
 
 /** A file the migration could not copy, verify, purge or move back. */

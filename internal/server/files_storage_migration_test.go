@@ -88,6 +88,20 @@ func (r onlyFileRepo) ListMigrated(ctx context.Context, afterID string, limit in
 	return out, nil
 }
 
+func (r onlyFileRepo) ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	copies, err := r.DriveStorageMigrationRepository.ListRestoredCopiesOfFile(ctx, r.id)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.DriveObjectStorageRestoredCopy
+	for _, c := range copies {
+		if c.Key > afterKey && len(out) < limit {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 func (r onlyFileRepo) ListPurgeable(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error) {
 	files, err := r.DriveStorageMigrationRepository.ListPurgeable(ctx, "", 1<<20)
 	if err != nil {
@@ -102,7 +116,12 @@ func (r onlyFileRepo) ListPurgeable(ctx context.Context, afterID string, limit i
 	return out, nil
 }
 
-type queuedMigrationJobs struct{ jobs, verifyJobs, purgeJobs, restoreJobs [][2]string }
+type queuedMigrationJobs struct{ jobs, verifyJobs, purgeJobs, restoreJobs, cleanupJobs [][2]string }
+
+func (q *queuedMigrationJobs) EnqueueCleanupRestoredDriveFileCopies(token, afterKey string) error {
+	q.cleanupJobs = append(q.cleanupJobs, [2]string{token, afterKey})
+	return nil
+}
 
 func (q *queuedMigrationJobs) EnqueueRestoreMigratedDriveFiles(token, afterID string) error {
 	q.restoreJobs = append(q.restoreJobs, [2]string{token, afterID})
@@ -163,6 +182,7 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	ak, tk, wk := "storagemig4180ak", "storagemig4180tk", "storagemig4180wk"
 	clean := func() {
 		require.NoError(t, db.Exec(`DELETE FROM "drive_file" WHERE "id" = ?`, id).Error)
+		require.NoError(t, db.Exec(`DELETE FROM "drive_object_storage_restored_copy" WHERE "fileId" = ?`, id).Error)
 	}
 	clean()
 	t.Cleanup(clean)
@@ -255,9 +275,24 @@ func TestFilesServesTheSameURLAfterTheStorageMigration(t *testing.T) {
 	assert.Nil(t, back.ObjectStorageVerifiedAt)
 	assert.Nil(t, back.ObjectStorageLocalDeletedAt)
 	assert.Equal(t, url, back.URL, "the url column was rewritten")
+
+	// 戻した行の写しは、実 DB に記録が残る (#4197)。写しを消す処理は、記録した写しを
+	// オブジェクトストレージから消して記録を消し、その後もローカルから配信する。
+	var recorded []model.DriveObjectStorageRestoredCopy
+	require.NoError(t, db.Where(`"fileId" = ?`, id).Order(`"key"`).Find(&recorded).Error)
+	require.Len(t, recorded, 3, "the copies were not recorded")
+	for _, c := range recorded {
+		assert.Contains(t, obj.byKey, c.Key, "the recorded copy %s is not in object storage", c.Key)
+	}
+	require.NoError(t, m.StartCleanup(ctx))
+	for i := 0; i < len(jobs.cleanupJobs); i++ {
+		require.NoError(t, m.RunCleanupBatch(ctx, jobs.cleanupJobs[i][0], jobs.cleanupJobs[i][1]))
+	}
+	var left int64
+	require.NoError(t, db.Model(&model.DriveObjectStorageRestoredCopy{}).Where(`"fileId" = ?`, id).Count(&left).Error)
+	assert.Zero(t, left, "the records of the deleted copies were kept")
 	for _, k := range []string{ak, tk, wk} {
-		// オブジェクトストレージの写しを消しても、ローカルから配信する。
-		delete(obj.byKey, k)
+		assert.NotContains(t, obj.byKey, k, "the copy %s was kept", k)
 		code, body := serve(k)
 		assert.Equal(t, http.StatusOK, code, k)
 		assert.Equal(t, "bytes of "+k, body, k)

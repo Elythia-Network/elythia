@@ -11871,6 +11871,10 @@ export interface Locale extends ILocale {
          * オブジェクトストレージへ移したファイルをローカルへ戻す処理を開始
          */
         "restoreMigratedDriveFiles": string;
+        /**
+         * ローカルへ戻したファイルのバケットの写しの削除を開始
+         */
+        "cleanupRestoredDriveFileCopies": string;
     };
     "_fileViewer": {
         /**
@@ -17266,7 +17270,7 @@ export interface Locale extends ILocale {
          */
         "title": string;
         /**
-         * オブジェクトストレージを有効にする前にローカルへ保存したドライブのファイルを、オブジェクトストレージへ移します。ファイルのURLは変わりません。移す → 確かめる → ローカルを消すの順に進め、元に戻すときは「ローカルへ戻す」を使います。保存した設定で動くので、設定を変えたら先に保存してください。
+         * オブジェクトストレージを有効にする前にローカルへ保存したドライブのファイルを、オブジェクトストレージへ移します。ファイルのURLは変わりません。移す → 確かめる → ローカルを消すの順に進め、元に戻すときは「ローカルへ戻す」を使います。戻した後にバケットに残った写しは「バケットの写しを消す」で消せます。保存した設定で動くので、設定を変えたら先に保存してください。
          */
         "description": string;
         /**
@@ -17298,6 +17302,10 @@ export interface Locale extends ILocale {
          */
         "localDeletedFiles": string;
         /**
+         * バケットに残った写し
+         */
+        "restoredCopies": string;
+        /**
          * オブジェクトストレージへ移す
          */
         "migrate": string;
@@ -17313,6 +17321,10 @@ export interface Locale extends ILocale {
          * ローカルへ戻す
          */
         "restore": string;
+        /**
+         * バケットの写しを消す
+         */
+        "cleanup": string;
         /**
          * 移しています
          */
@@ -17330,6 +17342,10 @@ export interface Locale extends ILocale {
          */
         "restoring": string;
         /**
+         * バケットの写しを消しています
+         */
+        "cleaningUp": string;
+        /**
          * 移せなかったファイル
          */
         "migrateFailures": string;
@@ -17346,6 +17362,10 @@ export interface Locale extends ILocale {
          */
         "restoreFailures": string;
         /**
+         * 消せなかった写し
+         */
+        "cleanupFailures": string;
+        /**
          * ローカルを消すには、二段階認証（TOTP）かパスキーを登録してください。
          */
         "purgeNeedsTwoFactor": string;
@@ -17361,6 +17381,10 @@ export interface Locale extends ILocale {
          * ローカルを消せるファイルがありません。先に確かめてください。
          */
         "noPurgeableFiles": string;
+        /**
+         * 消せる写しがありません。
+         */
+        "noRestoredCopies": string;
         /**
          * 別の処理を実行中です。終わってから操作してください。
          */
@@ -17390,8 +17414,12 @@ export interface Locale extends ILocale {
          */
         "purgeConfirm": string;
         /**
-         * 移したファイルをオブジェクトストレージからローカルへ戻します。ローカルに、戻すファイルを置ける空きが必要です。オブジェクトストレージの実体は消しません。続けますか？
+         * 移したファイルをオブジェクトストレージからローカルへ戻します。ローカルに、戻すファイルを置ける空きが必要です。オブジェクトストレージの写しは残ります（戻した後に「バケットの写しを消す」で消せます）。続けますか？
          */
         "restoreConfirm": string;
+        /**
+         * ローカルへ戻したファイルが、オブジェクトストレージに残した写しを消します。消すのは戻したときに記録した写しだけで、初めからオブジェクトストレージへアップロードしたファイルには触れません。消した写しは取り戻せません。TS版へ戻すときは、Elythiaで消してから切り替えてください。続けますか？
+         */
+        "cleanupConfirm": string;
     };
 }

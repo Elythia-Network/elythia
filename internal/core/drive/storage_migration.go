@@ -35,6 +35,9 @@ var (
 	// ErrStorageMigrationNothingToRestore is returned by StartRestore when no
 	// file has been migrated.
 	ErrStorageMigrationNothingToRestore = errors.New("drive: no migrated file to move back")
+	// ErrStorageMigrationNothingToCleanUp is returned by StartCleanup when no
+	// copy left by moving files back is recorded (#4197).
+	ErrStorageMigrationNothingToCleanUp = errors.New("drive: no copy left by moving files back")
 )
 
 // The operations of a storage migration run, reported by Status.
@@ -43,6 +46,7 @@ const (
 	StorageMigrationOperationVerify  = "verify"
 	StorageMigrationOperationPurge   = "purge"
 	StorageMigrationOperationRestore = "restore"
+	StorageMigrationOperationCleanup = "cleanup"
 )
 
 // verifyTokenPrefix starts the token of a verification run. The lock holds
@@ -59,6 +63,10 @@ const purgeTokenPrefix = "purge-"
 // back (#4183).
 const restoreTokenPrefix = "restore-"
 
+// cleanupTokenPrefix starts the token of a run deleting the copies left in
+// object storage by moving files back (#4197).
+const cleanupTokenPrefix = "cleanup-"
+
 // operationOfToken returns the operation of the run token names.
 func operationOfToken(token string) string {
 	switch {
@@ -68,6 +76,8 @@ func operationOfToken(token string) string {
 		return StorageMigrationOperationPurge
 	case strings.HasPrefix(token, restoreTokenPrefix):
 		return StorageMigrationOperationRestore
+	case strings.HasPrefix(token, cleanupTokenPrefix):
+		return StorageMigrationOperationCleanup
 	}
 	return StorageMigrationOperationMigrate
 }
@@ -96,7 +106,13 @@ type StorageMigrationRepository interface {
 	SetVerified(ctx context.Context, id string, migratedAt time.Time, at *time.Time) (bool, error)
 	ListPurgeable(ctx context.Context, afterID string, limit int) ([]model.DriveFile, error)
 	MarkLocalDeleted(ctx context.Context, id string, migratedAt, at time.Time) (bool, error)
-	MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time) (bool, error)
+	MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time, copies []model.DriveObjectStorageRestoredCopy) (bool, error)
+	ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error)
+	ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error)
+	DeleteRestoredCopy(ctx context.Context, key, location string) error
+	RecordRestoredCopyFailure(ctx context.Context, key, location, msg string, at time.Time) error
+	ListRestoredCopyFailures(ctx context.Context, limit int) ([]model.DriveObjectStorageRestoredCopy, error)
+	FindDriveFile(ctx context.Context, id string) (*model.DriveFile, error)
 	IsStoredLocally(ctx context.Context, id string) (bool, error)
 	IsMigrated(ctx context.Context, id string) (bool, error)
 	RecordFailure(ctx context.Context, fileID, operation, msg string, at time.Time) error
@@ -112,6 +128,7 @@ type StorageMigrationEnqueuer interface {
 	EnqueueVerifyMigratedDriveFiles(token, afterID string) error
 	EnqueuePurgeLocalDriveFiles(token, afterID string) error
 	EnqueueRestoreMigratedDriveFiles(token, afterID string) error
+	EnqueueCleanupRestoredDriveFileCopies(token, afterKey string) error
 }
 
 // StorageMigrationLock marks that a migration is running. The token names
@@ -167,6 +184,12 @@ type StorageMigrationStatus struct {
 	// and RestoreFailures are the most recent of them, newest first (#4183).
 	RestoreFailed   int64
 	RestoreFailures []model.DriveObjectStorageMigrationFailure
+	// RestoredCopies counts the copies left in object storage by moving files
+	// back, CleanupFailed those whose last deletion failed, and
+	// CleanupFailures are the most recent of them, newest first (#4197).
+	RestoredCopies  int64
+	CleanupFailed   int64
+	CleanupFailures []model.DriveObjectStorageRestoredCopy
 }
 
 // StorageMigrator copies the drive files stored locally to object storage
@@ -281,6 +304,27 @@ func (m *StorageMigrator) StartRestore(ctx context.Context) error {
 	return m.begin(ctx, restoreTokenPrefix, m.enq.EnqueueRestoreMigratedDriveFiles)
 }
 
+// StartCleanup starts a run deleting the copies left in object storage by
+// moving files back (#4197): it takes the lock and enqueues the first job.
+// The lock is the one of the migration, so the run never deletes a copy the
+// migration is writing again.
+func (m *StorageMigrator) StartCleanup(ctx context.Context) error {
+	if m.enq == nil {
+		return ErrStorageMigrationNoQueue
+	}
+	if m.objectStorage() == nil {
+		return ErrStorageMigrationNotConfigured
+	}
+	c, err := m.repo.Counts(ctx)
+	if err != nil {
+		return fmt.Errorf("drive: count copies left by moving files back: %w", err)
+	}
+	if c.RestoredCopies == 0 {
+		return ErrStorageMigrationNothingToCleanUp
+	}
+	return m.begin(ctx, cleanupTokenPrefix, m.enq.EnqueueCleanupRestoredDriveFileCopies)
+}
+
 // begin takes the lock for a new token starting with prefix and enqueues the
 // first job of the run.
 func (m *StorageMigrator) begin(ctx context.Context, prefix string, enqueue func(token, afterID string) error) error {
@@ -312,8 +356,10 @@ func (m *StorageMigrator) begin(ctx context.Context, prefix string, enqueue func
 // it. An error means the job should be retried.
 func (m *StorageMigrator) RunBatch(ctx context.Context, token, afterID string) error {
 	return m.runBatch(ctx, token, afterID, storageMigrationRun{
-		list:      m.repo.ListLocal,
-		each:      m.migrateFile,
+		list: m.repo.ListLocal,
+		each: func(ctx context.Context, dst Storage, f *model.DriveFile) error {
+			return m.migrateFile(ctx, dst, f, token)
+		},
 		operation: repository.DriveStorageMigrationOperationMigrate,
 		enqueue:   m.enq.EnqueueMigrateLocalDriveFiles,
 	})
@@ -380,6 +426,199 @@ func (m *StorageMigrator) RunRestoreBatch(ctx context.Context, token, afterID st
 		operation: repository.DriveStorageMigrationOperationRestore,
 		enqueue:   m.enq.EnqueueRestoreMigratedDriveFiles,
 	})
+}
+
+// errRestoredCopyMoved is recorded when the object storage settings no longer
+// put a copy where it was when the file was moved back (#4197).
+var errRestoredCopyMoved = errors.New("the object storage settings changed since the file was moved back; the copy is not deleted")
+
+// RunCleanupBatch deletes up to storageMigrationBatch recorded copies whose
+// key is greater than afterKey (#4197), then enqueues the next job, or
+// releases the lock when no copy is left. A copy that cannot be deleted is
+// recorded and skipped; the next run retries it. An error means the job
+// should be retried.
+func (m *StorageMigrator) RunCleanupBatch(ctx context.Context, token, afterKey string) error {
+	ok, err := m.lock.Extend(ctx, token, storageMigrationLockTTL)
+	if err != nil {
+		return fmt.Errorf("drive: extend the storage migration lock: %w", err)
+	}
+	if !ok {
+		slog.Info("drive: the storage migration lock is no longer held by this run; stopping", "afterKey", afterKey)
+		return nil
+	}
+	dst := m.objectStorage()
+	if dst == nil {
+		slog.Warn("drive: object storage was turned off; stopping the cleanup of the copies")
+		return m.lock.Release(ctx, token)
+	}
+	// ローカルとバケットが同じ実体 (バケットのマウント、ローカルのディレクトリを配る S3 互換
+	// サーバー) なら、写しを消すとローカルの実体も消える。ローカルを消す処理 (#4182) と同じ
+	// 検査を、実行の初めに 1 回だけ流す。
+	if afterKey == "" {
+		refuse, err := m.localIsObjectStorage(dst)
+		if err != nil {
+			return fmt.Errorf("drive: probe the local storage: %w", err)
+		}
+		if refuse != "" {
+			slog.Error("drive: refusing to delete the copies left by moving files back", "reason", refuse)
+			return m.lock.Release(ctx, token)
+		}
+	}
+	copies, err := m.repo.ListRestoredCopies(ctx, afterKey, storageMigrationBatch)
+	if err != nil {
+		return fmt.Errorf("drive: list copies to clean up: %w", err)
+	}
+	for i := range copies {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		c := &copies[i]
+		if ok, err := m.lock.Extend(ctx, token, storageMigrationLockTTL); err != nil {
+			return fmt.Errorf("drive: extend the storage migration lock: %w", err)
+		} else if !ok {
+			slog.Info("drive: the storage migration lock is no longer held by this run; stopping", "afterKey", c.Key)
+			return nil
+		}
+		if err := m.deleteRestoredCopy(ctx, dst, c, token); err != nil {
+			if errors.Is(err, errStorageMigrationLockLost) {
+				slog.Info("drive: the storage migration lock is no longer held by this run; stopping", "afterKey", c.Key)
+				return nil
+			}
+			var retry *storageMigrationRetry
+			if errors.As(err, &retry) {
+				return fmt.Errorf("drive: clean up the copy %s: %w", c.Key, retry.err)
+			}
+			msg := truncateUTF8(err.Error(), maxStorageMigrationError)
+			if rerr := m.repo.RecordRestoredCopyFailure(ctx, c.Key, c.Location, msg, m.now()); rerr != nil {
+				return fmt.Errorf("drive: record the failure of the copy %s: %w", c.Key, rerr)
+			}
+		}
+	}
+	if len(copies) < storageMigrationBatch {
+		return m.lock.Release(ctx, token)
+	}
+	return m.enq.EnqueueCleanupRestoredDriveFileCopies(token, copies[len(copies)-1].Key)
+}
+
+// errRestoredCopyIsTheOnlyCopy is recorded when the local storage has no
+// matching copy of a file whose copy the cleanup would delete (#4197).
+var errRestoredCopyIsTheOnlyCopy = errors.New("the local copy is missing or does not match the file; the copy in object storage is kept")
+
+// deleteRestoredCopy deletes the copy c from dst and its record. It keeps the
+// copy when dst would not delete it where it was, and drops the record
+// without deleting when the file is served from object storage again. With
+// the token of a cleanup run, it also keeps the copy when the local storage
+// has no matching copy of a file still stored locally, and extends the lock
+// of the run before deleting. An empty token is for a file being deleted.
+func (m *StorageMigrator) deleteRestoredCopy(ctx context.Context, dst Storage, c *model.DriveObjectStorageRestoredCopy, token string) error {
+	checkLocal := token != ""
+	if objectLocation(dst, c.Key) != c.Location {
+		// prefix やバケットを変えた後で消すと、同じアクセスキーの別の場所を消してしまう。
+		return errRestoredCopyMoved
+	}
+	f, err := m.repo.FindDriveFile(ctx, c.FileID)
+	if err != nil {
+		return &storageMigrationRetry{err: fmt.Errorf("read the file of the copy: %w", err)}
+	}
+	// 移す処理は写し直した行の記録を消すが、写す前の世代の DB のバックアップへ戻したときなど、
+	// 記録が残ったまま行がオブジェクトストレージを指していることがある。その写しは配信中の
+	// 実体なので、消さずに記録だけを外す。
+	served := f != nil && !f.StoredInternal && !f.IsLink
+	if !served && checkLocal && f != nil && f.StoredInternal && !f.IsLink {
+		// 戻した後で、ローカルを消した世代の DB へ戻したときや、ローカルのディスクを失った
+		// ときは、バケットの写しが最後の実体になっている。ローカルに正しい実体があるときだけ
+		// 消す。消している途中の行 (ReleaseRestoredCopies) は、ローカルの有無に依らず写しが
+		// 要らなくなるので確かめない。
+		ok, err := m.localCopyMatches(f, c.Key)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errRestoredCopyIsTheOnlyCopy
+		}
+		// ローカルの本体を読むのに時間がかかる (大きなファイル) ので、消す前に lock を延ばし
+		// 直す。切れている間に移す処理が同じキーへ写して行を倒していると、配信中の実体を消す。
+		if ok, err := m.lock.Extend(ctx, token, storageMigrationLockTTL); err != nil {
+			return &storageMigrationRetry{err: fmt.Errorf("extend the storage migration lock: %w", err)}
+		} else if !ok {
+			return errStorageMigrationLockLost
+		}
+	}
+	if !served {
+		if err := dst.Delete(c.Key); err != nil {
+			return err
+		}
+	} else {
+		slog.Warn("drive: a copy left by moving a file back is served from object storage again; keeping it", "fileId", c.FileID, "key", c.Key)
+	}
+	if err := m.repo.DeleteRestoredCopy(ctx, c.Key, c.Location); err != nil {
+		return &storageMigrationRetry{err: fmt.Errorf("delete the record of the copy: %w", err)}
+	}
+	return nil
+}
+
+// localCopyMatches reports whether the local storage has a copy of key for
+// f: the body must match the recorded size and md5, a thumbnail or a
+// webpublic variant must exist (the row has no md5 for them).
+func (m *StorageMigrator) localCopyMatches(f *model.DriveFile, key string) (bool, error) {
+	size, sum, err := readObject(m.local, key)
+	if errors.Is(err, ErrObjectNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if f.AccessKey != nil && *f.AccessKey == key {
+		return size == int64(f.Size) && strings.EqualFold(sum, f.MD5), nil
+	}
+	return true, nil
+}
+
+// restoredCopyReleaseTimeout bounds ReleaseRestoredCopies.
+const restoredCopyReleaseTimeout = 30 * time.Second
+
+// ReleaseRestoredCopies deletes the copies the file left in object storage
+// when it was moved back (#4197), as the file is being deleted. Best effort:
+// a copy it cannot delete keeps its record, and the cleanup deletes it later.
+//
+// 戻した行は storedInternal=true なので、削除はローカルだけを消す (本家と同じ)。
+// 写しはバケットに残り、public-read なら消したファイルが取れ続けるので、ここで消す。
+func (m *StorageMigrator) ReleaseRestoredCopies(ctx context.Context, fileID string) {
+	// 利用者の削除の中で動くので、DB の待ちで削除を止め続けない。
+	ctx, cancel := context.WithTimeout(ctx, restoredCopyReleaseTimeout)
+	defer cancel()
+	copies, err := m.repo.ListRestoredCopiesOfFile(ctx, fileID)
+	if err != nil {
+		slog.Warn("drive: list the copies left by moving a deleted file back", "fileId", fileID, "err", err)
+		return
+	}
+	if len(copies) == 0 {
+		return
+	}
+	dst := m.objectStorage()
+	if dst == nil {
+		// オブジェクトストレージを無効にしている。記録を残し、有効に戻してから消す。
+		return
+	}
+	for i := range copies {
+		if err := m.deleteRestoredCopy(ctx, dst, &copies[i], ""); err != nil {
+			slog.Warn("drive: delete a copy left by moving a deleted file back", "fileId", fileID, "key", copies[i].Key, "err", err)
+			msg := truncateUTF8(err.Error(), maxStorageMigrationError)
+			if rerr := m.repo.RecordRestoredCopyFailure(ctx, copies[i].Key, copies[i].Location, msg, m.now()); rerr != nil {
+				slog.Warn("drive: record the failure of a copy", "key", copies[i].Key, "err", rerr)
+			}
+		}
+	}
+}
+
+// objectLocation returns where st puts the object with key: the bucket and
+// the object key with the prefix for object storage, or key itself for a
+// storage that does not tell.
+func objectLocation(st Storage, key string) string {
+	if l, ok := st.(interface{ ObjectLocation(key string) string }); ok {
+		return l.ObjectLocation(key)
+	}
+	return key
 }
 
 // storageMigrationRun is what one operation does in runBatch.
@@ -539,11 +778,12 @@ var errLocalFileMissing = errors.New("the file is not on the local storage")
 //
 // サムネイルと webpublic の実体がローカルに無いときは飛ばす。もともと配信できて
 // いなかったもので、写した後も同じく見つからない。本体が無いときは失敗にする。
-func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model.DriveFile) error {
+func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model.DriveFile, token string) error {
 	keys := []struct {
 		key      *string
 		required bool
 	}{{f.AccessKey, true}, {f.ThumbnailAccessKey, false}, {f.WebpublicAccessKey, false}}
+	var copied []string
 	for _, k := range keys {
 		if k.key == nil || *k.key == "" {
 			if k.required {
@@ -557,6 +797,35 @@ func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model
 			}
 			if errors.Is(err, ErrObjectNotFound) {
 				return errLocalFileMissing
+			}
+			return err
+		}
+		copied = append(copied, *k.key)
+	}
+	// 写すのに時間がかかる (大きなファイル) ので、倒す前に lock を延ばし直す。期限が切れた
+	// だけなら取り直し、別の実行に取られていたら止める。期限が切れている間に写しを消す処理
+	// (#4197) が割り込むと、いま置いた写しを消すので、行を倒すとオブジェクトストレージを
+	// 指したまま実体が無くなる。止めれば行はローカルのままで、次に流せば写し直す。
+	if ok, err := m.lock.Extend(ctx, token, storageMigrationLockTTL); err != nil {
+		return &storageMigrationRetry{err: fmt.Errorf("extend the storage migration lock: %w", err)}
+	} else if !ok {
+		if ok, err := m.lock.Acquire(ctx, token, storageMigrationLockTTL); err != nil {
+			return &storageMigrationRetry{err: fmt.Errorf("take the storage migration lock again: %w", err)}
+		} else if !ok {
+			slog.Warn("drive: another run took the storage migration lock while copying a file", "fileId", f.ID)
+			return errStorageMigrationLockLost
+		}
+		// 取り直せても、切れている間に別の実行 (写しを消す処理など) が始まって終わっていれば、
+		// 置いた写しが消えているかもしれない。倒す前に、置いた写しを確かめ直す。
+		if err := m.copiesArePresent(dst, f, copied); err != nil {
+			if errors.Is(err, errMigrationCopyGone) {
+				// lock は取り直して持っているので、残った写しを消してから失敗にする。残すと、
+				// どの記録にも無い写しになり、ファイルを消しても消えない。
+				for _, key := range copied {
+					if derr := dst.Delete(key); derr != nil {
+						slog.Warn("drive: delete a copy left by a migration that lost the lock", "fileId", f.ID, "err", derr)
+					}
+				}
 			}
 			return err
 		}
@@ -586,6 +855,29 @@ func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model
 					slog.Warn("drive: delete the copy of a file deleted during the storage migration", "fileId", f.ID, "err", err)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// errMigrationCopyGone is recorded when a copy put by the migration was gone
+// or changed after the run lost and took back the lock (#4197). The row stays
+// local, and the next run copies the file again.
+var errMigrationCopyGone = errors.New("a copy was removed or changed while the lock was lost; the next run copies the file again")
+
+// copiesArePresent reports errMigrationCopyGone unless dst has every key in
+// copied: the body with the recorded size and md5, the variants at all.
+func (m *StorageMigrator) copiesArePresent(dst Storage, f *model.DriveFile, copied []string) error {
+	for _, key := range copied {
+		size, sum, err := readObject(dst, key)
+		if errors.Is(err, ErrObjectNotFound) {
+			return errMigrationCopyGone
+		}
+		if err != nil {
+			return err
+		}
+		if f.AccessKey != nil && *f.AccessKey == key && (size != int64(f.Size) || !strings.EqualFold(sum, f.MD5)) {
+			return errMigrationCopyGone
 		}
 	}
 	return nil
@@ -738,7 +1030,19 @@ func (m *StorageMigrator) restoreFile(ctx context.Context, dst Storage, f *model
 			return errStorageMigrationLockLost
 		}
 	}
-	marked, err := m.repo.MarkRestored(ctx, f.ID, *f.ObjectStorageMigratedAt, f.ObjectStorageLocalDeletedAt)
+	// 戻した後もバケットに残る写しを、行を倒すのと同じトランザクションで記録する (#4197)。
+	// 写しの無いキー (サムネイルを作らなかったなど) も記録するが、消すときに無いキーを消す
+	// だけで失敗にはならない。
+	var copies []model.DriveObjectStorageRestoredCopy
+	now := m.now()
+	for _, key := range []*string{f.AccessKey, f.ThumbnailAccessKey, f.WebpublicAccessKey} {
+		if key != nil && *key != "" {
+			copies = append(copies, model.DriveObjectStorageRestoredCopy{
+				Key: *key, FileID: f.ID, Location: objectLocation(dst, *key), RestoredAt: now,
+			})
+		}
+	}
+	marked, err := m.repo.MarkRestored(ctx, f.ID, *f.ObjectStorageMigratedAt, f.ObjectStorageLocalDeletedAt, copies)
 	if err != nil {
 		return &storageMigrationRetry{err: fmt.Errorf("move the row back: %w", err)}
 	}
@@ -996,6 +1300,7 @@ func (m *StorageMigrator) Status(ctx context.Context) (StorageMigrationStatus, e
 	st.Verified, st.VerifyFailed = c.Verified, c.VerifyFailed
 	st.Purgeable, st.LocalDeleted, st.PurgeFailed = c.Purgeable, c.LocalDeleted, c.PurgeFailed
 	st.RestoreFailed = c.RestoreFailed
+	st.RestoredCopies, st.CleanupFailed = c.RestoredCopies, c.CleanupFailed
 	st.Failures, err = m.repo.ListFailures(ctx, repository.DriveStorageMigrationOperationMigrate, storageMigrationFailureLimit)
 	if err != nil {
 		return st, fmt.Errorf("drive: list failures: %w", err)
@@ -1011,6 +1316,10 @@ func (m *StorageMigrator) Status(ctx context.Context) (StorageMigrationStatus, e
 	st.RestoreFailures, err = m.repo.ListFailures(ctx, repository.DriveStorageMigrationOperationRestore, storageMigrationFailureLimit)
 	if err != nil {
 		return st, fmt.Errorf("drive: list restore failures: %w", err)
+	}
+	st.CleanupFailures, err = m.repo.ListRestoredCopyFailures(ctx, storageMigrationFailureLimit)
+	if err != nil {
+		return st, fmt.Errorf("drive: list cleanup failures: %w", err)
 	}
 	return st, nil
 }

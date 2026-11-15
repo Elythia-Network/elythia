@@ -103,6 +103,16 @@ func (h *Handler) cleanupFilesBatched(c echo.Context, list func(limit int) ([]*m
 			slog.ErrorContext(c.Request().Context(), "drive cleanup: finish failed", "err", err)
 			return err
 		}
+		// ローカルへ戻したファイル (#4183) の写しはバケットに残っている。ドライブの画面からの
+		// 削除と同じく、記録した写しを消す (#4197)。行を消せた後で消す。先に消すと、行を
+		// 消せなかったときに、ローカルを消した行の最後の実体まで無くなる。
+		if h.restoredCopies != nil {
+			for _, f := range files {
+				if f.StoredInternal && !f.IsLink {
+					h.restoredCopies.ReleaseRestoredCopies(c.Request().Context(), f.ID)
+				}
+			}
+		}
 		if len(files) < driveCleanupBatchSize {
 			return nil
 		}

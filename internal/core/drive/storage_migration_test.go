@@ -29,11 +29,13 @@ type memObjectStorage struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	putErr  map[string]error
-	deleted []string
+	// deleteErr fails the deletion of the key (#4197).
+	deleteErr map[string]error
+	deleted   []string
 }
 
 func newMemObjectStorage() *memObjectStorage {
-	return &memObjectStorage{objects: map[string][]byte{}, putErr: map[string]error{}}
+	return &memObjectStorage{objects: map[string][]byte{}, putErr: map[string]error{}, deleteErr: map[string]error{}}
 }
 
 func (s *memObjectStorage) Put(key string, body io.Reader) (string, error) {
@@ -63,6 +65,9 @@ func (s *memObjectStorage) Get(key string) (io.ReadCloser, error) {
 func (s *memObjectStorage) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.deleteErr[key]; err != nil {
+		return err
+	}
 	delete(s.objects, key)
 	s.deleted = append(s.deleted, key)
 	return nil
@@ -73,6 +78,9 @@ type memMigrationRepo struct {
 	mu       sync.Mutex
 	files    []model.DriveFile
 	failures map[string]model.DriveObjectStorageMigrationFailure
+	// copies are the recorded copies left by moving files back (#4197), by
+	// key.
+	copies map[string]model.DriveObjectStorageRestoredCopy
 	// deleteOnMark deletes the row just before MarkMigrated, as if the file
 	// were deleted while it was being copied.
 	deleteOnMark string
@@ -86,7 +94,8 @@ type memMigrationRepo struct {
 }
 
 func newMemMigrationRepo() *memMigrationRepo {
-	return &memMigrationRepo{failures: map[string]model.DriveObjectStorageMigrationFailure{}}
+	return &memMigrationRepo{failures: map[string]model.DriveObjectStorageMigrationFailure{},
+		copies: map[string]model.DriveObjectStorageRestoredCopy{}}
 }
 
 func (r *memMigrationRepo) ListLocal(_ context.Context, afterID string, limit int) ([]model.DriveFile, error) {
@@ -133,6 +142,11 @@ func (r *memMigrationRepo) MarkMigrated(_ context.Context, id string, at time.Ti
 		if r.files[i].ID == id && r.files[i].StoredInternal && !r.files[i].IsLink {
 			r.files[i].StoredInternal = false
 			r.files[i].ObjectStorageMigratedAt = &at
+			for k, c := range r.copies {
+				if c.FileID == id {
+					delete(r.copies, k)
+				}
+			}
 			return true, nil
 		}
 	}
@@ -216,7 +230,7 @@ func (r *memMigrationRepo) IsStoredLocally(_ context.Context, id string) (bool, 
 	return false, nil
 }
 
-func (r *memMigrationRepo) MarkRestored(_ context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time) (bool, error) {
+func (r *memMigrationRepo) MarkRestored(_ context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time, copies []model.DriveObjectStorageRestoredCopy) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	sameTime := func(a, b *time.Time) bool { return (a == nil) == (b == nil) && (a == nil || a.Equal(*b)) }
@@ -226,10 +240,93 @@ func (r *memMigrationRepo) MarkRestored(_ context.Context, id string, migratedAt
 			sameTime(f.ObjectStorageLocalDeletedAt, localDeletedAt) {
 			f.StoredInternal = true
 			f.ObjectStorageMigratedAt, f.ObjectStorageVerifiedAt, f.ObjectStorageLocalDeletedAt = nil, nil, nil
+			for _, c := range copies {
+				r.copies[c.Key] = c
+			}
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (r *memMigrationRepo) ListRestoredCopies(_ context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var out []model.DriveObjectStorageRestoredCopy
+	for _, c := range r.copies {
+		if c.Key > afterKey {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b model.DriveObjectStorageRestoredCopy) int { return strings.Compare(a.Key, b.Key) })
+	return out[:min(len(out), limit)], nil
+}
+
+func (r *memMigrationRepo) ListRestoredCopiesOfFile(_ context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []model.DriveObjectStorageRestoredCopy
+	for _, c := range r.copies {
+		if c.FileID == fileID {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b model.DriveObjectStorageRestoredCopy) int { return strings.Compare(a.Key, b.Key) })
+	return out, nil
+}
+
+func (r *memMigrationRepo) DeleteRestoredCopy(_ context.Context, key, location string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.copies[key]; ok && c.Location == location {
+		delete(r.copies, key)
+	}
+	return nil
+}
+
+func (r *memMigrationRepo) RecordRestoredCopyFailure(_ context.Context, key, location, msg string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.copies[key]; ok && c.Location == location {
+		c.Error, c.FailedAt = &msg, &at
+		r.copies[key] = c
+	}
+	return nil
+}
+
+func (r *memMigrationRepo) ListRestoredCopyFailures(_ context.Context, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []model.DriveObjectStorageRestoredCopy
+	for _, c := range r.copies {
+		if c.FailedAt != nil {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b model.DriveObjectStorageRestoredCopy) int { return strings.Compare(a.Key, b.Key) })
+	return out[:min(len(out), limit)], nil
+}
+
+func (r *memMigrationRepo) FindDriveFile(_ context.Context, id string) (*model.DriveFile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, f := range r.files {
+		if f.ID == id {
+			return &f, nil
+		}
+	}
+	return nil, nil
+}
+
+// copy returns the recorded copy with key.
+func (r *memMigrationRepo) copy(key string) (model.DriveObjectStorageRestoredCopy, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.copies[key]
+	return c, ok
 }
 
 func (r *memMigrationRepo) IsMigrated(_ context.Context, id string) (bool, error) {
@@ -301,6 +398,12 @@ func (r *memMigrationRepo) Counts(context.Context) (repository.DriveStorageMigra
 			c.PurgeFailed++
 		case repository.DriveStorageMigrationOperationRestore:
 			c.RestoreFailed++
+		}
+	}
+	for _, cp := range r.copies {
+		c.RestoredCopies++
+		if cp.FailedAt != nil {
+			c.CleanupFailed++
 		}
 	}
 	return c, nil
@@ -378,7 +481,32 @@ type recordingMigrationEnqueuer struct {
 	purgeJobs []migrationJob
 	// restoreJobs are the jobs moving the files back (#4183).
 	restoreJobs []migrationJob
+	// cleanupJobs are the jobs deleting the copies left by moving files back
+	// (#4197).
+	cleanupJobs []migrationJob
 	err         error
+}
+
+func (e *recordingMigrationEnqueuer) EnqueueCleanupRestoredDriveFileCopies(token, afterKey string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.err != nil {
+		return e.err
+	}
+	e.cleanupJobs = append(e.cleanupJobs, migrationJob{token, afterKey})
+	return nil
+}
+
+// popCleanup removes and returns the oldest cleanup job.
+func (e *recordingMigrationEnqueuer) popCleanup() (migrationJob, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.cleanupJobs) == 0 {
+		return migrationJob{}, false
+	}
+	j := e.cleanupJobs[0]
+	e.cleanupJobs = e.cleanupJobs[1:]
+	return j, true
 }
 
 func (e *recordingMigrationEnqueuer) EnqueueRestoreMigratedDriveFiles(token, afterID string) error {
@@ -882,11 +1010,53 @@ func (r *failingMigrationRepo) MarkLocalDeleted(ctx context.Context, id string, 
 	return r.memMigrationRepo.MarkLocalDeleted(ctx, id, migratedAt, at)
 }
 
-func (r *failingMigrationRepo) MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time) (bool, error) {
+func (r *failingMigrationRepo) MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time, copies []model.DriveObjectStorageRestoredCopy) (bool, error) {
 	if err := r.err("MarkRestored"); err != nil {
 		return false, err
 	}
-	return r.memMigrationRepo.MarkRestored(ctx, id, migratedAt, localDeletedAt)
+	return r.memMigrationRepo.MarkRestored(ctx, id, migratedAt, localDeletedAt, copies)
+}
+
+func (r *failingMigrationRepo) ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if err := r.err("ListRestoredCopies"); err != nil {
+		return nil, err
+	}
+	return r.memMigrationRepo.ListRestoredCopies(ctx, afterKey, limit)
+}
+
+func (r *failingMigrationRepo) ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if err := r.err("ListRestoredCopiesOfFile"); err != nil {
+		return nil, err
+	}
+	return r.memMigrationRepo.ListRestoredCopiesOfFile(ctx, fileID)
+}
+
+func (r *failingMigrationRepo) DeleteRestoredCopy(ctx context.Context, key, location string) error {
+	if err := r.err("DeleteRestoredCopy"); err != nil {
+		return err
+	}
+	return r.memMigrationRepo.DeleteRestoredCopy(ctx, key, location)
+}
+
+func (r *failingMigrationRepo) RecordRestoredCopyFailure(ctx context.Context, key, location, msg string, at time.Time) error {
+	if err := r.err("RecordRestoredCopyFailure"); err != nil {
+		return err
+	}
+	return r.memMigrationRepo.RecordRestoredCopyFailure(ctx, key, location, msg, at)
+}
+
+func (r *failingMigrationRepo) ListRestoredCopyFailures(ctx context.Context, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if err := r.err("ListRestoredCopyFailures"); err != nil {
+		return nil, err
+	}
+	return r.memMigrationRepo.ListRestoredCopyFailures(ctx, limit)
+}
+
+func (r *failingMigrationRepo) FindDriveFile(ctx context.Context, id string) (*model.DriveFile, error) {
+	if err := r.err("FindDriveFile"); err != nil {
+		return nil, err
+	}
+	return r.memMigrationRepo.FindDriveFile(ctx, id)
 }
 
 func (r *failingMigrationRepo) IsStoredLocally(ctx context.Context, id string) (bool, error) {

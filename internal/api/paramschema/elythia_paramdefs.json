@@ -294,6 +294,14 @@
 			},
 			"meta": {}
 		},
+		"admin/drive/object-storage-migration/cleanup-copies": {
+			"paramDef": {
+				"type": "object",
+				"properties": {},
+				"required": []
+			},
+			"meta": {}
+		},
 		"admin/drive/object-storage-migration/purge-local": {
 			"paramDef": {
 				"type": "object",

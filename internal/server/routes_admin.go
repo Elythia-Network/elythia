@@ -149,6 +149,7 @@ func registerAdminRoutes(api apiRoutes, adminHandler *apiadmin.Handler, announce
 	// token だけを通し (RequireSecure)、handler の中で再認証する (#4184)。
 	api.POST("/admin/drive/object-storage-migration/purge-local", adminHandler.DriveStorageMigrationPurgeLocal, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"), middleware.RequireSecure())
 	api.POST("/admin/drive/object-storage-migration/restore", adminHandler.DriveStorageMigrationRestore, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
+	api.POST("/admin/drive/object-storage-migration/cleanup-copies", adminHandler.DriveStorageMigrationCleanupCopies, middleware.RequireAdmin(roleService), middleware.RequireScope("write:admin:drive"))
 	api.POST("/admin/emoji/add-aliases-bulk", adminHandler.EmojiAddAliasesBulk, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
 	api.POST("/admin/emoji/copy", adminHandler.EmojiCopy, middleware.RequireRolePolicy(roleService, corerole.PolicyCanManageCustomEmojis), middleware.RequireScope("write:admin:emoji"))
 	// mk-go 独自 (#2698)。リモート絵文字のインポート時に、AP では運ばれない
