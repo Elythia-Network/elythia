@@ -176,6 +176,9 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	// 見せない側) と配送停止のソフトウェアで絞る。
 	apHandler.SetFetchSigner(corefederation.NewSignedFetchAuthenticator(userRepo, federationResolver, s.config.Host),
 		instanceService, corefederation.NewSuspendedChecker(metaRepo, instanceRepo))
+	// プラグインが配送先を絞ったノートは、許されたホストの署名付きの照会にだけ
+	// 返す (#4199)。
+	apHandler.SetNoteDeliveryRules(s.noteDelivery)
 	// AP リソース系エンドポイントは Accept ヘッダで content negotiation する。
 	// ブラウザからのリロード (Accept: text/html など) では SPA 用の HTML を
 	// 返したいので、フォールバックとして frontendHTML を注入しておく。

@@ -698,6 +698,41 @@ func (s *DeliverService) DeliverToFollowersExcluding(signerUserID string, body [
 	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
 }
 
+// DeliverToFollowersAllowed is DeliverToFollowersExcluding limited to the
+// followers whose host allow reports true (#4199).
+//
+// **判定に使うのはフォロワーの利用者の host。** inbox の URL のホストで
+// 判定すると、利用者のドメインと配送先のドメインを分けたサーバー (利用者は
+// `acct.example`、inbox は `web.acct.example`) で、外したはずのホストに
+// 届くか、許したはずのホストに届かない。照会の判定 (署名した利用者の host)
+// とも揃わなくなる。
+//
+// shared inbox を許すホストと許さないホストの利用者が共有しているときは送る
+// (同じサーバーなので、送らなければ許したホストにも届かない)。
+func (s *DeliverService) DeliverToFollowersAllowed(signerUserID string, body []byte, exclude map[string]bool, allow func(host string) bool) error {
+	rows, err := s.followingRepo.ListRemoteFollowerInboxHosts(signerUserID)
+	if err != nil {
+		return err
+	}
+	inboxes := make([]string, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	var sharedInboxes map[string]bool
+	for _, row := range rows {
+		if exclude[row.Inbox] || seen[row.Inbox] || !allow(row.Host) {
+			continue
+		}
+		seen[row.Inbox] = true
+		inboxes = append(inboxes, row.Inbox)
+		if row.Shared {
+			if sharedInboxes == nil {
+				sharedInboxes = make(map[string]bool)
+			}
+			sharedInboxes[row.Inbox] = true
+		}
+	}
+	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
+}
+
 // DeliverToInboxes enqueues delivery to an explicit set of remote inboxes,
 // threading the shared-inbox flag (#2575).
 //

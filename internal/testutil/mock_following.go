@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"net/url"
 	"sort"
 	"strings"
 
@@ -17,6 +18,9 @@ type MockFollowingRepository struct {
 	// RemoteSharedInboxes maps an inbox URL to whether it is a shared inbox
 	// (#1811). 未登録の URL は Shared=false 扱い。
 	RemoteSharedInboxes map[string]bool
+	// RemoteInboxHosts maps an inbox URL to the host of the followers using it,
+	// for ListRemoteFollowerInboxHosts. 未登録の URL は inbox URL のホスト名を使う。
+	RemoteInboxHosts map[string][]string
 	// Birthdays maps followeeID -> "YYYY-MM-DD" string used by
 	// ListFollowingByBirthday. 未登録のユーザーは誕生日なしとして扱う。
 	Birthdays map[string]string
@@ -30,6 +34,7 @@ func NewMockFollowingRepository() *MockFollowingRepository {
 		Followings:          make(map[string]*model.Following),
 		RemoteInboxes:       make(map[string][]string),
 		RemoteSharedInboxes: make(map[string]bool),
+		RemoteInboxHosts:    make(map[string][]string),
 		Birthdays:           make(map[string]string),
 	}
 }
@@ -52,6 +57,23 @@ func (m *MockFollowingRepository) ListRemoteFollowerInboxes(userID string) ([]mo
 	out := make([]model.RemoteInbox, 0, len(urls))
 	for _, u := range urls {
 		out = append(out, model.RemoteInbox{Inbox: u, Shared: m.RemoteSharedInboxes[u]})
+	}
+	return out, nil
+}
+
+func (m *MockFollowingRepository) ListRemoteFollowerInboxHosts(userID string) ([]model.RemoteInboxHost, error) {
+	urls := m.RemoteInboxes[userID]
+	out := make([]model.RemoteInboxHost, 0, len(urls))
+	for _, u := range urls {
+		hosts := m.RemoteInboxHosts[u]
+		if len(hosts) == 0 {
+			if parsed, err := url.Parse(u); err == nil {
+				hosts = []string{parsed.Host}
+			}
+		}
+		for _, h := range hosts {
+			out = append(out, model.RemoteInboxHost{RemoteInbox: model.RemoteInbox{Inbox: u, Shared: m.RemoteSharedInboxes[u]}, Host: h})
+		}
 	}
 	return out, nil
 }

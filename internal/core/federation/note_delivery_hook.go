@@ -7,6 +7,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -40,6 +41,36 @@ type NoteDeliveryHook struct {
 	relay RelayBroadcaster
 	// quotes は引用の承認 (FEP-044f) を取りに行く (#3234)。nil なら何もしない。
 	quotes QuoteApprovalRequester
+	// rules はプラグインが絞った配送先 (#4199)。nil なら絞らない。
+	rules *notedelivery.Registry
+}
+
+// SetNoteDeliveryRules wires the plugins that narrow where local notes
+// federate (#4199). nil で絞らない (初期状態)。
+func (h *NoteDeliveryHook) SetNoteDeliveryRules(r *notedelivery.Registry) {
+	h.rules = r
+}
+
+// ruleFor returns the delivery rule of a local note.
+func (h *NoteDeliveryHook) ruleFor(note *model.Note) notedelivery.Rule {
+	return h.rules.Rule(context.Background(), note.ID)
+}
+
+// hostOf returns a remote user's host, or "" for a local user.
+func hostOf(u *model.User) string {
+	if u == nil || u.Host == nil {
+		return ""
+	}
+	return *u.Host
+}
+
+// deliverToFollowersByRule delivers body to the author's followers that rule
+// allows. 絞っていないノートは今までと同じ DeliverToFollowers を通す。
+func deliverToFollowersByRule(d *DeliverService, authorID string, body []byte, rule notedelivery.Rule) error {
+	if !rule.Restricted() {
+		return d.DeliverToFollowers(authorID, body)
+	}
+	return d.DeliverToFollowersAllowed(authorID, body, nil, rule.Allows)
 }
 
 // QuoteApprovalRequester obtains FEP-044f approvals for local quotes (#3234).
@@ -92,9 +123,13 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 		return
 	}
 
+	// **配送先の絞り込みを先に読む (#4199)。** 読めなければ
+	// DenyAll になり、リモートのどこにも配らない。
+	rule := h.ruleFor(note)
+
 	// 純粋なリノートは Create ではなく Announce として配信する。
 	if corenote.IsPureRenote(note) {
-		h.deliverAnnounce(note, author)
+		h.deliverAnnounce(note, author, rule)
 		return
 	}
 
@@ -113,12 +148,12 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 
 	switch note.Visibility {
 	case model.NoteVisibilityPublic, model.NoteVisibilityHome, model.NoteVisibilityFollowers:
-		if err := h.deliver.DeliverToFollowers(author.ID, body); err != nil {
+		if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
 			slog.Warn("note delivery: deliver to followers failed",
 				"noteId", note.ID, "err", err)
 		}
 	case model.NoteVisibilitySpecified:
-		h.deliverToSpecified(author, note, body)
+		h.deliverToSpecified(author, note, body, rule)
 	}
 
 	// 以下の remote user にも直接配信する。フォロワー配信だけでは相手に
@@ -130,7 +165,7 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 	// フォロワー配信先と重複したユーザーは DeliverService 側でも deduplicate
 	// されているが、ここでも user ID ベースで seen map を共有して無駄な
 	// enqueue を避ける。#369。
-	h.deliverToDirectRecipients(author, note, body)
+	h.deliverToDirectRecipients(author, note, body, rule)
 
 	// リモートの投稿の引用は、Create の後に作者へ承認を求める。
 	if h.quotes != nil {
@@ -141,7 +176,9 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 
 	// public な note のみ relay に fanout する。relay は AS Public addressed
 	// activity しか受け付けないため、home/followers/specified はスキップ。
-	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil {
+	// 配送先を絞ったノートも流さない。relay は受け取ったものを加盟する全サーバーへ
+	// 配り直すので、ホストで絞れない (#4199)。
+	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil && !rule.Restricted() {
 		if err := h.relay.DeliverToAccepted(context.Background(), author.ID, create); err != nil {
 			slog.Warn("note delivery: relay fanout failed",
 				"noteId", note.ID, "err", err)
@@ -155,7 +192,10 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 //
 // ローカル DB にキャッシュ済みの user だけを対象にする (未解決のリモート
 // user は webfinger を叩かない)。local user は連合配信の対象外。
-func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *model.Note, body []byte) {
+//
+// rule が許さないホストの利用者は、メンションされていても返信先でも外す
+// (#4199)。
+func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *model.Note, body []byte, rule notedelivery.Rule) {
 	if note == nil {
 		return
 	}
@@ -171,7 +211,7 @@ func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *m
 	recipients := make([]*model.User, 0, 3)
 
 	add := func(u *model.User) {
-		if u == nil || u.ID == author.ID || u.IsLocal() {
+		if u == nil || u.ID == author.ID || u.IsLocal() || !rule.Allows(hostOf(u)) {
 			return
 		}
 		if _, dup := seen[u.ID]; dup {
@@ -260,7 +300,7 @@ func (h *NoteDeliveryHook) findNoteAuthor(noteID string, origin *model.Note, kin
 
 // deliverAnnounce renders an Announce activity for a pure renote and ships it
 // to the renoter's followers.
-func (h *NoteDeliveryHook) deliverAnnounce(note *model.Note, author *model.User) {
+func (h *NoteDeliveryHook) deliverAnnounce(note *model.Note, author *model.User, rule notedelivery.Rule) {
 	// upstream renderAnnounce は specified visibility で throw し、federation 自体が
 	// 中止される (= specified pure renote は連合しない)。mk-go も specified renote を
 	// public-addressed Announce で follower へ漏らさないよう、ここで連合を skip する
@@ -281,7 +321,7 @@ func (h *NoteDeliveryHook) deliverAnnounce(note *model.Note, author *model.User)
 	}
 	announce := h.renderer.RenderAnnounce(author, note.ID, targetURI, note.Visibility, h.idGen)
 	body, _ := json.Marshal(announce)
-	if err := h.deliver.DeliverToFollowers(author.ID, body); err != nil {
+	if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
 		slog.Warn("note delivery: announce failed",
 			"noteId", note.ID, "err", err)
 	}
@@ -289,12 +329,15 @@ func (h *NoteDeliveryHook) deliverAnnounce(note *model.Note, author *model.User)
 
 // deliverToSpecified looks up each visibleUserId and routes to the recipient
 // if remote.
-func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.Note, body []byte) {
+func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.Note, body []byte, rule notedelivery.Rule) {
 	for _, uid := range note.VisibleUserIDs {
 		recipient, err := h.userRepo.FindByID(uid)
 		if err != nil {
 			slog.Warn("note delivery: visible user not found",
 				"noteId", note.ID, "userId", uid, "err", err)
+			continue
+		}
+		if !recipient.IsLocal() && !rule.Allows(hostOf(recipient)) {
 			continue
 		}
 		if err := h.deliver.DeliverToUser(author.ID, recipient, body); err != nil {
@@ -312,6 +355,11 @@ func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.No
 // 取り消しと誤認する)。送り直しは、保留中かを確かめてから送る予定の時刻のジョブ
 // (QuoteOutbox.ResendPending) だけが行う。
 func (h *NoteDeliveryHook) SendQuoteRequest(note *model.Note, quotedURI string, quotedAuthor *model.User) error {
+	// QuoteRequest は引用したノートを instrument に丸ごと持つ。配送先を絞った
+	// ノートなら、引用元の作者のホストが許されるときだけ送る (#4199)。
+	if !h.ruleFor(note).Allows(hostOf(quotedAuthor)) {
+		return nil
+	}
 	body, err := json.Marshal(h.renderer.RenderQuoteRequest(note, quotedURI, h.idGen))
 	if err != nil {
 		return err
@@ -343,12 +391,14 @@ func (h *NoteDeliveryHook) SendNoteUpdate(note *model.Note, author *model.User) 
 	if err != nil {
 		return err
 	}
-	if err := h.deliver.DeliverToFollowers(author.ID, body); err != nil {
+	// Create と同じ相手にだけ配る (#4199)。
+	rule := h.ruleFor(note)
+	if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
 		return err
 	}
-	h.deliverToDirectRecipients(author, note, body)
+	h.deliverToDirectRecipients(author, note, body, rule)
 	// Create を relay 経由で受け取ったサーバーにも届ける (OnNoteCreated と同じ条件)。
-	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil {
+	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil && !rule.Restricted() {
 		if err := h.relay.DeliverToAccepted(context.Background(), author.ID, update); err != nil {
 			slog.Warn("note delivery: relay fanout of update failed", "noteId", note.ID, "err", err)
 		}

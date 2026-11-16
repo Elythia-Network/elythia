@@ -618,6 +618,9 @@ func TestFollowingRepository_QueryErrors(t *testing.T) {
 
 	_, err = repo.ListRemoteFollowerInboxes("a")
 	assert.Error(t, err)
+
+	_, err = repo.ListRemoteFollowerInboxHosts("a")
+	assert.Error(t, err)
 }
 
 func TestFollowingRepository_ListRemoteFollowerInboxes(t *testing.T) {
@@ -671,6 +674,48 @@ func TestFollowingRepository_ListRemoteFollowerInboxes(t *testing.T) {
 		{Inbox: sharedInbox1, Shared: true},
 		{Inbox: inbox3, Shared: false},
 	}, inboxes)
+}
+
+// ListRemoteFollowerInboxHosts keys each inbox by the follower's own host,
+// not the inbox URL's host, so a server whose actors live on another domain
+// (acct.example users, inbox on web.acct.example) is matched by the host its
+// users carry.
+func TestFollowingRepository_ListRemoteFollowerInboxHosts(t *testing.T) {
+	repo := NewFollowingRepository(testDB)
+
+	followee := insertTestUser(t, "u_ih_fe", "ihfe")
+	defer cleanupUser(t, followee.ID)
+
+	shared := "https://web.acct.example/inbox"
+	insertRemote := func(id, username, host, inbox string, sharedInbox *string) {
+		t.Helper()
+		require.NoError(t, testDB.Exec(`INSERT INTO "user" (id, username, "usernameLower", host, uri, inbox, "sharedInbox", "avatarDecorations") VALUES (?, ?, ?, ?, ?, ?, ?, '[]')`,
+			id, username, username, host, "https://"+host+"/users/"+username, inbox, sharedInbox).Error)
+		t.Cleanup(func() { cleanupUser(t, id) })
+	}
+	// 同じ shared inbox を使う 2 人 (同じホスト) は 1 行にまとまる。
+	insertRemote("u_ih_r1", "ihr1", "acct.example", "https://web.acct.example/users/ihr1/inbox", &shared)
+	insertRemote("u_ih_r2", "ihr2", "acct.example", "https://web.acct.example/users/ihr2/inbox", &shared)
+	// 同じ shared inbox でも別のホストの利用者は別の行になる。
+	insertRemote("u_ih_r3", "ihr3", "alias.example", "https://web.acct.example/users/ihr3/inbox", &shared)
+	// shared inbox の無い利用者は個別の inbox。
+	insertRemote("u_ih_r4", "ihr4", "other.example", "https://other.example/users/ihr4/inbox", nil)
+	local := insertTestUser(t, "u_ih_lo", "ihlo")
+	defer cleanupUser(t, local.ID)
+
+	for i, follower := range []string{"u_ih_r1", "u_ih_r2", "u_ih_r3", "u_ih_r4", local.ID} {
+		id := fmt.Sprintf("fl_ih_%d", i)
+		insertFollowing(t, id, follower, followee.ID)
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "following" WHERE id = ?`, id) })
+	}
+
+	rows, err := repo.ListRemoteFollowerInboxHosts(followee.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []model.RemoteInboxHost{
+		{RemoteInbox: model.RemoteInbox{Inbox: shared, Shared: true}, Host: "acct.example"},
+		{RemoteInbox: model.RemoteInbox{Inbox: shared, Shared: true}, Host: "alias.example"},
+		{RemoteInbox: model.RemoteInbox{Inbox: "https://other.example/users/ihr4/inbox", Shared: false}, Host: "other.example"},
+	}, rows)
 }
 
 func TestUserRepository_IncrementFollowingCount(t *testing.T) {

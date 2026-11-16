@@ -138,6 +138,10 @@ type FollowingRepository interface {
 	// (Shared=true)、無いフォロワーは個別 inbox (Shared=false)。Shared フラグは
 	// deliver の goneSuspended 判定 (shared inbox の 410) に使う (#1811)。
 	ListRemoteFollowerInboxes(userID string) ([]model.RemoteInbox, error)
+	// ListRemoteFollowerInboxHosts is ListRemoteFollowerInboxes with the
+	// follower's host on each row (#4199). inbox と host の組で
+	// 重複を除くので、同じ inbox が複数のホストの行に出ることがある。
+	ListRemoteFollowerInboxHosts(userID string) ([]model.RemoteInboxHost, error)
 	// ListFollowingByBirthday returns the followees of followerID whose
 	// birthday (mmdd) falls in [beginMMDD, endMMDD] inclusive. Passing
 	// beginMMDD > endMMDD treats the range as year-wrapping (e.g. 1225..0105).
@@ -803,6 +807,36 @@ func (r *followingRepository) ListRemoteFollowerInboxes(userID string) ([]model.
 	for _, row := range rows {
 		if row.Inbox != "" {
 			out = append(out, model.RemoteInbox{Inbox: row.Inbox, Shared: row.Shared})
+		}
+	}
+	return out, nil
+}
+
+// ListRemoteFollowerInboxHosts returns the inboxes of remote followers, keyed
+// by the follower's host.
+//
+// inbox の選び方 (sharedInbox を優先) と shared の判定は
+// ListRemoteFollowerInboxes と**同じ式**にする。違えると、絞った配送だけが
+// 別の inbox へ送り、410 の扱い (#1811) や重複の除外 (#2567) がずれる。
+func (r *followingRepository) ListRemoteFollowerInboxHosts(userID string) ([]model.RemoteInboxHost, error) {
+	var rows []struct {
+		Inbox  string
+		Shared bool
+		Host   string
+	}
+	err := r.db.
+		Table(`"following" AS f`).
+		Select(`DISTINCT COALESCE(NULLIF(u."sharedInbox", ''), u.inbox) AS inbox, (u."sharedInbox" IS NOT NULL AND u."sharedInbox" != '') AS shared, u.host AS host`).
+		Joins(`JOIN "user" u ON u.id = f."followerId"`).
+		Where(`f."followeeId" = ? AND u.host IS NOT NULL AND (u."sharedInbox" IS NOT NULL OR u.inbox IS NOT NULL)`, userID).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.RemoteInboxHost, 0, len(rows))
+	for _, row := range rows {
+		if row.Inbox != "" {
+			out = append(out, model.RemoteInboxHost{RemoteInbox: model.RemoteInbox{Inbox: row.Inbox, Shared: row.Shared}, Host: row.Host})
 		}
 	}
 	return out, nil

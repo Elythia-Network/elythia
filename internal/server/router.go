@@ -1197,7 +1197,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// poll federation hook: ローカル user が remote poll に投票したら AP Note
 	// (with name + inReplyTo) を author の inbox に配信する (#690)。
-	pollService.SetFederationHook(corefederation.NewPollDeliveryHook(apRenderer, deliverService, userRepo, apURLs, idGen))
+	pollDeliveryHook := corefederation.NewPollDeliveryHook(apRenderer, deliverService, userRepo, apURLs, idGen)
+	// Update(Question) はノートを丸ごと持つので、Create と同じ相手にだけ配る (#4199)。
+	pollDeliveryHook.SetNoteDeliveryRules(s.noteDelivery)
+	pollService.SetFederationHook(pollDeliveryHook)
 
 	// Relay 連携 (#161): relay actor system account + relay.Service。
 	// relay.Service は buildFederation で作る (#3688)。admin/relays ハンドラへ注入し、
@@ -1749,6 +1752,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		driveFileRepo, metaRepo, blockingRepo, mutingRepo, renoteMutingRepo, channelMutingRepo, followingRepo)
 	notesHandler.SetLocalFederationObserver(coreSvcs.localFederation)
 	notesHandler.SetPiningRepo(piningRepo)
+	// notes/create の pluginOptions を受け取るプラグイン (#4199)。
+	notesHandler.SetNoteDeliveryRules(s.noteDelivery)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
 	// staleness trade-off があるため default off。
