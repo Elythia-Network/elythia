@@ -131,6 +131,15 @@ type Definition struct {
 	// 関係なく [Context.Secrets] でできるが、管理画面から入れられるのは
 	// ここに書いた名前だけになる。
 	Secrets []SecretSpec
+
+	// NoteDelivery declares that this plugin narrows where local notes federate
+	// (#4199). The host calls it after Migrations and before any
+	// Routes or Jobs callback, in every process regardless of role. May be nil.
+	//
+	// **ロールに関係なく呼ぶ。** 条件を保存するのはAPIを担うプロセス
+	// (notes/create) だが、配送はキューを担うプロセスからも走る (投票の
+	// Update(Question)など)。片方でしか登録しないと、そちらの配送だけ絞られない。
+	NoteDelivery func(Context) (NoteDeliveryRegistration, error)
 }
 
 // Validate reports whether the definition is usable.
@@ -166,8 +175,8 @@ func (d Definition) Validate() error {
 		}
 		seen[sp.Name] = struct{}{}
 	}
-	if d.Routes == nil && d.Jobs == nil && d.EffectivePolicies == nil && d.Peer == nil && d.Notifications == nil {
-		return fmt.Errorf("plugin %q: Routes も Jobs も EffectivePolicies も Peer も Notifications も設定されていません", d.Name)
+	if d.Routes == nil && d.Jobs == nil && d.EffectivePolicies == nil && d.Peer == nil && d.Notifications == nil && d.NoteDelivery == nil {
+		return fmt.Errorf("plugin %q: Routes も Jobs も EffectivePolicies も Peer も Notifications も NoteDelivery も設定されていません", d.Name)
 	}
 	return nil
 }

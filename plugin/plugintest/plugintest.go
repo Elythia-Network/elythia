@@ -346,6 +346,26 @@ func (h *Harness) Jobs(def plugin.Definition) *JobSet {
 	return j.set
 }
 
+// NoteDelivery applies the migrations and returns the plugin's
+// NoteDeliveryRegistration (#4199), failing the test when the
+// callback fails or leaves Prepare or Targets nil (the host refuses to start
+// then).
+func (h *Harness) NoteDelivery(def plugin.Definition) plugin.NoteDeliveryRegistration {
+	h.t.Helper()
+	h.applyMigrations(def)
+	if def.NoteDelivery == nil {
+		h.t.Fatalf("plugintest: NoteDelivery が宣言されていません")
+	}
+	registration, err := def.NoteDelivery(h.Context())
+	if err != nil {
+		h.t.Fatalf("plugintest: NoteDelivery に失敗しました: %v", err)
+	}
+	if registration.Prepare == nil || registration.Targets == nil {
+		h.t.Fatalf("plugintest: NoteDelivery の Prepare と Targets は両方とも必要です")
+	}
+	return registration
+}
+
 // EffectivePolicies runs def.EffectivePolicies and returns its registration.
 func (h *Harness) EffectivePolicies(def plugin.Definition) plugin.EffectivePolicyRegistration {
 	h.t.Helper()

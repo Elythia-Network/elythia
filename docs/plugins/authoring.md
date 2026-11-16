@@ -604,6 +604,58 @@ instance/server capはplugin集約の後に適用する。`chunkedUploadMaxConcu
 
 plugin独自の書き込みでpolicy入力が変わった場合は、永続化のcommit成功後にだけ`inv.InvalidateUser`または`inv.InvalidateRole`を呼ぶ。provider失敗の結果はcacheしない。in-flightの古いnative role/provider結果はinvalidation後のrequestへ返さず、cacheにも戻さない。conditional roleの対象userはassignment rowから列挙できないため、role invalidationは全userのrole/policy cacheを保守的に破棄する。匿名（空`UserID`）にはper-user invalidationが無いため、匿名結果に影響する状態変更では`InvalidateRole`を使う。
 
+## ノートの配送先を絞る
+
+`Definition.NoteDelivery`で、ローカルのノートを連合する先のホストを、ノートごとに絞れる(#4199)。CherryPickの「連合配送の対象」を移すために足した口で、指定の受け付けと保存はプラグインが持ち、配送と照会への適用は本体が行う。
+
+**絞ることしかできない。** 本体は、今までどおりに配送先と照会の可否を決めたうえで、プラグインが返した条件に合わないホストを外すことにだけ使う。プラグインが配送先を増やしたり、本体が見せない投稿を見せたりする口は無い。
+
+```go
+func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
+	db := ctx.Storage().DB()
+	return plugin.NoteDeliveryRegistration{
+		Prepare: func(c context.Context, req plugin.NoteDeliveryPrepareRequest) error {
+			var opt struct {
+				Mode  string   `json:"mode"`
+				Hosts []string `json:"hosts"`
+			}
+			if err := json.Unmarshal(req.Option, &opt); err != nil {
+				return fmt.Errorf("%w: %w", plugin.ErrBadNoteOption, err)
+			}
+			_, err := db.ExecContext(c, `INSERT INTO targets (note_id, mode, hosts) VALUES ($1, $2, $3)`,
+				req.NoteID, opt.Mode, strings.Join(opt.Hosts, ","))
+			return err
+		},
+		Targets: func(c context.Context, noteIDs []string) (map[string]plugin.DeliveryTargets, error) {
+			out := map[string]plugin.DeliveryTargets{}
+			// noteIDs の行を読み、条件のあるノートだけを out に入れる。
+			return out, nil
+		},
+	}, nil
+}
+```
+
+- **指定は`notes/create`の`pluginOptions.<プラグイン名>`で受け取る。** 本体は中身を読まずに`Prepare`へ渡す。`Prepare`は**ノートを保存する前**に、保存するIDで呼ばれる。保存の後だと、条件を書く前に配送が走りうるため。ノートの保存に失敗すると書いた行が残るが、IDは使い回されないので他のノートには効かない
+- **`Prepare`のエラーはノートを作らない。** `plugin.ErrBadNoteOption`を包んだエラーは400 `INVALID_PARAM`、それ以外は500になる。どちらも、プラグインのメッセージは利用者に返さない。`pluginOptions`に、登録されていないプラグインの名前があっても400になる (絞ったつもりの指定を黙って捨てない)
+- **`Targets`は配送と照会のたびに呼ばれる。** 1回に渡すIDは20件まで。条件の無いノートは返す map に入れない。**エラー・panic・5秒の期限切れは「どこにも配らない・誰にも見せない」になる**。配送の再試行は無いので、障害のあいだに作られたノートは連合しないまま残る
+- **ホストは利用者の`host`と完全一致で比べる。** 配送ではフォロワー・宛先の利用者の`host`を見る。inboxのURLのホストではない (利用者のドメインとサーバーのドメインを分けたサーバーで、判定がずれるため)。比べる前に小文字・punycodeにそろえるのはプラグインの役目
+- **絞ったノートはrelayへ流さない。** relayは受け取ったものを加盟する全サーバーへ配り直すので、ホストで絞れない
+- **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す
+- **User-Agentは相手が自由に書ける。** 外したホストはUser-Agentを書き換えれば照会でき、許したホストを名乗ればincludeのノートも照会できる。照会の判定は、信頼しないサーバーへ配送しないための補助と考えること
+- 適用するのは、Create・Announce (リノート)・引用の承認に伴うUpdate・投票のUpdate(Question)・QuoteRequestの配送と、上の照会。Deleteは絞らない (中身を持たず、届いていない相手には何も起きない)
+- **登録はロールに関係なく行われる。** 条件の保存はAPIのプロセス、投票のUpdateの配送はキューのプロセスで走るため。登録 (`NoteDelivery`の呼び出し) に失敗すると起動を止める
+- **プラグインを無効にすると絞り込みも止まる。** 本体は条件を持っていないので、無効にした後は、絞ったノートも今までどおりに配送・照会される。止める前に運営者へ知らせること
+- 予約投稿 (`notes/drafts`) は`pluginOptions`を受け取らない
+
+テストでは`plugintest`の`NoteDelivery`で登録を取り出し、`Prepare` / `Targets`を直接呼ぶ。migrationは本体と同じ実装で適用される。
+
+```go
+reg := plugintest.New(t).WithName("targets").WithDB(db).NoteDelivery(Plugin)
+if err := reg.Prepare(context.Background(), plugin.NoteDeliveryPrepareRequest{NoteID: "n1", UserID: "u1", Option: json.RawMessage(`{"mode":"include","hosts":["a.example"]}`)}); err != nil {
+	t.Fatal(err)
+}
+```
+
 ## 設定
 
 ```go
@@ -1302,8 +1354,31 @@ type Definition struct
   Notifications func(Context, Notifications) error
   EffectivePolicies func(Context, EffectivePolicyInvalidator) (EffectivePolicyRegistration, error)
   Secrets    []SecretSpec
+  NoteDelivery func(Context) (NoteDeliveryRegistration, error)
 
 func (Definition) Validate() error
+
+type NoteDeliveryRegistration struct
+  Prepare func(ctx context.Context, req NoteDeliveryPrepareRequest) error
+  Targets func(ctx context.Context, ids []string) (map[string]DeliveryTargets, error)
+
+type NoteDeliveryPrepareRequest struct
+  NoteID string
+  UserID string
+  Option json.RawMessage
+
+type DeliveryTargetsMode string
+
+const DeliveryTargetsInclude
+const DeliveryTargetsExclude
+
+type DeliveryTargets struct
+  Mode  DeliveryTargetsMode
+  Hosts []string
+
+func (DeliveryTargets) Allows(string) bool
+
+var ErrBadNoteOption error
 
 type SecretSpec struct
   Name        string

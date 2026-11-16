@@ -51,6 +51,7 @@ plugin/plugintest: func (*Harness) EffectivePolicies(plugin.Definition) plugin.E
 plugin/plugintest: func (*Harness) Enqueues() []Enqueued
 plugin/plugintest: func (*Harness) Jobs(plugin.Definition) *JobSet
 plugin/plugintest: func (*Harness) ManagedAccounts() []ManagedAccount
+plugin/plugintest: func (*Harness) NoteDelivery(plugin.Definition) plugin.NoteDeliveryRegistration
 plugin/plugintest: func (*Harness) Notifications(plugin.Definition)
 plugin/plugintest: func (*Harness) Notify(plugin.Notification) error
 plugin/plugintest: func (*Harness) Peer(plugin.Definition)
@@ -98,6 +99,7 @@ plugin:   field Definition.EffectivePolicies func(Context, EffectivePolicyInvali
 plugin:   field Definition.Jobs func(Context, Jobs) error
 plugin:   field Definition.Migrations []Migration
 plugin:   field Definition.Name string
+plugin:   field Definition.NoteDelivery func(Context) (NoteDeliveryRegistration, error)
 plugin:   field Definition.Notifications func(Context, Notifications) error
 plugin:   field Definition.Peer func(Context, Peer) error
 plugin:   field Definition.PeerMaxBody int64
@@ -105,6 +107,8 @@ plugin:   field Definition.Peered bool
 plugin:   field Definition.Routes func(Context, Router) error
 plugin:   field Definition.Secrets []SecretSpec
 plugin:   field Definition.Version string
+plugin:   field DeliveryTargets.Hosts []string
+plugin:   field DeliveryTargets.Mode DeliveryTargetsMode
 plugin:   field EffectivePolicyContribution.Key string
 plugin:   field EffectivePolicyContribution.Order int
 plugin:   field EffectivePolicyContribution.Priority int
@@ -123,6 +127,11 @@ plugin:   field Image.Data []byte
 plugin:   field Image.Filename string
 plugin:   field Migration.SQL string
 plugin:   field Migration.Version int
+plugin:   field NoteDeliveryPrepareRequest.NoteID string
+plugin:   field NoteDeliveryPrepareRequest.Option json.RawMessage
+plugin:   field NoteDeliveryPrepareRequest.UserID string
+plugin:   field NoteDeliveryRegistration.Prepare func(ctx context.Context, req NoteDeliveryPrepareRequest) error
+plugin:   field NoteDeliveryRegistration.Targets func(ctx context.Context, ids []string) (map[string]DeliveryTargets, error)
 plugin:   field Notification.AccountID string
 plugin:   field Notification.ChatMessageID string
 plugin:   field Notification.CreatedAt time.Time
@@ -189,6 +198,8 @@ plugin:   method Secrets.Set(context.Context, string, string) error
 plugin:   method Storage.DB() *sql.DB
 plugin:   method Storage.Migrate(context.Context, []Migration) error
 plugin: const APIVersion
+plugin: const DeliveryTargetsExclude
+plugin: const DeliveryTargetsInclude
 plugin: const NotificationChatMessage
 plugin: const NotificationFollow
 plugin: const NotificationFollowRequest
@@ -207,6 +218,7 @@ plugin: const ReversiGameStarted
 plugin: func (*APIError) Error() string
 plugin: func (*StatusError) Error() string
 plugin: func (Definition) Validate() error
+plugin: func (DeliveryTargets) Allows(string) bool
 plugin: func (EffectivePolicyRegistration) Validate() error
 plugin: func ErrNotFound(string, ...any) *StatusError
 plugin: func Errorf(int, string, ...any) *StatusError
@@ -230,6 +242,8 @@ plugin: type CheckedUserRolePolicyContext interface
 plugin: type Config interface
 plugin: type Context interface
 plugin: type Definition struct
+plugin: type DeliveryTargets struct
+plugin: type DeliveryTargetsMode other
 plugin: type EffectivePolicyContribution struct
 plugin: type EffectivePolicyInvalidator interface
 plugin: type EffectivePolicyRegistration struct
@@ -242,6 +256,8 @@ plugin: type Image struct
 plugin: type JobHandler func
 plugin: type Jobs interface
 plugin: type Migration struct
+plugin: type NoteDeliveryPrepareRequest struct
+plugin: type NoteDeliveryRegistration struct
 plugin: type Notification struct
 plugin: type NotificationHandler func
 plugin: type NotificationType other
@@ -259,6 +275,7 @@ plugin: type StatusError struct
 plugin: type Storage interface
 plugin: var ErrAccountNotFound
 plugin: var ErrAccountSuspended
+plugin: var ErrBadNoteOption
 plugin: var ErrBadPeerPayload
 plugin: var ErrInvalidUsername
 plugin: var ErrNoRetry

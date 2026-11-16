@@ -68,6 +68,12 @@ func TestDefinition_Validate_Accepts(t *testing.T) {
 	// 通知の handler だけでもよい (#3469。bot の返事だけをするプラグイン)。
 	notifOnly := Definition{Name: "x", APIVersion: APIVersion, Notifications: func(Context, Notifications) error { return nil }}
 	require.NoError(t, notifOnly.Validate())
+
+	// 配送先の絞り込みだけでもよい (ルートもジョブも持たないプラグイン)。
+	deliveryOnly := Definition{Name: "x", APIVersion: APIVersion, NoteDelivery: func(Context) (NoteDeliveryRegistration, error) {
+		return NoteDeliveryRegistration{}, nil
+	}}
+	require.NoError(t, deliveryOnly.Validate())
 }
 
 func TestDefinition_Validate_Rejects(t *testing.T) {
