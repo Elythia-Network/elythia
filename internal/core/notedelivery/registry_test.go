@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -242,11 +243,55 @@ func TestDenyAll(t *testing.T) {
 
 func TestCall_NilContext(t *testing.T) {
 	var ctx context.Context
-	err := call(ctx, func(ctx context.Context) error {
+	err := call(ctx, callTimeout, "targets", func(ctx context.Context) error {
 		if ctx == nil {
 			return errors.New("nil context")
 		}
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// slowRegistration ignores its context and returns success after d.
+func slowRegistration(d time.Duration) plugin.NoteDeliveryRegistration {
+	return plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error {
+			time.Sleep(d)
+			return nil
+		},
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) {
+			time.Sleep(d)
+			return map[string]plugin.DeliveryTargets{}, nil
+		},
+	}
+}
+
+func TestRules_LateSuccessIsDenied(t *testing.T) {
+	r := New()
+	r.timeout = 10 * time.Millisecond
+	require.NoError(t, r.Add("slow", slowRegistration(50*time.Millisecond)))
+	rule := r.Rule(context.Background(), "n1")
+	assert.True(t, rule.Restricted())
+	assert.False(t, rule.Allows("a.example"))
+}
+
+func TestPrepare_LateSuccessIsAnError(t *testing.T) {
+	r := New()
+	r.timeout = 10 * time.Millisecond
+	require.NoError(t, r.Add("slow", slowRegistration(50*time.Millisecond)))
+	err := r.Prepare(context.Background(), "n1", "u1", map[string]json.RawMessage{"slow": json.RawMessage(`{}`)})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.False(t, errors.Is(err, ErrBadOption))
+}
+
+func TestCall_PanicCarriesValue(t *testing.T) {
+	err := call(context.Background(), callTimeout, "targets", func(context.Context) error { panic("boom") })
+	require.ErrorIs(t, err, errPanicked)
+	assert.Contains(t, err.Error(), "boom")
+}
+
+func TestRegistry_CallTimeoutDefault(t *testing.T) {
+	var nilRegistry *Registry
+	assert.Equal(t, callTimeout, nilRegistry.callTimeout())
+	assert.Equal(t, callTimeout, New().callTimeout())
 }
