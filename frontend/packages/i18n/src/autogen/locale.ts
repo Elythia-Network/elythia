@@ -17422,4 +17422,8 @@ export interface Locale extends ILocale {
          */
         "cleanupConfirm": string;
     };
+    /**
+     * この投稿のプラグインの指定は、予約投稿では使えません。予約を外すか、指定を解除してください。
+     */
+    "pluginNoteOptionsCannotBeScheduled": string;
 }

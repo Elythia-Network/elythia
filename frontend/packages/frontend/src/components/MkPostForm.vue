@@ -104,6 +104,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<button v-tooltip="i18n.ts.mention" class="_button" :class="$style.footerButton" @click="insertMention"><i class="ti ti-at"></i></button>
 			<button v-if="showAddMfmFunction" v-tooltip="i18n.ts.addMfmFunction" :class="['_button', $style.footerButton]" @click="insertMfmFunction"><i class="ti ti-palette"></i></button>
 			<button v-if="postFormActions.length > 0" v-tooltip="i18n.ts.plugins" class="_button" :class="$style.footerButton" @click="showActions"><i class="ti ti-plug"></i></button>
+			<button v-for="option in noteOptionEntries" :key="option.plugin" v-tooltip="option.label()" class="_button" :class="[$style.footerButton, { [$style.footerButtonActive]: pluginOptions[option.plugin] !== undefined }]" :data-testid="`post-form-plugin-option-${option.plugin}`" @click="editNoteOption(option)"><i :class="option.icon"></i></button>
 		</div>
 		<div :class="$style.footerRight">
 			<button v-tooltip="i18n.ts.emoji" :class="['_button', $style.footerButton]" data-testid="post-form-emoji" @click="insertEmoji"><i class="ti ti-mood-happy"></i></button>
@@ -116,7 +117,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { watch, nextTick, onMounted, defineAsyncComponent, provide, shallowRef, ref, computed, useTemplateRef, onUnmounted, onBeforeUnmount } from 'vue';
+import { watch, nextTick, onMounted, defineAsyncComponent, provide, shallowRef, ref, computed, useTemplateRef, onUnmounted, onBeforeUnmount, markRaw } from 'vue';
 import * as mfm from '@/utility/mfm.js';
 import * as Misskey from 'misskey-js';
 import insertTextAtCursor from 'insert-text-at-cursor';
@@ -154,7 +155,8 @@ import { emojiPicker } from '@/utility/emoji-picker.js';
 import { mfmFunctionPicker } from '@/utility/mfm-function-picker.js';
 import { prefer } from '@/preferences.js';
 import { getPluginHandlers } from '@/plugin.js';
-import { transformPastedText } from '@/plugin-api.js';
+import { transformPastedText, noteOptions, isNoteOptionSet } from '@/plugin-api.js';
+import type { NoteOptionRegistration } from '@/plugin-api.js';
 import { DI } from '@/di.js';
 import { globalEvents } from '@/events.js';
 import { checkDragDataType, getDragData } from '@/drag-and-drop.js';
@@ -217,6 +219,11 @@ if (props.initialVisibleUsers) {
 }
 const reactionAcceptance = ref(store.s.reactionAcceptance);
 const scheduledAt = ref<number | null>(null);
+// サーバープラグインのノートごとの指定 (#4199)。設定済みのものだけを
+// 持ち、notes/create の pluginOptions にそのまま送る。投稿した後も残す (公開範囲と同じく、
+// 続けて投稿するときに指定し直さなくてよい。ボタンの強調で今の状態が分かる)。
+const noteOptionEntries = noteOptions();
+const pluginOptions = ref<Record<string, unknown>>({});
 const draghover = ref(false);
 const quoteId = ref<string | null>(null);
 const hasNotSpecifiedMentions = ref(false);
@@ -1016,6 +1023,16 @@ async function post(ev?: PointerEvent) {
 		}
 	}
 
+	// 予約投稿は下書きとして保存し、pluginOptions を受け取らない。黙って送らずに
+	// 投稿すると、絞ったつもりのノートがどこへでも届く (#4199)。
+	if (scheduledAt.value != null && Object.keys(pluginOptions.value).length > 0) {
+		os.alert({
+			type: 'error',
+			text: i18n.ts.pluginNoteOptionsCannotBeScheduled,
+		});
+		return;
+	}
+
 	if (scheduledAt.value != null) {
 		if (uploader.items.value.some(x => x.uploaded == null)) {
 			await uploadFiles();
@@ -1081,6 +1098,7 @@ async function post(ev?: PointerEvent) {
 		visibility: visibility.value,
 		visibleUserIds: visibility.value === 'specified' ? visibleUsers.value.map(u => u.id) : undefined,
 		reactionAcceptance: reactionAcceptance.value,
+		pluginOptions: Object.keys(pluginOptions.value).length > 0 ? JSON.parse(JSON.stringify(pluginOptions.value)) as Record<string, unknown> : undefined,
 	};
 
 	if (withHashtags.value && hashtags.value && hashtags.value.trim() !== '') {
@@ -1212,6 +1230,26 @@ async function postAsScheduled() {
 
 function cancel() {
 	emit('cancel');
+}
+
+async function editNoteOption(option: NoteOptionRegistration) {
+	const { dispose } = await os.popupAsyncWithDialog(import('@/components/MkPluginNoteOptionDialog.vue').then(x => x.default), {
+		title: option.label(),
+		component: markRaw(option.component),
+		initialValue: pluginOptions.value[option.plugin] ?? null,
+	}, {
+		done: (result) => {
+			if (result.canceled) return;
+			const next = { ...pluginOptions.value };
+			if (isNoteOptionSet(option, result.value)) {
+				next[option.plugin] = result.value;
+			} else {
+				delete next[option.plugin];
+			}
+			pluginOptions.value = next;
+		},
+		closed: () => dispose(),
+	});
 }
 
 function insertMention() {
