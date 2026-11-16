@@ -90,9 +90,8 @@ func (s *Server) buildFederation(w *wiring, coreSvcs core, idGen id.Generator) f
 	// Relay 連携 (#161)。relay.Service は AP delivery を必要とするので
 	// deliverService の直後で作る。setter (SetLdSigning) は setupRoutes の元の位置。
 	relaySvc := corerelay.NewService(repository.NewRelayRepository(s.db), sysAcctSvc, apRenderer, deliverService, idGen)
-	noteDeliveryHook := corefederation.NewNoteDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo, noteRepo)
-	// プラグインが絞った配送先 (#4199)。
-	noteDeliveryHook.SetNoteDeliveryRules(s.noteDelivery)
+	// s.noteDelivery はプラグインが絞った配送先 (#4199)。
+	noteDeliveryHook := corefederation.NewNoteDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo, noteRepo, s.noteDelivery)
 	followingDeliveryHook := corefederation.NewFollowingDeliveryHook(deliverService, apRenderer, apURLs)
 	// QuoteRequest への応答 (#3234)。QuoteRequest の handler と、ブロックで承認を
 	// 取り消す QuoteRevoker が共有する。配送の service と renderer しか持たない (#3688)。

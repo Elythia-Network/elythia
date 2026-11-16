@@ -84,7 +84,11 @@ func (h *NoteDeliveryHook) SetQuoteOutbox(q QuoteApprovalRequester) {
 	h.quotes = q
 }
 
-// NewNoteDeliveryHook constructs a NoteDeliveryHook.
+// NewNoteDeliveryHook constructs a NoteDeliveryHook. rules is the plugins
+// that narrow where local notes federate (#4199); nil means none.
+//
+// **rules は構築子の引数で受ける。** 後から渡す形だと、渡し忘れてもビルドも
+// テストも通り、絞ったつもりのノートが全フォロワーと relay へ流れる。
 func NewNoteDeliveryHook(
 	deliver *DeliverService,
 	renderer *activitypub.Renderer,
@@ -92,6 +96,7 @@ func NewNoteDeliveryHook(
 	idGen id.Generator,
 	userRepo repository.UserRepository,
 	noteRepo repository.NoteRepository,
+	rules *notedelivery.Registry,
 ) *NoteDeliveryHook {
 	return &NoteDeliveryHook{
 		deliver:  deliver,
@@ -100,6 +105,7 @@ func NewNoteDeliveryHook(
 		idGen:    idGen,
 		userRepo: userRepo,
 		noteRepo: noteRepo,
+		rules:    rules,
 	}
 }
 

@@ -62,7 +62,7 @@ func newHookSetupWithFollowing(t *testing.T) (*PollDeliveryHook, *recordingEnque
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	deliver := NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
-	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen)
+	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen, nil)
 	return hook, enq, userRepo, keypairRepo, followingRepo, idGen
 }
 

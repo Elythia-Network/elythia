@@ -1197,9 +1197,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 
 	// poll federation hook: ローカル user が remote poll に投票したら AP Note
 	// (with name + inReplyTo) を author の inbox に配信する (#690)。
-	pollDeliveryHook := corefederation.NewPollDeliveryHook(apRenderer, deliverService, userRepo, apURLs, idGen)
 	// Update(Question) はノートを丸ごと持つので、Create と同じ相手にだけ配る (#4199)。
-	pollDeliveryHook.SetNoteDeliveryRules(s.noteDelivery)
+	pollDeliveryHook := corefederation.NewPollDeliveryHook(apRenderer, deliverService, userRepo, apURLs, idGen, s.noteDelivery)
 	pollService.SetFederationHook(pollDeliveryHook)
 
 	// Relay 連携 (#161): relay actor system account + relay.Service。
