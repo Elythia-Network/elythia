@@ -12,6 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/config"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -56,6 +57,9 @@ type ssrMetaHandler struct {
 	// entityPacker は entity を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3796)。組み立てで渡す。
 	entityPacker *entity.Packer
+	// noteDelivery はプラグインが配送先を絞ったノートを見分ける (#4199)。nil なら
+	// 絞らない。渡し忘れをビルドで止めるため、構築子の引数で受ける。
+	noteDelivery *notedelivery.Registry
 }
 
 // ssrMetaDeps carries the repositories the permalink pages read from.
@@ -88,6 +92,7 @@ func newSSRMetaHandler(
 	adRepo repository.AdRepository,
 	deps ssrMetaDeps,
 	entityPacker *entity.Packer,
+	noteDelivery *notedelivery.Registry,
 ) *ssrMetaHandler {
 	return &ssrMetaHandler{
 		cfg:           cfg,
@@ -111,6 +116,7 @@ func newSSRMetaHandler(
 		announceRepo:  deps.Announcement,
 		idGen:         deps.IDGen,
 		entityPacker:  entityPacker,
+		noteDelivery:  noteDelivery,
 	}
 }
 
@@ -742,6 +748,12 @@ func (h *ssrMetaHandler) NotePage(c echo.Context) error {
 	}
 	if !h.visibleToVisitor(note.UserHost) {
 		return h.renderBareShell(c, noteIsRemote(note))
+	}
+	// プラグインが配送先を絞ったノートは meta を出さない (#4199)。外したサーバーが
+	// リンクカードを作るために /notes/:id を取ると、署名も User-Agent も無しに
+	// 要約と添付を読めてしまう。条件を読めないとき (DenyAll) も出さない。
+	if note.UserHost == nil && h.noteDelivery.Rule(c.Request().Context(), note.ID).Restricted() {
+		return h.renderBareShell(c, false)
 	}
 	title := ""
 	if note.User != nil {

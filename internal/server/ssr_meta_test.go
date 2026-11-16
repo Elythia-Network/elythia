@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,10 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/elythia-network/elythia/plugin"
 	"gorm.io/datatypes"
 )
 
@@ -28,7 +32,7 @@ func newSSRTestHandler(t *testing.T) (*ssrMetaHandler, *testutil.MockUserReposit
 	h := newSSRMetaHandler(
 		&config.Config{URL: "https://example.test", Host: "example.test"},
 		metaRepo, nil, nil, nil, nil,
-		ssrMetaDeps{User: userRepo, Note: noteRepo, IDGen: testIDGen(t)}, nil)
+		ssrMetaDeps{User: userRepo, Note: noteRepo, IDGen: testIDGen(t)}, nil, nil)
 
 	return h, userRepo, noteRepo
 }
@@ -250,7 +254,7 @@ func TestPrefersHTML(t *testing.T) {
 func TestSSRHandlers_NilReposServeShell(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
-	h := newSSRMetaHandler(&config.Config{URL: "https://example.test"}, metaRepo, nil, nil, nil, nil, ssrMetaDeps{IDGen: testIDGen(t)}, nil)
+	h := newSSRMetaHandler(&config.Config{URL: "https://example.test"}, metaRepo, nil, nil, nil, nil, ssrMetaDeps{IDGen: testIDGen(t)}, nil, nil)
 
 	for name, handler := range map[string]echo.HandlerFunc{
 		"user":    h.UserPage,
@@ -1230,4 +1234,80 @@ func TestSSRRemoteContentStaysNoindexWhenHidden(t *testing.T) {
 			})
 		}
 	})
+}
+
+// ssrDeliveryRegistry returns a registry whose plugin restricts the notes in
+// targets, or fails every lookup when fail is set.
+func ssrDeliveryRegistry(t *testing.T, targets map[string]plugin.DeliveryTargets, fail bool, asked *[]string) *notedelivery.Registry {
+	t.Helper()
+	r := notedelivery.New()
+	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
+		Targets: func(_ context.Context, ids []string) (map[string]plugin.DeliveryTargets, error) {
+			if asked != nil {
+				*asked = append(*asked, ids...)
+			}
+			if fail {
+				return nil, errors.New("plugin down")
+			}
+			return targets, nil
+		},
+	}))
+	return r
+}
+
+// A note a plugin restricts gets no meta: an excluded server building a link
+// card from /notes/:id would otherwise read its summary without signing or
+// naming itself (#4199).
+func TestSSRNotePage_DeliveryRestrictedNoteHasNoMeta(t *testing.T) {
+	for name, tc := range map[string]struct {
+		targets  map[string]plugin.DeliveryTargets
+		fail     bool
+		wantMeta bool
+	}{
+		"exclude":           {targets: map[string]plugin.DeliveryTargets{"n1": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"bad.example"}}}},
+		"include":           {targets: map[string]plugin.DeliveryTargets{"n1": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}}}},
+		"plugin failure":    {fail: true},
+		"not restricted":    {targets: map[string]plugin.DeliveryTargets{}, wantMeta: true},
+		"other note listed": {targets: map[string]plugin.DeliveryTargets{"n2": {Mode: plugin.DeliveryTargetsInclude}}, wantMeta: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, userRepo, noteRepo := newSSRTestHandler(t)
+			h.noteDelivery = ssrDeliveryRegistry(t, tc.targets, tc.fail, nil)
+			alice := ssrTestUser("u1", "alice")
+			userRepo.Users["u1"] = alice
+			text := "narrowed"
+			noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", User: alice, Text: &text, Visibility: model.NoteVisibilityPublic}
+
+			body := ssrGet(t, h.NotePage, "/notes/n1", map[string]string{"id": "n1"}).Body.String()
+
+			if tc.wantMeta {
+				assert.Contains(t, body, `<meta name="misskey:note-id" content="n1">`)
+				assert.Contains(t, body, "narrowed")
+				return
+			}
+			assert.NotContains(t, body, "misskey:note-id")
+			assert.NotContains(t, body, "narrowed")
+		})
+	}
+}
+
+// Remote notes are never narrowed by the plugins, so they are not asked about.
+func TestSSRNotePage_RemoteNoteDoesNotAskThePlugins(t *testing.T) {
+	h, userRepo, noteRepo := newSSRTestHandler(t)
+	// リモートの投稿も meta を出す構成にして、判定の手前で止まらないようにする。
+	h.metaRepo.(*testutil.MockMetaRepository).Meta.UgcVisibilityForVisitor = "all"
+	var asked []string
+	h.noteDelivery = ssrDeliveryRegistry(t, map[string]plugin.DeliveryTargets{}, false, &asked)
+	host := "remote.example"
+	bob := ssrTestUser("u2", "bob")
+	bob.Host = &host
+	userRepo.Users["u2"] = bob
+	text := "remote"
+	noteRepo.Notes["n2"] = &model.Note{ID: "n2", UserID: "u2", User: bob, UserHost: &host, Text: &text, Visibility: model.NoteVisibilityPublic}
+
+	body := ssrGet(t, h.NotePage, "/notes/n2", map[string]string{"id": "n2"}).Body.String()
+
+	assert.Contains(t, body, `<meta name="misskey:note-id" content="n2">`)
+	assert.Empty(t, asked)
 }
