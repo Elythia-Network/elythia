@@ -187,12 +187,14 @@ func TestNoteDeliveryHook_Rules_SendQuoteRequest(t *testing.T) {
 	hook.SetNoteDeliveryRules(deliveryRules(t, map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"b.example"}},
 	}, false))
+	assert.False(t, hook.QuoteRequestAllowed(note, bob))
 	require.NoError(t, hook.SendQuoteRequest(note, "https://b.example/notes/1", bob))
 	assert.Empty(t, enq.calls, "the quoted author's host is excluded")
 
 	hook.SetNoteDeliveryRules(deliveryRules(t, map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"b.example"}},
 	}, false))
+	assert.True(t, hook.QuoteRequestAllowed(note, bob))
 	require.NoError(t, hook.SendQuoteRequest(note, "https://b.example/notes/1", bob))
 	assert.Equal(t, []string{*bob.Inbox}, enqueuedInboxes(enq))
 }

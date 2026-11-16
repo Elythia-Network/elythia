@@ -347,6 +347,14 @@ func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.No
 	}
 }
 
+// QuoteRequestAllowed implements QuoteOutboxDelivery (#4199).
+//
+// QuoteRequest は引用したノートを instrument に丸ごと持つ。配送先を絞った
+// ノートなら、引用元の作者のホストが許されるときだけ送る。
+func (h *NoteDeliveryHook) QuoteRequestAllowed(note *model.Note, quotedAuthor *model.User) bool {
+	return h.ruleFor(note).Allows(hostOf(quotedAuthor))
+}
+
 // SendQuoteRequest implements QuoteOutboxDelivery (#3234).
 //
 // **配送の queue では再試行しない** (#3238)。Mastodon は QuoteRequest を受けると
@@ -355,9 +363,9 @@ func (h *NoteDeliveryHook) deliverToSpecified(author *model.User, note *model.No
 // 取り消しと誤認する)。送り直しは、保留中かを確かめてから送る予定の時刻のジョブ
 // (QuoteOutbox.ResendPending) だけが行う。
 func (h *NoteDeliveryHook) SendQuoteRequest(note *model.Note, quotedURI string, quotedAuthor *model.User) error {
-	// QuoteRequest は引用したノートを instrument に丸ごと持つ。配送先を絞った
-	// ノートなら、引用元の作者のホストが許されるときだけ送る (#4199)。
-	if !h.ruleFor(note).Allows(hostOf(quotedAuthor)) {
+	// QuoteOutbox は送る前に QuoteRequestAllowed を確かめるが、条件はその後に
+	// 変わりうるので、送る直前にも確かめる。
+	if !h.QuoteRequestAllowed(note, quotedAuthor) {
 		return nil
 	}
 	body, err := json.Marshal(h.renderer.RenderQuoteRequest(note, quotedURI, h.idGen))

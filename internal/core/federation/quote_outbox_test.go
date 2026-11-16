@@ -181,6 +181,11 @@ type qoDelivery struct {
 	requests []string // "<noteId> <quotedURI> <authorId>"
 	updates  []string // "<noteId> <authorId>"
 	err      error
+	withheld map[string]bool // note IDs whose QuoteRequest the delivery rules withhold
+}
+
+func (d *qoDelivery) QuoteRequestAllowed(note *model.Note, _ *model.User) bool {
+	return !d.withheld[note.ID]
 }
 
 func (d *qoDelivery) SendQuoteRequest(note *model.Note, quotedURI string, author *model.User) error {
@@ -323,6 +328,33 @@ func TestQuoteOutbox_RequestApproval(t *testing.T) {
 	assert.Equal(t, model.QuoteRequestPending, row.State)
 	// 承認が返るまでは quoteAuthorization を付けない。
 	assert.Empty(t, e.approval(t, n))
+}
+
+// A QuoteRequest the delivery rules withhold leaves no pending row and no
+// resend: the resends would never reach the author (#4199).
+func TestQuoteOutbox_RequestApprovalWithheld(t *testing.T) {
+	e := newQOEnv(t)
+	sched := &qoScheduler{}
+	e.o.SetResendScheduler(sched)
+	e.delivery.withheld = map[string]bool{"q1": true}
+	require.NoError(t, e.o.RequestApproval(e.quote("q1", "remote", model.NoteVisibilityPublic), e.dave))
+	assert.Empty(t, e.delivery.requests)
+	assert.Empty(t, e.requests.rows)
+	assert.Empty(t, sched.got)
+}
+
+// A pending row left before the rules withheld the note is not resent.
+func TestQuoteOutbox_ResendSkipsWithheld(t *testing.T) {
+	e := newQOEnv(t)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.h.now = func() time.Time { return now }
+	require.NoError(t, e.o.RequestApproval(e.quote("q1", "remote", model.NoteVisibilityPublic), e.dave))
+	require.Len(t, e.delivery.requests, 1)
+	e.delivery.withheld = map[string]bool{"q1": true}
+	sent, err := e.o.ResendPending(now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, sent)
+	assert.Len(t, e.delivery.requests, 1)
 }
 
 func TestQuoteOutbox_RequestApprovalSkips(t *testing.T) {
