@@ -19,6 +19,7 @@ import (
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
 	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/core/userpack"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -114,6 +115,8 @@ type Handler struct {
 	// fetchSigner は /notes/:id と /notes/:id/activity の署名付き GET から、署名した
 	// リモートの利用者を特定する (#3914)。未配線なら公開の投稿だけを返す (従来どおり)。
 	fetchSigner FetchSignerAuthenticator
+	// noteDelivery はプラグインが絞った照会先 (#4199)。nil なら絞らない。
+	noteDelivery *notedelivery.Registry
 	// fetchDelivery / fetchDeliverSoftware は、署名した人のホストへ配送するかの
 	// 判定 (#3914)。配送しない相手には見せない投稿を返さない。
 	fetchDelivery        DeliveryGate
@@ -1162,6 +1165,11 @@ func (h *Handler) Note(c echo.Context) error {
 	if n.LocalOnly {
 		return c.NoContent(http.StatusNotFound)
 	}
+	// プラグインが配送先を絞ったノートは、外したホストと、署名の無い照会には
+	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。
+	if h.hiddenByDeliveryRule(c, n) {
+		return c.NoContent(http.StatusNotFound)
+	}
 	// リモートノートは原本 URI へリダイレクトする (upstream
 	// ActivityPubServerService の /notes/:note と同じ)。これが無いと、他サーバー
 	// がこのインスタンスの URL 経由で第三サーバーの投稿を照会したとき、
@@ -1238,10 +1246,15 @@ func (h *Handler) Featured(c echo.Context) error {
 	}
 	items := make([]any, 0, len(notes))
 	renderer := h.referenceRenderer(c)
+	hidden := h.hiddenByDeliveryRules(c, notes)
 	for _, n := range notes {
 		h.seedAPNote(c, n)
 		// upstream featured の filter: !localOnly && visibility ∈ {public, home}。
 		if n.LocalOnly || (n.Visibility != model.NoteVisibilityPublic && n.Visibility != model.NoteVisibilityHome) {
+			continue
+		}
+		// 配送先を絞ったノートは、照会できる相手にだけ出す (#4199)。
+		if hidden[n.ID] {
 			continue
 		}
 		rn := renderer.RenderNote(n, h.idGen)
@@ -1507,7 +1520,14 @@ func (h *Handler) Outbox(c echo.Context) error {
 	}
 
 	items := make([]any, 0, len(notes))
+	// 配送先を絞ったノートは、照会できる相手にだけ出す (#4199)。
+	// 件数 (totalItems) は数えたままにする。数を減らすと、絞ったノートの有無が
+	// 件数の差から分かる。
+	hidden := h.hiddenByDeliveryRules(c, notes)
 	for _, n := range notes {
+		if hidden[n.ID] {
+			continue
+		}
 		h.seedAPNote(c, n)
 		item := h.packOutboxActivity(c, bundle.User, n)
 		available, err := h.validateAPReferences(c, item)
@@ -1560,7 +1580,7 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	// はこのサーバーの発行物ではないので、redirect でなく 404)。visibility は
 	// showNoteForFetch が見て (署名の無い GET には public / home だけ)、localOnly は
 	// ここで弾く (Note と同じ)。
-	if n.UserHost != nil || n.LocalOnly {
+	if n.UserHost != nil || n.LocalOnly || h.hiddenByDeliveryRule(c, n) {
 		return c.NoContent(http.StatusNotFound)
 	}
 	if h.localFederationObserver != nil {

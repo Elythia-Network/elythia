@@ -172,6 +172,13 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 				return errPluginEffectivePolicySetup
 			}
 		}
+		// **ロールに関係なく登録する (#4199)。** 条件の保存は API の
+		// プロセス、投票の Update(Question) の配送はキューのプロセスで走る。
+		if def.NoteDelivery != nil {
+			if err := s.registerPluginNoteDelivery(def, pctx); err != nil {
+				return fmt.Errorf("plugin %q: 配送先の絞り込みの登録に失敗しました: %w", def.Name, err)
+			}
+		}
 		prepared = append(prepared, preparedPlugin{def: def, ctx: pctx, peer: peer})
 	}
 
@@ -285,6 +292,7 @@ func (s *Server) setupPlugins(api *echo.Group, plugins []plugin.Definition, open
 			"secrets", len(def.Secrets),
 			"jobs", def.Jobs != nil && s.role.RunsQueue(),
 			"notifications", def.Notifications != nil && s.role.RunsQueue(),
+			"noteDelivery", def.NoteDelivery != nil,
 			"migrations", len(def.Migrations),
 			"schema", schema)
 	}

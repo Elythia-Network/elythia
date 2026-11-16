@@ -24,6 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/chart"
 	"github.com/elythia-network/elythia/internal/core/event"
 	corefederation "github.com/elythia-network/elythia/internal/core/federation"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/core/pluginaccount"
 	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	corereaction "github.com/elythia-network/elythia/internal/core/reaction"
@@ -111,6 +112,11 @@ type Server struct {
 	// setupRoutes で setupPlugins より前に入る。nil のときは秘密の値の入力口を
 	// 張らず、プラグインには鍵の無い口 (呼ぶと ErrSecretsUnavailable) を渡す。
 	pluginSecrets *pluginsecret.Service
+	// noteDelivery はノートの配送先を絞るプラグイン (#4199)。
+	// 構築の最初に空で作り、配送の hook・notes/create・AP の照会へ同じものを
+	// 渡す。setupPlugins が中身を登録する (登録は配線より後になるため、値ではなく
+	// 共有の参照で渡す)。
+	noteDelivery *notedelivery.Registry
 	// roleService は HTTP と queue が共有する process-local policy registry。
 	// 有効な plugin provider の登録は起動時だけ行い、enabled の変更には
 	// 再起動を要求する。
@@ -904,6 +910,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 		queueScheduler: queueScheduler,
 		queueInspector: queueInspector,
 		queueMetrics:   newQueueMetrics(queueDriver),
+		noteDelivery:   notedelivery.New(),
 
 		// admin UI 向けの短期ランタイム統計 (#2277)。config に関係なく常に
 		// 有効。ring buffer 固定長なのでメモリは queue 数 × 数 KB。

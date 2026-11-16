@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
 	"github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/core/reaction"
@@ -35,6 +37,9 @@ import (
 
 // Handler handles note-related API endpoints.
 type Handler struct {
+	// noteDelivery は notes/create の pluginOptions を受け取るプラグイン
+	// (#4199)。nil なら pluginOptions の項目は全部 400 になる。
+	noteDelivery    *notedelivery.Registry
 	noteRepo        repository.NoteRepository
 	piningRepo      repository.UserNotePiningRepository
 	createService   *note.CreateService
@@ -201,6 +206,12 @@ func (h *Handler) gateRemoteNoteAction(c echo.Context, user *model.User, noteID 
 		return false
 	}
 	return true
+}
+
+// SetNoteDeliveryRules wires the plugins that receive notes/create
+// pluginOptions (#4199).
+func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
+	h.noteDelivery = r
 }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
@@ -499,6 +510,10 @@ type CreateRequest struct {
 	NoExtractMentions bool `json:"noExtractMentions"`
 	NoExtractHashtags bool `json:"noExtractHashtags"`
 	NoExtractEmojis   bool `json:"noExtractEmojis"`
+	// PluginOptions is an Elythia extension (#4199): each entry
+	// is handed, unread, to the plugin it names (plugin.NoteDeliveryRegistration.Prepare)
+	// before the note is stored.
+	PluginOptions map[string]json.RawMessage `json:"pluginOptions"`
 }
 
 // PollRequest is the poll part of a create note request.
@@ -548,6 +563,13 @@ func (h *Handler) Create(c echo.Context) error {
 		NoExtractMentions:  req.NoExtractMentions,
 		NoExtractHashtags:  req.NoExtractHashtags,
 		NoExtractEmojis:    req.NoExtractEmojis,
+	}
+	if len(req.PluginOptions) > 0 {
+		options := req.PluginOptions
+		reqCtx := c.Request().Context()
+		in.BeforeInsert = func(noteID string) error {
+			return h.noteDelivery.Prepare(reqCtx, noteID, user.ID, options)
+		}
 	}
 
 	if req.Poll != nil {
@@ -623,6 +645,9 @@ func (h *Handler) Create(c echo.Context) error {
 			return apierr.JSONContainsProhibitedWords(c)
 		case errors.Is(err, note.ErrContainsTooManyMentions):
 			return apierr.JSONContainsTooManyMentions(c)
+		case errors.Is(err, notedelivery.ErrUnknownPlugin), errors.Is(err, notedelivery.ErrBadOption):
+			// プラグインの返したメッセージは利用者に見せない (内部の事情を含みうる)。
+			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "pluginOptions is invalid.", apierr.UUIDInvalidParam))
 		}
 		return apierr.JSONInternalError(c)
 	}

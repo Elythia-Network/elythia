@@ -970,3 +970,74 @@ func TestDeliverToUser_RemoteEmptyInbox(t *testing.T) {
 	require.NoError(t, svc.DeliverToUser("alice", rem, []byte(`{}`)))
 	assert.Empty(t, enq.calls)
 }
+
+// DeliverToFollowersAllowed judges by the follower's own host, not the inbox
+// URL's host (#4199).
+func TestDeliverToFollowersAllowed_FiltersByFollowerHost(t *testing.T) {
+	svc, enq, userRepo, followingRepo, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	split := "https://web.acct.example/inbox"
+	other := "https://other.example/users/x/inbox"
+	followingRepo.RemoteInboxes["alice"] = []string{split, other}
+	followingRepo.RemoteSharedInboxes[split] = true
+	followingRepo.RemoteInboxHosts[split] = []string{"acct.example"}
+
+	allowAcct := func(host string) bool { return host == "acct.example" }
+	require.NoError(t, svc.DeliverToFollowersAllowed("alice", []byte(`{}`), nil, allowAcct))
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, split, enq.calls[0].Inbox)
+	assert.True(t, enq.calls[0].IsSharedInbox)
+
+	enq.calls = nil
+	allowWeb := func(host string) bool { return host == "web.acct.example" }
+	require.NoError(t, svc.DeliverToFollowersAllowed("alice", []byte(`{}`), nil, allowWeb))
+	assert.Empty(t, enq.calls, "the inbox URL's host must not be what is judged")
+}
+
+// A shared inbox used by an allowed and a denied host is delivered once.
+func TestDeliverToFollowersAllowed_SharedInboxOfMixedHosts(t *testing.T) {
+	svc, enq, userRepo, followingRepo, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	shared := "https://remote.example/inbox"
+	followingRepo.RemoteInboxes["alice"] = []string{shared}
+	followingRepo.RemoteInboxHosts[shared] = []string{"denied.example", "allowed.example", "allowed2.example"}
+
+	allow := func(host string) bool { return host != "denied.example" }
+	require.NoError(t, svc.DeliverToFollowersAllowed("alice", []byte(`{}`), nil, allow))
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, shared, enq.calls[0].Inbox)
+}
+
+func TestDeliverToFollowersAllowed_HonorsExclude(t *testing.T) {
+	svc, enq, userRepo, followingRepo, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes["alice"] = []string{"https://a.example/inbox", "https://b.example/inbox"}
+
+	allowAll := func(string) bool { return true }
+	require.NoError(t, svc.DeliverToFollowersAllowed("alice", []byte(`{}`), map[string]bool{"https://a.example/inbox": true}, allowAll))
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, "https://b.example/inbox", enq.calls[0].Inbox)
+
+	enq.calls = nil
+	denyAll := func(string) bool { return false }
+	require.NoError(t, svc.DeliverToFollowersAllowed("alice", []byte(`{}`), nil, denyAll))
+	assert.Empty(t, enq.calls)
+}
+
+type failingListInboxHostsRepo struct {
+	*testutil.MockFollowingRepository
+}
+
+func (f *failingListInboxHostsRepo) ListRemoteFollowerInboxHosts(_ string) ([]model.RemoteInboxHost, error) {
+	return nil, errors.New("db down")
+}
+
+func TestDeliverToFollowersAllowed_RepoError(t *testing.T) {
+	_, _, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	failing := &failingListInboxHostsRepo{MockFollowingRepository: testutil.NewMockFollowingRepository()}
+	urls := activitypub.NewURLBuilder("https://example.com")
+	svc := federation.NewDeliverService(&stubEnqueuer{}, userRepo, failing, keypairRepo, urls, nil)
+	err := svc.DeliverToFollowersAllowed("alice", []byte(`{}`), nil, func(string) bool { return true })
+	assert.Error(t, err)
+}

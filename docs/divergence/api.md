@@ -401,6 +401,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `admin/show-user` | `withSignins` | `false`でサインインの履歴を返さない (同梱のfrontendのIPの照会が送る)。省略と`null`は履歴を含める。#3867までこの表に載せていなかった ([deployment.md](../deployment.md) に説明がある) |
 | `admin/drive/files` | `host` | ファイルのホストで絞り込む。`hostname` (本家の引数) より優先する。同梱のfrontendは`hostname`を送る。#3867まで記録していなかった |
 | `notes` | `noteIds` | 公開のノートの一覧の代わりに、指定した id のノートを返す (100 件まで。`notes/show-partial-bulk`と同じ上限)。同梱のfrontendは`notes/show-partial-bulk`を使う。#3867までこの表に載せていなかった ([operations.md](operations.md)・[security.md](security.md) に記録がある)。100 件を超えると先頭の 100 件に切っていた (#3867から400) |
+| `notes/create` | `pluginOptions` | ノートの配送先を絞るプラグイン (`plugin.Definition.NoteDelivery`) への指定 (#4199)。プラグインの名前をキーにしたobjectで、値は本体が読まずにそのプラグインへ渡す。そのプラグインが入っていない名前は`INVALID_PARAM` (400) にする (絞ったつもりの指定を黙って捨てない)。プラグインが値を拒んだときも`INVALID_PARAM`で、どちらの場合もノートは作らない。値の`null`は省略と同じ。予約投稿 (`notes/drafts/create`) は受け取らない。プラグインの入っていないサーバーでは、本家と同じく何も絞らない。詳細は[プラグインの作者向けの文書](../plugins/authoring.md#ノートの配送先を絞る) |
 | `notes/global-timeline` | `allowPartial` | `limit`に満たなくても読み進めずに返す。本家は他のtimeline (`notes/timeline`・`notes/local-timeline`など) にだけ持ち、同梱のfrontendはどのtimelineにも送る。#3867までこの表に載せていなかった ([approximations.md](approximations.md)・[operations.md](operations.md) に記述がある) |
 | `federation/instances` | `sinceId` / `untilId` / `sinceDate` / `untilDate` | 一覧のカーソル (#493、#1173)。本家は`offset`だけを持つ。#3867まで記録していなかった |
 | `i/move` | `password` | 渡したときだけアカウントのパスワードを照合する (#1546)。同梱のfrontendは送らない。#3867まで記録していなかった |

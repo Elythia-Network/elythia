@@ -129,3 +129,13 @@ type RemoteInbox struct {
 	Inbox  string
 	Shared bool
 }
+
+// RemoteInboxHost is a [RemoteInbox] together with the host of a remote user
+// it was resolved from (#4199).
+//
+// 同じ inbox (shared inbox) を別のホストの利用者が共有していれば、ホストごとに
+// 1 行になる。配送先をホストで絞るときに使う。
+type RemoteInboxHost struct {
+	RemoteInbox
+	Host string
+}

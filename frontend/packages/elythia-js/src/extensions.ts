@@ -172,6 +172,14 @@ export type ElythiaRequestExtensions = {
 		 */
 		noteIds?: string[];
 	};
+	'notes/create': {
+		/**
+		 * Options for the server plugins that narrow where the note federates,
+		 * keyed by plugin name (#4199). A name no such plugin owns
+		 * is rejected with `INVALID_PARAM`.
+		 */
+		pluginOptions?: Record<string, unknown>;
+	};
 	'pages/create': {
 		/** Who can see the Page (#3479). Defaults to `public`. */
 		visibility?: PageVisibility;

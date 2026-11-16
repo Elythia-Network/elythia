@@ -112,6 +112,13 @@ type CreateInput struct {
 	NoExtractMentions bool
 	NoExtractHashtags bool
 	NoExtractEmojis   bool
+	// BeforeInsert runs after every check and right before the note row is
+	// written, with the ID the note will be stored under. An error aborts the
+	// creation and is returned as is. nil で何もしない。
+	//
+	// プラグインが配送先の条件を保存するのに使う (#4199)。保存の
+	// 後に書くと、条件が書かれる前に配送が走りうる。
+	BeforeInsert func(noteID string) error
 }
 
 // PollInput represents the poll part of a create note input.
@@ -1007,6 +1014,12 @@ func (s *CreateService) Create(in CreateInput) (*model.Note, error) {
 		}
 		if names := mfm.CollectEmojiCodes(text, cw); len(names) > 0 {
 			note.Emojis = names
+		}
+	}
+
+	if in.BeforeInsert != nil {
+		if err := in.BeforeInsert(noteID); err != nil {
+			return nil, err
 		}
 	}
 
