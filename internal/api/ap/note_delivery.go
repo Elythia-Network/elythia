@@ -53,12 +53,21 @@ func userAgentHost(userAgent string) string {
 	return ""
 }
 
+// fetchRequester is who fetched, as fetchHost tells it.
+type fetchRequester struct {
+	host     string
+	rejected bool
+}
+
 // fetchHost returns the host of the server that is fetching, or "" when it
-// cannot be told.
+// cannot be told. rejected is true when the signature verified but the
+// signer is one this server does not serve.
 //
 //  1. 署名を本体が持っている鍵で確かめられれば、署名した利用者のホスト
 //     (FetchSignerAuthenticator、#3914)。署名した利用者が凍結・削除されているか、
-//     こちらが配送しない相手 (signerHostAllowed) なら "" にする
+//     こちらが配送しない相手 (signerHostAllowed) なら rejected にする。"" を返すだけ
+//     だと、exclude のノートは「相手が分からない」として見せてしまい、外したホストが
+//     署名を付けるだけで照会できる
 //  2. 署名が無いか、確かめられなければ、User-Agent に書かれたホスト。Misskey と
 //     Mastodon は自分の URL を User-Agent に入れる (CherryPick と同じ判定)
 //
@@ -69,11 +78,11 @@ func userAgentHost(userAgent string) string {
 // ときは、User-Agent を見ない。
 //
 // 自分自身を名乗る User-Agent は "" にする (自分のホストを指定する意味は無い)。
-func (h *Handler) fetchHost(c echo.Context) string {
-	if v, ok := c.Get(fetchHostKey).(string); ok {
-		return v
+func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
+	if v, ok := c.Get(fetchHostKey).(fetchRequester); ok {
+		return v.host, v.rejected
 	}
-	host, signed := "", false
+	signed := false
 	req := c.Request()
 	if h.fetchSigner != nil && req.Header.Get("Signature") != "" {
 		signer, err := h.fetchSigner.AuthenticateFetch(req)
@@ -83,7 +92,7 @@ func (h *Handler) fetchHost(c echo.Context) string {
 		case signer == nil:
 		case signer.IsSuspended || signer.IsDeleted || !h.signerHostAllowed(signer):
 			// 確かめられたが見せない相手。User-Agent で名乗り直させない。
-			signed = true
+			signed, rejected = true, true
 		default:
 			host, signed = *signer.Host, true
 		}
@@ -94,8 +103,8 @@ func (h *Handler) fetchHost(c echo.Context) string {
 			host = ""
 		}
 	}
-	c.Set(fetchHostKey, host)
-	return host
+	c.Set(fetchHostKey, fetchRequester{host: host, rejected: rejected})
+	return host, rejected
 }
 
 // hiddenByDeliveryRules returns the IDs of the local notes in notes that the
@@ -103,7 +112,8 @@ func (h *Handler) fetchHost(c echo.Context) string {
 //
 // 絞られたノートだけが対象。相手が分からない照会は、include のノートには
 // 見せず、exclude のノートには見せる (外したホストかどうかを決められないので、
-// 利用者が選んだ側の既定に倒す)。署名を確かめるのは、絞られたノートがあった
+// 利用者が選んだ側の既定に倒す)。署名を確かめたうえで断った相手には、絞られた
+// ノートを1つも見せない。署名を確かめるのは、絞られたノートがあった
 // ときだけにする。リモートのノートは原本のサーバーへ転送するものなので見ない。
 func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) map[string]bool {
 	if h.noteDelivery.Empty() {
@@ -122,7 +132,10 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) map
 	var hidden map[string]bool
 	for _, id := range ids {
 		rule := rules[id]
-		if !rule.Restricted() || rule.Allows(h.fetchHost(c)) {
+		if !rule.Restricted() {
+			continue
+		}
+		if host, rejected := h.fetchHost(c); !rejected && rule.Allows(host) {
 			continue
 		}
 		if hidden == nil {

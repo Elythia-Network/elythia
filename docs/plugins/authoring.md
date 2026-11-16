@@ -640,7 +640,7 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 - **`Targets`は配送と照会のたびに呼ばれる。** 1回に渡すIDは20件まで。条件の無いノートは返す map に入れない。**エラー・panic・5秒の期限切れは「どこにも配らない・誰にも見せない」になる**。配送の再試行は無いので、障害のあいだに作られたノートは連合しないまま残る
 - **ホストは利用者の`host`と完全一致で比べる。** 配送ではフォロワー・宛先の利用者の`host`を見る。inboxのURLのホストではない (利用者のドメインとサーバーのドメインを分けたサーバーで、判定がずれるため)。比べる前に小文字・punycodeにそろえるのはプラグインの役目
 - **絞ったノートはrelayへ流さない。** relayは受け取ったものを加盟する全サーバーへ配り直すので、ホストで絞れない
-- **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す
+- **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。署名は確かめられたが、署名した利用者が凍結・削除されているか、こちらが配送しない相手のときは、絞ったノートを1つも見せない (空文字として扱うと、外したホストが署名を付けるだけでexcludeのノートを照会できるため)。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す
 - **User-Agentは相手が自由に書ける。** 外したホストはUser-Agentを書き換えれば照会でき、許したホストを名乗ればincludeのノートも照会できる。照会の判定は、信頼しないサーバーへ配送しないための補助と考えること
 - 適用するのは、Create・Announce (リノート)・引用の承認に伴うUpdate・投票のUpdate(Question)・QuoteRequestの配送と、上の照会。Deleteは絞らない (中身を持たず、届いていない相手には何も起きない)
 - **登録はロールに関係なく行われる。** 条件の保存はAPIのプロセス、投票のUpdateの配送はキューのプロセスで走るため。登録 (`NoteDelivery`の呼び出し) に失敗すると起動を止める

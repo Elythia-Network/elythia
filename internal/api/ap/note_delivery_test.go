@@ -137,6 +137,36 @@ func TestNoteDeliveryRules_SignerRejected(t *testing.T) {
 	})
 }
 
+// A signer this server refuses must not read an exclude note as an unknown
+// host: the excluded host would only have to sign its fetch (#4199).
+func TestNoteDeliveryRules_SignerRejectedExclude(t *testing.T) {
+	targets := map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"remote.example"}}}
+	tests := []struct {
+		name   string
+		reject func(f *signedFetchFixture)
+	}{
+		{name: "suspended", reject: func(f *signedFetchFixture) { f.bob.IsSuspended = true }},
+		{name: "deleted", reject: func(f *signedFetchFixture) { f.bob.IsDeleted = true }},
+		{name: "host this server does not deliver to", reject: func(f *signedFetchFixture) {
+			f.h.SetFetchSigner(f.signer, stubDeliveryGate{"remote.example": true}, apShowSoftwareBlocker{})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(apDeliveryRules(t, targets))
+			tt.reject(f)
+			assert.Equal(t, http.StatusNotFound, f.fetch(t, f.h.Note, "n-public", true))
+			assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, "Misskey/2025.1.0 (https://other.example)", true))
+		})
+	}
+	t.Run("unsigned unknown host still reads an exclude note", func(t *testing.T) {
+		f := newSignedFetchFixture(t)
+		f.h.SetNoteDeliveryRules(apDeliveryRules(t, targets))
+		assert.Equal(t, http.StatusOK, f.fetch(t, f.h.Note, "n-public", false))
+	})
+}
+
 func TestNoteDeliveryRules_PluginFailureHidesNote(t *testing.T) {
 	f := newSignedFetchFixture(t)
 	r := notedelivery.New()
@@ -156,8 +186,11 @@ func TestNoteDeliveryRules_FetchHostMemoized(t *testing.T) {
 	f := newSignedFetchFixture(t)
 	c, _ := newReq(t, "id", "x")
 	c.Request().Header.Set("Signature", `keyId="https://remote.example/users/bob#main-key"`)
-	assert.Equal(t, "remote.example", f.h.fetchHost(c))
-	assert.Equal(t, "remote.example", f.h.fetchHost(c))
+	for range 2 {
+		host, rejected := f.h.fetchHost(c)
+		assert.Equal(t, "remote.example", host)
+		assert.False(t, rejected)
+	}
 	assert.Equal(t, 1, f.signer.calls)
 }
 
