@@ -17426,4 +17426,8 @@ export interface Locale extends ILocale {
      * プラグインの指定は、下書きと予約投稿には保存できません。指定を解除してから保存するか、予約せずに投稿してください。
      */
     "pluginNoteOptionsCannotBeDrafted": string;
+    /**
+     * 書きかけの投稿にあったプラグインの指定のうち、使えなくなったものを外しました。指定を確かめてから投稿してください。
+     */
+    "pluginNoteOptionsDroppedFromDraft": string;
 }
