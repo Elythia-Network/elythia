@@ -39,14 +39,17 @@ func (h *PollDeliveryHook) SetNoteDeliveryRules(r *notedelivery.Registry) {
 	h.rules = r
 }
 
-// NewPollDeliveryHook constructs a PollDeliveryHook.
-func NewPollDeliveryHook(renderer *activitypub.Renderer, deliver *DeliverService, userRepo repository.UserRepository, urls *activitypub.URLBuilder, idGen id.Generator) *PollDeliveryHook {
+// NewPollDeliveryHook constructs a PollDeliveryHook. rules is the plugins that
+// narrow where local notes federate (#4199); nil means none. 渡し忘れを
+// ビルドで止めるため、構築子の引数で受ける (NewNoteDeliveryHook と同じ)。
+func NewPollDeliveryHook(renderer *activitypub.Renderer, deliver *DeliverService, userRepo repository.UserRepository, urls *activitypub.URLBuilder, idGen id.Generator, rules *notedelivery.Registry) *PollDeliveryHook {
 	return &PollDeliveryHook{
 		renderer: renderer,
 		deliver:  deliver,
 		userRepo: userRepo,
 		urls:     urls,
 		idGen:    idGen,
+		rules:    rules,
 	}
 }
 
