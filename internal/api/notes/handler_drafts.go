@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -102,9 +103,14 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 		Poll                *draftPoll `json:"poll"`
 		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled bool       `json:"isActuallyScheduled"`
+		// PluginOptions is read only to refuse it (#4199).
+		PluginOptions map[string]json.RawMessage `json:"pluginOptions"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
+	}
+	if hasPluginOptions(req.PluginOptions) {
+		return jsonDraftPluginOptionsUnsupported(c)
 	}
 	// visibility / reactionAcceptance enum 検証 (notes/create と共有、#1934)。
 	// draft 経由でも upstream drafts/create.ts:161,168 の enum 制約に揃え、不正値が
@@ -250,9 +256,14 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		Poll                *draftPoll `json:"poll"`
 		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled *bool      `json:"isActuallyScheduled"`
+		// PluginOptions is read only to refuse it (#4199).
+		PluginOptions map[string]json.RawMessage `json:"pluginOptions"`
 	}
 	if err := c.Bind(&req); err != nil || req.DraftID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("draftId is required."))
+	}
+	if hasPluginOptions(req.PluginOptions) {
+		return jsonDraftPluginOptionsUnsupported(c)
 	}
 	// visibility / reactionAcceptance enum 検証 (drafts/create と共有、#1934)。"" /
 	// nil は「変更しない」セマンティクスなので許容し、非空の不正値のみ弾く。paramDef
@@ -982,4 +993,23 @@ func (h *Handler) resolveDraftFileMap(fileIDs []string) map[string]entity.DriveF
 		m[f.ID] = h.entityPacker.PackDriveFile(f, h.idGen)
 	}
 	return m
+}
+
+// hasPluginOptions reports whether options carries a non-null entry.
+//
+// **下書きと予約投稿は pluginOptions を受け取れない。** 下書きには指定を残す場所が
+// 無く、黙って捨てると、絞ったつもりのノートが予約の時刻に絞られないまま連合する。
+// notes/create と同じく、null の項目は送られなかったものとして扱う (#4199)。
+func hasPluginOptions(options map[string]json.RawMessage) bool {
+	for _, raw := range options {
+		var v any
+		if len(raw) > 0 && (json.Unmarshal(raw, &v) != nil || v != nil) {
+			return true
+		}
+	}
+	return false
+}
+
+func jsonDraftPluginOptionsUnsupported(c echo.Context) error {
+	return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "pluginOptions cannot be used with drafts.", apierr.UUIDInvalidParam))
 }

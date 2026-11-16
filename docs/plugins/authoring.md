@@ -636,7 +636,7 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 ```
 
 - **指定は`notes/create`の`pluginOptions.<プラグイン名>`で受け取る。** 本体は中身を読まずに`Prepare`へ渡す。`Prepare`は**ノートを保存する前**に、保存するIDで呼ばれる。保存の後だと、条件を書く前に配送が走りうるため。ノートの保存に失敗すると書いた行が残るが、IDは使い回されないので他のノートには効かない
-- **`Prepare`のエラーはノートを作らない。** `plugin.ErrBadNoteOption`を包んだエラーは400 `INVALID_PARAM`、それ以外は500になる。どちらも、プラグインのメッセージは利用者に返さない。`pluginOptions`に、登録されていないプラグインの名前があっても400になる (絞ったつもりの指定を黙って捨てない)。400以外の失敗 (エラー・panic・期限切れ) は、プラグインの名前とノートのIDを付けて本体のログに残す。panicは値とスタックも残す
+- **`Prepare`のエラーはノートを作らない。** `plugin.ErrBadNoteOption`を包んだエラーは400 `INVALID_PARAM`、それ以外は500になる。どちらも、プラグインのメッセージは利用者に返さない。`pluginOptions`に、登録されていないプラグインの名前があっても400になる (絞ったつもりの指定を黙って捨てない)。値が`null`の項目は送られなかったものとして扱い、名前も確かめない。400以外の失敗 (エラー・panic・期限切れ) は、プラグインの名前とノートのIDを付けて本体のログに残す。panicは値とスタックも残す
 - **`Targets`は配送と照会のたびに呼ばれる。** 1回に渡すIDは20件まで。条件の無いノートは返す map に入れない。**エラー・panic・5秒の期限切れは「どこにも配らない・誰にも見せない」になる**。どのノートを絞っていたかも読めないので、そのとき渡したノートは、条件を付けていないものも含めて全部が対象になる。プラグインの障害のあいだは、そのサーバーのローカルのノートが1つも連合しない。配送の再試行は無いので、障害のあいだに作られたノートは連合しないまま残る
 - **期限は`Prepare` / `Targets`に渡す`context`でしか伝わらない。** 本体はプラグインの処理を途中で止められないので、`context`を見ない処理は期限を過ぎても戻るまで配送や照会を待たせる。期限を過ぎてから返った結果は、成功でも失敗として扱う
 - **ホストは利用者の`host`と完全一致で比べる。** 配送ではフォロワー・宛先の利用者の`host`を見る。inboxのURLのホストではない (利用者のドメインとサーバーのドメインを分けたサーバーで、判定がずれるため)。比べる前に小文字・punycodeにそろえるのはプラグインの役目
@@ -646,7 +646,7 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 - 適用するのは、Create・Announce (リノート)・引用の承認に伴うUpdate・投票のUpdate(Question)・QuoteRequestの配送と、上の照会。Deleteは絞らない (中身を持たず、届いていない相手には何も起きない)
 - **登録はロールに関係なく行われる。** 条件の保存はAPIのプロセス、投票のUpdateの配送はキューのプロセスで走るため。登録 (`NoteDelivery`の呼び出し) に失敗すると起動を止める
 - **プラグインを無効にすると絞り込みも止まる。** 本体は条件を持っていないので、無効にした後は、絞ったノートも今までどおりに配送・照会される。止める前に運営者へ知らせること
-- 予約投稿 (`notes/drafts`) は`pluginOptions`を受け取らない
+- 下書きと予約投稿 (`notes/drafts/create`・`notes/drafts/update`) は`pluginOptions`を受け取れない。`null`以外の値があれば400 `INVALID_PARAM`にする (黙って捨てると、予約の時刻に絞られないまま連合するため)
 
 テストでは`plugintest`の`NoteDelivery`で登録を取り出し、`Prepare` / `Targets`を直接呼ぶ。migrationは本体と同じ実装で適用される。
 
@@ -1025,7 +1025,7 @@ host.postForm.registerNoteOption({
 `component`はホストのダイアログの中に置かれ、`modelValue`を受け取って`update:modelValue`を
 出す。未設定のときの`modelValue`は`null`。`isSet`が偽を返す値は送らず、ボタンも強調しない
 (省略すると`null` / `undefined`以外を設定済みとみなし、`isSet`が例外を投げたときも設定済みに倒す)。
-予約投稿は`pluginOptions`を受け取らないので、指定があるまま予約しようとすると、フォームが
+予約投稿は`pluginOptions`を受け取れないので、指定があるまま予約しようとすると、フォームが
 止めて知らせる。
 
 `registerNoteOption`は`PluginHost`の必須のメソッドとして足したので、テストなどで`PluginHost`を
