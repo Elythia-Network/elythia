@@ -38,6 +38,8 @@ Elythia 本体を変更する人向け。**公開面を広げてよい条件**�
 
 `Definition.Peer`（#2819）と`Context.Queue()`、`plugin.Queue` / `EnqueueOption`の追加も同じ扱い。`Definition.Peer`は既存プラグインが`Routes`の中でpeerを登録していても壊さない（`RoleBoth`ならそのまま動く）が、**ロールを分割した構成では応答が届かない**ので、移すこと。登録が無いロールでは起動時にwarnが出る。
 
+`Definition.NoteDelivery`と`plugin.NoteDeliveryRegistration` / `NoteDeliveryPrepareRequest` / `DeliveryTargets` / `DeliveryTargetsMode` / `ErrBadNoteOption`の追加 (#4199) も同じ扱い。宣言しないプラグインの挙動は変わらず、`Validate`も`NoteDelivery`だけのプラグインを通すよう緩めただけなので、`APIVersion`は1のまま。
+
 `plugin.ErrBadPeerPayload`の追加も同じ扱い。`PeerHandler`がこれを包んだエラーを返したときだけ受信側が`400`を返す (送信側は再送しない)。包まないエラーの扱い (`500` + ERROR、送信側が再送) は変えていないので、既存のプラグインの挙動は変わらない。
 
 `Context`はElythiaが実装してプラグインは受け取るだけなので、メソッドが増えてもプラグインは壊れない（プラグイン側が`Context`を自前で実装している場合はこの限りではないが、それはサポート対象外）。
@@ -124,7 +126,7 @@ git mv mk-plugin.yml elythia-plugin.yml   # git で管理していなければ m
 | `echo.Context` | Echo は内部の選択。差し替えたときにプラグインが全滅する |
 | `*gorm.DB` | 同上。標準の `*sql.DB` に留める |
 | `model.*` | DB モデルが契約になり、migration が打てなくなる |
-| ActivityPub 関連 | 不具合の症状が他人のサーバー側に出る。**後から塞げない**。プラグイン同士の通信が要る場合は [`Peer`](authoring.md#他のインスタンスとやりとりする) を使う (Elythia 同士に閉じた経路、#2537) |
+| ActivityPub 関連 | 不具合の症状が他人のサーバー側に出る。**後から塞げない**。プラグイン同士の通信が要る場合は [`Peer`](authoring.md#他のインスタンスとやりとりする) を使う (Elythia 同士に閉じた経路、#2537)。例外は配送先を**絞るだけ**の [`NoteDelivery`](authoring.md#ノートの配送先を絞る) (#4199)。activity の中身にも宛先の追加にも触れず、不具合の症状は「届かない」側にだけ出る |
 | repository / service | 可視性判定などのアプリケーション側のガードを迂回できる |
 | ルーターの定義そのもの | プラグインが本体のパスを奪える。名前空間を切った登録だけを許す |
 

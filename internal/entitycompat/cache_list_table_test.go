@@ -169,6 +169,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"clock", "closed", "doneCh", "flushIn", "mu", "pending", "started", "stopCh", "target"}, nil},
 	"internal/core/iplog.Service": {kindDropLocal, "",
 		[]string{"clearedAt", "dispatch", "meta", "mu", "now", "repo", "seen", "window"}, nil},
+	"internal/core/notedelivery.Registry": {kindNotCache, "起動時にsetupPluginsが登録するプラグインの一覧(#4199)。DBや外から読んだ値は持たず、ノートごとの条件は呼ぶたびにプラグインへ問い合わせる",
+		[]string{"mu", "providers"}, nil},
 	"internal/core/notification.NoteSource": {kindPerCall, "1つの通知のstreamとWeb Pushで同じノートを1回だけ読むためのもの(#3611)。通知を送り終えれば捨てられる",
 		[]string{"err", "load", "note", "once"}, nil},
 	"internal/core/reaction.SwitchableWriter": {kindReloadOnDrop, "bufferingはmetaのenableReactionsBuffering。一覧のreactionBufferingの項目(reloadOnDrop)がmetaUpdatedと同じreloadReactionBufferingで読み直す(#3777)。drainUntilは切り替えた後に溜めた分を読みに足す期限",
