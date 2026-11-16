@@ -306,3 +306,57 @@ func TestRegistry_CallTimeoutDefault(t *testing.T) {
 	assert.Equal(t, callTimeout, nilRegistry.callTimeout())
 	assert.Equal(t, callTimeout, New().callTimeout())
 }
+
+// The hosts a plugin returns and the host compared with them are put in the
+// stored form first, so spelling differences cannot let an excluded server
+// through (#4199).
+func TestRule_ComparesCanonicalHosts(t *testing.T) {
+	spellings := []string{"Bad.Example", "bad.example.", "bad.example:443", " BAD.example.:443 ", "bad.example"}
+	for _, listed := range spellings {
+		for _, asked := range spellings {
+			t.Run(listed+" vs "+asked, func(t *testing.T) {
+				for _, mode := range []plugin.DeliveryTargetsMode{plugin.DeliveryTargetsExclude, plugin.DeliveryTargetsInclude} {
+					r := New()
+					require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+						"n1": {Mode: mode, Hosts: []string{listed}},
+					}}).registration()))
+					rule := r.Rule(context.Background(), "n1")
+					assert.Equal(t, mode == plugin.DeliveryTargetsInclude, rule.Allows(asked), "mode %s", mode)
+				}
+			})
+		}
+	}
+}
+
+func TestRule_ComparesCanonicalHosts_IDNAndPorts(t *testing.T) {
+	r := New()
+	require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+		"idn":  {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"パイ.example"}},
+		"port": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"bad.example:8443"}},
+	}}).registration()))
+	idn := r.Rule(context.Background(), "idn")
+	assert.False(t, idn.Allows("xn--eckve.example"))
+	assert.False(t, idn.Allows("パイ.example"))
+	assert.True(t, idn.Allows("other.example"))
+
+	// 既定でないポートは別のサーバーのまま扱う (保存される host もポートを残す)。
+	port := r.Rule(context.Background(), "port")
+	assert.False(t, port.Allows("bad.example:8443"))
+	assert.True(t, port.Allows("bad.example"))
+}
+
+func TestCanonicalHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                   "",
+		"  ":                 "",
+		".":                  "",
+		"Bad.Example.":       "bad.example",
+		"bad.example:443":    "bad.example",
+		"bad.example:8443":   "bad.example:8443",
+		"パイ.example":         "xn--eckve.example",
+		"[2001:db8::1]:443":  "[2001:db8::1]",
+		"[2001:db8::1]:8443": "[2001:db8::1]:8443",
+	} {
+		assert.Equal(t, want, canonicalHost(in), "canonicalHost(%q)", in)
+	}
+}

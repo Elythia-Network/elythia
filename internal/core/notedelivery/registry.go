@@ -170,6 +170,7 @@ func (r Rule) Allows(host string) bool {
 	if r.denyAll {
 		return false
 	}
+	host = canonicalHost(host)
 	for _, t := range r.targets {
 		if !t.Allows(host) {
 			return false
@@ -227,7 +228,7 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 				if rule.denyAll {
 					continue
 				}
-				rule.targets = append(rule.targets, plugin.DeliveryTargets{Mode: t.Mode, Hosts: append([]string(nil), t.Hosts...)})
+				rule.targets = append(rule.targets, plugin.DeliveryTargets{Mode: t.Mode, Hosts: canonicalHosts(t.Hosts)})
 				out[id] = rule
 			}
 		}
