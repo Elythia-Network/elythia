@@ -65,7 +65,7 @@ func (h *Handler) noteForSigner(c echo.Context, noteID string) *model.Note {
 	if h.fetchSigner == nil || req.Header.Get("Signature") == "" {
 		return nil
 	}
-	signer, err := h.fetchSigner.AuthenticateFetch(req)
+	signer, err := h.authenticateFetch(c)
 	if err != nil {
 		slog.Debug("ap: signed fetch not authenticated", "noteId", noteID, "error", err)
 		return nil

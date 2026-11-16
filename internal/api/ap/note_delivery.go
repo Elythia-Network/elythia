@@ -53,6 +53,28 @@ func userAgentHost(userAgent string) string {
 	return ""
 }
 
+// fetchSignerKey memoizes the result of checking this request's signature.
+const fetchSignerKey = "ap.fetchSigner"
+
+type fetchSignerResult struct {
+	user *model.User
+	err  error
+}
+
+// authenticateFetch checks the request's signature once per request.
+//
+// 見せてよいかの判定 (noteForSigner) と、配送先の絞り込みの判定 (fetchHost) が
+// 同じ要求で両方とも署名を確かめるので、結果を共有する (#4199)。呼ぶ側が
+// fetchSigner と Signature ヘッダーの有無を確かめておく。
+func (h *Handler) authenticateFetch(c echo.Context) (*model.User, error) {
+	if v, ok := c.Get(fetchSignerKey).(fetchSignerResult); ok {
+		return v.user, v.err
+	}
+	user, err := h.fetchSigner.AuthenticateFetch(c.Request())
+	c.Set(fetchSignerKey, fetchSignerResult{user: user, err: err})
+	return user, err
+}
+
 // fetchRequester is who fetched, as fetchHost tells it.
 type fetchRequester struct {
 	host     string
@@ -85,7 +107,7 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 	signed := false
 	req := c.Request()
 	if h.fetchSigner != nil && req.Header.Get("Signature") != "" {
-		signer, err := h.fetchSigner.AuthenticateFetch(req)
+		signer, err := h.authenticateFetch(c)
 		switch {
 		case err != nil:
 			slog.Debug("ap: signed fetch not authenticated", "error", err)

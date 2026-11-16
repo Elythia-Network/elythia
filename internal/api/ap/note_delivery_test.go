@@ -194,6 +194,18 @@ func TestNoteDeliveryRules_FetchHostMemoized(t *testing.T) {
 	assert.Equal(t, 1, f.signer.calls)
 }
 
+// A followers-only note needs the signer for visibility and again for the
+// delivery rules; the signature is verified once for both (#4199).
+func TestNoteDeliveryRules_SignatureVerifiedOnce(t *testing.T) {
+	f := newSignedFetchFixture(t)
+	f.follow(t)
+	f.h.SetNoteDeliveryRules(apDeliveryRules(t, map[string]plugin.DeliveryTargets{
+		"n-followers": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"remote.example"}},
+	}))
+	assert.Equal(t, http.StatusOK, f.fetch(t, f.h.Note, "n-followers", true))
+	assert.Equal(t, 1, f.signer.calls)
+}
+
 func TestNoteDeliveryRules_Outbox(t *testing.T) {
 	h, users, notes := newHandlerWithOutbox(t)
 	users.Users["owner"] = &model.User{ID: "owner", Username: "alice", NotesCount: 2}
