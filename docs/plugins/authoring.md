@@ -902,6 +902,52 @@ await host.openMedia([{ id, type: 'image', blob, alt: 'Preview' }], id);
 
 `openMedia` はブラウザで表示できる画像・音声・動画MIMEだけを受け取り、ホストの
 メディアビューアへ渡す。表示用URLはビューアを閉じたときに解放される。
+`PluginMediaItem`の`isSensitive`を真にすると、ビューアの中では利用者の設定どおりに隠す。
+
+### センシティブなメディアの表示 (`MkSensitiveMedia`)
+
+カードの中に外部の画像や動画を並べるときは、`MkSensitiveMedia`で包む (#4191)。
+本体のメディア表示と同じ規則 (`nsfw`の設定、データセーバー、表示前の確認、
+センシティブの強調の枠) で隠し、押されたら出す。
+
+```vue
+<template>
+<div :class="$style.cell">
+	<MkSensitiveMedia :isSensitive="post.sensitive" type="image" :size="image.size">
+		<template #default="{ hide }">
+			<img :src="image.url" :alt="image.alt" :class="$style.image" @dblclick="hide()">
+		</template>
+	</MkSensitiveMedia>
+</div>
+</template>
+
+<script lang="ts" setup>
+import { MkSensitiveMedia } from '@/plugin-api.js';
+</script>
+
+<style lang="scss" module>
+.cell { aspect-ratio: 16 / 9; }
+.image { width: 100%; height: 100%; object-fit: cover; }
+</style>
+```
+
+- **隠している間は既定のslotを描画しない。** 中身の画像や動画は、表示が押されるまで取得されない。slotがmountされたことが「表示された」ことなので、取得や再生はslotの中の部品のmountで始めればよい
+- 根の要素は親の幅と高さに従う。隠している間も格子の高さを変えたくなければ、親に`aspect-ratio`か高さを付ける
+- `isSensitive`か利用者の設定 (`nsfw` / データセーバー) が変わると、表示した後でも既定の状態に戻す
+- props: `isSensitive` (必須)、`type` (`'image' | 'video' | 'audio'`、既定は`'image'`。隠している間の文言とアイコンに使う)、`size` (バイト数。データセーバーが有効なときに出す)、`controls` (表示した後に隠し直すボタン。既定は`true`)
+- slotには隠し直す関数`hide`を渡す
+- 表示したメディアを`host.openMedia`で開くときは、`initiallyRevealed: true`を渡す。渡さないと、ビューアの中でセンシティブなものを改めて隠し、設定によっては確認を求める
+- 確認のダイアログを待つ間に`isSensitive`か設定が変わったら、その確認では表示しない
+
+部品で足りないときは、同じ判定を`host`から呼べる。
+
+```ts
+host.shouldHideSensitiveMedia(isSensitive);        // 既定で隠すか (同期)
+await host.canRevealSensitiveMedia(isSensitive);   // 表示してよいか (確認のダイアログが出ることがある)
+```
+
+`plugin-api.ts`の最上位ではなく`host`に置いているのは、判定が設定とダイアログを読み、
+`plugin-api.ts`を読み込むだけでそれらを初期化しないためである。
 
 ### プレビュー provider
 
@@ -1508,6 +1554,8 @@ host.preview.register(provider)
 host.api<T>(endpoint, params, { signal? })
 host.fetch(path, options?)
 host.openMedia(items, initialId?)
+host.shouldHideSensitiveMedia(isSensitive)
+host.canRevealSensitiveMedia(isSensitive)
 host.postForm.registerPasteTransform(id, transform, options?)
 
 PluginPage: { path, component, navTitle?, navIcon?, admin? }
@@ -1522,6 +1570,7 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
         MkA / MkUrl
         useMkSelect / definePage
         MkPluginSecrets (秘密の値の入力欄。props: plugin)
+        MkSensitiveMedia (センシティブなメディアを隠す枠。props: isSensitive / type / size / controls)
 ```
 
 ## やってはいけないこと
