@@ -155,6 +155,33 @@ export type PasteTextTransformRuntime = {
 
 export type TransformedPasteText = { text: string; notification?: string };
 
+/**
+ * A per-note value the author sets from a post form button (#4199).
+ *
+ * 値は `notes/create` の `pluginOptions.<プラグイン名>` としてそのまま送られ、
+ * バックエンドの `plugin.NoteDeliveryRegistration.Prepare` が受け取る。本体は
+ * 中身を読まない。
+ */
+export type NoteOptionDefinition = {
+	/** Icon class of the footer button (例: 'ti ti-world-share')。 */
+	icon: string;
+	/** Tooltip and dialog title, resolved each time so it follows the language setting. */
+	label: () => string;
+	/**
+	 * Edits the value inside a host dialog. Receives `modelValue` and emits
+	 * `update:modelValue`. 未設定のときの `modelValue` は null。
+	 */
+	component: SlotComponent;
+	/**
+	 * Whether a value asks for anything. 偽なら送らず、ボタンも強調しない。
+	 * 省略すると null / undefined 以外を設定済みとみなす。
+	 */
+	isSet?: (value: unknown) => boolean;
+};
+
+/** A registered post form option. `plugin` is also its key in `pluginOptions`. */
+export type NoteOptionRegistration = NoteOptionDefinition & { plugin: string };
+
 /** A fetched media Blob owned by a plugin, rather than a drive file. */
 export type PluginMediaItem = {
 	id: string;
@@ -312,6 +339,11 @@ export type PluginHost = {
 	/** Synchronous plain-text transforms for text pasted into the post form. */
 	readonly postForm: {
 		registerPasteTransform(id: string, transform: PasteTextTransform, options?: PasteTextTransformOptions): void;
+		/**
+		 * Adds a footer button that sets this plugin's per-note value (#4199).
+		 * 1 つのプラグインにつき 1 つまで (`pluginOptions` のキーがプラグイン名のため)。
+		 */
+		registerNoteOption(option: NoteOptionDefinition): void;
 	};
 
 	/**
@@ -360,6 +392,32 @@ export type PageRegistration = PluginPage & { plugin: string; fullPath: string }
 const registry = new Map<SlotName, Registration[]>();
 const previewRegistry = new Map<string, PreviewRegistration>();
 const pasteTransformRegistry = new Map<string, PasteTextRegistration>();
+const noteOptionRegistry = new Map<string, NoteOptionRegistration>();
+
+function registerNoteOption(plugin: string, option: NoteOptionDefinition): void {
+	if (noteOptionRegistry.has(plugin)) {
+		throw new Error(`Post form note option is already registered: ${plugin}`);
+	}
+	if (typeof option.label !== 'function' || option.component == null) {
+		throw new Error(`Post form note option needs a label and a component: ${plugin}`);
+	}
+	noteOptionRegistry.set(plugin, { ...option, plugin });
+}
+
+/** Returns the registered post form options, ordered by plugin name. */
+export function noteOptions(): NoteOptionRegistration[] {
+	return [...noteOptionRegistry.values()].sort((a, b) => a.plugin < b.plugin ? -1 : a.plugin > b.plugin ? 1 : 0);
+}
+
+/** Reports whether a post form option value asks for anything. 判定が例外を投げたら、送る側 (設定済み) に倒す。 */
+export function isNoteOptionSet(option: NoteOptionRegistration, value: unknown): boolean {
+	if (option.isSet == null) return value != null;
+	try {
+		return option.isSet(value);
+	} catch {
+		return value != null;
+	}
+}
 
 function registerPreviewProvider<T>(plugin: string, provider: PreviewProvider<T>): void {
 	if (provider.id.length === 0 || provider.id.includes(':')) {
@@ -511,6 +569,9 @@ function buildHost(name: string): PluginHost {
 			registerPasteTransform(id, transform, options) {
 				registerPasteTextTransform(name, id, transform, options);
 			},
+			registerNoteOption(option) {
+				registerNoteOption(name, option);
+			},
 		},
 		slot(slotName, renderer) {
 			const list = registry.get(slotName) ?? [];
@@ -615,4 +676,9 @@ export function _resetPreviewsForTest(): void {
 /** Test hook: clears registered post form paste transforms. */
 export function _resetPasteTransformsForTest(): void {
 	pasteTransformRegistry.clear();
+}
+
+/** Test hook: clears registered post form note options. */
+export function _resetNoteOptionsForTest(): void {
+	noteOptionRegistry.clear();
 }

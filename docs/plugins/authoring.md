@@ -1005,6 +1005,32 @@ host.postForm.registerPasteTransform('normalize-example', text => text.trim());
 URLプレビューポップアップ、ページ本文などは対象外。`PreviewInput`の`file`は将来の
 接続用に型だけを定義しており、現時点でfile入力を渡す画面は無い。
 
+### 投稿フォームの指定
+
+投稿フォームのフッターにボタンを足し、ノートごとの指定を入力させられる(#4199)。
+値は`notes/create`の`pluginOptions.<プラグイン名>`としてそのまま送られ、バックエンドの
+[`NoteDelivery`](#ノートの配送先を絞る)の`Prepare`が受け取る。登録はプラグインごとに1つで、
+キーはプラグインの名前になる。
+
+```ts
+host.postForm.registerNoteOption({
+	icon: 'ti ti-world-share',
+	label: () => 'Delivery targets',
+	component: TargetsEditor,
+	isSet: value => value != null,
+});
+```
+
+`component`はホストのダイアログの中に置かれ、`modelValue`を受け取って`update:modelValue`を
+出す。未設定のときの`modelValue`は`null`。`isSet`が偽を返す値は送らず、ボタンも強調しない
+(省略すると`null` / `undefined`以外を設定済みとみなし、`isSet`が例外を投げたときも設定済みに倒す)。
+予約投稿は`pluginOptions`を受け取らないので、指定があるまま予約しようとすると、フォームが
+止めて知らせる。
+
+`registerNoteOption`は`PluginHost`の必須のメソッドとして足したので、テストなどで`PluginHost`を
+手で組み立てているプラグインは、`postForm`に`registerNoteOption() {}`を足さないと`vue-tsc`が
+落ちる。
+
 ### checked role policy
 
 HTTP routeでは `plugin.CheckedRolePolicyRequest`、バックグラウンド処理では
@@ -1584,6 +1610,7 @@ host.api<T>(endpoint, params, { signal? })
 host.fetch(path, options?)
 host.openMedia(items, initialId?)
 host.postForm.registerPasteTransform(id, transform, options?)
+host.postForm.registerNoteOption(option)
 
 PluginPage: { path, component, navTitle?, navIcon?, admin? }
 
@@ -1591,6 +1618,7 @@ PluginPage: { path, component, navTitle?, navIcon?, admin? }
     PluginPage / PageRegistration / PluginUser / PreviewInput / PreviewContext
     PreviewPresentation / PreviewProvider / PreviewRegistration
     PasteTextTransform / PasteTextTransformOptions / PluginMediaItem
+    NoteOptionDefinition
 関数: getUsers(ids)
 再公開: MkInput / MkButton / MkFolder / MkLoading
         MkSelect / MkSwitch / MkAvatar / MkUserName / MkTime / PageWithHeader
