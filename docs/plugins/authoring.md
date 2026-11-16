@@ -1025,8 +1025,9 @@ host.postForm.registerNoteOption({
 `component`はホストのダイアログの中に置かれ、`modelValue`を受け取って`update:modelValue`を
 出す。未設定のときの`modelValue`は`null`。`isSet`が偽を返す値は送らず、ボタンも強調しない
 (省略すると`null` / `undefined`以外を設定済みとみなし、`isSet`が例外を投げたときも設定済みに倒す)。
-予約投稿は`pluginOptions`を受け取れないので、指定があるまま予約しようとすると、フォームが
-止めて知らせる。
+下書きと予約投稿は`pluginOptions`を受け取れないので、指定があるままメニューから下書きに
+保存しようとしたときと、予約しようとしたときは、フォームが止めて知らせる。指定は投稿の後も
+フォームに残り、メニューの「リセット」では消える。
 
 `registerNoteOption`は`PluginHost`の必須のメソッドとして足したので、テストなどで`PluginHost`を
 手で組み立てているプラグインは、`postForm`に`registerNoteOption() {}`を足さないと`vue-tsc`が
