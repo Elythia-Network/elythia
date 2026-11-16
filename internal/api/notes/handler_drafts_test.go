@@ -1400,3 +1400,31 @@ func TestDrafts_RejectUnstorableText(t *testing.T) {
 		assert.Equal(t, "old", *repo.drafts["d1"].Text, upd)
 	}
 }
+
+// Drafts cannot keep pluginOptions, so they are refused instead of dropped: a
+// dropped option would publish the scheduled note unrestricted (#4199).
+func TestDrafts_RefusePluginOptions(t *testing.T) {
+	h, repo := newDraftHandlerWithRepo()
+	u := &model.User{ID: "u1"}
+	repo.drafts["d1"] = &model.NoteDraft{ID: "d1", UserID: "u1", Visibility: "public"}
+	tests := []struct {
+		name       string
+		handler    echo.HandlerFunc
+		body       string
+		wantStatus int
+	}{
+		{"create with an option", h.DraftsCreate, `{"text":"x","pluginOptions":{"targets":{"mode":"include"}}}`, http.StatusBadRequest},
+		{"update with an option", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":{"targets":{}}}`, http.StatusBadRequest},
+		{"create with a null option", h.DraftsCreate, `{"text":"x","pluginOptions":{"targets":null}}`, http.StatusOK},
+		{"update with an empty map", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":{}}`, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := postDraft(tt.handler, tt.body, u)
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantStatus == http.StatusBadRequest {
+				assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+			}
+		})
+	}
+}

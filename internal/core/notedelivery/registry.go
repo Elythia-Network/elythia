@@ -114,7 +114,11 @@ func (r *Registry) Prepare(ctx context.Context, noteID, userID string, options m
 		byName[p.name] = p
 	}
 	names := make([]string, 0, len(options))
-	for name := range options {
+	for name, option := range options {
+		// null は送られなかったものと同じに扱うので、知らない名前でも断らない。
+		if isNull(option) {
+			continue
+		}
 		if _, ok := byName[name]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownPlugin, name)
 		}
@@ -123,9 +127,6 @@ func (r *Registry) Prepare(ctx context.Context, noteID, userID string, options m
 	sort.Strings(names)
 	for _, name := range names {
 		option := options[name]
-		if isNull(option) {
-			continue
-		}
 		p := byName[name]
 		err := call(ctx, r.callTimeout(), p.name, func(ctx context.Context) error {
 			return p.reg.Prepare(ctx, plugin.NoteDeliveryPrepareRequest{NoteID: noteID, UserID: userID, Option: option})

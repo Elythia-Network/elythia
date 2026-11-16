@@ -94,6 +94,17 @@ func TestPrepare_SkipsNull(t *testing.T) {
 	assert.Empty(t, f.prepared)
 }
 
+func TestPrepare_UnknownNameWithNullIsIgnored(t *testing.T) {
+	r := New()
+	f := &fakePlugin{}
+	require.NoError(t, r.Add("targets", f.registration()))
+	require.NoError(t, r.Prepare(context.Background(), "n1", "u1", map[string]json.RawMessage{
+		"targets": json.RawMessage(`{}`),
+		"zzz":     json.RawMessage(`null`),
+	}))
+	assert.Len(t, f.prepared, 1)
+}
+
 func TestPrepare_UnknownNameCallsNoPlugin(t *testing.T) {
 	r := New()
 	f := &fakePlugin{}
