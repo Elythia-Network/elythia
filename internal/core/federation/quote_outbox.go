@@ -43,6 +43,9 @@ type QuoteApprovalLookup interface {
 
 // QuoteOutboxDelivery sends what the quote outbox produces.
 type QuoteOutboxDelivery interface {
+	// QuoteRequestAllowed reports whether a QuoteRequest for note may go to
+	// quotedAuthor. false なら、保留中の記録も送り直しも作らない (#4199)。
+	QuoteRequestAllowed(note *model.Note, quotedAuthor *model.User) bool
 	SendQuoteRequest(note *model.Note, quotedURI string, quotedAuthor *model.User) error
 	SendNoteUpdate(note *model.Note, author *model.User) error
 }
@@ -160,6 +163,11 @@ func (o *QuoteOutbox) RequestApproval(note *model.Note, author *model.User) erro
 	}
 	if err != nil {
 		return fmt.Errorf("quote outbox: find quoted author: %w", err)
+	}
+	// 配送先の条件で送れない相手なら、記録も送り直しも作らない。作ると、届かない
+	// 送り直しが毎回プラグインに問い合わせたうえで空振りする (#4199)。
+	if !o.deliver.QuoteRequestAllowed(note, quotedAuthor) {
+		return nil
 	}
 	// 返ってくる Accept は id で照合するので、送る前に記録する。
 	req, err := o.requests.Ensure(note.ID, o.decider.urls.QuoteRequestURI(note.ID), o.decider.now().Add(quoteRequestResendAfter[0]))
@@ -341,6 +349,9 @@ func (o *QuoteOutbox) resend(noteID string) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	if !o.deliver.QuoteRequestAllowed(note, quotedAuthor) {
+		return false, nil
 	}
 	if err := o.deliver.SendQuoteRequest(note, *target.URI, quotedAuthor); err != nil {
 		return false, err
