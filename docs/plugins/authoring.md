@@ -643,6 +643,7 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 - **フォロワーへの配送は、shared inboxの単位でしか分けられない。** 許すホストと許さないホストの利用者が同じshared inboxを使っていれば (1つのサーバーが複数のドメインの利用者を持つとき)、そのinboxへは送る。送らなければ許したホストにも届かないため。excludeにそのうち片方のドメインだけを入れても、外したドメインのサーバーには届く
 - **絞ったノートはrelayへ流さない。** relayは受け取ったものを加盟する全サーバーへ配り直すので、ホストで絞れない
 - **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。署名は確かめられたが、署名した利用者が凍結・削除されているか、こちらが配送しない相手のときは、絞ったノートを1つも見せない (空文字として扱うと、外したホストが署名を付けるだけでexcludeのノートを照会できるため)。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す
+- **`/notes/:id`をWebページ (HTML) として取られたときは、絞ったノートのOGP (要約・添付・作者) を出さない。** 外したサーバーがリンクカードを作るために取ると、署名もUser-Agentも無しに中身を読めるため。条件を読めないときも出さない。**埋め込み (`/embed/notes/:id`)・フィード (`/@user.rss`など)・公開のAPI (`notes/show`など) は絞らない。** 公開のノートはWebから誰でも読めるので、この機能で隠しきることはできない。絞るのは、ActivityPubで届く先と照会できる相手、OGPの3つ
 - **User-Agentは相手が自由に書ける。** 外したホストはUser-Agentを書き換えれば照会でき、許したホストを名乗ればincludeのノートも照会できる。照会の判定は、信頼しないサーバーへ配送しないための補助と考えること
 - 適用するのは、Create・Announce (リノート)・引用の承認に伴うUpdate・投票のUpdate(Question)・QuoteRequestの配送と、上の照会。Deleteは絞らない (中身を持たず、届いていない相手には何も起きない)
 - **登録はロールに関係なく行われる。** 条件の保存はAPIのプロセス、投票のUpdateの配送はキューのプロセスで走るため。登録 (`NoteDelivery`の呼び出し) に失敗すると起動を止める

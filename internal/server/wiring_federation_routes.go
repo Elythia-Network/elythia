@@ -206,7 +206,8 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 			Announcement: announcementRepo,
 			IDGen:        idGen,
 		},
-		entityPacker, // #3796: SSR の OGP 画像のファイルを包む
+		entityPacker,   // #3796: SSR の OGP 画像のファイルを包む
+		s.noteDelivery, // #4199: 配送先を絞ったノートは OGP を出さない
 	)
 	s.echo.GET("/notes/:id", func(c echo.Context) error {
 		// 同一 URL が Accept 次第で HTML / AP JSON / 302 を返すので、HTML 変種
