@@ -701,6 +701,8 @@ function showOtherSettings() {
 			});
 			if (canceled) return;
 			clear();
+			// 投稿の後は残すが (pluginOptions の宣言を参照)、明示的なリセットでは消す。
+			pluginOptions.value = {};
 		},
 	}] satisfies MenuItem[];
 
@@ -970,9 +972,25 @@ function deleteDraft() {
 	miLocalStorage.setItem('drafts', JSON.stringify(draftsData));
 }
 
+// refusePluginOptionsInDraft alerts and returns true when the form carries
+// plugin options, which drafts and scheduled posts cannot keep.
+//
+// 下書きと予約投稿は pluginOptions を受け取らない。黙って送らずに保存すると、
+// 後でその下書きから投稿したときに、絞ったつもりのノートがどこへでも届く (#4199)。
+function refusePluginOptionsInDraft(): boolean {
+	if (Object.keys(pluginOptions.value).length === 0) return false;
+	os.alert({
+		type: 'error',
+		text: i18n.ts.pluginNoteOptionsCannotBeDrafted,
+	});
+	return true;
+}
+
 async function saveServerDraft(options: {
 	isActuallyScheduled?: boolean;
 } = {}) {
+	// メニューの「下書きに保存」も予約投稿もここを通る。
+	if (refusePluginOptionsInDraft()) return null;
 	return await os.apiWithDialog(serverDraftId.value == null ? 'notes/drafts/create' : 'notes/drafts/update', {
 		...(serverDraftId.value == null ? {} : { draftId: serverDraftId.value }),
 		text: text.value,
@@ -1023,15 +1041,9 @@ async function post(ev?: PointerEvent) {
 		}
 	}
 
-	// 予約投稿は下書きとして保存し、pluginOptions を受け取らない。黙って送らずに
-	// 投稿すると、絞ったつもりのノートがどこへでも届く (#4199)。
-	if (scheduledAt.value != null && Object.keys(pluginOptions.value).length > 0) {
-		os.alert({
-			type: 'error',
-			text: i18n.ts.pluginNoteOptionsCannotBeScheduled,
-		});
-		return;
-	}
+	// 予約投稿は下書きとして保存する。保存の側 (saveServerDraft) でも止めるが、
+	// ここで止めないと、保存されないままフォームを空にしてしまう。
+	if (scheduledAt.value != null && refusePluginOptionsInDraft()) return;
 
 	if (scheduledAt.value != null) {
 		if (uploader.items.value.some(x => x.uploaded == null)) {
