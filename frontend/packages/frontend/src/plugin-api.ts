@@ -66,6 +66,21 @@ export { default as PageWithHeader } from '@/components/global/PageWithHeader.vu
  * import すると plugin-api を読むだけでルーターまで巻き込む。
  */
 export const MkPluginSecrets = defineAsyncComponent(() => import('@/components/MkPluginSecrets.vue'));
+/**
+ * Hides sensitive or data-saver media until revealed, following the user's settings (Elythia #4191).
+ *
+ * 本体のメディア表示と同じ規則 (`nsfw` の設定、データセーバー、表示前の確認、強調の枠) で隠す。
+ * props は `isSensitive` (必須)、`type` (`'image' | 'video' | 'audio'`、既定は `'image'`)、
+ * `size` (バイト数。データセーバーが有効なときの表示に使う)、`controls` (表示した後に隠し直すボタン。既定は true)。
+ *
+ * **隠している間は既定の slot を描画しない。** 表示を押してから slot を描画するので、
+ * 中身の画像や動画は表示されるまで取得されない。slot には隠し直す関数 `hide` を渡す。
+ * 根の要素は親の幅と高さに従うので、隠している間の大きさは親で決める (縦横比を保つなら親に `aspect-ratio` を付ける)。
+ * `isSensitive` か利用者の設定 (`nsfw` / データセーバー) が変わると、表示した後でも既定の状態に戻す。
+ *
+ * 遅延読み込みにする。判定がダイアログ (`@/os.js`) を使うため。
+ */
+export const MkSensitiveMedia = defineAsyncComponent(() => import('@/components/MkSensitiveMedia.vue'));
 export { useMkSelect } from '@/composables/use-mkselect.js';
 export { definePage } from '@/page.js';
 
@@ -327,6 +342,20 @@ export type PluginHost = {
 
 	/** Opens browser-safe fetched Blobs in the host media viewer. */
 	openMedia(items: PluginMediaItem[], initialId?: string): Promise<void>;
+
+	/**
+	 * Reports whether media should start hidden under the user's settings.
+	 *
+	 * `MkSensitiveMedia` と同じ判定 (`nsfw` の設定とデータセーバー)。部品で足りないときに使う。
+	 */
+	shouldHideSensitiveMedia(isSensitive: boolean): boolean;
+
+	/**
+	 * Asks for confirmation before revealing sensitive media when the user wants it.
+	 *
+	 * 利用者が確認を求める設定でなければ、すぐ true を返す。取り消されたら false。
+	 */
+	canRevealSensitiveMedia(isSensitive: boolean): Promise<boolean>;
 };
 
 export type PluginDefinition = {
@@ -497,7 +526,27 @@ function pagePath(name: string, path: string): string {
 	return `/plugin/${name}${rest}`;
 }
 
-function buildHost(name: string): PluginHost {
+type SensitiveMediaJudge = Pick<typeof import('@/utility/sensitive-file.js'), 'shouldHideSensitiveMediaByDefault' | 'canRevealSensitiveMedia'>;
+
+// 判定のモジュールを読めなかったときの代わり。表示してしまう側には倒さない。
+const fallbackSensitiveMediaJudge: SensitiveMediaJudge = {
+	shouldHideSensitiveMediaByDefault: () => true,
+	canRevealSensitiveMedia: async isSensitive => !isSensitive,
+};
+
+const importSensitiveMediaJudge = (): Promise<SensitiveMediaJudge> => import('@/utility/sensitive-file.js');
+let sensitiveMediaJudgeImporter = importSensitiveMediaJudge;
+
+async function loadSensitiveMediaJudge(): Promise<SensitiveMediaJudge> {
+	try {
+		return await sensitiveMediaJudgeImporter();
+	} catch (err) {
+		console.error('[plugin] failed to load the sensitive media settings', err);
+		return fallbackSensitiveMediaJudge;
+	}
+}
+
+function buildHost(name: string, sensitive: SensitiveMediaJudge): PluginHost {
 	const pluginAPIPrefix = `/api/plugin/${name}/`;
 	return {
 		name,
@@ -583,6 +632,12 @@ function buildHost(name: string): PluginHost {
 				throw err;
 			}
 		},
+		shouldHideSensitiveMedia(isSensitive) {
+			return sensitive.shouldHideSensitiveMediaByDefault(isSensitive === true);
+		},
+		canRevealSensitiveMedia(isSensitive) {
+			return sensitive.canRevealSensitiveMedia(isSensitive === true);
+		},
 	};
 }
 
@@ -593,9 +648,13 @@ function buildHost(name: string): PluginHost {
  * 起動しなくなる方が損害が大きい。
  */
 export async function launchServerPlugins(plugins: PluginDefinition[]): Promise<void> {
+	if (plugins.length === 0) return;
+	// 判定は設定とダイアログ (`@/os.js`) を読むので、モジュールの読み込みでは import しない。
+	// 同期で呼べるよう、setup より前に 1 回だけ読む。読めなくても、プラグインの起動は止めない。
+	const sensitive = await loadSensitiveMediaJudge();
 	for (const p of plugins) {
 		try {
-			await p.setup(buildHost(p.name));
+			await p.setup(buildHost(p.name, sensitive));
 		} catch (err) {
 			console.error(`[plugin:${p.name}] setup failed`, err);
 		}
@@ -610,6 +669,11 @@ export function _resetSlotsForTest(): void {
 /** Test hook: clears registered preview providers. */
 export function _resetPreviewsForTest(): void {
 	previewRegistry.clear();
+}
+
+/** Test hook: replaces how the sensitive media judge is loaded. Pass null to restore it. */
+export function _setSensitiveMediaImporterForTest(importer: (() => Promise<SensitiveMediaJudge>) | null): void {
+	sensitiveMediaJudgeImporter = importer ?? importSensitiveMediaJudge;
 }
 
 /** Test hook: clears registered post form paste transforms. */
