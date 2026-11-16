@@ -453,6 +453,7 @@ function watchForDraft() {
 	watch(quoteId, () => saveDraft());
 	watch(reactionAcceptance, () => saveDraft());
 	watch(scheduledAt, () => saveDraft());
+	watch(pluginOptions, () => saveDraft());
 }
 
 function checkMissingMention() {
@@ -935,6 +936,7 @@ type StoredDrafts = {
 			quoteId: string | null;
 			reactionAcceptance: 'likeOnly' | 'likeOnlyForRemote' | 'nonSensitiveOnly' | 'nonSensitiveOnlyForLocalLikeOnlyForRemote' | null;
 			scheduledAt: number | null;
+			pluginOptions?: Record<string, unknown>;
 		};
 	};
 };
@@ -958,10 +960,40 @@ function saveDraft() {
 			quoteId: quoteId.value,
 			reactionAcceptance: reactionAcceptance.value,
 			scheduledAt: scheduledAt.value,
+			// 書きかけを開き直したときに指定だけが消えると、絞ったつもりのノートが
+			// 絞られないまま連合するので、本文と一緒に残す (#4199)。
+			...(Object.keys(pluginOptions.value).length > 0 ? { pluginOptions: JSON.parse(JSON.stringify(pluginOptions.value)) as Record<string, unknown> } : {}),
 		},
 	};
 
 	miLocalStorage.setItem('drafts', JSON.stringify(draftsData));
+}
+
+// restorePluginOptions puts the plugin options of a local draft back, keeping
+// only those of plugins still registered.
+//
+// 下書きを残した後にプラグインが外されていると、その指定は送れない (送ると
+// notes/create が400で断る) ので外す。黙って外すと絞られないまま投稿されうるので、
+// 外したことを知らせる (#4199)。
+function restorePluginOptions(stored: Record<string, unknown> | undefined) {
+	if (stored == null) return;
+	const next: Record<string, unknown> = {};
+	let dropped = false;
+	for (const [plugin, value] of Object.entries(stored)) {
+		const option = noteOptionEntries.find(x => x.plugin === plugin);
+		if (option != null && isNoteOptionSet(option, value)) {
+			next[plugin] = value;
+		} else {
+			dropped = true;
+		}
+	}
+	pluginOptions.value = next;
+	if (dropped) {
+		os.alert({
+			type: 'warning',
+			text: i18n.ts.pluginNoteOptionsDroppedFromDraft,
+		});
+	}
 }
 
 function deleteDraft() {
@@ -1531,6 +1563,7 @@ onMounted(() => {
 				quoteId.value = draft.data.quoteId;
 				reactionAcceptance.value = draft.data.reactionAcceptance;
 				scheduledAt.value = draft.data.scheduledAt ?? null;
+				restorePluginOptions(draft.data.pluginOptions);
 			}
 		}
 

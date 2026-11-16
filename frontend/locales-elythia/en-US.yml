@@ -1076,3 +1076,4 @@ _objectStorageMigration:
   restoreConfirm: "This moves the migrated files back from object storage to the local storage. The local storage needs room for them. The copies in object storage are kept (you can delete them with \"Delete the copies left in the bucket\" afterwards). Continue?"
   cleanupConfirm: "This deletes the copies the files moved back left in object storage. Only the copies recorded when the files were moved back are deleted; files uploaded to object storage directly are not touched. Deleted copies cannot be recovered. If you are going back to the TS version, delete them on Elythia before switching. Continue?"
 pluginNoteOptionsCannotBeDrafted: "Plugin options cannot be saved to drafts or scheduled posts. Clear the options before saving, or post without scheduling."
+pluginNoteOptionsDroppedFromDraft: "Some plugin options in the unfinished post are no longer available and were removed. Check the options before posting."

@@ -23,6 +23,7 @@ const testState = vi.hoisted(() => ({
 	misskeyApi: vi.fn(async () => ({ createdNote: { id: 'created' } })),
 	inputDatetime: vi.fn(async () => ({ canceled: false, result: new Date(Date.now() + 60 * 60 * 1000) })),
 	menuItems: [] as MenuItem[],
+	storage: new Map<string, string>(),
 	dialogValue: { mode: 'include', hosts: ['a.example'] } as unknown,
 }));
 
@@ -87,9 +88,9 @@ vi.mock('@/os.js', () => ({
 }));
 vi.mock('@/utility/autocomplete.js', () => ({ Autocomplete: class { detach() {} } }));
 vi.mock('@/local-storage.js', () => ({ miLocalStorage: {
-	getItem: () => null,
-	setItem: vi.fn(),
-	removeItem: vi.fn(),
+	getItem: (key: string) => testState.storage.get(key) ?? null,
+	setItem: (key: string, value: string) => { testState.storage.set(key, value); },
+	removeItem: (key: string) => { testState.storage.delete(key); },
 	getItemAsJson: () => undefined,
 	setItemAsJson: vi.fn(),
 } }));
@@ -102,15 +103,20 @@ async function flush(): Promise<void> {
 	}
 }
 
-async function mountWithOption() {
+async function registerOption(name: string) {
 	await launchServerPlugins([{
-		name: 'targets',
+		name,
 		setup(host) {
-			host.postForm.registerNoteOption({ icon: 'ti ti-world-share', label: () => 'Targets', component: {} });
+			host.postForm.registerNoteOption({ icon: 'ti ti-world-share', label: () => name, component: {} });
 		},
 	}]);
+}
+
+// instant: false のときだけ、端末に書きかけの投稿を残して復元する。
+async function mountWithOption(options: { plugin?: string; instant?: boolean } = {}) {
+	await registerOption(options.plugin ?? 'targets');
 	const view = render(MkPostForm, {
-		props: { initialText: 'hello', instant: true, autofocus: false, mock: false },
+		props: { initialText: 'hello', instant: options.instant ?? true, autofocus: false, mock: false },
 		global: {
 			stubs: { MkEllipsis: true, MkAcct: true, MkTime: true, I18n: true, MkTip: true },
 			directives: { 'click-anime': () => {}, tooltip: () => {} },
@@ -120,8 +126,8 @@ async function mountWithOption() {
 	return view;
 }
 
-async function setOption(view: Awaited<ReturnType<typeof mountWithOption>>) {
-	await fireEvent.click(view.getByTestId('post-form-plugin-option-targets'));
+async function setOption(view: Awaited<ReturnType<typeof mountWithOption>>, plugin = 'targets') {
+	await fireEvent.click(view.getByTestId(`post-form-plugin-option-${plugin}`));
 	await flush();
 }
 
@@ -142,6 +148,7 @@ beforeEach(() => {
 	Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false });
 	testState.dialogValue = { mode: 'include', hosts: ['a.example'] };
 	testState.menuItems = [];
+	testState.storage.clear();
 });
 
 afterEach(() => {
@@ -206,6 +213,36 @@ describe('MkPostForm plugin note options', () => {
 		await setOption(view);
 		await runMenuItem(view, 'ti ti-trash');
 		await fireEvent.update(view.getByTestId('post-form-text'), 'again');
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
+		expect(payload.pluginOptions).toBeUndefined();
+	});
+
+	test('the local draft keeps the option and restores it', async () => {
+		const first = await mountWithOption({ instant: false });
+		await setOption(first);
+		const stored = JSON.parse(testState.storage.get('drafts') ?? '{}') as Record<string, { data: { pluginOptions?: unknown } }>;
+		expect(Object.values(stored).map(x => x.data.pluginOptions)).toEqual([{ targets: { mode: 'include', hosts: ['a.example'] } }]);
+		cleanup();
+		_resetNoteOptionsForTest();
+
+		const view = await mountWithOption({ instant: false });
+		expect(testState.alert).not.toHaveBeenCalled();
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
+		expect(payload.pluginOptions).toEqual({ targets: { mode: 'include', hosts: ['a.example'] } });
+	});
+
+	test('restoring drops the option of a plugin no longer registered and says so', async () => {
+		const first = await mountWithOption({ instant: false });
+		await setOption(first);
+		cleanup();
+		_resetNoteOptionsForTest();
+
+		const view = await mountWithOption({ instant: false, plugin: 'other' });
+		expect(testState.alert).toHaveBeenCalledTimes(1);
 		await fireEvent.click(view.getByTestId('post-form-submit'));
 		await flush();
 		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
