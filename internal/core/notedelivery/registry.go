@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -25,6 +26,10 @@ const MaxNotesPerCall = 20
 
 // callTimeout bounds one call into a plugin. 配送の hook と照会の handler を
 // プラグインの遅さで止めないため。
+//
+// **期限は context でしか伝えられない。** 本体はプラグインの処理を途中で止められない
+// ので、context を見ない処理は期限を過ぎても戻るまで待つ。ただし、期限を過ぎてから
+// 返った結果は成功でも使わず、失敗として扱う (#4199)。
 const callTimeout = 5 * time.Second
 
 var (
@@ -44,6 +49,16 @@ type provider struct {
 type Registry struct {
 	mu        sync.RWMutex
 	providers []provider
+
+	// timeout overrides callTimeout in tests. 0 means callTimeout.
+	timeout time.Duration
+}
+
+func (r *Registry) callTimeout() time.Duration {
+	if r == nil || r.timeout <= 0 {
+		return callTimeout
+	}
+	return r.timeout
 }
 
 // New returns an empty registry.
@@ -112,13 +127,16 @@ func (r *Registry) Prepare(ctx context.Context, noteID, userID string, options m
 			continue
 		}
 		p := byName[name]
-		err := call(ctx, func(ctx context.Context) error {
+		err := call(ctx, r.callTimeout(), p.name, func(ctx context.Context) error {
 			return p.reg.Prepare(ctx, plugin.NoteDeliveryPrepareRequest{NoteID: noteID, UserID: userID, Option: option})
 		})
 		if errors.Is(err, plugin.ErrBadNoteOption) {
 			return fmt.Errorf("%w: plugin %q: %w", ErrBadOption, name, err)
 		}
 		if err != nil {
+			// 利用者には 500 しか返さないので、運営者が原因を追えるようここで残す。
+			slog.Error("note delivery: plugin prepare failed; note not created",
+				"plugin", p.name, "note", noteID, "err", err)
 			return fmt.Errorf("notedelivery: plugin %q: prepare: %w", name, err)
 		}
 	}
@@ -186,7 +204,7 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 		}
 		for _, p := range providers {
 			var got map[string]plugin.DeliveryTargets
-			err := call(ctx, func(ctx context.Context) error {
+			err := call(ctx, r.callTimeout(), p.name, func(ctx context.Context) error {
 				var err error
 				got, err = p.reg.Targets(ctx, append([]string(nil), chunk...))
 				return err
@@ -227,17 +245,27 @@ var errPanicked = errors.New("notedelivery: plugin panicked")
 // call runs fn with a deadline, turning a panic into an error.
 //
 // **プラグインのpanicでプロセスを落とさない。** 配送の hook は本体の goroutine
-// で動くので、回収しないとサーバーごと落ちる。
-func call(ctx context.Context, fn func(context.Context) error) (err error) {
+// で動くので、回収しないとサーバーごと落ちる。panic の値とスタックは、利用者にも
+// 配送の相手にも見えないので、ここで記録する。
+//
+// **期限を過ぎてから返った成功は使わない。** context を見ないプラグインは期限を
+// 過ぎても戻るまで止められないが、その結果を受け入れると「5秒の期限切れは配らない」
+// が成り立たない ([callTimeout])。
+func call(ctx context.Context, timeout time.Duration, name string, fn func(context.Context) error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	defer func() {
-		if recover() != nil {
-			err = errPanicked
+		if v := recover(); v != nil {
+			slog.Error("note delivery: plugin panicked", "plugin", name, "panic", v, "stack", string(debug.Stack()))
+			err = fmt.Errorf("%w: %v", errPanicked, v)
 		}
 	}()
-	return fn(ctx)
+	err = fn(ctx)
+	if err == nil && ctx.Err() != nil {
+		return fmt.Errorf("notedelivery: plugin %q returned after the deadline: %w", name, ctx.Err())
+	}
+	return err
 }
