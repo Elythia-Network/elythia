@@ -205,6 +205,7 @@ func TestRules_FailureDeniesEverything(t *testing.T) {
 			for _, id := range []string{"n1", "n2"} {
 				assert.True(t, rules[id].Restricted(), id)
 				assert.False(t, rules[id].Allows("a.example"), id)
+				assert.True(t, rules[id].Unavailable(), "%s: a failed plugin must be told apart from a deny rule", id)
 			}
 		})
 	}
@@ -250,6 +251,135 @@ func TestRules_UnknownHostForExclude(t *testing.T) {
 func TestDenyAll(t *testing.T) {
 	assert.True(t, DenyAll.Restricted())
 	assert.False(t, DenyAll.Allows("a.example"))
+	assert.False(t, DenyAll.Unavailable())
+}
+
+func TestRules_HealthyPluginIsAvailable(t *testing.T) {
+	r := New()
+	require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+		"n1": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
+	}}).registration()))
+	rules := r.Rules(context.Background(), []string{"n1", "n2"})
+	assert.False(t, rules["n1"].Unavailable())
+	assert.False(t, rules["n2"].Unavailable())
+}
+
+// A value that is not a host name cannot match any stored host, so an exclude
+// list carrying one would let the excluded server through. The whole rule is
+// treated as unreadable instead (#4202).
+func TestRules_NonHostValueDeniesTheNote(t *testing.T) {
+	for _, bad := range []string{"https://bad.example", "bad.example/", "*.bad.example", "", "bad example", "bad.example:http", "bad.example:0", "bad.example:65536", "bad..example", "user@bad.example", "[::1"} {
+		for _, mode := range []plugin.DeliveryTargetsMode{plugin.DeliveryTargetsExclude, plugin.DeliveryTargetsInclude} {
+			t.Run(string(mode)+" "+bad, func(t *testing.T) {
+				r := New()
+				require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+					"n1": {Mode: mode, Hosts: []string{"ok.example", bad}},
+				}}).registration()))
+				rules := r.Rules(context.Background(), []string{"n1", "n2"})
+				rule := rules["n1"]
+				assert.True(t, rule.Restricted())
+				for _, host := range []string{"bad.example", "ok.example", "other.example", ""} {
+					assert.False(t, rule.Allows(host), host)
+				}
+				assert.False(t, rule.Unavailable(), "only the note with the bad value is denied, so it is not an outage")
+				assert.False(t, rules["n2"].Restricted(), "other notes keep their rules")
+			})
+		}
+	}
+}
+
+func TestRules_HostValuesThatAreHosts(t *testing.T) {
+	for _, good := range []string{"a.example", "A.Example.", "a.example:8443", "パイ.example", "192.0.2.1", "[2001:db8::1]", "[2001:db8::1]:8443", "under_score.example", "localhost"} {
+		t.Run(good, func(t *testing.T) {
+			r := New()
+			require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+				"n1": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{good}},
+			}}).registration()))
+			rule := r.Rule(context.Background(), "n1")
+			assert.True(t, rule.Allows("other.example"), "a valid host must not deny the whole note")
+			assert.False(t, rule.Allows(good))
+		})
+	}
+}
+
+func TestNames(t *testing.T) {
+	var nilRegistry *Registry
+	assert.Empty(t, nilRegistry.Names())
+	r := New()
+	require.NoError(t, r.Add("zeta", (&fakePlugin{}).registration()))
+	require.NoError(t, r.Add("alpha", (&fakePlugin{}).registration()))
+	assert.Equal(t, []string{"alpha", "zeta"}, r.Names())
+}
+
+type forgetRecorder struct {
+	notes [][]string
+	users []string
+	err   error
+	panic bool
+}
+
+func (f *forgetRecorder) registration() plugin.NoteDeliveryRegistration {
+	reg := (&fakePlugin{}).registration()
+	reg.ForgetNotes = func(ctx context.Context, ids []string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			return errors.New("no deadline")
+		}
+		if f.panic {
+			panic("boom")
+		}
+		f.notes = append(f.notes, ids)
+		return f.err
+	}
+	reg.ForgetUser = func(ctx context.Context, userID string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			return errors.New("no deadline")
+		}
+		if f.panic {
+			panic("boom")
+		}
+		f.users = append(f.users, userID)
+		return f.err
+	}
+	return reg
+}
+
+func TestForgetNotes(t *testing.T) {
+	r := New()
+	broken := &forgetRecorder{panic: true}
+	failing := &forgetRecorder{err: errors.New("db down")}
+	ok := &forgetRecorder{}
+	require.NoError(t, r.Add("a-broken", broken.registration()))
+	require.NoError(t, r.Add("b-failing", failing.registration()))
+	require.NoError(t, r.Add("c-ok", ok.registration()))
+	require.NoError(t, r.Add("d-without", (&fakePlugin{}).registration()))
+
+	ids := make([]string, MaxNotesPerCall+1)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("n%d", i)
+	}
+	r.ForgetNotes(context.Background(), ids)
+	require.Len(t, ok.notes, 2, "IDs are handed over in chunks")
+	assert.Len(t, ok.notes[0], MaxNotesPerCall)
+	assert.Equal(t, []string{ids[MaxNotesPerCall]}, ok.notes[1])
+	assert.Len(t, failing.notes, 2, "a failing plugin does not stop the others")
+
+	r.ForgetNotes(context.Background(), nil)
+	assert.Len(t, ok.notes, 2, "nothing to forget calls nothing")
+	var nilRegistry *Registry
+	nilRegistry.ForgetNotes(context.Background(), ids)
+}
+
+func TestForgetUser(t *testing.T) {
+	r := New()
+	failing := &forgetRecorder{err: errors.New("db down")}
+	ok := &forgetRecorder{}
+	require.NoError(t, r.Add("a-failing", failing.registration()))
+	require.NoError(t, r.Add("b-broken", (&forgetRecorder{panic: true}).registration()))
+	require.NoError(t, r.Add("c-ok", ok.registration()))
+	require.NoError(t, r.Add("d-without", (&fakePlugin{}).registration()))
+	r.ForgetUser(context.Background(), "u1")
+	assert.Equal(t, []string{"u1"}, ok.users)
+	assert.Equal(t, []string{"u1"}, failing.users)
 }
 
 func TestCall_NilContext(t *testing.T) {
@@ -311,7 +441,7 @@ func TestRegistry_CallTimeoutDefault(t *testing.T) {
 // stored form first, so spelling differences cannot let an excluded server
 // through (#4199).
 func TestRule_ComparesCanonicalHosts(t *testing.T) {
-	spellings := []string{"Bad.Example", "bad.example.", "bad.example:443", " BAD.example.:443 ", "bad.example"}
+	spellings := []string{"Bad.Example", "bad.example.", "bad.example:443", "bad.example:80", " BAD.example.:443 ", "bad.example"}
 	for _, listed := range spellings {
 		for _, asked := range spellings {
 			t.Run(listed+" vs "+asked, func(t *testing.T) {
@@ -352,8 +482,10 @@ func TestCanonicalHost(t *testing.T) {
 		".":                  "",
 		"Bad.Example.":       "bad.example",
 		"bad.example:443":    "bad.example",
+		"bad.example:80":     "bad.example",
 		"bad.example:8443":   "bad.example:8443",
 		"パイ.example":         "xn--eckve.example",
+		"[2001:db8::1]":      "[2001:db8::1]",
 		"[2001:db8::1]:443":  "[2001:db8::1]",
 		"[2001:db8::1]:8443": "[2001:db8::1]:8443",
 	} {

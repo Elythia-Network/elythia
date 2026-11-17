@@ -1461,8 +1461,10 @@ type Definition struct
 func (Definition) Validate() error
 
 type NoteDeliveryRegistration struct
-  Prepare func(ctx context.Context, req NoteDeliveryPrepareRequest) error
-  Targets func(ctx context.Context, ids []string) (map[string]DeliveryTargets, error)
+  Prepare     func(ctx context.Context, req NoteDeliveryPrepareRequest) error
+  Targets     func(ctx context.Context, ids []string) (map[string]DeliveryTargets, error)
+  ForgetNotes func(ctx context.Context, ids []string) error
+  ForgetUser  func(ctx context.Context, userID string) error
 
 type NoteDeliveryPrepareRequest struct
   NoteID string
