@@ -1165,12 +1165,6 @@ func (h *Handler) Note(c echo.Context) error {
 	if n.LocalOnly {
 		return c.NoContent(http.StatusNotFound)
 	}
-	// プラグインが配送先を絞ったノートは、外したホストと、署名の無い照会には
-	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。条件を読めない
-	// ときは 503 にする (#4202)。
-	if status := h.deliveryRuleStatus(c, n); status != 0 {
-		return c.NoContent(status)
-	}
 	// リモートノートは原本 URI へリダイレクトする (upstream
 	// ActivityPubServerService の /notes/:note と同じ)。これが無いと、他サーバー
 	// がこのインスタンスの URL 経由で第三サーバーの投稿を照会したとき、
@@ -1207,6 +1201,14 @@ func (h *Handler) Note(c echo.Context) error {
 		if !available {
 			return c.NoContent(http.StatusNotFound)
 		}
+	}
+	// プラグインが配送先を絞ったノートは、外したホストと、署名の無い照会には
+	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。条件を読めない
+	// ときは 503 にする (#4202)。作者が連合できるかの確認の後に置く。前に置くと、
+	// 障害のあいだは平常時なら 404 を返す作者 (連合を止めた・凍結された) の
+	// ノートも 503 になり、相手が取り直しを続ける。
+	if status := h.deliveryRuleStatus(c, n); status != 0 {
+		return c.NoContent(status)
 	}
 	note := h.referenceRenderer(c).RenderNote(n, h.idGen)
 	return h.writeAPJSON(c, note)
@@ -1592,9 +1594,6 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	if n.UserHost != nil || n.LocalOnly {
 		return c.NoContent(http.StatusNotFound)
 	}
-	if status := h.deliveryRuleStatus(c, n); status != 0 {
-		return c.NoContent(status)
-	}
 	if h.localFederationObserver != nil {
 		author, err := h.resolveAPAuthor(c, n)
 		if err != nil {
@@ -1610,6 +1609,14 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 		if !available {
 			return c.NoContent(http.StatusNotFound)
 		}
+	}
+	// プラグインが配送先を絞ったノートは、外したホストと、署名の無い照会には
+	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。条件を読めない
+	// ときは 503 にする (#4202)。作者が連合できるかの確認の後に置く。前に置くと、
+	// 障害のあいだは平常時なら 404 を返す作者 (連合を止めた・凍結された) の
+	// ノートも 503 になり、相手が取り直しを続ける。
+	if status := h.deliveryRuleStatus(c, n); status != 0 {
+		return c.NoContent(status)
 	}
 	author := n.User
 	if author == nil {
