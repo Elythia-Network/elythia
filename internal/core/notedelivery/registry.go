@@ -226,8 +226,10 @@ func (r Rule) DeniesAll() bool { return r.denyAll }
 
 // Allows reports whether host may receive or fetch the note.
 //
-// 空のホスト (照会した相手が分からない) は、include なら許さず、exclude なら
-// 許す ([plugin.DeliveryTargets.Allows] がそう判定する)。
+// 空のホストは、include なら許さず、exclude なら許す ([plugin.DeliveryTargets.Allows]
+// がそう判定する)。照会した相手が分からないときは、呼ぶ側が空ではなく自分のホスト
+// ([Registry.LocalHost]) を渡す (#4203) ので、空になるのは設定の`url`を読めず
+// 自分のホストが分からないときだけ。
 func (r Rule) Allows(host string) bool {
 	if r.denyAll {
 		return false
