@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/notehide"
 	"github.com/elythia-network/elythia/internal/api/pagination"
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/core/notesfilter"
@@ -39,7 +40,9 @@ import (
 type Handler struct {
 	// noteDelivery は notes/create の pluginOptions を受け取るプラグイン
 	// (#4199)。nil なら pluginOptions の項目は全部 400 になる。
-	noteDelivery    *notedelivery.Registry
+	noteDelivery *notedelivery.Registry
+	// background は片付けを走らせる世代のグループ (#3661、#4202)。
+	background      *bgwork.Group
 	noteRepo        repository.NoteRepository
 	piningRepo      repository.UserNotePiningRepository
 	createService   *note.CreateService
@@ -225,9 +228,9 @@ func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
 // **保存したノートは、localOnly でも条件を残す。** 連合はしないが、`/notes/:id`を
 // Webページとして取られたときのOGPを隠すのに条件を使う (ssr_meta.go)。
 //
-// プラグインは別のgoroutineで呼ぶ。Prepareが期限切れで失敗したときに、止まって
-// いるプラグインをもう一度待つと、エラーの応答がさらに遅れる。IDは使い回さない
-// ので、片付けは急がなくてよい。
+// プラグインは世代のグループの goroutine で呼ぶ (同時に走る数には上限がある)。
+// Prepareが期限切れで失敗したときに、止まっているプラグインをもう一度待つと、
+// エラーの応答がさらに遅れる。IDは使い回さないので、片付けは急がなくてよい。
 func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, createErr error) {
 	if createErr == nil || h.noteRepo == nil {
 		return
@@ -238,8 +241,14 @@ func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, crea
 	if err != nil || len(ids) > 0 {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
-	go h.noteDelivery.ForgetNotes(ctx, []string{noteID})
+	h.noteDelivery.ForgetNotesInBackground(h.background, []string{noteID})
+}
+
+// SetBackground wires the group of the server generation (#3661) that runs
+// the cleanup of forgetUnfederatedNote, so stopping the generation waits for
+// it. nil runs plain goroutines.
+func (h *Handler) SetBackground(g *bgwork.Group) {
+	h.background = g
 }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target

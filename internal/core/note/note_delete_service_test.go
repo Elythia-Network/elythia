@@ -1,12 +1,11 @@
 package note_test
 
 import (
-	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -372,31 +371,20 @@ func TestDeleteService_NotificationHookNotFiredOnFailure(t *testing.T) {
 	assert.Empty(t, hook.notes)
 }
 
-// recordingNoteForgetter records the IDs it is told to forget. The delete
-// service calls it on another goroutine; block holds every call until closed.
+// recordingNoteForgetter records the IDs and the group it is handed.
 type recordingNoteForgetter struct {
-	mu    sync.Mutex
-	got   []string
-	block chan struct{}
+	got    []string
+	groups []*bgwork.Group
 }
 
-func (r *recordingNoteForgetter) ForgetNotes(_ context.Context, ids []string) {
-	if r.block != nil {
-		<-r.block
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *recordingNoteForgetter) ForgetNotesInBackground(g *bgwork.Group, ids []string) {
 	r.got = append(r.got, ids...)
-}
-
-func (r *recordingNoteForgetter) ids() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.got...)
+	r.groups = append(r.groups, g)
 }
 
 // Deleting a local note tells the NoteDelivery plugins to drop what they
-// stored for it; a remote note never had any (#4202).
+// stored for it, in the group of the server generation; a remote note never
+// had any (#4202).
 func TestDeleteService_ForgetsNoteDelivery(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	host := "remote.example"
@@ -404,35 +392,12 @@ func TestDeleteService_ForgetsNoteDelivery(t *testing.T) {
 	noteRepo.Notes["remote"] = &model.Note{ID: "remote", UserID: "user2", UserHost: &host}
 	svc := note.NewDeleteService(noteRepo)
 	forgetter := &recordingNoteForgetter{}
-	svc.SetNoteDeliveryForgetter(forgetter)
+	g := bgwork.New()
+	svc.SetNoteDeliveryForgetter(forgetter, g)
 
 	require.NoError(t, svc.Delete(&model.User{ID: "user1"}, "local"))
 	require.NoError(t, svc.Delete(&model.User{ID: "user2", Host: &host}, "remote"))
 	require.ErrorIs(t, svc.Delete(&model.User{ID: "user1"}, "missing"), note.ErrNoteNotFound)
-	require.Eventually(t, func() bool { return len(forgetter.ids()) > 0 }, 2*time.Second, 5*time.Millisecond)
-	assert.Never(t, func() bool { return len(forgetter.ids()) > 1 }, 100*time.Millisecond, 5*time.Millisecond,
-		"a remote note and a note that was not deleted are not forgotten")
-	assert.Equal(t, []string{"local"}, forgetter.ids())
-}
-
-// The cleanup does not hold up the deletion: notes/delete, and unrenote once
-// per renote, would wait for a stuck plugin otherwise (#4202).
-func TestDeleteService_ForgetDoesNotDelayDeletion(t *testing.T) {
-	noteRepo := testutil.NewMockNoteRepository()
-	noteRepo.Notes["local"] = &model.Note{ID: "local", UserID: "user1"}
-	svc := note.NewDeleteService(noteRepo)
-	forgetter := &recordingNoteForgetter{block: make(chan struct{})}
-	svc.SetNoteDeliveryForgetter(forgetter)
-
-	done := make(chan error, 1)
-	go func() { done <- svc.Delete(&model.User{ID: "user1"}, "local") }()
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		close(forgetter.block)
-		t.Fatal("Delete waited for ForgetNotes")
-	}
-	close(forgetter.block)
-	require.Eventually(t, func() bool { return len(forgetter.ids()) == 1 }, 2*time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"local"}, forgetter.got, "a remote note and a note that was not deleted are not forgotten")
+	assert.Equal(t, []*bgwork.Group{g}, forgetter.groups)
 }
