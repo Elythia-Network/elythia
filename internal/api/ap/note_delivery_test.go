@@ -167,8 +167,8 @@ func TestNoteDeliveryRules_SignerRejectedExclude(t *testing.T) {
 	})
 }
 
-func TestNoteDeliveryRules_PluginFailureHidesNote(t *testing.T) {
-	f := newSignedFetchFixture(t)
+func failingDeliveryRules(t *testing.T) *notedelivery.Registry {
+	t.Helper()
 	r := notedelivery.New()
 	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
 		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
@@ -176,8 +176,37 @@ func TestNoteDeliveryRules_PluginFailureHidesNote(t *testing.T) {
 			return nil, errors.New("db down")
 		},
 	}))
-	f.h.SetNoteDeliveryRules(r)
-	assert.Equal(t, http.StatusNotFound, f.fetch(t, f.h.Note, "n-public", true))
+	return r
+}
+
+// While the plugin cannot report the targets, a fetch answers 503 rather than
+// 404, for every note alike: a peer that takes 404 as "deleted" would not
+// fetch the note again once the plugin recovers (#4202).
+func TestNoteDeliveryRules_PluginFailureIsUnavailable(t *testing.T) {
+	for name := range signedFetchEndpoints(newSignedFetchFixture(t).h) {
+		t.Run(name, func(t *testing.T) {
+			f := newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(failingDeliveryRules(t))
+			handler := signedFetchEndpoints(f.h)[name]
+			assert.Equal(t, http.StatusServiceUnavailable, f.fetch(t, handler, "n-public", true), "signed")
+			assert.Equal(t, http.StatusServiceUnavailable, f.fetch(t, handler, "n-public", false), "unsigned")
+		})
+	}
+}
+
+// A value that is not a host denies only that note, which is not an outage:
+// it stays 404 so it looks like any other note the requester may not see.
+func TestNoteDeliveryRules_NonHostValueIsNotFound(t *testing.T) {
+	for name := range signedFetchEndpoints(newSignedFetchFixture(t).h) {
+		t.Run(name, func(t *testing.T) {
+			f := newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(apDeliveryRules(t, map[string]plugin.DeliveryTargets{
+				"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"https://other.example"}},
+			}))
+			handler := signedFetchEndpoints(f.h)[name]
+			assert.Equal(t, http.StatusNotFound, f.fetch(t, handler, "n-public", true))
+		})
+	}
 }
 
 // The signature is checked once per request even when several notes are
@@ -248,4 +277,28 @@ func TestNoteDeliveryRules_Featured(t *testing.T) {
 	require.Len(t, items, 1)
 	item, _ := items[0].(map[string]any)
 	assert.Equal(t, "https://example.com/notes/n1", item["id"])
+}
+
+func TestNoteDeliveryRules_OutboxPluginFailureIsUnavailable(t *testing.T) {
+	h, users, notes := newHandlerWithOutbox(t)
+	users.Users["owner"] = &model.User{ID: "owner", Username: "alice", NotesCount: 1}
+	notes.Notes["n1"] = &model.Note{ID: "n1", UserID: "owner", Visibility: model.NoteVisibilityPublic}
+	h.SetNoteDeliveryRules(failingDeliveryRules(t))
+
+	c, rec := newReqQuery(t, "id", "owner", "page=true")
+	require.NoError(t, h.Outbox(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "an empty page would read as no notes")
+}
+
+func TestNoteDeliveryRules_FeaturedPluginFailureIsUnavailable(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: "u1", NoteID: "n1"}))
+	h.SetNoteDeliveryRules(failingDeliveryRules(t))
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.Featured(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "an empty collection would read as unpinned")
 }

@@ -2,6 +2,7 @@ package ap
 
 import (
 	"log/slog"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -131,15 +132,22 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 
 // hiddenByDeliveryRules returns the IDs of the local notes in notes that the
 // requester may not fetch because a plugin narrowed their delivery.
+// unavailable is true when a plugin could not report the targets of any of
+// them; the caller answers 503 then (#4202).
 //
 // 絞られたノートだけが対象。相手が分からない照会は、include のノートには
 // 見せず、exclude のノートには見せる (外したホストかどうかを決められないので、
 // 利用者が選んだ側の既定に倒す)。署名を確かめたうえで断った相手には、絞られた
 // ノートを1つも見せない。署名を確かめるのは、絞られたノートがあった
 // ときだけにする。リモートのノートは原本のサーバーへ転送するものなので見ない。
-func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) map[string]bool {
+//
+// **条件を読めないときは、404ではなく503にさせる。** 404を「消えた」と扱う相手
+// では、障害が直っても戻らない。プラグインの障害は、そのとき渡したノートの
+// 全部 (条件を付けていないものも含む) に同じく出るので、503にしても、どの
+// ノートを絞っているかは漏れない。
+func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) (hidden map[string]bool, unavailable bool) {
 	if h.noteDelivery.Empty() {
-		return nil
+		return nil, false
 	}
 	ids := make([]string, 0, len(notes))
 	for _, n := range notes {
@@ -148,12 +156,14 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) map
 		}
 	}
 	if len(ids) == 0 {
-		return nil
+		return nil, false
 	}
 	rules := h.noteDelivery.Rules(c.Request().Context(), ids)
-	var hidden map[string]bool
 	for _, id := range ids {
 		rule := rules[id]
+		if rule.Unavailable() {
+			return nil, true
+		}
 		if !rule.Restricted() {
 			continue
 		}
@@ -165,10 +175,19 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) map
 		}
 		hidden[id] = true
 	}
-	return hidden
+	return hidden, false
 }
 
-// hiddenByDeliveryRule reports whether the requester may not fetch n.
-func (h *Handler) hiddenByDeliveryRule(c echo.Context, n *model.Note) bool {
-	return h.hiddenByDeliveryRules(c, []*model.Note{n})[n.ID]
+// deliveryRuleStatus returns the status to answer instead of n, or 0 when the
+// requester may fetch it: 404 when a plugin narrowed n away from the
+// requester, 503 when the targets could not be read.
+func (h *Handler) deliveryRuleStatus(c echo.Context, n *model.Note) int {
+	hidden, unavailable := h.hiddenByDeliveryRules(c, []*model.Note{n})
+	switch {
+	case unavailable:
+		return http.StatusServiceUnavailable
+	case hidden[n.ID]:
+		return http.StatusNotFound
+	}
+	return 0
 }
