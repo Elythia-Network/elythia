@@ -99,6 +99,17 @@ func (r *Registry) snapshot() []provider {
 // Empty reports whether no plugin is registered.
 func (r *Registry) Empty() bool { return len(r.snapshot()) == 0 }
 
+// Names returns the names of the registered plugins, sorted. These are the
+// keys notes/create accepts in pluginOptions.
+func (r *Registry) Names() []string {
+	providers := r.snapshot()
+	names := make([]string, 0, len(providers))
+	for _, p := range providers {
+		names = append(names, p.name)
+	}
+	return names
+}
+
 // Prepare hands each entry of options to the plugin it names, before the note
 // is stored.
 //
@@ -155,7 +166,16 @@ func isNull(raw json.RawMessage) bool {
 type Rule struct {
 	targets []plugin.DeliveryTargets
 	denyAll bool
+	// unavailable is set when a plugin could not report the targets at all
+	// (error, panic, deadline). denyAll is set with it.
+	unavailable bool
 }
+
+// Unavailable reports whether the targets could not be read because a plugin
+// failed. 照会はこのとき404ではなく503にする (#4202)。404を「消えた」と扱う相手
+// では、障害が直っても戻らない。条件を付けていないノートも同じ扱いになるので、
+// どのノートを絞っているかは漏れない。
+func (r Rule) Unavailable() bool { return r.unavailable }
 
 // Restricted reports whether the rule narrows anything. Restricted なノートは
 // relay へ流さない (relay は受け取ったものを加盟する全サーバーへ配り直すので、
@@ -179,14 +199,20 @@ func (r Rule) Allows(host string) bool {
 	return true
 }
 
-// DenyAll is the rule used when the targets could not be read.
+// DenyAll is the rule of a note whose targets cannot be applied, such as one
+// that names a value that is not a host.
 var DenyAll = Rule{denyAll: true}
+
+// unavailableRule is the rule used when a plugin failed to report targets.
+var unavailableRule = Rule{denyAll: true, unavailable: true}
 
 // Rules returns the rule of each note in noteIDs. 全ノートの結果を必ず返す。
 //
 // **読めなければ配らない。** プラグインがエラーを返す、panicする、時間内に
-// 返らない、のどれでも、そのプラグインに渡したノートは [DenyAll] になる。
-// どのプラグインも登録されていなければ、問い合わせずに全部を無制限で返す。
+// 返らない、のどれでも、そのプラグインに渡したノートは、どこにも配らず
+// [Rule.Unavailable] が真になる。ホスト名として読めない値を含む条件のノートは
+// [DenyAll] になる。どのプラグインも登録されていなければ、問い合わせずに全部を
+// 無制限で返す。
 func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule {
 	out := make(map[string]Rule, len(noteIDs))
 	providers := r.snapshot()
@@ -215,7 +241,7 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 				slog.Warn("note delivery: plugin targets failed; not federating these notes",
 					"plugin", p.name, "notes", len(chunk), "err", err)
 				for _, id := range chunk {
-					out[id] = DenyAll
+					out[id] = unavailableRule
 				}
 				continue
 			}
@@ -228,7 +254,14 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 				if rule.denyAll {
 					continue
 				}
-				rule.targets = append(rule.targets, plugin.DeliveryTargets{Mode: t.Mode, Hosts: canonicalHosts(t.Hosts)})
+				hosts, ok := canonicalHostList(t.Hosts)
+				if !ok {
+					slog.Warn("note delivery: plugin returned a value that is not a host; not federating this note",
+						"plugin", p.name, "note", id)
+					out[id] = DenyAll
+					continue
+				}
+				rule.targets = append(rule.targets, plugin.DeliveryTargets{Mode: t.Mode, Hosts: hosts})
 				out[id] = rule
 			}
 		}
@@ -239,6 +272,47 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 // Rule returns the rule of one note.
 func (r *Registry) Rule(ctx context.Context, noteID string) Rule {
 	return r.Rules(ctx, []string{noteID})[noteID]
+}
+
+// ForgetNotes tells every plugin that the conditions of noteIDs are no longer
+// needed (plugin.NoteDeliveryRegistration.ForgetNotes). Failures are logged
+// and not returned: ノートの作成と削除は、片付けの失敗で止めない。
+func (r *Registry) ForgetNotes(ctx context.Context, noteIDs []string) {
+	if len(noteIDs) == 0 {
+		return
+	}
+	for _, p := range r.snapshot() {
+		if p.reg.ForgetNotes == nil {
+			continue
+		}
+		for start := 0; start < len(noteIDs); start += MaxNotesPerCall {
+			chunk := append([]string(nil), noteIDs[start:min(start+MaxNotesPerCall, len(noteIDs))]...)
+			err := call(ctx, r.callTimeout(), p.name, func(ctx context.Context) error {
+				return p.reg.ForgetNotes(ctx, chunk)
+			})
+			if err != nil {
+				slog.Warn("note delivery: plugin forget notes failed", "plugin", p.name, "notes", len(chunk), "err", err)
+			}
+		}
+	}
+}
+
+// ForgetUser tells every plugin that a local user and all their notes were
+// deleted (plugin.NoteDeliveryRegistration.ForgetUser). Failures are logged
+// and not returned: プラグインの障害で利用者の削除を止めない (止めると、
+// 再試行のたびに削除が途中で止まり、アカウントが消えきらない)。
+func (r *Registry) ForgetUser(ctx context.Context, userID string) {
+	for _, p := range r.snapshot() {
+		if p.reg.ForgetUser == nil {
+			continue
+		}
+		err := call(ctx, r.callTimeout(), p.name, func(ctx context.Context) error {
+			return p.reg.ForgetUser(ctx, userID)
+		})
+		if err != nil {
+			slog.Warn("note delivery: plugin forget user failed", "plugin", p.name, "user", userID, "err", err)
+		}
+	}
 }
 
 // errPanicked is returned when a plugin callback panicked.

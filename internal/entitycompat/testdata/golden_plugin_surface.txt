@@ -130,6 +130,8 @@ plugin:   field Migration.Version int
 plugin:   field NoteDeliveryPrepareRequest.NoteID string
 plugin:   field NoteDeliveryPrepareRequest.Option json.RawMessage
 plugin:   field NoteDeliveryPrepareRequest.UserID string
+plugin:   field NoteDeliveryRegistration.ForgetNotes func(ctx context.Context, ids []string) error
+plugin:   field NoteDeliveryRegistration.ForgetUser func(ctx context.Context, userID string) error
 plugin:   field NoteDeliveryRegistration.Prepare func(ctx context.Context, req NoteDeliveryPrepareRequest) error
 plugin:   field NoteDeliveryRegistration.Targets func(ctx context.Context, ids []string) (map[string]DeliveryTargets, error)
 plugin:   field Notification.AccountID string
