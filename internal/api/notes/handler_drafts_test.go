@@ -1417,6 +1417,15 @@ func TestDrafts_RefusePluginOptions(t *testing.T) {
 		{"update with an option", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":{"targets":{}}}`, http.StatusBadRequest},
 		{"create with a null option", h.DraftsCreate, `{"text":"x","pluginOptions":{"targets":null}}`, http.StatusOK},
 		{"update with an empty map", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":{}}`, http.StatusOK},
+		{"create with null", h.DraftsCreate, `{"text":"x","pluginOptions":null}`, http.StatusOK},
+		{"update with null", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":null}`, http.StatusOK},
+		// 型の合わない値も、受け取れないことを同じ文言で返す (#4202)。
+		{"create with a string", h.DraftsCreate, `{"text":"x","pluginOptions":"targets"}`, http.StatusBadRequest},
+		{"update with a string", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":"targets"}`, http.StatusBadRequest},
+		{"create with an array", h.DraftsCreate, `{"text":"x","pluginOptions":[{"targets":{}}]}`, http.StatusBadRequest},
+		{"update with an array", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":[]}`, http.StatusBadRequest},
+		{"update with a number", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":1}`, http.StatusBadRequest},
+		{"update with false", h.DraftsUpdate, `{"draftId":"d1","pluginOptions":false}`, http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1424,6 +1433,7 @@ func TestDrafts_RefusePluginOptions(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus == http.StatusBadRequest {
 				assert.Contains(t, rec.Body.String(), "INVALID_PARAM")
+				assert.Contains(t, rec.Body.String(), "pluginOptions cannot be used with drafts.")
 			}
 		})
 	}

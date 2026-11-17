@@ -607,8 +607,9 @@
 	"notes/create": {
 		"x-elythia-properties": {
 			"pluginOptions": {
-				"description": "Options for the server plugins that narrow where the note federates (#4199), keyed by plugin name. Each value is handed unread to that plugin before the note is stored; a name no such plugin owns is rejected.",
-				"type": "object"
+				"description": "Options for the server plugins that narrow where the note federates (#4199), keyed by plugin name. Each value is handed unread to that plugin before the note is stored; a name no such plugin owns is rejected. null is the same as omitting it (#4202).",
+				"type": "object",
+				"nullable": true
 			}
 		}
 	}

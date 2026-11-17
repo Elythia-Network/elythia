@@ -103,8 +103,9 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 		Poll                *draftPoll `json:"poll"`
 		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled bool       `json:"isActuallyScheduled"`
-		// PluginOptions is read only to refuse it (#4199).
-		PluginOptions map[string]json.RawMessage `json:"pluginOptions"`
+		// PluginOptions is read only to refuse it (#4199). 型を問わずに受け、
+		// 値があれば断る (#4202)。
+		PluginOptions json.RawMessage `json:"pluginOptions"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("Invalid parameters."))
@@ -256,8 +257,9 @@ func (h *Handler) DraftsUpdate(c echo.Context) error {
 		Poll                *draftPoll `json:"poll"`
 		ScheduledAt         *jsnum.Int `json:"scheduledAt"`
 		IsActuallyScheduled *bool      `json:"isActuallyScheduled"`
-		// PluginOptions is read only to refuse it (#4199).
-		PluginOptions map[string]json.RawMessage `json:"pluginOptions"`
+		// PluginOptions is read only to refuse it (#4199). 型を問わずに受け、
+		// 値があれば断る (#4202)。
+		PluginOptions json.RawMessage `json:"pluginOptions"`
 	}
 	if err := c.Bind(&req); err != nil || req.DraftID == "" {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("draftId is required."))
@@ -995,15 +997,27 @@ func (h *Handler) resolveDraftFileMap(fileIDs []string) map[string]entity.DriveF
 	return m
 }
 
-// hasPluginOptions reports whether options carries a non-null entry.
+// hasPluginOptions reports whether options carries anything but null: an
+// object with a non-null entry, or a value of another type.
 //
 // **下書きと予約投稿は pluginOptions を受け取れない。** 下書きには指定を残す場所が
 // 無く、黙って捨てると、絞ったつもりのノートが予約の時刻に絞られないまま連合する。
 // notes/create と同じく、null の項目は送られなかったものとして扱う (#4199)。
-func hasPluginOptions(options map[string]json.RawMessage) bool {
-	for _, raw := range options {
-		var v any
-		if len(raw) > 0 && (json.Unmarshal(raw, &v) != nil || v != nil) {
+//
+// **型を確かめるのはここで行う。** map で Bind すると、文字列や配列で送られたときに
+// Bind が失敗し、`Invalid parameters.` (update では的外れな `draftId is required.`)
+// になる。受け取れないことを同じ文言で返す (#4202)。
+func hasPluginOptions(options json.RawMessage) bool {
+	var v any
+	if len(options) == 0 || json.Unmarshal(options, &v) != nil || v == nil {
+		return false
+	}
+	entries, ok := v.(map[string]any)
+	if !ok {
+		return true
+	}
+	for _, entry := range entries {
+		if entry != nil {
 			return true
 		}
 	}
