@@ -404,3 +404,23 @@ func TestAddedPropertiesMatchElythiaJS(t *testing.T) {
 		assert.Contains(t, ts, name, "%s adds properties that extensions.ts does not declare", name)
 	}
 }
+
+// TestNotesCreatePluginOptionsOverlay pins the notes/create pluginOptions
+// declaration (#4199). The handler reads null as omitted, so the declaration
+// accepts null too (#4202).
+func TestNotesCreatePluginOptionsOverlay(t *testing.T) {
+	eff, err := paramschema.Effective()
+	require.NoError(t, err)
+	for body, ok := range map[string]bool{
+		`{"text":"x","pluginOptions":null}`:                  true,
+		`{"text":"x","pluginOptions":{}}`:                    true,
+		`{"text":"x","pluginOptions":{"targets":{"a":1}}}`:   true,
+		`{"text":"x","pluginOptions":"targets"}`:             false,
+		`{"text":"x","pluginOptions":[{"targets":{"a":1}}]}`: false,
+	} {
+		var data any
+		require.NoError(t, json.Unmarshal([]byte(body), &data), body)
+		verr := eff["notes/create"].Schema.Validate(data)
+		assert.Equal(t, ok, verr == nil, "%s: %v", body, verr)
+	}
+}
