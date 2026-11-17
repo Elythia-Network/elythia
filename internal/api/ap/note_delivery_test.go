@@ -194,6 +194,31 @@ func TestNoteDeliveryRules_PluginFailureIsUnavailable(t *testing.T) {
 	}
 }
 
+// An author whose notes do not federate answers 404 even while the plugin is
+// down: 503 asks the peer to fetch again, which it should not (#4202).
+func TestNoteDeliveryRules_PluginFailureKeepsUnavailableAuthorNotFound(t *testing.T) {
+	for _, status := range []model.FederationStatus{model.FederationStatusOff, model.FederationStatusPending} {
+		for name := range signedFetchEndpoints(newSignedFetchFixture(t).h) {
+			t.Run(string(status)+" "+name, func(t *testing.T) {
+				f := newSignedFetchFixture(t)
+				f.users.Users["alice"].FederationStatus = status
+				f.h.SetLocalFederationObserver(&availabilityObserver{})
+				f.h.SetNoteDeliveryRules(failingDeliveryRules(t))
+				handler := signedFetchEndpoints(f.h)[name]
+				assert.Equal(t, http.StatusNotFound, f.fetch(t, handler, "n-public", true))
+			})
+		}
+	}
+	t.Run("available author", func(t *testing.T) {
+		f := newSignedFetchFixture(t)
+		f.users.Users["alice"].FederationStatus = model.FederationStatusOn
+		f.h.SetLocalFederationObserver(&availabilityObserver{})
+		f.h.SetNoteDeliveryRules(failingDeliveryRules(t))
+		assert.Equal(t, http.StatusServiceUnavailable, f.fetch(t, f.h.Note, "n-public", true))
+		assert.Equal(t, http.StatusServiceUnavailable, f.fetch(t, f.h.NoteActivity, "n-public", true))
+	})
+}
+
 // A value that is not a host denies only that note, which is not an outage:
 // it stays 404 so it looks like any other note the requester may not see.
 func TestNoteDeliveryRules_NonHostValueIsNotFound(t *testing.T) {
