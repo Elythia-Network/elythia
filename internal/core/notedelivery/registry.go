@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"runtime/debug"
 	"sort"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/bgwork"
+	"github.com/elythia-network/elythia/internal/misc/idnhost"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -58,6 +60,10 @@ type Registry struct {
 	// forgetsRunning counts the ForgetNotes calls running in the background
 	// (ForgetNotesInBackground). 上限を超えた分は走らせずに捨てる (#4202)。
 	forgetsRunning atomic.Int32
+	// localHost is this server's host, in canonicalHost's form. 条件にこの
+	// ホストを入れると、ログインしていない閲覧者に見せるかも同じ条件で絞れる
+	// (#4203)。"" なら、どのノートも自分のホストを入れていないものとして扱う。
+	localHost string
 }
 
 // MaxBackgroundForgets bounds the ForgetNotes calls ForgetNotesInBackground
@@ -75,8 +81,27 @@ func (r *Registry) callTimeout() time.Duration {
 	return r.timeout
 }
 
-// New returns an empty registry.
+// New returns an empty registry that does not know this server's host.
 func New() *Registry { return &Registry{} }
+
+// NewForServer returns an empty registry for the server at serverURL (the
+// `url` of the configuration). The server's host is what the conditions name
+// to narrow who sees a note on this server without signing in (#4203).
+func NewForServer(serverURL string) *Registry {
+	r := &Registry{}
+	if u, err := url.Parse(serverURL); err == nil && u.Host != "" {
+		r.localHost = canonicalHost(idnhost.HostPort(u))
+	}
+	return r
+}
+
+// LocalHost returns this server's host as the conditions name it, or "".
+func (r *Registry) LocalHost() string {
+	if r == nil {
+		return ""
+	}
+	return r.localHost
+}
 
 // Add registers a plugin's NoteDeliveryRegistration.
 func (r *Registry) Add(name string, reg plugin.NoteDeliveryRegistration) error {
@@ -313,6 +338,36 @@ func (r *Registry) ForgetNotesInBackground(g *bgwork.Group, noteIDs []string) {
 	if !started {
 		r.forgetsRunning.Add(-1)
 	}
+}
+
+// HiddenFromVisitors returns the IDs of the local notes in noteIDs that a
+// viewer who is not signed in on this server may not see (#4203).
+//
+// **ログインしていない閲覧者を、自分のホストからの照会として判定する。** 条件の
+// ホストに自分のホストを入れたときの意味を、ActivityPubで届く先と揃える:
+// includeに入れたら見せ、入れなければ見せない。excludeに入れたら見せず、入れ
+// なければ見せる。絞っていないノートは今までどおり見せる。条件を読めないとき
+// (プラグインの障害) も見せない (「届かない」側に倒す)。
+//
+// 使うのは、埋め込み (`/embed/notes/:id`)・フィード (`/@user.rss`など)・
+// 未ログインの`notes/show`。ログインしているローカルの利用者と、タイムライン・
+// 検索には効かせない。呼ぶ側がリモートのノートを除いてから渡す。
+func (r *Registry) HiddenFromVisitors(ctx context.Context, noteIDs []string) map[string]bool {
+	if r.Empty() || len(noteIDs) == 0 {
+		return nil
+	}
+	rules := r.Rules(ctx, noteIDs)
+	var hidden map[string]bool
+	for _, id := range noteIDs {
+		if rules[id].Allows(r.localHost) {
+			continue
+		}
+		if hidden == nil {
+			hidden = make(map[string]bool)
+		}
+		hidden[id] = true
+	}
+	return hidden
 }
 
 // ForgetNotes tells every plugin that the conditions of noteIDs are no longer
