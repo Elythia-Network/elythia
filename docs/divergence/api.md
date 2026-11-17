@@ -232,6 +232,16 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 本家では、ローカルの利用者は退会すると削除のジョブで行ごと消え、割り当ても消えるので、一覧に残るのは管理者が凍結した利用者と、ジョブが終わるまでの間に限られる。Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると行を残す(#3207)ので、絞らないとずっと一覧に出る。`admin/roles/users`と`admin/roles/show`は、本家と同じく絞らない。
 
+## 削除したアカウントのトークンで、認証が要るエンドポイントを呼んだとき (#4208)
+
+認証が要るエンドポイント(`RequireAuth` / `RequireSecure` / `RequireAdmin` / `RequireModerator`)に、削除したアカウントのトークンを付けて来たら、401の`AUTHENTICATION_FAILED`を返す。トークンが無効なときと同じ応答。それまでは401の`CREDENTIAL_REQUIRED`を返していた。認証が要らないエンドポイントでは、これまでどおり匿名として扱う。これらのgateを通らずに認証を確かめるエンドポイント(`i/revoke-token`、`RequireRolePolicy`だけで守る`admin/emoji/*`など)は変えておらず、`CREDENTIAL_REQUIRED`のまま。
+
+削除したアカウントのトークンは、削除のジョブが消すまで残る。行を残す退会(#3207)ではジョブの最初に消すが、管理者の削除などではノートなどを全部消し終えて行を消すまで残り、ジョブが失敗するとそのまま残る。ジョブがトークンを消した後は、もともと`AUTHENTICATION_FAILED`になるので、それより前の間も同じ応答にした。`CREDENTIAL_REQUIRED`のままだと、トークンの解決がDBの一時的な失敗で止まったとき(同じく`CREDENTIAL_REQUIRED`)と見分けられず、frontendが端末からこのアカウントを外せない(frontendの側は[frontend.md](frontend.md)の#4208の行)。
+
+本家はこの間、普通に認証する(`ApiCallService`も`AuthenticateService`も`isDeleted`を見ない)。ジョブが行ごと消した後は、トークンが引けずに`AUTHENTICATION_FAILED`になる。
+
+あわせて、native tokenの検索がDBの一時的な失敗で落ちたときは、access_tokenの検索へ進まずに匿名として扱うようにした(`resolveUser`)。進むとnot foundで終わり、有効なトークンに`AUTHENTICATION_FAILED`を返していた。本家は認証の途中のDBの失敗を捕まえず、500(`INTERNAL_ERROR`)を返す(`/streaming`のupgradeも500)。Elythiaは以前から匿名に落とすので、認証が要るエンドポイントは401の`CREDENTIAL_REQUIRED`になり、`/streaming`は匿名の接続として張られる。
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。

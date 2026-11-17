@@ -46,7 +46,8 @@ const (
 	rawTokenPresentContextKey contextKey = "misskeyRawTokenPresent"
 	// deletedContextKey flags that the request carried a valid token whose
 	// account is (logically) deleted. HTTP では匿名として扱うが、/streaming は
-	// 凍結と同じくこの接続を拒否する (IsInactiveAccountRequest)。
+	// 凍結と同じくこの接続を拒否する (IsInactiveAccountRequest)。認証が要る
+	// gateでは401 AUTHENTICATION_FAILEDを返す (credentialRequiredResponse、#4208)。
 	deletedContextKey contextKey = "misskeyDeleted"
 	// heldAppUserContextKey holds the user of an app token that lacks
 	// AppReadKind, moved out of UserContextKey by HideAppUserWithoutRead until
@@ -335,11 +336,20 @@ func IsInactiveAccountRequest(c echo.Context) bool {
 }
 
 // credentialRequiredResponse writes the error for a credential-required gate
-// when GetUser is nil: 403 YOUR_ACCOUNT_SUSPENDED when the request carried a
-// valid token for a suspended account (upstream ApiCallService.ts、#1559)、else
-// 401 CREDENTIAL_REQUIRED. Shared by RequireAuth / RequireSecure /
-// RequireAdmin / RequireModerator so the suspended branch stays consistent.
+// when GetUser is nil: 401 AUTHENTICATION_FAILED when the request carried a
+// token for a deleted account (#4208), 403 YOUR_ACCOUNT_SUSPENDED when it
+// carried a valid token for a suspended account (upstream ApiCallService.ts、
+// #1559)、else 401 CREDENTIAL_REQUIRED. Shared by RequireAuth / RequireSecure /
+// RequireAdmin / RequireModerator so these branches stay consistent.
 func credentialRequiredResponse(c echo.Context) error {
+	// 削除したアカウントのトークンには、削除のジョブがトークンを消した後と同じ応答を
+	// 返す (#4208)。トークンは、管理者の削除などではジョブがノートなどを全部消し終える
+	// まで残り、ジョブが失敗すると残り続ける。その間をCREDENTIAL_REQUIREDにすると、
+	// DBの一時的な失敗(同じくCREDENTIAL_REQUIRED)と見分けられず、frontendが端末から
+	// このアカウントを外せない。
+	if v, _ := c.Get(string(deletedContextKey)).(bool); v {
+		return c.JSON(http.StatusUnauthorized, apierr.AuthenticationFailed())
+	}
 	if v, _ := c.Get(string(suspendedContextKey)).(bool); v {
 		return c.JSON(http.StatusForbidden, apierr.YourAccountSuspended())
 	}
@@ -651,6 +661,14 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 	if err == nil {
 		a.tokenCache.putIfFresh(readStart, token, user, nil, "", false)
 		return user, nil, "", false, nil
+	}
+	// 見つからなかった以外の失敗(DBの一時的な失敗など)は、ここで打ち切る (#4208)。
+	// 下のaccess_tokenの検索へ進むと、native tokenはそちらに無いのでnot foundで
+	// 終わり、有効なtokenなのに401 AUTHENTICATION_FAILEDを返す。frontendは
+	// これを「トークンが無効」と受け取り、端末からアカウントを外す。打ち切れば
+	// Authenticateが匿名として扱い、認証が要るendpointはCREDENTIAL_REQUIREDになる。
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, "", false, err
 	}
 
 	// hash 列 (miauth: sha256(token) / 本家の app 認証の形: 提示された値の小文字)

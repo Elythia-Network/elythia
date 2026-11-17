@@ -3,6 +3,8 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1250,6 +1252,81 @@ func TestSuspendedUser_403OnAllCredentialGates(t *testing.T) {
 			assert.Equal(t, "YOUR_ACCOUNT_SUSPENDED", resp["error"].(map[string]any)["code"])
 		})
 	}
+}
+
+// 削除したアカウントのトークンは、どのcredential必須gateでも401
+// AUTHENTICATION_FAILEDになる (#4208)。DBの一時的な失敗のCREDENTIAL_REQUIREDと
+// 区別できないと、frontendが端末からこのアカウントを外せない。自分で削除すると
+// isSuspendedも立つので、その形でも同じ応答になることを確かめる。
+func TestDeletedUser_AuthenticationFailedOnAllCredentialGates(t *testing.T) {
+	gates := map[string]echo.MiddlewareFunc{
+		"RequireAuth":      RequireAuth(),
+		"RequireSecure":    RequireSecure(),
+		"RequireAdmin":     RequireAdmin(&stubRoleChecker{admin: true}),
+		"RequireModerator": RequireModerator(&stubRoleChecker{moderator: true}),
+	}
+	for name, gate := range gates {
+		for _, suspended := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/suspended=%v", name, suspended), func(t *testing.T) {
+				userRepo := testutil.NewMockUserRepository()
+				tokenRepo := testutil.NewMockAccessTokenRepository()
+				token := "deleted-token-" + name
+				userRepo.Tokens[token] = &model.User{ID: "u_d", Username: "gone", IsDeleted: true, IsSuspended: suspended}
+				auth := NewAuthMiddleware(userRepo, tokenRepo)
+
+				e := echo.New()
+				req := httptest.NewRequest(http.MethodPost, "/", nil)
+				req.Header.Set("Authorization", "Bearer "+token)
+				rec := httptest.NewRecorder()
+				c := e.NewContext(req, rec)
+
+				chained := auth.Authenticate()(gate(func(c echo.Context) error {
+					t.Fatal("deleted user must not pass the gate")
+					return nil
+				}))
+				require.NoError(t, chained(c))
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+				var resp map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				errObj := resp["error"].(map[string]any)
+				assert.Equal(t, "AUTHENTICATION_FAILED", errObj["code"])
+				assert.Equal(t, "b0a7f5f8-dc2f-4171-b91f-de88ad238e14", errObj["id"])
+			})
+		}
+	}
+}
+
+// failingTokenUserRepo fails the native token lookup with a transient error.
+type failingTokenUserRepo struct {
+	*testutil.MockUserRepository
+}
+
+func (failingTokenUserRepo) FindByToken(string) (*model.User, error) {
+	return nil, errors.New("connection reset")
+}
+
+// native tokenの検索がDBの一時的な失敗で落ちたら、access_tokenの検索へ進まずに
+// 匿名として扱う (#4208)。進むとnot foundで終わって401 AUTHENTICATION_FAILEDになり、
+// frontendが有効なアカウントを端末から外す。
+func TestRequireAuth_TransientNativeTokenLookupFailureIsNotAuthenticationFailed(t *testing.T) {
+	tokenRepo := testutil.NewMockAccessTokenRepository()
+	auth := NewAuthMiddleware(failingTokenUserRepo{testutil.NewMockUserRepository()}, tokenRepo)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Authorization", "Bearer abcdefghijklmnop")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	chained := auth.Authenticate()(RequireAuth()(func(c echo.Context) error {
+		t.Fatal("must not pass the gate")
+		return nil
+	}))
+	require.NoError(t, chained(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "CREDENTIAL_REQUIRED", resp["error"].(map[string]any)["code"])
 }
 
 // 未認証 (token 無し) は従来どおり 401 CREDENTIAL_REQUIRED (凍結 flag 無し)。
