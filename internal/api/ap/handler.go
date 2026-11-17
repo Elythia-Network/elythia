@@ -1166,9 +1166,10 @@ func (h *Handler) Note(c echo.Context) error {
 		return c.NoContent(http.StatusNotFound)
 	}
 	// プラグインが配送先を絞ったノートは、外したホストと、署名の無い照会には
-	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。
-	if h.hiddenByDeliveryRule(c, n) {
-		return c.NoContent(http.StatusNotFound)
+	// 見せない (#4199)。無いのと区別が付かないよう 404 にする。条件を読めない
+	// ときは 503 にする (#4202)。
+	if status := h.deliveryRuleStatus(c, n); status != 0 {
+		return c.NoContent(status)
 	}
 	// リモートノートは原本 URI へリダイレクトする (upstream
 	// ActivityPubServerService の /notes/:note と同じ)。これが無いと、他サーバー
@@ -1246,7 +1247,11 @@ func (h *Handler) Featured(c echo.Context) error {
 	}
 	items := make([]any, 0, len(notes))
 	renderer := h.referenceRenderer(c)
-	hidden := h.hiddenByDeliveryRules(c, notes)
+	hidden, unavailable := h.hiddenByDeliveryRules(c, notes)
+	if unavailable {
+		// 一覧から外すと、相手は固定したノートが外されたと受け取る (#4202)。
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
 	for _, n := range notes {
 		h.seedAPNote(c, n)
 		// upstream featured の filter: !localOnly && visibility ∈ {public, home}。
@@ -1523,7 +1528,11 @@ func (h *Handler) Outbox(c echo.Context) error {
 	// 配送先を絞ったノートは、照会できる相手にだけ出す (#4199)。
 	// 件数 (totalItems) は数えたままにする。数を減らすと、絞ったノートの有無が
 	// 件数の差から分かる。
-	hidden := h.hiddenByDeliveryRules(c, notes)
+	hidden, unavailable := h.hiddenByDeliveryRules(c, notes)
+	if unavailable {
+		// 空のページを返すと、相手はノートが無いと受け取る (#4202)。
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
 	for _, n := range notes {
 		if hidden[n.ID] {
 			continue
@@ -1580,8 +1589,11 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 	// はこのサーバーの発行物ではないので、redirect でなく 404)。visibility は
 	// showNoteForFetch が見て (署名の無い GET には public / home だけ)、localOnly は
 	// ここで弾く (Note と同じ)。
-	if n.UserHost != nil || n.LocalOnly || h.hiddenByDeliveryRule(c, n) {
+	if n.UserHost != nil || n.LocalOnly {
 		return c.NoContent(http.StatusNotFound)
+	}
+	if status := h.deliveryRuleStatus(c, n); status != 0 {
+		return c.NoContent(status)
 	}
 	if h.localFederationObserver != nil {
 		author, err := h.resolveAPAuthor(c, n)
