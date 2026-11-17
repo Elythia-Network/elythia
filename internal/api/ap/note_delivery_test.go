@@ -137,17 +137,6 @@ func TestNoteDeliveryRules_SignerRejected(t *testing.T) {
 // same as notes/show, the embed and the feed: a note whose conditions name
 // this server's host reads the same through ActivityPub as on the web (#4203).
 func TestNoteDeliveryRules_UnknownRequesterIsJudgedAsOwnHost(t *testing.T) {
-	ownHostRules := func(t *testing.T, mode plugin.DeliveryTargetsMode, hosts ...string) *notedelivery.Registry {
-		t.Helper()
-		r := notedelivery.NewForServer("https://local.example")
-		require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
-			Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
-			Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) {
-				return map[string]plugin.DeliveryTargets{"n-public": {Mode: mode, Hosts: hosts}}, nil
-			},
-		}))
-		return r
-	}
 	anonymous := map[string]string{
 		"no User-Agent":          "",
 		"unknown User-Agent":     "curl/8.0",
@@ -156,25 +145,25 @@ func TestNoteDeliveryRules_UnknownRequesterIsJudgedAsOwnHost(t *testing.T) {
 	for name, ua := range anonymous {
 		t.Run(name, func(t *testing.T) {
 			f := newSignedFetchFixture(t)
-			f.h.SetNoteDeliveryRules(ownHostRules(t, plugin.DeliveryTargetsExclude, "local.example"))
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}}}))
 			assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, ua, false), "exclude own host hides it from anonymous fetches too")
 
 			f = newSignedFetchFixture(t)
-			f.h.SetNoteDeliveryRules(ownHostRules(t, plugin.DeliveryTargetsInclude, "a.example", "local.example"))
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example", "local.example"}}}))
 			assert.Equal(t, http.StatusOK, f.fetchWithUA(t, ua, false), "include own host shows it to anonymous fetches")
 
 			f = newSignedFetchFixture(t)
-			f.h.SetNoteDeliveryRules(ownHostRules(t, plugin.DeliveryTargetsInclude, "a.example"))
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}}}))
 			assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, ua, false))
 
 			f = newSignedFetchFixture(t)
-			f.h.SetNoteDeliveryRules(ownHostRules(t, plugin.DeliveryTargetsExclude, "a.example"))
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"a.example"}}}))
 			assert.Equal(t, http.StatusOK, f.fetchWithUA(t, ua, false))
 		})
 	}
 	t.Run("signed requester is judged by its own host", func(t *testing.T) {
 		f := newSignedFetchFixture(t)
-		f.h.SetNoteDeliveryRules(ownHostRules(t, plugin.DeliveryTargetsExclude, "local.example"))
+		f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}}}))
 		assert.Equal(t, http.StatusOK, f.fetch(t, f.h.Note, "n-public", true), "remote.example is not excluded")
 	})
 }
