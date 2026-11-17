@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +60,32 @@ func TestEmbedNote_HiddenFromVisitorsByDeliveryRules(t *testing.T) {
 			assert.Equal(t, tt.wantEmbed, strings.Contains(rec.Body.String(), "packed-n1"))
 		})
 	}
+}
+
+// While the plugin cannot report the conditions, the note is not embedded
+// (#4203).
+func TestEmbedNote_PluginFailureHidesNote(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
+	rules := notedelivery.NewForServer("https://local.example")
+	require.NoError(t, rules.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) {
+			return nil, errors.New("db down")
+		},
+	}))
+	h := newEmbedHandlers(&config.Config{URL: "https://local.example"}, testutil.NewMockMetaRepository(), nil, nil, nil, nil, nil, EmbedDeps{
+		NoteRepo:     noteRepo,
+		PackNote:     func(echo.Context, *model.Note) (any, error) { return map[string]string{"id": "packed-n1"}, nil },
+		NoteDelivery: rules,
+	})
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/embed/notes/n1", nil), rec)
+	c.SetParamNames("note")
+	c.SetParamValues("n1")
+	require.NoError(t, h.Note(c))
+	assert.NotContains(t, rec.Body.String(), "packed-n1")
 }
 
 // The feed is read without signing in, so it leaves out the notes whose
