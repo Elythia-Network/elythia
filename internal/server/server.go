@@ -910,7 +910,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 		queueScheduler: queueScheduler,
 		queueInspector: queueInspector,
 		queueMetrics:   newQueueMetrics(queueDriver),
-		noteDelivery:   notedelivery.New(),
+		noteDelivery:   notedelivery.NewForServer(cfg.URL),
 
 		// admin UI 向けの短期ランタイム統計 (#2277)。config に関係なく常に
 		// 有効。ring buffer 固定長なのでメモリは queue 数 × 数 KB。

@@ -614,3 +614,58 @@ func TestForgetNotesInBackground_NothingToDo(t *testing.T) {
 	assert.Equal(t, int32(0), r.forgetsRunning.Load())
 	assert.Equal(t, int32(0), calls.Load())
 }
+
+func TestNewForServer_LocalHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://Local.Example/":       "local.example",
+		"https://local.example:443":    "local.example",
+		"https://local.example:8443/":  "local.example:8443",
+		"https://パイ.example":           "xn--eckve.example",
+		"http://local.example:80/path": "local.example",
+		"":                             "",
+		"::not a url":                  "",
+	} {
+		assert.Equal(t, want, NewForServer(in).LocalHost(), in)
+	}
+	var nilRegistry *Registry
+	assert.Equal(t, "", nilRegistry.LocalHost())
+	assert.Equal(t, "", New().LocalHost())
+}
+
+// A viewer who is not signed in is judged as a fetch from this server's own
+// host, the same way the conditions narrow remote servers (#4203).
+func TestHiddenFromVisitors(t *testing.T) {
+	r := NewForServer("https://local.example")
+	require.NoError(t, r.Add("targets", (&fakePlugin{targets: map[string]plugin.DeliveryTargets{
+		"include-local":   {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example", "Local.Example"}},
+		"include-remote":  {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
+		"exclude-local":   {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example:443"}},
+		"exclude-remote":  {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"a.example"}},
+		"not-a-host":      {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"https://a.example"}},
+		"include-nothing": {Mode: plugin.DeliveryTargetsInclude},
+	}}).registration()))
+	ids := []string{"include-local", "include-remote", "exclude-local", "exclude-remote", "not-a-host", "include-nothing", "unrestricted"}
+	assert.Equal(t, map[string]bool{
+		"include-remote":  true,
+		"exclude-local":   true,
+		"not-a-host":      true,
+		"include-nothing": true,
+	}, r.HiddenFromVisitors(context.Background(), ids))
+}
+
+func TestHiddenFromVisitors_PluginFailureHides(t *testing.T) {
+	r := NewForServer("https://local.example")
+	require.NoError(t, r.Add("targets", (&fakePlugin{targetsErr: errors.New("db down")}).registration()))
+	assert.Equal(t, map[string]bool{"n1": true, "n2": true}, r.HiddenFromVisitors(context.Background(), []string{"n1", "n2"}))
+}
+
+func TestHiddenFromVisitors_NothingToJudge(t *testing.T) {
+	assert.Nil(t, NewForServer("https://local.example").HiddenFromVisitors(context.Background(), []string{"n1"}), "no plugin")
+	var nilRegistry *Registry
+	assert.Nil(t, nilRegistry.HiddenFromVisitors(context.Background(), []string{"n1"}))
+	r := NewForServer("https://local.example")
+	f := &fakePlugin{}
+	require.NoError(t, r.Add("targets", f.registration()))
+	assert.Nil(t, r.HiddenFromVisitors(context.Background(), nil))
+	assert.Empty(t, f.calls, "no note, no call")
+}
