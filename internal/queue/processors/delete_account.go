@@ -34,6 +34,9 @@ type DeleteAccountProcessor struct {
 	// のに使う (#4218)。捨てないと、退会の後も最大 1 分 (TTL)、消えた webhook へ
 	// ジョブを積み、配送のときに not found で失敗したジョブが溜まる。
 	webhookCache WebhookCacheInvalidator
+	// noteDelivery は配送先を絞るプラグイン (#4202)。ローカルの利用者のノートを
+	// 消した後に、プラグインが書いた条件を片付けさせる。nil なら何もしない。
+	noteDelivery NoteDeliveryUserForgetter
 }
 
 // WebhookCacheInvalidator drops the cached active webhooks in every process.
@@ -52,6 +55,19 @@ func (p *DeleteAccountProcessor) invalidateWebhooks() {
 	if p.webhookCache != nil {
 		p.webhookCache.NotifyChanged()
 	}
+}
+
+// NoteDeliveryUserForgetter drops what the plugins that narrow where local
+// notes federate stored for a deleted local user's notes.
+// *notedelivery.Registry satisfies it. 失敗は実装がログに残し、削除は止めない。
+type NoteDeliveryUserForgetter interface {
+	ForgetUser(ctx context.Context, userID string)
+}
+
+// SetNoteDeliveryForgetter wires the plugins told about a deleted local user
+// (#4202). nil keeps the rows the plugins wrote.
+func (p *DeleteAccountProcessor) SetNoteDeliveryForgetter(f NoteDeliveryUserForgetter) {
+	p.noteDelivery = f
 }
 
 // PushSubscriptionCacheInvalidator drops the cached push subscriptions of a
@@ -146,6 +162,10 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 
 	if err := p.deleteNotes(ctx, payload.UserID); err != nil {
 		return err
+	}
+	// Soft はリモートの利用者で、配送先の条件を持つノートが無い。
+	if !payload.Soft && p.noteDelivery != nil {
+		p.noteDelivery.ForgetUser(ctx, payload.UserID)
 	}
 
 	if err := p.deletePages(ctx, payload.UserID); err != nil {

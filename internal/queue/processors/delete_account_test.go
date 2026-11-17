@@ -594,3 +594,44 @@ func TestDeleteAccountProcessor_InvalidatesWebhookCache(t *testing.T) {
 	require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", PreserveAccount: true})))
 	assert.Zero(t, webhooks.calls)
 }
+
+type recordingUserForgetter struct {
+	users []string
+	// notesLeft is the count of the user's notes still stored when called.
+	notesLeft []int
+	noteRepo  *testutil.MockNoteRepository
+}
+
+func (r *recordingUserForgetter) ForgetUser(_ context.Context, userID string) {
+	r.users = append(r.users, userID)
+	left := 0
+	for _, n := range r.noteRepo.Notes {
+		if n.UserID == userID {
+			left++
+		}
+	}
+	r.notesLeft = append(r.notesLeft, left)
+}
+
+// Deleting a local user tells the NoteDelivery plugins to drop what they
+// stored for the user's notes, once the notes are gone (#4202).
+func TestDeleteAccountProcessor_ForgetsNoteDeliveryForLocalUser(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["n-target"] = &model.Note{ID: "n-target", UserID: "target"}
+	forgetter := &recordingUserForgetter{noteRepo: noteRepo}
+	p := processors.NewDeleteAccountProcessor(noteRepo, nil, nil, nil, nil)
+	p.SetNoteDeliveryForgetter(forgetter)
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Equal(t, []string{"target"}, forgetter.users)
+	assert.Equal(t, []int{0}, forgetter.notesLeft, "told after the notes are deleted")
+}
+
+// A remote user (Soft) has no local notes with conditions.
+func TestDeleteAccountProcessor_RemoteUserSkipsNoteDelivery(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	forgetter := &recordingUserForgetter{noteRepo: noteRepo}
+	p := processors.NewDeleteAccountProcessor(noteRepo, nil, nil, nil, nil)
+	p.SetNoteDeliveryForgetter(forgetter)
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "remote", Soft: true})))
+	assert.Empty(t, forgetter.users)
+}

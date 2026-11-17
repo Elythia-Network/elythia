@@ -566,6 +566,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteService.SetUserRepo(userRepo) // #1538: resolve author for moderator delete
 	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
 	noteDeleteService.SetChartHook(chartHooks)
+	// 配送先を絞るプラグインが書いた条件を、ノートの削除で片付ける (#4202)。
+	noteDeleteService.SetNoteDeliveryForgetter(s.noteDelivery)
 	noteQueryService.SetFavoriteRepo(noteFavoriteRepo)
 	noteQueryService.SetThreadMutingRepo(noteThreadMutingRepo)
 	userService.SetMainStreamPublisher(mainStreamPublisher)

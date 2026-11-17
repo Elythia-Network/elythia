@@ -214,6 +214,30 @@ func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
 	h.noteDelivery = r
 }
 
+// forgetUnfederatedNote tells the NoteDelivery plugins to drop the conditions
+// they stored for noteID when the note will never federate: it was not
+// stored, or it was stored local-only (#4202).
+//
+// **保存に失敗したかは、エラーではなくDBで確かめる。** 作成はノートの行を書いた
+// 後 (投票の保存など) でも失敗を返しうる。その行はAPで照会されうるので、条件を
+// 消すと、絞ったつもりのノートが誰にでも見えるようになる。行があるか確かめられ
+// ないとき (DBの障害) も消さない。
+func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, created *model.Note, createErr error) {
+	if createErr == nil {
+		if created != nil && created.LocalOnly {
+			h.noteDelivery.ForgetNotes(context.WithoutCancel(ctx), []string{noteID})
+		}
+		return
+	}
+	if h.noteRepo == nil {
+		return
+	}
+	if _, err := h.noteRepo.FindByID(noteID); !repository.IsNotFound(err) {
+		return
+	}
+	h.noteDelivery.ForgetNotes(context.WithoutCancel(ctx), []string{noteID})
+}
+
 // SetPiningRepo wires the repository used to verify that a notes/show target
 // is still pinned at request time.
 func (h *Handler) SetPiningRepo(r repository.UserNotePiningRepository) {
@@ -564,10 +588,14 @@ func (h *Handler) Create(c echo.Context) error {
 		NoExtractHashtags:  req.NoExtractHashtags,
 		NoExtractEmojis:    req.NoExtractEmojis,
 	}
+	// preparedID はプラグインに条件を書かせたノートの ID。書かせた後にノートが
+	// 連合しないことになったら、プラグインに片付けさせる (#4202)。
+	var preparedID string
 	if len(req.PluginOptions) > 0 {
 		options := req.PluginOptions
 		reqCtx := c.Request().Context()
 		in.BeforeInsert = func(noteID string) error {
+			preparedID = noteID
 			return h.noteDelivery.Prepare(reqCtx, noteID, user.ID, options)
 		}
 	}
@@ -611,6 +639,9 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 
 	created, err := h.createService.Create(in)
+	if preparedID != "" {
+		h.forgetUnfederatedNote(c.Request().Context(), preparedID, created, err)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, note.ErrNoteContentRequired):

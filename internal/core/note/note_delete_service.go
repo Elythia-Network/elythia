@@ -1,6 +1,7 @@
 package note
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -62,6 +63,13 @@ type ModeratorDeleteHook interface {
 	OnModeratorNoteDeleted(moderatorID string, note *model.Note, author *model.User)
 }
 
+// NoteDeliveryForgetter drops what the plugins that narrow where local notes
+// federate stored for deleted notes (#4202). 実装は core/notedelivery.Registry。
+// 失敗はベストエフォート (実装がログに残す)。
+type NoteDeliveryForgetter interface {
+	ForgetNotes(ctx context.Context, noteIDs []string)
+}
+
 // DeleteService provides note deletion logic.
 type DeleteService struct {
 	noteRepo            repository.NoteRepository
@@ -73,6 +81,7 @@ type DeleteService struct {
 	noteStreamHook      DeleteNoteStreamHook
 	moderatorDeleteHook ModeratorDeleteHook
 	notificationHook    DeleteNotificationHook
+	noteDelivery        NoteDeliveryForgetter
 }
 
 // NewDeleteService creates a new DeleteService.
@@ -122,6 +131,13 @@ func (s *DeleteService) SetModeratorDeleteHook(h ModeratorDeleteHook) {
 // so the renote / quote notification the note left is removed (#3201)。
 func (s *DeleteService) SetNotificationHook(h DeleteNotificationHook) {
 	s.notificationHook = h
+}
+
+// SetNoteDeliveryForgetter attaches the plugins that narrow where local notes
+// federate, so they can drop what they stored for a deleted local note
+// (#4202). nil で何もしない (初期状態)。
+func (s *DeleteService) SetNoteDeliveryForgetter(f NoteDeliveryForgetter) {
+	s.noteDelivery = f
 }
 
 // SetNoteStreamHook attaches a DeleteNoteStreamHook invoked after Delete so
@@ -209,6 +225,11 @@ func (s *DeleteService) DeleteAs(actor *model.User, isModerator bool, noteID str
 	// ベストエフォート。
 	if s.notificationHook != nil {
 		s.notificationHook.OnNoteDeleted(note)
+	}
+	// 配送先を絞るプラグインが書いた条件を片付ける (#4202)。条件を書くのは
+	// ローカルのノートだけ。ベストエフォート。
+	if s.noteDelivery != nil && note.UserHost == nil {
+		s.noteDelivery.ForgetNotes(context.Background(), []string{note.ID})
 	}
 	// moderator が他人の note を削除したときは moderation log に deleteNote を
 	// 残す (upstream NoteDeleteService の deleter && note.userId !== deleter.id、

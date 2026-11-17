@@ -1,6 +1,7 @@
 package note_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -368,4 +369,29 @@ func TestDeleteService_NotificationHookNotFiredOnFailure(t *testing.T) {
 
 	require.Error(t, svc.Delete(&model.User{ID: "intruder"}, "n1"))
 	assert.Empty(t, hook.notes)
+}
+
+type recordingNoteForgetter struct{ ids []string }
+
+func (r *recordingNoteForgetter) ForgetNotes(_ context.Context, ids []string) {
+	r.ids = append(r.ids, ids...)
+}
+
+// Deleting a local note tells the NoteDelivery plugins to drop what they
+// stored for it; a remote note never had any (#4202).
+func TestDeleteService_ForgetsNoteDelivery(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	host := "remote.example"
+	noteRepo.Notes["local"] = &model.Note{ID: "local", UserID: "user1"}
+	noteRepo.Notes["remote"] = &model.Note{ID: "remote", UserID: "user2", UserHost: &host}
+	svc := note.NewDeleteService(noteRepo)
+	forgetter := &recordingNoteForgetter{}
+	svc.SetNoteDeliveryForgetter(forgetter)
+
+	require.NoError(t, svc.Delete(&model.User{ID: "user1"}, "local"))
+	require.NoError(t, svc.Delete(&model.User{ID: "user2", Host: &host}, "remote"))
+	assert.Equal(t, []string{"local"}, forgetter.ids)
+
+	require.ErrorIs(t, svc.Delete(&model.User{ID: "user1"}, "missing"), note.ErrNoteNotFound)
+	assert.Equal(t, []string{"local"}, forgetter.ids, "a note that was not deleted is not forgotten")
 }
