@@ -268,7 +268,7 @@ func TestRules_HealthyPluginIsAvailable(t *testing.T) {
 // list carrying one would let the excluded server through. The whole rule is
 // treated as unreadable instead (#4202).
 func TestRules_NonHostValueDeniesTheNote(t *testing.T) {
-	for _, bad := range []string{"https://bad.example", "bad.example/", "*.bad.example", "", "bad example", "bad.example:http", "bad.example:0", "bad.example:65536", "bad..example", "user@bad.example", "[::1"} {
+	for _, bad := range []string{"https://bad.example", "bad.example/", "*.bad.example", "", "bad example", "bad.example:http", "bad.example:0", "bad.example:65536", "bad..example", "user@bad.example", "[::1", "2001:db8::1"} {
 		for _, mode := range []plugin.DeliveryTargetsMode{plugin.DeliveryTargetsExclude, plugin.DeliveryTargetsInclude} {
 			t.Run(string(mode)+" "+bad, func(t *testing.T) {
 				r := New()
