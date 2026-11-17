@@ -58,6 +58,10 @@ export async function removeAccount(host: string, id: AccountWithToken['id']) {
 }
 
 const isAccountDeleted = Symbol('isAccountDeleted');
+// Elythia: トークンが無効・削除・凍結と確かめられたもの(isAccountDeleted)と分ける (#4208)。
+// 一時的なDBの失敗でも/api/iは401 CREDENTIAL_REQUIREDを返すので、これでアカウントを
+// 外すと、使えるアカウントを端末から失い、全部外れるとサインアウトまで進む
+const isAccountUnconfirmed = Symbol('isAccountUnconfirmed');
 
 function fetchAccount(token: string, id?: string, forceShowDialog?: boolean): Promise<Misskey.entities.MeDetailed> {
 	return new Promise((done, fail) => {
@@ -111,6 +115,8 @@ function fetchAccount(token: string, id?: string, forceShowDialog?: boolean): Pr
 							title: i18n.ts.failedToFetchAccountInformation,
 							text: JSON.stringify(res.error),
 						});
+						fail(isAccountUnconfirmed);
+						return;
 					}
 
 					fail(isAccountDeleted);
@@ -150,15 +156,28 @@ export function updateCurrentAccount(accountData: Partial<Misskey.entities.MeDet
 export async function refreshCurrentAccount() {
 	if (!$i) return;
 	const me = $i;
-	return fetchAccount($i.token, $i.id).then(replaceCurrentAccountData).catch(reason => {
-		if (reason === isAccountDeleted) {
-			removeAccount(host, me.id);
-			if (Object.keys(store.s.accountTokens).length > 0) {
-				login(Object.values(store.s.accountTokens)[0]);
-			} else {
-				signout();
+	return fetchAccount($i.token, $i.id).then(replaceCurrentAccountData).catch(async reason => {
+		// Elythia: 無効・削除・凍結と確かめられたときだけ、アカウントを外す (#4208)。
+		// 本家はどのエラーの本文でも外すが、一時的なDBの失敗でも/api/iは401
+		// CREDENTIAL_REQUIREDを返すので、使えるアカウントを端末から外してしまう
+		if (reason !== isAccountDeleted) return;
+		await removeAccount(host, me.id);
+		// Elythia: 切り替え先のトークンも無効なら、そのアカウントも外して次を試す (#4208)。
+		// 本家は先頭の1つだけを試して失敗を捨てるので、端末に無効なトークンが残り、
+		// 開き直すたびに「トークンが無効です」を繰り返して抜けられない。無効・削除・凍結と
+		// 確かめられなかったとき(通信の失敗、5xx、ほかのエラー)は、使えるアカウントを
+		// 外さないようにそこで止める
+		for (const [key, token] of Object.entries(store.s.accountTokens)) {
+			try {
+				await login(token);
+				return;
+			} catch (err) {
+				if (err !== isAccountDeleted) return;
+				const sep = key.lastIndexOf('/');
+				await removeAccount(key.slice(0, sep), key.slice(sep + 1));
 			}
 		}
+		signout();
 	});
 }
 

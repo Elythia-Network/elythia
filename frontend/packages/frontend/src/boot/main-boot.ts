@@ -362,8 +362,8 @@ export async function mainBoot() {
 			// 次の通知を受け取って読むまでバッジが残り続ける。
 			//
 			// **$i を丸ごと取り直さない。** refreshCurrentAccount() は取得に失敗すると
-			// サインアウトして localStorage ごと消す経路を持つ (accounts.ts の
-			// fetchAccount は 4xx の error 応答を全て isAccountDeleted に倒す)。
+			// サインアウトして localStorage ごと消す経路を持つ (トークンが無効・削除・凍結と
+			// 確かめられたとき。accounts.ts の isAccountDeleted)。
 			// サーバー再起動の直後は一時的な認証失敗が起こりうるうえ、再接続は全タブ
 			// 全ユーザーで同時に走るので、そこへ繋ぐと巻き添えでサインアウトさせうる。
 			// 未読の 2 フィールドだけを部分適用し、失敗は無視する。
