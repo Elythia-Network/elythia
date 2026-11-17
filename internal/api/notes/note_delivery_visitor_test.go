@@ -3,6 +3,7 @@ package notes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -90,4 +91,27 @@ func TestShow_RemoteNoteNotJudgedForVisitors(t *testing.T) {
 		"n1": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}},
 	}))
 	assert.Equal(t, "body", showAs(t, h, nil)["text"])
+}
+
+// While the plugin cannot report the conditions, the note is blanked for
+// viewers who are not signed in (#4203).
+func TestShow_PluginFailureHidesFromVisitors(t *testing.T) {
+	h, noteRepo := newShowHandler(t)
+	noteRepo.Notes["n1"] = &model.Note{
+		ID: "n1", UserID: "author", Visibility: "public",
+		Text: strPtr("body"),
+		User: &model.User{ID: "author", Username: "author"},
+	}
+	r := notedelivery.NewForServer("https://local.example")
+	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) {
+			return nil, errors.New("db down")
+		},
+	}))
+	h.SetNoteDeliveryRules(r)
+	anon := showAs(t, h, nil)
+	assert.Equal(t, true, anon["isHidden"])
+	assert.Nil(t, anon["text"])
+	assert.Equal(t, "body", showAs(t, h, &model.User{ID: "viewer"})["text"])
 }
