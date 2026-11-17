@@ -1249,17 +1249,24 @@ func (h *Handler) Featured(c echo.Context) error {
 	}
 	items := make([]any, 0, len(notes))
 	renderer := h.referenceRenderer(c)
-	hidden, unavailable := h.hiddenByDeliveryRules(c, notes)
-	if unavailable {
-		// 一覧から外すと、相手は固定したノートが外されたと受け取る (#4202)。
-		return c.NoContent(http.StatusServiceUnavailable)
-	}
+	listed := make([]*model.Note, 0, len(notes))
 	for _, n := range notes {
 		h.seedAPNote(c, n)
 		// upstream featured の filter: !localOnly && visibility ∈ {public, home}。
 		if n.LocalOnly || (n.Visibility != model.NoteVisibilityPublic && n.Visibility != model.NoteVisibilityHome) {
 			continue
 		}
+		listed = append(listed, n)
+	}
+	// 配送先の条件は、上で出すと決めたノートだけに問い合わせる。固定ノート全部を
+	// 渡すと、障害のあいだ、出すものが無い (localOnly や非公開だけを固定した)
+	// 利用者も 503 になり、固定ノートの無い利用者 (200) と見分けが付く (#4202)。
+	hidden, unavailable := h.hiddenByDeliveryRules(c, listed)
+	if unavailable {
+		// 一覧から外すと、相手は固定したノートが外されたと受け取る (#4202)。
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
+	for _, n := range listed {
 		// 配送先を絞ったノートは、照会できる相手にだけ出す (#4199)。
 		if hidden[n.ID] {
 			continue

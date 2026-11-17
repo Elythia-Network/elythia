@@ -315,6 +315,27 @@ func TestNoteDeliveryRules_OutboxPluginFailureIsUnavailable(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "an empty page would read as no notes")
 }
 
+// While the plugin is down, featured asks only about the notes it would list:
+// a user who pinned only local-only or non-public notes gets the same empty
+// collection as in normal times, not 503 (#4202).
+func TestNoteDeliveryRules_FeaturedPluginFailureSkipsUnlistedNotes(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	noteRepo.Notes["local-only"] = &model.Note{ID: "local-only", UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic, LocalOnly: true}
+	noteRepo.Notes["followers"] = &model.Note{ID: "followers", UserID: "u1", User: author, Visibility: model.NoteVisibilityFollowers}
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p1", UserID: "u1", NoteID: "local-only"}))
+	require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: "p2", UserID: "u1", NoteID: "followers"}))
+	h.SetNoteDeliveryRules(failingDeliveryRules(t))
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var col map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
+	assert.Empty(t, col["orderedItems"])
+}
+
 func TestNoteDeliveryRules_FeaturedPluginFailureIsUnavailable(t *testing.T) {
 	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
 	author := &model.User{ID: "u1", Username: "alice"}
