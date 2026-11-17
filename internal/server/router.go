@@ -567,7 +567,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	noteDeleteService.SetNoteStreamHook(&noteDeleteStreamAdapter{pub: noteEventPub})
 	noteDeleteService.SetChartHook(chartHooks)
 	// 配送先を絞るプラグインが書いた条件を、ノートの削除で片付ける (#4202)。
-	noteDeleteService.SetNoteDeliveryForgetter(s.noteDelivery)
+	noteDeleteService.SetNoteDeliveryForgetter(s.noteDelivery, s.background)
 	noteQueryService.SetFavoriteRepo(noteFavoriteRepo)
 	noteQueryService.SetThreadMutingRepo(noteThreadMutingRepo)
 	userService.SetMainStreamPublisher(mainStreamPublisher)
@@ -1769,6 +1769,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	notesHandler.SetPiningRepo(piningRepo)
 	// notes/create の pluginOptions を受け取るプラグイン (#4199)。
 	notesHandler.SetNoteDeliveryRules(s.noteDelivery)
+	// 作成に失敗したノートの条件の片付けを、世代の停止で待たせる (#3661、#4202)。
+	notesHandler.SetBackground(s.background)
 	// first-page timeline 応答を per-viewer 短期キャッシュ (hit 時に DB + pack +
 	// encode を skip)。opt-in (enableTimelineCache / MK_ENABLETIMELINECACHE)。
 	// staleness trade-off があるため default off。

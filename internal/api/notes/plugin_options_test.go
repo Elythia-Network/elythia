@@ -18,6 +18,7 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -302,4 +303,30 @@ func TestCreate_PluginOptions_ForgetDoesNotDelayTheAnswer(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("ForgetNotes was not called")
 	}
+}
+
+// The cleanup runs in the group of the server generation, so stopping the
+// generation waits for it (#3661, #4202).
+func TestCreate_PluginOptions_ForgetRunsInBackgroundGroup(t *testing.T) {
+	h, _ := newTestHandler(t)
+	release := make(chan struct{})
+	r := notedelivery.New()
+	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error {
+			return fmt.Errorf("%w: empty", plugin.ErrBadNoteOption)
+		},
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) { return nil, nil },
+		ForgetNotes: func(context.Context, []string) error {
+			<-release
+			return nil
+		},
+	}))
+	h.SetNoteDeliveryRules(r)
+	g := bgwork.New()
+	h.SetBackground(g)
+	t.Cleanup(func() { close(release) })
+
+	rec := postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Eventually(t, func() bool { return g.Running() == 1 }, 2*time.Second, 5*time.Millisecond)
 }
