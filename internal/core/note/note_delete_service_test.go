@@ -3,6 +3,7 @@ package note_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,10 +372,27 @@ func TestDeleteService_NotificationHookNotFiredOnFailure(t *testing.T) {
 	assert.Empty(t, hook.notes)
 }
 
-type recordingNoteForgetter struct{ ids []string }
+// recordingNoteForgetter records the IDs it is told to forget. The delete
+// service calls it on another goroutine; block holds every call until closed.
+type recordingNoteForgetter struct {
+	mu    sync.Mutex
+	got   []string
+	block chan struct{}
+}
 
 func (r *recordingNoteForgetter) ForgetNotes(_ context.Context, ids []string) {
-	r.ids = append(r.ids, ids...)
+	if r.block != nil {
+		<-r.block
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got = append(r.got, ids...)
+}
+
+func (r *recordingNoteForgetter) ids() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.got...)
 }
 
 // Deleting a local note tells the NoteDelivery plugins to drop what they
@@ -390,8 +408,31 @@ func TestDeleteService_ForgetsNoteDelivery(t *testing.T) {
 
 	require.NoError(t, svc.Delete(&model.User{ID: "user1"}, "local"))
 	require.NoError(t, svc.Delete(&model.User{ID: "user2", Host: &host}, "remote"))
-	assert.Equal(t, []string{"local"}, forgetter.ids)
-
 	require.ErrorIs(t, svc.Delete(&model.User{ID: "user1"}, "missing"), note.ErrNoteNotFound)
-	assert.Equal(t, []string{"local"}, forgetter.ids, "a note that was not deleted is not forgotten")
+	require.Eventually(t, func() bool { return len(forgetter.ids()) > 0 }, 2*time.Second, 5*time.Millisecond)
+	assert.Never(t, func() bool { return len(forgetter.ids()) > 1 }, 100*time.Millisecond, 5*time.Millisecond,
+		"a remote note and a note that was not deleted are not forgotten")
+	assert.Equal(t, []string{"local"}, forgetter.ids())
+}
+
+// The cleanup does not hold up the deletion: notes/delete, and unrenote once
+// per renote, would wait for a stuck plugin otherwise (#4202).
+func TestDeleteService_ForgetDoesNotDelayDeletion(t *testing.T) {
+	noteRepo := testutil.NewMockNoteRepository()
+	noteRepo.Notes["local"] = &model.Note{ID: "local", UserID: "user1"}
+	svc := note.NewDeleteService(noteRepo)
+	forgetter := &recordingNoteForgetter{block: make(chan struct{})}
+	svc.SetNoteDeliveryForgetter(forgetter)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.Delete(&model.User{ID: "user1"}, "local") }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		close(forgetter.block)
+		t.Fatal("Delete waited for ForgetNotes")
+	}
+	close(forgetter.block)
+	require.Eventually(t, func() bool { return len(forgetter.ids()) == 1 }, 2*time.Second, 5*time.Millisecond)
 }

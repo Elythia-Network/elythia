@@ -227,9 +227,11 @@ func (s *DeleteService) DeleteAs(actor *model.User, isModerator bool, noteID str
 		s.notificationHook.OnNoteDeleted(note)
 	}
 	// 配送先を絞るプラグインが書いた条件を片付ける (#4202)。条件を書くのは
-	// ローカルのノートだけ。ベストエフォート。
+	// ローカルのノートだけ。ベストエフォート。止まっているプラグインを待つと、
+	// notes/delete (unrenote はリノートの数だけ) の応答が遅れるので、別の
+	// goroutine で呼ぶ。IDは使い回さないので、片付けは急がなくてよい。
 	if s.noteDelivery != nil && note.UserHost == nil {
-		s.noteDelivery.ForgetNotes(context.Background(), []string{note.ID})
+		go s.noteDelivery.ForgetNotes(context.Background(), []string{note.ID})
 	}
 	// moderator が他人の note を削除したときは moderation log に deleteNote を
 	// 残す (upstream NoteDeleteService の deleter && note.userId !== deleter.id、
