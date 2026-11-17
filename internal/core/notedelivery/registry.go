@@ -14,8 +14,10 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -52,7 +54,19 @@ type Registry struct {
 
 	// timeout overrides callTimeout in tests. 0 means callTimeout.
 	timeout time.Duration
+
+	// forgetsRunning counts the ForgetNotes calls running in the background
+	// (ForgetNotesInBackground). 上限を超えた分は走らせずに捨てる (#4202)。
+	forgetsRunning atomic.Int32
 }
+
+// MaxBackgroundForgets bounds the ForgetNotes calls ForgetNotesInBackground
+// runs at once.
+//
+// **止まったプラグインで goroutine を積み上げない。** ctx を見ずに戻らない
+// プラグインが止まっていると、削除のたびに待つ goroutine が増え続ける。片付けは
+// ベストエフォートで、IDは使い回さないので、上限を超えた分は捨ててログに残す。
+const MaxBackgroundForgets = 8
 
 func (r *Registry) callTimeout() time.Duration {
 	if r == nil || r.timeout <= 0 {
@@ -272,6 +286,30 @@ func (r *Registry) Rules(ctx context.Context, noteIDs []string) map[string]Rule 
 // Rule returns the rule of one note.
 func (r *Registry) Rule(ctx context.Context, noteID string) Rule {
 	return r.Rules(ctx, []string{noteID})[noteID]
+}
+
+// ForgetNotesInBackground runs ForgetNotes in a goroutine of g, the group of
+// the server generation, so stopping the generation waits for it (#3661).
+// At most MaxBackgroundForgets calls run at once; beyond that, and once g has
+// stopped, the call is dropped and logged. 呼び出し元 (作成や削除の応答) は
+// 待たない。止まっているプラグインをもう一度待つと、応答がさらに遅れるため。
+func (r *Registry) ForgetNotesInBackground(g *bgwork.Group, noteIDs []string) {
+	if r.Empty() || len(noteIDs) == 0 {
+		return
+	}
+	if r.forgetsRunning.Add(1) > MaxBackgroundForgets {
+		r.forgetsRunning.Add(-1)
+		slog.Warn("note delivery: too many forget calls running; dropping this one", "notes", len(noteIDs), "limit", MaxBackgroundForgets)
+		return
+	}
+	ids := append([]string(nil), noteIDs...)
+	started := g.GoAs("note delivery forget", func(ctx context.Context) {
+		defer r.forgetsRunning.Add(-1)
+		r.ForgetNotes(ctx, ids)
+	})
+	if !started {
+		r.forgetsRunning.Add(-1)
+	}
 }
 
 // ForgetNotes tells every plugin that the conditions of noteIDs are no longer

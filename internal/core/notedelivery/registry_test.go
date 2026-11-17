@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/bgwork"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -491,4 +493,89 @@ func TestCanonicalHost(t *testing.T) {
 	} {
 		assert.Equal(t, want, canonicalHost(in), "canonicalHost(%q)", in)
 	}
+}
+
+// blockingForgetter registers a plugin whose ForgetNotes blocks until
+// release is closed (ignoring ctx, as a stuck plugin would).
+func blockingForgetter(t *testing.T, r *Registry) (release chan struct{}, calls *atomic.Int32) {
+	t.Helper()
+	release = make(chan struct{})
+	calls = &atomic.Int32{}
+	reg := (&fakePlugin{}).registration()
+	reg.ForgetNotes = func(context.Context, []string) error {
+		calls.Add(1)
+		<-release
+		return nil
+	}
+	require.NoError(t, r.Add("targets", reg))
+	return release, calls
+}
+
+// The caller does not wait, and the call runs in the group of the server
+// generation so stopping it waits for the call (#4202).
+func TestForgetNotesInBackground_RunsInGroup(t *testing.T) {
+	r := New()
+	r.timeout = time.Minute
+	release, calls := blockingForgetter(t, r)
+	g := bgwork.New()
+
+	done := make(chan struct{})
+	go func() {
+		r.ForgetNotesInBackground(g, []string{"n1"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ForgetNotesInBackground waited for the plugin")
+	}
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 2*time.Second, 5*time.Millisecond)
+	assert.Equal(t, int64(1), g.Running(), "the call is tracked by the generation group")
+	close(release)
+	require.Eventually(t, func() bool { return g.Running() == 0 && r.forgetsRunning.Load() == 0 }, 2*time.Second, 5*time.Millisecond)
+}
+
+// A stuck plugin does not pile up goroutines: beyond MaxBackgroundForgets
+// running calls, more are dropped (#4202).
+func TestForgetNotesInBackground_BoundsRunningCalls(t *testing.T) {
+	r := New()
+	r.timeout = time.Minute
+	release, calls := blockingForgetter(t, r)
+	g := bgwork.New()
+	for i := 0; i < MaxBackgroundForgets+3; i++ {
+		r.ForgetNotesInBackground(g, []string{fmt.Sprintf("n%d", i)})
+	}
+	require.Eventually(t, func() bool { return calls.Load() == MaxBackgroundForgets }, 2*time.Second, 5*time.Millisecond)
+	assert.Never(t, func() bool { return calls.Load() > MaxBackgroundForgets }, 100*time.Millisecond, 5*time.Millisecond)
+	assert.Equal(t, int64(MaxBackgroundForgets), g.Running())
+
+	close(release)
+	require.Eventually(t, func() bool { return r.forgetsRunning.Load() == 0 }, 2*time.Second, 5*time.Millisecond)
+	r.ForgetNotesInBackground(g, []string{"after"})
+	require.Eventually(t, func() bool { return calls.Load() == MaxBackgroundForgets+1 }, 2*time.Second, 5*time.Millisecond, "slots are given back")
+}
+
+// After the generation stopped, the call is not started and its slot is
+// given back.
+func TestForgetNotesInBackground_StoppedGroup(t *testing.T) {
+	r := New()
+	release, calls := blockingForgetter(t, r)
+	close(release)
+	g := bgwork.New()
+	g.Stop(context.Background())
+	r.ForgetNotesInBackground(g, []string{"n1"})
+	assert.Equal(t, int32(0), r.forgetsRunning.Load())
+	assert.Equal(t, int64(1), g.Dropped())
+	assert.Never(t, func() bool { return calls.Load() > 0 }, 50*time.Millisecond, 5*time.Millisecond)
+}
+
+func TestForgetNotesInBackground_NothingToDo(t *testing.T) {
+	var nilRegistry *Registry
+	nilRegistry.ForgetNotesInBackground(nil, []string{"n1"})
+	r := New()
+	r.ForgetNotesInBackground(nil, []string{"n1"})
+	_, calls := blockingForgetter(t, r)
+	r.ForgetNotesInBackground(nil, nil)
+	assert.Equal(t, int32(0), r.forgetsRunning.Load())
+	assert.Equal(t, int32(0), calls.Load())
 }
