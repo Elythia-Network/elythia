@@ -27,8 +27,9 @@ type NoteDeliveryRegistration struct {
 	//
 	// **ノートを保存する前に呼ぶ。** 保存の後に呼ぶと、条件が書かれる前に配送が
 	// 走りうる (配送はノートの保存の直後に別のgoroutineで始まる)。ノートの
-	// 保存に失敗したときと、保存したノートが連合しない (localOnly) ときは、
-	// 本体が [NoteDeliveryRegistration.ForgetNotes] で知らせる。
+	// 保存に失敗したときは、本体が [NoteDeliveryRegistration.ForgetNotes] で
+	// 知らせる。保存したノートは、連合しない (localOnly) ものでも条件を使う
+	// (OGPを隠す) ので、知らせない。
 	//
 	// [ErrBadNoteOption]を包んだエラーは、利用者の指定の誤りとして400
 	// (`INVALID_PARAM`)になる。それ以外のエラーは500になる。どちらでもノートは
@@ -53,9 +54,9 @@ type NoteDeliveryRegistration struct {
 	// ForgetNotes drops what Prepare stored for notes that no longer need it.
 	// Optional: nil means the plugin keeps the rows.
 	//
-	// 本体が呼ぶのは、Prepareの後にノートの保存に失敗したとき、保存したノートが
-	// 連合しない (localOnly) とき、ローカルのノートを削除したとき (Delete
-	// サービスを通るもの)。**全部の削除を知らせるわけではない。** 返信先や
+	// 本体が呼ぶのは、Prepareの後にノートの保存に失敗したときと、ローカルの
+	// ノートを削除したとき (Deleteサービスを通るもの)。保存に失敗したときは、
+	// 作成の応答を待たせないよう別のgoroutineから呼ぶ。**全部の削除を知らせるわけではない。** 返信先や
 	// リノート元の削除に伴ってDBの外部キーで消えるノートと、[NoteDeliveryRegistration.ForgetUser]
 	// で知らせる利用者の削除は、ここには来ない。IDは他のノートに使われないので、
 	// 残った行が他のノートに効くことは無い。

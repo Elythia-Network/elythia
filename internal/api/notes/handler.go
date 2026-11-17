@@ -215,27 +215,28 @@ func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
 }
 
 // forgetUnfederatedNote tells the NoteDelivery plugins to drop the conditions
-// they stored for noteID when the note will never federate: it was not
-// stored, or it was stored local-only (#4202).
+// they stored for noteID when the note was not stored (#4202).
 //
 // **保存に失敗したかは、エラーではなくDBで確かめる。** 作成はノートの行を書いた
 // 後 (投票の保存など) でも失敗を返しうる。その行はAPで照会されうるので、条件を
 // 消すと、絞ったつもりのノートが誰にでも見えるようになる。行があるか確かめられ
 // ないとき (DBの障害) も消さない。
-func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, created *model.Note, createErr error) {
-	if createErr == nil {
-		if created != nil && created.LocalOnly {
-			h.noteDelivery.ForgetNotes(context.WithoutCancel(ctx), []string{noteID})
-		}
-		return
-	}
-	if h.noteRepo == nil {
+//
+// **保存したノートは、localOnly でも条件を残す。** 連合はしないが、`/notes/:id`を
+// Webページとして取られたときのOGPを隠すのに条件を使う (ssr_meta.go)。
+//
+// プラグインは別のgoroutineで呼ぶ。Prepareが期限切れで失敗したときに、止まって
+// いるプラグインをもう一度待つと、エラーの応答がさらに遅れる。IDは使い回さない
+// ので、片付けは急がなくてよい。
+func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, createErr error) {
+	if createErr == nil || h.noteRepo == nil {
 		return
 	}
 	if _, err := h.noteRepo.FindByID(noteID); !repository.IsNotFound(err) {
 		return
 	}
-	h.noteDelivery.ForgetNotes(context.WithoutCancel(ctx), []string{noteID})
+	ctx = context.WithoutCancel(ctx)
+	go h.noteDelivery.ForgetNotes(ctx, []string{noteID})
 }
 
 // SetPiningRepo wires the repository used to verify that a notes/show target
@@ -588,8 +589,8 @@ func (h *Handler) Create(c echo.Context) error {
 		NoExtractHashtags:  req.NoExtractHashtags,
 		NoExtractEmojis:    req.NoExtractEmojis,
 	}
-	// preparedID はプラグインに条件を書かせたノートの ID。書かせた後にノートが
-	// 連合しないことになったら、プラグインに片付けさせる (#4202)。
+	// preparedID はプラグインに条件を書かせたノートの ID。書かせた後にノートを
+	// 保存しなかったら、プラグインに片付けさせる (#4202)。
 	var preparedID string
 	if len(req.PluginOptions) > 0 {
 		options := req.PluginOptions
@@ -640,7 +641,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	created, err := h.createService.Create(in)
 	if preparedID != "" {
-		h.forgetUnfederatedNote(c.Request().Context(), preparedID, created, err)
+		h.forgetUnfederatedNote(c.Request().Context(), preparedID, err)
 	}
 	if err != nil {
 		switch {
