@@ -55,8 +55,8 @@ type NoteDeliveryRegistration struct {
 	// Optional: nil means the plugin keeps the rows.
 	//
 	// 本体が呼ぶのは、Prepareの後にノートの保存に失敗したときと、ローカルの
-	// ノートを削除したとき (Deleteサービスを通るもの)。保存に失敗したときは、
-	// 作成の応答を待たせないよう別のgoroutineから呼ぶ。**全部の削除を知らせるわけではない。** 返信先や
+	// ノートを削除したとき (Deleteサービスを通るもの)。どちらも、作成や削除の
+	// 応答を待たせないよう別のgoroutineから呼ぶ。**全部の削除を知らせるわけではない。** 返信先や
 	// リノート元の削除に伴ってDBの外部キーで消えるノートと、[NoteDeliveryRegistration.ForgetUser]
 	// で知らせる利用者の削除は、ここには来ない。IDは他のノートに使われないので、
 	// 残った行が他のノートに効くことは無い。
