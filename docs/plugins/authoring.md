@@ -622,8 +622,8 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 			if err := json.Unmarshal(req.Option, &opt); err != nil {
 				return fmt.Errorf("%w: %w", plugin.ErrBadNoteOption, err)
 			}
-			_, err := db.ExecContext(c, `INSERT INTO targets (note_id, mode, hosts) VALUES ($1, $2, $3)`,
-				req.NoteID, opt.Mode, strings.Join(opt.Hosts, ","))
+			_, err := db.ExecContext(c, `INSERT INTO targets (note_id, user_id, mode, hosts) VALUES ($1, $2, $3, $4)`,
+				req.NoteID, req.UserID, opt.Mode, strings.Join(opt.Hosts, ","))
 			return err
 		},
 		Targets: func(c context.Context, noteIDs []string) (map[string]plugin.DeliveryTargets, error) {
@@ -631,18 +631,33 @@ func noteDelivery(ctx plugin.Context) (plugin.NoteDeliveryRegistration, error) {
 			// noteIDs の行を読み、条件のあるノートだけを out に入れる。
 			return out, nil
 		},
+		// 省略できる。要らなくなった行を片付ける。
+		ForgetNotes: func(c context.Context, noteIDs []string) error {
+			for _, id := range noteIDs {
+				if _, err := db.ExecContext(c, `DELETE FROM targets WHERE note_id = $1`, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		ForgetUser: func(c context.Context, userID string) error {
+			_, err := db.ExecContext(c, `DELETE FROM targets WHERE user_id = $1`, userID)
+			return err
+		},
 	}, nil
 }
 ```
 
-- **指定は`notes/create`の`pluginOptions.<プラグイン名>`で受け取る。** 本体は中身を読まずに`Prepare`へ渡す。`Prepare`は**ノートを保存する前**に、保存するIDで呼ばれる。保存の後だと、条件を書く前に配送が走りうるため。ノートの保存に失敗すると書いた行が残るが、IDは使い回されないので他のノートには効かない
+- **指定は`notes/create`の`pluginOptions.<プラグイン名>`で受け取る。** 本体は中身を読まずに`Prepare`へ渡す。`Prepare`は**ノートを保存する前**に、保存するIDで呼ばれる。保存の後だと、条件を書く前に配送が走りうるため
 - **`Prepare`のエラーはノートを作らない。** `plugin.ErrBadNoteOption`を包んだエラーは400 `INVALID_PARAM`、それ以外は500になる。どちらも、プラグインのメッセージは利用者に返さない。`pluginOptions`に、登録されていないプラグインの名前があっても400になる (絞ったつもりの指定を黙って捨てない)。値が`null`の項目は送られなかったものとして扱い、名前も確かめない。400以外の失敗 (エラー・panic・期限切れ) は、プラグインの名前とノートのIDを付けて本体のログに残す。panicは値とスタックも残す
-- **`Targets`は配送と照会のたびに呼ばれる。** 1回に渡すIDは20件まで。条件の無いノートは返す map に入れない。**エラー・panic・5秒の期限切れは「どこにも配らない・誰にも見せない」になる**。どのノートを絞っていたかも読めないので、そのとき渡したノートは、条件を付けていないものも含めて全部が対象になる。プラグインの障害のあいだは、そのサーバーのローカルのノートが1つも連合しない。配送の再試行は無いので、障害のあいだに作られたノートは連合しないまま残る
+- **`Targets`は配送と照会のたびに呼ばれる。** 1回に渡すIDは20件まで。条件の無いノートは返す map に入れない。**エラー・panic・5秒の期限切れは「どこにも配らない・誰にも見せない」になる**。どのノートを絞っていたかも読めないので、そのとき渡したノートは、条件を付けていないものも含めて全部が対象になる。プラグインの障害のあいだは、そのサーバーのローカルのノートが1つも連合しない。配送の再試行は無いので、障害のあいだに作られたノートは連合しないまま残る。障害のあいだに止めた引用の承認のUpdateとQuoteRequestも、送り直さない (QuoteRequestは送り直しの予定も作らない)。照会は404ではなく503にする (下を参照)
+- **`ForgetNotes` / `ForgetUser`で、`Prepare`が書いた行を片付けられる (#4202)。** どちらも省略できる。`ForgetNotes`は、`Prepare`の後にノートの保存に失敗したとき (行が書かれていないことをDBで確かめられたときだけ。保存の後で失敗したノートは照会されうるので、条件を残す)、保存したノートが連合しない (`localOnly`) とき、ローカルのノートを削除したとき (`notes/delete`やモデレーターによる削除など、削除のサービスを通るもの) に、そのノートのIDで呼ばれる。返信先やリノート元の削除に伴ってDBの外部キーで消えるノートには呼ばれない。`ForgetUser`は、ローカルの利用者の削除のジョブが、その利用者のノートを消し終えた後に呼ぶ。どちらも、エラー・panic・期限切れは本体のログに残すだけで、ノートの作成や削除は止めない。呼ばれなかった行が残っても、IDは使い回されないので他のノートには効かない
 - **期限は`Prepare` / `Targets`に渡す`context`でしか伝わらない。** 本体はプラグインの処理を途中で止められないので、`context`を見ない処理は期限を過ぎても戻るまで配送や照会を待たせる。期限を過ぎてから返った結果は、成功でも失敗として扱う
-- **ホストは利用者の`host`と比べる。** 配送ではフォロワー・宛先の利用者の`host`を見る。inboxのURLのホストではない (inboxを別のホストに置くサーバーで、判定がずれるため)。比べる前に、本体が両方を利用者の`host`と同じ形 (小文字・punycode・末尾の`.`と既定のポートを外したもの) にそろえる。`Bad.Example`・`bad.example.`・`bad.example:443`・`パイ.example`は、それぞれ`bad.example`・`xn--eckve.example`と同じに扱う。既定でないポート (`bad.example:8443`) は別のサーバーのまま扱う
+- **ホストは利用者の`host`と比べる。** 配送ではフォロワー・宛先の利用者の`host`を見る。inboxのURLのホストではない (inboxを別のホストに置くサーバーで、判定がずれるため)。比べる前に、本体が両方を利用者の`host`と同じ形 (小文字・punycode・末尾の`.`と既定のポートを外したもの) にそろえる。`Bad.Example`・`bad.example.`・`bad.example:443`・`bad.example:80`・`パイ.example`は、それぞれ`bad.example`・`xn--eckve.example`と同じに扱う (`:80`は、httpのactorの`host`がポートを外した形で持たれるため。#4202)。既定でないポート (`bad.example:8443`) は別のサーバーのまま扱う
+- **ホスト名として読めない値は、条件ごと読めないものとして扱う (#4202)。** URL (`https://bad.example`)・パスの付いた値 (`bad.example/`)・ワイルドカード (`*.bad.example`)・空文字などを1つでも含むと、そのノートはincludeでもexcludeでも、どこにも配らず誰にも見せない (照会は404)。そのまま比べると、どの利用者の`host`とも一致せず、excludeでは外したはずのサーバーへ届くため。ホスト名として読めるのは、英数字・`-`・`_`のラベルを`.`でつないだもの (IPアドレスを含む)・括弧で囲んだIPv6のアドレスで、どちらも数字のポートを付けられる。ほかのノートの条件には影響しない
 - **フォロワーへの配送は、shared inboxの単位でしか分けられない。** 許すホストと許さないホストの利用者が同じshared inboxを使っていれば (1つのサーバーが複数のドメインの利用者を持つとき)、そのinboxへは送る。送らなければ許したホストにも届かないため。excludeにそのうち片方のドメインだけを入れても、外したドメインのサーバーには届く
 - **絞ったノートはrelayへ流さない。** relayは受け取ったものを加盟する全サーバーへ配り直すので、ホストで絞れない
-- **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。署名は確かめられたが、署名した利用者が凍結・削除されているか、こちらが配送しない相手のときは、絞ったノートを1つも見せない (空文字として扱うと、外したホストが署名を付けるだけでexcludeのノートを照会できるため)。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す
+- **照会 (`/notes/:id`・`/notes/:id/activity`・outbox・featured) は、照会してきたサーバーのホストで判定する。** 署名を本体が持っている鍵で確かめられれば署名した利用者の`host`、確かめられなければUser-Agentに書かれたホスト (MisskeyとMastodonは自分のURLを入れる。CherryPickと同じ判定) を使う。どちらでも分からない相手は空文字になり、includeでは見せず、excludeでは見せる。署名は確かめられたが、署名した利用者が凍結・削除されているか、こちらが配送しない相手のときは、絞ったノートを1つも見せない (空文字として扱うと、外したホストが署名を付けるだけでexcludeのノートを照会できるため)。見せないときは`/notes/:id`・`/notes/:id/activity`は404、outboxとfeaturedの一覧からは外す。**条件を読めないとき (`Targets`の障害) は、どれも503にする** (#4202)。404を「消えた」と扱う相手で、障害が直っても戻らなくなるため。障害は渡したノートの全部 (条件の無いものも含む) に同じく出るので、503でもどのノートを絞っているかは漏れない
 - **`/notes/:id`をWebページ (HTML) として取られたときは、絞ったノートのOGP (要約・添付・作者) を出さない。** 外したサーバーがリンクカードを作るために取ると、署名もUser-Agentも無しに中身を読めるため。条件を読めないときも出さない。**埋め込み (`/embed/notes/:id`)・フィード (`/@user.rss`など)・公開のAPI (`notes/show`など) は絞らない。** 公開のノートはWebから誰でも読めるので、この機能で隠しきることはできない。絞るのは、ActivityPubで届く先と照会できる相手、OGPの3つ
 - **User-Agentは相手が自由に書ける。** 外したホストはUser-Agentを書き換えれば照会でき、許したホストを名乗ればincludeのノートも照会できる。照会の判定は、信頼しないサーバーへ配送しないための補助と考えること
 - 適用するのは、Create・Announce (リノート)・引用の承認に伴うUpdate・投票のUpdate(Question)・QuoteRequestの配送と、上の照会。Deleteは絞らない (中身を持たず、届いていない相手には何も起きない)
@@ -1102,6 +1117,12 @@ host.postForm.registerNoteOption({
 たびに`notes/create`が400になる。失敗した投稿では記憶を書き換えないので、利用者が指定を外すか
 リセットするまで続く。古い形を受け付けられないなら、`isSet`で古い形を設定済みとみなさないように
 すると、初期値から外れる。
+
+**ボタンを出すのは、サーバーで有効なプラグインだけ** (#4202)。frontendはビルドに含めたプラグインを
+全部起動するが、サーバーで無効にした (`enabled: false`) プラグインは`pluginOptions`を受け取らないので、
+`/api/meta`の`noteDeliveryPlugins`に名前の無いプラグインの指定は、登録しても出さない。端末に残る
+書きかけの投稿にそのプラグインの指定があれば、入っていないプラグインと同じく外して知らせる。
+`label`が例外を投げたときは、ボタンの説明とダイアログの題にプラグインの名前を出す。
 
 `registerNoteOption`は`PluginHost`の必須のメソッドとして足したので、テストなどで`PluginHost`を
 手で組み立てているプラグインは、`postForm`に`registerNoteOption() {}`を足さないと`vue-tsc`が

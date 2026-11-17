@@ -779,10 +779,11 @@ func (s *DeliverService) DeliverToFollowersExcluding(signerUserID string, body [
 // followers whose host allow reports true (#4199).
 //
 // **判定に使うのはフォロワーの利用者の host。** inbox の URL のホストで
-// 判定すると、利用者のドメインと配送先のドメインを分けたサーバー (利用者は
-// `acct.example`、inbox は `web.acct.example`) で、外したはずのホストに
+// 判定すると、inbox を actor とは別のホストに置くサーバー (利用者の host は
+// `remote.example`、inbox は `inbox.remote.example`) で、外したはずのホストに
 // 届くか、許したはずのホストに届かない。照会の判定 (署名した利用者の host)
-// とも揃わなくなる。
+// とも揃わなくなる。利用者の host は actor の URL のホストで、WebFinger の
+// acct のドメインではない (#4202)。
 //
 // shared inbox を許すホストと許さないホストの利用者が共有しているときは送る
 // (同じサーバーなので、送らなければ許したホストにも届かない)。
