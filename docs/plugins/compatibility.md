@@ -40,6 +40,8 @@ Elythia 本体を変更する人向け。**公開面を広げてよい条件**�
 
 `Definition.NoteDelivery`と`plugin.NoteDeliveryRegistration` / `NoteDeliveryPrepareRequest` / `DeliveryTargets` / `DeliveryTargetsMode` / `ErrBadNoteOption`の追加 (#4199) も同じ扱い。宣言しないプラグインの挙動は変わらず、`Validate`も`NoteDelivery`だけのプラグインを通すよう緩めただけなので、`APIVersion`は1のまま。
 
+`DeliveryTargets.Hosts`に自分のサーバーのホストを書いたときの意味の追加 (#4203) も同じ扱い。型も`Allows`も変えておらず、ログインしていない閲覧者に見せるかを同じ条件で判定するようにしただけなので、`APIVersion`は1のまま。**includeで自分のホストを入れていないノートは、埋め込み・フィード・ログインしていないときの`notes/show`に出なくなる** (今までは出ていた)。ActivityPubで届く先を絞ったノートを、ログインしていない閲覧者にも見せないほうに倒した。
+
 `NoteDeliveryRegistration.ForgetNotes` / `ForgetUser`の追加 (#4202) も同じ扱い。どちらも省略でき、省略したプラグインの挙動は変わらない。同じ#4202で、`Targets`の返したホストにホスト名として読めない値があると、そのノートをどこにも配らないようにした。今までは一致しないまま比べていたので、excludeに書いた値は効いておらず、includeに書いた値は一致する相手が無かった。読めない値を返していないプラグインの挙動は変わらない。**`NoteDeliveryRegistration`をpositional / unkeyed literalで組み立てているコードは、フィールドが増えたのでコンパイルが通らなくなる** (keyed struct literalだけを互換対象とする扱いは`plugin.Definition`と同じ)。
 
 `plugin.ErrBadPeerPayload`の追加も同じ扱い。`PeerHandler`がこれを包んだエラーを返したときだけ受信側が`400`を返す (送信側は再送しない)。包まないエラーの扱い (`500` + ERROR、送信側が再送) は変えていないので、既存のプラグインの挙動は変わらない。
