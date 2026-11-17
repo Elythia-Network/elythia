@@ -832,6 +832,12 @@ func (h *Handler) Show(c echo.Context) error {
 	if h.queryService != nil && !h.queryService.CanSee(viewer, n) {
 		entity.HideNoteEntity(&s[0])
 	}
+	// プラグインの条件で自分のホストに見せないノートは、ログインしていない閲覧者には
+	// 本文を伏せる (#4203)。見られない公開範囲のノートと同じ形 (200 + isHidden) に
+	// するので、本家のクライアントはそのまま表示できる。
+	if viewer == nil && n.UserHost == nil && h.noteDelivery.HiddenFromVisitors(c.Request().Context(), []string{n.ID})[n.ID] {
+		entity.HideNoteEntity(&s[0])
+	}
 	return c.JSON(http.StatusOK, s[0])
 }
 
