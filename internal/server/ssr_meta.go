@@ -752,6 +752,10 @@ func (h *ssrMetaHandler) NotePage(c *echo.Context) error {
 	// プラグインが配送先を絞ったノートは meta を出さない (#4199)。外したサーバーが
 	// リンクカードを作るために /notes/:id を取ると、署名も User-Agent も無しに
 	// 要約と添付を読めてしまう。条件を読めないとき (DenyAll) も出さない。
+	//
+	// **条件に自分のホストを入れても、OGP は出さないままにする (#4203)。** 埋め込み・
+	// フィード・未ログインの notes/show は自分のホストとして判定するが、OGP を取りに
+	// 来るのは主にリンクカードを作る他のサーバーで、どのサーバーかを確かめられない。
 	if note.UserHost == nil && h.noteDelivery.Rule(c.Request().Context(), note.ID).Restricted() {
 		return h.renderBareShell(c, false)
 	}

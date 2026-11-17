@@ -9,6 +9,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -40,6 +41,10 @@ type EmbedDeps struct {
 	PackNote func(c *echo.Context, note *model.Note) (any, error)
 	PackUser func(c *echo.Context, user *model.User) (any, error)
 	PackClip func(c *echo.Context, clip *model.Clip) (any, error)
+
+	// NoteDelivery は配送先を絞るプラグイン (#4203)。条件で自分のホストに
+	// 見せないノートは埋め込まない。nil なら絞らない。
+	NoteDelivery *notedelivery.Registry
 }
 
 // embedHandlers renders the embed shell for the four upstream embed routes.
@@ -92,6 +97,7 @@ func newEmbedHandlers(
 //   - visibility が specified   -> 文脈なしのシェル (宛先限定)
 //   - visibility が followers   -> 文脈なしのシェル (フォロワー限定)
 //   - userHost != nil (リモート) -> 文脈なしのシェル
+//   - プラグインの条件で、自分のホストに見せないノート -> 文脈なしのシェル (#4203)
 //
 // upstream は該当時に何も返さず fastify の既定 (空応答) に落ちるが、mk-go は
 // 常にシェルを返す。「ノートが無い」と「非公開」を応答の形で区別させないため。
@@ -100,6 +106,10 @@ func (h *embedHandlers) Note(c *echo.Context) error {
 	// FindByID だと author が空のまま pack され、埋め込みに投稿者名が出ない。
 	note, err := h.deps.NoteRepo.FindByIDWithRelations(c.Param("note"))
 	if err != nil || note == nil || !embedNoteIsPublic(note) {
+		return h.render(c, nil)
+	}
+	// 埋め込みは認証を伴わないので、ログインしていない閲覧者として判定する。
+	if h.deps.NoteDelivery.HiddenFromVisitors(c.Request().Context(), []string{note.ID})[note.ID] {
 		return h.render(c, nil)
 	}
 	packed, err := h.deps.PackNote(c, note)

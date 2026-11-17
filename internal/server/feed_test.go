@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -331,13 +332,16 @@ func TestFeed_UGCVisibilityForVisitor(t *testing.T) {
 func TestNewFeedHandlerKeepsDependencies(t *testing.T) {
 	users := &stubFeedUsers{}
 	notes := &stubFeedNotes{}
+	rules := notedelivery.NewForServer("https://local.example")
 	var called []string
 	h := newFeedHandler("https://local.example", "local.example", users, notes,
 		func(string) (time.Time, error) { called = append(called, "parseTime"); return time.Time{}, nil },
 		func() string { called = append(called, "ugcVisibility"); return "none" },
 		func(string) *model.UserProfile { called = append(called, "profiles"); return nil },
 		func(*model.User) string { called = append(called, "avatarURL"); return "" },
-		func(string, string) string { called = append(called, "toHTML"); return "" })
+		func(string, string) string { called = append(called, "toHTML"); return "" },
+		rules)
+	assert.Same(t, rules, h.noteDelivery)
 	assert.Equal(t, "https://local.example", h.baseURL)
 	assert.Equal(t, "local.example", h.host)
 	assert.Same(t, users, h.users)

@@ -160,9 +160,11 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	// フィールドを解決してはいけない。可視性の判断は各 handler の
 	// PackForEmbed 経由で既存の CanSee / HideEmbeds に委ねる。
 	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, s.noteDelivery.Names, EmbedDeps{
-		NoteRepo: noteRepo,
-		UserRepo: userRepo,
-		ClipRepo: clipRepo,
+		// 条件で自分のホストに見せないノートは埋め込まない (#4203)。
+		NoteDelivery: s.noteDelivery,
+		NoteRepo:     noteRepo,
+		UserRepo:     userRepo,
+		ClipRepo:     clipRepo,
 		PackNote: func(c *echo.Context, n *model.Note) (any, error) {
 			return notesHandler.PackForEmbed(c.Request().Context(), n), nil
 		},
