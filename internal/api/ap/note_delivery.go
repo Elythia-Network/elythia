@@ -100,7 +100,9 @@ type fetchRequester struct {
 // 既知の制約として受け入れている (#4199)。署名で確かめられた
 // ときは、User-Agent を見ない。
 //
-// 自分自身を名乗る User-Agent は "" にする (自分のホストを指定する意味は無い)。
+// 自分自身を名乗る User-Agent は "" にする。外から来た照会が自分のホストを名乗っても、
+// 自分の閲覧者として信じる理由は無い。"" の相手は、判定では匿名の閲覧者として
+// 自分のホストに置き換える (hiddenByDeliveryRules、#4203)。
 func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 	if v, ok := c.Get(fetchHostKey).(fetchRequester); ok {
 		return v.host, v.rejected
@@ -135,9 +137,13 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 // unavailable is true when a plugin could not report the targets of any of
 // them; the caller answers 503 then (#4202).
 //
-// 絞られたノートだけが対象。相手が分からない照会は、include のノートには
-// 見せず、exclude のノートには見せる (外したホストかどうかを決められないので、
-// 利用者が選んだ側の既定に倒す)。署名を確かめたうえで断った相手には、絞られた
+// 絞られたノートだけが対象。相手が分からない照会は、ログインしていない閲覧者と
+// 同じく、自分のホストからの照会として判定する (#4203)。自分のホストを条件に
+// 入れていなければ、include のノートには見せず、exclude のノートには見せる
+// (外したホストかどうかを決められないので、利用者が選んだ側の既定に倒す)。
+// **匿名の Web と同じ相手として扱う。** 分けると、exclude に自分のホストを入れた
+// ノートが、Web (notes/show・埋め込み・フィード) では伏せられ、同じ URL を
+// activity+json で署名も User-Agent も無しに取ると本文ごと読める。署名を確かめたうえで断った相手には、絞られた
 // ノートを1つも見せない。署名を確かめるのは、絞られたノートがあった
 // ときだけにする。リモートのノートは原本のサーバーへ転送するものなので見ない。
 //
@@ -167,7 +173,11 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) (hi
 		if !rule.Restricted() {
 			continue
 		}
-		if host, rejected := h.fetchHost(c); !rejected && rule.Allows(host) {
+		host, rejected := h.fetchHost(c)
+		if host == "" {
+			host = h.noteDelivery.LocalHost()
+		}
+		if !rejected && rule.Allows(host) {
 			continue
 		}
 		if hidden == nil {
