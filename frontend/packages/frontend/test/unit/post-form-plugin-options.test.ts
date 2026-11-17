@@ -392,6 +392,31 @@ describe('MkPostForm remembers plugin note options like the visibility', () => {
 		expect(await submit(view)).toBeUndefined();
 	});
 
+	test('an ordinary form with no local draft keeps them', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption({ instant: false });
+		expect(testState.alert).not.toHaveBeenCalled();
+		expect(await submit(view)).toEqual(sent);
+	});
+
+	// 覚えた指定から始まったフォームも、自分で付けた指定と同じく下書きと予約投稿で止まる。
+	test('a form starting from them stops saving a server draft and scheduling', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption();
+		await runMenuItem(view, 'ti ti-cloud-upload');
+		expect(testState.alert).toHaveBeenCalledTimes(1);
+		expect(testState.apiWithDialog).not.toHaveBeenCalled();
+
+		await runMenuItem(view, 'ti ti-calendar-time');
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		expect(testState.alert).toHaveBeenCalledTimes(2);
+		expect(testState.apiWithDialog).not.toHaveBeenCalled();
+		expect(createCalls()).toHaveLength(0);
+	});
+
 	test('a restored local draft replaces them', async () => {
 		setRememberNoteVisibility(true);
 		const first = await mountWithOption({ instant: false });
