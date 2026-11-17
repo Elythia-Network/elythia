@@ -44,6 +44,12 @@ export const store = markRaw(new Pizzax('base', {
 		where: 'deviceAccount',
 		default: false,
 	},
+	// 投稿フォームのサーバープラグインの指定 (#4205)。rememberNoteVisibility がオンのとき、
+	// 送信に成功した指定を覚え、公開範囲と同じく次に開くフォームの初期値にする。
+	pluginNoteOptions: {
+		where: 'deviceAccount',
+		default: {} as Record<string, unknown>,
+	},
 	showPreview: {
 		where: 'device',
 		default: false,

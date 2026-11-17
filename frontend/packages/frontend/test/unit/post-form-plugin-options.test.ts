@@ -13,6 +13,13 @@ import { cleanup, fireEvent, render } from '@testing-library/vue';
 import { nextTick } from 'vue';
 import MkPostForm from '@/components/MkPostForm.vue';
 import { _resetNoteOptionsForTest, launchServerPlugins } from '@/plugin-api.js';
+import { prefer } from '@/preferences.js';
+
+// rememberNoteVisibility を張り替える。プロセス全体で共有されるので、afterEach で戻す。
+const originalRememberNoteVisibility = prefer.s.rememberNoteVisibility;
+function setRememberNoteVisibility(value: boolean) {
+	(prefer.s as { rememberNoteVisibility: boolean }).rememberNoteVisibility = value;
+}
 
 type MenuItem = { text?: string; icon?: string; action?: () => unknown };
 
@@ -25,7 +32,13 @@ const testState = vi.hoisted(() => ({
 	menuItems: [] as MenuItem[],
 	storage: new Map<string, string>(),
 	dialogValue: { mode: 'include', hosts: ['a.example'] } as unknown,
+	// store に覚えた指定 (#4205)。
+	remembered: {} as Record<string, unknown>,
+	// os.popup に渡されたイベント (下書きの一覧の restore を呼ぶため)。
+	popupEvents: null as Record<string, (...args: unknown[]) => unknown> | null,
 }));
+
+vi.mock('@/accounts.js', () => ({ getAccounts: async () => [], getAccountMenu: async () => [] }));
 
 vi.mock('@/i.js', async () => {
 	const { reactive } = await import('vue');
@@ -40,12 +53,20 @@ vi.mock('@/store.js', async () => {
 	return {
 		store: {
 			r: { tips: { value: { postForm: true } } },
-			s: { showPreview: false, localOnly: false, visibility: 'public', reactionAcceptance: 'nonSensitiveOnly' },
+			s: {
+				showPreview: false,
+				localOnly: false,
+				visibility: 'public',
+				reactionAcceptance: 'nonSensitiveOnly',
+				get pluginNoteOptions() { return testState.remembered; },
+			},
 			model(key: string) {
 				if (!models.has(key)) models.set(key, ref(key === 'postFormWithHashtags' ? false : ''));
 				return models.get(key);
 			},
-			set: vi.fn(),
+			set: (key: string, value: unknown) => {
+				if (key === 'pluginNoteOptions') testState.remembered = value as Record<string, unknown>;
+			},
 		},
 	};
 });
@@ -80,6 +101,10 @@ vi.mock('@/os.js', () => ({
 	apiWithDialog: testState.apiWithDialog,
 	inputDatetime: testState.inputDatetime,
 	popupMenu: (items: MenuItem[]) => { testState.menuItems = items; },
+	popup: (_component: unknown, _props: unknown, events: Record<string, (...args: unknown[]) => unknown>) => {
+		testState.popupEvents = events;
+		return { dispose: vi.fn() };
+	},
 	// 指定のダイアログは、開いたらすぐに testState.dialogValue で閉じる。
 	popupAsyncWithDialog: async (_component: unknown, _props: unknown, events: { done: (result: { canceled: boolean; value: unknown }) => void }) => {
 		events.done({ canceled: false, value: testState.dialogValue });
@@ -113,10 +138,10 @@ async function registerOption(name: string) {
 }
 
 // instant: false のときだけ、端末に書きかけの投稿を残して復元する。
-async function mountWithOption(options: { plugin?: string; instant?: boolean } = {}) {
+async function mountWithOption(options: { plugin?: string; instant?: boolean; props?: Record<string, unknown> } = {}) {
 	await registerOption(options.plugin ?? 'targets');
 	const view = render(MkPostForm, {
-		props: { initialText: 'hello', instant: options.instant ?? true, autofocus: false, mock: false },
+		props: { initialText: 'hello', instant: options.instant ?? true, autofocus: false, mock: false, ...options.props },
 		global: {
 			stubs: { MkEllipsis: true, MkAcct: true, MkTime: true, I18n: true, MkTip: true },
 			directives: { 'click-anime': () => {}, tooltip: () => {} },
@@ -148,10 +173,14 @@ beforeEach(() => {
 	Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false });
 	testState.dialogValue = { mode: 'include', hosts: ['a.example'] };
 	testState.menuItems = [];
+	testState.popupEvents = null;
 	testState.storage.clear();
+	testState.remembered = {};
+	setRememberNoteVisibility(false);
 });
 
 afterEach(() => {
+	setRememberNoteVisibility(originalRememberNoteVisibility);
 	cleanup();
 	_resetNoteOptionsForTest();
 	testState.alert.mockClear();
@@ -247,5 +276,130 @@ describe('MkPostForm plugin note options', () => {
 		await flush();
 		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
 		expect(payload.pluginOptions).toBeUndefined();
+	});
+});
+
+// rememberNoteVisibility がオンなら、送った指定を覚えて次に開いたフォームの初期値にする (#4205)。
+describe('MkPostForm remembers plugin note options like the visibility', () => {
+	const sent = { targets: { mode: 'include', hosts: ['a.example'] } };
+
+	async function submit(view: Awaited<ReturnType<typeof mountWithOption>>) {
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const calls = createCalls();
+		return ((calls[calls.length - 1] as unknown[])[1] as { pluginOptions?: unknown }).pluginOptions;
+	}
+
+	async function remount(options: Parameters<typeof mountWithOption>[0] = {}) {
+		cleanup();
+		_resetNoteOptionsForTest();
+		return mountWithOption(options);
+	}
+
+	test('the next form starts from the options sent when the setting is on', async () => {
+		setRememberNoteVisibility(true);
+		const first = await mountWithOption();
+		await setOption(first);
+		expect(await submit(first)).toEqual(sent);
+		expect(testState.remembered).toEqual(sent);
+
+		const next = await remount();
+		expect(await submit(next)).toEqual(sent);
+	});
+
+	test('the next form starts empty when the setting is off', async () => {
+		const first = await mountWithOption();
+		await setOption(first);
+		expect(await submit(first)).toEqual(sent);
+		expect(testState.remembered).toEqual({});
+
+		const next = await remount();
+		expect(await submit(next)).toBeUndefined();
+	});
+
+	test('options of plugins not registered now are dropped', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = { ...sent, gone: { mode: 'exclude', hosts: ['b.example'] } };
+		const view = await mountWithOption();
+		expect(await submit(view)).toEqual(sent);
+		expect(testState.alert).not.toHaveBeenCalled();
+	});
+
+	test('a value remembered earlier is not used once the setting is off', async () => {
+		testState.remembered = sent;
+		const view = await mountWithOption();
+		expect(await submit(view)).toBeUndefined();
+		expect(testState.remembered).toEqual(sent);
+	});
+
+	test('posting without an option remembers none', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption();
+		testState.dialogValue = null;
+		await setOption(view);
+		expect(await submit(view)).toBeUndefined();
+		expect(testState.remembered).toEqual({});
+	});
+
+	test('a failed post remembers nothing', async () => {
+		setRememberNoteVisibility(true);
+		testState.misskeyApi.mockImplementationOnce(async () => { throw new Error('rejected'); });
+		const view = await mountWithOption();
+		await setOption(view);
+		await submit(view);
+		expect(testState.remembered).toEqual({});
+	});
+
+	test('reset forgets the remembered options', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption();
+		await runMenuItem(view, 'ti ti-trash');
+		expect(testState.remembered).toEqual({});
+	});
+
+	test('a form given its visibility by the caller does not start from them', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption({ props: { initialVisibility: 'home' } });
+		expect(await submit(view)).toBeUndefined();
+	});
+
+	test('delete and edit does not start from them', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption({ props: {
+			initialNote: { id: 'old', text: 'hello', cw: null, visibility: 'public', localOnly: false, files: [], poll: null, reactionAcceptance: null },
+		} });
+		expect(await submit(view)).toBeUndefined();
+	});
+
+	test('a restored server draft replaces them', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		const view = await mountWithOption();
+		await fireEvent.click(view.getByTestId('post-form-account'));
+		await flush();
+		const listDrafts = testState.menuItems.find(x => x.icon === 'ti ti-cloud-download');
+		expect(listDrafts).toBeDefined();
+		listDrafts!.action!();
+		await testState.popupEvents!.restore({
+			id: 'draft1', text: 'from the server', cw: null, visibility: 'public', localOnly: false, files: [], hashtag: null, poll: null,
+			visibleUserIds: [], renoteId: null, renote: null, reply: null, reactionAcceptance: null, scheduledAt: null, channel: null,
+		});
+		await flush();
+		expect(await submit(view)).toBeUndefined();
+	});
+
+	test('a restored local draft replaces them', async () => {
+		setRememberNoteVisibility(true);
+		const first = await mountWithOption({ instant: false });
+		await fireEvent.update(first.getByTestId('post-form-text'), 'draft without options');
+		await flush();
+		testState.remembered = sent;
+
+		const next = await remount({ instant: false });
+		expect(await submit(next)).toBeUndefined();
 	});
 });
