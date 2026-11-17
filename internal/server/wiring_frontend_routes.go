@@ -136,6 +136,11 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	// manifest.json — PWA用
 	s.echo.GET("/manifest.json", manifestJSON(s.config, metaRepo))
 
+	// /flush — 端末の保存データを消して開き直させる回復のページ (#4204)。登録しないと
+	// SPA catchall の通常の画面が返り、起動の失敗の画面 (public/loader/boot.js) にある
+	// /flush のリンクを押しても何も消えない。
+	s.echo.GET("/flush", flushPage(s.config.URL))
+
 	// Service Worker (sw.js) — Misskey frontend は GET /sw.js を登録しにくる。
 	// SPA catchall より前に登録しないと text/html にフォールバックしてしまい
 	// ブラウザが "unsupported MIME type" エラーで SW 登録を拒否する。
