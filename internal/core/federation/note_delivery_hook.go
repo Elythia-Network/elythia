@@ -45,12 +45,6 @@ type NoteDeliveryHook struct {
 	rules *notedelivery.Registry
 }
 
-// SetNoteDeliveryRules wires the plugins that narrow where local notes
-// federate (#4199). nil で絞らない (初期状態)。
-func (h *NoteDeliveryHook) SetNoteDeliveryRules(r *notedelivery.Registry) {
-	h.rules = r
-}
-
 // ruleFor returns the delivery rule of a local note.
 func (h *NoteDeliveryHook) ruleFor(note *model.Note) notedelivery.Rule {
 	return h.rules.Rule(context.Background(), note.ID)
