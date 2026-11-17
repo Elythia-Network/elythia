@@ -249,7 +249,9 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 			}
 			return entityPacker.IdenticonURL(u)
 		},
-		feedNoteHTML(feedHost))
+		feedNoteHTML(feedHost),
+		// 条件で自分のホストに見せないノートはフィードに載せない (#4203)。
+		s.noteDelivery)
 
 	// /@<acct> は AP のユーザー解決とフィードの入口を兼ねる。Echo のルータは
 	// Fastify と違い `/@:user.rss` のようなセグメント内リテラルを解釈できない

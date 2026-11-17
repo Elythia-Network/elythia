@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	apmfm "github.com/elythia-network/elythia/internal/activitypub/mfm"
 	"github.com/elythia-network/elythia/internal/config"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -255,6 +257,9 @@ type feedHandler struct {
 	toHTML func(text, mentionedRemoteUsers string) string
 	// now は時間窓の判定に使う現在時刻。nil なら time.Now (テストで固定する)。
 	now func() time.Time
+	// noteDelivery は配送先を絞るプラグイン (#4203)。条件で自分のホストに見せない
+	// ノートはフィードに載せない。nil なら絞らない。
+	noteDelivery *notedelivery.Registry
 }
 
 // newFeedHandler builds the feed handler setupRoutes registers on /@:acct.
@@ -274,8 +279,10 @@ func newFeedHandler(
 	profiles func(userID string) *model.UserProfile,
 	avatarURL func(u *model.User) string,
 	toHTML func(text, mentionedRemoteUsers string) string,
+	noteDelivery *notedelivery.Registry,
 ) *feedHandler {
 	return &feedHandler{
+		noteDelivery:  noteDelivery,
 		baseURL:       baseURL,
 		host:          host,
 		users:         users,
@@ -327,7 +334,7 @@ func (h *feedHandler) serve(c *echo.Context, username string, render func(*feedD
 		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 
-	data := h.build(u)
+	data := h.build(c.Request().Context(), u)
 	out, err := render(data)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
@@ -343,7 +350,7 @@ func (h *feedHandler) ugcVisibilityNow() string {
 	return h.ugcVisibility()
 }
 
-func (h *feedHandler) build(u *model.User) *feedData {
+func (h *feedHandler) build(ctx context.Context, u *model.User) *feedData {
 	name := u.Username
 	if u.Name != nil && *u.Name != "" {
 		name = *u.Name
@@ -366,11 +373,18 @@ func (h *feedHandler) build(u *model.User) *feedData {
 	if err != nil {
 		notes = nil
 	}
+	// フィードは常に匿名で読まれるので、ログインしていない閲覧者として判定する
+	// (#4203)。外した分だけ件数が減るが、フィードは件数を出さないので、どれを
+	// 絞ったかは件数からは分からない。
+	hidden := h.hiddenFromVisitors(ctx, notes)
 	nowMs := time.Now().UnixMilli()
 	if h.now != nil {
 		nowMs = h.now().UnixMilli()
 	}
 	for _, n := range notes {
+		if hidden[n.ID] {
+			continue
+		}
 		e := feedEntry{
 			Title: "New note by " + name,
 			Link:  h.baseURL + "/notes/" + n.ID,
@@ -408,6 +422,19 @@ func (h *feedHandler) build(u *model.User) *feedData {
 		data.Updated = data.Entries[0].Date
 	}
 	return data
+}
+
+// hiddenFromVisitors returns the IDs of the notes a plugin keeps from viewers
+// who are not signed in (#4203). フィードはローカルの利用者のノートだけを載せる。
+func (h *feedHandler) hiddenFromVisitors(ctx context.Context, notes []*model.Note) map[string]bool {
+	if h.noteDelivery.Empty() || len(notes) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(notes))
+	for _, n := range notes {
+		ids = append(ids, n.ID)
+	}
+	return h.noteDelivery.HiddenFromVisitors(ctx, ids)
 }
 
 // describe mirrors upstream の description 組み立て。
