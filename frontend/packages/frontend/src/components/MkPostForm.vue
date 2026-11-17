@@ -104,7 +104,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<button v-tooltip="i18n.ts.mention" class="_button" :class="$style.footerButton" @click="insertMention"><i class="ti ti-at"></i></button>
 			<button v-if="showAddMfmFunction" v-tooltip="i18n.ts.addMfmFunction" :class="['_button', $style.footerButton]" @click="insertMfmFunction"><i class="ti ti-palette"></i></button>
 			<button v-if="postFormActions.length > 0" v-tooltip="i18n.ts.plugins" class="_button" :class="$style.footerButton" @click="showActions"><i class="ti ti-plug"></i></button>
-			<button v-for="option in noteOptionEntries" :key="option.plugin" v-tooltip="option.label()" class="_button" :class="[$style.footerButton, { [$style.footerButtonActive]: pluginOptions[option.plugin] !== undefined }]" :data-testid="`post-form-plugin-option-${option.plugin}`" @click="editNoteOption(option)"><i :class="option.icon"></i></button>
+			<button v-for="option in noteOptionEntries" :key="option.plugin" v-tooltip="noteOptionLabel(option)" class="_button" :class="[$style.footerButton, { [$style.footerButtonActive]: pluginOptions[option.plugin] !== undefined }]" :data-testid="`post-form-plugin-option-${option.plugin}`" @click="editNoteOption(option)"><i :class="option.icon"></i></button>
 		</div>
 		<div :class="$style.footerRight">
 			<button v-tooltip="i18n.ts.emoji" :class="['_button', $style.footerButton]" data-testid="post-form-emoji" @click="insertEmoji"><i class="ti ti-mood-happy"></i></button>
@@ -155,7 +155,7 @@ import { emojiPicker } from '@/utility/emoji-picker.js';
 import { mfmFunctionPicker } from '@/utility/mfm-function-picker.js';
 import { prefer } from '@/preferences.js';
 import { getPluginHandlers } from '@/plugin.js';
-import { transformPastedText, noteOptions, isNoteOptionSet } from '@/plugin-api.js';
+import { transformPastedText, noteOptions, noteOptionLabel, isNoteOptionSet } from '@/plugin-api.js';
 import type { NoteOptionRegistration } from '@/plugin-api.js';
 import { DI } from '@/di.js';
 import { globalEvents } from '@/events.js';
@@ -1306,7 +1306,7 @@ function cancel() {
 
 async function editNoteOption(option: NoteOptionRegistration) {
 	const { dispose } = await os.popupAsyncWithDialog(import('@/components/MkPluginNoteOptionDialog.vue').then(x => x.default), {
-		title: option.label(),
+		title: noteOptionLabel(option),
 		component: markRaw(option.component),
 		initialValue: pluginOptions.value[option.plugin] ?? null,
 	}, {

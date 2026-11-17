@@ -40,6 +40,8 @@ const testState = vi.hoisted(() => ({
 	// 端末に保存したアカウントと、アカウントのメニューで選んだときの処理。
 	accounts: [] as { id: string; token: string }[],
 	chooseAccount: null as ((account: { id: string }) => void) | null,
+	dialogTitles: [] as unknown[],
+	noteDeliveryPlugins: ['targets', 'other'] as string[],
 }));
 
 vi.mock('@/accounts.js', () => ({
@@ -101,7 +103,14 @@ vi.mock('@/composables/use-uploader.js', async () => {
 
 vi.mock('@/instance.js', async importOriginal => {
 	const actual = await importOriginal<typeof import('@/instance.js')>();
-	return { ...actual, instance: { ...actual.instance, maxNoteTextLength: 3000 } };
+	return {
+		...actual,
+		instance: {
+			...actual.instance,
+			maxNoteTextLength: 3000,
+			get noteDeliveryPlugins() { return testState.noteDeliveryPlugins; },
+		},
+	};
 });
 vi.mock('@/plugin.js', () => ({ getPluginHandlers: () => [] }));
 vi.mock('@/os.js', () => ({
@@ -116,7 +125,8 @@ vi.mock('@/os.js', () => ({
 		return { dispose: vi.fn() };
 	},
 	// 指定のダイアログは、開いたらすぐに testState.dialogValue で閉じる。
-	popupAsyncWithDialog: async (_component: unknown, _props: unknown, events: { done: (result: { canceled: boolean; value: unknown }) => void }) => {
+	popupAsyncWithDialog: async (_component: unknown, props: { title?: unknown }, events: { done: (result: { canceled: boolean; value: unknown }) => void }) => {
+		testState.dialogTitles.push(props.title);
 		events.done({ canceled: false, value: testState.dialogValue });
 		return { dispose: vi.fn() };
 	},
@@ -138,18 +148,18 @@ async function flush(): Promise<void> {
 	}
 }
 
-async function registerOption(name: string) {
+async function registerOption(name: string, label: () => string = () => name) {
 	await launchServerPlugins([{
 		name,
 		setup(host) {
-			host.postForm.registerNoteOption({ icon: 'ti ti-world-share', label: () => name, component: {} });
+			host.postForm.registerNoteOption({ icon: 'ti ti-world-share', label, component: {} });
 		},
 	}]);
 }
 
 // instant: false のときだけ、端末に書きかけの投稿を残して復元する。
-async function mountWithOption(options: { plugin?: string; instant?: boolean; props?: Record<string, unknown> } = {}) {
-	await registerOption(options.plugin ?? 'targets');
+async function mountWithOption(options: { plugin?: string; instant?: boolean; label?: () => string; props?: Record<string, unknown> } = {}) {
+	await registerOption(options.plugin ?? 'targets', options.label);
 	const view = render(MkPostForm, {
 		props: { initialText: 'hello', instant: options.instant ?? true, autofocus: false, mock: false, ...options.props },
 		global: {
@@ -182,6 +192,8 @@ function createCalls() {
 beforeEach(() => {
 	Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false });
 	testState.dialogValue = { mode: 'include', hosts: ['a.example'] };
+	testState.dialogTitles = [];
+	testState.noteDeliveryPlugins = ['targets', 'other'];
 	testState.menuItems = [];
 	testState.popupEvents = null;
 	testState.storage.clear();
@@ -288,6 +300,44 @@ describe('MkPostForm plugin note options', () => {
 		await flush();
 		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
 		expect(payload.pluginOptions).toBeUndefined();
+	});
+
+	// サーバーで無効にしたプラグインは、ボタンを出さない (#4202)。出すと、指定した
+	// 投稿が毎回 INVALID_PARAM になる。
+	test('a plugin disabled on the server shows no button', async () => {
+		testState.noteDeliveryPlugins = ['other'];
+		const view = await mountWithOption();
+		expect(view.queryByTestId('post-form-plugin-option-targets')).toBeNull();
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
+		expect(payload.pluginOptions).toBeUndefined();
+	});
+
+	test('restoring drops the option of a plugin disabled on the server and says so', async () => {
+		const first = await mountWithOption({ instant: false });
+		await setOption(first);
+		cleanup();
+		_resetNoteOptionsForTest();
+
+		testState.noteDeliveryPlugins = [];
+		const view = await mountWithOption({ instant: false });
+		expect(testState.alert).toHaveBeenCalledTimes(1);
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: unknown };
+		expect(payload.pluginOptions).toBeUndefined();
+	});
+
+	// label() が例外を投げても、フォームは描画でき、ダイアログの題にはプラグインの名前を出す (#4202)。
+	test('a label that throws does not break the form', async () => {
+		const view = await mountWithOption({ label: () => { throw new Error('broken'); } });
+		await setOption(view);
+		expect(testState.dialogTitles).toEqual(['targets']);
+		await fireEvent.click(view.getByTestId('post-form-submit'));
+		await flush();
+		const payload = (createCalls()[0] as unknown[])[1] as { pluginOptions?: Record<string, unknown> };
+		expect(payload.pluginOptions).toEqual({ targets: { mode: 'include', hosts: ['a.example'] } });
 	});
 });
 

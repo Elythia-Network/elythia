@@ -31,6 +31,7 @@ import { FILE_TYPE_BROWSERSAFE } from '@@/js/const.js';
 import type { Content } from '@/components/MkLightbox.item.vue';
 import { misskeyApi } from '@/utility/misskey-api.js';
 import { $i } from '@/i.js';
+import { instance } from '@/instance.js';
 
 /*
  * Misskey のコンポーネントを再公開する。
@@ -433,9 +434,35 @@ function registerNoteOption(plugin: string, option: NoteOptionDefinition): void 
 	noteOptionRegistry.set(plugin, { ...option, plugin });
 }
 
-/** Returns the registered post form options, ordered by plugin name. */
+/**
+ * Returns the registered post form options the server accepts, ordered by
+ * plugin name.
+ *
+ * **サーバーで有効なものだけを返す (#4202)。** frontend はビルドに含めた全部の
+ * プラグインを起動するが、サーバーで無効にしたプラグイン (`enabled: false`) は
+ * `pluginOptions` を受け取らない。ボタンを出すと、指定した投稿が毎回
+ * `INVALID_PARAM` になり、端末に残る書きかけの投稿からも指定が戻る。受け取る
+ * プラグインは meta の `noteDeliveryPlugins` で知る。古いサーバーや端末に残った
+ * 古い meta で欠けているときは、どれも出さない。
+ */
 export function noteOptions(): NoteOptionRegistration[] {
-	return [...noteOptionRegistry.values()].sort((a, b) => a.plugin < b.plugin ? -1 : a.plugin > b.plugin ? 1 : 0);
+	const accepted = instance.noteDeliveryPlugins ?? [];
+	return [...noteOptionRegistry.values()]
+		.filter(o => accepted.includes(o.plugin))
+		.sort((a, b) => a.plugin < b.plugin ? -1 : a.plugin > b.plugin ? 1 : 0);
+}
+
+/**
+ * Returns the option's label, or the plugin name when `label()` throws, so a
+ * broken plugin cannot keep the post form from rendering (#4202).
+ */
+export function noteOptionLabel(option: NoteOptionRegistration): string {
+	try {
+		const label = option.label();
+		return typeof label === 'string' ? label : option.plugin;
+	} catch {
+		return option.plugin;
+	}
 }
 
 /** Reports whether a post form option value asks for anything. 判定が例外を投げたら、送る側 (設定済み) に倒す。 */
