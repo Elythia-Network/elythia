@@ -1055,3 +1055,32 @@ func TestMeta_RegistrationClosed(t *testing.T) {
 		})
 	}
 }
+
+// The post form shows a plugin's button only when the server accepts its
+// pluginOptions; a plugin bundled into the frontend but disabled on the
+// server is not listed (#4202). The key is always present.
+func TestMeta_NoteDeliveryPlugins(t *testing.T) {
+	fetch := func(t *testing.T, h *Handler) map[string]any {
+		t.Helper()
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/api/meta", nil)
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		require.NoError(t, h.Meta(e.NewContext(req, rec)))
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return resp
+	}
+
+	h, metaRepo := newTestHandler()
+	metaRepo.Meta = &model.Meta{ID: "x"}
+	resp := fetch(t, h)
+	require.Contains(t, resp, "noteDeliveryPlugins")
+	assert.Equal(t, []any{}, resp["noteDeliveryPlugins"], "unwired reports an empty list")
+
+	h.SetNoteDeliveryPlugins(func() []string { return nil })
+	assert.Equal(t, []any{}, fetch(t, h)["noteDeliveryPlugins"])
+
+	h.SetNoteDeliveryPlugins(func() []string { return []string{"targets"} })
+	assert.Equal(t, []any{"targets"}, fetch(t, h)["noteDeliveryPlugins"], "the setter drops the cached response")
+}

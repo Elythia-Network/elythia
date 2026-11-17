@@ -33,6 +33,9 @@ type Handler struct {
 	chunkedUpload ChunkedUploadCapability
 	// setup は `requireSetup` の判定 (#3037)。nil なら `rootUserId` だけで判定する。
 	setup *SetupDetector
+	// noteDeliveryPlugins は notes/create の pluginOptions を受け取るプラグインの
+	// 名前 (#4202)。nil なら空の一覧を出す。
+	noteDeliveryPlugins NoteDeliveryPlugins
 	// respCache は serialize 済みレスポンスのキャッシュ (#2649)。
 	// 上の依存を差し替える SetXxx は、レスポンスの中身が変わるので
 	// いずれも respCache を落とす。
@@ -79,6 +82,34 @@ func (h *Handler) SetChunkedUploadCapability(f ChunkedUploadCapability) {
 func (h *Handler) SetSetupDetector(d *SetupDetector) {
 	h.setup = d
 	h.respCache.invalidate()
+}
+
+// NoteDeliveryPlugins lists the names of the server plugins whose options
+// notes/create accepts in pluginOptions (#4202). 起動の後は変わらない。
+type NoteDeliveryPlugins func() []string
+
+// SetNoteDeliveryPlugins wires the additive `noteDeliveryPlugins` field.
+// Unset reports an empty list.
+func (h *Handler) SetNoteDeliveryPlugins(f NoteDeliveryPlugins) {
+	h.noteDeliveryPlugins = f
+	h.respCache.invalidate()
+}
+
+// NoteDeliveryPluginNames returns the value of the additive
+// `noteDeliveryPlugins` field: never nil, so it is written as `[]`.
+//
+// **投稿フォームが、ボタンを出すかの判定に使う** (#4202)。frontend に同梱した
+// プラグインでも、サーバーで無効にしたもの (`enabled: false`) は pluginOptions を
+// 受け取らない。ボタンを出すと、指定した投稿が毎回 `INVALID_PARAM` になる。
+func NoteDeliveryPluginNames(f NoteDeliveryPlugins) []string {
+	if f == nil {
+		return []string{}
+	}
+	names := f()
+	if names == nil {
+		return []string{}
+	}
+	return names
 }
 
 // chunkedUploadInfo returns the value of the additive `chunkedUpload` field,
@@ -177,6 +208,8 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 		// upstream の `localUsernameSchema` は `^\w{1,20}$` 固定なので
 		// 対応する field が無い。
 		"minimumUsernameLength": signup.EffectiveMinimumUsernameLength(m),
+		// notes/create の pluginOptions を受け取るプラグインの名前 (#4202)。
+		"noteDeliveryPlugins": NoteDeliveryPluginNames(h.noteDeliveryPlugins),
 		// ビルドした revision (#2700)。/about-elythia が「Elythia 1.3.0 (abc1234)」として
 		// 出す。以前は同梱 frontend の版 (mkGoFrontendVersion) も出していたが、
 		// frontend を本体へ取り込んで版が本体と同じになったので廃止した (#3379)。

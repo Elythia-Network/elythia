@@ -29,7 +29,7 @@ var cacheEntries = map[string]cacheEntry{
 	"internal/api/hashtags.Handler": {kindNotCache, "trendFlightはhashtags/trendの同時の集計を1回にまとめるsingleflight(#3579)で、集計の結果は持たない",
 		[]string{"db", "entityPacker", "extras", "idGen", "meta", "moderators", "relation", "selfPacker", "trendFlight"}, nil},
 	"internal/api/meta.Handler": {kindDropLocal, "",
-		[]string{"adRepo", "chunkedUpload", "config", "metaRepo", "proxyAccountName", "respCache", "setup"}, nil},
+		[]string{"adRepo", "chunkedUpload", "config", "metaRepo", "noteDeliveryPlugins", "proxyAccountName", "respCache", "setup"}, nil},
 	"internal/api/meta.SetupDetector": {kindThrottle, "数え方(組み立てで渡す依存)と、ローカルの利用者を一度でも見た印(seen)。印はCOUNTを毎回発行しないための掛け金で、捨てても次のリクエストで1回数え直すだけ。組み立てごとの値なので、組み立て直した世代は数え直す(#3803)。DropLocalは持たないので、同じ世代のままDBを利用者のいない状態へ戻すと印が残る",
 		[]string{"count", "seen"}, nil},
 	"internal/api/meta.metaResponseCache": {kindDroppedByOwner, "/api/metaの応答。meta.Handler.DropLocalがinvalidateで捨てる",

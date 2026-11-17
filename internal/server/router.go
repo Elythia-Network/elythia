@@ -1516,11 +1516,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		return settings.ChunkSize, ok
 	}
 	metaHandler.SetChunkedUploadCapability(chunkedUploadCapability)
+	// 投稿フォームが、サーバーで有効なプラグインの指定だけを出すのに使う (#4202)。
+	metaHandler.SetNoteDeliveryPlugins(s.noteDelivery.Names)
 
 	// Frontend SPA shell — AP resource handlers fall back to this when the
 	// request prefers HTML over application/activity+json, and the final
 	// catch-all route at the bottom of RegisterRoutes uses the same handler.
-	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo)
+	frontend := frontendHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, s.noteDelivery.Names)
 
 	// URL preview endpoint
 	//

@@ -21,7 +21,7 @@ import (
 // buildSSRMetaKeys renders the embedded meta and returns its top-level keys.
 func buildSSRMetaKeys(t *testing.T, cfg *config.Config, m *model.Meta) map[string]any {
 	t.Helper()
-	raw := buildMetaJSON(cfg, m, nil, nil, nil, nil)
+	raw := buildMetaJSON(cfg, m, nil, nil, nil, nil, nil)
 	var out map[string]any
 	require.NoError(t, json.Unmarshal([]byte(raw), &out))
 	return out
@@ -168,7 +168,7 @@ func TestSSRMetaCarriesTheSameAdsAsAPIMeta(t *testing.T) {
 		StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
 
 	var ssr map[string]any
-	require.NoError(t, json.Unmarshal([]byte(buildMetaJSON(cfg, m, nil, nil, nil, ads)), &ssr))
+	require.NoError(t, json.Unmarshal([]byte(buildMetaJSON(cfg, m, nil, nil, nil, ads, nil)), &ssr))
 
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = m
@@ -207,7 +207,7 @@ func TestSSRMetaAdsEmptyWithoutRepoOrOnError(t *testing.T) {
 			metaRepo.Meta = &model.Meta{ID: "x"}
 			rec := httptest.NewRecorder()
 			c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-			require.NoError(t, frontendHTML(cfg, metaRepo, nil, nil, nil, repo)(c))
+			require.NoError(t, frontendHTML(cfg, metaRepo, nil, nil, nil, repo, nil)(c))
 			require.Equal(t, http.StatusOK, rec.Code)
 			require.Equal(t, []any{}, extractEmbeddedMeta(t, rec.Body.String())["ads"])
 		})

@@ -334,7 +334,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		// 本家 OAuth2ProviderService は NODE_ENV === 'test' のとき http の
 		// client_id を許可する (本番は https のみ)。TestMode を同じ用途で使う。
 		s.config.TestMode,
-		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo),
+		frontendConsentHTML(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, s.noteDelivery.Names),
 		// code 再利用で token を revoke したとき、auth cache に残った entry で
 		// 通り続けないよう即時失効させる (RFC6749 §4.1.2)。構築子の必須の引数 (#3823)。
 		s.auth,
