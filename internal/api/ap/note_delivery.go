@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -100,9 +99,10 @@ type fetchRequester struct {
 // 既知の制約として受け入れている (#4199)。署名で確かめられた
 // ときは、User-Agent を見ない。
 //
-// 自分自身を名乗る User-Agent は "" にする。外から来た照会が自分のホストを名乗っても、
-// 自分の閲覧者として信じる理由は無い。"" の相手は、判定では匿名の閲覧者として
-// 自分のホストに置き換える (hiddenByDeliveryRules、#4203)。
+// 自分のホストを名乗る User-Agent も、そのまま返す。分からない相手 ("") は、判定で
+// 匿名の閲覧者として自分のホストに置き換える (hiddenByDeliveryRules、#4203) ので、
+// どちらも自分のホストとして判定される。自分のホストは配送先の条件のレジストリが
+// 持つ1つだけを使い、ここでは比べない (綴りの揃え方を2か所に持たないため)。
 func (h *Handler) fetchHost(c *echo.Context) (host string, rejected bool) {
 	if v, ok := c.Get(fetchHostKey).(fetchRequester); ok {
 		return v.host, v.rejected
@@ -124,9 +124,6 @@ func (h *Handler) fetchHost(c *echo.Context) (host string, rejected bool) {
 	}
 	if !signed {
 		host = userAgentHost(req.UserAgent())
-		if h.localHost != "" && strings.EqualFold(host, h.localHost) {
-			host = ""
-		}
 	}
 	c.Set(fetchHostKey, fetchRequester{host: host, rejected: rejected})
 	return host, rejected
