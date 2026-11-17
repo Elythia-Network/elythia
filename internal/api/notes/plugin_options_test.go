@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notedelivery"
@@ -113,6 +114,16 @@ type insertFailingNoteRepo struct {
 }
 
 func (*insertFailingNoteRepo) Create(*model.Note) error { return errors.New("insert failed") }
+
+// laggingReplicaNoteRepo answers plain reads as a replica that has not copied
+// the note yet; ExistingNoteIDsOnPrimary still reads the primary.
+type laggingReplicaNoteRepo struct {
+	*testutil.MockNoteRepository
+}
+
+func (*laggingReplicaNoteRepo) FindByID(string) (*model.Note, error) {
+	return nil, gorm.ErrRecordNotFound
+}
 
 // insertFailingPollRepo fails after the note row is written.
 type insertFailingPollRepo struct {
@@ -212,9 +223,19 @@ func TestCreate_PluginOptions_KeepWhenStored(t *testing.T) {
 		h := newHandlerWithRepos(t, &insertFailingNoteRepo{noteRepo}, testutil.NewMockPollRepository())
 		r, forgot := forgetRegistry(t, nil)
 		h.SetNoteDeliveryRules(r)
-		noteRepo.FindErr = errors.New("db down")
+		noteRepo.ExistingOnPrimaryErr = errors.New("db down")
 		postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
 		forgot.never(t, "a lookup failure is not proof that the note is gone")
+	})
+	t.Run("replica has not caught up", func(t *testing.T) {
+		noteRepo := testutil.NewMockNoteRepository()
+		h := newHandlerWithRepos(t, &laggingReplicaNoteRepo{noteRepo}, &insertFailingPollRepo{testutil.NewMockPollRepository()})
+		r, forgot := forgetRegistry(t, nil)
+		h.SetNoteDeliveryRules(r)
+		rec := postCreate(t, h, `{"text":"hi","poll":{"choices":["a","b"]},"pluginOptions":{"targets":{}}}`)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.Len(t, noteRepo.Notes, 1, "the note row was written")
+		forgot.never(t, "a replica that has not copied the row is not proof that the note is gone")
 	})
 	t.Run("federated note", func(t *testing.T) {
 		h, _ := newTestHandler(t)

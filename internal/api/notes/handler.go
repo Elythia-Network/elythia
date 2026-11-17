@@ -217,7 +217,7 @@ func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
 // forgetUnfederatedNote tells the NoteDelivery plugins to drop the conditions
 // they stored for noteID when the note was not stored (#4202).
 //
-// **保存に失敗したかは、エラーではなくDBで確かめる。** 作成はノートの行を書いた
+// **保存に失敗したかは、エラーではなくDBの primary で確かめる。** 作成はノートの行を書いた
 // 後 (投票の保存など) でも失敗を返しうる。その行はAPで照会されうるので、条件を
 // 消すと、絞ったつもりのノートが誰にでも見えるようになる。行があるか確かめられ
 // ないとき (DBの障害) も消さない。
@@ -232,7 +232,10 @@ func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, crea
 	if createErr == nil || h.noteRepo == nil {
 		return
 	}
-	if _, err := h.noteRepo.FindByID(noteID); !repository.IsNotFound(err) {
+	// primary を読む。レプリカは複製前の行を取りこぼすので、保存の後で失敗した
+	// ノートを「無い」と取り違え、条件を消してしまう (repository の規約、#4202)。
+	ids, err := h.noteRepo.ExistingNoteIDsOnPrimary([]string{noteID})
+	if err != nil || len(ids) > 0 {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
