@@ -29,14 +29,8 @@ type PollDeliveryHook struct {
 	urls     *activitypub.URLBuilder
 	idGen    id.Generator
 	// rules はプラグインが絞った配送先 (#4199)。nil なら絞らない。
+	// Update(Question) はノートの本文を丸ごと持つので、Create と同じ相手にだけ配る。
 	rules *notedelivery.Registry
-}
-
-// SetNoteDeliveryRules wires the plugins that narrow where local notes
-// federate (#4199). Update(Question) はノートの本文を丸ごと
-// 持つので、Create と同じ相手にだけ配る。
-func (h *PollDeliveryHook) SetNoteDeliveryRules(r *notedelivery.Registry) {
-	h.rules = r
 }
 
 // NewPollDeliveryHook constructs a PollDeliveryHook. rules is the plugins that

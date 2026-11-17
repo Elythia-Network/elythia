@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -58,6 +59,13 @@ func newHookSetup(t *testing.T) (*PollDeliveryHook, *recordingEnqueuer, *testuti
 // seed remote followers and assert that they are NOT used as the recipient set.
 func newHookSetupWithFollowing(t *testing.T) (*PollDeliveryHook, *recordingEnqueuer, *testutil.MockUserRepository, *testutil.MockUserKeypairRepository, *testutil.MockFollowingRepository, id.Generator) {
 	t.Helper()
+	return newHookSetupWithRules(t, nil)
+}
+
+// newHookSetupWithRules is newHookSetupWithFollowing with the plugins that
+// narrow where local notes federate (#4199) handed to the constructor.
+func newHookSetupWithRules(t *testing.T, rules *notedelivery.Registry) (*PollDeliveryHook, *recordingEnqueuer, *testutil.MockUserRepository, *testutil.MockUserKeypairRepository, *testutil.MockFollowingRepository, id.Generator) {
+	t.Helper()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
 	urls := activitypub.NewURLBuilder("https://local.example")
@@ -67,7 +75,7 @@ func newHookSetupWithFollowing(t *testing.T) (*PollDeliveryHook, *recordingEnque
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	deliver := NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
-	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen, nil)
+	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen, rules)
 	return hook, enq, userRepo, keypairRepo, followingRepo, idGen
 }
 
