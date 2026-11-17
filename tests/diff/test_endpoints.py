@@ -40,6 +40,11 @@ META_IGNORE = DEFAULT_IGNORE_KEYS | {
     # 「2 文字以下を全部」を表現できない)。登録フォームが判定に使うので公開
     # meta に出している。docs/divergence.md に additive field として記載済み。
     "minimumUsernameLength",
+    # notes/create の pluginOptions を受け取るプラグインの名前 (#4202)。投稿
+    # フォームがボタンを出すかの判定に使う。upstream にはプラグインの仕組みが
+    # 無いので TS 側にキーが無い。docs/divergence.md に additive field として
+    # 記載済み。
+    "noteDeliveryPlugins",
     # 分割アップロード (#2313) は mk-go 独自機能なので policies に TS 側の
     # 対応キーが無い。docs/divergence.md に additive field として記載済み。
     "canUseChunkedUpload", "chunkedUploadMaxConcurrentSessions",
