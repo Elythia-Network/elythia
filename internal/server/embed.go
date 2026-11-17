@@ -50,6 +50,7 @@ type embedHandlers struct {
 	chunkedUpload        meta.ChunkedUploadCapability
 	setup                *meta.SetupDetector
 	adRepo               repository.AdRepository
+	noteDeliveryPlugins  meta.NoteDeliveryPlugins
 	entry                frontendutil.ClientEntryInfo
 	loader               frontendutil.LoaderAssets
 	deps                 EmbedDeps
@@ -65,6 +66,7 @@ func newEmbedHandlers(
 	chunkedUpload meta.ChunkedUploadCapability,
 	setup *meta.SetupDetector,
 	adRepo repository.AdRepository,
+	noteDeliveryPlugins meta.NoteDeliveryPlugins,
 	deps EmbedDeps,
 ) *embedHandlers {
 	return &embedHandlers{
@@ -74,6 +76,7 @@ func newEmbedHandlers(
 		chunkedUpload:        chunkedUpload,
 		setup:                setup,
 		adRepo:               adRepo,
+		noteDeliveryPlugins:  noteDeliveryPlugins,
 		entry:                embedEntryFor(cfg),
 		loader:               embedLoaderAssetsFor(cfg),
 		deps:                 deps,
@@ -183,7 +186,7 @@ func (h *embedHandlers) render(c echo.Context, ctx *embedContext) error {
 		if m.ThemeColor != nil && *m.ThemeColor != "" {
 			themeColor = *m.ThemeColor
 		}
-		metaJSON = buildMetaJSON(h.cfg, m, h.proxyAccountResolver, h.chunkedUpload, h.setup, h.adRepo)
+		metaJSON = buildMetaJSON(h.cfg, m, h.proxyAccountResolver, h.chunkedUpload, h.setup, h.adRepo, h.noteDeliveryPlugins)
 	}
 
 	embedCtxJSON := ""

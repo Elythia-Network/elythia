@@ -122,7 +122,7 @@ func newSSRMetaHandler(
 
 // render serves the shell with the given per-page overrides.
 func (h *ssrMetaHandler) render(c echo.Context, ov shellOverrides) error {
-	return renderFrontendShell(c, h.cfg, h.metaRepo, h.proxyResolver, h.chunkedUpload, h.setup, h.adRepo, h.clientEntry, h.loader, ov)
+	return renderFrontendShell(c, h.cfg, h.metaRepo, h.proxyResolver, h.chunkedUpload, h.setup, h.adRepo, h.noteDelivery.Names, h.clientEntry, h.loader, ov)
 }
 
 // renderPlain serves the shell without any page-specific override. 対象が

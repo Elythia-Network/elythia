@@ -156,7 +156,7 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	// pack は viewer なしで行う。埋め込みは認証を伴わないので、閲覧者依存の
 	// フィールドを解決してはいけない。可視性の判断は各 handler の
 	// PackForEmbed 経由で既存の CanSee / HideEmbeds に委ねる。
-	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, EmbedDeps{
+	embed := newEmbedHandlers(s.config, metaRepo, proxyAccountResolver, chunkedUploadCapability, setupDetector, adRepo, s.noteDelivery.Names, EmbedDeps{
 		NoteRepo: noteRepo,
 		UserRepo: userRepo,
 		ClipRepo: clipRepo,

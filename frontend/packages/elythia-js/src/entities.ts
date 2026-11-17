@@ -47,6 +47,8 @@ export type ElythiaMetaFields = {
 	approvalRequiredForSignup?: boolean;
 	registrationClosed?: boolean;
 	signupApplicationForm?: SignupApplicationFormField[];
+	/** The server plugins whose post form options `notes/create` accepts in `pluginOptions`. */
+	noteDeliveryPlugins?: string[];
 	/** Present only when chunked upload is available. */
 	chunkedUpload?: {
 		chunkSize: number;
