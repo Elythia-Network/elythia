@@ -128,6 +128,8 @@ func (s *Server) wireBackgroundJobs(d backgroundJobsDeps) (*processors.ReactionF
 	deleteAccountProcessor := processors.NewDeleteAccountProcessor(noteRepo, driveFileRepo, followingRepo, pageRepo, webPushCache)
 	// #2230: local user の物理削除に userRepo を配線。未配線だと soft 削除止まりで行が残る。
 	deleteAccountProcessor.SetUserRepo(userRepo)
+	// 利用者の削除で、配送先を絞るプラグインが書いた条件を片付ける (#4202)。
+	deleteAccountProcessor.SetNoteDeliveryForgetter(s.noteDelivery)
 
 	// 30s ごとに buffered reaction count を DB へ drain する。30s ticker は
 	// upstream の日次 cron より高頻度で反映遅延を抑える mk-go の運用。

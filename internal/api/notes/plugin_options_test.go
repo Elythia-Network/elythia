@@ -15,8 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 
+	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/core/notedelivery"
+	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -99,4 +103,118 @@ func TestCreate_PluginOptions_NoRegistry(t *testing.T) {
 
 	rec = postCreate(t, h, `{"text":"hi","pluginOptions":{}}`)
 	assert.Equal(t, http.StatusOK, rec.Code, "an empty object asks for nothing")
+}
+
+// insertFailingNoteRepo fails to store notes, as the database would.
+type insertFailingNoteRepo struct {
+	*testutil.MockNoteRepository
+}
+
+func (*insertFailingNoteRepo) Create(*model.Note) error { return errors.New("insert failed") }
+
+// insertFailingPollRepo fails after the note row is written.
+type insertFailingPollRepo struct {
+	*testutil.MockPollRepository
+}
+
+func (*insertFailingPollRepo) Create(*model.Poll) error { return errors.New("poll insert failed") }
+
+// forgetRegistry returns a registry whose plugin records the IDs it was told
+// to forget, failing Prepare with prepareErr.
+func forgetRegistry(t *testing.T, prepareErr error) (*notedelivery.Registry, *[]string) {
+	t.Helper()
+	var forgot []string
+	r := notedelivery.New()
+	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return prepareErr },
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) { return nil, nil },
+		ForgetNotes: func(_ context.Context, ids []string) error {
+			forgot = append(forgot, ids...)
+			return nil
+		},
+	}))
+	return r, &forgot
+}
+
+func newHandlerWithRepos(t *testing.T, noteRepo repository.NoteRepository, pollRepo repository.PollRepository) *Handler {
+	t.Helper()
+	idGen, _ := id.NewGenerator("aidx")
+	createSvc := corenote.NewCreateService(noteRepo, pollRepo, idGen, nil, nil, nil, nil, nil, nil, nil)
+	return newHandlerNilDeps(noteRepo, createSvc, corenote.NewDeleteService(noteRepo), corenote.NewQueryService(noteRepo, nil), nil, nil, nil, nil, idGen)
+}
+
+// The rows Prepare wrote are dropped when the note is not stored (#4202).
+func TestCreate_PluginOptions_ForgetWhenNotStored(t *testing.T) {
+	t.Run("insert failed", func(t *testing.T) {
+		h := newHandlerWithRepos(t, &insertFailingNoteRepo{testutil.NewMockNoteRepository()}, testutil.NewMockPollRepository())
+		r, forgot := forgetRegistry(t, nil)
+		h.SetNoteDeliveryRules(r)
+		rec := postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Len(t, *forgot, 1)
+	})
+	t.Run("prepare failed", func(t *testing.T) {
+		h, noteRepo := newTestHandler(t)
+		r, forgot := forgetRegistry(t, fmt.Errorf("%w: empty", plugin.ErrBadNoteOption))
+		h.SetNoteDeliveryRules(r)
+		rec := postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Empty(t, noteRepo.Notes)
+		assert.Len(t, *forgot, 1, "another plugin may have stored rows before this one refused")
+	})
+}
+
+// A note whose row was written before the failure can still be fetched over
+// ActivityPub, so its conditions must stay (#4202).
+func TestCreate_PluginOptions_KeepWhenStored(t *testing.T) {
+	t.Run("failed after insert", func(t *testing.T) {
+		noteRepo := testutil.NewMockNoteRepository()
+		h := newHandlerWithRepos(t, noteRepo, &insertFailingPollRepo{testutil.NewMockPollRepository()})
+		r, forgot := forgetRegistry(t, nil)
+		h.SetNoteDeliveryRules(r)
+		rec := postCreate(t, h, `{"text":"hi","poll":{"choices":["a","b"]},"pluginOptions":{"targets":{}}}`)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.Len(t, noteRepo.Notes, 1, "the note row was written")
+		assert.Empty(t, *forgot)
+	})
+	t.Run("cannot tell", func(t *testing.T) {
+		noteRepo := testutil.NewMockNoteRepository()
+		h := newHandlerWithRepos(t, &insertFailingNoteRepo{noteRepo}, testutil.NewMockPollRepository())
+		r, forgot := forgetRegistry(t, nil)
+		h.SetNoteDeliveryRules(r)
+		noteRepo.FindErr = errors.New("db down")
+		postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
+		assert.Empty(t, *forgot, "a lookup failure is not proof that the note is gone")
+	})
+	t.Run("federated note", func(t *testing.T) {
+		h, _ := newTestHandler(t)
+		r, forgot := forgetRegistry(t, nil)
+		h.SetNoteDeliveryRules(r)
+		rec := postCreate(t, h, `{"text":"hi","pluginOptions":{"targets":{}}}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Empty(t, *forgot)
+	})
+}
+
+// A local-only note never federates, so its conditions are not needed.
+func TestCreate_PluginOptions_ForgetLocalOnly(t *testing.T) {
+	h, noteRepo := newTestHandler(t)
+	r, forgot := forgetRegistry(t, nil)
+	h.SetNoteDeliveryRules(r)
+	rec := postCreate(t, h, `{"text":"hi","localOnly":true,"pluginOptions":{"targets":{}}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, noteRepo.Notes, 1)
+	for id := range noteRepo.Notes {
+		assert.Equal(t, []string{id}, *forgot)
+	}
+}
+
+// Without pluginOptions nothing was prepared, so nothing is forgotten.
+func TestCreate_PluginOptions_NothingPreparedNothingForgotten(t *testing.T) {
+	h, _ := newTestHandler(t)
+	r, forgot := forgetRegistry(t, nil)
+	h.SetNoteDeliveryRules(r)
+	rec := postCreate(t, h, `{"text":"hi","localOnly":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Empty(t, *forgot)
 }
