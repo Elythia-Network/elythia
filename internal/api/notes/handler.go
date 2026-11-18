@@ -231,7 +231,7 @@ func (h *Handler) SetNoteDeliveryRules(r *notedelivery.Registry) {
 // プラグインは世代のグループの goroutine で呼ぶ (同時に走る数には上限がある)。
 // Prepareが期限切れで失敗したときに、止まっているプラグインをもう一度待つと、
 // エラーの応答がさらに遅れる。IDは使い回さないので、片付けは急がなくてよい。
-func (h *Handler) forgetUnfederatedNote(ctx context.Context, noteID string, createErr error) {
+func (h *Handler) forgetUnfederatedNote(noteID string, createErr error) {
 	if createErr == nil || h.noteRepo == nil {
 		return
 	}
@@ -653,7 +653,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	created, err := h.createService.Create(in)
 	if preparedID != "" {
-		h.forgetUnfederatedNote(c.Request().Context(), preparedID, err)
+		h.forgetUnfederatedNote(preparedID, err)
 	}
 	if err != nil {
 		switch {
