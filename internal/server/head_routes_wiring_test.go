@@ -16,6 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 )
 
 // **組み立てたサーバーで、主な GET のルートが HEAD に GET と同じ status と
@@ -29,6 +30,12 @@ func TestNewServer_GETRoutesAnswerHEAD(t *testing.T) {
 	}
 	// 連合を切っていると ActivityPub の応答と .well-known が 403 になるので、
 	// 200 の応答で比べられるよう、組み立てる前に連合を開く。
+	//
+	// **先に meta の行を作る。** このパッケージで最初に走るテストだと、まだ行が無い。
+	// 行が無いと UPDATE は何も変えず、組み立てたサーバーが既定の行
+	// (federation = 'none') を作って、連合の応答が 403 になる。
+	_, err := repository.NewMetaRepository(db).Fetch()
+	require.NoError(t, err)
 	var meta struct{ Federation string }
 	require.NoError(t, db.Raw(`SELECT "federation" AS federation FROM "meta" LIMIT 1`).Scan(&meta).Error)
 	require.NoError(t, db.Exec(`UPDATE "meta" SET "federation" = 'all'`).Error)
