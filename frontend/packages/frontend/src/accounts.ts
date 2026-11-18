@@ -59,8 +59,9 @@ export async function removeAccount(host: string, id: AccountWithToken['id']) {
 
 const isAccountDeleted = Symbol('isAccountDeleted');
 // Elythia: トークンが無効・削除・凍結と確かめられたもの(isAccountDeleted)と分ける (#4208)。
-// 一時的なDBの失敗でも/api/iは401 CREDENTIAL_REQUIREDを返すので、これでアカウントを
-// 外すと、使えるアカウントを端末から失い、全部外れるとサインアウトまで進む
+// それ以外のエラーの本文(レート制限など。#4212より前のbackendでは、一時的なDBの失敗の
+// CREDENTIAL_REQUIREDも)でアカウントを外すと、使えるアカウントを端末から失い、全部外れると
+// サインアウトまで進む
 const isAccountUnconfirmed = Symbol('isAccountUnconfirmed');
 
 function fetchAccount(token: string, id?: string, forceShowDialog?: boolean): Promise<Misskey.entities.MeDetailed> {
@@ -158,8 +159,8 @@ export async function refreshCurrentAccount() {
 	const me = $i;
 	return fetchAccount($i.token, $i.id).then(replaceCurrentAccountData).catch(async reason => {
 		// Elythia: 無効・削除・凍結と確かめられたときだけ、アカウントを外す (#4208)。
-		// 本家はどのエラーの本文でも外すが、一時的なDBの失敗でも/api/iは401
-		// CREDENTIAL_REQUIREDを返すので、使えるアカウントを端末から外してしまう
+		// 本家はどのエラーの本文でも外すので、確かめられない失敗(isAccountUnconfirmed)で
+		// 使えるアカウントを端末から外してしまう
 		if (reason !== isAccountDeleted) return;
 		await removeAccount(host, me.id);
 		// Elythia: 切り替え先のトークンも無効なら、そのアカウントも外して次を試す (#4208)。

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -183,7 +184,12 @@ func (a *AuthMiddleware) notifyInvalidated(userID string) {
 }
 
 // Authenticate is an Echo middleware that extracts and validates the user token.
-// It does NOT reject unauthenticated requests - it just sets the user if valid.
+// Requests without a usable credential pass through as anonymous (no token,
+// a deleted or suspended account, an access token whose user is gone), leaving
+// authorization to the gates. It rejects only a token that does not exist (or
+// a plugin-managed account's token from outside) with 401
+// AUTHENTICATION_FAILED, and a token it could not check because of a database
+// failure with 500 INTERNAL_ERROR (#4212).
 func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -202,12 +208,20 @@ func (a *AuthMiddleware) Authenticate() echo.MiddlewareFunc {
 				// AUTHENTICATION_FAILED を返す経路なのでそれに揃える (#1559)。
 				// WWW-Authenticate: error=invalid_token は WWWAuthenticate
 				// middleware が body から判定して付ける。orphaned access_token
-				// (#514) や transient な DB error は誤って全 request を 401 に
-				// しないよう従来どおり anonymous に落とし、後続の認可に委ねる。
+				// (#514) は anonymous に落とし、後続の認可に委ねる。
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return c.JSON(http.StatusUnauthorized, apierr.AuthenticationFailed())
 				}
-				return next(c)
+				if errors.Is(err, errOrphanedAccessToken) {
+					return next(c)
+				}
+				// DBの一時的な失敗などで確かめられなかったときは、本家と同じく500を返す
+				// (#4212)。本家は認証の途中の失敗をAuthenticationError以外として500にし、
+				// /streamingのupgradeも500で拒否する。匿名に落とすと、認証が要る
+				// endpointは401 CREDENTIAL_REQUIREDになってクライアントがログインの切れと
+				// 受け取り、/streamingは匿名の接続として張られて通知が届かなくなる。
+				slog.Error("auth: cannot resolve token", "path", c.Request().URL.Path, "err", err)
+				return apierr.JSONInternalError(c)
 			}
 
 			// **プラグインが管理するアカウントの token は、プロセス内の呼び出しで
@@ -345,7 +359,7 @@ func credentialRequiredResponse(c echo.Context) error {
 	// 削除したアカウントのトークンには、削除のジョブがトークンを消した後と同じ応答を
 	// 返す (#4208)。トークンは、管理者の削除などではジョブがノートなどを全部消し終える
 	// まで残り、ジョブが失敗すると残り続ける。その間をCREDENTIAL_REQUIREDにすると、
-	// DBの一時的な失敗(同じくCREDENTIAL_REQUIRED)と見分けられず、frontendが端末から
+	// frontendはトークンが無効と確かめられなかった失敗として扱い、端末から
 	// このアカウントを外せない。
 	if v, _ := c.Get(string(deletedContextKey)).(bool); v {
 		return c.JSON(http.StatusUnauthorized, apierr.AuthenticationFailed())
@@ -666,7 +680,7 @@ func (a *AuthMiddleware) resolveUser(token string) (user *model.User, scopes []s
 	// 下のaccess_tokenの検索へ進むと、native tokenはそちらに無いのでnot foundで
 	// 終わり、有効なtokenなのに401 AUTHENTICATION_FAILEDを返す。frontendは
 	// これを「トークンが無効」と受け取り、端末からアカウントを外す。打ち切れば
-	// Authenticateが匿名として扱い、認証が要るendpointはCREDENTIAL_REQUIREDになる。
+	// Authenticateが500を返す (#4212)。
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, "", false, err
 	}

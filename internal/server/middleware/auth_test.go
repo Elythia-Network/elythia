@@ -188,7 +188,7 @@ func TestAuthenticate_HasRawToken(t *testing.T) {
 		return nil
 	})(c))
 
-	// query param i= の token (解決不能でも transient error 経路で anonymous) → HasRawToken=true。
+	// query param i= の削除済み token (匿名に落ちる) → HasRawToken=true。
 	deleted := &model.User{ID: "ud", Username: "del", IsDeleted: true}
 	userRepo.Tokens["dtok"] = deleted
 	req2 := httptest.NewRequest(http.MethodGet, "/?i=dtok", nil)
@@ -1255,8 +1255,8 @@ func TestSuspendedUser_403OnAllCredentialGates(t *testing.T) {
 }
 
 // 削除したアカウントのトークンは、どのcredential必須gateでも401
-// AUTHENTICATION_FAILEDになる (#4208)。DBの一時的な失敗のCREDENTIAL_REQUIREDと
-// 区別できないと、frontendが端末からこのアカウントを外せない。自分で削除すると
+// AUTHENTICATION_FAILEDになる (#4208)。CREDENTIAL_REQUIREDのままだと、frontendが
+// 確かめられない失敗として扱い、端末からこのアカウントを外せない。自分で削除すると
 // isSuspendedも立つので、その形でも同じ応答になることを確かめる。
 func TestDeletedUser_AuthenticationFailedOnAllCredentialGates(t *testing.T) {
 	gates := map[string]echo.MiddlewareFunc{
@@ -1305,28 +1305,42 @@ func (failingTokenUserRepo) FindByToken(string) (*model.User, error) {
 	return nil, errors.New("connection reset")
 }
 
-// native tokenの検索がDBの一時的な失敗で落ちたら、access_tokenの検索へ進まずに
-// 匿名として扱う (#4208)。進むとnot foundで終わって401 AUTHENTICATION_FAILEDになり、
-// frontendが有効なアカウントを端末から外す。
-func TestRequireAuth_TransientNativeTokenLookupFailureIsNotAuthenticationFailed(t *testing.T) {
-	tokenRepo := testutil.NewMockAccessTokenRepository()
-	auth := NewAuthMiddleware(failingTokenUserRepo{testutil.NewMockUserRepository()}, tokenRepo)
+// failingAccessTokenRepo fails the access token lookup with a transient error.
+type failingAccessTokenRepo struct {
+	*testutil.MockAccessTokenRepository
+}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Authorization", "Bearer abcdefghijklmnop")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+func (failingAccessTokenRepo) FindByHashOrToken(string, string) (*model.AccessToken, error) {
+	return nil, errors.New("connection reset")
+}
 
-	chained := auth.Authenticate()(RequireAuth()(func(c echo.Context) error {
-		t.Fatal("must not pass the gate")
-		return nil
-	}))
-	require.NoError(t, chained(c))
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "CREDENTIAL_REQUIRED", resp["error"].(map[string]any)["code"])
+// トークンの検索がDBの一時的な失敗で落ちたら、本家と同じく500を返し、匿名として
+// 先へ進めない (#4212)。native tokenの検索で落ちたときは、access_tokenの検索へ
+// 進むとnot foundで終わって401 AUTHENTICATION_FAILEDになり、frontendが有効な
+// アカウントを端末から外す (#4208)。匿名で進むと、認証が要るendpointは401
+// CREDENTIAL_REQUIREDになり、/streamingは匿名の接続として張られる。
+func TestAuthenticate_TransientTokenLookupFailureIsInternalError(t *testing.T) {
+	for name, auth := range map[string]*AuthMiddleware{
+		"native token": NewAuthMiddleware(failingTokenUserRepo{testutil.NewMockUserRepository()}, testutil.NewMockAccessTokenRepository()),
+		"access token": NewAuthMiddleware(testutil.NewMockUserRepository(), failingAccessTokenRepo{testutil.NewMockAccessTokenRepository()}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.Header.Set("Authorization", "Bearer abcdefghijklmnop")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+				t.Fatal("must not continue as an anonymous request")
+				return nil
+			})(c))
+			assert.Equal(t, http.StatusInternalServerError, rec.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			assert.Equal(t, "INTERNAL_ERROR", resp["error"].(map[string]any)["code"])
+		})
+	}
 }
 
 // 未認証 (token 無し) は従来どおり 401 CREDENTIAL_REQUIRED (凍結 flag 無し)。
