@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elythia-network/elythia/internal/core/webpush"
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/stretchr/testify/assert"
@@ -438,4 +439,81 @@ func TestService_PushNewChatMessage_CutKeepsGraphemeClusters(t *testing.T) {
 			}
 		})
 	}
+}
+
+type stubMetaFetcher struct {
+	meta *model.Meta
+	err  error
+}
+
+func (s stubMetaFetcher) Fetch() (*model.Meta, error) { return s.meta, s.err }
+
+type stubSubscriptionLister struct {
+	subs map[string][]*model.SwSubscription
+	err  error
+}
+
+func (s stubSubscriptionLister) Get(_ context.Context, userID string) ([]*model.SwSubscription, error) {
+	return s.subs[userID], s.err
+}
+
+func pushEnabledMeta() *model.Meta {
+	pub, priv := "pub", "priv"
+	return &model.Meta{EnableServiceWorker: true, SwPublicKey: &pub, SwPrivateKey: &priv}
+}
+
+// 配信されない push は積まない (#4217)。Service Worker が無効・VAPID の鍵が無い・
+// 購読が無いときは、workerが取り出して捨てるだけなので、組み立ても積み込みもしない。
+// 読み込みに失敗したときは、今までどおり積んで worker に判断させる。
+func TestService_SkipsPushesThatWouldNotBeDelivered(t *testing.T) {
+	subscribed := map[string][]*model.SwSubscription{"u1": {{ID: "s1", UserID: "u1"}}}
+	disabled := pushEnabledMeta()
+	disabled.EnableServiceWorker = false
+	noKey := pushEnabledMeta()
+	noKey.SwPrivateKey = nil
+	noPublicKey := pushEnabledMeta()
+	noPublicKey.SwPublicKey = nil
+	for name, tc := range map[string]struct {
+		meta    stubMetaFetcher
+		subs    stubSubscriptionLister
+		userID  string
+		enqueue bool
+	}{
+		"subscribed user":           {stubMetaFetcher{meta: pushEnabledMeta()}, stubSubscriptionLister{subs: subscribed}, "u1", true},
+		"user without subscription": {stubMetaFetcher{meta: pushEnabledMeta()}, stubSubscriptionLister{subs: subscribed}, "u2", false},
+		"service worker disabled":   {stubMetaFetcher{meta: disabled}, stubSubscriptionLister{subs: subscribed}, "u1", false},
+		"no VAPID key":              {stubMetaFetcher{meta: noKey}, stubSubscriptionLister{subs: subscribed}, "u1", false},
+		"no VAPID public key":       {stubMetaFetcher{meta: noPublicKey}, stubSubscriptionLister{subs: subscribed}, "u1", false},
+		"no meta and no error":      {stubMetaFetcher{}, stubSubscriptionLister{subs: subscribed}, "u1", true},
+		"meta read fails":           {stubMetaFetcher{err: errors.New("db down")}, stubSubscriptionLister{subs: subscribed}, "u1", true},
+		"meta read fails with meta": {stubMetaFetcher{meta: disabled, err: errors.New("db down")}, stubSubscriptionLister{subs: subscribed}, "u1", true},
+		"subscriptions read fails":  {stubMetaFetcher{meta: pushEnabledMeta()}, stubSubscriptionLister{err: errors.New("db down")}, "u2", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			enq := &fakeEnqueuer{}
+			svc := webpush.NewService(enq)
+			svc.SetGate(tc.meta, tc.subs)
+
+			assert.Equal(t, tc.enqueue, svc.WantsPush(tc.userID))
+			svc.PushNotification(tc.userID, map[string]any{"type": "mention"})
+			svc.PushReadAllNotifications(tc.userID)
+			svc.PushNewChatMessage(tc.userID, map[string]any{"text": "hi"})
+			svc.PushUnreadAntennaNote(tc.userID, map[string]any{"note": map[string]any{"text": "hi"}})
+			if tc.enqueue {
+				assert.Len(t, enq.calls, 4)
+			} else {
+				assert.Empty(t, enq.calls)
+			}
+		})
+	}
+}
+
+// 見る先を配線していないときは、今までどおり積む。
+func TestService_WithoutGateEnqueues(t *testing.T) {
+	enq := &fakeEnqueuer{}
+	svc := webpush.NewService(enq)
+	assert.True(t, svc.WantsPush("u1"))
+	assert.False(t, svc.WantsPush(""))
+	assert.False(t, (*webpush.Service)(nil).WantsPush("u1"))
+	assert.False(t, webpush.NewService(nil).WantsPush("u1"))
 }

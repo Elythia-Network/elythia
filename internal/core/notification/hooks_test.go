@@ -741,6 +741,15 @@ type stubWebPushPublisher struct {
 		userID string
 		body   map[string]any
 	}
+	// noSubscription makes WantsPush report that no push would be delivered.
+	noSubscription bool
+	// asked records the userIDs WantsPush was called with.
+	asked []string
+}
+
+func (s *stubWebPushPublisher) WantsPush(userID string) bool {
+	s.asked = append(s.asked, userID)
+	return !s.noSubscription
 }
 
 func (s *stubWebPushPublisher) PushNotification(userID string, body map[string]any) {
@@ -816,6 +825,27 @@ func TestHook_WebPushNoteGatedByRecipient(t *testing.T) {
 	h.OnReactionCreated("alice", "bob", "n1", "\U0001F44D") // alice = recipient, bob = reactor
 	require.Len(t, pub.calls, 1)
 	require.Equal(t, []string{"alice"}, viewerIDs, "note packer must be gated by the recipient (notifiee), not the notifier")
+}
+
+// 配信されない (購読が無い) 利用者への通知では、push の本文を組み立てない (#4217)。
+// 組み立てには通知した人とノートの pack がかかる。
+func TestHook_WebPushSkipsBuildingWithoutSubscription(t *testing.T) {
+	h, _, repo := newTestHook(t)
+	addLocalUser(repo, "alice", "alice")
+
+	pub := &stubWebPushPublisher{noSubscription: true}
+	h.SetWebPushPublisher(pub)
+	var viewerIDs []string
+	h.SetPackers(
+		stubUserPacker{out: map[string]any{"id": "bob"}},
+		stubNotePacker{out: map[string]any{"id": "n1"}, gotViewerIDs: &viewerIDs},
+	)
+
+	h.OnReactionCreated("alice", "bob", "n1", "\U0001F44D") // alice = recipient, bob = reactor
+	assert.Empty(t, pub.calls)
+	assert.Empty(t, viewerIDs, "the note must not be packed for a push that is not delivered")
+	// 判定するのは受け手 (notifiee) の購読。
+	assert.Equal(t, []string{"alice"}, pub.asked)
 }
 
 func TestHook_WebPushWithChoiceField(t *testing.T) {

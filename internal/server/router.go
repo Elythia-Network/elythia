@@ -767,6 +767,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// push は送る直前に、ノートがまだあるかだけを primary で確かめる (#3611)。
 	notificationHook.SetNoteExistenceChecker(noteRepo)
 	webPushCache := corewebpush.NewSubscriptionCache(swSubRepo, s.redis.Default)
+	// 配信されない (Service Worker が無効・購読が無い) push は、組み立てずに捨てる (#4217)。
+	webPushService.SetGate(metaRepo, webPushCache)
 	// Web Push delivery: webpush-go の HTTPClient field に SSRF-safe client
 	// を注入して FCM / Mozilla / Apple endpoint への配送も outbound 政策
 	// (forward proxy / outgoingAddress 等) に従わせる (#638)。

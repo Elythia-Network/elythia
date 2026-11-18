@@ -46,6 +46,8 @@ func (r *laggingReplicaRepo) ExistingNoteIDsOnPrimary(ids []string) ([]string, e
 	return r.MockNoteRepository.ExistingNoteIDsOnPrimary(ids)
 }
 
+func (r *recordingPush) WantsPush(string) bool { return true }
+
 func (r *recordingPush) PushNotification(_ string, body map[string]any) {
 	r.bodies = append(r.bodies, body)
 }
