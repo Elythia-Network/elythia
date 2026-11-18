@@ -20,6 +20,9 @@ type MuteChecker interface {
 // 間の循環依存を避けるため interface で受け取る (実装は core/webpush.Service)。
 type WebPushPublisher interface {
 	PushNotification(userID string, body map[string]any)
+	// WantsPush reports whether a push to userID would be delivered. 本文の
+	// 組み立て (通知した人とノートのpack) は、これがtrueのときだけ行う (#4217)。
+	WantsPush(userID string) bool
 }
 
 // NotePacker packs a note ID into a JSON-serializable representation matching
@@ -697,7 +700,7 @@ func (h *Hook) notifyLocalUser(ctx context.Context, notifieeID string, in Create
 	var pushFn func(*Notification)
 	if h.webpush != nil {
 		pushFn = func(n *Notification) {
-			if n != nil {
+			if n != nil && h.webpush.WantsPush(notifieeID) {
 				h.webpush.PushNotification(notifieeID, h.buildPushBody(n, notifieeID, src))
 			}
 		}

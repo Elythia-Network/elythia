@@ -7,6 +7,7 @@ import (
 	"maps"
 	"unicode/utf8"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/rivo/uniseg"
 )
@@ -20,11 +21,63 @@ import (
 // している。
 type Service struct {
 	enqueuer queue.Enqueuer
+	// meta と subs は、積む前に配信されるかを見るのに使う (#4217)。nil の方は
+	// 見ない。
+	meta MetaFetcher
+	subs SubscriptionLister
+}
+
+// MetaFetcher reads the instance meta (Service Worker and VAPID keys).
+type MetaFetcher interface {
+	Fetch() (*model.Meta, error)
+}
+
+// SubscriptionLister lists the push subscriptions of a user.
+// *SubscriptionCache implements it.
+type SubscriptionLister interface {
+	Get(ctx context.Context, userID string) ([]*model.SwSubscription, error)
 }
 
 // NewService returns a new webpush.Service bound to the queue enqueuer.
 func NewService(enqueuer queue.Enqueuer) *Service {
 	return &Service{enqueuer: enqueuer}
+}
+
+// SetGate makes the service check, before building and enqueuing a push,
+// that the push would be delivered (#4217).
+func (s *Service) SetGate(meta MetaFetcher, subs SubscriptionLister) {
+	s.meta = meta
+	s.subs = subs
+}
+
+// WantsPush reports whether a push to userID would be delivered: the Service
+// Worker is enabled with VAPID keys and the user has a subscription. A
+// failure to read either counts as yes, leaving the decision to the worker.
+//
+// 購読の無い利用者への通知でも、本文の組み立て (通知した人とノートのpack) と
+// ジョブの積み込みをしてから、workerが取り出して捨てていた。本家も送る前に
+// metaと購読のキャッシュを見る (PushNotificationService)。購読のキャッシュは
+// workerやsw/registerと同じもので、同じプロセスでは購読の登録・更新・解除の
+// たびに捨てられる。他のプロセスのメモリは最大3分古いことがあり (本家と同じ)、
+// 他のプロセスの読み込みと重なると、Redisにも古い一覧が残ることがある
+// (SubscriptionCache.Getを参照。workerも同じ一覧を読む)。本文を先に組み立てる
+// 呼び出し元は、組み立てる前にこれを呼ぶ。
+func (s *Service) WantsPush(userID string) bool {
+	if s == nil || s.enqueuer == nil || userID == "" {
+		return false
+	}
+	if s.meta != nil {
+		if m, err := s.meta.Fetch(); err == nil && m != nil &&
+			(!m.EnableServiceWorker || m.SwPublicKey == nil || m.SwPrivateKey == nil) {
+			return false
+		}
+	}
+	if s.subs != nil {
+		if subs, err := s.subs.Get(context.Background(), userID); err == nil && len(subs) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // PushNotification enqueues a `notification` push to userID.
@@ -53,7 +106,7 @@ func (s *Service) PushNewChatMessage(userID string, body map[string]any) {
 }
 
 func (s *Service) push(userID, pushType string, body map[string]any) {
-	if s == nil || s.enqueuer == nil || userID == "" {
+	if !s.WantsPush(userID) {
 		return
 	}
 	truncated := TruncateBody(pushType, body)
