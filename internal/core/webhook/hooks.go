@@ -73,7 +73,7 @@ func (h *NoteCreateHook) isThreadMuted(userID string, threadNote *model.Note) bo
 }
 
 // OnNoteCreated fires note / reply / renote / mention webhook events. 失敗は
-// すべて svc.DispatchUser 内でログに留まる。
+// すべて svc.DispatchUserLazy 内でログに留まる。
 func (h *NoteCreateHook) OnNoteCreated(note *model.Note, author *model.User, replyTarget, renoteTarget *model.Note) {
 	if h == nil || h.svc == nil || note == nil || author == nil {
 		return
@@ -81,22 +81,33 @@ func (h *NoteCreateHook) OnNoteCreated(note *model.Note, author *model.User, rep
 	// note payload は受信者ごとに pack + embed gate する。同一 body を共有すると、
 	// ある受信者が見られない embed (第三者の followers 引用先など) が別受信者に
 	// leak する。upstream の mention webhook と同じ per-recipient gate。
-	emit := func(recipientID, event string) {
-		body := map[string]any{"note": h.packNoteFor(note, author, recipientID)}
-		h.svc.DispatchUser(recipientID, event, body)
+	//
+	// **pack は受信者がそのイベントの webhook を持つときだけ行う (#4218)。** 作者・
+	// 返信先・リノート先・メンション先のほとんどは webhook を持たず (リモートの人は
+	// 持てない)、以前は全員について pack と可視性の判定をしてから捨てていた。
+	//
+	// mutedIn を渡したときは、受け手がそのスレッドをミュートしていれば届けない。この
+	// 判定 (DB を 1 本引く) も、受け手が webhook を持つときだけ行う。
+	emit := func(recipientID, event string, mutedIn *model.Note) {
+		h.svc.DispatchUserLazy(recipientID, event, func() (any, bool) {
+			if mutedIn != nil && h.isThreadMuted(recipientID, mutedIn) {
+				return nil, false
+			}
+			return map[string]any{"note": h.packNoteFor(note, author, recipientID)}, true
+		})
 	}
 
 	// 作者本人のwebhook
-	emit(author.ID, EventNote)
+	emit(author.ID, EventNote, nil)
 
 	// reply: 親ノート投稿者。upstream はスレッドミュート中の reply 先には reply
 	// webhook を出さない (#1965)。thread は reply 先ノートの threadId。
-	if replyTarget != nil && replyTarget.UserID != author.ID && !h.isThreadMuted(replyTarget.UserID, replyTarget) {
-		emit(replyTarget.UserID, EventReply)
+	if replyTarget != nil && replyTarget.UserID != author.ID {
+		emit(replyTarget.UserID, EventReply, replyTarget)
 	}
 	// renote: 対象ノート投稿者 (renote はスレッドミュートで gate しない、upstream 同様)。
 	if renoteTarget != nil && renoteTarget.UserID != author.ID {
-		emit(renoteTarget.UserID, EventRenote)
+		emit(renoteTarget.UserID, EventRenote, nil)
 	}
 	// mention: 本文から抽出されたユーザー ID ごとに配信。スレッドミュート中の
 	// mention 先には mention webhook を出さない (#1965)。thread は新規ノートの threadId。
@@ -104,10 +115,7 @@ func (h *NoteCreateHook) OnNoteCreated(note *model.Note, author *model.User, rep
 		if mentionID == "" || mentionID == author.ID {
 			continue
 		}
-		if h.isThreadMuted(mentionID, note) {
-			continue
-		}
-		emit(mentionID, EventMention)
+		emit(mentionID, EventMention, note)
 	}
 }
 
@@ -182,20 +190,24 @@ func (h *ReactionCreateHook) OnReactionCreated(note *model.Note, reactor *model.
 	}
 	// reaction webhook の受信者は note 著者 (note.UserID)。embed は受信者 (= 著者)
 	// の可視性で gate する。著者本人が見られない第三者ネスト引用先が leak しないように。
-	noteForPack := note
-	if note.User == nil {
-		clone := *note
-		clone.User = &model.User{ID: note.UserID}
-		noteForPack = &clone
-	}
-	packed := h.entityPacker.PackNote(noteForPack, h.idGen)
-	gateNoteEmbeds(&model.User{ID: note.UserID}, &packed, h.followingRepo, time.Now().UnixMilli())
-	body := map[string]any{
-		"note":     noteEntityToMap(packed),
-		"userId":   reactor.ID,
-		"reaction": reaction,
-	}
-	h.svc.DispatchUser(note.UserID, EventReaction, body)
+	//
+	// pack は著者が reaction の webhook を持つときだけ行う (#4218)。リアクションの
+	// たびに、webhook を持たない著者 (リモートの人を含む) のためにも pack していた。
+	h.svc.DispatchUserLazy(note.UserID, EventReaction, func() (any, bool) {
+		noteForPack := note
+		if note.User == nil {
+			clone := *note
+			clone.User = &model.User{ID: note.UserID}
+			noteForPack = &clone
+		}
+		packed := h.entityPacker.PackNote(noteForPack, h.idGen)
+		gateNoteEmbeds(&model.User{ID: note.UserID}, &packed, h.followingRepo, time.Now().UnixMilli())
+		return map[string]any{
+			"note":     noteEntityToMap(packed),
+			"userId":   reactor.ID,
+			"reaction": reaction,
+		}, true
+	})
 }
 
 // ProfileLookup / RelationApplier / ModeratorChecker / UserLookups are the

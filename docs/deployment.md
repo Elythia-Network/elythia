@@ -838,7 +838,7 @@ listen に失敗してもログを出して動き続け、配送ノードなら�
   (停止中にまだ走っている受信ジョブなど)、DB を直接書く後始末バッチ
 - 同じ形で全プロセスへ伝えているキャッシュと、その event (`internal:` の後ろの名前) は次のとおり。
   通知が届かない場合の上限は、どれもそれぞれのキャッシュの TTL になる。自分の通知の
-  扱いは 2 通りある。`metaUpdated`・`federationRulesUpdated`・`antennaUpdated` は送信元を
+  扱いは 2 通りある。`metaUpdated`・`federationRulesUpdated`・`antennaUpdated`・`userWebhookUpdated` は送信元を
   載せず、書いたプロセスも自分の通知を受けて捨て直す。それ以外 (`rolesUpdated`・
   `relationCacheInvalidated`・`emojiCacheInvalidated` と #3664 の 5 つ) は送信元の id を
   載せ、書いたプロセスは publish の前に自分のキャッシュを捨て、自分の通知は受け流す
@@ -849,6 +849,7 @@ listen に失敗してもログを出して動き続け、配送ノードなら�
   | 連合のルール | `federationRulesUpdated` | 5 分 (読み直しの周期) |
   | ロールとポリシー | `rolesUpdated` | 5 分 |
   | アンテナ | `antennaUpdated` | 1 分 |
+  | 利用者の有効な webhook (#4218) | `userWebhookUpdated` | 1 分 |
   | ミュート・ブロック・フォローの一覧 | `relationCacheInvalidated` | 1 分 |
   | 絵文字 | `emojiCacheInvalidated` | 上の項目 |
   | 利用者 (user / profile / URI) | `userCacheInvalidated` | 5 分 |

@@ -45,6 +45,7 @@ type repos struct {
 	channel              repository.ChannelRepository
 	channelFollowing     repository.ChannelFollowingRepository
 	cachedAntenna        *repository.CachedAntennaRepository
+	cachedWebhook        *repository.CachedWebhookRepository
 	clip                 repository.ClipRepository
 	clipNote             repository.ClipNoteRepository
 	page                 repository.PageRepository
@@ -170,7 +171,10 @@ func (s *Server) buildRepos() repos {
 	noteFavoriteRepo := repository.NewNoteFavoriteRepository(s.db)
 	noteThreadMutingRepo := repository.NewNoteThreadMutingRepository(s.db)
 	userListRepo := repository.NewUserListRepository(s.db)
-	webhookRepo := repository.NewWebhookRepository(s.db)
+	// 有効な webhook をプロセスの中に持つ (#4218)。ノートやリアクションのたびに受け手
+	// ごとに引かれ、ほとんどが空を返すクエリになるため。
+	cachedWebhook := repository.NewCachedWebhookRepositoryFromDB(s.db)
+	var webhookRepo repository.WebhookRepository = cachedWebhook
 	systemWebhookRepo := repository.NewSystemWebhookRepository(s.db)
 	reversiRepo := repository.NewReversiRepository(s.db)
 	// userIPRepo は signin handler (Phase 6) と clean cron processor (#1563)
@@ -249,6 +253,7 @@ func (s *Server) buildRepos() repos {
 		channel:              channelRepo,
 		channelFollowing:     channelFollowingRepo,
 		cachedAntenna:        cachedAntenna,
+		cachedWebhook:        cachedWebhook,
 		clip:                 clipRepo,
 		clipNote:             clipNoteRepo,
 		page:                 pageRepo,

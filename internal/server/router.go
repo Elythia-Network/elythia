@@ -168,6 +168,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	channelRepo := w.repos.channel
 	channelFollowingRepo := w.repos.channelFollowing
 	cachedAntenna := w.repos.cachedAntenna
+	cachedWebhook := w.repos.cachedWebhook
 	var antennaRepo repository.AntennaRepository = cachedAntenna
 	clipRepo := w.repos.clip
 	clipNoteRepo := w.repos.clipNote
@@ -1357,6 +1358,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		deliverProcessor:             deliverProcessor,
 		inboxProcessor:               inboxProcessor,
 	})
+	// 退会で webhook の行を消した後に、有効な webhook のキャッシュを捨てる (#4218)。
+	deleteAccountProcessor.SetWebhookCache(cachedWebhook)
 
 	// Health check
 	s.echo.GET("/healthz", func(c echo.Context) error {
@@ -2243,6 +2246,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		cachedMeta:               cachedMeta,
 		emojiRepo:                emojiRepo,
 		cachedAntenna:            cachedAntenna,
+		cachedWebhook:            cachedWebhook,
 		emojiDecorationResolver:  emojiDecorationResolver,
 		ipLogService:             ipLogService,
 		roleService:              roleService,

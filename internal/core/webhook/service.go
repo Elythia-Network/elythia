@@ -86,7 +86,7 @@ func (s *Service) DispatchUser(userID, eventType string, body any) {
 
 // DispatchUserLazy is DispatchUser with the body built on demand. build runs
 // at most once, and only when userID has an active webhook subscribed to
-// eventType; returning false drops the delivery.
+// eventType; returning false drops every delivery of this call.
 //
 // follow 系の本文は UserDetailedNotMe で、profile や関係の行を読む。Webhook を
 // 持たない利用者 (リモートの利用者を含む) のフォローのたびに読まないよう、

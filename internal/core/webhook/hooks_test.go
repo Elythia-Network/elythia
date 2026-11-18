@@ -3,6 +3,7 @@ package webhook_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/core/webhook"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -505,4 +506,97 @@ func TestNoteCreateHook_TopLevelVisibilityGate(t *testing.T) {
 
 		assert.Equal(t, "quote body", noteBody(t, enq)["text"])
 	})
+}
+
+// countingIDGen counts ParseTime calls, which PackNote makes for the note's
+// createdAt, so a test can tell whether a payload was packed.
+type countingIDGen struct {
+	id.Generator
+	parses int
+}
+
+func (g *countingIDGen) ParseTime(s string) (time.Time, error) {
+	g.parses++
+	return g.Generator.ParseTime(s)
+}
+
+func newCountingIDGen(t *testing.T) *countingIDGen {
+	t.Helper()
+	inner, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	return &countingIDGen{Generator: inner}
+}
+
+// webhook を持たない受け手のために、ノートを pack しない (#4218)。作者・返信先・
+// リノート先・メンション先・リアクションの著者のほとんどは webhook を持たない。
+func TestHooks_DoNotPackForRecipientsWithoutWebhook(t *testing.T) {
+	svc, enq, _, _ := newTestService(t)
+	idGen := newCountingIDGen(t)
+	noteID := idGen.Generate(time.Now())
+	text := "hello"
+	note := &model.Note{ID: noteID, UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic, Mentions: model.StringArray{"carol"}}
+	author := &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
+
+	webhook.NewNoteCreateHook(svc, idGen, nil).OnNoteCreated(note, author,
+		&model.Note{ID: "np", UserID: "bob"}, &model.Note{ID: "nr", UserID: "dave"})
+	webhook.NewReactionCreateHook(svc, idGen, nil).OnReactionCreated(note, &model.User{ID: "erin"}, ":like@.:")
+
+	assert.Empty(t, enq.userCalls)
+	assert.Zero(t, idGen.parses, "the note must not be packed for a recipient without a webhook")
+}
+
+// webhook を持つ受け手には、今までどおり pack して届ける。
+func TestHooks_PackForRecipientsWithWebhook(t *testing.T) {
+	svc, enq, userRepo, _ := newTestService(t)
+	userRepo.hooks["h1"] = &model.Webhook{ID: "h1", UserID: "alice", Active: true, On: model.StringArray{"note", "reaction"}}
+	idGen := newCountingIDGen(t)
+	noteID := idGen.Generate(time.Now())
+	text := "hello"
+	note := &model.Note{ID: noteID, UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic}
+	author := &model.User{ID: "alice", Username: "alice", UsernameLower: "alice"}
+
+	webhook.NewNoteCreateHook(svc, idGen, nil).OnNoteCreated(note, author, nil, nil)
+	webhook.NewReactionCreateHook(svc, idGen, nil).OnReactionCreated(note, &model.User{ID: "erin"}, ":like@.:")
+
+	require.Len(t, enq.userCalls, 2)
+	assert.Equal(t, "note", enq.userCalls[0].EventType)
+	assert.Equal(t, "reaction", enq.userCalls[1].EventType)
+	var env struct {
+		Body map[string]any `json:"body"`
+	}
+	require.NoError(t, json.Unmarshal(enq.userCalls[1].Body, &env))
+	assert.Equal(t, "erin", env.Body["userId"])
+	assert.NotNil(t, env.Body["note"])
+	assert.Positive(t, idGen.parses)
+}
+
+// countingThreadMuting counts Exists calls.
+type countingThreadMuting struct {
+	*testutil.MockNoteThreadMutingRepository
+	exists int
+}
+
+func (r *countingThreadMuting) Exists(userID, threadID string) (bool, error) {
+	r.exists++
+	return r.MockNoteThreadMutingRepository.Exists(userID, threadID)
+}
+
+// 返信先とメンション先のスレッドのミュートの判定 (DB を 1 本引く) も、受け手が
+// webhook を持つときだけ行う (#4218)。
+func TestNoteCreateHook_ChecksThreadMuteOnlyForRecipientsWithWebhook(t *testing.T) {
+	svc, enq, _, _ := newTestService(t)
+	idGen := newCountingIDGen(t)
+	h := webhook.NewNoteCreateHook(svc, idGen, nil)
+	mutes := &countingThreadMuting{MockNoteThreadMutingRepository: testutil.NewMockNoteThreadMutingRepository()}
+	h.SetThreadMutingRepo(mutes)
+
+	text := "hello"
+	h.OnNoteCreated(
+		&model.Note{ID: idGen.Generate(time.Now()), UserID: "alice", Text: &text, Visibility: model.NoteVisibilityPublic, Mentions: model.StringArray{"carol"}},
+		&model.User{ID: "alice", Username: "alice", UsernameLower: "alice"},
+		&model.Note{ID: "np", UserID: "bob"},
+		nil,
+	)
+	assert.Empty(t, enq.userCalls)
+	assert.Zero(t, mutes.exists)
 }

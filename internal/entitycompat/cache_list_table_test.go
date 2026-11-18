@@ -243,6 +243,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"mu", "now", "queues"}, nil},
 	"internal/repository.CachedAntennaRepository": {kindDropLocal, "",
 		[]string{"at", "inner", "mu", "onChange", "rows", "ttl"}, nil},
+	"internal/repository.CachedWebhookRepository": {kindDropLocal, "",
+		[]string{"at", "byUser", "inner", "lister", "mu", "onChange", "ttl"}, nil},
 	"internal/repository.CachedEmojiRepository": {kindDropLocal, "",
 		[]string{"at", "inner", "keys", "local", "mu", "onInvalidate", "ttl"}, nil},
 	"internal/repository.CachedMetaRepository": {kindDropLocal, "",
