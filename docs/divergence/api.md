@@ -216,7 +216,7 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 ## `/api/clear-browser-cache`に無効なtokenを付けたとき (#3926)
 
-`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは`/api`の全体に掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
+`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは全ルートに掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenの検索がDBの失敗で落ちたときは500を返し、同じく`Clear-Site-Data`を付けない(#4212)。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
 
 本体のfrontendは、tokenを付けずに呼ぶ(`misskeyApiGet('clear-browser-cache', {})`)ので、この違いを踏まない。踏むのは、失効したtokenを付けたまま呼ぶ他のクライアントだけなので、全体の認証にこのパスの例外を足すことはしていない。
 
@@ -236,11 +236,21 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 認証が要るエンドポイント(`RequireAuth` / `RequireSecure` / `RequireAdmin` / `RequireModerator`)に、削除したアカウントのトークンを付けて来たら、401の`AUTHENTICATION_FAILED`を返す。トークンが無効なときと同じ応答。それまでは401の`CREDENTIAL_REQUIRED`を返していた。認証が要らないエンドポイントでは、これまでどおり匿名として扱う。これらのgateを通らずに認証を確かめるエンドポイント(`i/revoke-token`、`RequireRolePolicy`だけで守る`admin/emoji/*`など)は変えておらず、`CREDENTIAL_REQUIRED`のまま。
 
-削除したアカウントのトークンは、削除のジョブが消すまで残る。行を残す退会(#3207)ではジョブの最初に消すが、管理者の削除などではノートなどを全部消し終えて行を消すまで残り、ジョブが失敗するとそのまま残る。ジョブがトークンを消した後は、もともと`AUTHENTICATION_FAILED`になるので、それより前の間も同じ応答にした。`CREDENTIAL_REQUIRED`のままだと、トークンの解決がDBの一時的な失敗で止まったとき(同じく`CREDENTIAL_REQUIRED`)と見分けられず、frontendが端末からこのアカウントを外せない(frontendの側は[frontend.md](frontend.md)の#4208の行)。
+削除したアカウントのトークンは、削除のジョブが消すまで残る。行を残す退会(#3207)ではジョブの最初に消すが、管理者の削除などではノートなどを全部消し終えて行を消すまで残り、ジョブが失敗するとそのまま残る。ジョブがトークンを消した後は、もともと`AUTHENTICATION_FAILED`になるので、それより前の間も同じ応答にした。`CREDENTIAL_REQUIRED`のままだと、frontendはトークンが無効と確かめられなかった失敗として扱い、端末からこのアカウントを外せない(frontendの側は[frontend.md](frontend.md)の#4208の行)。
 
 本家はこの間、普通に認証する(`ApiCallService`も`AuthenticateService`も`isDeleted`を見ない)。ジョブが行ごと消した後は、トークンが引けずに`AUTHENTICATION_FAILED`になる。
 
-あわせて、native tokenの検索がDBの一時的な失敗で落ちたときは、access_tokenの検索へ進まずに匿名として扱うようにした(`resolveUser`)。進むとnot foundで終わり、有効なトークンに`AUTHENTICATION_FAILED`を返していた。本家は認証の途中のDBの失敗を捕まえず、500(`INTERNAL_ERROR`)を返す(`/streaming`のupgradeも500)。Elythiaは以前から匿名に落とすので、認証が要るエンドポイントは401の`CREDENTIAL_REQUIRED`になり、`/streaming`は匿名の接続として張られる。
+あわせて、native tokenの検索がDBの一時的な失敗で落ちたときは、access_tokenの検索へ進まずにそこで打ち切るようにした(`resolveUser`)。進むとnot foundで終わり、有効なトークンに`AUTHENTICATION_FAILED`を返していた。打ち切った後の扱いは次の節。
+
+## 認証の途中でDBが失敗したとき (#4212)
+
+トークンの検索がDBの失敗(見つからなかった以外のエラー)で落ちたら、500(`INTERNAL_ERROR`)を返す。本家のendpoint(`ApiCallService`を通るもの)では、認証を要るかどうかを問わず本家と同じ。`/streaming`のupgradeも本家と同じく500で拒否する。本家は認証の途中の失敗を`AuthenticationError`以外として500にする(`ApiCallService#sendAuthenticationError`、`StreamingApiServerService`)。
+
+**本家が認証しないルートも500になる。** Elythiaの認証(`auth.Authenticate`)は全ルートに掛かるので、本家が認証を通さないルートでも、tokenを付けて来てDBが失敗すれば500を返す。`/api`の下では、endpointの仕組みの外に直接登録されたもの(`signin-flow`、`signup`、`miauth/:session/check`、`clear-browser-cache`、存在しないendpointへのcatch-allなど)、`/api`の外では、frontendの画面、`/proxy`、`/files`、nodeinfoなど。本家はここでtokenを見ないので500にならない(存在しないendpointなら404)。ブラウザの画像の読み込みやActivityPubの配送はtokenを付けないので、踏むのは、tokenを付けて呼ぶクライアント。DBが生きているときも同じ理由で、これらのルートに無効なtokenを付けると401(`AUTHENTICATION_FAILED`)を返す。これは以前からの違いで、`clear-browser-cache`の分は#3926の節に書いた。
+
+それまでは匿名として先へ進めていたので、認証が要るエンドポイントは401の`CREDENTIAL_REQUIRED`を返し、クライアントがログインの切れと受け取っていた(本家のfrontendは端末からアカウントを外す)。`/streaming`は匿名の接続として張られ、次に切れるまで通知が届かなかった。DBのエラー自体はGORMのログに出ていたが、認証を匿名に落としたことは記録していなかった。今は`slog`で記録する。
+
+持ち主の利用者の行が無いaccess_token(#514)は、これまでどおり匿名として扱う。本家ではaccess_tokenは利用者と一緒に消えるので、この状態にならない。
 
 ## 1. API endpoint
 
