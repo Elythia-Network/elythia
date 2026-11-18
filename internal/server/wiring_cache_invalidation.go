@@ -46,6 +46,7 @@ type cacheInvalidationDeps struct {
 	cachedMeta               *repository.CachedMetaRepository
 	emojiRepo                *repository.CachedEmojiRepository
 	cachedAntenna            *repository.CachedAntennaRepository
+	cachedWebhook            *repository.CachedWebhookRepository
 	emojiDecorationResolver  *avatardecoration.EmojiResolver
 	ipLogService             *iplog.Service
 	roleService              *corerole.Service
@@ -88,6 +89,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	cachedMeta := d.cachedMeta
 	emojiRepo := d.emojiRepo
 	cachedAntenna := d.cachedAntenna
+	cachedWebhook := d.cachedWebhook
 	emojiDecorationResolver := d.emojiDecorationResolver
 	ipLogService := d.ipLogService
 	roleService := d.roleService
@@ -255,6 +257,19 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 		cachedAntenna.Invalidate()
 	})
 
+	// #4218: 利用者の webhook の cross-worker cache invalidation。antenna と同じ形で、
+	// 書き込んだプロセスが自分のキャッシュを捨ててから internal:userWebhookUpdated を
+	// publish し、他のプロセスは受けて捨てる。本家の webhookCreated / webhookUpdated /
+	// webhookDeleted に相当する (キャッシュは有効な全件なので、どれも全体を捨てる)。
+	cachedWebhook.SetInvalidationHook(func() {
+		if err := internalPubSub.Publish(context.Background(), "userWebhookUpdated", struct{}{}); err != nil {
+			slog.Warn("webhook: publish userWebhookUpdated failed", "err", err)
+		}
+	})
+	internalPubSub.Subscribe(context.Background(), "userWebhookUpdated", func([]byte) {
+		cachedWebhook.Invalidate()
+	})
+
 	// #3607: 閲覧者ごとの関係のキャッシュの cross-worker invalidation。
 	// 関係の repository に書いたプロセスは自分のキャッシュを捨ててから
 	// internal:relationCacheInvalidated を publish し、他のプロセスは受けて捨てる。
@@ -375,6 +390,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	// ならない。
 	// タイムラインの JSON は opt-in で、有効にしたときだけ登録する。
 	s.addCache("antennas", cacheFromDB, cachedAntenna)
+	s.addCache("userWebhooks", cacheFromDB, cachedWebhook)
 	s.addCache("pushSubscriptions", cacheFromDB, webPushCache)
 	s.addCache("featuredNotes", cacheFromDB, notesHandler.FeaturedRankingCache())
 	s.addCache("notePublisher", cacheFromDB, notePublisher)

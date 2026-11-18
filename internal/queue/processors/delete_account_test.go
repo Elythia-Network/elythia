@@ -540,3 +540,57 @@ func TestDeleteAccountProcessor_HardDeleteFailureKeepsPushSubscriptionCache(t *t
 	require.ErrorIs(t, err, r.err)
 	assert.Empty(t, cache.invalidated)
 }
+
+// countingWebhookCache counts NotifyChanged calls.
+type countingWebhookCache struct{ calls int }
+
+func (c *countingWebhookCache) NotifyChanged() { c.calls++ }
+
+// webhook の行を消す経路 (保持時の資格情報削除と、user 行の CASCADE) では、有効な
+// webhook のキャッシュを捨てる (#4218)。remote は webhook を持たず、行も消さない。
+// 削除に失敗したときは行が残っているので捨てない。
+func TestDeleteAccountProcessor_InvalidatesWebhookCache(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		soft     bool
+		preserve bool
+		want     int
+	}{
+		{"local purge", false, false, 1},
+		{"local preserve", false, true, 1},
+		{"remote purge flag", true, false, 0},
+		{"remote preserve", true, true, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			userRepo := testutil.NewMockUserRepository()
+			userRepo.Users["u"] = &model.User{ID: "u", IsDeleted: true}
+			userRepo.Profiles["u"] = &model.UserProfile{UserID: "u"}
+			webhooks := &countingWebhookCache{}
+			p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository(), nil, &recordingPushCache{})
+			p.SetUserRepo(userRepo)
+			p.SetWebhookCache(webhooks)
+
+			require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{
+				UserID: "u", Soft: tt.soft, PreserveAccount: tt.preserve,
+			})))
+			assert.Equal(t, tt.want, webhooks.calls)
+		})
+	}
+
+	r := &failingHardDeleteUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: errors.New("hard delete failure")}
+	webhooks := &countingWebhookCache{}
+	p := processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository(), nil, &recordingPushCache{})
+	p.SetUserRepo(r)
+	p.SetWebhookCache(webhooks)
+	require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u"})))
+	assert.Zero(t, webhooks.calls)
+
+	// 行を残す退会で、資格情報 (webhook を含む) の削除に失敗したときも捨てない。
+	cr := &credentialUserRepo{MockUserRepository: testutil.NewMockUserRepository(), err: errors.New("revoke failure")}
+	webhooks = &countingWebhookCache{}
+	p = processors.NewDeleteAccountProcessor(testutil.NewMockNoteRepository(), testutil.NewMockDriveFileRepository(), testutil.NewMockFollowingRepository(), nil, &recordingPushCache{})
+	p.SetUserRepo(cr)
+	p.SetWebhookCache(webhooks)
+	require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "u", PreserveAccount: true})))
+	assert.Zero(t, webhooks.calls)
+}

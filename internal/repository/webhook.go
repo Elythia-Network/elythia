@@ -5,6 +5,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 // WebhookRepository handles webhook persistence.
@@ -79,6 +80,20 @@ func (r *webhookRepository) CountByUserID(userID string) (int64, error) {
 func (r *webhookRepository) ListActiveByUserID(userID string) ([]*model.Webhook, error) {
 	var webhooks []*model.Webhook
 	if err := r.db.Where(`"userId" = ? AND active = ?`, userID, true).Find(&webhooks).Error; err != nil {
+		return nil, err
+	}
+	return webhooks, nil
+}
+
+// ListAllActive returns every active webhook, read from the primary.
+// CachedWebhookRepository loads its cache with it (#4218).
+//
+// **レプリカから読まない (dbresolver.Write)。** 無効化は primary でコミットした直後に
+// 届くので、その直後の読み直しがまだ複製されていないレプリカへ振られると、書き込みの
+// 前の一覧を TTL の間保存してしまう (RelationCache.load と同じ理由)。
+func (r *webhookRepository) ListAllActive() ([]*model.Webhook, error) {
+	var webhooks []*model.Webhook
+	if err := r.db.Clauses(dbresolver.Write).Where(`active = ?`, true).Find(&webhooks).Error; err != nil {
 		return nil, err
 	}
 	return webhooks, nil

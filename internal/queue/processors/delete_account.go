@@ -30,6 +30,28 @@ type DeleteAccountProcessor struct {
 	// 捨てないと、削除後に作られた通知が Redis の 1 時間 TTL が切れるまで
 	// 消したはずの購読へ push され続ける。
 	pushCache PushSubscriptionCacheInvalidator
+	// webhookCache は webhook の行を消した後に、有効な webhook のキャッシュを捨てる
+	// のに使う (#4218)。捨てないと、退会の後も最大 1 分 (TTL)、消えた webhook へ
+	// ジョブを積み、配送のときに not found で失敗したジョブが溜まる。
+	webhookCache WebhookCacheInvalidator
+}
+
+// WebhookCacheInvalidator drops the cached active webhooks in every process.
+// *repository.CachedWebhookRepository satisfies it.
+type WebhookCacheInvalidator interface {
+	NotifyChanged()
+}
+
+// SetWebhookCache wires the cache of the active webhooks to drop after the
+// webhook rows of an account are deleted (#4218). nil keeps it unwired.
+func (p *DeleteAccountProcessor) SetWebhookCache(c WebhookCacheInvalidator) {
+	p.webhookCache = c
+}
+
+func (p *DeleteAccountProcessor) invalidateWebhooks() {
+	if p.webhookCache != nil {
+		p.webhookCache.NotifyChanged()
+	}
 }
 
 // PushSubscriptionCacheInvalidator drops the cached push subscriptions of a
@@ -119,6 +141,7 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 			return fmt.Errorf("delete-account: revoke retained account credentials: %w", err)
 		}
 		p.invalidatePushSubscriptions(ctx, payload.UserID)
+		p.invalidateWebhooks()
 	}
 
 	if err := p.deleteNotes(ctx, payload.UserID); err != nil {
@@ -176,6 +199,7 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 		}
 		// sw_subscription は user 行の CASCADE で消えるので、購読キャッシュも捨てる。
 		p.invalidatePushSubscriptions(ctx, payload.UserID)
+		p.invalidateWebhooks()
 		slog.Info("delete-account: user row deleted", "userId", payload.UserID)
 	}
 	return nil
