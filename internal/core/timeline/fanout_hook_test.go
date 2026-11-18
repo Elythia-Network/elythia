@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -614,17 +616,24 @@ func TestFanoutHook_NonReplyFanoutsToAllFollowers(t *testing.T) {
 }
 
 // failingFollowingRepo errors out on listing followers to exercise the warning
-// path: ListHomeTimelineFollowers for the create fanout, ListFollowers for the
-// delete path.
+// path: ListHomeTimelineFollowers for the create fanout, ListLocalFollowerIDs
+// for the delete path. ListFollowers also fails and counts its calls, so a
+// test can tell that the delete path did not fall back to it.
 type failingFollowingRepo struct {
 	*testutil.MockFollowingRepository
+	listFollowers int
 }
 
 func (f *failingFollowingRepo) ListFollowers(_ string, _, _ int) ([]*model.Following, error) {
+	f.listFollowers++
 	return nil, assertError{}
 }
 
 func (f *failingFollowingRepo) ListHomeTimelineFollowers(_ string, _, _ int) ([]*model.Following, error) {
+	return nil, assertError{}
+}
+
+func (f *failingFollowingRepo) ListLocalFollowerIDs(string) ([]string, error) {
 	return nil, assertError{}
 }
 
@@ -1441,32 +1450,131 @@ func TestFanoutHook_OnNoteDeleted_FollowersListError(t *testing.T) {
 
 	noteID := idGen.Generate(time.Now())
 	n := &model.Note{ID: noteID, UserID: "author", Visibility: model.NoteVisibilityPublic}
-	// エラーがあっても上位に伝搬しない
+	// エラーがあっても上位に伝搬せず、全フォロワーをめくる一覧 (ListFollowers) へ倒さない。
 	h.OnNoteDeleted(n, &model.User{ID: "author"})
+	assert.Zero(t, following.listFollowers)
 }
 
-func TestFanoutHook_OnNoteDeleted_FollowersAcrossPages(t *testing.T) {
+// pipelineSizes records the number of commands of every pipeline its client
+// runs.
+type pipelineSizes struct {
+	mu    sync.Mutex
+	sizes []int
+}
+
+func (p *pipelineSizes) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (p *pipelineSizes) ProcessHook(next redis.ProcessHook) redis.ProcessHook { return next }
+
+func (p *pipelineSizes) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		p.mu.Lock()
+		p.sizes = append(p.sizes, len(cmds))
+		p.mu.Unlock()
+		return next(ctx, cmds)
+	}
+}
+
+// 区切り (followerHomeRemoveChunk) をまたぐ人数でも、全員のホームから消え、1 つの
+// pipeline に積むのは区切りの数まで。全員を 1 つの pipeline に積むと、フォロワーの
+// 多い人の削除でコマンドが一度に固まって Redis を占める。
+func TestFanoutHook_OnNoteDeleted_FollowersAcrossChunks(t *testing.T) {
 	testRedis.FlushAll(context.Background())
-	fanout := NewFanoutTimelineService(testRedis.Client, idGen, "")
+	ctx := context.Background()
+	client := redis.NewClient(&redis.Options{Addr: testRedis.Addr})
+	t.Cleanup(func() { _ = client.Close() })
+	sizes := &pipelineSizes{}
+	fanout := NewFanoutTimelineService(client, idGen, "")
 	fanout.randFn = func() float64 { return 1.0 }
 	following := testutil.NewMockFollowingRepository()
-	for i := range 201 {
+	noteID := idGen.Generate(time.Now())
+	var homes []Name
+	seed := client.Pipeline()
+	for i := range 2*followerHomeRemoveChunk + 1 {
 		fid := "f-" + idGen.Generate(time.Now().Add(time.Duration(i)*time.Microsecond))
 		following.Followings[fid] = &model.Following{
 			ID:         fid,
 			FollowerID: "follower-" + fid,
 			FolloweeID: "author",
 		}
+		homes = append(homes, HomeTimelineName("follower-"+fid))
+		seed.LPush(ctx, fanout.key(HomeTimelineName("follower-"+fid)), noteID)
 	}
+	_, err := seed.Exec(ctx)
+	require.NoError(t, err)
+	client.AddHook(sizes)
+	h := NewFanoutHook(fanout, following)
+
+	n := &model.Note{ID: noteID, UserID: "author", Visibility: model.NoteVisibilityPublic}
+	h.OnNoteDeleted(n, &model.User{ID: "author"})
+
+	sizes.mu.Lock()
+	got := append([]int(nil), sizes.sizes...)
+	sizes.mu.Unlock()
+	assert.Equal(t, []int{followerHomeRemoveChunk, followerHomeRemoveChunk, 1}, got)
+
+	check := client.Pipeline()
+	lens := make([]*redis.IntCmd, 0, len(homes))
+	for _, name := range homes {
+		lens = append(lens, check.LLen(ctx, fanout.key(name)))
+	}
+	_, err = check.Exec(ctx)
+	require.NoError(t, err)
+	for i, l := range lens {
+		assert.Zero(t, l.Val(), "after delete: %q should be empty", homes[i])
+	}
+}
+
+// deleteLookupFollowingRepo counts the follower lookups of the delete path.
+type deleteLookupFollowingRepo struct {
+	*testutil.MockFollowingRepository
+	listFollowers int
+}
+
+func (c *deleteLookupFollowingRepo) ListFollowers(id string, limit, offset int) ([]*model.Following, error) {
+	c.listFollowers++
+	return c.MockFollowingRepository.ListFollowers(id, limit, offset)
+}
+
+// 削除で掃除するのはローカルのフォロワーのホームタイムラインだけ (#4225)。リモートの
+// フォロワーのホームタイムラインは配っていないので触らず、全フォロワーをめくる一覧
+// (ListFollowers) も引かない。休眠中のローカルのフォロワーからは消す (#4021)。
+func TestFanoutHook_OnNoteDeleted_OnlyLocalFollowerHomes(t *testing.T) {
+	testRedis.FlushAll(context.Background())
+	ctx := context.Background()
+	fanout := NewFanoutTimelineService(testRedis.Client, idGen, "")
+	fanout.randFn = func() float64 { return 1.0 }
+	following := &deleteLookupFollowingRepo{MockFollowingRepository: testutil.NewMockFollowingRepository()}
+	host := "remote.example"
+	following.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "local1", FolloweeID: "author"}
+	following.Followings["f2"] = &model.Following{ID: "f2", FollowerID: "sleeper", FolloweeID: "author", IsFollowerHibernated: true}
+	following.Followings["f3"] = &model.Following{ID: "f3", FollowerID: "remote1", FolloweeID: "author", FollowerHost: &host}
 	h := NewFanoutHook(fanout, following)
 
 	noteID := idGen.Generate(time.Now())
-	n := &model.Note{ID: noteID, UserID: "author", Visibility: model.NoteVisibilityPublic}
-	h.OnNoteDeleted(n, &model.User{ID: "author"})
+	for _, id := range []string{"local1", "sleeper", "remote1"} {
+		require.NoError(t, fanout.client.LPush(ctx, fanout.key(HomeTimelineName(id)), noteID).Err())
+	}
+
+	h.OnNoteDeleted(&model.Note{ID: noteID, UserID: "author", Visibility: model.NoteVisibilityPublic}, &model.User{ID: "author"})
+
+	for _, id := range []string{"local1", "sleeper"} {
+		out, err := fanout.Get(ctx, HomeTimelineName(id), "", "", 10)
+		require.NoError(t, err)
+		assert.Empty(t, out, "local follower %q", id)
+	}
+	// リモートの人の key は配っていないので本来は存在しない。置いておいた値が残る
+	// ことで、触っていないことを確かめる。
+	out, err := fanout.Get(ctx, HomeTimelineName("remote1"), "", "", 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{noteID}, out)
+	assert.Zero(t, following.listFollowers)
 }
 
 func TestFanoutHook_OnNoteDeleted_RemoveErrorIsLogged(t *testing.T) {
 	following := testutil.NewMockFollowingRepository()
+	// フォロワーのホームタイムラインの掃除 (RemoveMany) の失敗も通す。
+	following.Followings["f1"] = &model.Following{ID: "f1", FollowerID: "follower1", FolloweeID: "u"}
 	fanout := NewFanoutTimelineService(closedClient(t), idGen, "")
 	h := NewFanoutHook(fanout, following)
 	noteID := idGen.Generate(time.Now())
