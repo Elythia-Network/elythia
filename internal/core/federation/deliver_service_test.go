@@ -3,6 +3,7 @@ package federation_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -200,6 +201,8 @@ func TestDeliverActivity_StillExtractsStandaloneLocalNoteURL(t *testing.T) {
 
 // stubEnqueuer captures EnqueueDeliver calls.
 type stubEnqueuer struct {
+	// mu は、件数の多い配送が並べて積むとき (#4219) の calls と opts を守る。
+	mu    sync.Mutex
 	calls []queue.DeliverPayload
 	// opts は calls と同じ順で、各配送に渡された enqueue オプション。
 	opts []driver.EnqueueOptions
@@ -210,6 +213,8 @@ func (s *stubEnqueuer) EnqueueDeliver(payload queue.DeliverPayload, opts ...driv
 	if s.err != nil {
 		return s.err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls = append(s.calls, payload)
 	s.opts = append(s.opts, driver.ApplyEnqueueOptions(opts))
 	return nil
