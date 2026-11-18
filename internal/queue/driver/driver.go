@@ -48,6 +48,16 @@ type InspectorInfo struct {
 	// IsPaused reports whether the queue is paused (BullMQ meta.paused)。
 	// upstream admin/queue は queueInfo.isPaused でボタンを切り替える (#17436)。
 	IsPaused bool
+	// ProcessedTotal is the cumulative number of jobs that finished
+	// (completed or failed for good) on the queue. It only grows, unlike
+	// Completed, which the retention keeps at a bound. HasProcessedTotal is
+	// false when the driver does not count them or could not read them this
+	// time.
+	//
+	// 直近に処理した数を、この差分から出す (#4220)。Completed の差分は、
+	// 保持数 (既定30件) に達すると0のままになる。
+	ProcessedTotal    int64
+	HasProcessedTotal bool
 	// QualifiedName is BullMQ's `<keyPrefix>:<name>` (queue-keys.js の
 	// getQueueQualifiedName)。admin UI がそのまま表示する。prefix は driver の
 	// 設定なのでここで組む — 上位が "bull" を決め打ちすると、prefix を変えた

@@ -18,14 +18,27 @@ type QueueInspector interface {
 // this package does not have to import internal/queue. 循環依存防止。
 // Delayed は Bull 用語で、未来実行予定と失敗後の再試行待ちの合計 (#3962)。
 //
-// Completed は「累計の処理完了数」。前 tick との差分で
-// activeSincePrevTick (= tick 間に処理された数) を計算するために保持する
-// (#654)。
+// activeSincePrevTick (= tick 間に処理された数) は、ProcessedTotal (終わった
+// ジョブの累計) の前 tick との差分で出す (#4220)。driver が累計を持たない
+// (HasProcessedTotal が false) ときだけ、Completed の差分で代える (#654)。
+// Completed は保持数で頭打ちになるので、代わりの値は保持数に達するまでしか
+// 正しくない。前の tick で累計を読めていたのに false になったときは、読み出しの
+// 一時的な失敗として0を出し、前の累計を残す。
 type QueueStatsInfo struct {
-	Active    int
-	Pending   int
-	Delayed   int
-	Completed int
+	Active            int
+	Pending           int
+	Delayed           int
+	Completed         int
+	ProcessedTotal    int64
+	HasProcessedTotal bool
+}
+
+// processedMark is the counter an earlier tick saw for one queue.
+type processedMark struct {
+	value int64
+	// total は value が ProcessedTotal か (false なら Completed)。種類が
+	// 変わった tick は差分を取らない。
+	total bool
 }
 
 // QueueStatsPublisher periodically queries queue depths and publishes
@@ -48,11 +61,11 @@ type QueueStatsPublisher struct {
 	// 最大 QueueStatsLogMax 件)。requestLog 応答用。
 	logBuf *statsRingBuffer
 
-	// prevCompleted は前 tick 時点の Completed 累計を queue 名別に保持
+	// prevProcessed は前 tick 時点の処理数の累計を queue 名別に保持
 	// する。次 tick で current - prev を activeSincePrevTick として
 	// 送信し、Misskey TS の Bull `active` event count 互換にする (#654)。
 	// loop goroutine 単独で書き込むので mutex 不要。
-	prevCompleted map[string]int
+	prevProcessed map[string]processedMark
 }
 
 // QueueStatsLogMax は requestLog 応答で返す最大件数。TS 本家と同じ 200。
@@ -78,13 +91,13 @@ func NewQueueStatsPublisher(inspector QueueInspector, pub PubSubPublisher, inter
 		interval:      interval,
 		stopCh:        make(chan struct{}),
 		logBuf:        newStatsRingBuffer(QueueStatsLogMax),
-		prevCompleted: make(map[string]int),
+		prevProcessed: make(map[string]processedMark),
 	}
 }
 
 // Start begins the collection loop.
 //
-// Stop()→Start() による再起動時は前 publisher の prevCompleted を捨て、
+// Stop()→Start() による再起動時は前 publisher の prevProcessed を捨て、
 // 新規 loop の初回 tick で activeSincePrevTick=0 を出す (再起動またぎで
 // delta を取っても意味のある値にならない)。
 func (p *QueueStatsPublisher) Start() {
@@ -93,7 +106,7 @@ func (p *QueueStatsPublisher) Start() {
 	if p.started || p.pub == nil || p.inspector == nil {
 		return
 	}
-	p.prevCompleted = make(map[string]int)
+	p.prevProcessed = make(map[string]processedMark)
 	p.started = true
 	p.wg.Add(1)
 	go p.loop()
@@ -136,8 +149,8 @@ type queueStatsBody struct {
 
 type queueStatsEntry struct {
 	// ActiveSincePrevTick はBullのactive eventカウントに相当。driver には
-	// 同等APIがないため、前 tick からの completed 差分を出す (本家ほど厳密で
-	// なくてもグラフは描画できる)。
+	// 同等APIがないため、前 tick から終わったジョブの数を出す (#4220。本家
+	// ほど厳密でなくてもグラフは描画できる)。
 	ActiveSincePrevTick int `json:"activeSincePrevTick"`
 	Active              int `json:"active"`
 	Waiting             int `json:"waiting"`
@@ -184,22 +197,37 @@ var (
 // 「前 tick から処理された量」を表示する仕様には合致する。snapshot 時
 // の Active 数より低トラフィック環境で観測しやすい。
 //
-// 初回 tick (prevCompleted に該当 queue の値が無い) は 0 を出して、
+// 初回 tick (prevProcessed に該当 queue の値が無い) は 0 を出して、
 // 次 tick から実数の delta を出す。
 func (p *QueueStatsPublisher) entryForQueue(qname string) queueStatsEntry {
 	info, err := p.inspector.GetQueueInfo(qname)
 	if err != nil || info == nil {
 		return queueStatsEntry{}
 	}
-	var processed int
-	if prev, ok := p.prevCompleted[qname]; ok {
-		// Completed は retention の prune でも減るので負値になり得る。
-		// 負値は 0 にクランプ。
-		if d := info.Completed - prev; d > 0 {
-			processed = d
+	cur := processedMark{value: int64(info.Completed)}
+	if info.HasProcessedTotal {
+		cur = processedMark{value: info.ProcessedTotal, total: true}
+	}
+	prev, ok := p.prevProcessed[qname]
+	if ok && prev.total && !cur.total {
+		// 累計を読めたのに、この tick だけ読めなかった (Redis の一時的な
+		// エラー)。前の累計を残し、読めた次の tick で、この間の分もまとめて
+		// 出す。上書きすると、この tick と次の tick の両方が 0 になる。
+		return queueStatsEntry{
+			Active:  info.Active,
+			Waiting: info.Pending,
+			Delayed: info.Delayed,
 		}
 	}
-	p.prevCompleted[qname] = info.Completed
+	var processed int
+	if ok && prev.total == cur.total {
+		// Completed は retention の prune でも減り、累計も metrics のキーを
+		// 消せば戻るので、負値になり得る。負値は 0 にクランプ。
+		if d := cur.value - prev.value; d > 0 {
+			processed = int(d)
+		}
+	}
+	p.prevProcessed[qname] = cur
 	return queueStatsEntry{
 		ActiveSincePrevTick: processed,
 		Active:              info.Active,

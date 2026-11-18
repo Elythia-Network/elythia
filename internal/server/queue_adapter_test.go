@@ -44,6 +44,18 @@ func TestQueueStatsInspectorAdapter_CarriesDelayed(t *testing.T) {
 	assert.Equal(t, 4, got.Delayed, "queueStats delayed must come from the driver's Delayed")
 }
 
+// TestQueueStatsInspectorAdapter_CarriesProcessedTotal pins that queueStats
+// receives the driver's cumulative processed count (#4220).
+func TestQueueStatsInspectorAdapter_CarriesProcessedTotal(t *testing.T) {
+	a := &queueStatsInspectorAdapter{inner: newAdapterInspector(&driver.InspectorInfo{
+		Completed: 30, ProcessedTotal: 1234, HasProcessedTotal: true,
+	})}
+	got, err := a.GetQueueInfo("deliver")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1234, got.ProcessedTotal)
+	assert.True(t, got.HasProcessedTotal)
+}
+
 func TestQueueInspectorAdapter_CarriesDelayed(t *testing.T) {
 	a := &queueInspectorAdapter{inner: newAdapterInspector(&driver.InspectorInfo{
 		Queue: "deliver", Size: 9, Active: 1, Pending: 2, Completed: 3, Failed: 4, Delayed: 5,

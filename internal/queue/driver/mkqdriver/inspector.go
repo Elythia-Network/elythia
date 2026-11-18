@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/elythia-network/mkq"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/elythia-network/elythia/internal/queue/driver"
 )
@@ -47,31 +48,49 @@ func (i *Inspector) Queues() ([]string, error) {
 // サーバーへの再試行がたまるほど CPU と Redis を食っていた。本家の
 // QueueStatsService も getJobCounts() だけを読む。一覧の側 (ListScheduledTasks /
 // ListRetryTasks) は今も atm で分ける。
+//
+// Redis へは2往復 (#4220)。Counts の Lua と、残りの読み出しをまとめた
+// pipeline。Counts に paused を数えさせると、meta.paused の HEXISTS が1往復
+// 増え、下でも同じものを読むので、数えるバケットを指定する。
 func (i *Inspector) GetQueueInfo(qname string) (*driver.InspectorInfo, error) {
 	q := i.driver.queueFor(qname)
 	if q == nil {
 		return nil, fmt.Errorf("mkqdriver: unknown queue %q", qname)
 	}
-	counts, err := q.Counts(inspectorCtx())
+	ctx := inspectorCtx()
+	counts, err := q.Counts(ctx, mkq.JobBucketWait, mkq.JobBucketActive, mkq.JobBucketDelayed,
+		mkq.JobBucketPrioritized, mkq.JobBucketCompleted, mkq.JobBucketFailed)
 	if err != nil {
 		return nil, fmt.Errorf("mkqdriver: counts %q: %w", qname, err)
 	}
+	pipe := i.driver.rdb.Pipeline()
 	// Repeat ZSET の登録数を Delayed に加算する (mk-go #455)。
 	// admin UI の Delayed カラムに、登録した定期ジョブを「予定数」として
 	// 見せるため。mkq の addJobScheduler は次回発火の実体のジョブも
 	// delayed に積むので、定期ジョブ 1 件は delayed と repeat の両方で
 	// 数えられ、Delayed は 2 になる (以前からの挙動。#3962 のレビューで実測)。
-	// ZCARD 失敗は致命ではないので 0 として扱い、queue 全体を error
-	// 返却にしない (Counts が成功した時点で UI 表示は救う方を優先)。
-	repeatCount, _ := i.driver.rdb.ZCard(inspectorCtx(), i.driver.repeatKey(qname)).Result()
+	repeatCmd := pipe.ZCard(ctx, i.driver.repeatKey(qname))
+	pausedCmd := pipe.HExists(ctx, i.driver.metaKey(qname), "paused")
+	// 終わったジョブの累計は、job metrics の count から読む (#4220)。metrics を
+	// 書かない構成 (MaxMetricsDataPoints が負) では、キーが無いのと区別が
+	// つかないので読まない。
+	var completedCmd, failedCmd *redis.StringCmd
+	if i.driver.jobMetricsEnabled() {
+		completedCmd = pipe.HGet(ctx, i.driver.metricsKey(qname, "completed"), "count")
+		failedCmd = pipe.HGet(ctx, i.driver.metricsKey(qname, "failed"), "count")
+	}
+	// ここで読むものは、どれも失敗しても致命ではない。0 (と paused=false、
+	// 累計は不明) として扱い、queue 全体を error 返却にしない (Counts が成功
+	// した時点で UI 表示は救う方を優先)。HGET はキーが無いと redis.Nil を
+	// 返し、Exec もそれを返すので、Exec の error は見ない。
+	_, _ = pipe.Exec(ctx)
+	repeatCount, _ := repeatCmd.Result()
+	paused, _ := pausedCmd.Result()
+	processed, hasProcessed := finishedTotal(completedCmd, failedCmd)
 
 	// Size は「キューに居るジョブ数」= Pending + Active + Delayed + Failed。
 	// **Completed は入れない** (完了済みは retention として保存されて
 	// いるだけでキューの住人ではない)。
-	// paused 状態 (meta.paused) は best-effort で取得 (失敗しても info 全体は
-	// 返す、admin panel を真っ白にしない方針)。
-	paused, _ := q.IsPaused(inspectorCtx())
-
 	return &driver.InspectorInfo{
 		Queue:     qname,
 		Size:      int(counts.Wait+counts.Active+counts.Delayed+counts.Prioritized+counts.Failed) + int(repeatCount),
@@ -81,10 +100,38 @@ func (i *Inspector) GetQueueInfo(qname string) (*driver.InspectorInfo, error) {
 		Failed:    int(counts.Failed),
 		Delayed:   int(counts.Delayed) + int(repeatCount),
 		IsPaused:  paused,
+		// 完了と、最後まで失敗したものの合計。本家の activeSincePrevTick は
+		// worker がジョブを取り出した数 (失敗するものも含む) なので、失敗も
+		// 数える。ただし数えるのは終わったジョブだけで、本家とは違い、再試行に
+		// 回った試行と、stalled のまま上限を超えて failed になったジョブ
+		// (どちらも metrics を書かない) は入らない。
+		ProcessedTotal:    processed,
+		HasProcessedTotal: hasProcessed,
 		// BullMQ の Queue.qualifiedName。prefix は driver の設定なので、
 		// 上位が "bull" を決め打ちしないようここで組む (#2689)。
 		QualifiedName: i.driver.keyPrefix + ":" + qname,
 	}, nil
+}
+
+// finishedTotal sums the `count` fields read by GetQueueInfo. A missing key
+// counts as 0 (no job has finished that way yet). It reports false when the
+// counts were not read or a read failed.
+func finishedTotal(cmds ...*redis.StringCmd) (int64, bool) {
+	var total int64
+	for _, cmd := range cmds {
+		if cmd == nil {
+			return 0, false
+		}
+		n, err := cmd.Int64()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			return 0, false
+		}
+		total += n
+	}
+	return total, true
 }
 
 // DispatchableCount returns the `wait` list length for the named queue,

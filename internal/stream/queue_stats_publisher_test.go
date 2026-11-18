@@ -105,6 +105,7 @@ func (s *seqCompletedInspector) GetQueueInfo(qname string) (*QueueStatsInfo, err
 }
 
 // TestQueueStatsPublisher_ActiveSincePrevTickIsCompletedDelta は
+// driver が処理の累計を持たないとき (#4220)、
 // activeSincePrevTick が Completed の前 tick との差分で計算され、
 // Completed が retention の prune で減る挙動で
 // 負値になっても 0 にクランプされることを guard する (#654 review)。
@@ -144,7 +145,7 @@ func TestQueueStatsPublisher_ActiveSincePrevTickIsCompletedDelta(t *testing.T) {
 	}
 }
 
-// Start() → Stop() → Start() の再起動で prevCompleted が reset され、
+// Start() → Stop() → Start() の再起動で prevProcessed が reset され、
 // 新 publisher の初回 tick が 0 を出すことを確認 (#654 review)。
 func TestQueueStatsPublisher_RestartResetsPrevCompleted(t *testing.T) {
 	insp := &seqCompletedInspector{
@@ -154,10 +155,10 @@ func TestQueueStatsPublisher_RestartResetsPrevCompleted(t *testing.T) {
 	pub := &capturePubSub{}
 	p := NewQueueStatsPublisher(insp, pub, 0)
 
-	// 1 サイクル目: tick で prevCompleted=100 が記録される
+	// 1 サイクル目: tick で prevProcessed=100 が記録される
 	p.tick()
 
-	// prevCompleted が外から見えないので Start/Stop 経由で reset を起こす
+	// prevProcessed が外から見えないので Start/Stop 経由で reset を起こす
 	p.Start()
 	p.Stop()
 
