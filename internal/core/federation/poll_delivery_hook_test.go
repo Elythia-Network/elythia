@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -18,10 +19,14 @@ import (
 // hook tests can assert what was scheduled without a real queue server. The
 // non-deliver methods are no-ops to satisfy queue.Enqueuer.
 type recordingEnqueuer struct {
+	// mu は、件数の多い配送が並べて積むとき (#4219) の delivers を守る。
+	mu       sync.Mutex
 	delivers []queue.DeliverPayload
 }
 
 func (r *recordingEnqueuer) EnqueueDeliver(p queue.DeliverPayload, _ ...driver.EnqueueOption) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.delivers = append(r.delivers, p)
 	return nil
 }

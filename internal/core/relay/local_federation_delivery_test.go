@@ -3,6 +3,7 @@ package relay_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -18,6 +19,8 @@ import (
 )
 
 type relayDeliveryQueue struct {
+	// mu は、件数の多い配送が並べて積むとき (#4219) の calls を守る。
+	mu    sync.Mutex
 	calls []queue.DeliverPayload
 	err   error
 }
@@ -26,6 +29,8 @@ func (q *relayDeliveryQueue) EnqueueDeliver(payload queue.DeliverPayload, _ ...d
 	if q.err != nil {
 		return q.err
 	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.calls = append(q.calls, payload)
 	return nil
 }

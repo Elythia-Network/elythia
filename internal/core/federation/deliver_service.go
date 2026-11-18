@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
@@ -291,6 +293,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		edKeyID, edPrivPEM = s.signerEd25519Credentials(signerUserID)
 	}
 	seen := make(map[string]struct{}, len(inboxes))
+	payloads := make([]queue.DeliverPayload, 0, len(inboxes))
 	for _, inbox := range inboxes {
 		if inbox == "" {
 			continue
@@ -334,11 +337,83 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			}
 			continue
 		}
-		if err := s.enqueuer.EnqueueDeliver(payload, opts...); err != nil {
-			return fmt.Errorf("enqueue deliver to %s: %w", inbox, err)
-		}
+		payloads = append(payloads, payload)
 	}
-	return nil
+	return s.enqueueDelivers(payloads, opts)
+}
+
+const (
+	// deliverEnqueueParallelMin is the number of delivery jobs from which
+	// enqueueDelivers enqueues them in parallel (#4219). 1件ずつの配送
+	// (DeliverToUser など) では、並べても速くならず、goroutineの分だけ損をする。
+	deliverEnqueueParallelMin = 8
+	// deliverEnqueueParallelism is the maximum number of jobs enqueued at once
+	// (#4219). 積む間、この本数だけRedisの接続を使う。16本で1件あたり152µsから
+	// 73µsになり、それ以上はほとんど縮まなかった。
+	deliverEnqueueParallelism = 16
+)
+
+// enqueueDelivers enqueues payloads onto the deliver queue and returns the
+// first error. 件数が多ければ並べて積む (#4219)。失敗したら、まだ積んでいない
+// ものは積まない (直列のときに、失敗したところで止めていたのと同じ)。積む処理の
+// panic は、直列のときと同じく呼び出し元へ伝える。
+func (s *DeliverService) enqueueDelivers(payloads []queue.DeliverPayload, opts []driver.EnqueueOption) error {
+	if len(payloads) < deliverEnqueueParallelMin {
+		for _, payload := range payloads {
+			if err := s.enqueuer.EnqueueDeliver(payload, opts...); err != nil {
+				return fmt.Errorf("enqueue deliver to %s: %w", payload.Inbox, err)
+			}
+		}
+		return nil
+	}
+	var (
+		next     atomic.Int64
+		failed   atomic.Bool
+		errOnce  sync.Once
+		firstErr error
+		wg       sync.WaitGroup
+		// panicked は、worker の中で起きた最初の panic。
+		panicked  any
+		panicOnce sync.Once
+	)
+	fail := func(err error) {
+		failed.Store(true)
+		errOnce.Do(func() { firstErr = err })
+	}
+	for range min(deliverEnqueueParallelism, len(payloads)) {
+		wg.Go(func() {
+			var inbox string
+			// 直列のときは、積む処理の panic を呼び出し元の recover (hook の
+			// goroutine や echo の Recover) がスタック付きで記録していた。worker の
+			// goroutine には受け手がいないので、ここで受け止めて、全部の worker が
+			// 止まった後に呼び出し元の goroutine で投げ直す。元のスタックは、投げ直す
+			// 値に含める。
+			defer func() {
+				if r := recover(); r != nil {
+					failed.Store(true)
+					panicOnce.Do(func() {
+						panicked = fmt.Sprintf("enqueue deliver to %s: %v\n\n%s", inbox, r, debug.Stack())
+					})
+				}
+			}()
+			for !failed.Load() {
+				i := int(next.Add(1)) - 1
+				if i >= len(payloads) {
+					return
+				}
+				inbox = payloads[i].Inbox
+				if err := s.enqueuer.EnqueueDeliver(payloads[i], opts...); err != nil {
+					fail(fmt.Errorf("enqueue deliver to %s: %w", inbox, err))
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if panicked != nil {
+		panic(panicked)
+	}
+	return firstErr
 }
 
 func (s *DeliverService) confirmOutboundLocalNotes(body []byte) error {
