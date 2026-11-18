@@ -57,6 +57,9 @@ type FollowingRepository interface {
 	// 移行は 1 回きりの一括処理で件数上限も無いため、全件を 1 クエリで引く
 	// 専用メソッドを分けている (ページング漏れが取りこぼしに直結するため)。
 	// proxy account の除外は caller 側で行う。
+	//
+	// ノートの削除のときに、ローカルのフォロワーのホームタイムラインから消す
+	// 範囲を決めるのにも使う (#4225)。
 	ListLocalFollowerIDs(followeeID string) ([]string, error)
 	// FollowsAnyOnHost reports whether followerID follows at least one user on
 	// host (followeeHost, in the stored form). ap/show uses it to decide whether

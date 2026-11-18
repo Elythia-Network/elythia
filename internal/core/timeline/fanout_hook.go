@@ -847,30 +847,38 @@ func (h *FanoutHook) removeBestEffort(ctx context.Context, name Name, noteID str
 	}
 }
 
-// removeFromFollowerHomes mirrors fanoutToFollowersAndStream: page through
-// followers and LREM the note ID from each follower's home timeline list.
+// followerHomeRemoveChunk is how many home timelines one pipeline of
+// removeFromFollowerHomes covers.
+const followerHomeRemoveChunk = 1000
+
+// removeFromFollowerHomes removes the note ID from the home timeline of every
+// local follower of the author, followerHomeRemoveChunk timelines per
+// pipeline.
 //
 // 配るとき (ListHomeTimelineFollowers) と違い、休眠したフォロワーも読む (#4021)。
 // TS 版の時代に積まれた一覧には、休眠する前に届いたノートが残っていることがある。
+//
+// **リモートのフォロワーは読まない (#4225)。** 配るのはローカルのフォロワーだけで、
+// リモートの人のホームタイムラインは無い。以前は全フォロワーを OFFSET で 200 人ずつ
+// めくって 1 人ずつ LREM していたので、リモートのフォロワーが 3000 人いると削除の
+// 応答に約 1.5〜2.2 秒かかっていた。消すのは pipeline (RemoveMany) でまとめる。
+// 1 つの pipeline に全員を積むと、フォロワーの多い人の削除でコマンドが一度に
+// 固まって Redis を占めるので、区切って送る。
 func (h *FanoutHook) removeFromFollowerHomes(ctx context.Context, authorID, noteID string) {
-	const pageSize = 200
-	offset := 0
-	for {
-		rows, err := h.followingRepo.ListFollowers(authorID, pageSize, offset)
-		if err != nil {
-			slog.Warn("removeFromFollowerHomes: list followers failed", "err", err, "author", authorID)
-			return
+	ids, err := h.followingRepo.ListLocalFollowerIDs(authorID)
+	if err != nil {
+		slog.Warn("removeFromFollowerHomes: list local followers failed", "err", err, "author", authorID)
+		return
+	}
+	for start := 0; start < len(ids); start += followerHomeRemoveChunk {
+		chunk := ids[start:min(start+followerHomeRemoveChunk, len(ids))]
+		names := make([]Name, 0, len(chunk))
+		for _, id := range chunk {
+			names = append(names, HomeTimelineName(id))
 		}
-		if len(rows) == 0 {
-			return
+		if err := h.fanout.RemoveMany(ctx, names, []string{noteID}); err != nil {
+			slog.Warn("removeFromFollowerHomes: timeline remove failed", "author", authorID, "id", noteID, "timelines", len(names), "err", err)
 		}
-		for _, f := range rows {
-			h.removeBestEffort(ctx, HomeTimelineName(f.FollowerID), noteID)
-		}
-		if len(rows) < pageSize {
-			return
-		}
-		offset += pageSize
 	}
 }
 
