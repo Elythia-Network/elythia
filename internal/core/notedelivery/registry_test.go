@@ -290,6 +290,38 @@ func TestRules_NonHostValueDeniesTheNote(t *testing.T) {
 	}
 }
 
+// 読めないホストの値を返すプラグインと、エラーを返すプラグインが同じノートに
+// 重なったら、どちらが先に呼ばれても障害 (503) として扱う。読めない値の DenyAll
+// (404) が残ると、障害のあいだに照会した相手が、ノートを消えたものと扱う (#4202)。
+func TestRules_FailureWinsOverNonHostValue(t *testing.T) {
+	tests := []struct {
+		name               string
+		badName, errorName string
+	}{
+		{name: "bad value first", badName: "a-bad-value", errorName: "b-broken"},
+		{name: "error first", badName: "b-bad-value", errorName: "a-broken"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := New()
+			bad := &fakePlugin{targets: map[string]plugin.DeliveryTargets{
+				"n1": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"https://bad.example"}},
+			}}
+			broken := &fakePlugin{targetsErr: errors.New("db down")}
+			require.NoError(t, r.Add(tt.badName, bad.registration()))
+			require.NoError(t, r.Add(tt.errorName, broken.registration()))
+
+			rules := r.Rules(context.Background(), []string{"n1", "n2"})
+			require.Len(t, bad.calls, 1, "both plugins are asked")
+			require.Len(t, broken.calls, 1, "both plugins are asked")
+			for _, id := range []string{"n1", "n2"} {
+				assert.True(t, rules[id].Unavailable(), id)
+				assert.False(t, rules[id].Allows("ok.example"), id)
+			}
+		})
+	}
+}
+
 func TestRules_HostValuesThatAreHosts(t *testing.T) {
 	for _, good := range []string{"a.example", "A.Example.", "a.example:8443", "パイ.example", "192.0.2.1", "[2001:db8::1]", "[2001:db8::1]:8443", "under_score.example", "localhost"} {
 		t.Run(good, func(t *testing.T) {
