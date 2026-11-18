@@ -34,10 +34,12 @@ func (a *queueStatsInspectorAdapter) GetQueueInfo(qname string) (*stream.QueueSt
 		return nil, err
 	}
 	return &stream.QueueStatsInfo{
-		Active:    info.Active,
-		Pending:   info.Pending,
-		Delayed:   info.Delayed,
-		Completed: info.Completed,
+		Active:            info.Active,
+		Pending:           info.Pending,
+		Delayed:           info.Delayed,
+		Completed:         info.Completed,
+		ProcessedTotal:    info.ProcessedTotal,
+		HasProcessedTotal: info.HasProcessedTotal,
 	}, nil
 }
 

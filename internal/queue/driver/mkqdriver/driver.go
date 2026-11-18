@@ -257,6 +257,20 @@ func (d *Driver) metaKey(queue string) string {
 	return d.keyPrefix + ":" + queue + ":meta"
 }
 
+// metricsKey returns the BullMQ metrics HASH key of kind ("completed" or
+// "failed") for the named queue. Its `count` field is the cumulative number
+// of jobs finalised that way, written while job metrics are enabled.
+func (d *Driver) metricsKey(queue, kind string) string {
+	return d.keyPrefix + ":" + queue + ":metrics:" + kind
+}
+
+// jobMetricsEnabled reports whether the workers write BullMQ job metrics.
+// MaxMetricsDataPoints の0は既定の点数で書き、負の値は書かない (Server の
+// 組み立てと同じ判定)。
+func (d *Driver) jobMetricsEnabled() bool {
+	return d.cfg.MaxMetricsDataPoints >= 0
+}
+
 // queueFor returns the pre-defined queue for the given name, or nil.
 func (d *Driver) queueFor(name string) *mkq.Queue[framedPayload] {
 	return d.queues[name]
