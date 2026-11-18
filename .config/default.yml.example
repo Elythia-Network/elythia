@@ -132,6 +132,9 @@ port: 3000
 # Two budgets are kept: one for the timeline fanout and one shared by the rest,
 # so a slow hook cannot starve fanout and delay when posts reach timelines.
 #
+# The same value also sizes the budgets of the reaction delivery and the note
+# delete delivery (one each), which run outside the request as well.
+#
 # Measured on a 2-CPU container (20 VU posting, 9 followers): total budget 8
 # gave notes/create p95 ~105ms vs ~181ms unbounded, with no cost to propagation
 # delay. Raise it if your instance has very wide fanout and CPU to spare.

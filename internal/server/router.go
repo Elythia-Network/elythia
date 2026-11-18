@@ -1259,11 +1259,18 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ブロックした相手の引用に出していた承認を取り消す (#3234 段階 4)。
 	blockingService.SetQuoteRevoker(corefederation.NewQuoteRevoker(quoteAuthorizationRepo, userRepo, noteRepo,
 		quoteRequestDeliveryHook, noteDeliveryHook, apURLs))
-	reactionService.SetFederationHook(corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo))
+	// 配送は要求の外で積む (#4216)。
+	reactionService.SetFederationHook(asyncReactionFederationHook{
+		inner:  corefederation.NewReactionDeliveryHook(deliverService, apRenderer, apURLs, idGen, userRepo),
+		runner: newAsyncHookRunner(s.background, s.config.NoteHookConcurrency),
+	})
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。
 	blockingService.SetFederationHook(corefederation.NewBlockingDeliveryHook(deliverService, userRepo, apRenderer))
-	noteDeleteService.SetFederationHook(noteDeleteHook)
+	noteDeleteService.SetFederationHook(asyncNoteDeleteFederationHook{
+		inner:  noteDeleteHook,
+		runner: newAsyncHookRunner(s.background, s.config.NoteHookConcurrency),
+	})
 	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404。第 2 引数)。
 	// enqueue 時の isBlockedInbox を通り抜ける retry-backoff 中・積み残しジョブも弾く。
 	// **署名鍵は payload に載せず、配送時に引く (第 3 引数)。** queue の job は

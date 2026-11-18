@@ -267,6 +267,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"apiSpec", "auth", "autoscale", "background", "beforePluginGoRelease", "builtCore", "builtHandlers", "builtRouteParts", "caches", "chartMgmt", "config", "crossProcessCaches", "db", "deliverSvc", "echo", "internalPubSub", "lifecycle", "mediaProxySecret", "metaUpdatedHandled", "noteDelivery", "outboundLookup", "outboundTr", "outboundTrOnce", "passwordHasher", "peerDeps", "pluginAccounts", "pluginGoGate", "pluginGoStarter", "pluginRoles", "pluginSecrets", "pluginSetupErr", "queueClient", "queueDriver", "queueInspector", "queueMetrics", "queueRuntimeStats", "queueScheduler", "queueServer", "queueStarted", "reactionCountWriter", "reactionFlushWorker", "redis", "relationCache", "remoteChecker", "role", "roleService", "runMu", "selfCheckRunner", "shutdownErr", "shutdownOnce", "startErr", "startOnce", "startedAt", "stopped", "streamManager", "streamPubSub", "userCache", "userRepo", "wiringChecked", "wiringErr"}, nil},
 	"internal/server.Supervisor": {kindNotCache, "今の世代とlistenerの切り替え",
 		[]string{"afterLoad", "cfg", "current", "deps", "gen", "genMu", "httpSrv", "listenerAddr", "listening", "maint", "redis", "shutdownErr", "shutdownOnce"}, nil},
+	"internal/server.asyncHookRunner": {kindNotCache, "配送のhookを要求の外で走らせる枠と、同じ鍵のhookを呼ばれた順に流すための、最後に呼ばれたhookの終わりの印(#4216)。hookが終われば消え、DB・設定・外部から読んだ値を持たない",
+		[]string{"background", "mu", "slots", "tails"}, nil},
 	"internal/server.anyBodyEndpoints": {kindNotCache, "本家のparamDefがobjectでない値も通すendpointの集合を、埋め込みのgoldenから1回だけ組む。DB・設定・外部のどれからも来ない",
 		[]string{}, nil},
 	"internal/server.apiSpecCache": {kindNotCache, "/api.jsonの本文とそのgzip。Echoのルートと埋め込みのgoldenだけから組み、DBから読んだ値を含まない。ルートは世代のServerごとに決まるので、世代と一緒に作り直される",

@@ -190,7 +190,8 @@ type Source struct {
 	// 未設定なら password.DefaultCost。範囲外の値は警告して既定に落とす。
 	BcryptCost *int `mapstructure:"bcryptCost"`
 	// NoteHookConcurrency は投稿後のベストエフォートフックを種別ごとに
-	// 何本まで同時に走らせるか。未設定なら GOMAXPROCS x 2。
+	// 何本まで同時に走らせるか。未設定なら GOMAXPROCS x 2。リアクションと
+	// ノートの削除の配送の枠 (それぞれ別) にも同じ値を使う (#4216)。
 	NoteHookConcurrency *int `mapstructure:"noteHookConcurrency"`
 	// MediaProxyConcurrency は media proxy の画像処理 (decode/resize/encode)
 	// を同時に何本走らせてよいか (#3032)。未設定なら GOMAXPROCS / 2 (最低 1)。
