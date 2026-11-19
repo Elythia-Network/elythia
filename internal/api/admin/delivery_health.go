@@ -62,7 +62,8 @@ func (h *Handler) FederationDeliveryHealth(c echo.Context) error {
 // /api/admin/federation/close-delivery-breaker.
 //
 // **mk-go 独自 endpoint** (#3048)。ブレーカーを閉じ、429 の停止と予約も消して、
-// 遅延させていたジョブを次に起きたとき (最大 5 分後) に送らせる。**429 の予約も
+// 遅延させていたジョブを次に起きたとき (最大 5 分後。試す間隔が 1 時間に達した
+// 相手は次に試す時刻で、最大 66 分後、#4222) に送らせる。**429 の予約も
 // 消す** — 予約の列は溜まった件数 x 間隔まで伸びるので、残すと手で解けない。
 // 相手がまだ 429 を返せば、また止まり直すだけ。
 func (h *Handler) FederationCloseDeliveryBreaker(c echo.Context) error {
