@@ -41,6 +41,57 @@ func MatchesBlockList(patterns []string, host string) bool {
 	return false
 }
 
+// BlockList is a compiled MatchesBlockList: the patterns are normalized once,
+// and a host is matched by looking its suffixes up in a set (#4221).
+// MatchesBlockList の一覧の長さに比例する照合 (項目ごとに正規化し直す) を、
+// ホストのラベルの数の引き当てにする。同じ一覧を何度も照合する呼び出し元が使う。
+type BlockList struct {
+	set map[string]struct{}
+}
+
+// CompileBlockList builds a BlockList that matches exactly what
+// MatchesBlockList(patterns, host) does.
+func CompileBlockList(patterns []string) *BlockList {
+	set := make(map[string]struct{}, len(patterns))
+	for _, p := range patterns {
+		if pat, _ := gateForms(p); pat != "" {
+			set[pat] = struct{}{}
+		}
+	}
+	return &BlockList{set: set}
+}
+
+// Matches reports whether host falls under the list, with the same rule as
+// MatchesBlockList.
+func (l *BlockList) Matches(host string) bool {
+	if l == nil || len(l.set) == 0 {
+		return false
+	}
+	hostFull, hostBare := gateForms(host)
+	if hostFull == "" {
+		return false
+	}
+	return l.matchesSuffix(hostFull) || l.matchesSuffix(hostBare)
+}
+
+// matchesSuffix is gateSuffixMatch against every pattern at once.
+// `.`+host が `.`+pattern で終わるのは、pattern が host そのものか、host の
+// `.` の直後から末尾までのどれかと等しいとき。
+func (l *BlockList) matchesSuffix(host string) bool {
+	if _, ok := l.set[host]; ok {
+		return true
+	}
+	for i := 0; i < len(host); i++ {
+		if host[i] != '.' {
+			continue
+		}
+		if _, ok := l.set[host[i+1:]]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // MatchesAllowList reports whether host falls under any of patterns for a
 // list whose effect is to admit the host (federationHosts under
 // `federation: specified`).

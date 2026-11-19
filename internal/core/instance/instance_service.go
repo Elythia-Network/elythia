@@ -5,7 +5,9 @@ package instance
 import (
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -90,6 +92,16 @@ type Service struct {
 	// 継続障害時に配送ごとに warn を吐かないよう間引く (#1410)。
 	lastMetaWarn  time.Time
 	metaWarnEvery time.Duration
+	// blocked は meta.blockedHosts を正規化した集合と、作った元の一覧の写し
+	// (#4221)。配送と受信の 1 件ごとに一覧の長さに比例する照合を何度も回していた。
+	// 一覧が変わったかは写しと比べて決めるので、捨てる操作は要らない。
+	blocked atomic.Pointer[compiledBlockList]
+}
+
+// compiledBlockList is a BlockList with the list it was built from.
+type compiledBlockList struct {
+	src  []string
+	list *idnhost.BlockList
 }
 
 // suspendEntry caches a host's delivery-suspend decision until expiresAt.
@@ -494,7 +506,7 @@ func (s *Service) IsBlocked(host string) bool {
 	if err != nil {
 		return false
 	}
-	return HostMatchesAny(meta.BlockedHosts, host)
+	return s.isBlockedHost(meta, host)
 }
 
 // IsSilenced reports whether the host matches an entry in meta.silencedHosts.
@@ -644,7 +656,7 @@ func (s *Service) IsAllowed(host string) bool {
 			return false
 		}
 	}
-	return !HostMatchesAny(meta.BlockedHosts, host)
+	return !s.isBlockedHost(meta, host)
 }
 
 // FederationDisabled reports whether the instance federation mode is "none"
@@ -684,7 +696,7 @@ func (s *Service) ShouldSkipDelivery(host string) bool {
 				return true
 			}
 		}
-		if HostMatchesAny(meta.BlockedHosts, host) {
+		if s.isBlockedHost(meta, host) {
 			return true
 		}
 	} else {
@@ -726,7 +738,7 @@ func (s *Service) CanFetchOptionalRemoteData(host string) bool {
 			return false
 		}
 	}
-	if HostMatchesAny(meta.BlockedHosts, host) {
+	if s.isBlockedHost(meta, host) {
 		return false
 	}
 	return !s.shouldSkipBySuspend(host)
@@ -899,6 +911,19 @@ func (s *Service) warnMetaFetchFailed(host string, err error) {
 
 	slog.Warn("instance: ShouldSkipDelivery could not fetch meta; block/federation gate skipped this call",
 		"host", host, "error", err)
+}
+
+// isBlockedHost is HostMatchesAny(meta.BlockedHosts, host) through the
+// compiled list.
+func (s *Service) isBlockedHost(meta *model.Meta, host string) bool {
+	if c := s.blocked.Load(); c != nil && slices.Equal(c.src, meta.BlockedHosts) {
+		return c.list.Matches(host)
+	}
+	// 写しを持つ。meta の一覧をそのまま持つと、一覧が書き換えられたときに比べる
+	// 相手も一緒に変わり、古い集合を使い続ける。
+	c := &compiledBlockList{src: slices.Clone(meta.BlockedHosts), list: idnhost.CompileBlockList(meta.BlockedHosts)}
+	s.blocked.Store(c)
+	return c.list.Matches(host)
 }
 
 // HostMatchesAny reports whether host (case-insensitive, Unicode-aware)

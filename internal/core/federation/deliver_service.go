@@ -306,19 +306,10 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 	if recipient != nil && s.recipientIsEd25519Capable(recipient) {
 		edKeyID, edPrivPEM = s.signerEd25519Credentials(signerUserID)
 	}
-	seen := make(map[string]struct{}, len(inboxes))
+	// inboxes は冒頭で空・重複・ブロックを除いてある (#4221。以前はここでもう
+	// 一度ブロックを照合していた)。
 	payloads := make([]queue.DeliverPayload, 0, len(inboxes))
 	for _, inbox := range inboxes {
-		if inbox == "" {
-			continue
-		}
-		if _, dup := seen[inbox]; dup {
-			continue
-		}
-		if s.isBlockedInbox(inbox) {
-			continue
-		}
-		seen[inbox] = struct{}{}
 		isShared := sharedInboxes[inbox] ||
 			(recipient != nil && recipient.SharedInbox != nil && *recipient.SharedInbox != "" && inbox == *recipient.SharedInbox)
 		// **署名鍵は payload に詰めない。** queue の job は
