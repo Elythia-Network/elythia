@@ -198,9 +198,10 @@ type Source struct {
 	// 同時に走る本数がそのまま同時に確保される中間バッファの本数になるので、
 	// これがプロキシのピークメモリの上限を決める。
 	MediaProxyConcurrency *int `mapstructure:"mediaProxyConcurrency"`
-	// QueueIdlePollSeconds はジョブが無いときに worker が marker を待つ秒数の
-	// 下限。空振りのたびに mkq が待ちを倍にし 30 秒で頭打ちにするので、
-	// これは初回の待ちにあたる。未設定なら mkq の既定。mkq driver のみ有効。
+	// QueueIdlePollSeconds はジョブが無いときに worker が marker を待つ秒数。
+	// 30 秒未満なら初回の待ちで、空振りのたびに mkq が待ちを倍にし 30 秒で
+	// 頭打ちにする。30 秒以上なら毎回その秒数を待つ。未設定なら
+	// defaultQueueIdlePollSeconds。mkq driver のみ有効。
 	QueueIdlePollSeconds *int `mapstructure:"queueIdlePollSeconds"`
 	// QueueStuckWorkerSeconds は 1 件の job の handler が何秒戻ってこなければ
 	// その worker を「キューの worker 数に数えない」扱いにするか (#2657)。
@@ -450,7 +451,7 @@ type Config struct {
 	NoteHookConcurrency int
 	// MediaProxyConcurrency: 0 なら実行時に既定 (GOMAXPROCS / 2、最低 1) を使う。
 	MediaProxyConcurrency int
-	// QueueIdlePollSeconds: 0 なら driver 既定。
+	// QueueIdlePollSeconds: 未設定・0 以下なら defaultQueueIdlePollSeconds。
 	QueueIdlePollSeconds int
 	// QueueStuckWorkerSeconds: 0 ならキューごとの既定、負値で無効。
 	QueueStuckWorkerSeconds int
@@ -609,6 +610,34 @@ func (c *Config) ProvidesTarball() bool {
 
 const defaultMaxFileSize int64 = 262144000
 
+// defaultQueueIdlePollSeconds は待機中の worker が marker を待つ秒数の既定。
+//
+// mkq の既定 (倍にしていって 30 秒で頭打ち) では、待機中の worker 1 本ごとに
+// 30 秒ごとに BZPOPMIN と moveToActive を撃つ。120 秒にすると、Queue ベンチの
+// スタックで待機中の 5 分を INFO commandstats で数えて、BZPOPMIN が 106.6 → 36.8
+// 回/分、Redis のコマンド全体が 1370.8 → 823.2 回/分になった (#4215)。ジョブの
+// 取得は marker で起きるので遅くならず (待機の後に積んで 2.9ms)、停止も wake key
+// で起こすので遅くならない (16 worker で 3ms)。
+//
+// 延びるのは次の 2 つ。
+//   - marker を取り逃したとき (Redis のフェイルオーバーなど) に気付くまで
+//   - Redis が戻ってから取得を再開するまで。失敗の後の眠りが 1 秒から始まる
+//     ので、以前の既定 (100ms から) より遅く、最大約 5 秒 (Redis を 5 秒止めて
+//     戻した実測で 0.1 → 3.28 秒)
+//
+// RST の届かない切断 (ホストのクラッシュなど) に気付くまでは、ほとんど変わらない。
+// go-redis は BZPOPMIN の読み取りの期限を待ちの長さ + 10 秒 (130 秒) にするが、
+// 既定の dialer の TCP keepalive (30 秒のアイドルの後、5 秒ごとに 3 回) が多くの
+// 場合約 45 秒で切る。UNIX socket では同じホストなので、Redis が落ちればすぐに
+// EOF で分かる。proxy がアイドルの接続を閉じても、go-redis が EOF を新しい接続で
+// 撃ち直す。
+//
+// **mkq v1.5.2 より前に戻さない。** それより前の mkq は、取り出しが失敗すると
+// この間隔だけ眠り、marker でも起きなかったので、Redis の瞬断の後に全 worker が
+// 最大 120 秒止まった (同じ実測で 115 秒)。v1.5.2 からは、失敗の後の眠りは
+// 1 秒から倍にして 5 秒で頭打ちになる (mkq#154)。
+const defaultQueueIdlePollSeconds = 120
+
 // Load reads the Misskey YAML configuration and returns a resolved Config.
 // Environment variables with the prefix MK_ override YAML values.
 // Nested keys use underscore separation (e.g. MK_DB_HOST overrides db.host).
@@ -722,8 +751,8 @@ func resolve(src *Source) (*Config, error) {
 	// **範囲外は既定に落として警告する。** 設定の書き間違いで cost 4 の
 	// ハッシュを量産すると、気づいた時点で全員のパスワードが弱い。
 	bcryptCost := password.DefaultCost
-	// 0 以下は「未設定」として driver 既定に委ねる。
-	queueIdlePollSeconds := 0
+	// 0 以下は「未設定」として既定を使う。
+	queueIdlePollSeconds := defaultQueueIdlePollSeconds
 	if src.QueueIdlePollSeconds != nil && *src.QueueIdlePollSeconds > 0 {
 		queueIdlePollSeconds = *src.QueueIdlePollSeconds
 	}

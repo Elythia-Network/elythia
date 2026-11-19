@@ -73,11 +73,13 @@ type Config struct {
 	// behaviour pre-v1.0.1).
 	MaxMetricsDataPoints int
 
-	// IdlePollInterval is the floor of how long an idle worker waits on the
-	// marker key before re-checking. 0 applies mkq's own default.
+	// IdlePollInterval is how long an idle worker waits on the marker key
+	// before re-checking. 0 applies mkq's own default (100ms, doubling to a
+	// 30s cap); Elythia's config never passes 0 (default 120s, #4215), so
+	// that path is only for callers that build a Driver directly.
 	//
-	// mkq v1.0.4 以降、空振りのたびに待ちが倍になり 30 秒で頭打ちになる。
-	// つまりこれは初回の待ちで、アイドルが続けば実際の間隔はもっと長い。
+	// 30 秒未満なら初回の待ちで、mkq v1.0.4 以降は空振りのたびに待ちが倍になり
+	// 30 秒で頭打ちになる。30 秒以上なら毎回その間隔を待つ。
 	//
 	// **ジョブ取得の遅さには繋がらない** (marker push で起きるため)。
 	// 停止の速さにも影響しない (Stop が marker を突いて起こす)。
