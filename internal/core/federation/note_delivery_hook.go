@@ -65,12 +65,13 @@ func hostOf(u *model.User) string {
 }
 
 // deliverToFollowersByRule delivers body to the author's followers that rule
-// allows. 絞っていないノートは今までと同じ DeliverToFollowers を通す。
-func deliverToFollowersByRule(d *DeliverService, authorID string, body []byte, rule notedelivery.Rule) error {
+// allows, and returns the inboxes it enqueued to (nil on error).
+// 絞っていないノートは、今までと同じく全てのフォロワーへ送る。
+func deliverToFollowersByRule(d *DeliverService, authorID string, body []byte, rule notedelivery.Rule) (map[string]bool, error) {
 	if !rule.Restricted() {
-		return d.DeliverToFollowers(authorID, body)
+		return d.DeliverToFollowersCollect(authorID, body, nil)
 	}
-	return d.DeliverToFollowersAllowed(authorID, body, nil, rule.Allows)
+	return d.DeliverToFollowersCollect(authorID, body, rule.Allows)
 }
 
 // QuoteApprovalRequester obtains FEP-044f approvals for local quotes (#3234).
@@ -152,12 +153,16 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 	// 構成されるため json.Marshal が失敗するケースは存在しない。
 	body, _ := json.Marshal(create)
 
+	// フォロワーへ積んだ inbox。1:1 の配送で、ここに含まれる相手を省く (#4223)。
+	var followerInboxes map[string]bool
 	switch note.Visibility {
 	case model.NoteVisibilityPublic, model.NoteVisibilityHome, model.NoteVisibilityFollowers:
-		if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
+		sent, err := deliverToFollowersByRule(h.deliver, author.ID, body, rule)
+		if err != nil {
 			slog.Warn("note delivery: deliver to followers failed",
 				"noteId", note.ID, "err", err)
 		}
+		followerInboxes = sent
 	case model.NoteVisibilitySpecified:
 		h.deliverToSpecified(author, note, body, rule)
 	}
@@ -168,10 +173,9 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 	//     投票の選択肢から作成時に解決したもの。#3330)
 	//   - リプライ対象 (ReplyID) の作者がリモートの場合
 	//   - 引用リノート (Renote + text/cw/files/poll) の renote 元作者がリモートの場合
-	// フォロワー配信先と重複したユーザーは DeliverService 側でも deduplicate
-	// されているが、ここでも user ID ベースで seen map を共有して無駄な
-	// enqueue を避ける。#369。
-	h.deliverToDirectRecipients(author, note, body, rule)
+	// 同じ利用者へ重ねて送らないよう、user ID の seen map を共有する (#369)。
+	// フォロワーへ送った inbox で届く相手には送らない (#4223)。
+	h.deliverToDirectRecipients(author, note, body, rule, followerInboxes)
 
 	// リモートの投稿の引用は、Create の後に作者へ承認を求める。
 	if h.quotes != nil {
@@ -201,7 +205,15 @@ func (h *NoteDeliveryHook) OnNoteCreated(note *model.Note, author *model.User) {
 //
 // rule が許さないホストの利用者は、メンションされていても返信先でも外す
 // (#4199)。
-func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *model.Note, body []byte, rule notedelivery.Rule) {
+//
+// followerInboxes は、同じ activity をフォロワーへ積んだ inbox。相手の
+// sharedInbox (か 1:1 で使う inbox) がその中にあれば送らない (#4223)。本家の
+// `ApDeliverManagerService.execute` も、フォロワーの inbox を先に集めて、
+// direct recipe の sharedInbox が既にあれば skip する。shared inbox に届いた
+// activity は、受け取ったサーバーがメンションや返信の相手にも届けるので、
+// 1:1 でもう 1 通送ると、署名と HTTP の往復と相手の受信処理が無駄になる。
+// DM (specified) はフォロワーへ配らないので、followerInboxes は空で省かない。
+func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *model.Note, body []byte, rule notedelivery.Rule, followerInboxes map[string]bool) {
 	if note == nil {
 		return
 	}
@@ -273,11 +285,27 @@ func (h *NoteDeliveryHook) deliverToDirectRecipients(author *model.User, note *m
 	}
 
 	for _, u := range recipients {
+		if coveredByInboxes(u, followerInboxes) {
+			continue
+		}
 		if err := h.deliver.DeliverToUser(author.ID, u, body); err != nil {
 			slog.Warn("direct delivery: deliver to user failed",
 				"noteId", note.ID, "userId", u.ID, "err", err)
 		}
 	}
+}
+
+// coveredByInboxes reports whether a delivery to one of inboxes already
+// reaches u: its sharedInbox, or the inbox a 1:1 delivery would use.
+func coveredByInboxes(u *model.User, inboxes map[string]bool) bool {
+	if len(inboxes) == 0 {
+		return false
+	}
+	if u.SharedInbox != nil && *u.SharedInbox != "" && inboxes[*u.SharedInbox] {
+		return true
+	}
+	inbox := preferredInbox(u)
+	return inbox != "" && inboxes[inbox]
 }
 
 // findNoteAuthor は noteID の note を引いて作者 user を返す。失敗は warn log
@@ -327,7 +355,7 @@ func (h *NoteDeliveryHook) deliverAnnounce(note *model.Note, author *model.User,
 	}
 	announce := h.renderer.RenderAnnounce(author, note.ID, targetURI, note.Visibility, h.idGen)
 	body, _ := json.Marshal(announce)
-	if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
+	if _, err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
 		slog.Warn("note delivery: announce failed",
 			"noteId", note.ID, "err", err)
 	}
@@ -407,10 +435,11 @@ func (h *NoteDeliveryHook) SendNoteUpdate(note *model.Note, author *model.User) 
 	}
 	// Create と同じ相手にだけ配る (#4199)。
 	rule := h.ruleFor(note)
-	if err := deliverToFollowersByRule(h.deliver, author.ID, body, rule); err != nil {
+	followerInboxes, err := deliverToFollowersByRule(h.deliver, author.ID, body, rule)
+	if err != nil {
 		return err
 	}
-	h.deliverToDirectRecipients(author, note, body, rule)
+	h.deliverToDirectRecipients(author, note, body, rule, followerInboxes)
 	// Create を relay 経由で受け取ったサーバーにも届ける (OnNoteCreated と同じ条件)。
 	if note.Visibility == model.NoteVisibilityPublic && h.relay != nil && !rule.Restricted() {
 		if err := h.relay.DeliverToAccepted(context.Background(), author.ID, update); err != nil {
