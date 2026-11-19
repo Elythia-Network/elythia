@@ -90,8 +90,9 @@ func TestBreaker_OnlyProbeFailuresDoubleTheInterval(t *testing.T) {
 	assert.Equal(t, BreakerInitialInterval, wait)
 }
 
-// 待たせる時間は 5 分で区切る。次に試す時刻まで丸ごと待たせると、試行が通った後や
-// 手で閉じた後も、溜まったジョブが最大 1 時間待ったままになる。
+// 間隔が短いうちは、待たせる時間を 5 分で区切る。次に試す時刻まで丸ごと待たせると、
+// 手で閉じた後も、溜まったジョブがその時刻まで待ったままになる。間隔が長くなった
+// 後は区切らない (#4222、breaker_long_hold_test.go)。
 func TestBreaker_HoldIsCapped(t *testing.T) {
 	b, clk, _ := newTestBreaker(t)
 	ctx := context.Background()
@@ -183,7 +184,11 @@ func TestBreaker_FailedProbeDoublesTheIntervalUpToTheCap(t *testing.T) {
 		require.Equal(t, want, untilProbe)
 		d, wait, _ := check(b, ctx, "down.example")
 		require.Equal(t, BreakerDelay, d)
-		require.Equal(t, min(want, breakerHoldCap), wait, "a held job re-checks at most every breakerHoldCap")
+		hold := min(want, breakerHoldCap)
+		if want >= breakerLongHoldInterval {
+			hold = want
+		}
+		require.Equal(t, hold, wait, "a held job re-checks every breakerHoldCap until the interval grows long")
 	}
 	assert.Equal(t, BreakerMaxInterval, want, "the loop must reach the cap")
 	list, err := b.List(ctx)
