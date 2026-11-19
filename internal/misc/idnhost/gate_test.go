@@ -16,6 +16,7 @@ func TestMatchesBlockList(t *testing.T) {
 		{name: "exact", patterns: []string{"evil.example"}, host: "evil.example", want: true},
 		{name: "subdomain", patterns: []string{"evil.example"}, host: "a.b.evil.example", want: true},
 		{name: "lookalike prefix is not a subdomain", patterns: []string{"evil.example"}, host: "notevil.example", want: false},
+		{name: "suffix not at a label boundary", patterns: []string{"vil.example"}, host: "evil.example", want: false},
 		{name: "unrelated", patterns: []string{"evil.example"}, host: "good.example", want: false},
 		{name: "empty host", patterns: []string{"evil.example"}, host: "", want: false},
 		{name: "empty and blank patterns are skipped", patterns: []string{"", "  ", "."}, host: "evil.example", want: false},
@@ -60,8 +61,33 @@ func TestMatchesBlockList(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, MatchesBlockList(tc.patterns, tc.host))
+			assert.Equal(t, tc.want, CompileBlockList(tc.patterns).Matches(tc.host), "compiled")
 		})
 	}
+
+	// 表の項目と照合するホストを総当たりで組み合わせ、集合で引く形が項目ごとに
+	// 照合する形と同じ答えを出すことを確かめる (#4221)。
+	var patterns, hosts []string
+	for _, tc := range cases {
+		patterns = append(patterns, tc.patterns...)
+		hosts = append(hosts, tc.host)
+	}
+	hosts = append(hosts, patterns...)
+	for _, p := range patterns {
+		for _, h := range hosts {
+			assert.Equal(t, MatchesBlockList([]string{p}, h), CompileBlockList([]string{p}).Matches(h), "pattern %q host %q", p, h)
+		}
+	}
+	for _, h := range hosts {
+		assert.Equal(t, MatchesBlockList(patterns, h), CompileBlockList(patterns).Matches(h), "all patterns, host %q", h)
+	}
+}
+
+func TestBlockList_Empty(t *testing.T) {
+	var nilList *BlockList
+	assert.False(t, nilList.Matches("evil.example"))
+	assert.False(t, CompileBlockList(nil).Matches("evil.example"))
+	assert.False(t, CompileBlockList([]string{"", " "}).Matches("evil.example"))
 }
 
 func TestMatchesAllowList(t *testing.T) {

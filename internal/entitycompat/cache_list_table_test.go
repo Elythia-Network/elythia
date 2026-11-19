@@ -163,7 +163,8 @@ var cacheEntries = map[string]cacheEntry{
 	"internal/core/instance.MetadataRefresher": {kindThrottle, "nextCheckはDBのinfoUpdatedAtから計算した取り直しの時刻で、その間はDBも見ない。dropAllだけで捨てて同じ世代のままDBを戻すと最大24時間取り直さない。メンテナンスでは世代ごと作り直すので一覧に入れない(4.4、#3729、#3802)。inflightは実行中の印",
 		[]string{"checkOrder", "clock", "closed", "fetcher", "inflight", "lastWarn", "lock", "mu", "nextCheck", "repo", "suppressedWarns", "warnf", "wg"}, nil},
 	"internal/core/instance.Service": {kindDropLocal, "",
-		[]string{"cacheTTL", "clock", "dropGen", "goneRecorder", "healthGen", "idGen", "lastMetaWarn", "metaRepo", "metaWarnEvery", "metadataFetcher", "mu", "repo", "requestReceivedCache", "requestReceivedWindow", "responseHealthyCache", "responseHealthyTTL", "suspendCache", "suspendGen", "suspendInvalidated"}, map[string]string{
+		[]string{"blocked", "cacheTTL", "clock", "dropGen", "goneRecorder", "healthGen", "idGen", "lastMetaWarn", "metaRepo", "metaWarnEvery", "metadataFetcher", "mu", "repo", "requestReceivedCache", "requestReceivedWindow", "responseHealthyCache", "responseHealthyTTL", "suspendCache", "suspendGen", "suspendInvalidated"}, map[string]string{
+			"blocked":      "metaから読んだblockedHostsを正規化した集合。使うたびに作った元の一覧の写しと比べ、違えば作り直すので、捨てなくても古い一覧で照合しない(#4221)",
 			"lastMetaWarn": "警告の間引き(ログのためだけ)(4.4)",
 		}},
 	"internal/core/instance.TouchBuffer": {kindWriteBuffer, "受信の時刻を溜めてDBへまとめて書く。メンテナンスでは世代を止めるときのCloseが書き出してからDBを戻す(4.4、#3802)",

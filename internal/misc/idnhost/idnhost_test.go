@@ -105,6 +105,8 @@ func TestMatchesBlockList_MappedSpellings(t *testing.T) {
 	for _, in := range []string{"ｅｖｉｌ.example", "evil\u3002example", "evil.ex\u00adample", "sub.ｅｖｉｌ.example:8443"} {
 		assert.True(t, MatchesBlockList([]string{"evil.example"}, in), "%q", in)
 		assert.True(t, MatchesBlockList([]string{"ｅｖｉｌ.example"}, Puny(in)), "%q", in)
+		assert.True(t, CompileBlockList([]string{"evil.example"}).Matches(in), "compiled %q", in)
+		assert.True(t, CompileBlockList([]string{"ｅｖｉｌ.example"}).Matches(Puny(in)), "compiled %q", in)
 	}
 }
 
