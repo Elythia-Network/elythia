@@ -106,7 +106,7 @@ func TestNoteDeliveryHook_Rules_IncludeFiltersFollowersAndRelay(t *testing.T) {
 }
 
 func TestNoteDeliveryHook_Rules_UnrestrictedNoteIsUnchanged(t *testing.T) {
-	hook, enq, userRepo, followingRepo, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
+	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox", "https://b.example/inbox"}
 	relay := &fakeRelayBroadcaster{}
@@ -115,9 +115,63 @@ func TestNoteDeliveryHook_Rules_UnrestrictedNoteIsUnchanged(t *testing.T) {
 		"other-note": {Mode: plugin.DeliveryTargetsInclude},
 	}, false)
 
-	hook.OnNoteCreated(makeNote(author.ID, model.NoteVisibilityPublic), author)
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	noteRepo.Notes[note.ID] = note
+	hook.OnNoteCreated(note, author)
 	assert.ElementsMatch(t, []string{"https://a.example/inbox", "https://b.example/inbox"}, enqueuedInboxes(enq))
 	assert.Len(t, relay.calls, 1)
+}
+
+// Deleting a note cleans up the rule its plugin wrote. When the deletion and
+// the clean-up both finish while the Create still waits for a slot, the Create
+// reads no rule, and must not take that as "unrestricted" and reach the hosts
+// the note excluded (#4202).
+func TestNoteDeliveryHook_Rules_NoteDeletedBeforeDeliveryGoesNowhere(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox", "https://b.example/inbox"}
+	relay := &fakeRelayBroadcaster{}
+	hook.SetRelayBroadcaster(relay)
+	rules.set(map[string]plugin.DeliveryTargets{}, false)
+
+	hook.OnNoteCreated(makeNote(author.ID, model.NoteVisibilityPublic), author)
+	assert.Empty(t, enq.calls, "a deleted note must not reach any follower")
+	assert.Empty(t, relay.calls, "a deleted note must not reach relays")
+}
+
+// When whether the note still exists cannot be read, the note is not
+// federated, as when its rule cannot be read (#4202).
+func TestNoteDeliveryHook_Rules_ExistenceCheckFailureGoesNowhere(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox"}
+	relay := &fakeRelayBroadcaster{}
+	hook.SetRelayBroadcaster(relay)
+	rules.set(map[string]plugin.DeliveryTargets{}, false)
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	noteRepo.Notes[note.ID] = note
+	noteRepo.ExistingOnPrimaryErr = errors.New("primary down")
+	hook.OnNoteCreated(note, author)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, relay.calls)
+}
+
+// A restricted note already has the rule to apply, so its existence is not
+// read: the hook asks the primary only for notes it would send everywhere.
+func TestNoteDeliveryHook_Rules_RestrictedNoteSkipsExistenceCheck(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox", "https://b.example/inbox"}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	noteRepo.ExistingOnPrimaryErr = errors.New("must not be asked")
+	rules.set(map[string]plugin.DeliveryTargets{
+		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
+	}, false)
+
+	hook.OnNoteCreated(note, author)
+	assert.Equal(t, []string{"https://a.example/inbox"}, enqueuedInboxes(enq))
 }
 
 func TestNoteDeliveryHook_Rules_ExcludeFiltersMentionsReplyAndQuote(t *testing.T) {
