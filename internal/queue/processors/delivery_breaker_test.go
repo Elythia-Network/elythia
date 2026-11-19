@@ -34,13 +34,17 @@ type fakeBreaker struct {
 	throttles map[string]time.Duration
 	// openAfterFailure は RecordFailure の後にブレーカーが開いているか。
 	openAfterFailure bool
+	// flagSet は CheckWithFlag が印を見つけたと答えるか。flagKeys は渡された印のキー。
+	flagSet  bool
+	flagKeys []string
 }
 
-func (f *fakeBreaker) Check(_ context.Context, _, job string) deliveryhealth.CheckResult {
+func (f *fakeBreaker) CheckWithFlag(_ context.Context, _, job, flagKey string) deliveryhealth.CheckResult {
 	f.mu.Lock()
 	f.jobs = append(f.jobs, job)
+	f.flagKeys = append(f.flagKeys, flagKey)
 	f.mu.Unlock()
-	r := deliveryhealth.CheckResult{Decision: f.decision, Delay: f.wait, HasState: f.hasState}
+	r := deliveryhealth.CheckResult{Decision: f.decision, Delay: f.wait, HasState: f.hasState, FlagSet: f.flagSet && flagKey != ""}
 	if f.decision == deliveryhealth.BreakerProbe {
 		r.ProbeToken = f.token
 	}

@@ -113,6 +113,8 @@ type CheckResult struct {
 	// ProbeToken は半開の試行の札。試行の結果はこの札と一緒に返す。札が一致する
 	// ときだけ「試行の失敗」として間隔を倍にし、枠を外す。
 	ProbeToken string
+	// FlagSet は CheckWithFlag に渡したキーが Redis にあったか。
+	FlagSet bool
 }
 
 // BreakerState is one host's breaker as shown to admins.
@@ -177,7 +179,8 @@ const (
 	checkThrottle = 4 // 429 で止めている。値は予約した送信時刻までの ms
 )
 
-// checkScript returns {kind, ms, hasState}.
+// checkScript returns {kind, ms, hasState, flag}. flag is whether KEYS[6]
+// exists (0 when it is not passed).
 //
 // 判定と probe ロックの取得を不可分にする。別々に叩くと、半開の瞬間に
 // 複数のノードが同時に「試してよい」と判断する。
@@ -188,12 +191,16 @@ local token = ARGV[3]
 local spacing = tonumber(ARGV[4])
 local job = ARGV[5]
 local hasState = redis.call("EXISTS", KEYS[1])
+local flag = 0
+if #KEYS >= 6 then
+  flag = redis.call("EXISTS", KEYS[6])
+end
 -- 予約済みのジョブは自分の時刻まで待つ。時刻が来たら予約を消して先へ進む
 -- (まだ止めていれば列の最後尾に並び直す = 429 が再発した)。
 if job ~= "" then
   local mine = tonumber(redis.call("HGET", KEYS[5], job) or "0")
   if mine > now then
-    return {4, mine - now, hasState}
+    return {4, mine - now, hasState, flag}
   end
   if mine > 0 then
     redis.call("HDEL", KEYS[5], job)
@@ -213,20 +220,20 @@ if ttl and ttl > 0 then
     redis.call("HSET", KEYS[5], job, slot)
     redis.call("PEXPIRE", KEYS[5], slot - now + 60000)
   end
-  return {4, slot - now, hasState}
+  return {4, slot - now, hasState, flag}
 end
 local o = tonumber(redis.call("HGET", KEYS[1], "o") or "0")
 if o > 0 then
   local p = tonumber(redis.call("HGET", KEYS[1], "p") or "0")
   if now < p then
-    return {2, p - now, 1}
+    return {2, p - now, 1, flag}
   end
   if redis.call("SET", KEYS[2], token, "NX", "PX", lockTTL) then
-    return {1, 0, 1}
+    return {1, 0, 1, flag}
   end
-  return {3, redis.call("PTTL", KEYS[2]), 1}
+  return {3, redis.call("PTTL", KEYS[2]), 1, flag}
 end
-return {0, 0, hasState}
+return {0, 0, hasState, flag}
 `)
 
 // Check decides whether a delivery to host may go now. job identifies the
@@ -236,17 +243,29 @@ return {0, 0, hasState}
 // **Redis が読めなければ通す。** 観測のための仕組みが配送を止める側に倒れると、
 // Redis の瞬断が全配送の停止になる。
 func (b *Breaker) Check(ctx context.Context, host, job string) CheckResult {
+	return b.CheckWithFlag(ctx, host, job, "")
+}
+
+// CheckWithFlag is Check that also reports in FlagSet whether flagKey exists
+// on the breaker's Redis ("" reads nothing). 配送が同じ Redis に置く別の印
+// (Ed25519 の degrade) を、判定と同じ 1 往復で読むために使う (#4221)。
+//
+// Redis が読めなければ FlagSet は false になる。
+func (b *Breaker) CheckWithFlag(ctx context.Context, host, job, flagKey string) CheckResult {
 	if b == nil || host == "" {
 		return CheckResult{}
 	}
 	token := b.token()
-	res, err := checkScript.Run(ctx, b.rdb,
-		[]string{breakerKey(host), probeKey(host), throttleKey(host), slotKey(host), reservationKey(host)},
+	keys := []string{breakerKey(host), probeKey(host), throttleKey(host), slotKey(host), reservationKey(host)}
+	if flagKey != "" {
+		keys = append(keys, flagKey)
+	}
+	res, err := checkScript.Run(ctx, b.rdb, keys,
 		b.clock().UnixMilli(), breakerProbeLockTTL.Milliseconds(), token, throttleSpacing.Milliseconds(), job).Int64Slice()
-	if err != nil || len(res) != 3 {
+	if err != nil || len(res) != 4 {
 		return CheckResult{}
 	}
-	r := CheckResult{HasState: res[2] == 1}
+	r := CheckResult{HasState: res[2] == 1, FlagSet: res[3] == 1}
 	ms := time.Duration(res[1]) * time.Millisecond
 	switch res[0] {
 	case checkProbe:

@@ -75,7 +75,9 @@ type DeliveryTelemetry interface {
 // DeliveryBreaker holds deliveries to hosts that are down or asked us to
 // slow down (#3048). 実装は core/deliveryhealth.Breaker。
 type DeliveryBreaker interface {
-	Check(ctx context.Context, host, job string) deliveryhealth.CheckResult
+	// CheckWithFlag also reports whether flagKey exists, in the same round
+	// trip (#4221)。Ed25519 の degrade の印を読むのに使う。
+	CheckWithFlag(ctx context.Context, host, job, flagKey string) deliveryhealth.CheckResult
 	RecordFailure(ctx context.Context, host, probeToken string) (open bool, untilProbe time.Duration)
 	ReleaseProbe(ctx context.Context, host, probeToken string)
 	HoldFor(untilProbe time.Duration) time.Duration
@@ -320,6 +322,9 @@ func isPermanentSigningKeyError(err error) bool {
 // に EX=300 で記録され、以後 5 分間は同 host への配送が即 RSA fallback される
 // (= "assertionMethod を expose しているが Ed25519 verify が壊れている" 実装
 // に対する safety net #1067 / #1071)。
+//
+// ブレーカーを配線したときは、印をブレーカーの Redis で読む (#4221)。
+// SetDeliveryBreaker には同じ Redis のブレーカーを渡すこと。
 func (p *DeliverProcessor) SetRedis(c *redis.Client) {
 	p.redis = c
 }
@@ -623,7 +628,8 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 	// (admin/queue/jobs から読めてしまうため)、PrivPEM の有無では判定できない。
 	// KeyID は DeliverService が「相手が FEP-521a で Ed25519 を expose して
 	// いる」と判断したときだけ詰める、という契約は変わっていない。
-	useEd25519 := (payload.Ed25519KeyID != "" || payload.Ed25519PrivPEM != "") && !p.isEd25519Degraded(host)
+	wantEd25519 := payload.Ed25519KeyID != "" || payload.Ed25519PrivPEM != ""
+	useEd25519 := wantEd25519
 
 	// 落ちている相手 / 間隔を空けるよう言われた相手へは送らず、試行回数を消費せずに
 	// 後へ回す (#3048)。**生成側 (fanout) では止めない** — ブレーカーの開閉は可変な
@@ -632,13 +638,25 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 	// 迂回させても届かない)。
 	a := attempt{ctx: ctx, host: host}
 	if p.breaker != nil && host != "" {
-		r := p.breaker.Check(ctx, host, deliveryJobKey(t.Payload()))
+		// Ed25519 の degrade の印は、ブレーカーの判定と同じ 1 往復で読む (#4221。
+		// 以前は別々に Redis へ聞いていた)。印を書くのは SetRedis の client なので、
+		// **ブレーカーと SetRedis には同じ Redis を渡す** (どちらも Default)。
+		// 分けると、書いた印をここで読めなくなる。
+		// 読めなければ印は無い扱いになり、isEd25519Degraded と同じく Ed25519 を試す。
+		var flagKey string
+		if wantEd25519 {
+			flagKey = ed25519DegradeKey(host)
+		}
+		r := p.breaker.CheckWithFlag(ctx, host, deliveryJobKey(t.Payload()), flagKey)
 		if r.Decision == deliveryhealth.BreakerDelay {
 			slog.Debug("ap deliver: held back (breaker open or rate limited)", "host", host, "wait", r.Delay)
 			return holdOrDrop(payload, fmt.Errorf("ap deliver: %s held back", host), r.Delay)
 		}
 		a.probeToken = r.ProbeToken
 		a.breakerState = r.HasState || r.Decision == deliveryhealth.BreakerProbe
+		useEd25519 = useEd25519 && !r.FlagSet
+	} else if useEd25519 {
+		useEd25519 = !p.isEd25519Degraded(host)
 	}
 
 	// 配送レイテンシの起点 (#2461)。sendOnce の中で Ed25519->RSA の再送が起きた
