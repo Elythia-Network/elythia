@@ -14,6 +14,7 @@ import { nextTick } from 'vue';
 import MkPostForm from '@/components/MkPostForm.vue';
 import { _resetNoteOptionsForTest, launchServerPlugins } from '@/plugin-api.js';
 import { prefer } from '@/preferences.js';
+import { i18n } from '@/i18n.js';
 
 // rememberNoteVisibility を張り替える。プロセス全体で共有されるので、afterEach で戻す。
 const originalRememberNoteVisibility = prefer.s.rememberNoteVisibility;
@@ -36,9 +37,18 @@ const testState = vi.hoisted(() => ({
 	remembered: {} as Record<string, unknown>,
 	// os.popup に渡されたイベント (下書きの一覧の restore を呼ぶため)。
 	popupEvents: null as Record<string, (...args: unknown[]) => unknown> | null,
+	// 端末に保存したアカウントと、アカウントのメニューで選んだときの処理。
+	accounts: [] as { id: string; token: string }[],
+	chooseAccount: null as ((account: { id: string }) => void) | null,
 }));
 
-vi.mock('@/accounts.js', () => ({ getAccounts: async () => [], getAccountMenu: async () => [] }));
+vi.mock('@/accounts.js', () => ({
+	getAccounts: async () => testState.accounts,
+	getAccountMenu: async (opts: { onChoose: (account: { id: string }) => void }) => {
+		testState.chooseAccount = opts.onChoose;
+		return [];
+	},
+}));
 
 vi.mock('@/i.js', async () => {
 	const { reactive } = await import('vue');
@@ -176,6 +186,8 @@ beforeEach(() => {
 	testState.popupEvents = null;
 	testState.storage.clear();
 	testState.remembered = {};
+	testState.accounts = [];
+	testState.chooseAccount = null;
 	setRememberNoteVisibility(false);
 });
 
@@ -332,6 +344,24 @@ describe('MkPostForm remembers plugin note options like the visibility', () => {
 		expect(testState.remembered).toEqual(sent);
 	});
 
+	// 覚える先はログイン中のアカウントの記憶なので、別のアカウントとして投稿した
+	// 指定は覚えない (#4205)。
+	test('posting as another account remembers nothing', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = { targets: { mode: 'exclude', hosts: ['c.example'] } };
+		testState.accounts = [{ id: 'other-account', token: 'other-token' }];
+		const view = await mountWithOption();
+		await fireEvent.click(view.getByTestId('post-form-account'));
+		await flush();
+		expect(testState.chooseAccount).not.toBeNull();
+		testState.chooseAccount!({ id: 'other-account' });
+		await flush();
+		await setOption(view);
+		expect(await submit(view)).toEqual(sent);
+		expect(testState.misskeyApi).toHaveBeenLastCalledWith('notes/create', expect.anything(), 'other-token');
+		expect(testState.remembered).toEqual({ targets: { mode: 'exclude', hosts: ['c.example'] } });
+	});
+
 	test('posting without an option remembers none', async () => {
 		setRememberNoteVisibility(true);
 		testState.remembered = sent;
@@ -406,13 +436,16 @@ describe('MkPostForm remembers plugin note options like the visibility', () => {
 		testState.remembered = sent;
 		const view = await mountWithOption();
 		await runMenuItem(view, 'ti ti-cloud-upload');
+		// 止めた理由が指定によるものかを、知らせの文言で確かめる。
 		expect(testState.alert).toHaveBeenCalledTimes(1);
+		expect(testState.alert).toHaveBeenLastCalledWith(expect.objectContaining({ text: i18n.ts.pluginNoteOptionsCannotBeDrafted }));
 		expect(testState.apiWithDialog).not.toHaveBeenCalled();
 
 		await runMenuItem(view, 'ti ti-calendar-time');
 		await fireEvent.click(view.getByTestId('post-form-submit'));
 		await flush();
 		expect(testState.alert).toHaveBeenCalledTimes(2);
+		expect(testState.alert).toHaveBeenLastCalledWith(expect.objectContaining({ text: i18n.ts.pluginNoteOptionsCannotBeDrafted }));
 		expect(testState.apiWithDialog).not.toHaveBeenCalled();
 		expect(createCalls()).toHaveLength(0);
 	});

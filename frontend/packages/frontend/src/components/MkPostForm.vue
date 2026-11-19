@@ -1206,11 +1206,16 @@ async function post(ev?: PointerEvent) {
 		}
 	}
 
+	// 別のアカウントとして投稿したかは、送る前に控える (送った後で postAccount を空にする)。
+	const postedAsAnotherAccount = token != null;
 	posting.value = true;
 	misskeyApi('notes/create', postData, token).then((res) => {
 		// 公開範囲と同じく、送った指定を次のフォームの初期値に覚える。送信に成功したもの
 		// だけを覚え、指定が無ければ空を覚える (#4205)。
-		if (prefer.s.rememberNoteVisibility) {
+		// **別のアカウントとして投稿したときは覚えない。** 覚える先はログイン中の
+		// アカウントの記憶なので、別のアカウントで付けた指定が、次のフォームで今の
+		// アカウントの初期値に入る。指定は配送先を絞るもので、アカウントごとに違いうる。
+		if (prefer.s.rememberNoteVisibility && !postedAsAnotherAccount) {
 			store.set('pluginNoteOptions', JSON.parse(JSON.stringify(postData.pluginOptions ?? {})) as Record<string, unknown>);
 		}
 		if (props.freezeAfterPosted) {
