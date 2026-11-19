@@ -231,8 +231,15 @@ func (s *DeliverService) DeliverToUserOnce(signerUserID string, recipient *model
 // goneSuspend the instance on a 410 (#1811)。recipient の sharedInbox に一致する
 // inbox も shared 扱いにする。
 func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inboxes []string, recipient *model.User, sharedInboxes map[string]bool, notAfter time.Time, opts ...driver.EnqueueOption) error {
+	_, err := s.deliverUsable(signerUserID, body, inboxes, recipient, sharedInboxes, notAfter, opts...)
+	return err
+}
+
+// deliverUsable is deliverInternal that also returns the inboxes it enqueued
+// to: inboxes without the empty, blocked and duplicate ones (nil on error).
+func (s *DeliverService) deliverUsable(signerUserID string, body []byte, inboxes []string, recipient *model.User, sharedInboxes map[string]bool, notAfter time.Time, opts ...driver.EnqueueOption) ([]string, error) {
 	if len(inboxes) == 0 {
-		return nil
+		return nil, nil
 	}
 	usableInboxes := make([]string, 0, len(inboxes))
 	usableSeen := make(map[string]struct{}, len(inboxes))
@@ -247,7 +254,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		usableInboxes = append(usableInboxes, inbox)
 	}
 	if len(usableInboxes) == 0 {
-		return nil
+		return nil, nil
 	}
 	inboxes = usableInboxes
 	var signer *model.User
@@ -257,7 +264,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		var err error
 		signer, signerNeedsObservation, err = s.preflightSigner(signerUserID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		knownUsers := make(map[string]*model.User, 1)
 		if signer != nil {
@@ -265,7 +272,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		}
 		bodyReferences, err = s.preflightBodyReferences(body, knownUsers)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// Both signer and every local actor/note reference have passed lookup and
 		// availability checks. Only now can an outbound attempt record a first
@@ -273,13 +280,13 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		host := firstDeliveryHost(inboxes, s)
 		if signerNeedsObservation {
 			if err := s.observeExternalReference(signer.ID, host); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		for _, candidate := range bodyReferences {
 			if candidate.observe {
 				if err := s.observeExternalReference(candidate.id, host); err != nil {
-					return err
+					return nil, err
 				}
 			}
 			s.localReferenceCache.rememberUser(candidate.id, s.clock())
@@ -290,13 +297,13 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 		}
 		if needsNoteRecheck {
 			if err := s.confirmOutboundLocalNotes(body); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	keyID, keyPEM, err := s.signerCredentials(signerUserID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Ed25519 sign 経路を試行できるのは recipient が Ed25519 capable
 	// (assertionMethod を持つ) + sender が Ed25519 keypair を持つ両方が
@@ -341,13 +348,16 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			inline.KeyPEM = keyPEM
 			inline.Ed25519PrivPEM = edPrivPEM
 			if err := s.syncDeliverHook(inline); err != nil {
-				return fmt.Errorf("sync deliver to %s: %w", inbox, err)
+				return nil, fmt.Errorf("sync deliver to %s: %w", inbox, err)
 			}
 			continue
 		}
 		payloads = append(payloads, payload)
 	}
-	return s.enqueueDelivers(payloads, opts)
+	if err := s.enqueueDelivers(payloads, opts); err != nil {
+		return nil, err
+	}
+	return inboxes, nil
 }
 
 const (
@@ -761,25 +771,8 @@ func (s *DeliverService) DeliverToFollowers(signerUserID string, body []byte) er
 // (#2567)。同一アクティビティを同一 inbox に重複 POST しないため、先に
 // 別バッチ (DirectRecipe 等) で送った inbox をここで省く用途で使う。
 func (s *DeliverService) DeliverToFollowersExcluding(signerUserID string, body []byte, exclude map[string]bool) error {
-	rows, err := s.followingRepo.ListRemoteFollowerInboxes(signerUserID)
-	if err != nil {
-		return err
-	}
-	inboxes := make([]string, 0, len(rows))
-	var sharedInboxes map[string]bool
-	for _, row := range rows {
-		if exclude[row.Inbox] {
-			continue
-		}
-		inboxes = append(inboxes, row.Inbox)
-		if row.Shared {
-			if sharedInboxes == nil {
-				sharedInboxes = make(map[string]bool)
-			}
-			sharedInboxes[row.Inbox] = true
-		}
-	}
-	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
+	_, err := s.deliverToFollowers(signerUserID, body, exclude, nil)
+	return err
 }
 
 // DeliverToFollowersAllowed is DeliverToFollowersExcluding limited to the
@@ -794,27 +787,76 @@ func (s *DeliverService) DeliverToFollowersExcluding(signerUserID string, body [
 // shared inbox を許すホストと許さないホストの利用者が共有しているときは送る
 // (同じサーバーなので、送らなければ許したホストにも届かない)。
 func (s *DeliverService) DeliverToFollowersAllowed(signerUserID string, body []byte, exclude map[string]bool, allow func(host string) bool) error {
-	rows, err := s.followingRepo.ListRemoteFollowerInboxHosts(signerUserID)
-	if err != nil {
-		return err
+	_, err := s.deliverToFollowers(signerUserID, body, exclude, allow)
+	return err
+}
+
+// DeliverToFollowersCollect is DeliverToFollowersAllowed (allow == nil means
+// every follower) that also returns the inboxes it enqueued to, so a caller
+// can skip 1:1 deliveries those inboxes already cover (#4223). On error the
+// set is nil.
+func (s *DeliverService) DeliverToFollowersCollect(signerUserID string, body []byte, allow func(host string) bool) (map[string]bool, error) {
+	return s.deliverToFollowers(signerUserID, body, nil, allow)
+}
+
+// deliverToFollowers enqueues delivery to signerUserID's remote followers,
+// skipping inboxes in exclude and, when allow is non-nil, followers whose
+// host allow rejects. Returns the inboxes enqueued to (blocked ones left out).
+func (s *DeliverService) deliverToFollowers(signerUserID string, body []byte, exclude map[string]bool, allow func(host string) bool) (map[string]bool, error) {
+	var rows []model.RemoteInbox
+	if allow == nil {
+		var err error
+		rows, err = s.followingRepo.ListRemoteFollowerInboxes(signerUserID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		hostRows, err := s.followingRepo.ListRemoteFollowerInboxHosts(signerUserID)
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]model.RemoteInbox, 0, len(hostRows))
+		for _, row := range hostRows {
+			if allow(row.Host) {
+				rows = append(rows, row.RemoteInbox)
+			}
+		}
 	}
 	inboxes := make([]string, 0, len(rows))
 	seen := make(map[string]bool, len(rows))
 	var sharedInboxes map[string]bool
 	for _, row := range rows {
-		if exclude[row.Inbox] || seen[row.Inbox] || !allow(row.Host) {
+		if exclude[row.Inbox] {
 			continue
 		}
-		seen[row.Inbox] = true
-		inboxes = append(inboxes, row.Inbox)
+		// shared の印は、同じ URL の行のどれか 1 つが shared なら付ける。行の順で
+		// 決めると、ある利用者の sharedInbox と別の利用者の個別 inbox が同じ URL の
+		// とき、410 をホスト単位の判定 (#1811) へ回せないことがある。
 		if row.Shared {
 			if sharedInboxes == nil {
 				sharedInboxes = make(map[string]bool)
 			}
 			sharedInboxes[row.Inbox] = true
 		}
+		if seen[row.Inbox] {
+			continue
+		}
+		seen[row.Inbox] = true
+		inboxes = append(inboxes, row.Inbox)
 	}
-	return s.deliverInternal(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
+	// 返すのは実際に積んだ inbox だけ。除いた inbox (空、ブロックや許可リストの
+	// 外) まで返すと、1:1 の配送を省いた相手がどこからも受け取らないことがある。
+	// 判定は積むときの 1 回だけにする (もう一度判定すると、間に設定が変わったとき
+	// 積まなかった inbox が入る)。
+	usable, err := s.deliverUsable(signerUserID, body, inboxes, nil, sharedInboxes, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	enqueued := make(map[string]bool, len(usable))
+	for _, inbox := range usable {
+		enqueued[inbox] = true
+	}
+	return enqueued, nil
 }
 
 // DeliverToInboxes enqueues delivery to an explicit set of remote inboxes,
@@ -935,6 +977,13 @@ func fanoutInbox(u *model.User) string {
 //
 // 個別 inbox を持たない行だけ sharedInbox へ倒す。upstream はその場合
 // 配送を skip するが、送れるなら送る方が利用者の意図に近い。
+//
+// ただし、ノートの作成と SendNoteUpdate の Update (引用の承認を付けたものと
+// 外したもの) では、相手の sharedInbox へフォロワーとして既に積んでいれば、
+// 1:1 では送らない (#4223、本家と同じ)。上の
+// 「shared inbox で非公開 activity を扱わない実装」の相手には、フォロワー限定や
+// ホームのノートが、フォローしていないメンション先へ届かないことがある。本家と
+// 同じ振る舞いなので受け入れる。
 func preferredInbox(u *model.User) string {
 	if u.Inbox != nil && *u.Inbox != "" {
 		return *u.Inbox

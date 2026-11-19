@@ -156,7 +156,7 @@ func (h *PollDeliveryHook) OnLocalPollUpdated(target *model.Note) {
 		}
 		return
 	}
-	if err := deliverToFollowersByRule(h.deliver, target.UserID, body, rule); err != nil {
+	if _, err := deliverToFollowersByRule(h.deliver, target.UserID, body, rule); err != nil {
 		slog.Warn("poll delivery: enqueue question update failed",
 			"noteId", target.ID, "err", err)
 	}
