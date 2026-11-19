@@ -62,6 +62,12 @@ type ed25519SignerEntry struct {
 	fetchedAt time.Time
 }
 
+// rsaSignerEntry is a local signer's RSA keypair, cached only once found.
+type rsaSignerEntry struct {
+	privPEM   string
+	fetchedAt time.Time
+}
+
 // DeliverService computes recipient inboxes and enqueues HTTP-signed delivery
 // jobs onto the deliver queue.
 //
@@ -101,8 +107,16 @@ type DeliverService struct {
 	// に対する DB lookup を 1 回に集約。resolver の resolveActorGroup と同 pattern。
 	capGroup    singleflight.Group
 	signerGroup singleflight.Group
+	// rsaSignerCache は署名者の RSA 鍵 (#4221)。activity ごとに鍵の有無を DB へ
+	// 聞いていた。見つかったものだけを持つ。queue の経路は値を使わず (worker が
+	// SignerUserID から引き直す)、有無の確認にだけ使う。連合を Off から On に戻すと
+	// 鍵は作り直されるが、Off の間の配送は preflightSigner が先に止める。
+	// rsaSignerGroup は signerGroup と分ける。同じ group で鍵を取り違えると、
+	// 戻り値の型が合わずに panic する。
+	rsaSignerCache sync.Map // string (userID) -> rsaSignerEntry
+	rsaSignerGroup singleflight.Group
 	// cacheMu / cacheGen は DropLocal (#3732) のための世代。DropLocal は番号を進めてから
-	// 2 つの cache を消し、読み込みの結果は読む前に控えた番号と一致するときだけ積む。
+	// cache を消し、読み込みの結果は読む前に控えた番号と一致するときだけ積む。
 	// singleflight の鍵にも番号を含め、捨てた後の呼び出しが捨てる前に始まった
 	// 読み込みに相乗りしないようにする。
 	cacheMu  sync.Mutex
@@ -684,7 +698,7 @@ func (s *DeliverService) signerEd25519Credentials(userID string) (string, string
 }
 
 // DropLocal drops the cached Ed25519 capabilities of recipients and the
-// cached Ed25519 keys of local signers in this process (#3732). It is what the
+// cached Ed25519 and RSA keys of local signers in this process (#3732). It is what the
 // cache list of internal/server calls (docs/architecture.md 4.4). It tells no
 // other process.
 func (s *DeliverService) DropLocal() {
@@ -693,6 +707,7 @@ func (s *DeliverService) DropLocal() {
 	s.cacheGen++
 	s.capCache.Clear()
 	s.signerCache.Clear()
+	s.rsaSignerCache.Clear()
 }
 
 func (s *DeliverService) cacheGeneration() uint64 {
@@ -854,7 +869,25 @@ func (s *DeliverService) signerCredentials(userID string) (string, string, error
 	if !user.IsLocal() {
 		return "", "", ErrNoLocalSigner
 	}
-	kp, err := s.keypairRepo.FindByUserID(userID)
+	keyID := s.urls.UserKeyURI(userID)
+	if cached, ok := s.rsaSignerCache.Load(userID); ok {
+		entry := cached.(rsaSignerEntry)
+		if s.clock().Sub(entry.fetchedAt) <= ed25519CacheTTL {
+			return keyID, entry.privPEM, nil
+		}
+	}
+	gen := s.cacheGeneration()
+	val, err, _ := s.rsaSignerGroup.Do(flightKey(userID, gen), func() (any, error) {
+		kp, err := s.keypairRepo.FindByUserID(userID)
+		if err != nil {
+			return nil, err
+		}
+		// 無いときと読めなかったときは持たない。鍵を作った直後や DB が戻った
+		// 直後に、TTL の間だけ配送が止まらないようにする。
+		entry := rsaSignerEntry{privPEM: kp.PrivateKey, fetchedAt: s.clock()}
+		s.storeIfCurrent(gen, func() { s.rsaSignerCache.Store(userID, entry) })
+		return entry, nil
+	})
 	if err != nil {
 		// **DB 障害を「鍵が無い」にしない** (#2799)。この経路は enqueue の
 		// 前 (producer 側) なので job のリトライ判定は変わらないが、呼び出し元は
@@ -865,8 +898,7 @@ func (s *DeliverService) signerCredentials(userID string) (string, string, error
 		}
 		return "", "", ErrSignerKeyMissing
 	}
-	keyID := s.urls.UserKeyURI(userID)
-	return keyID, kp.PrivateKey, nil
+	return keyID, val.(rsaSignerEntry).privPEM, nil
 }
 
 // fanoutInbox returns the inbox URL that the FOLLOWER fan-out would use for u.
