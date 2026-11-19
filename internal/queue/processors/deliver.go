@@ -40,7 +40,8 @@ const (
 // HTTPSigner abstracts the signed POST capability of activitypub.Client so
 // that DeliverProcessor can be unit-tested without an actual HTTP client.
 type HTTPSigner interface {
-	PostSigned(url string, body []byte, key *activitypub.PrivateKey) (*http.Response, error)
+	// PostSignedDigest sends body with digest as its Digest header value.
+	PostSignedDigest(url string, body []byte, digest string, key *activitypub.PrivateKey) (*http.Response, error)
 }
 
 // ResponseHook is invoked after each HTTP attempt so the instance metadata
@@ -647,7 +648,7 @@ func (p *DeliverProcessor) Handle(ctx context.Context, t driver.Task) error {
 		if wantEd25519 {
 			flagKey = ed25519DegradeKey(host)
 		}
-		r := p.breaker.CheckWithFlag(ctx, host, deliveryJobKey(t.Payload()), flagKey)
+		r := p.breaker.CheckWithFlag(ctx, host, deliveryJobKey(payload, t.Payload()), flagKey)
 		if r.Decision == deliveryhealth.BreakerDelay {
 			slog.Debug("ap deliver: held back (breaker open or rate limited)", "host", host, "wait", r.Delay)
 			return holdOrDrop(payload, fmt.Errorf("ap deliver: %s held back", host), r.Delay)
@@ -788,7 +789,7 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 	if useEd25519 {
 		key, err := p.resolveSigningKey(keyKindEd25519, payload)
 		if err == nil {
-			resp, perr := p.signer.PostSigned(payload.Inbox, payload.Body, key)
+			resp, perr := p.signer.PostSignedDigest(payload.Inbox, payload.Body, bodyDigest(payload), key)
 			if perr != nil {
 				slog.Warn("ap deliver: ed25519 post failed",
 					"inbox", payload.Inbox, "err", perr)
@@ -814,7 +815,7 @@ func (p *DeliverProcessor) sendOnce(payload queue.DeliverPayload, useEd25519 boo
 		}
 		return nil, false, fmt.Errorf("load private key: %w: %w", err, errLocalSend)
 	}
-	resp, perr := p.signer.PostSigned(payload.Inbox, payload.Body, key)
+	resp, perr := p.signer.PostSignedDigest(payload.Inbox, payload.Body, bodyDigest(payload), key)
 	if perr != nil {
 		slog.Warn("ap deliver: post failed",
 			"inbox", payload.Inbox, "err", perr)
@@ -849,15 +850,43 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 	return 0
 }
 
+// bodyDigest returns the Digest header value of the payload's body: the one
+// computed when it was enqueued, or computed here for a job enqueued before
+// #4221.
+func bodyDigest(p queue.DeliverPayload) string {
+	if p.Digest != "" {
+		return p.Digest
+	}
+	return activitypub.SHA256Digest(p.Body)
+}
+
 // deliveryJobKey identifies a delivery across wake-ups so that a job held by
 // a 429 keeps its reserved send time.
 //
 // ジョブの ID は driver.Task に載っていないので payload から作る。同じ payload の
 // ジョブが 2 つあると予約を共有するが、先に起きた方が予約を消し、後の方は
 // 止めていなければそのまま送る (止めていれば並び直す) だけで、取りこぼしは無い。
-func deliveryJobKey(payload []byte) string {
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:16])
+//
+// **本文はハッシュし直さない** (#4221)。Digest があれば、本文の代わりにそれと
+// 本文以外の項目から作る。本文ごとハッシュすると、本文の SHA-256 を Digest と
+// 合わせて 2 回計算することになる。Digest の無い job (それより前に積まれたもの)
+// は、今までどおり payload 全体から作る。新旧の worker が混ざっている間は、
+// 同じ job でも版によって鍵が変わる。予約が見つからなかった側は列の最後尾に
+// 並び直すだけで、送り損ねはしない。
+//
+// payload に項目を足したら、ここに入れるか、入れない理由を
+// TestDeliverProcessor_JobKeyCoversEveryField の除外に書く。
+func deliveryJobKey(p queue.DeliverPayload, raw []byte) string {
+	if p.Digest == "" {
+		sum := sha256.Sum256(raw)
+		return hex.EncodeToString(sum[:16])
+	}
+	h := sha256.New()
+	for _, f := range []string{p.Inbox, p.Digest, p.SignerUserID, p.KeyID, p.Ed25519KeyID, strconv.FormatInt(p.NotAfter, 10), strconv.FormatBool(p.IsSharedInbox)} {
+		_, _ = h.Write([]byte(f))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 // expired reports whether a delivery with a deadline is past it (#3238).

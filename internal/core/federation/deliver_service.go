@@ -308,6 +308,8 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 	}
 	// inboxes は冒頭で空・重複・ブロックを除いてある (#4221。以前はここでもう
 	// 一度ブロックを照合していた)。
+	// 本文の Digest は activity ごとに 1 回だけ計算し、job に持たせる (#4221)。
+	digest := activitypub.SHA256Digest(body)
 	payloads := make([]queue.DeliverPayload, 0, len(inboxes))
 	for _, inbox := range inboxes {
 		isShared := sharedInboxes[inbox] ||
@@ -326,6 +328,7 @@ func (s *DeliverService) deliverInternal(signerUserID string, body []byte, inbox
 			Ed25519KeyID:  edKeyID,
 			IsSharedInbox: isShared,
 			SignerUserID:  signerUserID,
+			Digest:        digest,
 		}
 		if !notAfter.IsZero() {
 			payload.NotAfter = notAfter.UnixMilli()

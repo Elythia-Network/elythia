@@ -274,6 +274,11 @@ type DeliverPayload struct {
 	// 変わった後に届いてしまうもの (引用の承認の QuoteRequest) に付ける。期限付きの
 	// job は、ブレーカーや流量の制限で後へ回す代わりに捨てる。
 	NotAfter int64 `json:"notAfter,omitempty"`
+	// Digest is the HTTP Digest header value of Body ("SHA-256=<base64>"),
+	// computed once per activity when it is enqueued (#4221). 配送先が何千あっても
+	// 本文のハッシュは 1 回で済む。空 (それより前に積まれた job) なら worker が
+	// 計算する。
+	Digest string `json:"digest,omitempty"`
 }
 
 // NewDeliverTask serializes the payload into a driver.Task ready to

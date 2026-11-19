@@ -76,7 +76,7 @@ func TestInstanceSuspension_ReachesOtherProcess(t *testing.T) {
 // countingSigner counts the deliveries that reached the HTTP layer.
 type countingSigner struct{ posts atomic.Int32 }
 
-func (s *countingSigner) PostSigned(string, []byte, *activitypub.PrivateKey) (*http.Response, error) {
+func (s *countingSigner) PostSignedDigest(string, []byte, string, *activitypub.PrivateKey) (*http.Response, error) {
 	s.posts.Add(1)
 	return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(""))}, nil
 }

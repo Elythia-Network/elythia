@@ -346,7 +346,7 @@ type sequenceSigner struct {
 	steps []signerStep
 }
 
-func (s *sequenceSigner) PostSigned(string, []byte, *activitypub.PrivateKey) (*http.Response, error) {
+func (s *sequenceSigner) PostSignedDigest(string, []byte, string, *activitypub.PrivateKey) (*http.Response, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.steps[0]

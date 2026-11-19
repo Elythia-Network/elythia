@@ -92,11 +92,19 @@ func TestNewDeliverTask_RoundTrip(t *testing.T) {
 		Body:   []byte(`{"type":"Create"}`),
 		KeyID:  "https://example.com/users/u1#main-key",
 		KeyPEM: "PEMDATA",
+		Digest: "SHA-256=digest",
 	}
 	task := queue.NewDeliverTask(payload)
 	assert.Equal(t, queue.TaskTypeDeliver, task.Type())
 
 	decoded, err := queue.DecodeDeliverPayload(task.Payload())
+	require.NoError(t, err)
+	assert.Equal(t, payload, decoded)
+
+	// #3614 の形でも Digest が残る (#4221)。
+	compact, err := payload.MarshalCompactJSON()
+	require.NoError(t, err)
+	decoded, err = queue.DecodeDeliverPayload(compact)
 	require.NoError(t, err)
 	assert.Equal(t, payload, decoded)
 }

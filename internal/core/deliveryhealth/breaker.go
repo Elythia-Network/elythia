@@ -237,7 +237,7 @@ return {0, 0, hasState, flag}
 `)
 
 // Check decides whether a delivery to host may go now. job identifies the
-// delivery across wake-ups (the processor passes a hash of the payload), so
+// delivery across wake-ups (the processor passes a hash of the payload fields), so
 // a job held by a 429 keeps its reserved send time; "" reserves anew each time.
 //
 // **Redis が読めなければ通す。** 観測のための仕組みが配送を止める側に倒れると、

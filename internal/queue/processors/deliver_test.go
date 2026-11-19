@@ -24,16 +24,18 @@ import (
 
 // stubSigner records the call and returns a canned response or error.
 type stubSigner struct {
-	resp     *http.Response
-	err      error
-	gotURL   string
-	gotBody  []byte
-	gotKeyID string
+	resp      *http.Response
+	err       error
+	gotURL    string
+	gotBody   []byte
+	gotDigest string
+	gotKeyID  string
 }
 
-func (s *stubSigner) PostSigned(url string, body []byte, key *activitypub.PrivateKey) (*http.Response, error) {
+func (s *stubSigner) PostSignedDigest(url string, body []byte, digest string, key *activitypub.PrivateKey) (*http.Response, error) {
 	s.gotURL = url
 	s.gotBody = body
+	s.gotDigest = digest
 	if key != nil {
 		s.gotKeyID = key.KeyID
 	}
@@ -168,7 +170,7 @@ type recordingSigner struct {
 	calls     []string // recorded KeyID for each call
 }
 
-func (r *recordingSigner) PostSigned(_ string, _ []byte, key *activitypub.PrivateKey) (*http.Response, error) {
+func (r *recordingSigner) PostSignedDigest(_ string, _ []byte, _ string, key *activitypub.PrivateKey) (*http.Response, error) {
 	if key != nil {
 		r.calls = append(r.calls, key.KeyID)
 	}
@@ -536,7 +538,7 @@ type keyCapturingSigner struct {
 	keys []*activitypub.PrivateKey
 }
 
-func (s *keyCapturingSigner) PostSigned(_ string, _ []byte, key *activitypub.PrivateKey) (*http.Response, error) {
+func (s *keyCapturingSigner) PostSignedDigest(_ string, _ []byte, _ string, key *activitypub.PrivateKey) (*http.Response, error) {
 	s.keys = append(s.keys, key)
 	return s.resp, nil
 }
