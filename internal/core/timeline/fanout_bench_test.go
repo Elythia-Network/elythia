@@ -31,7 +31,10 @@ func (c *roundTripCounter) ProcessHook(next redis.ProcessHook) redis.ProcessHook
 
 func (c *roundTripCounter) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
-		c.n++
+		// 新しい接続の初期化 (go-redis v9.23 から pipeline の hook を通る) は数えない。
+		if !isConnSetup(cmds) {
+			c.n++
+		}
 		return next(ctx, cmds)
 	}
 }

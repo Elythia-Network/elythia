@@ -1456,7 +1456,10 @@ func TestFanoutHook_OnNoteDeleted_FollowersListError(t *testing.T) {
 }
 
 // pipelineSizes records the number of commands of every pipeline its client
-// runs.
+// runs, except the ones go-redis sends to set up a new connection.
+//
+// go-redis v9.23 から、pipeline は別の接続のプールを使い、新しい接続を作ると
+// 初期化の CLIENT SETINFO を pipeline で流す。それもこの hook を通るので数えない。
 type pipelineSizes struct {
 	mu    sync.Mutex
 	sizes []int
@@ -1468,11 +1471,25 @@ func (p *pipelineSizes) ProcessHook(next redis.ProcessHook) redis.ProcessHook { 
 
 func (p *pipelineSizes) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
-		p.mu.Lock()
-		p.sizes = append(p.sizes, len(cmds))
-		p.mu.Unlock()
+		if !isConnSetup(cmds) {
+			p.mu.Lock()
+			p.sizes = append(p.sizes, len(cmds))
+			p.mu.Unlock()
+		}
 		return next(ctx, cmds)
 	}
+}
+
+// isConnSetup reports whether cmds is go-redis setting up a new connection.
+func isConnSetup(cmds []redis.Cmder) bool {
+	for _, c := range cmds {
+		switch c.Name() {
+		case "hello", "client", "select", "auth", "readonly":
+		default:
+			return false
+		}
+	}
+	return len(cmds) > 0
 }
 
 // 区切り (followerHomeRemoveChunk) をまたぐ人数でも、全員のホームから消え、1 つの
