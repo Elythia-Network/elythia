@@ -47,7 +47,41 @@ type NoteDeliveryHook struct {
 
 // ruleFor returns the delivery rule of a local note.
 func (h *NoteDeliveryHook) ruleFor(note *model.Note) notedelivery.Rule {
-	return h.rules.Rule(context.Background(), note.ID)
+	return liveNoteRule(h.rules, h.noteRepo, note.ID)
+}
+
+// existingNoteChecker reads which notes still exist, on the primary.
+type existingNoteChecker interface {
+	ExistingNoteIDsOnPrimary(ids []string) ([]string, error)
+}
+
+// liveNoteRule returns the delivery rule of a local note, or
+// [notedelivery.DenyAll] once the note is gone.
+//
+// **条件を読んだ後に、ノートがまだあるかをprimaryで確かめる (#4202)。** ノートの
+// 削除は、ノートの行を消した後に、プラグインが書いた条件の行を裏で片付ける
+// (退会のジョブも、ノートを消した後に片付ける)。配送が枠を待つ間に削除と
+// 片付けが先に済むと、条件の行が無いノートは絞らないと読まれ、外したサーバーの
+// フォロワーにも届く。片付けはノートを消した後なので、条件を読んだ時点で
+// 片付けが済んでいれば、続けて確かめるときにはノートも無い。
+//
+// 絞っている条件のときと、プラグインの無いサーバーでは確かめない。前者は読んだ
+// 条件で足り、後者は片付ける行がそもそも無い。確かめられなければ配らない。
+func liveNoteRule(rules *notedelivery.Registry, notes existingNoteChecker, noteID string) notedelivery.Rule {
+	rule := rules.Rule(context.Background(), noteID)
+	if rule.Restricted() || rules.Empty() {
+		return rule
+	}
+	found, err := notes.ExistingNoteIDsOnPrimary([]string{noteID})
+	if err != nil {
+		slog.Warn("note delivery: checking that the note still exists failed; not federating it",
+			"noteId", noteID, "err", err)
+		return notedelivery.DenyAll
+	}
+	if len(found) == 0 {
+		return notedelivery.DenyAll
+	}
+	return rule
 }
 
 // hostOf returns a remote user's host, or "" for a local user.

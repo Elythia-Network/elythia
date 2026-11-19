@@ -59,12 +59,13 @@ func newHookSetup(t *testing.T) (*PollDeliveryHook, *recordingEnqueuer, *testuti
 // seed remote followers and assert that they are NOT used as the recipient set.
 func newHookSetupWithFollowing(t *testing.T) (*PollDeliveryHook, *recordingEnqueuer, *testutil.MockUserRepository, *testutil.MockUserKeypairRepository, *testutil.MockFollowingRepository, id.Generator) {
 	t.Helper()
-	return newHookSetupWithRules(t, nil)
+	return newHookSetupWithRules(t, nil, testutil.NewMockNoteRepository())
 }
 
 // newHookSetupWithRules is newHookSetupWithFollowing with the plugins that
-// narrow where local notes federate (#4199) handed to the constructor.
-func newHookSetupWithRules(t *testing.T, rules *notedelivery.Registry) (*PollDeliveryHook, *recordingEnqueuer, *testutil.MockUserRepository, *testutil.MockUserKeypairRepository, *testutil.MockFollowingRepository, id.Generator) {
+// narrow where local notes federate (#4199) and the notes that exist (#4202)
+// handed to the constructor.
+func newHookSetupWithRules(t *testing.T, rules *notedelivery.Registry, notes *testutil.MockNoteRepository) (*PollDeliveryHook, *recordingEnqueuer, *testutil.MockUserRepository, *testutil.MockUserKeypairRepository, *testutil.MockFollowingRepository, id.Generator) {
 	t.Helper()
 	idGen, err := id.NewGenerator("aidx")
 	require.NoError(t, err)
@@ -75,7 +76,7 @@ func newHookSetupWithRules(t *testing.T, rules *notedelivery.Registry) (*PollDel
 	keypairRepo := testutil.NewMockUserKeypairRepository()
 	followingRepo := testutil.NewMockFollowingRepository()
 	deliver := NewDeliverService(enq, userRepo, followingRepo, keypairRepo, urls, nil)
-	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen, rules)
+	hook := NewPollDeliveryHook(renderer, deliver, userRepo, urls, idGen, rules, notes)
 	return hook, enq, userRepo, keypairRepo, followingRepo, idGen
 }
 
