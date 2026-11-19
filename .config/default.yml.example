@@ -165,22 +165,28 @@ port: 3000
 # line as-is would quadruple it.
 #mediaProxyConcurrency: 4
 
-# Floor for how long an idle queue worker waits on the marker key before
-# re-checking, in seconds (default: mkq's own).
+# How long an idle queue worker waits on the marker key before re-checking,
+# in seconds (default: 120).
 #
-# Since mkq v1.0.4 the wait doubles on every empty poll and is capped at 30s,
-# snapping back to this floor as soon as a job is processed. So this is the
-# *first* wait, not a fixed period — idle chatter decays on its own and there
-# is normally no reason to set this at all.
+# At 30 or more the worker waits this long every time. Below 30 it is the
+# *first* wait: since mkq v1.0.4 the wait doubles on every empty poll and is
+# capped at 30s, snapping back as soon as a job is processed; set 1 for idle
+# polling close to mkq's own (recovery after a Redis outage stays as with 120). The default 120 cuts the idle workers' BZPOPMIN
+# to about a third of the 30s cap (measured with the queue bench: 106.6 ->
+# 36.8 per minute; all Redis commands 1370.8 -> 823.2 per minute).
 #
 # Workers wake within milliseconds of a job landing (the Lua scripts push to a
 # marker key that the worker blocks on), so raising this does NOT delay job
-# pickup — measured 18.9ms pickup even with a 30s interval. It only bounds how
-# long it takes to notice a *missed* marker push.
+# pickup — measured 18.9ms pickup even with a 30s interval. Shutdown is not
+# affected either: Stop pokes the marker key to wake blocked workers, so
+# stopping takes single-digit milliseconds at any interval.
 #
-# Shutdown is not affected either: Stop pokes the marker key to wake blocked
-# workers, so stopping takes single-digit milliseconds at any interval.
-#queueIdlePollSeconds: 5
+# It lengthens two things: (1) noticing a *missed* marker push (e.g. a
+# failover); (2) resuming after a Redis outage. Since mkq v1.5.2 the sleep
+# after a failed dequeue starts at 1s (mkq's own default starts at 100ms) and
+# caps at 5s, so workers resume within about 5s of Redis coming back
+# (measured 0.1s -> 3.28s; 115s with 120 on mkq older than v1.5.2).
+#queueIdlePollSeconds: 120
 
 # How long one job's handler may run before its worker stops counting towards
 # the queue's worker budget and gets replaced.

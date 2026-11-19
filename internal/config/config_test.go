@@ -497,10 +497,44 @@ redis:
 	assert.Equal(t, 3, cfg.MediaProxyConcurrency)
 }
 
+// queueIdlePollSeconds は未設定・0 以下なら 120 秒 (#4215)。mkq の既定 (30 秒で
+// 頭打ち) のままだと、待機中の worker が Redis へ往復する回数が約 3 倍になる。
+func TestLoad_QueueIdlePollSecondsDefault(t *testing.T) {
+	base := `
+url: https://example.com
+port: 3000
+db:
+  host: localhost
+  port: 5432
+  db: misskey
+  user: postgres
+  pass: secret
+redis:
+  host: localhost
+  port: 6379
+`
+	for name, tc := range map[string]struct {
+		line string
+		want int
+	}{
+		"unset uses the default":         {"", 120},
+		"zero uses the default":          {"queueIdlePollSeconds: 0", 120},
+		"negative uses the default":      {"queueIdlePollSeconds: -1", 120},
+		"a positive value is kept as is": {"queueIdlePollSeconds: 30", 30},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeTestConfig(t, base+tc.line+"\n")
+			cfg, err := Load(path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.QueueIdlePollSeconds)
+		})
+	}
+}
+
 // queueStuckWorkerSeconds は 0 = キューごとの既定、負値 = 機能ごと無効。
 //
-// **負値を素通しさせる。** 隣の noteHookConcurrency / queueIdlePollSeconds は
-// 負値を 0 に落とすが、こちらは負値が「無効化」という別の意味を持つ。0 に
+// **負値を素通しさせる。** 隣の noteHookConcurrency は負値を 0 に、
+// queueIdlePollSeconds は既定に落とすが、こちらは負値が「無効化」という別の意味を持つ。0 に
 // 落とすと「既定に従う」に化けて、operator が止めたはずの機構が動き続ける
 // (#2657 の逃げ道が塞がる)。
 func TestLoad_QueueStuckWorkerSeconds(t *testing.T) {
