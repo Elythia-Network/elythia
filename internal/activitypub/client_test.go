@@ -35,6 +35,36 @@ func TestClient_PostSigned(t *testing.T) {
 	assert.NotEmpty(t, seenSig)
 }
 
+// TestClient_PostSignedDigest pins #4221: the digest passed in is the Digest
+// header sent and signed, as is.
+func TestClient_PostSignedDigest(t *testing.T) {
+	key, pub := newTestKey(t)
+	body := []byte(`{"type":"Create"}`)
+
+	var seenDigest string
+	verified := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenDigest = r.Header.Get("Digest")
+		r.Header.Set("Host", r.Host)
+		verified = VerifyRequest(r, pub) == nil
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(nil, "mk-go-test")
+	resp, err := c.PostSignedDigest(srv.URL+"/inbox", body, SHA256Digest(body), key)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, SHA256Digest(body), seenDigest)
+	assert.True(t, verified)
+
+	// 渡した値を計算し直さずに使う (合っていなければ相手が拒む)。
+	resp, err = c.PostSignedDigest(srv.URL+"/inbox", body, "SHA-256=given", key)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, "SHA-256=given", seenDigest)
+}
+
 func TestClient_PostSigned_BadURL(t *testing.T) {
 	key, _ := newTestKey(t)
 	c := NewClient(nil, "")

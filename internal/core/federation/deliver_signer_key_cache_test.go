@@ -99,3 +99,17 @@ func TestDeliverActivity_SignerKeyMissIsNotCached(t *testing.T) {
 	assert.Equal(t, int32(3), kp.finds.Load())
 	assert.Equal(t, []string{"PEM-1"}, *keys)
 }
+
+// TestDeliverActivity_JobsCarryBodyDigest pins #4221: every job of one
+// activity carries the Digest of its body, so the worker does not hash it.
+func TestDeliverActivity_JobsCarryBodyDigest(t *testing.T) {
+	svc, enq, userRepo, _, keypairRepo := newDeliverService(t)
+	installLocalSigner(t, userRepo, keypairRepo)
+	body := []byte(`{"type":"Create","id":"https://example.com/notes/1"}`)
+
+	require.NoError(t, svc.DeliverActivity("alice", body, []string{"https://a.example/inbox", "https://b.example/inbox"}))
+	require.Len(t, enq.calls, 2)
+	for _, p := range enq.calls {
+		assert.Equal(t, activitypub.SHA256Digest(body), p.Digest, p.Inbox)
+	}
+}

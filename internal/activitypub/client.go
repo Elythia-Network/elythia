@@ -80,6 +80,14 @@ func NewClient(httpClient *http.Client, userAgent string) *Client {
 // PostSigned sends a signed POST containing body to url, signed with key.
 // 戻り値は呼び出し側で Body.Close() すること。
 func (c *Client) PostSigned(url string, body []byte, key *PrivateKey) (*http.Response, error) {
+	return c.PostSignedDigest(url, body, SHA256Digest(body), key)
+}
+
+// PostSignedDigest is PostSigned with the Digest header value of body
+// already computed (SHA256Digest(body)). 同じ本文を多くの相手へ送る配送が、
+// 本文のハッシュを 1 回だけ計算するために使う (#4221)。digest が本文と
+// 合っていないと、相手は署名を拒む。
+func (c *Client) PostSignedDigest(url string, body []byte, digest string, key *PrivateKey) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -88,7 +96,6 @@ func (c *Client) PostSigned(url string, body []byte, key *PrivateKey) (*http.Res
 	if c.userAgent != "" {
 		req.Header.Set("User-Agent", c.userAgent)
 	}
-	digest := SHA256Digest(body)
 	if err := SignRequest(req, key, digest, []string{"(request-target)", "date", "host", "digest"}); err != nil {
 		return nil, err
 	}
