@@ -522,6 +522,27 @@ func corsRestrictedPath(p string) bool {
 	return false
 }
 
+// recoverMiddleware returns the global middleware that turns a panic in a
+// handler into a 500 and logs it with the stack.
+//
+// **ログは slog に出す (#4236)。** echo の Recover は既定で echo の logger に
+// 書くが、echo の v5 の Recover はログを書かずにエラーを返すだけになる。今の
+// うちに自分で書く形にしておき、v5 へ上げても panic の記録が消えないようにする。
+// 応答は今までどおり echo のエラーハンドラが書く (LogErrorFunc が err を返すので)。
+// v5 の Recover には LogErrorFunc が無いので、上げるときは Recover の返すエラー
+// から errors.As で *PanicStackError を取り出し、その Stack と元の Err をここで
+// slog に書いてから返す形に書き直す (PanicStackError の Error() は stack を含む
+// ので、そのまま err に渡すと stack が二重に出る)。
+func recoverMiddleware() echo.MiddlewareFunc {
+	cfg := echomw.DefaultRecoverConfig
+	cfg.LogErrorFunc = func(c echo.Context, err error, stack []byte) error {
+		slog.Error("panic recovered in a handler",
+			"method", c.Request().Method, "route", c.Path(), "err", err, "stack", string(stack))
+		return err
+	}
+	return echomw.RecoverWithConfig(cfg)
+}
+
 // corsMiddleware returns the global CORS middleware.
 // Shared with cors_test.go so production and tests stay in sync.
 func corsMiddleware() echo.MiddlewareFunc {
@@ -788,7 +809,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	warnTrustProxyWithoutLocalRanges(trustedNets, cfg.Socket)
 
 	// Global middleware
-	e.Use(echomw.Recover())
+	e.Use(recoverMiddleware())
 	// Echo は Content-Type の charset を `UTF-8` (大文字) で出すが、本家
 	// (Fastify) は `utf-8` (小文字) を返す。HTTP 的には case-insensitive でも、
 	// 完全一致で分岐するクライアントが実在する (本家 e2e の simpleGet は
