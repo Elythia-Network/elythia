@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/federation"
 	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
@@ -286,8 +287,7 @@ func (h *Handler) Inbox(c echo.Context) error {
 		// 返す。ContentLength での即時 reject は handler に到達しないが、chunked 超過は
 		// ここで read error になるため echo.HTTPError を伝播して upstream fastify と同じ
 		// 413 を返す (それ以外の read error は従来通り 400)。
-		var he *echo.HTTPError
-		if errors.As(err, &he) {
+		if he := apierr.HTTPStatusError(err); he != nil {
 			return he
 		}
 		return c.NoContent(http.StatusBadRequest)

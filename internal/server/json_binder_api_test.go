@@ -41,7 +41,7 @@ func TestDeserialize_DecoderSemanticsKept(t *testing.T) {
 // as is.
 func TestDeserialize_ReadErrorPassesThrough(t *testing.T) {
 	e := echo.New()
-	readErr := echo.NewHTTPError(http.StatusRequestEntityTooLarge)
+	readErr := echo.ErrStatusRequestEntityTooLarge
 	req := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(readErr))
 	c := e.NewContext(req, httptest.NewRecorder())
 	var got exactTarget
@@ -372,7 +372,7 @@ func TestAnyBodyEndpoints(t *testing.T) {
 // (e.g. the 413 of an oversized chunked body) is returned as is.
 func TestRequireObjectBody_ReadErrorPassesThrough(t *testing.T) {
 	e := echo.New()
-	readErr := echo.NewHTTPError(http.StatusRequestEntityTooLarge)
+	readErr := echo.ErrStatusRequestEntityTooLarge
 	req := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(readErr))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	c := e.NewContext(req, httptest.NewRecorder())

@@ -1,10 +1,28 @@
 package apierr
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
+
+// HTTPStatusError returns the error in err's chain that tells echo which
+// HTTP status to answer with, such as the 413 of a body over BodyLimit, or
+// nil when there is none.
+//
+// echo の v5 では、BodyLimit の 413 などの定義済みのエラーが *echo.HTTPError
+// ではなくなり、型で判定すると見落とす (#4236)。判定をここへ集め、v5 へ上げる
+// ときはここだけを直す。v5 では echo.HTTPStatusCoder を errors.As で取り出し、
+// StatusCode() が 0 でなければそれを error として返す (echo.StatusCode は int
+// しか返さないので、wrap の内側のエラーを返すにはこの形になる)。
+func HTTPStatusError(err error) error {
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		return he
+	}
+	return nil
+}
 
 // BodyNotObjectContextKey is the echo.Context key the server's JSON binder
 // sets (to true) when it rejected an API request body that is not a JSON

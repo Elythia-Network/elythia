@@ -2,6 +2,8 @@ package apierr
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -369,4 +371,18 @@ func TestInvalidParamCast(t *testing.T) {
 	errObj := InvalidParamCast("blocked", "boolean")["error"].(map[string]any)
 	assert.Equal(t, "0b5f1631-7c1a-41a6-b399-cce335f34d85", errObj["id"])
 	assert.Equal(t, map[string]any{"param": "blocked", "reason": "cannot cast to boolean"}, errObj["info"])
+}
+
+// TestHTTPStatusError pins that the error echo answers with a status is
+// found through wrapping, and that other errors are not taken for one
+// (#4236).
+//
+// echo の定義済みのエラーで確かめる。v5 ではこれが *echo.HTTPError でなくなる
+// ので、上げたときに判定を直し忘れるとここで落ちる。
+func TestHTTPStatusError(t *testing.T) {
+	tooLarge := echo.ErrStatusRequestEntityTooLarge
+	assert.Equal(t, tooLarge, HTTPStatusError(tooLarge))
+	assert.Equal(t, tooLarge, HTTPStatusError(fmt.Errorf("read body: %w", tooLarge)))
+	assert.NoError(t, HTTPStatusError(errors.New("connection reset")))
+	assert.NoError(t, HTTPStatusError(nil))
 }

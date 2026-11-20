@@ -127,7 +127,7 @@ func TestRequireMultipartFile(t *testing.T) {
 // answered: BodyLimitByPath's 413 is returned as is (multipart and JSON), and
 // another read error on a JSON body gets Fastify's invalid-JSON envelope.
 func TestRequireMultipartFile_ReadErrors(t *testing.T) {
-	tooLarge := echo.NewHTTPError(http.StatusRequestEntityTooLarge)
+	tooLarge := echo.ErrStatusRequestEntityTooLarge
 	ct, body := multipartBody(t, "file", nil)
 
 	t.Run("multipart over the limit", func(t *testing.T) {

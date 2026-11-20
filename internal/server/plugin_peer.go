@@ -565,8 +565,7 @@ func (p *pluginPeer) echoHandler() echo.HandlerFunc {
 		// 止まらない)。ここは middleware を通らない経路への保険。
 		body, err := io.ReadAll(io.LimitReader(req.Body, p.maxBody+1))
 		if err != nil {
-			var he *echo.HTTPError
-			if errors.As(err, &he) {
+			if he := apierr.HTTPStatusError(err); he != nil {
 				// BodyLimitByPath が wrap した limitedReader の 413 を潰さない。
 				return he
 			}
