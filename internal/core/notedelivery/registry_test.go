@@ -145,6 +145,7 @@ func TestRules_NoPluginsIsUnrestricted(t *testing.T) {
 	require.Len(t, rules, 2)
 	for _, rule := range rules {
 		assert.False(t, rule.Restricted())
+		assert.False(t, rule.DeniesAll())
 		assert.True(t, rule.Allows("any.example"))
 		assert.True(t, rule.Allows(""))
 	}
@@ -162,6 +163,7 @@ func TestRules_AppliesTargets(t *testing.T) {
 	require.Len(t, rules, 2, "IDs the caller did not ask for must not appear")
 
 	assert.True(t, rules["n1"].Restricted())
+	assert.False(t, rules["n1"].DeniesAll(), "an include rule with a host lets that host in")
 	assert.True(t, rules["n1"].Allows("a.example"))
 	assert.False(t, rules["n1"].Allows("b.example"))
 	assert.False(t, rules["n1"].Allows(""), "an unknown requester must not see an include note")
@@ -206,6 +208,7 @@ func TestRules_FailureDeniesEverything(t *testing.T) {
 			rules := r.Rules(context.Background(), []string{"n1", "n2"})
 			for _, id := range []string{"n1", "n2"} {
 				assert.True(t, rules[id].Restricted(), id)
+				assert.True(t, rules[id].DeniesAll(), id)
 				assert.False(t, rules[id].Allows("a.example"), id)
 				assert.True(t, rules[id].Unavailable(), "%s: a failed plugin must be told apart from a deny rule", id)
 			}
