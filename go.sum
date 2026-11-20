@@ -98,6 +98,8 @@ github.com/elythia-network/mkq v1.5.1 h1:ptBcspskZ7HvgiECvIYM2SpPtE4QV/+NMHgm3OO
 github.com/elythia-network/mkq v1.5.1/go.mod h1:Fm8qyewEpiLC21bzVhJNirvP0RWxe93JnkrWIzKqmGM=
 github.com/elythia-network/mkq v1.5.2 h1:F3sU598jCfrSVuWxbwpHzNSdu7TQmjhMStpuLxuaWIA=
 github.com/elythia-network/mkq v1.5.2/go.mod h1:CEZlPZ6ENTnR/W6X4tGv4P+lMgKcssC10VQ0Hn/WvfI=
+github.com/elythia-network/mkq v1.5.3 h1:Pm99nOIPxk3HeS7Naehfs/hhoJAG4qfq2GMj6I5fHiA=
+github.com/elythia-network/mkq v1.5.3/go.mod h1:CEZlPZ6ENTnR/W6X4tGv4P+lMgKcssC10VQ0Hn/WvfI=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/forPelevin/gomoji v1.4.1 h1:7U+Bl8o6RV/dOQz7coQFWj/jX6Ram6/cWFOuFDEPEUo=
