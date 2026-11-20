@@ -17430,4 +17430,8 @@ export interface Locale extends ILocale {
      * 書きかけの投稿にあったプラグインの指定のうち、使えなくなったものを外しました。指定を確かめてから投稿してください。
      */
     "pluginNoteOptionsDroppedFromDraft": string;
+    /**
+     * 前の投稿から引き継いだプラグインの指定のうち、使えなくなったものを外しました。指定を確かめてから投稿してください。
+     */
+    "pluginNoteOptionsDroppedFromRemembered": string;
 }

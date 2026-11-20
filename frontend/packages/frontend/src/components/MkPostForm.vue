@@ -225,11 +225,13 @@ const scheduledAt = ref<number | null>(null);
 // rememberNoteVisibility がオンなら、公開範囲と同じく前のフォームで送った指定から始める
 // (#4205)。呼び出し元が公開範囲を渡したフォームでは、公開範囲と同じく覚えた値を使わない。
 const noteOptionEntries = noteOptions();
-const pluginOptions = ref<Record<string, unknown>>(
-	prefer.s.rememberNoteVisibility && props.initialVisibility == null
-		? keepRegisteredPluginOptions(store.s.pluginNoteOptions).kept
-		: {},
-);
+const rememberedPluginOptions = prefer.s.rememberNoteVisibility && props.initialVisibility == null
+	? keepRegisteredPluginOptions(store.s.pluginNoteOptions)
+	: { kept: {}, dropped: false };
+const pluginOptions = ref<Record<string, unknown>>(rememberedPluginOptions.kept);
+// 書きかけの投稿や、削除して編集する元のノートが、覚えた指定を置き換えたか。置き換えた
+// ときは、覚えた指定から外したものを知らせない (フォームに出ている指定とは関係がない)。
+let rememberedPluginOptionsReplaced = false;
 const draghover = ref(false);
 const quoteId = ref<string | null>(null);
 const hasNotSpecifiedMentions = ref(false);
@@ -988,6 +990,7 @@ function restorePluginOptions(stored: Record<string, unknown> | undefined) {
 	// 指定が無ければ空にし、覚えていた指定を持ち越さない (#4205)。
 	const { kept, dropped } = keepRegisteredPluginOptions(stored);
 	pluginOptions.value = kept;
+	rememberedPluginOptionsReplaced = true;
 	if (dropped) {
 		os.alert({
 			type: 'warning',
@@ -1607,6 +1610,7 @@ onMounted(() => {
 			localOnly.value = resolveLocalOnlyPreference($i.federationStatus, init.localOnly);
 			// 元のノートの指定はクライアントから分からないので、覚えた指定を付けずに空から始める (#4205)。
 			pluginOptions.value = {};
+			rememberedPluginOptionsReplaced = true;
 			files.value = init.files ?? [];
 			if (init.poll) {
 				poll.value = {
@@ -1625,9 +1629,28 @@ onMounted(() => {
 			reactionAcceptance.value = init.reactionAcceptance;
 		}
 
+		notifyDroppedRememberedPluginOptions();
+
 		nextTick(() => watchForDraft());
 	});
 });
+
+// notifyDroppedRememberedPluginOptions tells that some remembered plugin
+// options were dropped, and forgets them so that the next form does not tell
+// it again.
+//
+// サーバーで無効にしたり外したりしたプラグインの覚えた指定は送れないので外す。
+// 黙って外すと、絞ったつもりのノートが絞られないまま投稿されうるので、書きかけの
+// 投稿と同じく知らせる (#4202)。
+function notifyDroppedRememberedPluginOptions() {
+	if (!rememberedPluginOptions.dropped) return;
+	store.set('pluginNoteOptions', JSON.parse(JSON.stringify(rememberedPluginOptions.kept)) as Record<string, unknown>);
+	if (rememberedPluginOptionsReplaced) return;
+	os.alert({
+		type: 'warning',
+		text: i18n.ts.pluginNoteOptionsDroppedFromRemembered,
+	});
+}
 
 onBeforeUnmount(() => {
 	uploader.abortAll();

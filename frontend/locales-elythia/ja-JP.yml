@@ -1060,3 +1060,4 @@ _objectStorageMigration:
   cleanupConfirm: "ローカルへ戻したファイルが、オブジェクトストレージに残した写しを消します。消すのは戻したときに記録した写しだけで、初めからオブジェクトストレージへアップロードしたファイルには触れません。消した写しは取り戻せません。TS版へ戻すときは、Elythiaで消してから切り替えてください。続けますか？"
 pluginNoteOptionsCannotBeDrafted: "プラグインの指定は、下書きと予約投稿には保存できません。指定を解除してから保存するか、予約せずに投稿してください。"
 pluginNoteOptionsDroppedFromDraft: "書きかけの投稿にあったプラグインの指定のうち、使えなくなったものを外しました。指定を確かめてから投稿してください。"
+pluginNoteOptionsDroppedFromRemembered: "前の投稿から引き継いだプラグインの指定のうち、使えなくなったものを外しました。指定を確かめてから投稿してください。"
