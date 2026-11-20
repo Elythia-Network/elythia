@@ -66,7 +66,7 @@ func NewHandler(db *gorm.DB, redisClient *redis.Client, metaRepo repository.Meta
 // TestMode=false の場合は 404 を返して存在しないように振る舞う。
 func (h *Handler) ResetDB(c echo.Context) error {
 	if !h.testMode {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 
 	ctx := c.Request().Context()

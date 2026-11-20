@@ -295,16 +295,16 @@ func newFeedHandler(
 func (h *feedHandler) serve(c echo.Context, username string, render func(*feedData) ([]byte, error), contentType string) error {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 	u, err := h.users.FindLocalByUsername(username)
 	if err != nil && !repository.IsNotFound(err) {
 		// **DB 障害を not-found に丸めない** (#2792)。このファイルは
 		// apierr を使わないので echo の HTTPError で返す。
-		return echo.NewHTTPError(http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
 	if err != nil || u == nil {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 	// 凍結中 / 「ログインしていないユーザーにコンテンツを見せない」設定の
 	// 利用者はフィードを配らない。upstream ClientServerService.getFeed は
@@ -318,19 +318,19 @@ func (h *feedHandler) serve(c echo.Context, username string, render func(*feedDa
 	// channels/note_filter.go`) と同じく「requireSigninToViewContents な著者の
 	// コンテンツは匿名に出さない」を、この経路でも成立させる。
 	if u.IsSuspended || u.RequireSigninToViewContents {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 	// upstream getFeed は ugcVisibilityForVisitor が 'none' なら feed を返さない
 	// (404)。'local' で remote 利用者を外す条件は、この feed がローカル利用者
 	// だけを引く (feedUserResolver) ので常に満たされない。
 	if ugcvisibility.HidesAll(h.ugcVisibilityNow()) {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 
 	data := h.build(u)
 	out, err := render(data)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
 	return c.Blob(http.StatusOK, contentType, out)
 }

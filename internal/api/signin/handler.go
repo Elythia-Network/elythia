@@ -876,7 +876,7 @@ func readSigninObject(c echo.Context) (map[string]json.RawMessage, error) {
 	}
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest).SetInternal(err)
+		return nil, echo.NewHTTPError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest)).SetInternal(err)
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil

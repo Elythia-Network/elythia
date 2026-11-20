@@ -81,13 +81,13 @@ func (h *twemojiBadgeHandler) Serve(c echo.Context) error {
 		name = c.Param("name")
 	}
 	if !twemojiBadgeNamePattern.MatchString(name) {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 
 	// パターンで [0-9a-f-]+ に制限済みだが、念のため path traversal を潰す。
 	base := strings.TrimSuffix(name, ".png")
 	if base == "" || strings.Contains(base, "..") || strings.ContainsRune(base, filepath.Separator) {
-		return echo.NewHTTPError(http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 
 	out, err := h.badge(base)
@@ -116,11 +116,11 @@ func (h *twemojiBadgeHandler) badge(base string) ([]byte, error) {
 	h.mu.Unlock()
 	svg, err := os.ReadFile(filepath.Join(h.dir, base+".svg"))
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusNotFound)
+		return nil, echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}
 	out, err := renderTwemojiBadge(svg)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError)
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
 	if h.cache != nil {
 		h.mu.Lock()
