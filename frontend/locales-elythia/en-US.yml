@@ -1077,3 +1077,4 @@ _objectStorageMigration:
   cleanupConfirm: "This deletes the copies the files moved back left in object storage. Only the copies recorded when the files were moved back are deleted; files uploaded to object storage directly are not touched. Deleted copies cannot be recovered. If you are going back to the TS version, delete them on Elythia before switching. Continue?"
 pluginNoteOptionsCannotBeDrafted: "Plugin options cannot be saved to drafts or scheduled posts. Clear the options before saving, or post without scheduling."
 pluginNoteOptionsDroppedFromDraft: "Some plugin options in the unfinished post are no longer available and were removed. Check the options before posting."
+pluginNoteOptionsDroppedFromRemembered: "Some plugin options carried over from your previous post are no longer available and were removed. Check the options before posting."

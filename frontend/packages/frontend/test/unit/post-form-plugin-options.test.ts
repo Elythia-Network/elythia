@@ -379,12 +379,42 @@ describe('MkPostForm remembers plugin note options like the visibility', () => {
 		expect(await submit(next)).toBeUndefined();
 	});
 
-	test('options of plugins not registered now are dropped', async () => {
+	// 黙って外すと、絞ったつもりのノートが絞られないまま投稿されうるので、書きかけの
+	// 投稿と同じく知らせる。覚えた指定からも外し、次のフォームでは知らせ直さない (#4202)。
+	test('options of plugins not registered now are dropped and it says so once', async () => {
 		setRememberNoteVisibility(true);
 		testState.remembered = { ...sent, gone: { mode: 'exclude', hosts: ['b.example'] } };
 		const view = await mountWithOption();
+		expect(testState.alert).toHaveBeenCalledTimes(1);
+		expect(testState.alert).toHaveBeenLastCalledWith(expect.objectContaining({ text: i18n.ts.pluginNoteOptionsDroppedFromRemembered }));
+		expect(testState.remembered).toEqual(sent);
 		expect(await submit(view)).toEqual(sent);
+
+		testState.alert.mockClear();
+		await remount();
 		expect(testState.alert).not.toHaveBeenCalled();
+	});
+
+	test('options of a plugin disabled on the server are dropped and it says so', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = sent;
+		testState.noteDeliveryPlugins = ['other'];
+		const view = await mountWithOption();
+		expect(testState.alert).toHaveBeenCalledTimes(1);
+		expect(testState.alert).toHaveBeenLastCalledWith(expect.objectContaining({ text: i18n.ts.pluginNoteOptionsDroppedFromRemembered }));
+		expect(testState.remembered).toEqual({});
+		expect(await submit(view)).toBeUndefined();
+	});
+
+	// フォームに出ている指定と関係のない知らせは出さない。覚えた指定からは外す。
+	test('a form not starting from them does not tell about the dropped ones', async () => {
+		setRememberNoteVisibility(true);
+		testState.remembered = { ...sent, gone: { mode: 'exclude', hosts: ['b.example'] } };
+		await mountWithOption({ props: {
+			initialNote: { id: 'old', text: 'hello', cw: null, visibility: 'public', localOnly: false, files: [], poll: null, reactionAcceptance: null },
+		} });
+		expect(testState.alert).not.toHaveBeenCalled();
+		expect(testState.remembered).toEqual(sent);
 	});
 
 	test('a value remembered earlier is not used once the setting is off', async () => {
@@ -505,9 +535,10 @@ describe('MkPostForm remembers plugin note options like the visibility', () => {
 		const first = await mountWithOption({ instant: false });
 		await fireEvent.update(first.getByTestId('post-form-text'), 'draft without options');
 		await flush();
-		testState.remembered = sent;
+		testState.remembered = { ...sent, gone: { mode: 'exclude', hosts: ['b.example'] } };
 
 		const next = await remount({ instant: false });
+		expect(testState.alert).not.toHaveBeenCalled();
 		expect(await submit(next)).toBeUndefined();
 	});
 });
