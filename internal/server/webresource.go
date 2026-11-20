@@ -111,7 +111,7 @@ func (h *webResourceHandler) OpenSearchXML(c echo.Context) error {
 
 	out, err := xml.Marshal(doc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
 	return c.Blob(http.StatusOK, "application/opensearchdescription+xml", out)
 }
