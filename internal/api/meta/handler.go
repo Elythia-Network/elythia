@@ -158,11 +158,12 @@ func (h *Handler) Meta(c echo.Context) error {
 		h.respCache.putIfCurrent(detail, body, gen)
 	}
 
-	// echo は ?pretty / Debug のとき indent 付きで書く (context.JSON)。cache は
+	// echo は ?pretty のとき indent 付きで書く (context.JSON。echo の Debug でも
+	// 同じだが、Elythia は Debug を立てない。v5 で消えるので見ない、#4236)。cache は
 	// compact な bytes しか持たないので、ここで同じ形に整える。**cache を
 	// 素通しにはしない**: /api/meta は未認証で叩けて per-endpoint の rate limit も
 	// 無いので、素通しにすると ?pretty を付けるだけで誰でもキャッシュを外せる。
-	if _, pretty := c.QueryParams()["pretty"]; c.Echo().Debug || pretty {
+	if _, pretty := c.QueryParams()["pretty"]; pretty {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", metaPrettyIndent); err != nil {
 			return c.JSONBlob(http.StatusOK, body)
