@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -99,7 +100,7 @@ func (h *Handler) SignupApplicationList(c echo.Context) error {
 	// 「審査待ちに見えるが承認できない」行が並ぶ。
 	if _, err := h.signupApplications.ExpireStale(); err != nil {
 		// 掃除に失敗しても一覧は出す (表示が実態より古くなるだけ)。
-		c.Logger().Warnf("signup application: expire stale failed: %v", err)
+		slog.Warn("signup application: expire stale failed", "err", err)
 	}
 
 	rows, err := h.signupApplications.List(filter, limit, offset)

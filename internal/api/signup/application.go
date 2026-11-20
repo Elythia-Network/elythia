@@ -331,7 +331,7 @@ func (h *Handler) ApplicationRegister(c echo.Context) error {
 	if !completed {
 		// db / 申請 repo が未配線の構成 (テスト等)。従来どおり後追いで記録する。
 		if cerr := h.applications.MarkCompleted(app.ID, result.User.ID, ""); cerr != nil {
-			c.Logger().Warnf("signup application: mark completed failed: %v", cerr)
+			slog.Warn("signup application: mark completed failed", "applicationId", app.ID, "err", cerr)
 		} else {
 			completed = true
 		}
@@ -407,7 +407,7 @@ func (h *Handler) registerViaEmailConfirmation(
 	if ticket != nil && h.ticketStore != nil {
 		if merr := h.ticketStore.MarkPending(ticket.ID, pending.ID); merr != nil {
 			// 再送防止窓が効かなくなるだけで pending は成立している。
-			c.Logger().Warnf("signup application: mark ticket pending failed: %v", merr)
+			slog.Warn("signup application: mark ticket pending failed", "ticketId", ticket.ID, "err", merr)
 		}
 	}
 	h.sendSignupConfirmation(meta, email, pending.Code, c.Request().Header.Get("Accept-Language"))
