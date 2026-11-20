@@ -3,13 +3,13 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/labstack/echo/v4"
 )
 
@@ -89,8 +89,7 @@ func JSONBodyParse() echo.MiddlewareFunc {
 				// 413 HTTPError を返す。ContentLength 経路は middleware 段で 413 に
 				// なるが、chunked 超過はここで read error になるため echo.HTTPError を
 				// 伝播して upstream fastify と同じ 413 を返す (その他 read error は 400)。
-				var he *echo.HTTPError
-				if errors.As(err, &he) {
+				if he := apierr.HTTPStatusError(err); he != nil {
 					return he
 				}
 				return c.JSON(http.StatusBadRequest, errInvalidJSONBody)

@@ -3,12 +3,12 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/labstack/echo/v4"
 )
 
@@ -33,8 +33,8 @@ const multipartMaxMemory = 32 << 20
 // A body Fastify's JSON parser rejects (empty, not valid JSON, prototype
 // poisoning) is passed on so JSONBodyParse answers it with Fastify's
 // FST_ERR_CTP_* envelope: Fastify parses the body before the handler runs.
-// A body-limit error from reading the body (BodyLimitByPath's
-// *echo.HTTPError) is returned as is.
+// A body-limit error from reading the body (BodyLimitByPath's 413) is
+// returned as is.
 //
 // The response carries upstream's `Cache-Control: private, max-age=0,
 // must-revalidate` (ApiServerService's onRequest hook), which the /api
@@ -54,8 +54,7 @@ func RequireMultipartFile(routes ...string) echo.MiddlewareFunc {
 			switch {
 			case isMultipartFormData(ct):
 				err := req.ParseMultipartForm(multipartMaxMemory)
-				var he *echo.HTTPError
-				if errors.As(err, &he) {
+				if he := apierr.HTTPStatusError(err); he != nil {
 					return he
 				}
 				if err == nil && hasMultipartFile(req) {
@@ -64,8 +63,7 @@ func RequireMultipartFile(routes ...string) echo.MiddlewareFunc {
 			case IsJSONContentType(ct):
 				body, err := io.ReadAll(req.Body)
 				if err != nil {
-					var he *echo.HTTPError
-					if errors.As(err, &he) {
+					if he := apierr.HTTPStatusError(err); he != nil {
 						return he
 					}
 					// 読み切れなかった body は JSONBodyParse と同じく

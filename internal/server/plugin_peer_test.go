@@ -21,6 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue/driver"
+	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/plugin"
 )
 
@@ -272,6 +273,24 @@ func TestPluginPeer_ServeRejectsOversizedBody(t *testing.T) {
 	c, rec := peerRequest(t, []byte(strings.Repeat("a", int(peerDefaultMaxBody)+10)), nil)
 	require.NoError(t, p.echoHandler()(c))
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
+// 本文を読む途中で BodyLimitByPath の上限を超えたら、その 413 を潰さずに返す
+// (#4236)。上の 413 は handler 自身の上限で、こちらは middleware の上限。
+func TestPluginPeer_ServeKeepsBodyLimit413(t *testing.T) {
+	p := testPeer(t, &pluginPeerDeps{keyCache: activitypub.NewPublicKeyCache(4)})
+	p.Handle(func(context.Context, string, json.RawMessage) (any, error) { return nil, nil })
+	const path = "/api/plugin/demo/_peer"
+	e := echo.New()
+	e.Use(middleware.BodyLimitByPath(0, map[string]int64{path: 1024}))
+	e.POST(path, p.echoHandler())
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(strings.Repeat("a", 4096)))
+	req.ContentLength = -1
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	assert.JSONEq(t, `{"message":"Request Entity Too Large"}`, rec.Body.String())
 }
 
 // 署名が通っても、ハンドラのエラー文面は相手に返さない

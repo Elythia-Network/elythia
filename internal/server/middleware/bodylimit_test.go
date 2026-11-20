@@ -2,13 +2,13 @@ package middleware
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 )
@@ -23,8 +23,7 @@ func TestBodyLimitByPath(t *testing.T) {
 	// body を読む handler。chunked 超過時に limitedReader の 413 を伝播する。
 	h := func(c echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
-			var he *echo.HTTPError
-			if errors.As(err, &he) {
+			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
 			}
 			return c.NoContent(http.StatusBadRequest)
@@ -127,8 +126,7 @@ func TestBodyLimitByPathUploadIsNeverUnlimited(t *testing.T) {
 	e.Use(BodyLimitByPath(0, nil))
 	e.POST("/api/drive/files/create", func(c echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
-			var he *echo.HTTPError
-			if errors.As(err, &he) {
+			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
 			}
 			return c.NoContent(http.StatusBadRequest)
@@ -158,8 +156,7 @@ func TestBodyLimitByPath_PluginPeer(t *testing.T) {
 	}))
 	h := func(c echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
-			var he *echo.HTTPError
-			if errors.As(err, &he) {
+			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
 			}
 			return c.NoContent(http.StatusBadRequest)
