@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -100,7 +99,10 @@ type fetchRequester struct {
 // 既知の制約として受け入れている (#4199)。署名で確かめられた
 // ときは、User-Agent を見ない。
 //
-// 自分自身を名乗る User-Agent は "" にする (自分のホストを指定する意味は無い)。
+// 自分のホストを名乗る User-Agent も、そのまま返す。分からない相手 ("") は、判定で
+// 匿名の閲覧者として自分のホストに置き換える (hiddenByDeliveryRules、#4203) ので、
+// どちらも自分のホストとして判定される。自分のホストは配送先の条件のレジストリが
+// 持つ1つだけを使い、ここでは比べない (綴りの揃え方を2か所に持たないため)。
 func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 	if v, ok := c.Get(fetchHostKey).(fetchRequester); ok {
 		return v.host, v.rejected
@@ -122,9 +124,6 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 	}
 	if !signed {
 		host = userAgentHost(req.UserAgent())
-		if h.localHost != "" && strings.EqualFold(host, h.localHost) {
-			host = ""
-		}
 	}
 	c.Set(fetchHostKey, fetchRequester{host: host, rejected: rejected})
 	return host, rejected
@@ -135,11 +134,17 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 // unavailable is true when a plugin could not report the targets of any of
 // them; the caller answers 503 then (#4202).
 //
-// 絞られたノートだけが対象。相手が分からない照会は、include のノートには
-// 見せず、exclude のノートには見せる (外したホストかどうかを決められないので、
-// 利用者が選んだ側の既定に倒す)。署名を確かめたうえで断った相手には、絞られた
-// ノートを1つも見せない。署名を確かめるのは、絞られたノートがあった
-// ときだけにする。リモートのノートは原本のサーバーへ転送するものなので見ない。
+// 絞られたノートだけが対象。相手が分からない照会は、ログインしていない閲覧者と
+// 同じく、自分のホストからの照会として判定する (#4203)。自分のホストを条件に
+// 入れていなければ、include のノートには見せず、exclude のノートには見せる
+// (外したホストかどうかを決められないので、利用者が選んだ側の既定に倒す)。
+// **匿名の Web と同じ相手として扱う。** 分けると、exclude に自分のホストを入れた
+// ノートが、Web (notes/show・埋め込み・フィード) では伏せられ、同じ URL を
+// activity+json で署名も User-Agent も無しに取ると本文ごと読める。
+//
+// 署名を確かめたうえで断った相手には、絞られたノートを1つも見せない。署名を
+// 確かめるのは、絞られたノートがあったときだけにする。リモートのノートは原本の
+// サーバーへ転送するものなので見ない。
 //
 // **条件を読めないときは、404ではなく503にさせる。** 404を「消えた」と扱う相手
 // では、障害が直っても戻らない。プラグインの障害は、そのとき渡したノートの
@@ -167,7 +172,11 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) (hi
 		if !rule.Restricted() {
 			continue
 		}
-		if host, rejected := h.fetchHost(c); !rejected && rule.Allows(host) {
+		host, rejected := h.fetchHost(c)
+		if host == "" {
+			host = h.noteDelivery.LocalHost()
+		}
+		if !rejected && rule.Allows(host) {
 			continue
 		}
 		if hidden == nil {

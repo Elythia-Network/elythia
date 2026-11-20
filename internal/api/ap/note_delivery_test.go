@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -130,10 +131,40 @@ func TestNoteDeliveryRules_SignerRejected(t *testing.T) {
 		f.h.SetFetchSigner(f.signer, stubDeliveryGate{"remote.example": true}, apShowSoftwareBlocker{})
 		assert.Equal(t, http.StatusNotFound, f.fetch(t, f.h.Note, "n-public", true))
 	})
-	t.Run("own host in the User-Agent is unknown", func(t *testing.T) {
+}
+
+// An unknown requester is judged as an anonymous viewer of this server, the
+// same as notes/show, the embed and the feed: a note whose conditions name
+// this server's host reads the same through ActivityPub as on the web (#4203).
+func TestNoteDeliveryRules_UnknownRequesterIsJudgedAsOwnHost(t *testing.T) {
+	anonymous := map[string]string{
+		"no User-Agent":          "",
+		"unknown User-Agent":     "curl/8.0",
+		"own host in User-Agent": "Misskey/2025.1.0 (https://local.example)",
+	}
+	for name, ua := range anonymous {
+		t.Run(name, func(t *testing.T) {
+			f := newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}}}))
+			assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, ua, false), "exclude own host hides it from anonymous fetches too")
+
+			f = newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example", "local.example"}}}))
+			assert.Equal(t, http.StatusOK, f.fetchWithUA(t, ua, false), "include own host shows it to anonymous fetches")
+
+			f = newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}}}))
+			assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, ua, false))
+
+			f = newSignedFetchFixture(t)
+			f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"a.example"}}}))
+			assert.Equal(t, http.StatusOK, f.fetchWithUA(t, ua, false))
+		})
+	}
+	t.Run("signed requester is judged by its own host", func(t *testing.T) {
 		f := newSignedFetchFixture(t)
-		f.h.SetNoteDeliveryRules(apDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"local.example"}}}))
-		assert.Equal(t, http.StatusNotFound, f.fetchWithUA(t, "Misskey/2025.1.0 (https://local.example)", false))
+		f.h.SetNoteDeliveryRules(ownHostDeliveryRules(t, map[string]plugin.DeliveryTargets{"n-public": {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}}}))
+		assert.Equal(t, http.StatusOK, f.fetch(t, f.h.Note, "n-public", true), "remote.example is not excluded")
 	})
 }
 
@@ -302,6 +333,73 @@ func TestNoteDeliveryRules_Featured(t *testing.T) {
 	require.Len(t, items, 1)
 	item, _ := items[0].(map[string]any)
 	assert.Equal(t, "https://example.com/notes/n1", item["id"])
+}
+
+// ownHostDeliveryRules restricts notes on a server at local.example, as the
+// server builds the registry from its url.
+func ownHostDeliveryRules(t *testing.T, targets map[string]plugin.DeliveryTargets) *notedelivery.Registry {
+	t.Helper()
+	r := notedelivery.NewForServer("https://local.example")
+	require.NoError(t, r.Add("targets", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) { return targets, nil },
+	}))
+	return r
+}
+
+// The outbox and featured lists judge an unsigned fetch as this server's own
+// host, the same as a single note (#4203).
+var ownHostListTargets = map[string]plugin.DeliveryTargets{
+	"n-exclude-own":  {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"local.example"}},
+	"n-include-own":  {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"remote.example", "local.example"}},
+	"n-include-else": {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"remote.example"}},
+}
+
+func TestNoteDeliveryRules_OutboxJudgesUnsignedFetchAsOwnHost(t *testing.T) {
+	h, users, notes := newHandlerWithOutbox(t)
+	users.Users["owner"] = &model.User{ID: "owner", Username: "alice", NotesCount: 4}
+	for _, id := range []string{"n-exclude-own", "n-include-own", "n-include-else", "n-plain"} {
+		notes.Notes[id] = &model.Note{ID: id, UserID: "owner", Visibility: model.NoteVisibilityPublic}
+	}
+	h.SetNoteDeliveryRules(ownHostDeliveryRules(t, ownHostListTargets))
+
+	c, rec := newReqQuery(t, "id", "owner", "page=true")
+	require.NoError(t, h.Outbox(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var page map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
+	items, _ := page["orderedItems"].([]any)
+	var got []string
+	for _, it := range items {
+		activity, _ := it.(map[string]any)
+		object, _ := activity["object"].(map[string]any)
+		got = append(got, object["id"].(string))
+	}
+	assert.ElementsMatch(t, []string{"https://example.com/notes/n-include-own", "https://example.com/notes/n-plain"}, got)
+}
+
+func TestNoteDeliveryRules_FeaturedJudgesUnsignedFetchAsOwnHost(t *testing.T) {
+	h, userRepo, noteRepo, piningRepo := newHandlerWithPining(t)
+	author := &model.User{ID: "u1", Username: "alice"}
+	userRepo.Users["u1"] = author
+	for i, id := range []string{"n-exclude-own", "n-include-own", "n-include-else", "n-plain"} {
+		noteRepo.Notes[id] = &model.Note{ID: id, UserID: "u1", User: author, Visibility: model.NoteVisibilityPublic}
+		require.NoError(t, piningRepo.Create(&model.UserNotePining{ID: fmt.Sprintf("p%d", i), UserID: "u1", NoteID: id}))
+	}
+	h.SetNoteDeliveryRules(ownHostDeliveryRules(t, ownHostListTargets))
+
+	c, rec := newReq(t, "id", "u1")
+	require.NoError(t, h.Featured(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var col map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &col))
+	items, _ := col["orderedItems"].([]any)
+	var got []string
+	for _, it := range items {
+		item, _ := it.(map[string]any)
+		got = append(got, item["id"].(string))
+	}
+	assert.ElementsMatch(t, []string{"https://example.com/notes/n-include-own", "https://example.com/notes/n-plain"}, got)
 }
 
 func TestNoteDeliveryRules_OutboxPluginFailureIsUnavailable(t *testing.T) {

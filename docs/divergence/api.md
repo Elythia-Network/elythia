@@ -252,6 +252,21 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 
 持ち主の利用者の行が無いaccess_token(#514)は、これまでどおり匿名として扱う。本家ではaccess_tokenは利用者と一緒に消えるので、この状態にならない。
 
+## 配送先を絞るプラグインの条件と、ログインしていない閲覧者 (#4203)
+
+ノートの配送先を絞るプラグイン (`plugin.Definition.NoteDelivery`、#4199) の条件に、このサーバー自身のホストを書けるようにした。ログインしていない閲覧者には、自分のホストからの照会として、ActivityPubで届く先と同じ条件を当てる。includeに自分のホストを入れたら見せ、入れなければ見せない。excludeに入れたら見せず、入れなければ見せる。プラグインの入っていないサーバーと、条件を付けていないノートは本家と同じ (プラグインの障害のあいだを除く。下を参照)。
+
+| 経路 | 本家 | Elythia (見せないノート) |
+|---|---|---|
+| `notes/show` (ログインしていないとき) | 公開のノートを返す | 200で返すが、見られない公開範囲のノートと同じく本文・添付・投票などを伏せ、`isHidden`をtrueにする。応答の形は変えないので、本家のクライアントはそのまま「非公開のノート」として表示する |
+| 埋め込み (`/embed/notes/:id`) | 公開のノートを埋め込む | ノートの無いときと同じ、文脈なしのシェルを返す |
+| フィード (`/@user.rss`・`.atom`・`.json`) | 公開のノートを最大20件載せる | 載せない。20件を取った後で外すので、その分だけ少なくなる |
+
+- 条件を読めないとき (プラグインの障害) も見せない。**障害のあいだは、どのノートに条件があるかも読めないので、条件を付けていないノートも含めて、このサーバーのローカルのノートをすべて上の3つの経路で伏せる。** 見せるほうに倒すと、絞ったノートが漏れるため
+- ActivityPubの照会 (`/notes/:id`をactivity+jsonで取るものなど) で、署名もUser-Agentのホストも無い相手も、同じく自分のホストとして判定する。分けると、excludeに自分のホストを入れたノートが、Webでは伏せられ、同じURLをactivity+jsonで取ると本文ごと読める
+- ログインしているローカルの利用者には絞らない。`notes/show`以外のAPI (`users/notes`・タイムライン・検索など) と、リノート元・返信先として埋め込まれたノートも絞らない。公開のノートは、これらの経路から読める
+- `/notes/:id`をWebページとして取られたときのOGPは、自分のホストを入れても、絞ったノートでは出さないまま (#4199)。取りに来るのは主にリンクカードを作る他のサーバーで、どのサーバーかを確かめられないため
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。
@@ -422,7 +437,7 @@ upstream 由来のクライアントはそのまま通る (省略時は upstream
 | `admin/show-user` | `withSignins` | `false`でサインインの履歴を返さない (同梱のfrontendのIPの照会が送る)。省略と`null`は履歴を含める。#3867までこの表に載せていなかった ([deployment.md](../deployment.md) に説明がある) |
 | `admin/drive/files` | `host` | ファイルのホストで絞り込む。`hostname` (本家の引数) より優先する。同梱のfrontendは`hostname`を送る。#3867まで記録していなかった |
 | `notes` | `noteIds` | 公開のノートの一覧の代わりに、指定した id のノートを返す (100 件まで。`notes/show-partial-bulk`と同じ上限)。同梱のfrontendは`notes/show-partial-bulk`を使う。#3867までこの表に載せていなかった ([operations.md](operations.md)・[security.md](security.md) に記録がある)。100 件を超えると先頭の 100 件に切っていた (#3867から400) |
-| `notes/create` | `pluginOptions` | ノートの配送先を絞るプラグイン (`plugin.Definition.NoteDelivery`) への指定 (#4199)。プラグインの名前をキーにしたobjectで、値は本体が読まずにそのプラグインへ渡す。そのプラグインが入っていない名前は`INVALID_PARAM` (400) にする (絞ったつもりの指定を黙って捨てない)。プラグインが値を拒んだときも`INVALID_PARAM`で、どちらの場合もノートは作らない。値の`null`は省略と同じで、そのプラグインが入っていない名前でも断らない。`pluginOptions`そのものの`null`も省略と同じ (#4202)。下書きと予約投稿 (`notes/drafts/create`・`notes/drafts/update`) は受け取れないので、`null`以外の値があれば、型を問わず`INVALID_PARAM` (400) にする (下書きには指定を残す場所が無く、黙って捨てると予約の時刻に絞られないまま連合するため)。絞ったノートは、`/notes/:id`をWebページとして取られたときのOGPも出さない。プラグインの入っていないサーバーでは、本家と同じく何も絞らない。詳細は[プラグインの作者向けの文書](../plugins/authoring.md#ノートの配送先を絞る) |
+| `notes/create` | `pluginOptions` | ノートの配送先を絞るプラグイン (`plugin.Definition.NoteDelivery`) への指定 (#4199)。プラグインの名前をキーにしたobjectで、値は本体が読まずにそのプラグインへ渡す。そのプラグインが入っていない名前は`INVALID_PARAM` (400) にする (絞ったつもりの指定を黙って捨てない)。プラグインが値を拒んだときも`INVALID_PARAM`で、どちらの場合もノートは作らない。値の`null`は省略と同じで、そのプラグインが入っていない名前でも断らない。`pluginOptions`そのものの`null`も省略と同じ (#4202)。下書きと予約投稿 (`notes/drafts/create`・`notes/drafts/update`) は受け取れないので、`null`以外の値があれば、型を問わず`INVALID_PARAM` (400) にする (下書きには指定を残す場所が無く、黙って捨てると予約の時刻に絞られないまま連合するため)。絞ったノートは、`/notes/:id`をWebページとして取られたときのOGPも出さない。条件に自分のサーバーのホストを入れると、ログインしていない閲覧者への`notes/show`・埋め込み・フィードも同じ条件で絞る ([配送先を絞るプラグインの条件と、ログインしていない閲覧者](#配送先を絞るプラグインの条件とログインしていない閲覧者-4203))。プラグインの入っていないサーバーでは、本家と同じく何も絞らない。詳細は[プラグインの作者向けの文書](../plugins/authoring.md#ノートの配送先を絞る) |
 | `notes/global-timeline` | `allowPartial` | `limit`に満たなくても読み進めずに返す。本家は他のtimeline (`notes/timeline`・`notes/local-timeline`など) にだけ持ち、同梱のfrontendはどのtimelineにも送る。#3867までこの表に載せていなかった ([approximations.md](approximations.md)・[operations.md](operations.md) に記述がある) |
 | `federation/instances` | `sinceId` / `untilId` / `sinceDate` / `untilDate` | 一覧のカーソル (#493、#1173)。本家は`offset`だけを持つ。#3867まで記録していなかった |
 | `i/move` | `password` | 渡したときだけアカウントのパスワードを照合する (#1546)。同梱のfrontendは送らない。#3867まで記録していなかった |
