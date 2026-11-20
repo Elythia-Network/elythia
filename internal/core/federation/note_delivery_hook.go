@@ -63,13 +63,17 @@ type existingNoteChecker interface {
 // (退会のジョブも、ノートを消した後に片付ける)。配送が枠を待つ間に削除と
 // 片付けが先に済むと、条件の行が無いノートは絞らないと読まれ、外したサーバーの
 // フォロワーにも届く。片付けはノートを消した後なので、条件を読んだ時点で
-// 片付けが済んでいれば、続けて確かめるときにはノートも無い。
+// 片付けが始まっていれば、続けて確かめるときにはノートも無い。
 //
-// 絞っている条件のときと、プラグインの無いサーバーでは確かめない。前者は読んだ
-// 条件で足り、後者は片付ける行がそもそも無い。確かめられなければ配らない。
+// 絞っている条件でも確かめる。片付けはプラグインを1つずつ順に消すので、複数の
+// プラグインが条件を付けたノートは、片付けの途中を読むと一部の条件だけが残る。
+// 残った条件で絞っていても、片付けたプラグインが外したサーバーには届いてしまう。
+// 確かめないのは、全部を拒む条件のとき (読んだ条件で誰にも配らない) と、
+// プラグインの無いサーバー (片付ける行がそもそも無い) だけ。確かめられなければ
+// 配らない。
 func liveNoteRule(rules *notedelivery.Registry, notes existingNoteChecker, noteID string) notedelivery.Rule {
 	rule := rules.Rule(context.Background(), noteID)
-	if rule.Restricted() || rules.Empty() {
+	if rule.DeniesAll() || rules.Empty() {
 		return rule
 	}
 	found, err := notes.ExistingNoteIDsOnPrimary([]string{noteID})

@@ -23,6 +23,9 @@ import (
 type ruleSource struct {
 	targets map[string]plugin.DeliveryTargets
 	fail    bool
+	// other is what a second plugin, "other", restricts. 条件は2つのプラグインの
+	// ものを重ねて読む。
+	other map[string]plugin.DeliveryTargets
 }
 
 // set makes the plugin restrict the notes in targets, failing for every note
@@ -41,6 +44,12 @@ func (s *ruleSource) registry(t *testing.T) *notedelivery.Registry {
 				return nil, errors.New("db down")
 			}
 			return s.targets, nil
+		},
+	}))
+	require.NoError(t, r.Add("other", plugin.NoteDeliveryRegistration{
+		Prepare: func(context.Context, plugin.NoteDeliveryPrepareRequest) error { return nil },
+		Targets: func(context.Context, []string) (map[string]plugin.DeliveryTargets, error) {
+			return s.other, nil
 		},
 	}))
 	return r
@@ -89,13 +98,14 @@ func enqueuedInboxes(enq *stubEnqueuer) []string {
 }
 
 func TestNoteDeliveryHook_Rules_IncludeFiltersFollowersAndRelay(t *testing.T) {
-	hook, enq, userRepo, followingRepo, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
+	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox", "https://b.example/inbox"}
 	relay := &fakeRelayBroadcaster{}
 	hook.SetRelayBroadcaster(relay)
 
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	noteRepo.Notes[note.ID] = note
 	rules.set(map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
 	}, false)
@@ -157,21 +167,43 @@ func TestNoteDeliveryHook_Rules_ExistenceCheckFailureGoesNowhere(t *testing.T) {
 	assert.Empty(t, relay.calls)
 }
 
-// A restricted note already has the rule to apply, so its existence is not
-// read: the hook asks the primary only for notes it would send everywhere.
-func TestNoteDeliveryHook_Rules_RestrictedNoteSkipsExistenceCheck(t *testing.T) {
-	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
+// The clean-up forgets one plugin at a time. A Create that reads the rule
+// halfway through sees only the rules of the plugins not forgotten yet, which
+// still restrict the note, and must not take them as the whole rule and reach
+// the hosts the forgotten plugin excluded (#4202).
+func TestNoteDeliveryHook_Rules_RuleReadHalfwayThroughCleanUpGoesNowhere(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
-	followingRepo.RemoteInboxes[author.ID] = []string{"https://a.example/inbox", "https://b.example/inbox"}
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://x.example/inbox", "https://y.example/inbox", "https://z.example/inbox"}
 
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
-	noteRepo.ExistingOnPrimaryErr = errors.New("must not be asked")
-	rules.set(map[string]plugin.DeliveryTargets{
-		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
-	}, false)
+	// "targets" は x を外していたが、片付けで行が消えた。"other" の y を外す行だけが残る。
+	rules.set(map[string]plugin.DeliveryTargets{}, false)
+	rules.other = map[string]plugin.DeliveryTargets{
+		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"y.example"}},
+	}
 
 	hook.OnNoteCreated(note, author)
-	assert.Equal(t, []string{"https://a.example/inbox"}, enqueuedInboxes(enq))
+	assert.Empty(t, enq.calls, "a deleted note must not reach the hosts its forgotten rule excluded")
+}
+
+// A note that still exists keeps the rules of every plugin.
+func TestNoteDeliveryHook_Rules_RulesOfSeveralPluginsAreCombined(t *testing.T) {
+	hook, enq, userRepo, followingRepo, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
+	author := makeLocalAuthor(t, userRepo, keypairRepo)
+	followingRepo.RemoteInboxes[author.ID] = []string{"https://x.example/inbox", "https://y.example/inbox", "https://z.example/inbox"}
+
+	note := makeNote(author.ID, model.NoteVisibilityPublic)
+	noteRepo.Notes[note.ID] = note
+	rules.set(map[string]plugin.DeliveryTargets{
+		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"x.example"}},
+	}, false)
+	rules.other = map[string]plugin.DeliveryTargets{
+		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"y.example"}},
+	}
+
+	hook.OnNoteCreated(note, author)
+	assert.Equal(t, []string{"https://z.example/inbox"}, enqueuedInboxes(enq))
 }
 
 func TestNoteDeliveryHook_Rules_ExcludeFiltersMentionsReplyAndQuote(t *testing.T) {
@@ -188,6 +220,7 @@ func TestNoteDeliveryHook_Rules_ExcludeFiltersMentionsReplyAndQuote(t *testing.T
 	note.Text = &text
 	note.ReplyID = &parent
 	note.Mentions = model.StringArray{"allowed", "denied"}
+	noteRepo.Notes[note.ID] = note
 	rules.set(map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"b.example"}},
 	}, false)
@@ -197,13 +230,14 @@ func TestNoteDeliveryHook_Rules_ExcludeFiltersMentionsReplyAndQuote(t *testing.T
 }
 
 func TestNoteDeliveryHook_Rules_FiltersSpecified(t *testing.T) {
-	hook, enq, userRepo, _, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
+	hook, enq, userRepo, _, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	remoteUser(userRepo, "allowed", "a.example")
 	remoteUser(userRepo, "denied", "b.example")
 
 	note := makeNote(author.ID, model.NoteVisibilitySpecified)
 	note.VisibleUserIDs = model.StringArray{"allowed", "denied"}
+	noteRepo.Notes[note.ID] = note
 	rules.set(map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
 	}, false)
@@ -237,6 +271,7 @@ func TestNoteDeliveryHook_Rules_FiltersAnnounce(t *testing.T) {
 	renote := makeNote(author.ID, model.NoteVisibilityPublic)
 	target := "tgt"
 	renote.RenoteID = &target
+	noteRepo.Notes[renote.ID] = renote
 	rules.set(map[string]plugin.DeliveryTargets{
 		renote.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"a.example"}},
 	}, false)
@@ -260,6 +295,7 @@ func TestNoteDeliveryHook_Rules_SendNoteUpdate(t *testing.T) {
 	note := makeNote(author.ID, model.NoteVisibilityPublic)
 	text, target := "look", "bobnote"
 	note.Text, note.RenoteID = &text, &target
+	noteRepo.Notes[note.ID] = note
 	rules.set(map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"a.example"}},
 	}, false)
@@ -270,7 +306,7 @@ func TestNoteDeliveryHook_Rules_SendNoteUpdate(t *testing.T) {
 }
 
 func TestNoteDeliveryHook_Rules_SendQuoteRequest(t *testing.T) {
-	hook, enq, userRepo, _, keypairRepo, _, rules := newRuledNoteDeliveryHook(t)
+	hook, enq, userRepo, _, keypairRepo, noteRepo, rules := newRuledNoteDeliveryHook(t)
 	author := makeLocalAuthor(t, userRepo, keypairRepo)
 	bob := remoteUser(userRepo, "bob", "b.example")
 
@@ -278,6 +314,7 @@ func TestNoteDeliveryHook_Rules_SendQuoteRequest(t *testing.T) {
 	text, target := "look", "bobnote"
 	note.Text, note.RenoteID = &text, &target
 
+	noteRepo.Notes[note.ID] = note
 	rules.set(map[string]plugin.DeliveryTargets{
 		note.ID: {Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"b.example"}},
 	}, false)

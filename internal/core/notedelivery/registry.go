@@ -196,6 +196,9 @@ func (r Rule) Unavailable() bool { return r.unavailable }
 // ホストで絞れない)。
 func (r Rule) Restricted() bool { return r.denyAll || len(r.targets) > 0 }
 
+// DeniesAll reports whether the rule lets no host receive or fetch the note.
+func (r Rule) DeniesAll() bool { return r.denyAll }
+
 // Allows reports whether host may receive or fetch the note.
 //
 // 空のホスト (照会した相手が分からない) は、include なら許さず、exclude なら
