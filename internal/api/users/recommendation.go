@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // GetFrequentlyRepliedUsers handles POST /api/users/get-frequently-replied-users.
@@ -22,7 +22,7 @@ import (
 //
 // reply 集計は visibility push-down で viewer が CanSeeNote で見られる reply
 // のみに絞る (#1486)。匿名 viewer は public/home のみ集計する。
-func (h *Handler) GetFrequentlyRepliedUsers(c echo.Context) error {
+func (h *Handler) GetFrequentlyRepliedUsers(c *echo.Context) error {
 	var req struct {
 		UserID string     `json:"userId"`
 		Limit  *jsnum.Int `json:"limit"`
@@ -123,7 +123,7 @@ func isValidMMDD(m, d jsnum.Int) bool {
 // 認証ユーザーの followee のうち誕生日 (月日) が指定範囲に入る者を返す。
 // 単発指定 ({month, day}) と範囲指定 ({begin, end}) の 2 形式に対応し、
 // 範囲指定で begin > end の場合は年跨ぎ (例: 12/25..1/5) として扱う。
-func (h *Handler) GetFollowingUsersByBirthday(c echo.Context) error {
+func (h *Handler) GetFollowingUsersByBirthday(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		Limit    *jsnum.Int     `json:"limit"`
@@ -225,7 +225,7 @@ func nextBirthdayDate(bday string, now time.Time) string {
 // 認証ユーザーがまだフォローしていないローカルのアクティブユーザーを
 // followersCount 降順で返す (onboarding 向け)。Misskey 本家互換で 7 日以内に
 // 更新があったユーザーに絞る。
-func (h *Handler) UserRecommendation(c echo.Context) error {
+func (h *Handler) UserRecommendation(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		Limit  *jsnum.Int `json:"limit"`
@@ -262,7 +262,7 @@ func userIDs(users []*model.User) []string {
 //
 // Misskey 本家は userIds を最大 100 件に制限している。未知 ID は無視される
 // (他の ID の結果は返す)。
-func (h *Handler) UsersBulk(c echo.Context) error {
+func (h *Handler) UsersBulk(c *echo.Context) error {
 	var req struct {
 		UserIDs []string `json:"userIds"`
 	}

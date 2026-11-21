@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockFlashRepository, *testuti
 	return NewHandler(svc, nil, nil, nil), repo, likeRepo
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -41,7 +41,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 	return e.NewContext(req, rec), rec
 }
 
-func setUser(c echo.Context, userID string) {
+func setUser(c *echo.Context, userID string) {
 	c.Set(string(middleware.UserContextKey), &model.User{ID: userID})
 }
 
@@ -796,11 +796,11 @@ func TestCursorGuardRejectsUnstorableCursor(t *testing.T) {
 	const body = `{"untilId":"a\u0000b"}`
 	for _, tt := range []struct {
 		name string
-		fn   func(h *Handler) func(echo.Context) error
+		fn   func(h *Handler) func(*echo.Context) error
 	}{
-		{"My", func(h *Handler) func(echo.Context) error { return h.My }},
-		{"Search", func(h *Handler) func(echo.Context) error { return h.Search }},
-		{"MyLikes", func(h *Handler) func(echo.Context) error { return h.MyLikes }},
+		{"My", func(h *Handler) func(*echo.Context) error { return h.My }},
+		{"Search", func(h *Handler) func(*echo.Context) error { return h.Search }},
+		{"MyLikes", func(h *Handler) func(*echo.Context) error { return h.MyLikes }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, _, _ := newHandler(t)
@@ -927,7 +927,7 @@ func TestListParamsFollowUpstream(t *testing.T) {
 func TestIntegerValuedFractionsAreAccepted(t *testing.T) {
 	h, _, _ := newHandler(t)
 	for _, tc := range []struct {
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 	}{
 		{h.My, `{"limit":10.0,"sinceDate":1.0}`},

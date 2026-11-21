@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -121,7 +121,7 @@ func (h *Handler) SetSigninRecorder(r SigninRecorder) {
 
 // fireSigninSideEffects records the successful-login side-effects for a newly
 // created account (#1804). headers は Echo が request を再利用する前に Clone する。
-func (h *Handler) fireSigninSideEffects(c echo.Context, userID string) {
+func (h *Handler) fireSigninSideEffects(c *echo.Context, userID string) {
 	if h.signinRecorder == nil || userID == "" {
 		return
 	}
@@ -194,7 +194,7 @@ type signupRequest struct {
 //
 // **招待コードの誤り (INVITATION_CODE_INVALID) と分ける。** 同じにすると、利用者は
 // コードを打ち間違えたと読んでやり直し続ける。
-func registrationClosedError(c echo.Context) error {
+func registrationClosedError(c *echo.Context) error {
 	return c.JSON(http.StatusForbidden,
 		apierr.Error("REGISTRATION_CLOSED", "This server is not accepting new registrations.", "2776429f-df02-4b56-a708-30d5ddda7b95"))
 }
@@ -210,12 +210,12 @@ func registrationClosedError(c echo.Context) error {
 //
 // signup-pending 経路 / 通常 signup / signup-pending promote の 3 箇所から
 // 参照されるので helper 化している。
-func duplicatedUsernameError(c echo.Context) error {
+func duplicatedUsernameError(c *echo.Context) error {
 	return apierr.FastifyReply(c, http.StatusBadRequest, "DUPLICATED_USERNAME")
 }
 
 // Signup handles POST /api/signup.
-func (h *Handler) Signup(c echo.Context) error {
+func (h *Handler) Signup(c *echo.Context) error {
 	var req signupRequest
 	if err := c.Bind(&req); err != nil || req.Username == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -443,7 +443,7 @@ func (h *Handler) Signup(c echo.Context) error {
 // いた)。INTERNAL_ERROR (default catch) のみ server-side error として 500
 // を維持する (upstream の 400 を再現すると true internal failure が 400 に
 // 丸まり sanity check 上望ましくないため意図的 drift)。
-func (h *Handler) SignupPending(c echo.Context) error {
+func (h *Handler) SignupPending(c *echo.Context) error {
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -560,7 +560,7 @@ func validateEmailWithMeta(ctx context.Context, meta *model.Meta, addr string, c
 // 同じコードで並行に来たリクエストは全部検証を通るので、作成の前にここで
 // 条件付き UPDATE により 1 件だけを通す (upstream 2026.9.1 SignupApiService の
 // claimRegistrationTicket)。取れなかった側には検証失敗と同じエラーを返す。
-func (h *Handler) claimInvitation(c echo.Context, ticket *model.RegistrationTicket, emailRequired bool) func() error {
+func (h *Handler) claimInvitation(c *echo.Context, ticket *model.RegistrationTicket, emailRequired bool) func() error {
 	if ticket == nil || h.ticketStore == nil {
 		return nil
 	}

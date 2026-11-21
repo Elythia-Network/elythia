@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ModeratorChecker reports whether a user holds moderator privileges. Used to
@@ -89,7 +89,7 @@ type PairRequest struct {
 // (= isBlocking=true 反映) を返す。frontend (vue) が即時 redraw するため
 // 必要 (#870)。userRepo が wire されない test stub では legacy 互換で
 // 204 No Content にフォールバック。
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PairRequest
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
@@ -114,7 +114,7 @@ func (h *Handler) Create(c echo.Context) error {
 //
 // 同じく upstream TS は 200 + UserDetailed (isBlocking=false 反映) を返す。
 // userRepo 未 wire 時は 204 No Content フォールバック (#870)。
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PairRequest
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
@@ -142,7 +142,7 @@ func (h *Handler) Delete(c echo.Context) error {
 // 失敗時も best-effort 204 にフォールバックして block / unblock の副作用 (= state
 // 反映) を尊重する。relation block は h.relation 経由で viewer (= blocker) との関係を
 // 解決するため、block 後は isBlocking=true / unblock 後は isBlocking=false が乗る。
-func (h *Handler) respondPackedUser(c echo.Context, viewer *model.User, userID string) error {
+func (h *Handler) respondPackedUser(c *echo.Context, viewer *model.User, userID string) error {
 	if h.userRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -193,7 +193,7 @@ type ListRequest struct {
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する。
 // 本 endpoint は #493 で cursor 対応に切り替えた。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ListRequest
 	if err := c.Bind(&req); err != nil {

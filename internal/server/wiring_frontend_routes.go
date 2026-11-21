@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // frontendRoutesDeps holds the parts wireFrontendRoutes receives from
@@ -104,9 +104,12 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 		s.echo.Static("/static-assets", staticDir)
 		// 埋め込み先サイトが読み込むローダー。upstream も staticAssets から
 		// 配っている (#2389)。
-		s.echo.File("/embed.js", filepath.Join(staticDir, "embed.js"))
-		s.echo.File("/favicon.ico", filepath.Join(staticDir, "favicon.ico"))
-		s.echo.File("/apple-touch-icon.png", filepath.Join(staticDir, "apple-touch-icon.png"))
+		// echo の v5 の File は作業ディレクトリの外のファイルを開けないので、
+		// ディレクトリを根にした fs.FS から返す (#4239)。
+		staticFS := os.DirFS(staticDir)
+		s.echo.FileFS("/embed.js", "embed.js", staticFS)
+		s.echo.FileFS("/favicon.ico", "favicon.ico", staticFS)
+		s.echo.FileFS("/apple-touch-icon.png", "apple-touch-icon.png", staticFS)
 		// /robots.txt はここでは配らない。upstream は meta を見て動的生成する
 		// (ugcVisibilityForVisitor で Disallow が変わる) ので、wireFederationRoutes の
 		// webResHandler.RobotsTxt に一本化する。静的ファイルを後から登録すると
@@ -146,7 +149,7 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 	// ブラウザが "unsupported MIME type" エラーで SW 登録を拒否する。
 	swDistDir := frontendutil.SwDistDir()
 	if _, err := os.Stat(filepath.Join(swDistDir, "sw.js")); err == nil {
-		s.echo.File("/sw.js", filepath.Join(swDistDir, "sw.js"))
+		s.echo.FileFS("/sw.js", "sw.js", os.DirFS(swDistDir))
 	}
 
 	// 埋め込みページ (#2389)。SPA catchall より**前**に登録する。後だと
@@ -160,14 +163,14 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 		NoteRepo: noteRepo,
 		UserRepo: userRepo,
 		ClipRepo: clipRepo,
-		PackNote: func(c echo.Context, n *model.Note) (any, error) {
+		PackNote: func(c *echo.Context, n *model.Note) (any, error) {
 			return notesHandler.PackForEmbed(c.Request().Context(), n), nil
 		},
-		PackUser: func(_ echo.Context, u *model.User) (any, error) {
+		PackUser: func(_ *echo.Context, u *model.User) (any, error) {
 			// upstream の userEntityService.pack(user) 相当 (= UserLite)。
 			return entityPacker.PackUserLite(u), nil
 		},
-		PackClip: func(_ echo.Context, cl *model.Clip) (any, error) {
+		PackClip: func(_ *echo.Context, cl *model.Clip) (any, error) {
 			return clipsHandler.PackForEmbed(cl), nil
 		},
 	})

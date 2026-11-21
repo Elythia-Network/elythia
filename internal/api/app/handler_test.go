@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -126,7 +126,7 @@ func newTestHandler() (*Handler, *mockAuthSessionRepo) {
 	return NewHandler(repo, idGen), repo
 }
 
-func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -142,7 +142,7 @@ func post(handler func(echo.Context) error, body string, user *model.User) *http
 // postWithToken is post but also wires the raw auth token onto the context so
 // handlers that distinguish native session vs app access token (app/show
 // secret gate, #1829) can be exercised.
-func postWithToken(handler func(echo.Context) error, body string, user *model.User, token string) *httptest.ResponseRecorder {
+func postWithToken(handler func(*echo.Context) error, body string, user *model.User, token string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

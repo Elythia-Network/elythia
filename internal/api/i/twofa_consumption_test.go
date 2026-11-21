@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/twofactor"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,24 +102,24 @@ func TestChangePassword_WrongBothStaysInvalidToken(t *testing.T) {
 func TestTwoFAGatedEndpoints_WrongPasswordKeepsBackupCode(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
-		call     func(h *Handler) func(echo.Context) error
+		call     func(h *Handler) func(*echo.Context) error
 		body     string
 		webauthn bool
 	}{
-		{name: "change-password", call: func(h *Handler) func(echo.Context) error { return h.ChangePassword },
+		{name: "change-password", call: func(h *Handler) func(*echo.Context) error { return h.ChangePassword },
 			body: `{"currentPassword":"WRONG","newPassword":"newpass","token":"backup1"}`},
-		{name: "delete-account", call: func(h *Handler) func(echo.Context) error { return h.DeleteAccount },
+		{name: "delete-account", call: func(h *Handler) func(*echo.Context) error { return h.DeleteAccount },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "2fa/register", call: func(h *Handler) func(echo.Context) error { return h.TwoFARegister },
+		{name: "2fa/register", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARegister },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "2fa/unregister", call: func(h *Handler) func(echo.Context) error { return h.TwoFAUnregister },
+		{name: "2fa/unregister", call: func(h *Handler) func(*echo.Context) error { return h.TwoFAUnregister },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
+		{name: "update-email", call: func(h *Handler) func(*echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"WRONG","email":"new@example.com","token":"backup1"}`},
-		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+		{name: "regenerate-token", call: func(h *Handler) func(*echo.Context) error { return h.RegenerateToken },
 			body: `{"password":"WRONG","token":"backup1"}`},
 		// remove-key は WebAuthn 未設定だと 2FA gate の手前で 503 になるので配線する。
-		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
+		{name: "2fa/remove-key", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"WRONG","token":"backup1","credentialId":"c1"}`, webauthn: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,22 +242,22 @@ var _ twofactor.ReplayReleaser = (*countingReplayGuard)(nil)
 func TestTwoFAGatedEndpoints_SuccessConsumesExactlyOne(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
-		call     func(h *Handler) func(echo.Context) error
+		call     func(h *Handler) func(*echo.Context) error
 		body     string
 		want     int
 		webauthn bool
 	}{
-		{name: "change-password", call: func(h *Handler) func(echo.Context) error { return h.ChangePassword },
+		{name: "change-password", call: func(h *Handler) func(*echo.Context) error { return h.ChangePassword },
 			body: `{"currentPassword":"oldpass","newPassword":"newpass","token":"backup1"}`, want: http.StatusNoContent},
-		{name: "delete-account", call: func(h *Handler) func(echo.Context) error { return h.DeleteAccount },
+		{name: "delete-account", call: func(h *Handler) func(*echo.Context) error { return h.DeleteAccount },
 			body: `{"password":"oldpass","token":"backup1"}`, want: http.StatusNoContent},
-		{name: "2fa/register", call: func(h *Handler) func(echo.Context) error { return h.TwoFARegister },
+		{name: "2fa/register", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARegister },
 			body: `{"password":"oldpass","token":"backup1"}`, want: http.StatusOK},
-		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
+		{name: "update-email", call: func(h *Handler) func(*echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"oldpass","email":"new@example.com","token":"backup1"}`, want: http.StatusOK},
-		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+		{name: "regenerate-token", call: func(h *Handler) func(*echo.Context) error { return h.RegenerateToken },
 			body: `{"password":"oldpass","token":"backup1"}`, want: http.StatusNoContent},
-		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
+		{name: "2fa/remove-key", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"oldpass","token":"backup1","credentialId":"c1"}`, want: http.StatusOK, webauthn: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -312,23 +312,23 @@ func TestTwoFAUnregister_ClearsBackupCodes(t *testing.T) {
 func TestTwoFAGatedEndpoints_WrongPasswordReleasesReservation(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
-		call     func(h *Handler) func(echo.Context) error
+		call     func(h *Handler) func(*echo.Context) error
 		body     string
 		webauthn bool
 	}{
-		{name: "change-password", call: func(h *Handler) func(echo.Context) error { return h.ChangePassword },
+		{name: "change-password", call: func(h *Handler) func(*echo.Context) error { return h.ChangePassword },
 			body: `{"currentPassword":"WRONG","newPassword":"newpass","token":"backup1"}`},
-		{name: "delete-account", call: func(h *Handler) func(echo.Context) error { return h.DeleteAccount },
+		{name: "delete-account", call: func(h *Handler) func(*echo.Context) error { return h.DeleteAccount },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "2fa/register", call: func(h *Handler) func(echo.Context) error { return h.TwoFARegister },
+		{name: "2fa/register", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARegister },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "2fa/unregister", call: func(h *Handler) func(echo.Context) error { return h.TwoFAUnregister },
+		{name: "2fa/unregister", call: func(h *Handler) func(*echo.Context) error { return h.TwoFAUnregister },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "update-email", call: func(h *Handler) func(echo.Context) error { return h.UpdateEmail },
+		{name: "update-email", call: func(h *Handler) func(*echo.Context) error { return h.UpdateEmail },
 			body: `{"password":"WRONG","email":"new@example.com","token":"backup1"}`},
-		{name: "regenerate-token", call: func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+		{name: "regenerate-token", call: func(h *Handler) func(*echo.Context) error { return h.RegenerateToken },
 			body: `{"password":"WRONG","token":"backup1"}`},
-		{name: "2fa/remove-key", call: func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
+		{name: "2fa/remove-key", call: func(h *Handler) func(*echo.Context) error { return h.TwoFARemoveKey },
 			body: `{"password":"WRONG","token":"backup1","credentialId":"c1"}`, webauthn: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

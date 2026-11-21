@@ -59,7 +59,7 @@ const pluginPeerDepsWiring = "s.peerDeps = newPluginPeerDeps(s.config.Host, s.ou
 // 相手側にしか出ない (#2822)。
 func TestAPICatchallIsWired(t *testing.T) {
 	assertWired(t, serverPkg,
-		`api.Any("/*", apiCatchall)`,
+		`api.Group.Match(anyMethods, "/*", apiCatchall)`,
 		"peer の受け口が無いプラグインへの POST が 200 + {} に戻る")
 }
 

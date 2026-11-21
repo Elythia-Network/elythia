@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,6 +143,23 @@ func TestEchoPin_ErrorAnswers(t *testing.T) {
 				"Content-Type":     pinnedJSON,
 				"WWW-Authenticate": `Bearer realm="Misskey", error="invalid_token", error_description="Authentication failed. Please ensure your token is correct."`,
 			}},
+		// ブラウザは必ず gzip を受け付ける。gzip は本文を溜めてから書くので、
+		// WWW-Authenticate を決める middleware がその外側で本文を見ないと、ヘッダが
+		// 付かなくなる (#4239)。
+		{name: "api invalid token with gzip", method: http.MethodPost, path: "/api/notes/create",
+			header: map[string]string{"Content-Type": "application/json", "Authorization": "Bearer bogus", "Accept-Encoding": "gzip"}, body: `{"text":"x"}`,
+			status:   http.StatusUnauthorized,
+			wantBody: `{"error":{"code":"AUTHENTICATION_FAILED","id":"b0a7f5f8-dc2f-4171-b91f-de88ad238e14","kind":"client","message":"Authentication failed. Please ensure your token is correct."}}`,
+			wantHeader: map[string]string{
+				"Content-Type":     pinnedJSON,
+				"Content-Encoding": "",
+				"WWW-Authenticate": `Bearer realm="Misskey", error="invalid_token", error_description="Authentication failed. Please ensure your token is correct."`,
+			}},
+		{name: "api credential required with gzip", method: http.MethodPost, path: "/api/i",
+			header: map[string]string{"Content-Type": "application/json", "Accept-Encoding": "gzip"}, body: "{}",
+			status:     http.StatusUnauthorized,
+			wantBody:   `{"error":{"code":"CREDENTIAL_REQUIRED","id":"1384574d-a912-4b81-8601-c7b1c4085df1","kind":"client","message":"Authentication is required."}}`,
+			wantHeader: map[string]string{"Content-Type": pinnedJSON, "WWW-Authenticate": `Bearer realm="Misskey"`}},
 		{name: "api unknown endpoint by GET", method: http.MethodGet, path: "/api/no-such",
 			status:     http.StatusNotFound,
 			wantBody:   `{"error":{"code":"UNKNOWN_API_ENDPOINT","id":"2ca3b769-540a-4f08-9dd5-b5a825b6d0f1","kind":"client","message":"Unknown API endpoint."}}`,
@@ -189,7 +206,7 @@ func TestEchoPin_TrailingJSON(t *testing.T) {
 // recoverMiddleware が slog に書くので、v5 へ上げた後もここで確かめられる。
 func TestEchoPin_PanicAnswers500AndIsLogged(t *testing.T) {
 	srv := pinnedServer(t)
-	srv.echo.GET("/__pin-panic", func(echo.Context) error { panic("pinned panic") })
+	srv.echo.GET("/__pin-panic", func(*echo.Context) error { panic("pinned panic") })
 	logs := captureWarnLogs(t)
 
 	assertPinned(t, srv, []pinnedExchange{

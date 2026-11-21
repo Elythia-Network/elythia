@@ -7,7 +7,7 @@ import (
 
 	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func (o *availabilityObserver) ObserveExternalReference(userID, _, _ string) (bo
 func TestFollowCollections_LocalFederationUnavailableReturnsNotFound(t *testing.T) {
 	collections := []struct {
 		name string
-		call func(*Handler, echo.Context) error
+		call func(*Handler, *echo.Context) error
 	}{
 		{name: "followers", call: (*Handler).Followers},
 		{name: "following", call: (*Handler).Following},

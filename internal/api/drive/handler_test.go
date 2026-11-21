@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -44,11 +44,11 @@ func newHandlerWithRoleChecker(t *testing.T, rc coredrive.RoleChecker) (*Handler
 	return NewHandler(svc, idGen, nil, nil, nil), fileRepo, folderRepo
 }
 
-func setUser(c echo.Context, id string) {
+func setUser(c *echo.Context, id string) {
 	c.Set(string(middleware.UserContextKey), &model.User{ID: id})
 }
 
-func newJSONReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newJSONReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -58,7 +58,7 @@ func newJSONReq(t *testing.T, body string) (echo.Context, *httptest.ResponseReco
 }
 
 // newMultipartReq builds a multipart form request with the given file body and form fields.
-func newMultipartReq(t *testing.T, fileName, content string, fields map[string]string) (echo.Context, *httptest.ResponseRecorder) {
+func newMultipartReq(t *testing.T, fileName, content string, fields map[string]string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
@@ -1288,12 +1288,12 @@ func TestCursorGuardRejectsUnstorableCursor(t *testing.T) {
 	const body = `{"untilId":"a\u0000b"}`
 	for _, tt := range []struct {
 		name string
-		fn   func(h *Handler) func(echo.Context) error
+		fn   func(h *Handler) func(*echo.Context) error
 	}{
-		{"FilesList", func(h *Handler) func(echo.Context) error { return h.FilesList }},
-		{"FilesAttachedNotes", func(h *Handler) func(echo.Context) error { return h.FilesAttachedNotes }},
-		{"Stream", func(h *Handler) func(echo.Context) error { return h.Stream }},
-		{"FoldersList", func(h *Handler) func(echo.Context) error { return h.FoldersList }},
+		{"FilesList", func(h *Handler) func(*echo.Context) error { return h.FilesList }},
+		{"FilesAttachedNotes", func(h *Handler) func(*echo.Context) error { return h.FilesAttachedNotes }},
+		{"Stream", func(h *Handler) func(*echo.Context) error { return h.Stream }},
+		{"FoldersList", func(h *Handler) func(*echo.Context) error { return h.FoldersList }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, _, _ := newHandlerWithRepos(t)
@@ -1595,7 +1595,7 @@ func TestFilesCreate_ZeroPolicyBoundsTheRead(t *testing.T) {
 	orig := readMultipartFile
 	t.Cleanup(func() { readMultipartFile = orig })
 	var got int64 = -1
-	readMultipartFile = func(c echo.Context, maxBytes int64) ([]byte, string, error) {
+	readMultipartFile = func(c *echo.Context, maxBytes int64) ([]byte, string, error) {
 		got = maxBytes
 		return orig(c, maxBytes)
 	}

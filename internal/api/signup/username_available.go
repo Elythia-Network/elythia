@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	coresignup "github.com/elythia-network/elythia/internal/core/signup"
@@ -24,7 +24,7 @@ func (h *Handler) SetUsernameLookups(userRepo repository.UserRepository, usedRep
 
 // UsernameAvailable reports whether a username can be registered.
 // POST /api/username/available
-func (h *Handler) UsernameAvailable(c echo.Context) error {
+func (h *Handler) UsernameAvailable(c *echo.Context) error {
 	var req struct {
 		Username string `json:"username"`
 	}

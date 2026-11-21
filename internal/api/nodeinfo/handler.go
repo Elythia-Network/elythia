@@ -13,7 +13,7 @@ import (
 	corereversi "github.com/elythia-network/elythia/internal/core/reversi"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -243,7 +243,7 @@ func (h *Handler) SetProxyAccountResolver(r func() (string, bool)) {
 }
 
 // Version2_1 handles GET /nodeinfo/2.1.
-func (h *Handler) Version2_1(c echo.Context) error {
+func (h *Handler) Version2_1(c *echo.Context) error {
 	return h.serveDocument(c, "2.1")
 }
 
@@ -251,7 +251,7 @@ func (h *Handler) Version2_1(c echo.Context) error {
 // advertise するため、upstream NodeinfoServerService と同じく 2.0 も配信する
 // (#1777)。schema 2.0 には software.repository が無いので省略する (upstream は
 // version 2.0 で software.repository を delete する)。
-func (h *Handler) Version2_0(c echo.Context) error {
+func (h *Handler) Version2_0(c *echo.Context) error {
 	return h.serveDocument(c, "2.0")
 }
 
@@ -263,7 +263,7 @@ func (h *Handler) Version2_0(c echo.Context) error {
 //
 // 本体は documentBody が TTL 付きで cache する (upstream の MemorySingleCache
 // 相当)。ヘッダは cache hit / miss で同じものを返す。
-func (h *Handler) serveDocument(c echo.Context, version string) error {
+func (h *Handler) serveDocument(c *echo.Context, version string) error {
 	body, err := h.documentBody(version)
 	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)

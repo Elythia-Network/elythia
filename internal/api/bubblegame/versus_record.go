@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
@@ -127,7 +127,7 @@ func packRecord(pk *entity.Packer, rec *model.BubbleGameVersusRecord, withLogs b
 // History handles bubble-game/versus/history: finished matches of userId
 // (default: the caller), newest first. Other users' history only contains
 // matches the caller may see.
-func (h *VersusHandler) History(c echo.Context) error {
+func (h *VersusHandler) History(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID    string     `json:"userId"`
@@ -196,7 +196,7 @@ const historyMaxRounds = 10
 
 // ShowRecord handles bubble-game/versus/record: one stored match with both
 // players' logs.
-func (h *VersusHandler) ShowRecord(c echo.Context) error {
+func (h *VersusHandler) ShowRecord(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		MatchID string `json:"matchId"`
@@ -228,7 +228,7 @@ func (h *VersusHandler) ShowRecord(c echo.Context) error {
 
 // SetPublic handles bubble-game/versus/set-public: the caller's own consent
 // to show the match to others.
-func (h *VersusHandler) SetPublic(c echo.Context) error {
+func (h *VersusHandler) SetPublic(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		MatchID  string `json:"matchId"`

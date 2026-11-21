@@ -45,7 +45,7 @@
 | 用途 | ライブラリ |
 |---|---|
 | 言語 | Go 1.27(`go.mod`で管理) |
-| Web | Echo v4 |
+| Web | Echo v5 |
 | ORM | GORM + pgx/v5(PostgreSQL 18) |
 | Migration | golang-migrate(SQLファイル) |
 | 設定 | Viper(Misskey互換YAML + `MK_`環境変数) |
@@ -309,6 +309,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-21: echoをv5へ上げたので、Section 1の表を直した (#4239) → [docs/architecture.md](docs/architecture.md)
 - 2026-11-14: `vulncheck`をMakefileの`make vulncheck`から呼び、govulncheckの結果を許可の一覧と突き合わせるようにしたので、Section 8の行を直した (#4176) → [docs/ci.md](docs/ci.md)
 - 2026-11-14: Claude Code以外のコーディングエージェントも読めるよう、このファイルを指すシンボリックリンク`AGENTS.md`を置き、冒頭と読み方の節を直した (#4167)
 - 2026-11-11: `make frontend-check`とCIの`frontend`に、画面の文言を日本語で直書きしていないかの検査を足したので、Section 3とSection 8の行に足した (#4070) → [docs/contributing.md](docs/contributing.md#コーディング規約fork-frontend)

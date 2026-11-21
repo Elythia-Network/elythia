@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/frontendutil"
@@ -87,7 +87,7 @@ func registerFrontendAssets(e *echo.Echo, cfg *config.Config, prefix, dir, devSe
 	if isDev(cfg) {
 		// 全体の gzip middleware は `<prefix>/*` を外している (selfEncodedRoutes)
 		// ので、dev server の応答はここで従来どおり圧縮する。
-		e.Any(prefix+"/*", newViteProxy(devServer), frontendDynamicGzip())
+		e.Match(anyMethods, prefix+"/*", newViteProxy(devServer), frontendDynamicGzip())
 		return
 	}
 	_, err := os.Stat(dir)
@@ -97,7 +97,7 @@ func registerFrontendAssets(e *echo.Echo, cfg *config.Config, prefix, dir, devSe
 	}
 	slog.Warn("frontend のビルド成果物が見つからないので 404 を返します。開発中なら dev: true (MK_DEV=1) で Vite dev server を使ってください",
 		"prefix", prefix, "dir", dir, "error", err)
-	e.Any(prefix+"/*", func(echo.Context) error {
+	e.Match(anyMethods, prefix+"/*", func(*echo.Context) error {
 		return echo.ErrNotFound
 	})
 }

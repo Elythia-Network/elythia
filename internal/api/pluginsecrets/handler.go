@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/pluginsecret"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -82,7 +82,7 @@ type ListResponse struct {
 }
 
 // List returns the declared and stored secrets without their values.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	statuses, err := h.svc.Statuses(c.Request().Context(), h.plugin)
 	if err != nil {
 		slog.Error("plugin secrets: 一覧を読めません", "plugin", h.plugin, "err", err)
@@ -138,7 +138,7 @@ type setRequest struct {
 }
 
 // Set stores a declared secret. 204 を返し、値も末尾も返さない。
-func (h *Handler) Set(c echo.Context) error {
+func (h *Handler) Set(c *echo.Context) error {
 	var req setRequest
 	if err := bind(c, &req); err != nil {
 		return codedError(c, http.StatusBadRequest, "リクエストを読めません", CodeInvalidSecretParam)
@@ -167,7 +167,7 @@ type deleteRequest struct {
 }
 
 // Delete removes a secret, declared or not.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	var req deleteRequest
 	if err := bind(c, &req); err != nil {
 		return codedError(c, http.StatusBadRequest, "リクエストを読めません", CodeInvalidSecretParam)
@@ -188,7 +188,7 @@ func (h *Handler) isDeclared(name string) bool {
 	return false
 }
 
-func (h *Handler) writeError(c echo.Context, err error) error {
+func (h *Handler) writeError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, plugin.ErrSecretsUnavailable):
 		return codedError(c, http.StatusBadRequest,
@@ -206,7 +206,7 @@ func (h *Handler) writeError(c echo.Context, err error) error {
 
 // bind decodes the JSON body. 未知のキーは許す — 本体の frontend は token を
 // body の `i` に載せて送るため。
-func bind(c echo.Context, v any) error {
+func bind(c *echo.Context, v any) error {
 	err := json.NewDecoder(c.Request().Body).Decode(v)
 	if errors.Is(err, io.EOF) {
 		return nil
@@ -214,18 +214,18 @@ func bind(c echo.Context, v any) error {
 	return err
 }
 
-func userID(c echo.Context) string {
+func userID(c *echo.Context) string {
 	if u := middleware.GetUser(c); u != nil {
 		return u.ID
 	}
 	return ""
 }
 
-func codedError(c echo.Context, status int, message, code string) error {
+func codedError(c *echo.Context, status int, message, code string) error {
 	return c.JSON(status, map[string]any{"error": map[string]any{"message": message, "code": code}})
 }
 
-func internalError(c echo.Context) error {
+func internalError(c *echo.Context) error {
 	return c.JSON(http.StatusInternalServerError, map[string]any{
 		"error": map[string]any{"message": "Internal error."},
 	})

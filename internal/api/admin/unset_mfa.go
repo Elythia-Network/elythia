@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -18,7 +18,7 @@ import (
 // disables TOTP / password-less login. Targets that are administrators can
 // only be reset by themselves (ACCESS_DENIED otherwise), mirroring the
 // upstream fork-merge authorization fix.
-func (h *Handler) UnsetMfa(c echo.Context) error {
+func (h *Handler) UnsetMfa(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

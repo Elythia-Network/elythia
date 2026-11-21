@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +14,7 @@ func runSecurityHeader(t *testing.T, mw echo.MiddlewareFunc) http.Header {
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-	h := mw(func(c echo.Context) error { return c.String(http.StatusOK, "ok") })
+	h := mw(func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
 	assert.NoError(t, h(c))
 	return rec.Header()
 }

@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // FetchTimeout matches the upstream `timeout: 5000` ms.
@@ -44,7 +44,7 @@ func New(httpClient *http.Client, userAgent string) *Handler {
 }
 
 // Fetch handles POST /api/fetch-external-resources.
-func (h *Handler) Fetch(c echo.Context) error {
+func (h *Handler) Fetch(c *echo.Context) error {
 	var raw struct {
 		URL  *string `json:"url"`
 		Hash *string `json:"hash"`
@@ -115,6 +115,6 @@ func (h *Handler) Fetch(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"type": res.Type, "data": res.Data})
 }
 
-func (h *Handler) invalidSchema(c echo.Context) error {
+func (h *Handler) invalidSchema(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("EXT_RESOURCE_RETURNED_INVALID_SCHEMA", "External resource returned invalid schema.", "bb774091-7a15-4a70-9dc5-6ac8cf125856"))
 }

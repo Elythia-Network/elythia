@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -38,7 +38,7 @@ import (
 // MembersByModerator を request で受け取りつつ /dev/null に流していた
 // ため、admin UI から policy / 色 / アイコン等を設定しても DB に書かれず
 // 「ロール設定が反映されない」現象になっていた。
-func (h *Handler) RolesCreate(c echo.Context) error {
+func (h *Handler) RolesCreate(c *echo.Context) error {
 	var req struct {
 		Name                            *string         `json:"name"`
 		Description                     *string         `json:"description"`
@@ -214,7 +214,7 @@ func (h *Handler) packRole(r *model.Role) map[string]any {
 }
 
 // RolesShow handles POST /api/admin/roles/show.
-func (h *Handler) RolesShow(c echo.Context) error {
+func (h *Handler) RolesShow(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 	}
@@ -232,7 +232,7 @@ func (h *Handler) RolesShow(c echo.Context) error {
 }
 
 // RolesList handles POST /api/admin/roles/list.
-func (h *Handler) RolesList(c echo.Context) error {
+func (h *Handler) RolesList(c *echo.Context) error {
 	// upstream admin/roles/list.ts は lastUsedAt DESC で返す (#2061)。
 	roles, err := h.roleService.ListByLastUsed()
 	if err != nil {
@@ -255,7 +255,7 @@ func (h *Handler) RolesList(c echo.Context) error {
 // になっていた (PR #1102)。特に policies field の欠落は「canPublicNote 等の
 // ポリシーが UI 上で trueに見えても実際は default 値のまま」という drop-in
 // regression 重大度高めの bug。本 fix で upstream 15 field 全部を pipe する。
-func (h *Handler) RolesUpdate(c echo.Context) error {
+func (h *Handler) RolesUpdate(c *echo.Context) error {
 	var req struct {
 		RoleID                          string                    `json:"roleId"`
 		Name                            *string                   `json:"name"`
@@ -402,7 +402,7 @@ func (h *Handler) RolesUpdate(c echo.Context) error {
 }
 
 // RolesDelete handles POST /api/admin/roles/delete.
-func (h *Handler) RolesDelete(c echo.Context) error {
+func (h *Handler) RolesDelete(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 	}
@@ -425,7 +425,7 @@ func (h *Handler) RolesDelete(c echo.Context) error {
 }
 
 // RolesAssign handles POST /api/admin/roles/assign.
-func (h *Handler) RolesAssign(c echo.Context) error {
+func (h *Handler) RolesAssign(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 		RoleID string `json:"roleId"`
@@ -497,7 +497,7 @@ func (h *Handler) RolesAssign(c echo.Context) error {
 // 取得できない場合は administrator とみなさず ACCESS_DENIED に倒す (fail-closed)。
 // NO_SUCH_ROLE / ACCESS_DENIED の UUID は assign と unassign で異なるため呼び
 // 出し側から渡す。
-func (h *Handler) requireCanEditRoleMembers(c echo.Context, roleID, noSuchRoleID, accessDeniedID string) (handled bool, err error) {
+func (h *Handler) requireCanEditRoleMembers(c *echo.Context, roleID, noSuchRoleID, accessDeniedID string) (handled bool, err error) {
 	r, err := h.roleService.Show(roleID)
 	if err != nil {
 		if errors.Is(err, role.ErrRoleNotFound) {
@@ -557,7 +557,7 @@ func (h *Handler) requireCanEditRoleMembers(c echo.Context, roleID, noSuchRoleID
 }
 
 // RolesUnassign handles POST /api/admin/roles/unassign.
-func (h *Handler) RolesUnassign(c echo.Context) error {
+func (h *Handler) RolesUnassign(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 		RoleID string `json:"roleId"`
@@ -592,7 +592,7 @@ func (h *Handler) RolesUnassign(c echo.Context) error {
 }
 
 // RolesUsers handles POST /api/admin/roles/users.
-func (h *Handler) RolesUsers(c echo.Context) error {
+func (h *Handler) RolesUsers(c *echo.Context) error {
 	var req struct {
 		RoleID    string     `json:"roleId"`
 		Limit     *jsnum.Int `json:"limit"`
@@ -686,7 +686,7 @@ func (h *Handler) RolesUsers(c echo.Context) error {
 }
 
 // RolesUpdateDefaultPolicies handles POST /api/admin/roles/update-default-policies.
-func (h *Handler) RolesUpdateDefaultPolicies(c echo.Context) error {
+func (h *Handler) RolesUpdateDefaultPolicies(c *echo.Context) error {
 	var req struct {
 		Policies map[string]any `json:"policies"`
 	}

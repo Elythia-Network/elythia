@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // multipartMaxMemory is the in-memory budget for parsing a multipart body,
@@ -45,7 +45,7 @@ func RequireMultipartFile(routes ...string) echo.MiddlewareFunc {
 		want[r] = true
 	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			req := c.Request()
 			if req.Method != http.MethodPost || !want[c.Path()] {
 				return next(c)

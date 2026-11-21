@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +35,7 @@ func newHandler(t *testing.T) (
 	return NewHandler(svc, idGen, nil, nil, nil, nil), repo, followRepo, noteRepo
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -44,7 +44,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 	return e.NewContext(req, rec), rec
 }
 
-func setUser(c echo.Context, userID string) {
+func setUser(c *echo.Context, userID string) {
 	c.Set(string(middleware.UserContextKey), &model.User{ID: userID})
 }
 
@@ -1290,12 +1290,12 @@ func TestCursorGuardRejectsUnstorableCursor(t *testing.T) {
 	const body = `{"untilId":"a\u0000b"}`
 	for _, tt := range []struct {
 		name string
-		fn   func(h *Handler) func(echo.Context) error
+		fn   func(h *Handler) func(*echo.Context) error
 	}{
-		{"Followed", func(h *Handler) func(echo.Context) error { return h.Followed }},
-		{"Owned", func(h *Handler) func(echo.Context) error { return h.Owned }},
-		{"Search", func(h *Handler) func(echo.Context) error { return h.Search }},
-		{"Timeline", func(h *Handler) func(echo.Context) error { return h.Timeline }},
+		{"Followed", func(h *Handler) func(*echo.Context) error { return h.Followed }},
+		{"Owned", func(h *Handler) func(*echo.Context) error { return h.Owned }},
+		{"Search", func(h *Handler) func(*echo.Context) error { return h.Search }},
+		{"Timeline", func(h *Handler) func(*echo.Context) error { return h.Timeline }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, _, _, _ := newHandler(t)
@@ -1427,7 +1427,7 @@ func listCount(t *testing.T, rec *httptest.ResponseRecorder) int {
 func TestListsAcceptIntegerValuedFractions(t *testing.T) {
 	lists := []struct {
 		name string
-		call func(*Handler, echo.Context) error
+		call func(*Handler, *echo.Context) error
 		body string
 	}{
 		{"followed", (*Handler).Followed, `{"limit":1.0,"untilDate":1e15}`},
@@ -1458,7 +1458,7 @@ func TestListsAcceptIntegerValuedFractions(t *testing.T) {
 func TestListsIgnoreOffset(t *testing.T) {
 	lists := []struct {
 		name string
-		call func(*Handler, echo.Context) error
+		call func(*Handler, *echo.Context) error
 		body string
 	}{
 		{"followed", (*Handler).Followed, `{"offset":1}`},

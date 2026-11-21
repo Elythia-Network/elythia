@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +20,7 @@ func TestChatParams_AcceptIntegerValuedFractions(t *testing.T) {
 	const page = `"limit":10.0,"sinceDate":1e1,"untilDate":4102444800000.0`
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		body    string
 	}{
 		{"chat/history", h.History, `{"limit":1e1}`},
@@ -57,7 +57,7 @@ func TestChatParams_RejectOutOfRangeLimit(t *testing.T) {
 	repo.Rooms["r1"] = &model.ChatRoom{ID: "r1", OwnerID: u1.ID, Name: "r1", Owner: u1}
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		body    string
 	}{
 		{"chat/messages/search", h.MessagesSearch, `{"query":"x",%s}`},

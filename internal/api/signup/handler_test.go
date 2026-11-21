@@ -20,7 +20,7 @@ import (
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -119,7 +119,7 @@ func newTestHandler(t *testing.T) (*apisignup.Handler, *testutil.MockUserReposit
 	return h, userRepo, metaRepo
 }
 
-func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

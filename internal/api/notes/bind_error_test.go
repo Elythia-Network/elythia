@@ -3,7 +3,7 @@ package notes
 import (
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -16,7 +16,7 @@ import (
 func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 	h, _ := newDraftHandlerWithRepo()
 	me := &model.User{ID: "u1", Username: "u1"}
-	cases := map[string]func(echo.Context) error{
+	cases := map[string]func(*echo.Context) error{
 		"DraftsList":          h.DraftsList,
 		"PollsRecommendation": h.PollsRecommendation,
 	}

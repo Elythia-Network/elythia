@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -24,7 +24,7 @@ import (
 // Redis に置き、連合の相手へ配る。取り消された ctx では書いた後の処理だけが失敗し、
 // タイマーの無い手番ができて、相手が時間切れをすぐに申告できてしまう (接続を切るだけで
 // 起こせる。レビューで実測)。チャンネルは context.Background() で呼んでいる。
-func actionContext(c echo.Context) context.Context {
+func actionContext(c *echo.Context) context.Context {
 	return context.WithoutCancel(c.Request().Context())
 }
 
@@ -40,7 +40,7 @@ type actionError struct {
 // 本家の慣習に合わせて、endpoint ごとに別の id を持つ。
 type actionErrors []actionError
 
-func (e actionErrors) respond(c echo.Context, err error) error {
+func (e actionErrors) respond(c *echo.Context, err error) error {
 	for _, a := range e {
 		if errors.Is(err, a.err) {
 			return c.JSON(http.StatusBadRequest, apierr.Error(a.code, a.message, a.id))
@@ -72,7 +72,7 @@ var claimTimeIsUpErrors = actionErrors{
 
 // Ready handles POST /api/reversi/ready (Elythia, #3942): the `ready`
 // message of the reversiGame channel. 両者が準備完了になると対局が始まる。
-func (h *Handler) Ready(c echo.Context) error {
+func (h *Handler) Ready(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		GameID string `json:"gameId"`
@@ -93,7 +93,7 @@ func (h *Handler) Ready(c echo.Context) error {
 // PutStone handles POST /api/reversi/put-stone (Elythia, #3942): the
 // `putStone` message of the reversiGame channel. id はチャンネルと同じく、
 // stream の log イベントにそのまま載る (操作の突き合わせ用)。
-func (h *Handler) PutStone(c echo.Context) error {
+func (h *Handler) PutStone(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		GameID string `json:"gameId"`
@@ -118,7 +118,7 @@ func (h *Handler) PutStone(c echo.Context) error {
 //
 // チャンネルと同じく対局者でなくても呼べる。手番の時間が残っていれば何もしない
 // (結果は返さない。終局したかは reversi/show-game で読む)。
-func (h *Handler) ClaimTimeIsUp(c echo.Context) error {
+func (h *Handler) ClaimTimeIsUp(c *echo.Context) error {
 	var req struct {
 		GameID string `json:"gameId"`
 	}

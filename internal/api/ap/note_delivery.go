@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
@@ -67,7 +67,7 @@ type fetchSignerResult struct {
 // 見せてよいかの判定 (noteForSigner) と、配送先の絞り込みの判定 (fetchHost) が
 // 同じ要求で両方とも署名を確かめるので、結果を共有する (#4199)。呼ぶ側が
 // fetchSigner と Signature ヘッダーの有無を確かめておく。
-func (h *Handler) authenticateFetch(c echo.Context) (*model.User, error) {
+func (h *Handler) authenticateFetch(c *echo.Context) (*model.User, error) {
 	if v, ok := c.Get(fetchSignerKey).(fetchSignerResult); ok {
 		return v.user, v.err
 	}
@@ -101,7 +101,7 @@ type fetchRequester struct {
 // ときは、User-Agent を見ない。
 //
 // 自分自身を名乗る User-Agent は "" にする (自分のホストを指定する意味は無い)。
-func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
+func (h *Handler) fetchHost(c *echo.Context) (host string, rejected bool) {
 	if v, ok := c.Get(fetchHostKey).(fetchRequester); ok {
 		return v.host, v.rejected
 	}
@@ -145,7 +145,7 @@ func (h *Handler) fetchHost(c echo.Context) (host string, rejected bool) {
 // では、障害が直っても戻らない。プラグインの障害は、そのとき渡したノートの
 // 全部 (条件を付けていないものも含む) に同じく出るので、503にしても、どの
 // ノートを絞っているかは漏れない。
-func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) (hidden map[string]bool, unavailable bool) {
+func (h *Handler) hiddenByDeliveryRules(c *echo.Context, notes []*model.Note) (hidden map[string]bool, unavailable bool) {
 	if h.noteDelivery.Empty() {
 		return nil, false
 	}
@@ -181,7 +181,7 @@ func (h *Handler) hiddenByDeliveryRules(c echo.Context, notes []*model.Note) (hi
 // deliveryRuleStatus returns the status to answer instead of n, or 0 when the
 // requester may fetch it: 404 when a plugin narrowed n away from the
 // requester, 503 when the targets could not be read.
-func (h *Handler) deliveryRuleStatus(c echo.Context, n *model.Note) int {
+func (h *Handler) deliveryRuleStatus(c *echo.Context, n *model.Note) int {
 	hidden, unavailable := h.hiddenByDeliveryRules(c, []*model.Note{n})
 	switch {
 	case unavailable:

@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -60,7 +60,7 @@ var (
 )
 
 // fail maps a service error to a response. 内部のエラーは文面を返さない。
-func (h *VersusHandler) fail(c echo.Context, err error) error {
+func (h *VersusHandler) fail(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, bubbleversus.ErrNoSuchMatch), errors.Is(err, bubbleversus.ErrNotParticipant):
 		// 参加していない対局は、あることも知らせない。
@@ -85,7 +85,7 @@ func (h *VersusHandler) fail(c echo.Context, err error) error {
 }
 
 // bindMatchID reads {matchId}. 形が違えば 404 を書いて false を返す。
-func bindMatchID(c echo.Context, req any, matchID *string) (bool, error) {
+func bindMatchID(c *echo.Context, req any, matchID *string) (bool, error) {
 	if err := c.Bind(req); err != nil || *matchID == "" {
 		return false, c.JSON(http.StatusBadRequest, errVersusInvalidP)
 	}
@@ -157,7 +157,7 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-func (h *VersusHandler) respond(c echo.Context, m *bubbleversus.Match, known map[string]*model.User) error {
+func (h *VersusHandler) respond(c *echo.Context, m *bubbleversus.Match, known map[string]*model.User) error {
 	packed, err := h.packMatch(m, known)
 	if err != nil {
 		return h.fail(c, err)
@@ -166,7 +166,7 @@ func (h *VersusHandler) respond(c echo.Context, m *bubbleversus.Match, known map
 }
 
 // Invite handles POST /api/bubble-game/versus/invite.
-func (h *VersusHandler) Invite(c echo.Context) error {
+func (h *VersusHandler) Invite(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID   string `json:"userId"`
@@ -194,7 +194,7 @@ func (h *VersusHandler) Invite(c echo.Context) error {
 }
 
 // Invitations handles POST /api/bubble-game/versus/invitations.
-func (h *VersusHandler) Invitations(c echo.Context) error {
+func (h *VersusHandler) Invitations(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	list, err := h.svc.Invitations(c.Request().Context(), me.ID)
 	if err != nil {
@@ -217,7 +217,7 @@ type matchReq struct {
 }
 
 // Show handles POST /api/bubble-game/versus/show.
-func (h *VersusHandler) Show(c echo.Context) error {
+func (h *VersusHandler) Show(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req matchReq
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
@@ -234,7 +234,7 @@ func (h *VersusHandler) Show(c echo.Context) error {
 }
 
 // Accept handles POST /api/bubble-game/versus/accept.
-func (h *VersusHandler) Accept(c echo.Context) error {
+func (h *VersusHandler) Accept(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req matchReq
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
@@ -248,7 +248,7 @@ func (h *VersusHandler) Accept(c echo.Context) error {
 }
 
 // Decline handles POST /api/bubble-game/versus/decline.
-func (h *VersusHandler) Decline(c echo.Context) error {
+func (h *VersusHandler) Decline(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req matchReq
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
@@ -261,7 +261,7 @@ func (h *VersusHandler) Decline(c echo.Context) error {
 }
 
 // Cancel handles POST /api/bubble-game/versus/cancel.
-func (h *VersusHandler) Cancel(c echo.Context) error {
+func (h *VersusHandler) Cancel(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req matchReq
 	if ok, err := bindMatchID(c, &req, &req.MatchID); !ok {
@@ -274,7 +274,7 @@ func (h *VersusHandler) Cancel(c echo.Context) error {
 }
 
 // Report handles POST /api/bubble-game/versus/report.
-func (h *VersusHandler) Report(c echo.Context) error {
+func (h *VersusHandler) Report(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		MatchID string `json:"matchId"`

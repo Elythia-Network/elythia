@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/core/mediaproxy"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 

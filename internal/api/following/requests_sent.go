@@ -8,14 +8,14 @@ import (
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RequestsSent handles POST /api/following/requests/sent.
 //
 // 呼び出しユーザーが送った未承認の follow request を返す。承認済の関係は
 // Following テーブルへ移るのでここには含まれない。
-func (h *Handler) RequestsSent(c echo.Context) error {
+func (h *Handler) RequestsSent(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`

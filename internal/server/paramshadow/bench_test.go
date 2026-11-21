@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 )
@@ -45,7 +45,7 @@ func benchEcho(b *testing.B, eps map[string]paramschema.Endpoint, endpoint strin
 		mws = append(mws, Middleware(eps))
 	}
 	// handlerはbodyを読み切って200を返すだけにし、差を検証の分にする。
-	e.POST("/api/"+endpoint, func(c echo.Context) error {
+	e.POST("/api/"+endpoint, func(c *echo.Context) error {
 		_, _ = io.Copy(io.Discard, c.Request().Body)
 		return c.NoContent(http.StatusOK)
 	}, mws...)
@@ -160,7 +160,7 @@ func BenchmarkEnforcedWorstCase(b *testing.B) {
 				if on {
 					mws = append(mws, Middleware(eps))
 				}
-				e.POST("/api/clips/notes", func(c echo.Context) error {
+				e.POST("/api/clips/notes", func(c *echo.Context) error {
 					_, _ = io.Copy(io.Discard, c.Request().Body)
 					return c.NoContent(http.StatusOK)
 				}, mws...)

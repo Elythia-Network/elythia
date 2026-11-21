@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/dbhealth"
@@ -28,7 +28,7 @@ func (h *Handler) SetDatabaseHealth(r DatabaseHealthReader) {
 // dead tuple と VACUUM / ANALYZE の最終実行を返す。判断材料を出すだけで、
 // 何も消さない。upstream に対応物は無い (`get-index-stats` は pg_indexes の
 // 一覧を返すだけ)。
-func (h *Handler) DatabaseHealth(c echo.Context) error {
+func (h *Handler) DatabaseHealth(c *echo.Context) error {
 	if h.dbHealth == nil {
 		return apierr.JSONInternalError(c)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -397,7 +397,7 @@ func newCountingHandler(t *testing.T, now time.Time) (*Handler, *countingUserRep
 	return h, userRepo, noteRepo
 }
 
-func getNodeinfo(t *testing.T, fn func(echo.Context) error) map[string]any {
+func getNodeinfo(t *testing.T, fn func(*echo.Context) error) map[string]any {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/nodeinfo", nil), rec)
@@ -654,8 +654,8 @@ func TestNodeinfo_DropLocalDropsEveryVersion(t *testing.T) {
 	metaRepo.Meta = &model.Meta{ID: "x", Name: &before}
 	h.SetMetaRepo(metaRepo)
 
-	versions := map[string]func(echo.Context) error{"2.0": h.Version2_0, "2.1": h.Version2_1}
-	name := func(fn func(echo.Context) error) any {
+	versions := map[string]func(*echo.Context) error{"2.0": h.Version2_0, "2.1": h.Version2_1}
+	name := func(fn func(*echo.Context) error) any {
 		return getNodeinfo(t, fn)["metadata"].(map[string]any)["nodeName"]
 	}
 	for v, fn := range versions {

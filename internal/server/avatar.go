@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	apiusers "github.com/elythia-network/elythia/internal/api/users"
 	"github.com/elythia-network/elythia/internal/entity"
@@ -47,7 +47,7 @@ type avatarUserLookup interface {
 // Sets Cache-Control: public, max-age=86400 so browsers do not run
 // the DB lookup for every mention chip (matches upstream).
 func avatarHandler(pk *entity.Packer, userRepo avatarUserLookup, localHost string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		// 304 / cache-hit でも返したい header なので Redirect 前に書く。
 		c.Response().Header().Set(echo.HeaderCacheControl, "public, max-age=86400")
 

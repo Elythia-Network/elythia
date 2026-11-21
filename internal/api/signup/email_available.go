@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -22,7 +22,7 @@ func (h *Handler) SetEmailAvailabilityDB(db *gorm.DB) { h.emailDB = db }
 
 // EmailAvailable reports whether an email address can be registered.
 // POST /api/email-address/available
-func (h *Handler) EmailAvailable(c echo.Context) error {
+func (h *Handler) EmailAvailable(c *echo.Context) error {
 	var req struct {
 		EmailAddress string `json:"emailAddress"`
 	}

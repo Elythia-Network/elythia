@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -133,7 +133,7 @@ func seedDriveFile(t *testing.T, id, ownerID string) {
 	}).Error)
 }
 
-func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -721,7 +721,7 @@ func TestPostsCreateUpdate_NoOwnedFilesIsNoSuchFile(t *testing.T) {
 	seedDriveFile(t, "galf_nsf", "gal_u2")
 	seedPost(t, &model.GalleryPost{ID: "gp_nsf", UpdatedAt: time.Now(), Title: "t", UserID: "gal_u1", FileIDs: []string{}, Tags: []string{}})
 	for _, tc := range []struct {
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 	}{
 		{newHandler().PostsCreate, `{"title":"x","fileIds":["galf_nsf"]}`},

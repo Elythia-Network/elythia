@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -192,7 +192,7 @@ func callMetaPretty(t *testing.T, h *Handler) []byte {
 	return rec.Body.Bytes()
 }
 
-// ?pretty は echo が indent 付きで書くので、cache 済みの compact bytes を
+// ?pretty はサーバーの JSONSerializer が indent 付きで書くので、cache 済みの compact bytes を
 // そのまま返してはいけない。かといって cache を素通しにもしない (/api/meta は
 // 未認証で叩けて per-endpoint の rate limit も無いので、素通しだと ?pretty を
 // 付けるだけで誰でもキャッシュを外せる)。cache から整形して返す。
@@ -203,13 +203,14 @@ func TestMeta_PrettyIsIndentedAndMatchesEchoJSON(t *testing.T) {
 	got := callMetaPretty(t, h)
 	assert.Contains(t, string(got), "\n  ", "?pretty は indent 付きで返す")
 
-	// echo に同じ map を ?pretty で書かせた結果と bytes 一致すること。
+	// 同じ map を、サーバーの serializer が ?pretty で書く字下げ (echo の v4 の
+	// ?pretty と同じ 2 つの空白、#4239) で書いた結果と bytes 一致すること。
 	resp, err := h.buildMeta(true)
 	require.NoError(t, err)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/meta?pretty", nil)
 	rec := httptest.NewRecorder()
-	require.NoError(t, e.NewContext(req, rec).JSON(http.StatusOK, resp))
+	require.NoError(t, e.NewContext(req, rec).JSONPretty(http.StatusOK, resp, "  "))
 	assert.Equal(t, rec.Body.String(), string(got))
 }
 

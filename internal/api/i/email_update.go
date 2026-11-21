@@ -13,7 +13,7 @@ import (
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // generateVerifyCode returns a random 32-char hex code for email verification.
@@ -43,7 +43,7 @@ func (h *Handler) verifyURL(code string) string {
 //  3. email が非null → フォーマット + banned + active/API 検証
 //  4. profile の email / emailVerified / emailVerifyCode を更新
 //  5. 新 email があれば確認メールを送信
-func (h *Handler) UpdateEmail(c echo.Context) error {
+func (h *Handler) UpdateEmail(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Password string  `json:"password"`
@@ -170,7 +170,7 @@ func (h *Handler) UpdateEmail(c echo.Context) error {
 
 // VerifyEmail handles POST /api/verify-email.
 // emailVerifyCode が一致すれば emailVerified を true にする。
-func (h *Handler) VerifyEmail(c echo.Context) error {
+func (h *Handler) VerifyEmail(c *echo.Context) error {
 	var req struct {
 		Code *string `json:"code"`
 	}

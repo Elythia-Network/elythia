@@ -7,11 +7,11 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Achievements handles POST /api/users/achievements.
-func (h *Handler) Achievements(c echo.Context) error {
+func (h *Handler) Achievements(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/paramschema"
@@ -48,7 +48,7 @@ var multipartUploadRoutes = []string{"/api/drive/files/create"}
 
 // isAPIEndpointRoute reports whether c was routed to an /api endpoint whose
 // upstream counterpart validates params with an ajv `type: 'object'` schema.
-func isAPIEndpointRoute(c echo.Context) bool {
+func isAPIEndpointRoute(c *echo.Context) bool {
 	p := c.Path()
 	return strings.HasPrefix(p, "/api/") && !nonEndpointAPIRoutes[p]
 }
@@ -68,7 +68,7 @@ func expectsObject(t reflect.Type) bool {
 // string, number, boolean) and t expects an object. Upstream hands such a
 // body straight to ajv, whose first error is `#/type` "must be object"
 // (endpoint-base.ts). Malformed bodies are left to the decoder.
-func rejectNonObjectBody(c echo.Context, t reflect.Type, data []byte) error {
+func rejectNonObjectBody(c *echo.Context, t reflect.Type, data []byte) error {
 	if !isAPIEndpointRoute(c) || !expectsObject(t) {
 		return nil
 	}
@@ -97,7 +97,34 @@ type apiBinder struct {
 // query params, never the body, as upstream does. A GET first rejects, with
 // errQueryCast, a query value that upstream cannot cast to its param's type
 // (see checkQueryCasts).
-func (b *apiBinder) Bind(i any, c echo.Context) error {
+func (b *apiBinder) Bind(c *echo.Context, i any) error {
+	return v4BindError(b.bind(c, i))
+}
+
+// v4BindError gives a bind error of echo's binder, as echo v4 did, the text
+// of the error that failed the bind as its message.
+//
+// echo の v5 の binder は、query・path・form の型の変換や本文の読み込みの失敗を
+// ErrBadRequest.Wrap で包み、既定の HTTPErrorHandler は {"message":"Bad Request"}
+// だけを返す。v4 は NewHTTPError(400, err.Error()) で、失敗の理由を message に
+// 載せていた (#4239)。/api の endpoint はどれも bind のエラーを INVALID_PARAM に
+// 置き換えるが、そのまま返す handler でも理由が届くよう、理由を message に戻す。
+// **文言は v4 と完全には同じでない。** v5 の型の変換のエラーは、前にフィールド名が
+// 付く (`n: strconv.ParseInt: ...`)。外すと別の包みまで削りうるので、そのままにする。
+func v4BindError(err error) error {
+	var he *echo.HTTPError
+	if !errors.As(err, &he) || he.Code != http.StatusBadRequest || he.Message != http.StatusText(http.StatusBadRequest) {
+		return err
+	}
+	inner := he.Unwrap()
+	if inner == nil {
+		return err
+	}
+	return echo.NewHTTPError(http.StatusBadRequest, inner.Error()).Wrap(inner)
+}
+
+// bind is Bind without v4BindError.
+func (b *apiBinder) bind(c *echo.Context, i any) error {
 	req := c.Request()
 	if (req.Method == http.MethodGet || req.Method == http.MethodHead) && isAPIEndpointRoute(c) {
 		if req.Method == http.MethodGet {
@@ -111,19 +138,19 @@ func (b *apiBinder) Bind(i any, c echo.Context) error {
 		// `{"name":"bar"}` を付けると bar の応答が返る。cacheSec の endpoint では
 		// それに public が付き、URL だけを鍵にする CDN が別の内容を配ってしまう
 		// (#3593)。
-		if err := b.BindPathParams(c, i); err != nil {
+		if err := echo.BindPathValues(c, i); err != nil {
 			return err
 		}
 		return b.bindExactQueryParams(c, i)
 	}
-	err := b.DefaultBinder.Bind(i, c)
+	err := b.DefaultBinder.Bind(c, i)
 	if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) || !expectsObject(reflect.TypeOf(i)) {
 		return err
 	}
 	ct := req.Header.Get(echo.HeaderContentType)
 	switch {
 	case err == nil && req.ContentLength == 0 && (strings.TrimSpace(ct) == "" || isTextPlain(ct)):
-	case errors.Is(err, echo.ErrUnsupportedMediaType) && isTextPlain(ct):
+	case echo.StatusCode(err) == http.StatusUnsupportedMediaType && isTextPlain(ct):
 		// text/plain の body は Fastify の既定の parser が文字列のまま
 		// request.body に入れるので、空でなくても ajv の #/type で落ちる。
 	default:
@@ -140,10 +167,10 @@ func (b *apiBinder) Bind(i any, c echo.Context) error {
 // let a caller hand the handler a value the validator never saw (the
 // validator reads the query with exact keys; 2026-10-31 の監査)。A non-struct
 // target (a map) keeps echo's behaviour.
-func (b *apiBinder) bindExactQueryParams(c echo.Context, i any) error {
+func (b *apiBinder) bindExactQueryParams(c *echo.Context, i any) error {
 	t := derefType(reflect.TypeOf(i))
 	if t == nil || t.Kind() != reflect.Struct {
-		return b.BindQueryParams(c, i)
+		return echo.BindQueryParams(c, i)
 	}
 	names := map[string]bool{}
 	collectQueryNames(t, names)
@@ -159,7 +186,7 @@ func (b *apiBinder) bindExactQueryParams(c echo.Context, i any) error {
 	u := *req.URL
 	u.RawQuery = filtered.Encode()
 	req.URL = &u
-	return b.BindQueryParams(c.Echo().NewContext(req, c.Response()), i)
+	return echo.BindQueryParams(c.Echo().NewContext(req, c.Response()), i)
 }
 
 // collectQueryNames gathers the `query` tag names of t's fields, descending
@@ -192,7 +219,7 @@ var errQueryCast = echo.NewHTTPError(http.StatusBadRequest, "cannot cast query p
 // boolean param, an integer field an integer param and a float field a
 // number param. Fields are checked in declaration order and the first
 // failure is reported (upstream walks paramDef.properties in its order).
-func checkQueryCasts(c echo.Context, t reflect.Type) error {
+func checkQueryCasts(c *echo.Context, t reflect.Type) error {
 	t = derefType(t)
 	if t == nil || t.Kind() != reflect.Struct {
 		return nil
@@ -281,7 +308,7 @@ func isTextPlain(ct string) bool {
 // the same place upstream's ajv validation has in ApiCallService.call. It
 // covers handlers that never call c.Bind (endpoints without params).
 func requireObjectBody(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		req := c.Request()
 		if req.Method == http.MethodGet || req.Method == http.MethodHead || !isAPIEndpointRoute(c) {
 			return next(c)
@@ -355,7 +382,7 @@ func isUnsupportedAPIContentType(ct string) bool {
 }
 
 // unsupportedMediaType answers like fastify's FST_ERR_CTP_INVALID_MEDIA_TYPE.
-func unsupportedMediaType(c echo.Context) error {
+func unsupportedMediaType(c *echo.Context) error {
 	return c.JSON(http.StatusUnsupportedMediaType, map[string]any{
 		"statusCode": http.StatusUnsupportedMediaType,
 		"code":       "FST_ERR_CTP_INVALID_MEDIA_TYPE",
@@ -430,18 +457,18 @@ type apiRoutes struct {
 
 // POST registers a POST route like echo.Group.POST, then withParamShadow and
 // requireObjectBody.
-func (g apiRoutes) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+func (g apiRoutes) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
 	return g.Group.POST(path, h, append(m, withParamShadow, requireObjectBody)...)
 }
 
 // Match registers routes like echo.Group.Match, then withParamShadow and
 // requireObjectBody (which skips GET / HEAD itself).
-func (g apiRoutes) Match(methods []string, path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) []*echo.Route {
+func (g apiRoutes) Match(methods []string, path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.Routes {
 	return g.Group.Match(methods, path, h, append(m, withParamShadow, requireObjectBody)...)
 }
 
 // GET registers a GET route like echo.Group.GET, then withParamShadow.
-func (g apiRoutes) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route {
+func (g apiRoutes) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
 	return g.Group.GET(path, h, append(m, withParamShadow)...)
 }
 

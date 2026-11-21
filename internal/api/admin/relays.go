@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
@@ -17,7 +17,7 @@ import (
 // relay Service so that a Follow activity is actually dispatched to
 // the relay's inbox (#161). Falls back to raw DB insertion when the
 // service is not wired (tests or early boot).
-func (h *Handler) RelaysAdd(c echo.Context) error {
+func (h *Handler) RelaysAdd(c *echo.Context) error {
 	var req struct {
 		Inbox string `json:"inbox"`
 	}
@@ -52,7 +52,7 @@ func (h *Handler) RelaysAdd(c echo.Context) error {
 }
 
 // RelaysList handles POST /api/admin/relays/list.
-func (h *Handler) RelaysList(c echo.Context) error {
+func (h *Handler) RelaysList(c *echo.Context) error {
 	if h.relayService != nil {
 		list, err := h.relayService.List(c.Request().Context())
 		if err != nil {
@@ -78,7 +78,7 @@ func (h *Handler) RelaysList(c echo.Context) error {
 // 以前は Elythia 独自の id でも引いた (inbox より優先) が、本家の paramDef は
 // inbox を必須にしていて (#3861 から拒否に使う)、id だけの入力は既に 400 だった。
 // 同梱の frontend も inbox だけを送るので、#3867 で消した。
-func (h *Handler) RelaysRemove(c echo.Context) error {
+func (h *Handler) RelaysRemove(c *echo.Context) error {
 	var req struct {
 		Inbox string `json:"inbox"`
 	}

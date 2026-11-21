@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // frontendBase は本体へ取り込んだ frontend/ (#3379)。
@@ -293,21 +293,35 @@ func readPreloads(dir, entryKey, entryFile string, entryCSS []string) ([]string,
 	return scripts, styles
 }
 
+// ServeFile serves the file at path, absolute or relative to the working
+// directory, the way echo v4's Context.File did.
+//
+// echo の v5 の Context.File は Echo.Filesystem (作業ディレクトリを根にした
+// fs.FS) を通して開くので、作業ディレクトリの外の絶対パスは 404 になる (#4239)。
+// ファイルのあるディレクトリを根にして開く。
+func ServeFile(c *echo.Context, path string) error {
+	dir, name := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	return c.FileFS(name, os.DirFS(dir))
+}
+
 // AssetsHandler returns a handler that tries to serve files from primary dir
 // first, then falls back to fallback dir. This avoids Echo's limitation of
 // only supporting one handler per route pattern.
 func AssetsHandler(primary, fallback string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		name := c.Param("*")
 		// primaryディレクトリから探す
 		fp := filepath.Join(primary, filepath.Clean("/"+name))
 		if info, err := os.Stat(fp); err == nil && !info.IsDir() {
-			return c.File(fp)
+			return ServeFile(c, fp)
 		}
 		// fallbackディレクトリから探す
 		fp = filepath.Join(fallback, filepath.Clean("/"+name))
 		if info, err := os.Stat(fp); err == nil && !info.IsDir() {
-			return c.File(fp)
+			return ServeFile(c, fp)
 		}
 		return echo.ErrNotFound
 	}

@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles MiAuth endpoints.
@@ -69,7 +69,7 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) { h.userRepo = r }
 func (h *Handler) SetTokenNotifier(n TokenNotifier) { h.tokenNotifier = n }
 
 // SessionGenerate handles POST /api/auth/session/generate.
-func (h *Handler) SessionGenerate(c echo.Context) error {
+func (h *Handler) SessionGenerate(c *echo.Context) error {
 	var req struct {
 		AppSecret *string `json:"appSecret"`
 	}
@@ -104,7 +104,7 @@ func (h *Handler) SessionGenerate(c echo.Context) error {
 }
 
 // SessionShow handles POST /api/auth/session/show.
-func (h *Handler) SessionShow(c echo.Context) error {
+func (h *Handler) SessionShow(c *echo.Context) error {
 	var req struct {
 		Token *string `json:"token"`
 	}
@@ -135,7 +135,7 @@ func (h *Handler) SessionShow(c echo.Context) error {
 }
 
 // Accept handles POST /api/auth/accept.
-func (h *Handler) Accept(c echo.Context) error {
+func (h *Handler) Accept(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Token *string `json:"token"`
@@ -191,7 +191,7 @@ func (h *Handler) Accept(c echo.Context) error {
 }
 
 // SessionUserkey handles POST /api/auth/session/userkey.
-func (h *Handler) SessionUserkey(c echo.Context) error {
+func (h *Handler) SessionUserkey(c *echo.Context) error {
 	var req struct {
 		AppSecret *string `json:"appSecret"`
 		Token     *string `json:"token"`
@@ -273,7 +273,7 @@ func (h *Handler) packDetailedNotMe(u *model.User, profile *model.UserProfile) e
 
 // GenToken handles POST /api/miauth/gen-token.
 // MiAuth用のアクセストークンを直接生成する（App不要）。
-func (h *Handler) GenToken(c echo.Context) error {
+func (h *Handler) GenToken(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Session     *string  `json:"session"`
@@ -327,7 +327,7 @@ func (h *Handler) GenToken(c echo.Context) error {
 // ApiServerService の /miauth/:session/check 相当: session に対応する未取得の
 // token があれば fetched=true にして {ok, token, user} を返し、無ければ
 // {ok:false} を返す。認証不要 (token をまだ持たない client が叩くため)。
-func (h *Handler) MiAuthCheck(c echo.Context) error {
+func (h *Handler) MiAuthCheck(c *echo.Context) error {
 	session := c.Param("session")
 	if session == "" {
 		return c.JSON(http.StatusOK, map[string]any{"ok": false})

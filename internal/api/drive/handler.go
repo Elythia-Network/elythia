@@ -28,7 +28,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -211,7 +211,7 @@ var openMultipartFile = func(fh *multipart.FileHeader) (multipart.File, error) {
 //
 // の 2 つが起きた。どちらも「実用上失敗しない」を前提にしていたが、上の
 // `openMultipartFile` のとおりその前提が成り立たない。
-var readMultipartFile = func(c echo.Context, maxBytes int64) ([]byte, string, error) {
+var readMultipartFile = func(c *echo.Context, maxBytes int64) ([]byte, string, error) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return nil, "", err
@@ -302,7 +302,7 @@ var uploadBoolFields = []string{"isSensitive", "force"}
 // c.FormValue は URL の query も引くので使わない。同じ名前の field が 2 つ
 // あると本家では値が undefined になる (@fastify/multipart が配列にし、
 // `'value' in v` が偽になる) ので、未指定と同じに扱う。
-func multipartField(c echo.Context, key string) (string, bool) {
+func multipartField(c *echo.Context, key string) (string, bool) {
 	form, err := c.MultipartForm()
 	if err != nil {
 		return "", false
@@ -316,7 +316,7 @@ func multipartField(c echo.Context, key string) (string, bool) {
 
 // multipartBool returns the boolean field key (false when absent).
 // uploadFieldError must have accepted the request.
-func multipartBool(c echo.Context, key string) bool {
+func multipartBool(c *echo.Context, key string) bool {
 	v, _ := multipartField(c, key)
 	var b bool
 	_ = json.Unmarshal([]byte(v), &b)
@@ -331,7 +331,7 @@ func multipartBool(c echo.Context, key string) bool {
 // input")。変換できても真偽値でなければ ("1" や "null")、ajv が
 // `#/properties/<key>/type` で落とす。以前は "true" 以外を全て false と
 // 読んでいた。
-func uploadFieldError(c echo.Context) map[string]any {
+func uploadFieldError(c *echo.Context) map[string]any {
 	for _, key := range uploadBoolFields {
 		if v, ok := multipartField(c, key); ok && !json.Valid([]byte(v)) {
 			return apierr.InvalidParamCast(key, "boolean")
@@ -364,7 +364,7 @@ func uploadFieldError(c echo.Context) map[string]any {
 // FilesCreate handles POST /api/drive/files/create.
 // multipart/form-data with the file under "file"; optional fields: name,
 // folderId, comment, isSensitive, force.
-func (h *Handler) FilesCreate(c echo.Context) error {
+func (h *Handler) FilesCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if e := uploadFieldError(c); e != nil {
 		return c.JSON(http.StatusBadRequest, e)
@@ -484,7 +484,7 @@ type FileIDRequest struct {
 //
 // upstream paramDef は anyOf で {fileId} または {url} を受け、url 指定時は
 // url / webpublicUrl / thumbnailUrl の OR 一致で検索する (#1564)。
-func (h *Handler) FilesShow(c echo.Context) error {
+func (h *Handler) FilesShow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		FileID json.RawMessage `json:"fileId"`
@@ -585,7 +585,7 @@ func decodeNullableID(raw json.RawMessage) (*string, bool) {
 }
 
 // FilesUpdate handles POST /api/drive/files/update.
-func (h *Handler) FilesUpdate(c echo.Context) error {
+func (h *Handler) FilesUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FilesUpdateRequest
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
@@ -628,7 +628,7 @@ func (h *Handler) FilesUpdate(c echo.Context) error {
 }
 
 // FilesDelete handles POST /api/drive/files/delete.
-func (h *Handler) FilesDelete(c echo.Context) error {
+func (h *Handler) FilesDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FileIDRequest
 	if err := c.Bind(&req); err != nil || req.FileID == "" {
@@ -646,7 +646,7 @@ type FilesFindByHashRequest struct {
 }
 
 // FilesFindByHash handles POST /api/drive/files/find-by-hash.
-func (h *Handler) FilesFindByHash(c echo.Context) error {
+func (h *Handler) FilesFindByHash(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FilesFindByHashRequest
 	// upstream find-by-hash の paramDef は md5 {type:'string'} で空文字も valid
@@ -680,7 +680,7 @@ type FoldersCreateRequest struct {
 }
 
 // FoldersCreate handles POST /api/drive/folders/create.
-func (h *Handler) FoldersCreate(c echo.Context) error {
+func (h *Handler) FoldersCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FoldersCreateRequest
 	if err := c.Bind(&req); err != nil {
@@ -713,7 +713,7 @@ type FolderIDRequest struct {
 // upstream Misskey TS は `pack(folder, { detail: true })` で foldersCount /
 // filesCount / parent (recursive) を埋めて返す。本実装も同 shape に揃える
 // (#845)。default mode (= create / update / find) は影響なし。
-func (h *Handler) FoldersShow(c echo.Context) error {
+func (h *Handler) FoldersShow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FolderIDRequest
 	if err := c.Bind(&req); err != nil || req.FolderID == "" {
@@ -790,7 +790,7 @@ type FoldersUpdateRequest struct {
 }
 
 // FoldersUpdate handles POST /api/drive/folders/update.
-func (h *Handler) FoldersUpdate(c echo.Context) error {
+func (h *Handler) FoldersUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FoldersUpdateRequest
 	if err := c.Bind(&req); err != nil || req.FolderID == "" {
@@ -812,7 +812,7 @@ func (h *Handler) FoldersUpdate(c echo.Context) error {
 }
 
 // FoldersDelete handles POST /api/drive/folders/delete.
-func (h *Handler) FoldersDelete(c echo.Context) error {
+func (h *Handler) FoldersDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FolderIDRequest
 	if err := c.Bind(&req); err != nil || req.FolderID == "" {
@@ -837,7 +837,7 @@ const (
 	fileEndpointDelete
 )
 
-func mapFileError(c echo.Context, err error, ep fileEndpoint) error {
+func mapFileError(c *echo.Context, err error, ep fileEndpoint) error {
 	switch {
 	case errors.Is(err, coredrive.ErrFileNotFound):
 		var id string
@@ -903,7 +903,7 @@ const (
 	folderEndpointDelete
 )
 
-func mapFolderError(c echo.Context, err error, ep folderEndpoint) error {
+func mapFolderError(c *echo.Context, err error, ep folderEndpoint) error {
 	switch {
 	case errors.Is(err, coredrive.ErrFolderNotFound):
 		var id string
@@ -942,7 +942,7 @@ func mapFolderError(c echo.Context, err error, ep folderEndpoint) error {
 // --- Drive listing endpoints ---
 
 // Usage handles POST /api/drive — returns usage summary.
-func (h *Handler) Usage(c echo.Context) error {
+func (h *Handler) Usage(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var usage int64
 	if h.fileRepo != nil {
@@ -969,7 +969,7 @@ func emptyFolderIDToNil(s *string) *string {
 	return s
 }
 
-func (h *Handler) FilesList(c echo.Context) error {
+func (h *Handler) FilesList(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
@@ -1028,7 +1028,7 @@ func isValidDriveSort(v string) bool {
 }
 
 // FilesFind handles POST /api/drive/files/find — search by name.
-func (h *Handler) FilesFind(c echo.Context) error {
+func (h *Handler) FilesFind(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Name     string  `json:"name"`
@@ -1055,7 +1055,7 @@ func (h *Handler) FilesFind(c echo.Context) error {
 }
 
 // FilesCheckExistence handles POST /api/drive/files/check-existence.
-func (h *Handler) FilesCheckExistence(c echo.Context) error {
+func (h *Handler) FilesCheckExistence(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MD5 *string `json:"md5"`
@@ -1090,7 +1090,7 @@ func (h *Handler) FilesCheckExistence(c echo.Context) error {
 // が「file は author 所有」を強制するため必然的に viewer 自身の note で
 // あり、CanSeeNote は本人 short-circuit で常に true (= 追加の
 // FilterVisible が無くても leak しない)。
-func (h *Handler) FilesAttachedNotes(c echo.Context) error {
+func (h *Handler) FilesAttachedNotes(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		FileID    string     `json:"fileId"`
@@ -1162,7 +1162,7 @@ func (h *Handler) FilesAttachedNotes(c echo.Context) error {
 // サーバーに非同期でファイルを download させる。endpoint は即 204 を返し、
 // download / 保存はバックグラウンドで実行され、完了後に user の main stream へ
 // `urlUploadFinished` ({marker, file}) を publish する (#1217)。
-func (h *Handler) FilesUploadFromURL(c echo.Context) error {
+func (h *Handler) FilesUploadFromURL(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		URL         *string `json:"url"`
@@ -1204,7 +1204,7 @@ func (h *Handler) FilesUploadFromURL(c echo.Context) error {
 }
 
 // FilesMoveBulk handles POST /api/drive/files/move-bulk.
-func (h *Handler) FilesMoveBulk(c echo.Context) error {
+func (h *Handler) FilesMoveBulk(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		FileIDs  []string `json:"fileIds"`
@@ -1254,7 +1254,7 @@ func (h *Handler) FilesMoveBulk(c echo.Context) error {
 }
 
 // Stream handles POST /api/drive/stream — lists all files (unfoldered).
-func (h *Handler) Stream(c echo.Context) error {
+func (h *Handler) Stream(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
@@ -1297,7 +1297,7 @@ func (h *Handler) Stream(c echo.Context) error {
 }
 
 // FoldersList handles POST /api/drive/folders — lists user's folders.
-func (h *Handler) FoldersList(c echo.Context) error {
+func (h *Handler) FoldersList(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
@@ -1336,7 +1336,7 @@ func (h *Handler) FoldersList(c echo.Context) error {
 }
 
 // FoldersFind handles POST /api/drive/folders/find — search by name.
-func (h *Handler) FoldersFind(c echo.Context) error {
+func (h *Handler) FoldersFind(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Name     string  `json:"name"`
@@ -1369,14 +1369,14 @@ func (h *Handler) FoldersFind(c echo.Context) error {
 // 等の reverse proxy 配下でも本物の client IP を取得できる。空文字なら
 // nil を返して `requestIp` column を NULL のままにする。
 // requestIPValue is requestIPFromContext as a plain string ("" = 記録しない)。
-func requestIPValue(c echo.Context) string {
+func requestIPValue(c *echo.Context) string {
 	if ip := requestIPFromContext(c); ip != nil {
 		return *ip
 	}
 	return ""
 }
 
-func requestIPFromContext(c echo.Context) *string {
+func requestIPFromContext(c *echo.Context) *string {
 	// **プロセス内 API 呼び出しの IP は記録しない。** `pluginCaller.Call` は
 	// `RemoteAddr` に `127.0.0.1:0` を置く (IP を見る middleware が解釈に
 	// 困らないようにするため) が、その IP は実在しない。記録すると、
@@ -1416,7 +1416,7 @@ var sensitiveRequestHeaders = map[string]struct{}{
 // Headers` deny-list で credential 系を除外。`map[string]string` で保存する
 // (慣習として 1 要素 header が大半、複数値の場合は最初を採用)。空 header
 // set なら nil を返して列を NULL のままにする。
-func requestHeadersForDrive(c echo.Context) datatypes.JSON {
+func requestHeadersForDrive(c *echo.Context) datatypes.JSON {
 	req := c.Request()
 	if req == nil || len(req.Header) == 0 {
 		return nil

@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )
@@ -99,7 +99,7 @@ func packWebhook(w *model.Webhook) map[string]any {
 }
 
 // Create handles POST /api/i/webhooks/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Name   string   `json:"name"`
@@ -154,7 +154,7 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 // List handles POST /api/i/webhooks/list.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	webhooks, err := h.repo.ListByUserID(user.ID)
 	if err != nil {
@@ -168,7 +168,7 @@ func (h *Handler) List(c echo.Context) error {
 }
 
 // Show handles POST /api/i/webhooks/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		WebhookID string `json:"webhookId"`
@@ -190,7 +190,7 @@ func (h *Handler) Show(c echo.Context) error {
 }
 
 // Update handles POST /api/i/webhooks/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		WebhookID string                    `json:"webhookId"`
@@ -256,7 +256,7 @@ func (h *Handler) Update(c echo.Context) error {
 }
 
 // Delete handles POST /api/i/webhooks/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		WebhookID string `json:"webhookId"`
@@ -287,7 +287,7 @@ func (h *Handler) Delete(c echo.Context) error {
 // upstream Misskey TS の paramDef は webhookId + type を required + type に
 // webhookEventTypes enum check を強制している (packages/backend/src/.../i/
 // webhooks/test.ts、#937)。
-func (h *Handler) Test(c echo.Context) error {
+func (h *Handler) Test(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		WebhookID string `json:"webhookId"`

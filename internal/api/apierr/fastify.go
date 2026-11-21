@@ -25,12 +25,12 @@ package apierr
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // FastifyReply writes a Fastify-style error reply to the given context.
 // `code` is the upstream error code string (e.g. "DUPLICATED_USERNAME").
-func FastifyReply(c echo.Context, status int, code string) error {
+func FastifyReply(c *echo.Context, status int, code string) error {
 	return c.JSON(status, fastifyReplyBody{
 		StatusCode: status,
 		Error:      http.StatusText(status),

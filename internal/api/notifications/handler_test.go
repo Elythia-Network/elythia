@@ -14,7 +14,7 @@ import (
 
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/datatypes"
 
@@ -58,7 +58,7 @@ func newTestHandler(t *testing.T) (*Handler, *notification.Service) {
 	return NewHandler(svc, idGen, nil, nil, nil, nil, nil, nil), svc
 }
 
-func newJSONRequest(t *testing.T, path, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newJSONRequest(t *testing.T, path, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -67,7 +67,7 @@ func newJSONRequest(t *testing.T, path, body string) (echo.Context, *httptest.Re
 	return e.NewContext(req, rec), rec
 }
 
-func setAuth(c echo.Context, user *model.User) {
+func setAuth(c *echo.Context, user *model.User) {
 	c.Set(string(middleware.UserContextKey), user)
 }
 
@@ -167,7 +167,7 @@ func TestShowAndGrouped_IntegerParamsAcceptFractionForms(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	for name, fn := range map[string]func(echo.Context) error{"i/notifications": h.Show, "i/notifications-grouped": h.Grouped} {
+	for name, fn := range map[string]func(*echo.Context) error{"i/notifications": h.Show, "i/notifications-grouped": h.Grouped} {
 		for body, want := range map[string]int{
 			`{"limit":1e1,"sinceDate":0.0,"untilDate":4102444800000.0}`: 2,
 			`{"limit":1.0}`: 1,

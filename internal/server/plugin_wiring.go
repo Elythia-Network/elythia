@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/bgwork"
@@ -835,7 +835,7 @@ func wrapPluginHandler(h plugin.Handler, roles middleware.RoleChecker, policyRes
 	if len(policyResolvers) > 0 {
 		policyResolver = policyResolvers[0]
 	}
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		res, err := h(&pluginRequest{c: c, roles: roles, policyResolver: policyResolver})
 		if err != nil {
 			se, code := plugin.ExtractStatusError(err)
@@ -884,13 +884,13 @@ func wrapPluginHandler(h plugin.Handler, roles middleware.RoleChecker, policyRes
 // `Blob` ではなく素の値を返せばよい (本体が JSON 化する)。`text/plain` 等は
 // octet-stream に落ちるので、ブラウザでは表示ではなくダウンロードになる。
 // denylist にしないのは、危険な型を数え上げる形が必ず漏れるため。
-func writePluginBlob(c echo.Context, b plugin.Blob) error {
+func writePluginBlob(c *echo.Context, b plugin.Blob) error {
 	if b.WriteTimeout < 0 {
 		return errors.New("plugin blob write timeout must not be negative")
 	}
 	if b.WriteTimeout > 0 {
 		deadline := time.Now().Add(b.WriteTimeout)
-		if err := http.NewResponseController(c.Response().Writer).SetWriteDeadline(deadline); err != nil {
+		if err := http.NewResponseController(c.Response()).SetWriteDeadline(deadline); err != nil {
 			return fmt.Errorf("set plugin blob write deadline: %w", err)
 		}
 	}
@@ -913,7 +913,7 @@ func writePluginBlob(c echo.Context, b plugin.Blob) error {
 // --- Request ---
 
 type pluginRequest struct {
-	c              echo.Context
+	c              *echo.Context
 	policyResolver pluginCheckedRolePolicyProvider
 	// roles は権限判定に使う。未配線なら常に false を返す (画面は出ても
 	// API は通らない、という安全側に倒す)。

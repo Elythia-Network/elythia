@@ -1081,7 +1081,7 @@ func (s *Server) setupRoutes(x *unknownThing) {
 	api.POST("/ok", h.Create)
 	api.POST("/missing-method", h.NoSuchMethodHere)
 	api.POST("/unresolved", x.Run)
-	api.POST("/closure", func(c echo.Context) error { return nil })
+	api.POST("/closure", func(c *echo.Context) error { return nil })
 	api.POST("/local-type", s.OpenAPISpec)
 	api.POST("/idx", hs[0].Create)
 	promo := api.Group("/promo")

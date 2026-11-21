@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/htmltext"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -55,7 +55,7 @@ func frontendHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyA
 	clientEntry := clientEntryFor(cfg)
 	loader := loaderAssetsFor(cfg)
 
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		return renderFrontendShell(c, cfg, metaRepo, proxyAccountResolver, chunkedUpload, setup, adRepo, noteDeliveryPlugins, clientEntry, loader, shellOverrides{})
 	}
 }
@@ -142,7 +142,7 @@ const splashMarkup = `<div id="splash">
 // clientEntry and loader are read at construction (clientEntryFor /
 // loaderAssetsFor) and passed in, so each generation renders the frontend it
 // was built with.
-func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository, noteDeliveryPlugins meta.NoteDeliveryPlugins, clientEntry frontendutil.ClientEntryInfo, loader frontendutil.LoaderAssets, ov shellOverrides) error {
+func renderFrontendShell(c *echo.Context, cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository, noteDeliveryPlugins meta.NoteDeliveryPlugins, clientEntry frontendutil.ClientEntryInfo, loader frontendutil.LoaderAssets, ov shellOverrides) error {
 	instanceName := config.DisplayName
 	// og:description の既定値は upstream views/_.ts の defaultDescription。
 	// `<meta name="description">` の方は upstream と同じく meta.description が
@@ -393,7 +393,7 @@ func renderFrontendShell(c echo.Context, cfg *config.Config, metaRepo repository
 func frontendConsentHTML(cfg *config.Config, metaRepo repository.MetaRepository, proxyAccountResolver meta.ProxyAccountResolver, chunkedUpload meta.ChunkedUploadCapability, setup *meta.SetupDetector, adRepo repository.AdRepository, noteDeliveryPlugins meta.NoteDeliveryPlugins) oauth.ConsentRenderer {
 	clientEntry := clientEntryFor(cfg)
 	loader := loaderAssetsFor(cfg)
-	return func(c echo.Context, m oauth.ConsentMeta) error {
+	return func(c *echo.Context, m oauth.ConsentMeta) error {
 		var sb strings.Builder
 		sb.WriteString(`<meta name="misskey:oauth:transaction-id" content="` + stdhtml.EscapeString(m.TransactionID) + `">` + "\n")
 		sb.WriteString(`<meta name="misskey:oauth:client-name" content="` + stdhtml.EscapeString(m.ClientName) + `">` + "\n")
@@ -625,7 +625,7 @@ func clientOptionsJSON(raw []byte) any {
 // app512IconUrl が設定されていれば PWA icons に反映し、
 // meta.manifestJsonOverride が valid JSON object なら最後に deep merge する。
 func manifestJSON(cfg *config.Config, metaRepo repository.MetaRepository) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		m, _ := metaRepo.Fetch()
 		name := cfg.URL
 		shortName := cfg.URL
@@ -750,7 +750,7 @@ func newViteProxy(target string) echo.HandlerFunc {
 		},
 	}
 
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		proxy.ServeHTTP(c.Response(), c.Request())
 		return nil
 	}

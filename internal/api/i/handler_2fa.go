@@ -16,13 +16,13 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
 // TwoFARegister handles POST /api/i/2fa/register.
 // TOTP秘密鍵を生成してtempSecretに保存、QRコードURLを返す。
-func (h *Handler) TwoFARegister(c echo.Context) error {
+func (h *Handler) TwoFARegister(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Password *string `json:"password"`
@@ -125,7 +125,7 @@ func (h *Handler) twoFAIssuer() string {
 // TwoFADone handles POST /api/i/2fa/done.
 // TOTPコードを検証し、2FAを有効化する。同時にバックアップコードを生成して
 // 一度だけレスポンスに含めて返す (ユーザーが控えておかないと二度と見られない)。
-func (h *Handler) TwoFADone(c echo.Context) error {
+func (h *Handler) TwoFADone(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Token *string `json:"token"`
@@ -212,7 +212,7 @@ func (h *Handler) TwoFADone(c echo.Context) error {
 
 // TwoFAUnregister handles POST /api/i/2fa/unregister.
 // 2FAを無効化する。
-func (h *Handler) TwoFAUnregister(c echo.Context) error {
+func (h *Handler) TwoFAUnregister(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Password *string `json:"password"`
@@ -305,7 +305,7 @@ func (h *Handler) TwoFAUnregister(c echo.Context) error {
 // nil を return する。
 // incorrectPwID は INCORRECT_PASSWORD の endpoint 固有 id。upstream は
 // register-key / key-done 等で別 id を割り当てるため、caller が渡す。
-func (h *Handler) requireWebAuthn(c echo.Context, password, incorrectPwID string) (*model.User, *model.UserProfile, bool) {
+func (h *Handler) requireWebAuthn(c *echo.Context, password, incorrectPwID string) (*model.User, *model.UserProfile, bool) {
 	if h.webauthnSvc == nil || h.securityKeyRepo == nil {
 		_ = c.JSON(http.StatusServiceUnavailable, apierr.Error("UNAVAILABLE", "WebAuthn is not configured.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
 		return nil, nil, false
@@ -457,7 +457,7 @@ const twoFAKeyNameMaxLen = 30
 // the ajv error upstream reports for it.
 //
 // ajv の maxLength は code point で数えるので、長さも byte でなく rune で比べる。
-func twoFAKeyNameTooLong(c echo.Context) error {
+func twoFAKeyNameTooLong(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient("#/properties/name/maxLength", "must NOT have more than 30 characters"))
 }
 
@@ -480,7 +480,7 @@ func twoFAKeyNameTooLong(c echo.Context) error {
 // 削除と誤読したが、実際は file は保持。mk-go は WebAuthn を go-webauthn lib で
 // 実装しており upstream の @simplewebauthn lib 更新は無関係なので、本 handler
 // は upstream と独立に維持する。
-func (h *Handler) TwoFARegisterKey(c echo.Context) error {
+func (h *Handler) TwoFARegisterKey(c *echo.Context) error {
 	var req struct {
 		Password *string `json:"password"`
 		Token    string  `json:"token"`
@@ -523,7 +523,7 @@ func (h *Handler) TwoFARegisterKey(c echo.Context) error {
 // session は user 単位で 1 件保持されているので sessionId は不要 (#698)。
 //
 // 認証順序は TwoFARegisterKey と同じ (password → 2FA token)。
-func (h *Handler) TwoFAKeyDone(c echo.Context) error {
+func (h *Handler) TwoFAKeyDone(c *echo.Context) error {
 	var req struct {
 		Password   *string         `json:"password"`
 		Token      string          `json:"token"`
@@ -645,7 +645,7 @@ func (h *Handler) publishMeUpdatedPartial(userID string, fields map[string]any) 
 // password を先に check する requireWebAuthn だと wrong-password + wrong-
 // token 時の error code が upstream と drift する (INCORRECT_PASSWORD vs
 // INVALID_TOKEN)。drop-in 互換性のため upstream 順で並べ直す。
-func (h *Handler) TwoFARemoveKey(c echo.Context) error {
+func (h *Handler) TwoFARemoveKey(c *echo.Context) error {
 	var req struct {
 		Password     *string `json:"password"`
 		Token        string  `json:"token"`
@@ -721,7 +721,7 @@ func (h *Handler) TwoFARemoveKey(c echo.Context) error {
 
 // TwoFAUpdateKey handles POST /api/i/2fa/update-key.
 // 鍵の表示名を変更する。
-func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
+func (h *Handler) TwoFAUpdateKey(c *echo.Context) error {
 	var req struct {
 		CredentialID *string `json:"credentialId"`
 		Name         string  `json:"name"`
@@ -782,7 +782,7 @@ func (h *Handler) TwoFAUpdateKey(c echo.Context) error {
 // で password を要求しない (#758)。secure endpoint なので RequireAuth
 // middleware で session ベース認証が済んでいる前提。mk-go も合わせて
 // password 必須を撤回する。
-func (h *Handler) TwoFAPasswordLess(c echo.Context) error {
+func (h *Handler) TwoFAPasswordLess(c *echo.Context) error {
 	var req struct {
 		Value bool `json:"value"`
 	}

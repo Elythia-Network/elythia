@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,7 +18,7 @@ import (
 // query value it cannot cast (it marks the request and fails Bind).
 type castFailingBinder struct{}
 
-func (castFailingBinder) Bind(_ any, c echo.Context) error {
+func (castFailingBinder) Bind(c *echo.Context, _ any) error {
 	apierr.MarkCastFailure(c, "limit", "integer")
 	return errors.New("cannot cast")
 }

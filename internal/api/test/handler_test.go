@@ -13,7 +13,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,7 +63,7 @@ func requireContainers(t *testing.T) {
 }
 
 // freshEchoContext builds an Echo context with a POST /api/reset-db request.
-func freshEchoContext() (echo.Context, *httptest.ResponseRecorder) {
+func freshEchoContext() (*echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/reset-db", nil)
 	rec := httptest.NewRecorder()

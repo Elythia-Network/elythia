@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles channel-related API endpoints.
@@ -253,7 +253,7 @@ type CreateRequest struct {
 //
 // canCreateChannel role policy gate は #1020 で router 側の
 // middleware.RequireRolePolicy に昇格済み。handler 内では policy を見ない。
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	if err := c.Bind(&req); err != nil || req.Name == "" {
@@ -311,7 +311,7 @@ type ShowRequest struct {
 }
 
 // Show handles POST /api/channels/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -384,7 +384,7 @@ type UpdateRequest struct {
 }
 
 // Update handles POST /api/channels/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
@@ -456,7 +456,7 @@ type FollowRequest struct {
 }
 
 // Follow handles POST /api/channels/follow.
-func (h *Handler) Follow(c echo.Context) error {
+func (h *Handler) Follow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FollowRequest
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
@@ -475,7 +475,7 @@ func (h *Handler) Follow(c echo.Context) error {
 }
 
 // Unfollow handles POST /api/channels/unfollow.
-func (h *Handler) Unfollow(c echo.Context) error {
+func (h *Handler) Unfollow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req FollowRequest
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
@@ -510,7 +510,7 @@ type PaginatedListRequest struct {
 // を cursor として送ってくる。repository.ListFollowed 側で followeeId を
 // cursor 列として使うことで domain mismatch を避けている。詳細は
 // channel_following.go:ListFollowed の comment 参照。
-func (h *Handler) Followed(c echo.Context) error {
+func (h *Handler) Followed(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PaginatedListRequest
 	if err := c.Bind(&req); err != nil {
@@ -533,7 +533,7 @@ func (h *Handler) Followed(c echo.Context) error {
 }
 
 // Owned handles POST /api/channels/owned.
-func (h *Handler) Owned(c echo.Context) error {
+func (h *Handler) Owned(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PaginatedListRequest
 	if err := c.Bind(&req); err != nil {
@@ -562,7 +562,7 @@ func (h *Handler) Owned(c echo.Context) error {
 // cursor / limit は無視する (service が固定条件で返す) が、malformed JSON は
 // upstream のフレームワーク同様 400 で弾くため bind 検証だけ残す。本家の paramDef
 // は {} で、型の違う余分な鍵(limit: "x")も通すので、鍵を持たない型で受ける (#3758)。
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	var req struct{}
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -586,7 +586,7 @@ type SearchRequest struct {
 }
 
 // Search handles POST /api/channels/search.
-func (h *Handler) Search(c echo.Context) error {
+func (h *Handler) Search(c *echo.Context) error {
 	var req SearchRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -638,7 +638,7 @@ type TimelineRequest struct {
 }
 
 // Timeline handles POST /api/channels/timeline.
-func (h *Handler) Timeline(c echo.Context) error {
+func (h *Handler) Timeline(c *echo.Context) error {
 	var req TimelineRequest
 	if err := c.Bind(&req); err != nil || req.ChannelID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -731,7 +731,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 }
 
 // noSuchChannelTimeline writes channels/timeline's NO_SUCH_CHANNEL error.
-func noSuchChannelTimeline(c echo.Context) error {
+func noSuchChannelTimeline(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_CHANNEL", "No such channel.", "4d0eeeba-a02c-4c3c-9966-ef60d38d2e7f"))
 }
 
@@ -923,13 +923,13 @@ func (h *Handler) channelsToList(rows []*model.Channel, viewer *model.User) []ma
 	return out
 }
 
-func alreadyFollowing(c echo.Context) error {
+func alreadyFollowing(c *echo.Context) error {
 	// mk-go は upstream 2026.7.0 (#17802) に先行して ALREADY_FOLLOWING を実装
 	// していたが id が独自だった。upstream が canonical id を定義したので揃える。
 	return c.JSON(http.StatusBadRequest, apierr.Error("ALREADY_FOLLOWING", "You are already following that channel.", "7db31665-651e-40c1-8e6e-28e9ad829a2d"))
 }
 
-func notFollowing(c echo.Context) error {
+func notFollowing(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NOT_FOLLOWING", "You are not following that channel.", "1f87a25b-7c72-4ed1-b3c3-bcaf57636a64"))
 }
 

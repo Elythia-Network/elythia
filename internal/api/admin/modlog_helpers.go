@@ -6,7 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // logModeration is the generic moderation log writer. Callers build the
@@ -22,7 +22,7 @@ import (
 // Callers should invoke this only AFTER the underlying moderation
 // action has succeeded so the log reflects observed state changes
 // rather than attempts.
-func (h *Handler) logModeration(c echo.Context, t moderationlog.LogType, info map[string]any) {
+func (h *Handler) logModeration(c *echo.Context, t moderationlog.LogType, info map[string]any) {
 	if h.modLogService == nil {
 		return
 	}
@@ -47,7 +47,7 @@ func (h *Handler) logModeration(c echo.Context, t moderationlog.LogType, info ma
 // Same fire-and-forget semantics as logModeration. Empty entries / unwired
 // service / missing actor all degrade silently. Callers should invoke this
 // only AFTER the underlying bulk action has succeeded.
-func (h *Handler) logModerationMany(c echo.Context, entries []moderationlog.Entry) {
+func (h *Handler) logModerationMany(c *echo.Context, entries []moderationlog.Entry) {
 	if h.modLogService == nil || len(entries) == 0 {
 		return
 	}
@@ -75,7 +75,7 @@ func (h *Handler) logModerationMany(c echo.Context, entries []moderationlog.Entr
 // *model.User in scope (e.g. SuspendUser called FindByID before
 // flipping the flag), prefer logUserActionWithUser to avoid a second
 // DB lookup.
-func (h *Handler) logUserAction(c echo.Context, t moderationlog.LogType, targetUserID string) {
+func (h *Handler) logUserAction(c *echo.Context, t moderationlog.LogType, targetUserID string) {
 	if h.userRepo == nil {
 		return
 	}
@@ -96,7 +96,7 @@ func (h *Handler) logUserAction(c echo.Context, t moderationlog.LogType, targetU
 // already-looked-up user object, skipping the redundant FindByID.
 // Use this from handlers that load the target user up-front for their
 // own logic (e.g. existence check) so we don't pay for two SELECTs.
-func (h *Handler) logUserActionWithUser(c echo.Context, t moderationlog.LogType, target *model.User) {
+func (h *Handler) logUserActionWithUser(c *echo.Context, t moderationlog.LogType, target *model.User) {
 	if target == nil {
 		return
 	}
@@ -109,7 +109,7 @@ func (h *Handler) logUserActionWithUser(c echo.Context, t moderationlog.LogType,
 // userHost, roleId, roleName} for these types. roleService lookup
 // failures are tolerated (best-effort): the user info is logged even
 // if the role snapshot is unavailable.
-func (h *Handler) logRoleAssignment(c echo.Context, t moderationlog.LogType, targetUserID, roleID string) {
+func (h *Handler) logRoleAssignment(c *echo.Context, t moderationlog.LogType, targetUserID, roleID string) {
 	if h.userRepo == nil {
 		return
 	}

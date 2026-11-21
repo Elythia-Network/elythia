@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -15,7 +15,7 @@ import (
 )
 
 // AvatarDecorationsCreate handles POST /api/admin/avatar-decorations/create.
-func (h *Handler) AvatarDecorationsCreate(c echo.Context) error {
+func (h *Handler) AvatarDecorationsCreate(c *echo.Context) error {
 	if h.avatarDecoRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -83,7 +83,7 @@ func (h *Handler) packAvatarDecoration(d *model.AvatarDecoration) map[string]any
 }
 
 // AvatarDecorationsDelete handles POST /api/admin/avatar-decorations/delete.
-func (h *Handler) AvatarDecorationsDelete(c echo.Context) error {
+func (h *Handler) AvatarDecorationsDelete(c *echo.Context) error {
 	if h.avatarDecoRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -110,7 +110,7 @@ func (h *Handler) AvatarDecorationsDelete(c echo.Context) error {
 }
 
 // AvatarDecorationsList handles POST /api/admin/avatar-decorations/list.
-func (h *Handler) AvatarDecorationsList(c echo.Context) error {
+func (h *Handler) AvatarDecorationsList(c *echo.Context) error {
 	// upstream list.ts paramDef は limit/sinceId/untilId/sinceDate/untilDate/userId
 	// を受け取るが、実装は avatarDecorationService.getAll(true) で全件返す。mk-go も
 	// これに揃えて全件返す。params は受理するが結果には影響しない (#1543)。
@@ -147,7 +147,7 @@ func (h *Handler) AvatarDecorationsList(c echo.Context) error {
 }
 
 // AvatarDecorationsUpdate handles POST /api/admin/avatar-decorations/update.
-func (h *Handler) AvatarDecorationsUpdate(c echo.Context) error {
+func (h *Handler) AvatarDecorationsUpdate(c *echo.Context) error {
 	if h.avatarDecoRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}

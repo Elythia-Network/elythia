@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -223,13 +223,13 @@ func (f *Forwarder) unreachable(w http.ResponseWriter, op string, err error) {
 const clientIPHeader = "X-Elythia-Client-IP"
 
 // RestorePrepare handles POST /api/admin/backup/restore/prepare.
-func (h *Handler) RestorePrepare(c echo.Context) error { return h.restore(c, "prepare") }
+func (h *Handler) RestorePrepare(c *echo.Context) error { return h.restore(c, "prepare") }
 
 // RestoreConfirm handles POST /api/admin/backup/restore/confirm.
-func (h *Handler) RestoreConfirm(c echo.Context) error { return h.restore(c, "confirm") }
+func (h *Handler) RestoreConfirm(c *echo.Context) error { return h.restore(c, "confirm") }
 
 // RestoreAbort handles POST /api/admin/backup/restore/abort.
-func (h *Handler) RestoreAbort(c echo.Context) error { return h.restore(c, "abort") }
+func (h *Handler) RestoreAbort(c *echo.Context) error { return h.restore(c, "abort") }
 
 // RestoreCandidates handles POST /api/admin/backup/restore/candidates, after
 // the re-authentication.
@@ -237,11 +237,11 @@ func (h *Handler) RestoreAbort(c echo.Context) error { return h.restore(c, "abor
 // 一覧 (admin/backup/list の listBackups) と同じく、閲覧も記録する。退避した DB には
 // 利用者の秘密鍵などがそのまま入っており、その名前と大きさを誰がいつ見たかを追える
 // ようにする。成立した (daemon が 200 を返した) ときだけ書く。
-func (h *Handler) RestoreCandidates(c echo.Context) error {
+func (h *Handler) RestoreCandidates(c *echo.Context) error {
 	return h.guarded(c, h.restoreCandidates)
 }
 
-func (h *Handler) restoreCandidates(c echo.Context) error {
+func (h *Handler) restoreCandidates(c *echo.Context) error {
 	cw := &capturedResponse{header: http.Header{}, status: http.StatusOK}
 	h.forwarder.Serve(cw, c.Request(), opCandidates, c.RealIP())
 	if cw.status == http.StatusOK {
@@ -274,9 +274,9 @@ func (r *capturedResponse) Write(p []byte) (int, error) { return r.body.Write(p)
 func (r *capturedResponse) WriteHeader(status int)      { r.status = status }
 
 // RestoreStatus handles POST /api/admin/backup/restore/status.
-func (h *Handler) RestoreStatus(c echo.Context) error { return h.restore(c, "status") }
+func (h *Handler) RestoreStatus(c *echo.Context) error { return h.restore(c, "status") }
 
-func (h *Handler) restore(c echo.Context, op string) error {
+func (h *Handler) restore(c *echo.Context, op string) error {
 	h.forwarder.Serve(c.Response(), c.Request(), op, c.RealIP())
 	return nil
 }

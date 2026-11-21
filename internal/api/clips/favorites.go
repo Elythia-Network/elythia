@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ClipFavoriteRepository is the interface for clip favorite operations.
@@ -27,7 +27,7 @@ func (h *Handler) SetFavoriteRepo(r ClipFavoriteRepository) {
 }
 
 // Favorite handles POST /api/clips/favorite.
-func (h *Handler) Favorite(c echo.Context) error {
+func (h *Handler) Favorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ClipID string `json:"clipId"`
@@ -64,7 +64,7 @@ func (h *Handler) Favorite(c echo.Context) error {
 }
 
 // Unfavorite handles POST /api/clips/unfavorite.
-func (h *Handler) Unfavorite(c echo.Context) error {
+func (h *Handler) Unfavorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ClipID string `json:"clipId"`
@@ -99,7 +99,7 @@ func (h *Handler) Unfavorite(c echo.Context) error {
 }
 
 // MyFavorites handles POST /api/clips/my-favorites.
-func (h *Handler) MyFavorites(c echo.Context) error {
+func (h *Handler) MyFavorites(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.favoriteRepo == nil {
 		return c.JSON(http.StatusOK, []any{})

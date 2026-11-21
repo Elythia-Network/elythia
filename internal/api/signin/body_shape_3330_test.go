@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +30,7 @@ func newPasskeyTestHandler(t *testing.T) *signin.Handler {
 	return h
 }
 
-func postWithContentType(h func(echo.Context) error, contentType, body string) *httptest.ResponseRecorder {
+func postWithContentType(h func(*echo.Context) error, contentType, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/signin-with-passkey", strings.NewReader(body))
 	if contentType != "" {

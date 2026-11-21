@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,14 +34,14 @@ type castTarget struct {
 
 // bindQuery runs apiBinder.Bind for a request with the given method, route
 // pattern and raw query string.
-func bindQuery(t *testing.T, method, path, rawQuery string, dst any) (echo.Context, error) {
+func bindQuery(t *testing.T, method, path, rawQuery string, dst any) (*echo.Context, error) {
 	t.Helper()
 	e := echo.New()
 	e.JSONSerializer = fastJSONSerializer{}
 	req := httptest.NewRequest(method, "/x?"+rawQuery, nil)
 	c := e.NewContext(req, httptest.NewRecorder())
 	c.SetPath(path)
-	return c, (&apiBinder{}).Bind(dst, c)
+	return c, (&apiBinder{}).Bind(c, dst)
 }
 
 // TestAPIBinder_QueryCast pins upstream's "Cast non JSON input" step for
@@ -102,7 +102,7 @@ func TestAPIBinder_QueryCast(t *testing.T) {
 			}
 			assert.Same(t, errQueryCast, err)
 			rec := httptest.NewRecorder()
-			c.Response().Writer = rec
+			c.Response().(*echo.Response).ResponseWriter = rec
 			require.NoError(t, apierr.JSONInvalidParam(c))
 			var out map[string]any
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
@@ -120,10 +120,10 @@ func TestAPIBinder_QueryCast(t *testing.T) {
 
 // assertNoCastMark checks that c answers JSONInvalidParam with the plain
 // ajv id, i.e. the binder did not mark a cast failure.
-func assertNoCastMark(t *testing.T, c echo.Context) {
+func assertNoCastMark(t *testing.T, c *echo.Context) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	c.Response().Writer = rec
+	c.Response().(*echo.Response).ResponseWriter = rec
 	require.NoError(t, apierr.JSONInvalidParam(c))
 	assert.Contains(t, rec.Body.String(), apierr.UUIDInvalidParam)
 }

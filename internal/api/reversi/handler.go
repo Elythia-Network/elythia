@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -276,7 +276,7 @@ func (h *Handler) resolveAcct(acct string) (string, error) {
 // my=true (要認証) は自分が User1 or User2 のゲーム、それ以外は isStarted=true
 // のゲームを返す。pagination を無視すると frontend の無限スクロールが同じ
 // ページを繰り返しロードするので必須 (#417 P1 UDS 検証で発覚)。
-func (h *Handler) Games(c echo.Context) error {
+func (h *Handler) Games(c *echo.Context) error {
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
 		SinceID   string     `json:"sinceId"`
@@ -323,7 +323,7 @@ func (h *Handler) Games(c echo.Context) error {
 // 返すと Misskey フロントエンドの matching UI が期待値と食い違って無限 loading
 // になる (#417 P1 deploy で発覚)。viewer が User2 (招待される側) となっている
 // 未開始 / 未終了 game の User1 を UserLite として返す。
-func (h *Handler) Invitations(c echo.Context) error {
+func (h *Handler) Invitations(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	games, _ := h.repo.ListByUser(user.ID, 20)
 	inviters := make([]entity.UserLite, 0)
@@ -365,7 +365,7 @@ func (h *Handler) Invitations(c echo.Context) error {
 }
 
 // ShowGame handles POST /api/reversi/show-game.
-func (h *Handler) ShowGame(c echo.Context) error {
+func (h *Handler) ShowGame(c *echo.Context) error {
 	var req struct {
 		GameID string `json:"gameId"`
 	}
@@ -402,7 +402,7 @@ func (h *Handler) ShowGame(c echo.Context) error {
 // `@user` / `@user@host` 形式 (acct) も受け入れる。これは vanilla Misskey
 // フロントエンドが「対戦相手選択画面」を持たず、リモートユーザーを選択で
 // きない制約を緩和するための backend-side workaround。
-func (h *Handler) Match(c echo.Context) error {
+func (h *Handler) Match(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		UserID string `json:"userId"`
@@ -597,7 +597,7 @@ func (h *Handler) withinMatchDedupWindow(g *model.ReversiGame) bool {
 // sendJoinForAcceptedInvite delivers a Join activity to the remote inviter so
 // both sides agree the match has started. local-only の招待の場合 (User1 が
 // ローカル) は federation 不要なので何もしない。
-func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User, game *model.ReversiGame) error {
+func (h *Handler) sendJoinForAcceptedInvite(c *echo.Context, accepter *model.User, game *model.ReversiGame) error {
 	if h.userRepo == nil || h.deliverer == nil || h.fedCache == nil {
 		return nil
 	}
@@ -639,7 +639,7 @@ func (h *Handler) sendJoinForAcceptedInvite(c echo.Context, accepter *model.User
 // 最も新しい 1 件だけを見ると、それが受けてから 3 分を過ぎた対局のとき、より古い
 // 受けられていない招待 (招待一覧には出る) があっても逆向きの招待になる。一覧と
 // 同じく、招待として扱える対局を探す
-func (h *Handler) findInvitationFrom(c echo.Context, viewerID, inviterID string) *model.ReversiGame {
+func (h *Handler) findInvitationFrom(c *echo.Context, viewerID, inviterID string) *model.ReversiGame {
 	newest := h.findPendingInvitationFrom(viewerID, inviterID)
 	if newest == nil || !h.staleAccepted(c, newest) {
 		return newest
@@ -665,13 +665,13 @@ func (h *Handler) findInvitationFrom(c echo.Context, viewerID, inviterID string)
 
 // staleAccepted reports whether the game no longer counts as an invitation
 // (Service.AcceptedLongAgo, #3949).
-func (h *Handler) staleAccepted(c echo.Context, g *model.ReversiGame) bool {
+func (h *Handler) staleAccepted(c *echo.Context, g *model.ReversiGame) bool {
 	return h.svc != nil && h.svc.AcceptedLongAgo(c.Request().Context(), g)
 }
 
 // acceptInvitation records that the caller (User2) accepted the pending game,
 // so the inviter's screen moves to the game (#3946).
-func (h *Handler) acceptInvitation(c echo.Context, game *model.ReversiGame) {
+func (h *Handler) acceptInvitation(c *echo.Context, game *model.ReversiGame) {
 	if h.svc != nil {
 		h.svc.AcceptInvitation(c.Request().Context(), game)
 	}
@@ -680,7 +680,7 @@ func (h *Handler) acceptInvitation(c echo.Context, game *model.ReversiGame) {
 // markInviterWaiting records that the caller is waiting for their invitation
 // to be accepted, so the `matched` reaches them (#3946). 画面は待っている間
 // 5 秒ごとに reversi/match を呼ぶので、そのたびに付け直す。
-func (h *Handler) markInviterWaiting(c echo.Context, game *model.ReversiGame) {
+func (h *Handler) markInviterWaiting(c *echo.Context, game *model.ReversiGame) {
 	if h.svc != nil {
 		h.svc.MarkInviterWaiting(c.Request().Context(), game.ID)
 	}
@@ -696,7 +696,7 @@ func (h *Handler) ReversiMatched(inviterID string, game *model.ReversiGame) {
 	h.streamPub.PublishMatched(inviterID, packGame(h.entityPacker, game, h.idGen))
 }
 
-func federationDisabledResponse(c echo.Context) error {
+func federationDisabledResponse(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_DISABLED", "This account is not available for federation.", "ff6844bb-b2d5-4e8c-a3d1-14e0ac15d5a1"))
 }
 
@@ -704,7 +704,7 @@ func federationDisabledResponse(c echo.Context) error {
 // Service.CancelGame 経由で: Leave をリモート相手に配信 + canceled
 // イベントを WebSocket に publish + fedCache の session mapping も
 // 片付く。svc 未配線な旧テスト互換のため repo.Delete フォールバックも残す。
-func (h *Handler) CancelMatch(c echo.Context) error {
+func (h *Handler) CancelMatch(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		UserID string `json:"userId"`
@@ -786,7 +786,7 @@ func (h *Handler) CancelMatch(c echo.Context) error {
 // 対局中 (IsStarted かつ not IsEnded) のみ許可する。service.Surrender を経由
 // することで WebSocket チャネルに `ended` イベントを publish するので、両
 // プレイヤーのクライアントが即座に終局状態を検出できる。
-func (h *Handler) Surrender(c echo.Context) error {
+func (h *Handler) Surrender(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		GameID string `json:"gameId"`
@@ -849,7 +849,7 @@ func (h *Handler) Surrender(c echo.Context) error {
 // ALREADY_ENDED はすべて upstream surrender.ts:20,26,32 の endpoint 固有
 // UUID を使う (#1553)。NOT_STARTED は upstream surrender に存在しない
 // cherrypick 由来 code のため独自 UUID を維持する。
-func surrenderErrorResponse(c echo.Context, err error) error {
+func surrenderErrorResponse(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, corereversi.ErrGameNotFound):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_GAME", "No such game.", "ace0b11f-e0a6-4076-a30d-e8284c81b2df"))
@@ -867,7 +867,7 @@ func surrenderErrorResponse(c echo.Context, err error) error {
 // クライアントが送ってくる `crc32` を保存済みの game.crc32 と比較し、
 // 不一致なら `{desynced: true, game}` を返してフロント側で restoreGame を
 // 走らせる。一致なら `{desynced: false}` のみ。
-func (h *Handler) Verify(c echo.Context) error {
+func (h *Handler) Verify(c *echo.Context) error {
 	var req struct {
 		GameID string  `json:"gameId"`
 		CRC32  *string `json:"crc32"`
@@ -922,7 +922,7 @@ func (h *Handler) Verify(c echo.Context) error {
 // ただし (2) の招待は inbound AP Invite 由来 = リモートからのものがありうる。
 // そちらは specific-match と同じ accept 経路 (`sendJoinForAcceptedInvite`) を
 // 通るので、連合対局として正しく成立する。
-func (h *Handler) matchAny(c echo.Context, user *model.User, noIrregularRules, multiple bool) error {
+func (h *Handler) matchAny(c *echo.Context, user *model.User, noIrregularRules, multiple bool) error {
 	ctx := c.Request().Context()
 
 	// 1. 直近の未開始対局の再利用。upstream は multiple=true でこれを飛ばして
@@ -1017,7 +1017,7 @@ func (h *Handler) findPendingGameFor(userID string) *model.ReversiGame {
 //
 // specific-match は相手が分かっているので FindPendingInvitation を使うが、
 // any-match は「誰でもいいから自分宛ての招待」を探す。
-func (h *Handler) findPendingInvitationTo(c echo.Context, userID string) *model.ReversiGame {
+func (h *Handler) findPendingInvitationTo(c *echo.Context, userID string) *model.ReversiGame {
 	games, err := h.repo.ListByUser(userID, 20)
 	if err != nil {
 		return nil

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -152,7 +152,7 @@ func newHarness(t *testing.T) *testHarness {
 	users := &fakeUserRepo{byToken: map[string]*model.User{}}
 	tokens := &fakeTokenStore{}
 	hn := &testHarness{store: store, users: users, tokens: tokens, clientID: srv.URL + "/", redirect: srv.URL + "/cb"}
-	hn.h = NewHandler(store, srv.Client(), users, tokens, &fakeIDGen{}, "https://mk.example", true, func(c echo.Context, m ConsentMeta) error {
+	hn.h = NewHandler(store, srv.Client(), users, tokens, &fakeIDGen{}, "https://mk.example", true, func(c *echo.Context, m ConsentMeta) error {
 		hn.consent = &m
 		return c.HTML(http.StatusOK, "<html>consent</html>")
 	}, nil, nil)
@@ -575,7 +575,7 @@ func TestAuthorize_DiscoveryFailure(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	h := NewHandler(newFakeStore(), srv.Client(), &fakeUserRepo{}, &fakeTokenStore{}, &fakeIDGen{}, "https://mk.example", true, func(c echo.Context, _ ConsentMeta) error { return c.HTML(http.StatusOK, "x") }, nil, nil)
+	h := NewHandler(newFakeStore(), srv.Client(), &fakeUserRepo{}, &fakeTokenStore{}, &fakeIDGen{}, "https://mk.example", true, func(c *echo.Context, _ ConsentMeta) error { return c.HTML(http.StatusOK, "x") }, nil, nil)
 
 	e := echo.New()
 	q := url.Values{

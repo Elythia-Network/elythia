@@ -8,7 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +45,7 @@ func TestUsersParams_AcceptIntegerValuedFractions(t *testing.T) {
 	h, viewer := newParamsFixture(t)
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		body    string
 	}{
 		{"users", h.List, `{"limit":10.0,"offset":1e1}`},
@@ -89,7 +89,7 @@ func TestFeaturedNotes_GETAcceptsIntegerValuedFractions(t *testing.T) {
 // 送っても拒否しない (#3837)。
 func TestUsersParams_IgnoreOffsetUpstreamDoesNotHave(t *testing.T) {
 	h, viewer := newParamsFixture(t)
-	for name, handler := range map[string]func(echo.Context) error{
+	for name, handler := range map[string]func(*echo.Context) error{
 		"users/clips":         h.Clips,
 		"users/flashs":        h.Flashs,
 		"users/gallery/posts": h.GalleryPosts,
@@ -125,7 +125,7 @@ func TestRelations_EmptyUsernameIsNoSuchUser(t *testing.T) {
 	h, _ := newParamsFixture(t)
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		id      string
 	}{
 		{"users/followers", h.Followers, "27fa5435-88ab-43de-9360-387de88727cd"},
@@ -152,7 +152,7 @@ func TestRelations_UserIDKeyWinsOverUsername(t *testing.T) {
 	h, viewer := newParamsFixture(t)
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		id      string
 	}{
 		{"users/followers", h.Followers, "27fa5435-88ab-43de-9360-387de88727cd"},

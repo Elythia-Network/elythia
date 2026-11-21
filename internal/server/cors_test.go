@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -34,7 +34,7 @@ func corsProbe(t *testing.T, method, path, origin string) *httptest.ResponseReco
 	t.Helper()
 	e := echo.New()
 	e.Use(corsMiddleware())
-	e.Any("/*", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	e.Any("/*", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 
 	req := httptest.NewRequest(method, path, nil)
 	if origin != "" {

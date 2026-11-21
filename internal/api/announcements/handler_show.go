@@ -6,7 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Show handles POST /api/announcements/show.
@@ -24,7 +24,7 @@ import (
 //
 // の 2 重の drop-in regression / privacy hole 状態だったため両方塞ぐ
 // (#1164 Phase C)。
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req struct {
 		AnnouncementID string `json:"announcementId"`
 	}

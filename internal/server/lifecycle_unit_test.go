@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -64,9 +64,9 @@ func (f *fakeGenerations) deps(drain time.Duration) SupervisorDeps {
 			}
 			n := f.built.Add(1)
 			e := echo.New()
-			e.GET("/healthz", func(c echo.Context) error { return c.String(http.StatusOK, "ok") })
-			e.GET("/gen", func(c echo.Context) error { return c.JSON(http.StatusOK, n) })
-			e.GET("/slow", func(c echo.Context) error {
+			e.GET("/healthz", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
+			e.GET("/gen", func(c *echo.Context) error { return c.JSON(http.StatusOK, n) })
+			e.GET("/slow", func(c *echo.Context) error {
 				f.entered <- struct{}{}
 				<-f.release
 				return c.String(http.StatusOK, "slow")

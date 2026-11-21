@@ -21,7 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )
@@ -32,7 +32,7 @@ func (h *Handler) SetDraftRepo(r repository.NoteDraftRepository) {
 }
 
 // DraftsList handles POST /api/notes/drafts/list.
-func (h *Handler) DraftsList(c echo.Context) error {
+func (h *Handler) DraftsList(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.draftRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
@@ -83,7 +83,7 @@ func (h *Handler) DraftsList(c echo.Context) error {
 // upstream `notes/drafts/create.ts` 互換で scheduledAt / isActuallyScheduled
 // を受け入れ、scheduledNoteLimit policy gate + 遅延 queue enqueue を行う
 // (#1040)。
-func (h *Handler) DraftsCreate(c echo.Context) error {
+func (h *Handler) DraftsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.draftRepo == nil {
 		return c.NoContent(http.StatusNoContent)
@@ -236,7 +236,7 @@ func (h *Handler) DraftsCreate(c echo.Context) error {
 // scheduledAt / isActuallyScheduled の変更を upstream `notes/drafts/update`
 // と同 logic で取り扱い、変更があれば旧 delayed task を clear → 必要なら
 // 新 scheduledAt で再 enqueue する (#1045 Phase 2-C)。
-func (h *Handler) DraftsUpdate(c echo.Context) error {
+func (h *Handler) DraftsUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.draftRepo == nil {
 		return c.NoContent(http.StatusNoContent)
@@ -645,7 +645,7 @@ func applyDraftPoll(d *model.NoteDraft, p *draftPoll) {
 }
 
 // DraftsDelete handles POST /api/notes/drafts/delete.
-func (h *Handler) DraftsDelete(c echo.Context) error {
+func (h *Handler) DraftsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.draftRepo == nil {
 		return c.NoContent(http.StatusNoContent)
@@ -685,7 +685,7 @@ func (h *Handler) DraftsDelete(c echo.Context) error {
 }
 
 // DraftsCount handles POST /api/notes/drafts/count.
-func (h *Handler) DraftsCount(c echo.Context) error {
+func (h *Handler) DraftsCount(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	// upstream drafts/count.ts は res type:'number' で裸の数値を返す。旧実装は
 	// {"count": N} オブジェクトを返していた (#1538)。
@@ -719,7 +719,7 @@ func threadIDForMute(n *model.Note) string {
 // (notes/state の isMutedThread 読み取り経路は実装済みなのに) スレッドミュートが
 // 機能していなかった (#1538)。本家 thread-muting/create.ts 同様 note を解決し
 // (可視性 gate 無し)、threadId(無ければ id)で冪等に muting 行を作る。
-func (h *Handler) ThreadMutingCreate(c echo.Context) error {
+func (h *Handler) ThreadMutingCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		NoteID string `json:"noteId"`
@@ -763,7 +763,7 @@ func (h *Handler) ThreadMutingCreate(c echo.Context) error {
 }
 
 // ThreadMutingDelete handles POST /api/notes/thread-muting/delete.
-func (h *Handler) ThreadMutingDelete(c echo.Context) error {
+func (h *Handler) ThreadMutingDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		NoteID string `json:"noteId"`
@@ -795,7 +795,7 @@ func (h *Handler) ThreadMutingDelete(c echo.Context) error {
 // ローカル public で未期限切れの poll のうち、自分の投稿でない / 未投票 /
 // 投稿者を mute していないものを noteId DESC で返す (excludeChannels で
 // チャンネル poll を除外可)。可視性は public 限定なので追加 gate は不要。
-func (h *Handler) PollsRecommendation(c echo.Context) error {
+func (h *Handler) PollsRecommendation(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit  *jsnum.Int `json:"limit"`
@@ -1024,6 +1024,6 @@ func hasPluginOptions(options json.RawMessage) bool {
 	return false
 }
 
-func jsonDraftPluginOptionsUnsupported(c echo.Context) error {
+func jsonDraftPluginOptionsUnsupported(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "pluginOptions cannot be used with drafts.", apierr.UUIDInvalidParam))
 }

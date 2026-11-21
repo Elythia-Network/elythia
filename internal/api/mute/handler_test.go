@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +35,7 @@ func newHandlerWithExtras(t *testing.T, extras userpack.DetailExtrasMany) (*Hand
 	return NewHandler(svc, userRepo, idGen, nil, extras), userRepo
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -44,7 +44,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 	return e.NewContext(req, rec), rec
 }
 
-func setUser(c echo.Context, id string) {
+func setUser(c *echo.Context, id string) {
 	c.Set(string(middleware.UserContextKey), &model.User{ID: id})
 }
 
@@ -287,7 +287,7 @@ func (m modStub) IsModerator(id string) bool { return m.mods[id] }
 
 // newGatedHandler wires relation + moderator repos and returns a handler with a
 // muted "bob" whose followersVisibility=followers and followersCount=7.
-func newGatedHandler(t *testing.T, mod ModeratorChecker) (*Handler, *httptest.ResponseRecorder, echo.Context) {
+func newGatedHandler(t *testing.T, mod ModeratorChecker) (*Handler, *httptest.ResponseRecorder, *echo.Context) {
 	t.Helper()
 	userRepo := testutil.NewMockUserRepository()
 	mutingRepo := testutil.NewMockMutingRepository()

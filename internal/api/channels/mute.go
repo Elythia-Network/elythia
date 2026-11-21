@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SetMutingRepo attaches a ChannelMutingRepository for mute endpoints.
@@ -37,7 +37,7 @@ func (h *Handler) publishMuteReload(userID string) {
 }
 
 // MuteCreate handles POST /api/channels/mute/create.
-func (h *Handler) MuteCreate(c echo.Context) error {
+func (h *Handler) MuteCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ChannelID string `json:"channelId"`
@@ -87,7 +87,7 @@ func (h *Handler) MuteCreate(c echo.Context) error {
 }
 
 // MuteDelete handles POST /api/channels/mute/delete.
-func (h *Handler) MuteDelete(c echo.Context) error {
+func (h *Handler) MuteDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ChannelID string `json:"channelId"`
@@ -114,7 +114,7 @@ func (h *Handler) MuteDelete(c echo.Context) error {
 }
 
 // MuteList handles POST /api/channels/mute/list.
-func (h *Handler) MuteList(c echo.Context) error {
+func (h *Handler) MuteList(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.mutingRepo == nil {
 		return c.JSON(http.StatusOK, []any{})

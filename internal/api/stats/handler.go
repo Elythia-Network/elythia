@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
@@ -145,7 +145,7 @@ func totals(ctx context.Context, ch ChartReader) (all, local int64) {
 
 // Stats returns instance-wide counters.
 // POST /api/stats
-func (h *Handler) Stats(c echo.Context) error {
+func (h *Handler) Stats(c *echo.Context) error {
 	ctx := c.Request().Context()
 
 	notesCount, originalNotesCount := totals(ctx, h.notesChart)

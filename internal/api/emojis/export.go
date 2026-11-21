@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	coretransfer "github.com/elythia-network/elythia/internal/core/transfer"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -30,7 +30,7 @@ func (h *Handler) SetExportEnqueuer(q ExportEnqueuer) { h.exportQueue = q }
 // **投入に失敗しても 204 を返す。** upstream も `queueService.createExportCustomEmojisJob`
 // を await せず即 204 で、結果はドライブに出るファイルで確認する作りになっている。
 // ここを 500 にすると upstream と挙動がずれる。失敗はログに残す。
-func (h *Handler) ExportCustomEmojis(c echo.Context) error {
+func (h *Handler) ExportCustomEmojis(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if user == nil {
 		return c.NoContent(http.StatusNoContent)

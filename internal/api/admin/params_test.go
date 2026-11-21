@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -198,7 +198,7 @@ func TestEmojiLists_OffsetIsNotRead(t *testing.T) {
 		&model.Emoji{ID: "l1", Name: "l1"}, &model.Emoji{ID: "l2", Name: "l2"}, &model.Emoji{ID: "l3", Name: "l3"},
 		&model.Emoji{ID: "r1", Name: "r1", Host: &host}, &model.Emoji{ID: "r2", Name: "r2", Host: &host}, &model.Emoji{ID: "r3", Name: "r3", Host: &host},
 	)
-	for name, handle := range map[string]func(echo.Context) error{"admin/emoji/list": h.EmojiList, "admin/emoji/list-remote": h.EmojiListRemote} {
+	for name, handle := range map[string]func(*echo.Context) error{"admin/emoji/list": h.EmojiList, "admin/emoji/list-remote": h.EmojiListRemote} {
 		for _, body := range []string{`{"offset":2}`, `{"offset":"x"}`} {
 			rec := doPost(handle, body, adminUser)
 			require.Equal(t, http.StatusOK, rec.Code, name+" "+body)

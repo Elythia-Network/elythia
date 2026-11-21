@@ -26,7 +26,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
@@ -107,7 +107,7 @@ var listSortOrders = map[string]string{
 }
 
 // List handles POST /api/hashtags/list.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	// offset は本家の paramDef に無いので、本家と同じく読まない (#3746)。
 	var req struct {
 		Limit                    *jsnum.Int `json:"limit"`
@@ -153,7 +153,7 @@ func (h *Handler) List(c echo.Context) error {
 }
 
 // Search handles POST /api/hashtags/search.
-func (h *Handler) Search(c echo.Context) error {
+func (h *Handler) Search(c *echo.Context) error {
 	// query は欠落(nil)と空文字列を区別する。本家は空文字列を通し、前方一致の
 	// '%' で全タグから返す (#3746)。
 	var req struct {
@@ -197,7 +197,7 @@ func (h *Handler) Search(c echo.Context) error {
 }
 
 // Show handles POST /api/hashtags/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	// tag は欠落(nil)と空文字列を区別する。本家は空文字列を通し、一致する
 	// タグが無いので NO_SUCH_HASHTAG になる (#3746)。
 	var req struct {
@@ -280,7 +280,7 @@ type trendRow struct {
 //
 // 本家の updateHashtagsRanking と同じく、meta.hiddenTags と meta.sensitiveWords
 // に当たるタグはランキングに入れない (#3628)。
-func (h *Handler) Trend(c echo.Context) error {
+func (h *Handler) Trend(c *echo.Context) error {
 	hidden, sensitive, err := h.trendExclusions()
 	if err != nil {
 		// 隠すための設定が読めないまま集計すると、隠したタグを公開のトレンドに
@@ -497,7 +497,7 @@ const usersAliveWindow = 5 * 24 * time.Hour
 // (upstream hashtags/users)。tag は searchnorm.Normalize (NFKC + lowercase) で
 // 正規化して array containment (`tags @> {normTag}`) する。user.tags 側も同じ
 // 正規化で populate される前提 (Part 2)。
-func (h *Handler) Users(c echo.Context) error {
+func (h *Handler) Users(c *echo.Context) error {
 	// tag は欠落(nil)と空文字列を区別する。本家は空文字列を通し、空の結果を
 	// 返す (#3746)。
 	var req struct {

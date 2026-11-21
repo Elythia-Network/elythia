@@ -9,12 +9,12 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newWebResourceTestHandler(t *testing.T, meta *model.Meta) (*webResourceHandler, echo.Context, *httptest.ResponseRecorder) {
+func newWebResourceTestHandler(t *testing.T, meta *model.Meta) (*webResourceHandler, *echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	repo := testutil.NewMockMetaRepository()
 	repo.Meta = meta

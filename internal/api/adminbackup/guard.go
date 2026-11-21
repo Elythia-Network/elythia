@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Error IDs of the strong authentication. Elythia-only.
@@ -46,7 +46,7 @@ type reauthFields struct {
 }
 
 // subject builds the strongauth subject of the request.
-func subject(c echo.Context) strongauth.Subject {
+func subject(c *echo.Context) strongauth.Subject {
 	return strongauth.Subject{
 		User:           middleware.GetUser(c),
 		PresentedToken: middleware.GetToken(c),
@@ -67,7 +67,7 @@ func subject(c echo.Context) strongauth.Subject {
 // 検証 (internal/server の withParamShadow) より先に走るので、そこで再認証すると、
 // 形の誤った本文でも TOTP のコードを使い切ってから 400 になる。本家の i/2fa/* と
 // 同じく、検証を先にする (#3878)。
-func reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
+func reauthenticate(v *strongauth.Verifier, c *echo.Context) (bool, error) {
 	return Reauthenticate(v, c)
 }
 
@@ -77,7 +77,7 @@ func reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
 // (`password` and either `token` or `credential`). When the request may not
 // proceed, it writes the response and returns false. Other admin endpoints
 // doing an irreversible operation use it too (#4184).
-func Reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
+func Reauthenticate(v *strongauth.Verifier, c *echo.Context) (bool, error) {
 	req := c.Request()
 	var body []byte
 	if req.Body != nil {
@@ -114,7 +114,7 @@ func Reauthenticate(v *strongauth.Verifier, c echo.Context) (bool, error) {
 }
 
 // guarded runs next after reauthenticate.
-func (h *Handler) guarded(c echo.Context, next echo.HandlerFunc) error {
+func (h *Handler) guarded(c *echo.Context, next echo.HandlerFunc) error {
 	if ok, err := reauthenticate(h.verifier, c); !ok {
 		return err
 	}
@@ -122,7 +122,7 @@ func (h *Handler) guarded(c echo.Context, next echo.HandlerFunc) error {
 }
 
 // refusal writes the response for a strongauth refusal.
-func refusal(c echo.Context, err error) error {
+func refusal(c *echo.Context, err error) error {
 	res := Refusal(err, middleware.IsSuspendedRequest(c))
 	if res.RetryAfter != "" {
 		c.Response().Header().Set("Retry-After", res.RetryAfter)

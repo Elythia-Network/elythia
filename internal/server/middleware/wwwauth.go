@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 )
@@ -48,17 +48,23 @@ type apiErrorEnvelope struct {
 // 素通しで buffering コストもかからない。
 func WWWAuthenticate() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			res := c.Response()
-			w := &wwwAuthWriter{ResponseWriter: res.Writer}
-			res.Writer = w
+		return func(c *echo.Context) error {
+			// **c.Response() ごと包む (#4239)。** echo の v5 の gzip は SetResponse で
+			// echo の Response の外側に被さるので、Response の下の writer を差し替えると
+			// gzip の内側に回る。gzip は 1KB 未満の本文を溜めてから書くので、ここが
+			// 本文を見る前に判定が終わり、gzip を受け付けるクライアント (ブラウザは
+			// 必ずそう) へのエラーに WWW-Authenticate が付かなかった。v4 と同じく gzip
+			// より外側で本文を溜める。
+			orig := c.Response()
+			w := &wwwAuthWriter{ResponseWriter: orig}
+			c.SetResponse(w)
 			// handler が error を返して何も書かなかった場合は echo の
 			// HTTPErrorHandler が middleware chain の外で応答を書くため、
 			// 元の writer に戻してから返す (buffer に取り込むと flush の
 			// 機会が無く応答が消える)。
 			defer func() {
 				w.finalize()
-				res.Writer = w.ResponseWriter
+				c.SetResponse(orig)
 			}()
 			return next(c)
 		}

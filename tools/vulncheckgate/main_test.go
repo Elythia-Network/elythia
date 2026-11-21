@@ -163,14 +163,14 @@ func TestRunUsage(t *testing.T) {
 	assert.Equal(t, 2, run([]string{"-allow", write(t, "allow.tsv", allowBoth), filepath.Join(t.TempDir(), "missing.json")}, &out, &errOut))
 }
 
-// TestAllowlistIsReadable keeps the checked-in allowlist parseable. The echo
-// rows go when the vulnerability database records v4.16.3 as the fix.
+// TestAllowlistIsReadable keeps the checked-in allowlist parseable, with a
+// reason on every row. The echo v4 rows went with echo v4 itself (#4239).
 func TestAllowlistIsReadable(t *testing.T) {
 	allow, err := readAllowlist("allow.tsv")
 	require.NoError(t, err)
 	for id, e := range allow {
 		assert.NotEmpty(t, e.reason, id)
 	}
-	assert.Contains(t, allow, "GO-2026-6872")
-	assert.Contains(t, allow, "GO-2026-6875")
+	assert.NotContains(t, allow, "GO-2026-6872")
+	assert.NotContains(t, allow, "GO-2026-6875")
 }

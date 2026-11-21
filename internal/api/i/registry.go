@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // registryScopeElemRe mirrors upstream registry paramDef scope items pattern
@@ -80,7 +80,7 @@ func storableRegistryWrite(key string, domain *string) bool {
 // registry space; it cannot read/write the main domain=null space). A native
 // login token / cookie session uses the request's domain unchanged (#1717,
 // upstream `accessToken != null ? accessToken.id : ps.domain ?? null`)。
-func registryEffectiveDomain(c echo.Context, reqDomain *string) *string {
+func registryEffectiveDomain(c *echo.Context, reqDomain *string) *string {
 	if scope := middleware.GetAuthScope(c); scope != nil && scope.IsApp {
 		id := scope.TokenID
 		return &id
@@ -110,7 +110,7 @@ func normalizeRegistryScope(scope []string) []string {
 
 // RegistryGetDetail handles POST /api/i/registry/get-detail.
 // 指定の (key, scope, domain) に該当する RegistryItem を返す。
-func (h *Handler) RegistryGetDetail(c echo.Context) error {
+func (h *Handler) RegistryGetDetail(c *echo.Context) error {
 	if h.registryRepo == nil {
 		return c.JSON(http.StatusOK, map[string]any{})
 	}
@@ -149,7 +149,7 @@ func (h *Handler) RegistryGetDetail(c echo.Context) error {
 
 // RegistryKeys handles POST /api/i/registry/keys.
 // 指定 scope+domain 下の key 一覧を返す (本家互換で配列)。
-func (h *Handler) RegistryKeys(c echo.Context) error {
+func (h *Handler) RegistryKeys(c *echo.Context) error {
 	if h.registryRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -175,7 +175,7 @@ func (h *Handler) RegistryKeys(c echo.Context) error {
 
 // RegistryScopesWithDomain handles POST /api/i/registry/scopes-with-domain.
 // ユーザーが保存している (scope, domain) の distinct 一覧を返す。
-func (h *Handler) RegistryScopesWithDomain(c echo.Context) error {
+func (h *Handler) RegistryScopesWithDomain(c *echo.Context) error {
 	if h.registryRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -220,7 +220,7 @@ func (h *Handler) SetRegistryRepo(r repository.RegistryRepository) {
 }
 
 // RegistryGet handles POST /api/i/registry/get.
-func (h *Handler) RegistryGet(c echo.Context) error {
+func (h *Handler) RegistryGet(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Key    *string  `json:"key"`
@@ -253,7 +253,7 @@ func (h *Handler) RegistryGet(c echo.Context) error {
 }
 
 // RegistrySet handles POST /api/i/registry/set.
-func (h *Handler) RegistrySet(c echo.Context) error {
+func (h *Handler) RegistrySet(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Key    string          `json:"key"`
@@ -307,7 +307,7 @@ func (h *Handler) RegistrySet(c echo.Context) error {
 }
 
 // RegistryGetAll handles POST /api/i/registry/get-all.
-func (h *Handler) RegistryGetAll(c echo.Context) error {
+func (h *Handler) RegistryGetAll(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Scope  []string `json:"scope"`
@@ -334,7 +334,7 @@ func (h *Handler) RegistryGetAll(c echo.Context) error {
 }
 
 // RegistryKeysWithType handles POST /api/i/registry/keys-with-type.
-func (h *Handler) RegistryKeysWithType(c echo.Context) error {
+func (h *Handler) RegistryKeysWithType(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Scope  []string `json:"scope"`
@@ -357,7 +357,7 @@ func (h *Handler) RegistryKeysWithType(c echo.Context) error {
 }
 
 // RegistryRemove handles POST /api/i/registry/remove.
-func (h *Handler) RegistryRemove(c echo.Context) error {
+func (h *Handler) RegistryRemove(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Key    *string  `json:"key"`

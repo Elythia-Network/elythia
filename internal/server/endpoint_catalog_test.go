@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
-func noopHandler(c echo.Context) error { return c.NoContent(http.StatusOK) }
+func noopHandler(c *echo.Context) error { return c.NoContent(http.StatusOK) }
 
 func TestAPIEndpointNames(t *testing.T) {
 	e := echo.New()

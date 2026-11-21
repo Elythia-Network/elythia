@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -168,44 +167,11 @@ func TestServer_StopBackgroundWithoutAPanic(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 }
 
-// serveBlockedRequest makes the http.Server of s.echo serve one request that
-// does not return until the test ends, so that echo's Shutdown waits for it
-// and fails with the error of its ctx.
-func serveBlockedRequest(t *testing.T, s *Server) {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	inHandler := make(chan struct{})
-	release := make(chan struct{})
-	s.echo.GET("/block", func(c echo.Context) error {
-		close(inHandler)
-		<-release
-		return c.NoContent(http.StatusNoContent)
-	})
-	s.echo.Server.Handler = s.echo
-	go func() { _ = s.echo.Server.Serve(ln) }()
-	go func() {
-		resp, err := http.Get("http://" + ln.Addr().String() + "/block")
-		if err == nil {
-			_ = resp.Body.Close()
-		}
-	}()
-	t.Cleanup(func() {
-		close(release)
-		_ = s.echo.Server.Close()
-	})
-	select {
-	case <-inHandler:
-	case <-time.After(5 * time.Second):
-		t.Fatal("前提: リクエストがhandlerに届かない")
-	}
-}
-
-// TestServer_StopBackgroundJoinsThePanicWithTheEchoError checks that the
-// error of StopBackground keeps the error of echo's Shutdown next to the
-// errors of the panicked parts, and that without a panic it is echo's error
-// itself, not wrapped (#3707).
-func TestServer_StopBackgroundJoinsThePanicWithTheEchoError(t *testing.T) {
+// TestServer_StopBackgroundReturnsThePanicsOfParts checks that the error of
+// StopBackground names the panicked parts, and that it is nil without a panic
+// (#3707). echo の Shutdown の段は #4239 で無くなり、パニックの無い停止は
+// エラーを返さない。
+func TestServer_StopBackgroundReturnsThePanicsOfParts(t *testing.T) {
 	captureSlog(t)
 	for _, tc := range []struct {
 		name      string
@@ -217,15 +183,12 @@ func TestServer_StopBackgroundJoinsThePanicWithTheEchoError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mr := miniredis.RunT(t)
 			s, log := panicStopServer(t, mr, []string{"first", "second", "third"}, tc.panicking)
-			serveBlockedRequest(t, s)
 			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 			defer cancel()
 			err := s.StopBackground(ctx)
 			assert.Equal(t, []string{"first", "second", "third", "queueDriver.Close"}, *log)
-			require.ErrorIs(t, err, context.DeadlineExceeded, "the error of echo's Shutdown was dropped")
 			if tc.panicking == nil {
-				// panicが無いときは#3707より前と同じ値(包まないechoのエラー)を返す。
-				assert.Equal(t, context.DeadlineExceeded, err)
+				assert.NoError(t, err)
 				return
 			}
 			require.ErrorIs(t, err, errLifecycleStop)

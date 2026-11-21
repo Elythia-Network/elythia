@@ -3,7 +3,7 @@ package admin
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -22,7 +22,7 @@ import (
 // 旧 #186 の verified-email 経路 ({"sent": true} を返し reset link を送る) は標準 UI で
 // password が undefined になり drop-in を壊すため撤去した。ユーザー自身が行う
 // パスワードリセット (/request-reset-password → /reset-password) は別経路で存続する。
-func (h *Handler) ResetPassword(c echo.Context) error {
+func (h *Handler) ResetPassword(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

@@ -8,7 +8,7 @@ package endpoints
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 )
@@ -41,7 +41,7 @@ func (h *Handler) names() []string {
 
 // Endpoints returns every registered endpoint name.
 // POST /api/endpoints
-func (h *Handler) Endpoints(c echo.Context) error {
+func (h *Handler) Endpoints(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.names())
 }
 
@@ -52,7 +52,7 @@ func (h *Handler) Endpoints(c echo.Context) error {
 // mk-go は per-endpoint の paramDef メタデータを保持しないため、param の
 // 名前と型までは導出できない。response の shape (params は配列) と未知
 // endpoint の null だけ upstream に揃える (#1695)。
-func (h *Handler) Endpoint(c echo.Context) error {
+func (h *Handler) Endpoint(c *echo.Context) error {
 	var req struct {
 		Endpoint *string `json:"endpoint"`
 	}

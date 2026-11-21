@@ -25,7 +25,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -38,7 +38,7 @@ type pendingPasswordMigration struct {
 
 const pendingPasswordMigrationKey = "signin.pendingPasswordMigration"
 
-func setPendingPasswordMigration(c echo.Context, scheme password.Scheme, verified bool, stored, plain string) {
+func setPendingPasswordMigration(c *echo.Context, scheme password.Scheme, verified bool, stored, plain string) {
 	if verified && scheme == password.SchemeArgon2id {
 		c.Set(pendingPasswordMigrationKey, pendingPasswordMigration{stored: stored, plain: plain})
 	}
@@ -174,7 +174,7 @@ func (h *Handler) SetMainStreamPublisher(p MainStreamPublisher) {
 // 異なる。legacy はユーザの 2FA 設定に関わらず `'password'` 固定で返すのに対し、
 // `/signin-flow` は 2FA 無効ユーザに対して `'captcha'` を返す (TS upstream 互換)。
 // TS upstream 互換は `/signin-flow` のみ提供する。
-func (h *Handler) Signin(c echo.Context) error {
+func (h *Handler) Signin(c *echo.Context) error {
 	var req struct {
 		Username string  `json:"username"`
 		Password *string `json:"password"`
@@ -300,7 +300,7 @@ func (h *Handler) Signin(c echo.Context) error {
 // Misskey TS upstream の SigninApiService と完全互換。フロントの MkSignin.vue は
 // `next` 値で switch するので、`'captcha' | 'password' | 'totp' | 'passkey'`
 // 以外は受け付けない (#705)。
-func (h *Handler) SigninFlow(c echo.Context) error {
+func (h *Handler) SigninFlow(c *echo.Context) error {
 	body, err := readSigninObject(c)
 	if err != nil {
 		return err
@@ -578,7 +578,7 @@ func (h *Handler) SigninFlow(c echo.Context) error {
 
 // ok returns the standard "logged in" response. 認証経路 (TOTP / WebAuthn /
 // pwd-only) すべてで同じ shape を返したいのでヘルパに切り出している。
-func (h *Handler) ok(c echo.Context, user *model.User) error {
+func (h *Handler) ok(c *echo.Context, user *model.User) error {
 	h.migratePendingPassword(c, user.ID)
 	h.RecordSuccessfulSignin(user.ID, c.RealIP(), c.Request().Header.Clone())
 	token := ""
@@ -592,7 +592,7 @@ func (h *Handler) ok(c echo.Context, user *model.User) error {
 	})
 }
 
-func (h *Handler) migratePendingPassword(c echo.Context, userID string) {
+func (h *Handler) migratePendingPassword(c *echo.Context, userID string) {
 	pending, ok := c.Get(pendingPasswordMigrationKey).(pendingPasswordMigration)
 	if !ok {
 		return
@@ -748,7 +748,7 @@ func (h *Handler) recordSignin(userID, ip string, headers http.Header, success b
 // 残し、(c) SigninFlow では captcha の単回使用トークンまで消費していた。
 //
 // handled が真なら**呼び出し側は即座に nil を返すこと**。
-func (h *Handler) verifyPassword(c echo.Context, userID, stored, plain string) (scheme password.Scheme, ok, handled bool) {
+func (h *Handler) verifyPassword(c *echo.Context, userID, stored, plain string) (scheme password.Scheme, ok, handled bool) {
 	return h.verifyPasswordTolerant(c, userID, stored, plain, false)
 }
 
@@ -761,7 +761,7 @@ func (h *Handler) verifyPassword(c echo.Context, userID, stored, plain string) (
 //
 // **渡してよいのは、その先で password 不一致が素通しになる経路だけ。** そうで
 // ないと「枠が取れなかった」が「パスワードが違う」に化ける。
-func (h *Handler) verifyPasswordTolerant(c echo.Context, userID, stored, plain string, tolerateUnavailable bool) (scheme password.Scheme, ok, handled bool) {
+func (h *Handler) verifyPasswordTolerant(c *echo.Context, userID, stored, plain string, tolerateUnavailable bool) (scheme password.Scheme, ok, handled bool) {
 	scheme, outcome := password.Verify(c.Request().Context(), stored, plain)
 	switch outcome {
 	case password.OutcomeUnavailable:
@@ -798,7 +798,7 @@ func (h *Handler) verifyPasswordTolerant(c echo.Context, userID, stored, plain s
 // クライアントが枠を使い切ると 1 時間ログインできなくなる — #2849 が問題にした
 // 被害そのもの。signin は 1h/10 なので、窓を割った 3600/10 = 360 秒なら
 // 従っている限り枠を使い切らない。
-func writeVerifierUnavailable(c echo.Context) {
+func writeVerifierUnavailable(c *echo.Context) {
 	c.Response().Header().Set("Retry-After", verifierRetryAfterSeconds)
 	_ = c.JSON(http.StatusServiceUnavailable, apierr.PasswordVerificationUnavailable())
 }
@@ -812,7 +812,7 @@ const verifierRetryAfterSeconds = "360"
 // 不一致 / 2FA 失敗 / passkey passwordless 無効 等の認証失敗で signins に
 // success:false を insert してから error を返す (#1776)。user/signinRepo 未配線時は
 // 記録を skip して error だけ返す (= 旧挙動の superset、test fixture を壊さない)。
-func (h *Handler) fail(c echo.Context, user *model.User, status int, errID string) error {
+func (h *Handler) fail(c *echo.Context, user *model.User, status int, errID string) error {
 	if user != nil && h.signinRepo != nil && h.idGen != nil {
 		hdrs := c.Request().Header.Clone()
 		uid, ip := user.ID, c.RealIP()
@@ -842,7 +842,7 @@ var signinDecodeOptions = jsonv2.JoinOptions(json.DefaultOptionsV1(), jsonv2.Mat
 // 配線に依存する (echo の既定の serializer は大文字小文字を無視するので、
 // `{"CREDENTIAL": ...}` が credential に入る)。signin は資格情報を受ける経路
 // なので、handler 自身で本家と同じ読み方に固定する。
-func decodeSigninBody(c echo.Context, dst any) error {
+func decodeSigninBody(c *echo.Context, dst any) error {
 	req := c.Request()
 	if req.Body == nil || !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
 		return nil
@@ -869,14 +869,19 @@ func decodeSigninBody(c echo.Context, dst any) error {
 // と同じく完全一致で、重複したキーは後の値が勝つ。
 // 本家で null や body 無しは `body['credential']` が TypeError で 500 になる。
 // mk-go はそれを再現せず、member が無いものとして扱う (docs/divergence.md)。
-func readSigninObject(c echo.Context) (map[string]json.RawMessage, error) {
+func readSigninObject(c *echo.Context) (map[string]json.RawMessage, error) {
 	req := c.Request()
 	if req.Body == nil || !middleware.IsJSONContentType(req.Header.Get(echo.HeaderContentType)) {
 		return nil, nil
 	}
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest)).SetInternal(err)
+		// BodyLimit の 413 は潰さずに返す。echo の v4 の HTTPErrorHandler は、包んだ
+		// 内側の HTTPError の status を採っていたが、v5 は外側の 400 を採る (#4239)。
+		if he := apierr.HTTPStatusError(err); he != nil {
+			return nil, he
+		}
+		return nil, echo.NewHTTPError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest)).Wrap(err)
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil

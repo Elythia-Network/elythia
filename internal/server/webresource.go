@@ -7,7 +7,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // webResourceHandler serves the non-API web resources upstream exposes from
@@ -45,7 +45,7 @@ var robotsDisallowedPaths = []string{
 //
 // ugcVisibilityForVisitor が 'none' のインスタンスは未ログイン閲覧を塞いで
 // いる意思表示なので、/@ と /notes もクロール対象から外す (upstream 同様)。
-func (h *webResourceHandler) RobotsTxt(c echo.Context) error {
+func (h *webResourceHandler) RobotsTxt(c *echo.Context) error {
 	disallowed := robotsDisallowedPaths
 	if m, err := h.metaRepo.Fetch(); err == nil && m != nil && m.UgcVisibilityForVisitor == "none" {
 		disallowed = append(append([]string{}, disallowed...), "/@", "/notes")
@@ -88,7 +88,7 @@ type openSearchDescription struct {
 
 // OpenSearchXML serves /opensearch.xml so browsers can register the instance
 // as a search engine.
-func (h *webResourceHandler) OpenSearchXML(c echo.Context) error {
+func (h *webResourceHandler) OpenSearchXML(c *echo.Context) error {
 	name := config.DisplayName
 	if m, err := h.metaRepo.Fetch(); err == nil && m != nil && m.Name != nil && *m.Name != "" {
 		name = *m.Name

@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -227,8 +227,7 @@ func BenchmarkNote_ReferenceCheck(b *testing.B) {
 				req.Header.Set(echo.HeaderAccept, "application/activity+json")
 				rec := httptest.NewRecorder()
 				c := e.NewContext(req, rec)
-				c.SetParamNames("id")
-				c.SetParamValues(bc.noteID)
+				c.SetPathValues(echo.PathValues{{Name: "id", Value: bc.noteID}})
 				if err := h.Note(c); err != nil || rec.Code != http.StatusOK {
 					b.Fatalf("status %d err %v", rec.Code, err)
 				}

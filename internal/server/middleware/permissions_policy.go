@@ -1,6 +1,6 @@
 package middleware
 
-import "github.com/labstack/echo/v4"
+import "github.com/labstack/echo/v5"
 
 // permissionsPolicyValue disables browser features the UI never uses.
 //
@@ -43,7 +43,7 @@ const permissionsPolicyValue = "microphone=(), geolocation=(), payment=()"
 // カメラやマイクへ手を伸ばす余地を先に潰しておく。
 func PermissionsPolicy() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set("Permissions-Policy", permissionsPolicyValue)
 			return next(c)
 		}

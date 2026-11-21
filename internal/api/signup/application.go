@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/signupform"
 	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // approvalTicketTTL bounds how long the internally minted invite stays usable.
@@ -72,7 +72,7 @@ func applicationView(a *model.SignupApplication) map[string]any {
 // **戻り値に ok を持たせているのは、`c.JSON` が成功時に nil を返すため。**
 // エラー応答を書いたことを err の非 nil で表そうとすると、書いた直後に呼び出し
 // 側が素通りして処理を続けてしまう。
-func (h *Handler) approvalReady(c echo.Context) (*model.Meta, bool, error) {
+func (h *Handler) approvalReady(c *echo.Context) (*model.Meta, bool, error) {
 	return h.approvalGate(c, false)
 }
 
@@ -82,7 +82,7 @@ func (h *Handler) approvalReady(c echo.Context) (*model.Meta, bool, error) {
 // **承認制かどうかより先に見る。** 承認制でないサーバーでも、閉じているならそう
 // 伝える (UNAVAILABLE だと「承認制ではない」と読まれる)。照会 (approvalReady) には
 // 掛けない — 閉じている間も申請者が結果を見られるように。
-func (h *Handler) approvalGate(c echo.Context, rejectClosed bool) (*model.Meta, bool, error) {
+func (h *Handler) approvalGate(c *echo.Context, rejectClosed bool) (*model.Meta, bool, error) {
 	if h.applications == nil {
 		return nil, false, c.JSON(http.StatusServiceUnavailable,
 			apierr.Error("UNAVAILABLE", "Approval-based signup is not enabled.", "7c1c9c2f-1a2b-4c3d-8e5f-6a7b8c9d0e1f"))
@@ -111,7 +111,7 @@ func (h *Handler) approvalGate(c echo.Context, rejectClosed bool) (*model.Meta, 
 //
 // 状態の照会 (ApplicationStatus) には掛けない。読むだけで何も作らないので、
 // 既に申請した人が結果を見られなくなるほうが害が大きい。
-func (h *Handler) approvalOpen(c echo.Context) (*model.Meta, bool, error) {
+func (h *Handler) approvalOpen(c *echo.Context) (*model.Meta, bool, error) {
 	meta, ok, err := h.approvalGate(c, true)
 	if !ok {
 		return nil, false, err
@@ -127,7 +127,7 @@ func (h *Handler) approvalOpen(c echo.Context) (*model.Meta, bool, error) {
 //
 // **クレームコードを返すのはここだけ。** 保存しているのは hash なので、以後
 // サーバー側から平文を出す手段は無い。失くしたら再申請してもらうしかない。
-func (h *Handler) ApplicationApply(c echo.Context) error {
+func (h *Handler) ApplicationApply(c *echo.Context) error {
 	meta, ok, err := h.approvalOpen(c)
 	if !ok {
 		return err
@@ -207,7 +207,7 @@ func (h *Handler) ApplicationApply(c echo.Context) error {
 //
 // 申請者がコードを持って戻ってくる入口。**これが唯一の導線**なので、コードを
 // 失くした場合は再申請しかない。
-func (h *Handler) ApplicationStatus(c echo.Context) error {
+func (h *Handler) ApplicationStatus(c *echo.Context) error {
 	app, ok, err := h.applicationForClaimCode(c)
 	if !ok {
 		return err
@@ -220,7 +220,7 @@ func (h *Handler) ApplicationStatus(c echo.Context) error {
 // 承認済みの申請に対して、実際にアカウントを作る。**即時作成では招待を発行しない**
 // (#2813)。メール確認を挟む構成でだけ内部で発行し、確認リンクを踏んだ時点で消費する
 // — コードは利用者に渡らない。
-func (h *Handler) ApplicationRegister(c echo.Context) error {
+func (h *Handler) ApplicationRegister(c *echo.Context) error {
 	meta, ok, err := h.approvalOpen(c)
 	if !ok {
 		return err
@@ -360,7 +360,7 @@ func (h *Handler) ApplicationRegister(c echo.Context) error {
 // する。申請は approved のまま残るが、発行した ticket を申請に覚えさせておくので、
 // やり直しは前回を破棄してから進む。
 func (h *Handler) registerViaEmailConfirmation(
-	c echo.Context,
+	c *echo.Context,
 	meta *model.Meta,
 	app *model.SignupApplication,
 	ticket *model.RegistrationTicket,
@@ -424,7 +424,7 @@ func (h *Handler) registerViaEmailConfirmation(
 // 実 provider が有効なときも 200 で返す。**二重の負担は課さない** (apply 側が
 // 要求しない) が、endpoint 自体を 404 / 503 にすると、画面がどちらの構成かを
 // 別経路で判定しないといけなくなる。
-func (h *Handler) ApplicationFormToken(c echo.Context) error {
+func (h *Handler) ApplicationFormToken(c *echo.Context) error {
 	if _, ok, err := h.approvalOpen(c); !ok {
 		return err
 	}
@@ -470,7 +470,7 @@ func (h *Handler) formTokenRequired() bool {
 // **戻り値に ok を持たせるのは、`c.JSON` が成功時に nil を返すため。** error の
 // 非 nil だけで「応答を書いた」を表そうとすると、書いた直後に呼び出し側が素通り
 // して申請行を作ってしまう (approvalReady と同じ規約に揃えてある)。
-func (h *Handler) verifyFormToken(c echo.Context, token string) (bool, error) {
+func (h *Handler) verifyFormToken(c *echo.Context, token string) (bool, error) {
 	if !h.formTokenRequired() {
 		return true, nil
 	}
@@ -499,7 +499,7 @@ func (h *Handler) verifyFormToken(c echo.Context, token string) (bool, error) {
 
 // applicationForClaimCode resolves the caller's claim code, writing the error
 // response and returning ok=false when it cannot.
-func (h *Handler) applicationForClaimCode(c echo.Context) (*model.SignupApplication, bool, error) {
+func (h *Handler) applicationForClaimCode(c *echo.Context) (*model.SignupApplication, bool, error) {
 	if _, ok, err := h.approvalReady(c); !ok {
 		return nil, false, err
 	}
@@ -608,7 +608,7 @@ type approvalTicketDeleter interface {
 
 // signupServiceError maps SignupService failures to the same shapes the normal
 // `/api/signup` returns, so a client can handle one set of errors.
-func (h *Handler) signupServiceError(c echo.Context, err error) error {
+func (h *Handler) signupServiceError(c *echo.Context, err error) error {
 	// **Misskey misc 形式 (`apierr.Error`) で返す。`FastifyReply` は使わない。**
 	//
 	// あちらは code を `message` にしか載せず (`{"statusCode":400,

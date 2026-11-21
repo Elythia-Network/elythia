@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -237,7 +237,7 @@ func TestNormalizePeerHost_RejectsNonHost(t *testing.T) {
 
 // --- 受信 ---
 
-func peerRequest(t *testing.T, body []byte, sign func(*http.Request)) (echo.Context, *httptest.ResponseRecorder) {
+func peerRequest(t *testing.T, body []byte, sign func(*http.Request)) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	// 絶対 URL で作る。署名は Host を対象に含むので、実際の送信と同じ形に
 	// しないと検証できない。

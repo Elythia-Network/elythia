@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -242,8 +242,7 @@ func doAssetsRequest(handler echo.HandlerFunc, path string) (*httptest.ResponseR
 	req := httptest.NewRequest(http.MethodGet, "/assets/"+path, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames("*")
-	c.SetParamValues(path)
+	c.SetPathValues(echo.PathValues{{Name: "*", Value: path}})
 	err := handler(c)
 	return rec, err
 }

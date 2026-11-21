@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // maybeAPLookup matches an Accept header of an ActivityPub object lookup
@@ -36,7 +36,7 @@ func (h *Handler) SetExternalRedirectPolicy(allow func() bool, selfURL string) {
 // 追わない設定として使っており、管理者が false にしても受け側は外部へ 301 / 302 を
 // 返し続け、代わりに `.well-known` や actor を別ホストへ委譲している相手との
 // 連合が黙って壊れていた。
-func (h *Handler) redirectAP(c echo.Context, code int, location string) error {
+func (h *Handler) redirectAP(c *echo.Context, code int, location string) error {
 	if h.allowExternalRedirect != nil && !h.allowExternalRedirect() &&
 		maybeAPLookup.MatchString(c.Request().Header.Get("Accept")) && !h.isSelfURL(location) {
 		if u, err := url.Parse(location); err == nil {

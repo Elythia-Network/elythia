@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/entity"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
@@ -19,7 +19,7 @@ import (
 // assigned=false を返す。既存の admin/roles/users も ListByRole で同じテーブルを
 // 引くので挙動は揃っている。呼び出し側が判別できるよう role.target を返す。
 // effective 判定へ差し替えないこと (理由は roles.AssignmentShow の doc comment)。
-func (h *Handler) RolesAssignmentShow(c echo.Context) error {
+func (h *Handler) RolesAssignmentShow(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 		RoleID string `json:"roleId"`

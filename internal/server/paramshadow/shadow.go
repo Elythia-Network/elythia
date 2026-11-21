@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -60,7 +60,7 @@ func Middleware(eps map[string]paramschema.Endpoint, opts ...Option) echo.Middle
 // 落としうる。handlerの手書きの検査は消さずに残してあるので、そこで今までと
 // 同じ判定を受ける。
 func (s *shadow) middleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		name, ok := strings.CutPrefix(c.Path(), "/api/")
 		if !ok {
 			return next(c)
@@ -91,7 +91,7 @@ type judged struct {
 
 // validate builds what upstream would validate, without changing what the
 // handler reads, and validates it.
-func (s *shadow) validate(c echo.Context, ep paramschema.Endpoint) judged {
+func (s *shadow) validate(c *echo.Context, ep paramschema.Endpoint) judged {
 	req := c.Request()
 	if ep.RequireFile {
 		return judged{skip: SkipMultipart}

@@ -13,7 +13,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -64,7 +64,7 @@ func NewHandler(db *gorm.DB, redisClient *redis.Client, metaRepo repository.Meta
 // This mirrors Misskey 本家の `/api/reset-db` エンドポイントで、
 // Cypress の `resetState` カスタムコマンドが必須依存している。
 // TestMode=false の場合は 404 を返して存在しないように振る舞う。
-func (h *Handler) ResetDB(c echo.Context) error {
+func (h *Handler) ResetDB(c *echo.Context) error {
 	if !h.testMode {
 		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	}

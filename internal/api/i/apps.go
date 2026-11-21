@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Apps handles POST /api/i/apps.
@@ -24,7 +24,7 @@ import (
 // sort 値は +/-createdAt / +/-lastUsedAt。未指定時は token.id ASC (本家 default)。
 // 各 token の name / permission / description は app へフォールバックする
 // (例: token.name が NULL なら app.name を使う、本家と同じ ?? チェーン)。
-func (h *Handler) Apps(c echo.Context) error {
+func (h *Handler) Apps(c *echo.Context) error {
 	if h.accessTokenRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -113,7 +113,7 @@ func tokenPermission(t *model.AccessToken) []string {
 // isAuthorized は upstream で accessTokensRepository.countBy({appId, userId})>0。
 // ここで列挙している token 自体が該当 (appId, userId) ペアの存在を保証するので
 // 常に true。requireCredential なので me は必ず存在する。
-func (h *Handler) AuthorizedApps(c echo.Context) error {
+func (h *Handler) AuthorizedApps(c *echo.Context) error {
 	if h.accessTokenRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -168,7 +168,7 @@ func (h *Handler) AuthorizedApps(c echo.Context) error {
 // RevokeToken handles POST /api/i/revoke-token.
 // TS互換: tokenId (ID) または token (ハッシュ文字列) のどちらかで指定可。
 // 指定 access_token が自分の所有であれば削除する。
-func (h *Handler) RevokeToken(c echo.Context) error {
+func (h *Handler) RevokeToken(c *echo.Context) error {
 	// upstream c07ce75281 は requireCredential を外し、認証を実装内に移したうえで
 	// **endpoint 固有の** CREDENTIAL_REQUIRED を投げる。汎用の middleware に任せると
 	// id が 1384574d-... になり upstream (6f1f0d3a-...) と wire が食い違う。

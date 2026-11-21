@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )
@@ -105,7 +105,7 @@ func (h *Handler) SetUserListEventPublisher(p UserListEventPublisher) {
 // NO_SUCH_USER)。userId 未指定 && 未認証は INVALID_PARAM (#1550)。packed shape
 // ({id, createdAt, name, userIds, isPublic})、userIds は ListMembersByListIDs で
 // batch fetch (#876)。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		UserID string `json:"userId"`
@@ -174,7 +174,7 @@ func (h *Handler) List(c echo.Context) error {
 //
 // 新規作成時は member 0 件なので userIds は []。upstream と同じ packed
 // shape を返す (#871)。
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Name string `json:"name"`
@@ -214,7 +214,7 @@ func (h *Handler) Create(c echo.Context) error {
 // Show handles POST /api/users/lists/show.
 //
 // userIds を含む packed shape を返す (#871)。
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req struct {
 		ListID    string `json:"listId"`
 		ForPublic bool   `json:"forPublic"`
@@ -292,7 +292,7 @@ func (h *Handler) memberIDs(listID string) []string {
 }
 
 // Push handles POST /api/users/lists/push (add member).
-func (h *Handler) Push(c echo.Context) error {
+func (h *Handler) Push(c *echo.Context) error {
 	var req struct {
 		ListID string `json:"listId"`
 		UserID string `json:"userId"`
@@ -384,7 +384,7 @@ func (h *Handler) Push(c echo.Context) error {
 }
 
 // Pull handles POST /api/users/lists/pull (remove member).
-func (h *Handler) Pull(c echo.Context) error {
+func (h *Handler) Pull(c *echo.Context) error {
 	var req struct {
 		ListID string `json:"listId"`
 		UserID string `json:"userId"`
@@ -434,7 +434,7 @@ func (h *Handler) Pull(c echo.Context) error {
 }
 
 // Delete handles POST /api/users/lists/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	var req struct {
 		ListID string `json:"listId"`
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	mksentry "github.com/elythia-network/elythia/internal/sentry"
 	sentrygo "github.com/getsentry/sentry-go"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -86,7 +86,7 @@ func TestMiddleware_DisabledPassesThrough(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	called := false
-	handler := mw(func(c echo.Context) error {
+	handler := mw(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -103,7 +103,7 @@ func TestMiddleware_NilCfgPassesThrough(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	require.NoError(t, mw(func(c echo.Context) error { return c.String(http.StatusOK, "ok") })(c))
+	require.NoError(t, mw(func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -144,7 +144,7 @@ func TestMiddleware_CapturesHandlerError(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	wantErr := errors.New("boom")
-	handler := mw(func(c echo.Context) error { return wantErr })
+	handler := mw(func(c *echo.Context) error { return wantErr })
 	gotErr := handler(c)
 	require.ErrorIs(t, gotErr, wantErr)
 
@@ -174,7 +174,7 @@ func TestMiddleware_CapturesPanicAndRepanics(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	handler := mw(func(c echo.Context) error { panic("kaboom") })
+	handler := mw(func(c *echo.Context) error { panic("kaboom") })
 
 	// echo の Recover に巻き戻すため再 panic する仕様。テストでは defer recover で受ける。
 	defer func() {

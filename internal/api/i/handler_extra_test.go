@@ -25,7 +25,7 @@ import (
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/argon2"
@@ -58,7 +58,7 @@ func newDeleteAccountHandler(t *testing.T) (*Handler, *testutil.MockUserReposito
 
 // postExtraCanceled は**キャンセル済みの request context** で叩く。
 // Argon2id の検証枠を取れなかった経路 (OutcomeUnavailable) を待ち時間ゼロで再現する。
-func postExtraCanceled(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func postExtraCanceled(h func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -73,7 +73,7 @@ func postExtraCanceled(h func(echo.Context) error, body string, user *model.User
 	return rec
 }
 
-func postExtra(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func postExtra(h func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

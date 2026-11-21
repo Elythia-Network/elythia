@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -49,7 +49,7 @@ func (h *Handler) invalidate(ctx context.Context, userID string) {
 }
 
 // Register handles POST /api/sw/register.
-func (h *Handler) Register(c echo.Context) error {
+func (h *Handler) Register(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Endpoint        *string `json:"endpoint"`
@@ -133,7 +133,7 @@ func (h *Handler) Register(c echo.Context) error {
 }
 
 // ShowRegistration handles POST /api/sw/show-registration.
-func (h *Handler) ShowRegistration(c echo.Context) error {
+func (h *Handler) ShowRegistration(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Endpoint *string `json:"endpoint"`
@@ -166,7 +166,7 @@ func (h *Handler) ShowRegistration(c echo.Context) error {
 }
 
 // UpdateRegistration handles POST /api/sw/update-registration.
-func (h *Handler) UpdateRegistration(c echo.Context) error {
+func (h *Handler) UpdateRegistration(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Endpoint        *string `json:"endpoint"`
@@ -212,7 +212,7 @@ func (h *Handler) UpdateRegistration(c echo.Context) error {
 // Accepts the same parameters as upstream 2026.10.0: endpoint, auth and
 // publickey are all required, and only subscriptions matching all three (and
 // the caller, when authenticated) are removed. No match is a silent 204.
-func (h *Handler) Unregister(c echo.Context) error {
+func (h *Handler) Unregister(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Endpoint  json.RawMessage `json:"endpoint"`

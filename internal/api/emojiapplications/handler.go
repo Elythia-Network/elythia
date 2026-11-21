@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -69,7 +69,7 @@ func NewHandler(
 }
 
 // Create handles POST /api/emoji-application/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	if h.svc == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -125,7 +125,7 @@ func (h *Handler) Create(c echo.Context) error {
 // **種別を潰さない。** すべて 400 INVALID_PARAM に丸めると、利用者には
 // 「何か間違っている」としか伝わらず、名前を直せばよいのか別の問題なのかが
 // 分からない。DB 障害は 500 のまま残す (#2792 と同じ理由)。
-func (h *Handler) createError(c echo.Context, err error) error {
+func (h *Handler) createError(c *echo.Context, err error) error {
 	// 期間上限は sentinel ではなく値を持つので errors.As で受ける (#2958)。
 	var quota *emojiapplication.QuotaExceededError
 	var pending *emojiapplication.PendingLimitExceededError
@@ -204,7 +204,7 @@ func (h *Handler) createError(c echo.Context, err error) error {
 }
 
 // ListMine handles POST /api/emoji-application/list-mine.
-func (h *Handler) ListMine(c echo.Context) error {
+func (h *Handler) ListMine(c *echo.Context) error {
 	if h.apps == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -244,7 +244,7 @@ func (h *Handler) ListMine(c echo.Context) error {
 }
 
 // Cancel handles POST /api/emoji-application/cancel.
-func (h *Handler) Cancel(c echo.Context) error {
+func (h *Handler) Cancel(c *echo.Context) error {
 	if h.svc == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -289,7 +289,7 @@ func (h *Handler) Cancel(c echo.Context) error {
 //
 // **`RetryAt` がゼロ値なら時刻を出さない (#2977)。** 審査待ちの上限も同時に
 // 満杯だと、期間が空いてもまだ通らないので時刻を予告できない。
-func (h *Handler) quotaExceeded(c echo.Context, q *emojiapplication.QuotaExceededError) error {
+func (h *Handler) quotaExceeded(c *echo.Context, q *emojiapplication.QuotaExceededError) error {
 	body := apierr.Error(
 		"EMOJI_APPLICATION_QUOTA_EXCEEDED",
 		"You have reached the maximum number of emoji applications for this period.",

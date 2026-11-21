@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +49,7 @@ func TestRecordClientIP_SkipsInternalCalls(t *testing.T) {
 		}
 		c := e.NewContext(req, httptest.NewRecorder())
 		c.Set(string(UserContextKey), &model.User{ID: "u1"})
-		h := RecordClientIP(obs)(func(echo.Context) error { return nil })
+		h := RecordClientIP(obs)(func(*echo.Context) error { return nil })
 		_ = h(c)
 		return obs.calls
 	}

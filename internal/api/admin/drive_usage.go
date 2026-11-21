@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/driveusage"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // DriveUsageProvider serves instance-wide drive usage snapshots.
@@ -37,7 +37,7 @@ const driveUsageSourceDatabase = "database"
 // 集計は都度走らせて短い TTL のスナップショットを使い回す。**未配線なら 500 を
 // 返す** — 0 バイトを返すと「使っていない」という誤った事実を管理画面に出す
 // ことになるため。
-func (h *Handler) DriveUsage(c echo.Context) error {
+func (h *Handler) DriveUsage(c *echo.Context) error {
 	if h.driveUsage == nil {
 		return apierr.JSONInternalError(c)
 	}

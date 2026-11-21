@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -54,7 +54,7 @@ func TestDrive_DBFailureIsNot4xx(t *testing.T) {
 		return h
 	}
 
-	call := func(t *testing.T, fn func(echo.Context) error, body string) int {
+	call := func(t *testing.T, fn func(*echo.Context) error, body string) int {
 		t.Helper()
 		e := echo.New()
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))

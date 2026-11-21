@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func doJSONBody(t *testing.T, method, contentType, body string) (*httptest.Respo
 	t.Helper()
 	e := echo.New()
 	handlerRan := false
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		handlerRan = true
 		var req struct {
 			Value string `json:"value"`
@@ -219,7 +219,7 @@ func TestJSONBodyParse_BodyReadErrorReturnsInvalidEnvelope(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	handlerRan := false
-	err := JSONBodyParse()(func(echo.Context) error {
+	err := JSONBodyParse()(func(*echo.Context) error {
 		handlerRan = true
 		return nil
 	})(c)

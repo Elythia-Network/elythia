@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Grouped handles POST /api/i/notifications-grouped.
@@ -22,7 +22,7 @@ import (
 //
 // fetch / cursor / type filter / CanSeeNote ゲート (#1444) は Show と共通の
 // collectNotifications を使うので、grouped 側でも note embed の可視性は保たれる。
-func (h *Handler) Grouped(c echo.Context) error {
+func (h *Handler) Grouped(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	req, ok := h.bindListRequest(c)
 	if !ok {

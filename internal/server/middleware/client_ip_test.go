@@ -7,7 +7,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +38,7 @@ func runRecordClientIP(t *testing.T, observer middleware.IPObserver, user *model
 		c.Set(string(middleware.UserContextKey), user)
 	}
 	reached := false
-	h := middleware.RecordClientIP(observer)(func(echo.Context) error {
+	h := middleware.RecordClientIP(observer)(func(*echo.Context) error {
 		reached = true
 		return c.NoContent(http.StatusOK)
 	})

@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -39,7 +39,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
 	return h, noteRepo
 }
 
-func setAuthUser(c echo.Context, user *model.User) {
+func setAuthUser(c *echo.Context, user *model.User) {
 	c.Set(string(middleware.UserContextKey), user)
 }
 

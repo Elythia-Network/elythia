@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RolePolicyChecker reports whether a user has a given role policy enabled.
@@ -35,7 +35,7 @@ type RolePolicyChecker interface {
 // when called first.
 func RequireRolePolicy(checker RolePolicyChecker, policyKey string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			admitHeldAppUser(c)
 			user := GetUser(c)
 			if user == nil {
@@ -76,7 +76,7 @@ func RequireRolePolicy(checker RolePolicyChecker, policyKey string) echo.Middlew
 // ROLE_PERMISSION_DENIED、401 は返さない (#1784)。checker 未配線時は deny (`RequireRolePolicy` と同じ理由、#3037)。
 func RequireRolePolicyPublic(checker RolePolicyChecker, policyKey string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			// 未配線は通さない (`RequireRolePolicy` と同じ理由)。
 			if checker == nil {
 				slog.Error("middleware: role policy checker is not wired; denying",
@@ -126,7 +126,7 @@ func ChatAvailabilityAllows(policy, mode string) bool {
 // **checker 未配線は deny** (`RequireRolePolicy` と同じ、#3037)。
 func RequireChatAvailability(checker ChatAvailabilityChecker, mode string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			// **未配線は通さない。** 同じファイルの `RequireRolePolicy` と
 			// 同じ原則 — 依存が欠けたら gate ごと消える形をやめる。ここだけ
 			// 残すと、次に nil を渡す経路が生えたとき chat だけ黙って開く。

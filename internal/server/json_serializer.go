@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // fastJSONSerializer is the echo JSONSerializer used for all c.JSON / c.Bind
@@ -27,9 +27,17 @@ import (
 // 高速 encoder が現れたら再検討する。
 type fastJSONSerializer struct{}
 
+// prettyJSONIndent is the indent echo v4 used for ?pretty.
+const prettyJSONIndent = "  "
+
 // Serialize writes i as JSON to the response. indent が空でなければ
 // pretty-print する (echo 標準と同じセマンティクス)。
-func (fastJSONSerializer) Serialize(c echo.Context, i interface{}, indent string) error {
+func (fastJSONSerializer) Serialize(c *echo.Context, i interface{}, indent string) error {
+	// **?pretty なら字下げする (#4239)。** echo の v4 の c.JSON は ?pretty のとき
+	// 字下げしていたが、v5 はしない。応答を変えないよう、ここで同じ字下げにする。
+	if _, pretty := c.QueryParams()["pretty"]; indent == "" && pretty {
+		indent = prettyJSONIndent
+	}
 	enc := json.NewEncoder(c.Response())
 	if indent != "" {
 		enc.SetIndent("", indent)
@@ -61,7 +69,7 @@ var requestDecodeOptions = jsonv2.JoinOptions(json.DefaultOptionsV1(), jsonv2.Ma
 // endpoint a body that is not a JSON object is rejected when i expects an
 // object; see rejectNonObjectBody. 不正な JSON は echo の HTTPError(400) に
 // 翻訳し、そのまま返すと echo の error handler に渡る。
-func (fastJSONSerializer) Deserialize(c echo.Context, i interface{}) error {
+func (fastJSONSerializer) Deserialize(c *echo.Context, i interface{}) error {
 	data, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		return err
@@ -77,12 +85,12 @@ func (fastJSONSerializer) Deserialize(c echo.Context, i interface{}) error {
 		if errors.As(err, &ute) {
 			return echo.NewHTTPError(http.StatusBadRequest,
 				fmt.Sprintf("Unmarshal type error: expected=%v, got=%v, field=%v, offset=%v",
-					ute.Type, ute.Value, ute.Field, ute.Offset)).SetInternal(err)
+					ute.Type, ute.Value, ute.Field, ute.Offset)).Wrap(err)
 		}
 		var se *json.SyntaxError
 		if errors.As(err, &se) {
 			return echo.NewHTTPError(http.StatusBadRequest,
-				fmt.Sprintf("Syntax error: offset=%v, error=%v", se.Offset, se.Error())).SetInternal(err)
+				fmt.Sprintf("Syntax error: offset=%v, error=%v", se.Offset, se.Error())).Wrap(err)
 		}
 		return err
 	}

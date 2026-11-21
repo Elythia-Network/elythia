@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // redactAdminMetaSecrets replaces the secret fields of an admin/meta response
@@ -182,7 +182,7 @@ const errIDSecretReentryRequired = "32e50b4f-2201-49fe-8846-71d252213ac1"
 
 // secretReentryRequired writes the refusal for a destination change that
 // keeps the stored secret.
-func secretReentryRequired(c echo.Context, field string) error {
+func secretReentryRequired(c *echo.Context, field string) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("SECRET_REENTRY_REQUIRED",
 		"Enter "+field+" again when changing where it is sent.", errIDSecretReentryRequired))
 }
@@ -265,7 +265,7 @@ func (h *Handler) updateMetaChecked(fields map[string]any) error {
 // endpoint と項目が無い。ドライバのエラーの文には秘密でない欄の値が入ることが
 // あるが、秘密の欄の値は入らない (checkSecretFieldTypes が文字列か null に
 // 限っているので、エンコードの失敗の文に値が載らない)。
-func (h *Handler) writeCheckedUpdateError(c echo.Context, fields map[string]any, err error) error {
+func (h *Handler) writeCheckedUpdateError(c *echo.Context, fields map[string]any, err error) error {
 	var re *secretReentryError
 	if errors.As(err, &re) {
 		return secretReentryRequired(c, re.field)

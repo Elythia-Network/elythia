@@ -487,18 +487,18 @@ func TestScanCursorGuards_DetectsDiscardedOK(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Discarded(c echo.Context) error {
+func (h *Handler) Discarded(c *echo.Context) error {
 	sinceID, untilID, _ := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) Unchecked(c echo.Context) error {
+func (h *Handler) Unchecked(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	_ = ok
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) Guarded(c echo.Context) error {
+func (h *Handler) Guarded(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -526,17 +526,17 @@ func TestScanCursorGuards_ChecksIDFirstAndNormalizerParams(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) IDFirstDiscarded(c echo.Context) error {
+func (h *Handler) IDFirstDiscarded(c *echo.Context) error {
 	sinceID, untilID, _ := id.NormalizeCursorIDFirst(req.SinceID, req.UntilID, nil, nil)
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) ParamDiscarded(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+func (h *Handler) ParamDiscarded(c *echo.Context, normalizeCursor id.CursorNormalizer) error {
 	sinceID, untilID, _ := normalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) ParamGuarded(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+func (h *Handler) ParamGuarded(c *echo.Context, normalizeCursor id.CursorNormalizer) error {
 	sinceID, untilID, ok := normalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -563,12 +563,12 @@ func (p params) cursor() (string, string, bool) {
 	return id.NormalizeCursor(p.SinceID, p.UntilID, p.SinceDate, p.UntilDate)
 }
 
-func (h *Handler) Discarded(c echo.Context) error {
+func (h *Handler) Discarded(c *echo.Context) error {
 	sinceID, untilID, _ := req.cursor()
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) Guarded(c echo.Context) error {
+func (h *Handler) Guarded(c *echo.Context) error {
 	sinceID, untilID, ok := req.cursor()
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -592,7 +592,7 @@ func TestScanCursorGuards_ChecksBareFunctionWrapper(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func pageParams(c echo.Context) (int, string, bool) {
+func pageParams(c *echo.Context) (int, string, bool) {
 	limit, untilID, ok := id.NormalizeCursor("", "", nil, nil)
 	if !ok {
 		return 0, "", false
@@ -600,12 +600,12 @@ func pageParams(c echo.Context) (int, string, bool) {
 	return limit, untilID, true
 }
 
-func (h *Handler) Discarded(c echo.Context) error {
+func (h *Handler) Discarded(c *echo.Context) error {
 	limit, untilID, _ := pageParams(c)
 	return h.list(limit, untilID)
 }
 
-func (h *Handler) Guarded(c echo.Context) error {
+func (h *Handler) Guarded(c *echo.Context) error {
 	limit, untilID, ok := pageParams(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -627,7 +627,7 @@ func TestScanCursorGuards_DoesNotBorrowEarlierNegation(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Reused(c echo.Context) error {
+func (h *Handler) Reused(c *echo.Context) error {
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
 	if !limitOK {
 		return apierr.JSONInvalidParam(c)
@@ -648,7 +648,7 @@ func TestScanCursorGuards_DetectsLateGuard(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Late(c echo.Context) error {
+func (h *Handler) Late(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	rows, err := h.repo.List(sinceID, untilID)
 	if !ok {
@@ -668,7 +668,7 @@ func TestScanCursorGuards_DetectsEmptyFallback(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Fallback(c echo.Context) error {
+func (h *Handler) Fallback(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	if !ok {
 		sinceID, untilID = "", ""
@@ -695,7 +695,7 @@ func (r *listRequest) normalize() bool {
 	return true
 }
 
-func (h *Handler) Guarded(c echo.Context) error {
+func (h *Handler) Guarded(c *echo.Context) error {
 	if !req.normalize() {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -713,7 +713,7 @@ func TestScanCursorGuards_DoesNotBorrowGuardFromAnotherFunc(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Neighbour(c echo.Context) error {
+func (h *Handler) Neighbour(c *echo.Context) error {
 	ok := h.check()
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -721,7 +721,7 @@ func (h *Handler) Neighbour(c echo.Context) error {
 	return nil
 }
 
-func (h *Handler) Unchecked(c echo.Context) error {
+func (h *Handler) Unchecked(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	return h.list(sinceID, untilID, ok)
 }
@@ -752,7 +752,7 @@ func (r *otherRequest) normalize() bool {
 	return r.Limit > 0
 }
 
-func (h *Handler) UsesOther(c echo.Context) error {
+func (h *Handler) UsesOther(c *echo.Context) error {
 	if !other.normalize() {
 		return apierr.JSONInvalidParam(c)
 	}
@@ -772,7 +772,7 @@ func TestScanCursorGuards_AcceptsOrdinaryGuardShapes(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Stacked(c echo.Context) error {
+func (h *Handler) Stacked(c *echo.Context) error {
 	limit, limitOK := pagination.ResolveLimit(req.Limit, 30, 100)
 	sinceID, untilID, cursorOK := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	if !limitOK {
@@ -784,7 +784,7 @@ func (h *Handler) Stacked(c echo.Context) error {
 	return h.list(sinceID, untilID, limit)
 }
 
-func (h *Handler) Combined(c echo.Context) error {
+func (h *Handler) Combined(c *echo.Context) error {
 	sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
 	if !ok || req.Offset < 0 {
 		return apierr.JSONInvalidParam(c)
@@ -792,7 +792,7 @@ func (h *Handler) Combined(c echo.Context) error {
 	return h.list(sinceID, untilID)
 }
 
-func (h *Handler) Switched(c echo.Context) error {
+func (h *Handler) Switched(c *echo.Context) error {
 	switch req.Kind {
 	case "a":
 		sinceID, untilID, ok := id.NormalizeCursor(req.SinceID, req.UntilID, nil, nil)
@@ -804,7 +804,7 @@ func (h *Handler) Switched(c echo.Context) error {
 	return nil
 }
 
-func (h *Handler) Looping(c echo.Context) error {
+func (h *Handler) Looping(c *echo.Context) error {
 	for _, r := range reqs {
 		sinceID, untilID, ok := id.NormalizeCursor(r.SinceID, r.UntilID, nil, nil)
 		if !ok {
@@ -1015,7 +1015,7 @@ func TestScanCursorParamBinders_AcceptsNormalizerParam(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+func (h *Handler) my(c *echo.Context, normalizeCursor id.CursorNormalizer) error {
 	var req struct {
 		SinceID string `+"`"+`json:"sinceId"`+"`"+`
 	}
@@ -1027,7 +1027,7 @@ func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error 
 	return h.repo.List(sinceID)
 }
 
-func (h *Handler) otherType(c echo.Context, normalizeCursor id.Generator) error {
+func (h *Handler) otherType(c *echo.Context, normalizeCursor id.Generator) error {
 	var req struct {
 		SinceID string `+"`"+`json:"sinceId"`+"`"+`
 	}
@@ -1035,7 +1035,7 @@ func (h *Handler) otherType(c echo.Context, normalizeCursor id.Generator) error 
 	return h.repo.List(normalizeCursor(req.SinceID))
 }
 
-func (h *Handler) otherPackage(c echo.Context, normalizeCursor strutil.CursorNormalizer) error {
+func (h *Handler) otherPackage(c *echo.Context, normalizeCursor strutil.CursorNormalizer) error {
 	var req struct {
 		SinceID string `+"`"+`json:"sinceId"`+"`"+`
 	}
@@ -1056,7 +1056,7 @@ func TestScanCursorParamBinders_DetectsUnnormalizedBinder(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) Raw(c echo.Context) error {
+func (h *Handler) Raw(c *echo.Context) error {
 	var req struct {
 		UntilID string `+"`"+`json:"untilId"`+"`"+`
 	}
@@ -1064,7 +1064,7 @@ func (h *Handler) Raw(c echo.Context) error {
 	return h.repo.List(req.UntilID)
 }
 
-func (h *Handler) Normalized(c echo.Context) error {
+func (h *Handler) Normalized(c *echo.Context) error {
 	var req struct {
 		SinceID string `+"`"+`json:"sinceId"`+"`"+`
 	}
@@ -1076,7 +1076,7 @@ func (h *Handler) Normalized(c echo.Context) error {
 	return h.repo.List(sinceID)
 }
 
-func (h *Handler) ViaWrapper(c echo.Context) error {
+func (h *Handler) ViaWrapper(c *echo.Context) error {
 	var req struct {
 		UntilID string `+"`"+`json:"untilId"`+"`"+`
 	}
@@ -1088,7 +1088,7 @@ func (h *Handler) ViaWrapper(c echo.Context) error {
 	return h.repo.List(sinceID, untilID)
 }
 
-func (h *Handler) NoCursor(c echo.Context) error {
+func (h *Handler) NoCursor(c *echo.Context) error {
 	var req struct {
 		Limit int `+"`"+`json:"limit"`+"`"+`
 	}
@@ -1112,15 +1112,15 @@ func TestScanCursorParamBinders_DetectsQueryStringCursor(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	writeGoFile(t, dir, "h.go", `
-func (h *Handler) RawCursor(c echo.Context) error {
+func (h *Handler) RawCursor(c *echo.Context) error {
 	return h.repo.List(c.QueryParam("cursor"))
 }
 
-func (h *Handler) RawSnakeCase(c echo.Context) error {
+func (h *Handler) RawSnakeCase(c *echo.Context) error {
 	return h.repo.List(c.QueryParam("until_id"), c.QueryParam("since_id"))
 }
 
-func (h *Handler) NormalizedQuery(c echo.Context) error {
+func (h *Handler) NormalizedQuery(c *echo.Context) error {
 	_, untilID, ok := id.NormalizeCursor("", c.QueryParam("cursor"), nil, nil)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -1128,7 +1128,7 @@ func (h *Handler) NormalizedQuery(c echo.Context) error {
 	return h.repo.List(untilID)
 }
 
-func (h *Handler) UnrelatedQuery(c echo.Context) error {
+func (h *Handler) UnrelatedQuery(c *echo.Context) error {
 	return h.repo.List(c.QueryParam("page"))
 }
 `)

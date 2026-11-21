@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,7 +44,7 @@ func TestFrameGuard(t *testing.T) {
 			// **本番と同じルートを張る。** 判定はマッチしたパターンで行うので、
 			// catchall しか無いと除外対象まで SPA 扱いになる (実際の構成では
 			// `/embed/*` / `/files/:accessKey` / `/proxy/*` が個別に張られる)。
-			ok := func(c echo.Context) error { return c.NoContent(http.StatusOK) }
+			ok := func(c *echo.Context) error { return c.NoContent(http.StatusOK) }
 			e.Any("/embed/*", ok)
 			e.Any("/files/:accessKey", ok)
 			e.Any("/proxy/*", ok)
@@ -82,7 +82,7 @@ func TestFrameGuard_UsesRoutePatternNotRawPath(t *testing.T) {
 
 	e := echo.New()
 	e.Use(FrameGuard())
-	h := func(c echo.Context) error { return c.String(http.StatusOK, "ok") }
+	h := func(c *echo.Context) error { return c.String(http.StatusOK, "ok") }
 	e.GET("/files/:accessKey", h)
 	e.GET("/embed/*", h)
 	e.GET("/*", h)

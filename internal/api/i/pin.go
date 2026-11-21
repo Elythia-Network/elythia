@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // PinRequest is the request body for i/pin and i/unpin.
@@ -16,7 +16,7 @@ type PinRequest struct {
 }
 
 // Pin handles POST /api/i/pin.
-func (h *Handler) Pin(c echo.Context) error {
+func (h *Handler) Pin(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req PinRequest
@@ -46,7 +46,7 @@ func (h *Handler) Pin(c echo.Context) error {
 }
 
 // Unpin handles POST /api/i/unpin.
-func (h *Handler) Unpin(c echo.Context) error {
+func (h *Handler) Unpin(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req PinRequest

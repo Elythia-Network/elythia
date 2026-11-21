@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/openapi"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // OpenAPISpec serves /api.json.
@@ -28,7 +28,7 @@ import (
 // あり、全体のgzip middlewareに任せるとリクエストのたびに圧縮し直す(認証なしで
 // 叩ける)。gzipした本文も1度だけ作り、ここでContent-Encodingを決める
 // (selfEncodedRoutes。/api/emojisと同じ書き方)。
-func (s *Server) OpenAPISpec(c echo.Context) error {
+func (s *Server) OpenAPISpec(c *echo.Context) error {
 	spec, err := s.apiSpec.get(s.buildOpenAPISpec)
 	if err != nil {
 		slog.Error("failed to build /api.json", "error", err)
@@ -100,7 +100,7 @@ func (s *Server) buildOpenAPISpec() (*encodedSpec, error) {
 		return nil, err
 	}
 	var routes []openapi.Route
-	for _, r := range s.echo.Routes() {
+	for _, r := range s.echo.Router().Routes() {
 		name, ok := strings.CutPrefix(r.Path, "/api/")
 		if !ok {
 			continue

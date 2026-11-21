@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ import (
 func TestRequestIPFromContext_SkipsInternalCalls(t *testing.T) {
 	e := echo.New()
 
-	newCtx := func(internal bool) echo.Context {
+	newCtx := func(internal bool) *echo.Context {
 		req := httptest.NewRequest(http.MethodPost, "/api/drive/files/create", nil)
 		req.RemoteAddr = "203.0.113.9:1234"
 		if internal {

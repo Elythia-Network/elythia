@@ -21,7 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // legacyNow is a tiny indirection so tests can override time in the handler's
@@ -206,7 +206,7 @@ func (h *Handler) SetService(svc *corechat.Service) {
 }
 
 // mapChatErr maps a core/chat service error to an Echo response.
-func (h *Handler) mapChatErr(c echo.Context, err error) error {
+func (h *Handler) mapChatErr(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, corechat.ErrNotFound):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_MESSAGE", "No such message.", "006d73c9-dada-5b5d-a0f5-00b01f70bc3c"))
@@ -631,7 +631,7 @@ func (h *Handler) fillUsers(v any) {
 
 // jsonOK fills the embedded UserLite values of v (fillUsers) and writes it as
 // a 200 response. Every chat response carrying a packed user goes through it.
-func (h *Handler) jsonOK(c echo.Context, v any) error {
+func (h *Handler) jsonOK(c *echo.Context, v any) error {
 	h.fillUsers(v)
 	return c.JSON(http.StatusOK, v)
 }
@@ -643,7 +643,7 @@ func (h *Handler) jsonOK(c echo.Context, v any) error {
 // upstream (read:drive) と同じく file は owner-scope で引く
 // (moderator は任意 file 可)。
 // 連合互換: res は ChatMessage の配列 (packMessageDetailed)。
-func (h *Handler) AttachedChatMessages(c echo.Context) error {
+func (h *Handler) AttachedChatMessages(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		FileID    string     `json:"fileId"`
@@ -705,7 +705,7 @@ func (h *Handler) AttachedChatMessages(c echo.Context) error {
 // --- Rooms ---
 
 // RoomsCreate handles POST /api/chat/rooms/create.
-func (h *Handler) RoomsCreate(c echo.Context) error {
+func (h *Handler) RoomsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Name        *string `json:"name"`
@@ -741,7 +741,7 @@ func (h *Handler) RoomsCreate(c echo.Context) error {
 // owner / member / 招待受信者 / moderator 以外は noSuchRoom (404) を返す
 // (#1164 Phase C)。旧 mk-go は room id を知っていれば誰でも room メタ情報を
 // 取得できる drop-in regression 状態だったため本 gate で塞ぐ。
-func (h *Handler) RoomsShow(c echo.Context) error {
+func (h *Handler) RoomsShow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -768,7 +768,7 @@ func (h *Handler) RoomsShow(c echo.Context) error {
 }
 
 // RoomsUpdate handles POST /api/chat/rooms/update.
-func (h *Handler) RoomsUpdate(c echo.Context) error {
+func (h *Handler) RoomsUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID      string  `json:"roomId"`
@@ -808,7 +808,7 @@ func (h *Handler) RoomsUpdate(c echo.Context) error {
 }
 
 // RoomsDelete handles POST /api/chat/rooms/delete.
-func (h *Handler) RoomsDelete(c echo.Context) error {
+func (h *Handler) RoomsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -846,7 +846,7 @@ func (h *Handler) RoomsDelete(c echo.Context) error {
 }
 
 // RoomsOwned handles POST /api/chat/rooms/owned.
-func (h *Handler) RoomsOwned(c echo.Context) error {
+func (h *Handler) RoomsOwned(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
 	if err := c.Bind(&req); err != nil {
@@ -868,7 +868,7 @@ func (h *Handler) RoomsOwned(c echo.Context) error {
 }
 
 // RoomsJoined handles POST /api/chat/rooms/joined.
-func (h *Handler) RoomsJoined(c echo.Context) error {
+func (h *Handler) RoomsJoined(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
 	if err := c.Bind(&req); err != nil {
@@ -893,7 +893,7 @@ func (h *Handler) RoomsJoined(c echo.Context) error {
 }
 
 // RoomsLeave handles POST /api/chat/rooms/leave.
-func (h *Handler) RoomsLeave(c echo.Context) error {
+func (h *Handler) RoomsLeave(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -913,7 +913,7 @@ func (h *Handler) RoomsLeave(c echo.Context) error {
 }
 
 // RoomsMute handles POST /api/chat/rooms/mute.
-func (h *Handler) RoomsMute(c echo.Context) error {
+func (h *Handler) RoomsMute(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -939,7 +939,7 @@ func (h *Handler) RoomsMute(c echo.Context) error {
 }
 
 // RoomsUnmute handles POST /api/chat/rooms/unmute.
-func (h *Handler) RoomsUnmute(c echo.Context) error {
+func (h *Handler) RoomsUnmute(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -957,7 +957,7 @@ func (h *Handler) RoomsUnmute(c echo.Context) error {
 }
 
 // RoomsTransferOwnership handles POST /api/chat/rooms/transfer-ownership.
-func (h *Handler) RoomsTransferOwnership(c echo.Context) error {
+func (h *Handler) RoomsTransferOwnership(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1057,7 +1057,7 @@ func (h *Handler) RoomsTransferOwnership(c echo.Context) error {
 
 // MessagesCreate handles POST /api/chat/messages/create.
 // service が wire されていれば streaming 配信も同時に行う。
-func (h *Handler) MessagesCreate(c echo.Context) error {
+func (h *Handler) MessagesCreate(c *echo.Context) error {
 	return h.messagesCreate(c, messageDestAuto)
 }
 
@@ -1088,7 +1088,7 @@ type messageCreateRequest struct {
 // 無い。どちらも知らない項目として無視するので、route ごとに読む項目を分ける
 // (#3369)。以前は共有の構造体で両方を読み、create-to-user に toRoomId を付けると
 // 部屋へ投稿し、create-to-room の型の違う toUserId を400にしていた。
-func bindMessageCreate(c echo.Context, dest messageDest) (messageCreateRequest, error) {
+func bindMessageCreate(c *echo.Context, dest messageDest) (messageCreateRequest, error) {
 	var out messageCreateRequest
 	switch dest {
 	case messageDestUser:
@@ -1122,7 +1122,7 @@ func bindMessageCreate(c echo.Context, dest messageDest) (messageCreateRequest, 
 	}
 }
 
-func (h *Handler) messagesCreate(c echo.Context, dest messageDest) error {
+func (h *Handler) messagesCreate(c *echo.Context, dest messageDest) error {
 	user := middleware.GetUser(c)
 	req, err := bindMessageCreate(c, dest)
 	if err != nil {
@@ -1236,7 +1236,7 @@ func (h *Handler) messagesCreate(c echo.Context, dest messageDest) error {
 // messagesCreateLegacy preserves pre-Phase-9.8 behaviour for callers that
 // construct a Handler without wiring the service. 既存の chat handler テスト
 // はこちらを通る。
-func (h *Handler) messagesCreateLegacy(c echo.Context, user *model.User, text, toUserID, toRoomID, fileID *string) error {
+func (h *Handler) messagesCreateLegacy(c *echo.Context, user *model.User, text, toUserID, toRoomID, fileID *string) error {
 	msg := &model.ChatMessage{
 		ID: h.idGen.Generate(legacyNow()), FromUserID: user.ID,
 		ToUserID: toUserID, ToRoomID: toRoomID,
@@ -1277,7 +1277,7 @@ func (h *Handler) reloadIfFilePending(msg *model.ChatMessage) *model.ChatMessage
 }
 
 // MessagesShow handles POST /api/chat/messages/show.
-func (h *Handler) MessagesShow(c echo.Context) error {
+func (h *Handler) MessagesShow(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string `json:"messageId"`
@@ -1310,7 +1310,7 @@ func (h *Handler) MessagesShow(c echo.Context) error {
 }
 
 // MessagesUpdate handles POST /api/chat/messages/update.
-func (h *Handler) MessagesUpdate(c echo.Context) error {
+func (h *Handler) MessagesUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string  `json:"messageId"`
@@ -1353,7 +1353,7 @@ func (h *Handler) MessagesUpdate(c echo.Context) error {
 }
 
 // MessagesDelete handles POST /api/chat/messages/delete.
-func (h *Handler) MessagesDelete(c echo.Context) error {
+func (h *Handler) MessagesDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string `json:"messageId"`
@@ -1380,7 +1380,7 @@ func (h *Handler) MessagesDelete(c echo.Context) error {
 }
 
 // MessagesRead handles POST /api/chat/messages/read.
-func (h *Handler) MessagesRead(c echo.Context) error {
+func (h *Handler) MessagesRead(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string `json:"messageId"`
@@ -1399,7 +1399,7 @@ func (h *Handler) MessagesRead(c echo.Context) error {
 }
 
 // Messages handles POST /api/chat/messages (list).
-func (h *Handler) Messages(c echo.Context) error {
+func (h *Handler) Messages(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string     `json:"roomId"`
@@ -1440,7 +1440,7 @@ func (h *Handler) Messages(c echo.Context) error {
 }
 
 // MessagesSearch handles POST /api/chat/messages/search.
-func (h *Handler) MessagesSearch(c echo.Context) error {
+func (h *Handler) MessagesSearch(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Query  string     `json:"query"`
@@ -1475,7 +1475,7 @@ func (h *Handler) MessagesSearch(c echo.Context) error {
 
 // ReactionsCreate handles POST /api/chat/messages/reactions/create and
 // POST /api/chat/messages/react. Reaction format: "userId/emoji".
-func (h *Handler) ReactionsCreate(c echo.Context) error {
+func (h *Handler) ReactionsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string `json:"messageId"`
@@ -1493,7 +1493,7 @@ func (h *Handler) ReactionsCreate(c echo.Context) error {
 
 // ReactionsDelete handles POST /api/chat/messages/reactions/delete and
 // POST /api/chat/messages/unreact.
-func (h *Handler) ReactionsDelete(c echo.Context) error {
+func (h *Handler) ReactionsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		MessageID string  `json:"messageId"`
@@ -1522,7 +1522,7 @@ const (
 // reactionErr maps a React / Unreact service error to a response. Access
 // errors (missing message, own message, not a participant) all become the
 // same 400 NO_SUCH_MESSAGE; every other error stays a generic 500 as upstream.
-func reactionErr(c echo.Context, err error, noSuchMessageID string) error {
+func reactionErr(c *echo.Context, err error, noSuchMessageID string) error {
 	// 存在しない場合と参加していない場合を同じ応答にし、メッセージの
 	// 存在をエラーから判別できないようにする (upstream と同じ)。
 	if errors.Is(err, corechat.ErrMessageAccess) {
@@ -1539,7 +1539,7 @@ func reactionErr(c echo.Context, err error, noSuchMessageID string) error {
 // --- Invitations ---
 
 // InvitationsCreate handles POST /api/chat/rooms/invitations/create.
-func (h *Handler) InvitationsCreate(c echo.Context) error {
+func (h *Handler) InvitationsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1653,7 +1653,7 @@ func (h *Handler) InvitationsCreate(c echo.Context) error {
 //
 // 招待された側は reject / ignore を使う。こちらは連合の Reject を送らないので、
 // 被招待者に開放すると remote room の招待を黙って消せてしまう。
-func (h *Handler) InvitationsDelete(c echo.Context) error {
+func (h *Handler) InvitationsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		InvitationID string `json:"invitationId"`
@@ -1686,7 +1686,7 @@ func (h *Handler) InvitationsDelete(c echo.Context) error {
 }
 
 // InvitationsAccept handles POST /api/chat/rooms/invitations/accept.
-func (h *Handler) InvitationsAccept(c echo.Context) error {
+func (h *Handler) InvitationsAccept(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	// 招待は (呼び出した人, roomId) で引く。invitationId は読まない (宣言にも
 	// elythia-js の型にも無い。以前は読むだけで使わず、型の違う値を 400 にしていた。
@@ -1788,7 +1788,7 @@ func (h *Handler) blockedWithRoomOwner(userID string, room *model.ChatRoom) bool
 }
 
 // InvitationsReject handles POST /api/chat/rooms/invitations/reject.
-func (h *Handler) InvitationsReject(c echo.Context) error {
+func (h *Handler) InvitationsReject(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1816,7 +1816,7 @@ func (h *Handler) InvitationsReject(c echo.Context) error {
 
 // MembersBan handles POST /api/chat/rooms/members/ban.
 // ルームオーナーのみが他メンバーを退出させられる。
-func (h *Handler) MembersBan(c echo.Context) error {
+func (h *Handler) MembersBan(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1841,7 +1841,7 @@ func (h *Handler) MembersBan(c echo.Context) error {
 
 // MembersUpdateMembership handles POST /api/chat/rooms/members/update-membership.
 // ルームオーナーのみが他メンバーの設定を変更できる。
-func (h *Handler) MembersUpdateMembership(c echo.Context) error {
+func (h *Handler) MembersUpdateMembership(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID  string `json:"roomId"`
@@ -1879,12 +1879,12 @@ func (h *Handler) MembersUpdateMembership(c echo.Context) error {
 // --- TS-compatible aliases ---
 
 // MessagesCreateToUser handles POST /api/chat/messages/create-to-user.
-func (h *Handler) MessagesCreateToUser(c echo.Context) error {
+func (h *Handler) MessagesCreateToUser(c *echo.Context) error {
 	return h.messagesCreate(c, messageDestUser)
 }
 
 // MessagesCreateToRoom handles POST /api/chat/messages/create-to-room.
-func (h *Handler) MessagesCreateToRoom(c echo.Context) error {
+func (h *Handler) MessagesCreateToRoom(c *echo.Context) error {
 	return h.messagesCreate(c, messageDestRoom)
 }
 
@@ -1894,7 +1894,7 @@ func (h *Handler) MessagesCreateToRoom(c echo.Context) error {
 // 自分」の DM をすべて既読としてマークする。FE は新着メッセージにしか
 // 'read' イベントを送らないので、initial load 時点の既読化はサーバ側で
 // やらないと unread badge がリロードのたびに復活する (#692)。
-func (h *Handler) UserTimeline(c echo.Context) error {
+func (h *Handler) UserTimeline(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		UserID string `json:"userId"`
@@ -1932,7 +1932,7 @@ func (h *Handler) UserTimeline(c echo.Context) error {
 // RoomTimeline handles POST /api/chat/messages/room-timeline.
 //
 // upstream の readRoomChatMessage 相当 (#692)。
-func (h *Handler) RoomTimeline(c echo.Context) error {
+func (h *Handler) RoomTimeline(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1970,7 +1970,7 @@ func (h *Handler) RoomTimeline(c echo.Context) error {
 }
 
 // ReadAll handles POST /api/chat/read-all.
-func (h *Handler) ReadAll(c echo.Context) error {
+func (h *Handler) ReadAll(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if err := h.repo.MarkAllRead(user.ID); err != nil {
 		return apierr.JSONInternalError(c)
@@ -1979,7 +1979,7 @@ func (h *Handler) ReadAll(c echo.Context) error {
 }
 
 // InvitationsIgnore handles POST /api/chat/rooms/invitations/ignore.
-func (h *Handler) InvitationsIgnore(c echo.Context) error {
+func (h *Handler) InvitationsIgnore(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -1995,7 +1995,7 @@ func (h *Handler) InvitationsIgnore(c echo.Context) error {
 }
 
 // InvitationsInbox handles POST /api/chat/rooms/invitations/inbox.
-func (h *Handler) InvitationsInbox(c echo.Context) error {
+func (h *Handler) InvitationsInbox(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
 	if err := c.Bind(&req); err != nil {
@@ -2022,7 +2022,7 @@ func (h *Handler) InvitationsInbox(c echo.Context) error {
 }
 
 // InvitationsOutbox handles POST /api/chat/rooms/invitations/outbox.
-func (h *Handler) InvitationsOutbox(c echo.Context) error {
+func (h *Handler) InvitationsOutbox(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -2061,7 +2061,7 @@ func (h *Handler) InvitationsOutbox(c echo.Context) error {
 }
 
 // RoomsJoin handles POST /api/chat/rooms/join.
-func (h *Handler) RoomsJoin(c echo.Context) error {
+func (h *Handler) RoomsJoin(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -2133,7 +2133,7 @@ func (h *Handler) RoomsJoin(c echo.Context) error {
 // upstream joining.ts は ChatRoomMembership[] (populateRoom:true,
 // populateUser:false) を返す。旧 mk-go は RoomsJoined (= ChatRoom[]) の alias
 // だったが、shape が異なるため membership を返すよう独立実装する。
-func (h *Handler) RoomsJoining(c echo.Context) error {
+func (h *Handler) RoomsJoining(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req chatPageParams
 	if err := c.Bind(&req); err != nil {
@@ -2155,7 +2155,7 @@ func (h *Handler) RoomsJoining(c echo.Context) error {
 }
 
 // RoomsMembers handles POST /api/chat/rooms/members.
-func (h *Handler) RoomsMembers(c echo.Context) error {
+func (h *Handler) RoomsMembers(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		RoomID string `json:"roomId"`
@@ -2213,7 +2213,7 @@ func (h *Handler) RoomsMembers(c echo.Context) error {
 // 最新メッセージを返す。FE の MkChatHistories.vue は両方を並行に呼んで
 // マージするため、room パラメータを正しくハンドリングしないと chat home
 // で何も描画されない (#692)。
-func (h *Handler) History(c echo.Context) error {
+func (h *Handler) History(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit *jsnum.Int `json:"limit"`
@@ -2310,7 +2310,7 @@ func (h *Handler) historyIsRead(meID string, msgs []*model.ChatMessage, room boo
 }
 
 // UnreadCount handles POST /api/chat/unread-count.
-func (h *Handler) UnreadCount(c echo.Context) error {
+func (h *Handler) UnreadCount(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	count, _ := h.repo.CountUnread(user.ID)
 	return c.JSON(http.StatusOK, map[string]any{"count": count})

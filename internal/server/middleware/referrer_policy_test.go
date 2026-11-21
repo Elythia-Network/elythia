@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +26,7 @@ func TestReferrerPolicy_AppliedToEveryPath(t *testing.T) {
 	for _, p := range paths {
 		t.Run(p, func(t *testing.T) {
 			e := echo.New()
-			h := middleware.ReferrerPolicy()(func(c echo.Context) error {
+			h := middleware.ReferrerPolicy()(func(c *echo.Context) error {
 				return c.NoContent(http.StatusOK)
 			})
 			rec := httptest.NewRecorder()
@@ -41,7 +41,7 @@ func TestReferrerPolicy_AppliedToEveryPath(t *testing.T) {
 // handler がエラーを返しても header は書かれている (next 呼び出し前に設定する)。
 func TestReferrerPolicy_SetBeforeHandlerRuns(t *testing.T) {
 	e := echo.New()
-	h := middleware.ReferrerPolicy()(func(c echo.Context) error {
+	h := middleware.ReferrerPolicy()(func(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "boom")
 	})
 	rec := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestReferrerPolicy_SetBeforeHandlerRuns(t *testing.T) {
 // 意図してこの値を選んでいる (referrer_policy.go のコメント参照)。
 func TestReferrerPolicy_Value(t *testing.T) {
 	e := echo.New()
-	h := middleware.ReferrerPolicy()(func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	h := middleware.ReferrerPolicy()(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
 	require.NoError(t, h(c))

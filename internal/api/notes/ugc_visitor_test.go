@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -127,7 +127,7 @@ func (f *ugcFixture) call(t *testing.T, method, body string, viewer *model.User)
 	t.Helper()
 	m := reflect.ValueOf(f.h).MethodByName(method)
 	require.Truef(t, m.IsValid(), "no such method %s", method)
-	endpoint, ok := m.Interface().(func(echo.Context) error)
+	endpoint, ok := m.Interface().(func(*echo.Context) error)
 	require.Truef(t, ok, "%s is not an endpoint", method)
 	c, rec := newJSONRequest(t, "/", ugcBodyIDs.Replace(body))
 	if viewer != nil {
@@ -210,7 +210,7 @@ func TestUGCVisitor_EveryEndpointIsClassified(t *testing.T) {
 	for _, ep := range ugcVisibilityQueryEndpoints {
 		gated[ep.method] = true
 	}
-	endpointType := reflect.TypeOf((func(echo.Context) error)(nil))
+	endpointType := reflect.TypeOf((func(*echo.Context) error)(nil))
 	hv := reflect.ValueOf(&Handler{})
 	ht := hv.Type()
 	seen := 0

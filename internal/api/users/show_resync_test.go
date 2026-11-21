@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -31,7 +31,7 @@ func (r *resyncStubResolver) ResyncIfStale(u *model.User) (*model.User, error) {
 	return u, nil
 }
 
-func postJSON(t *testing.T, path, body string, handle func(echo.Context) error) *httptest.ResponseRecorder {
+func postJSON(t *testing.T, path, body string, handle func(*echo.Context) error) *httptest.ResponseRecorder {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))

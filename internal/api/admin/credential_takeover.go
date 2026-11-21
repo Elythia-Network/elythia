@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -32,7 +32,7 @@ import (
 //
 // **実行者が管理者ならモデレーターには触れる。** インシデント対応で
 // モデレーターのアカウントを復旧する経路は残す。
-func (h *Handler) credentialTakeoverDenied(c echo.Context, target *model.User) (denied bool, undetermined bool) {
+func (h *Handler) credentialTakeoverDenied(c *echo.Context, target *model.User) (denied bool, undetermined bool) {
 	if target == nil {
 		return false, false
 	}

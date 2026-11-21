@@ -753,14 +753,16 @@ var (
 	routerMatchRe = regexp.MustCompile(`\bapi\.Match\(chartMethods, "([^"]+)"`)
 	// 全メソッドで受ける route (#3926)。catchall (`"/*"`) は endpoint ではないので
 	// 拾わない。表に載るのは GET と POST (tools/apicompat が他のメソッドを除く)。
-	routerAnyRe = regexp.MustCompile(`\bapi\.Any\("(/[^"*]+)"`)
+	// echo の v5 の Any は使わず、v4 の Any と同じメソッドを Match で登録する
+	// (internal/server/echo_v5.go の anyMethods、#4239)。
+	routerAnyRe = regexp.MustCompile(`\bapi\.Group\.Match\(anyMethods, "(/[^"*]+)"`)
 
 	// 総数を数える側。抽出できた数と突き合わせて取りこぼしを検出する。
 	routerPostCallRe  = regexp.MustCompile(`\bapi\.POST\(`)
 	routerGetCallRe   = regexp.MustCompile(`\bapi\.GET\(`)
 	routerMatchCallRe = regexp.MustCompile(`\bapi\.Match\(`)
-	routerAnyCallRe   = regexp.MustCompile(`\bapi\.Any\(`)
-	routerCatchallRe  = regexp.MustCompile(`\bapi\.Any\("/\*"`)
+	routerAnyCallRe   = regexp.MustCompile(`\bapi\.Group\.Match\(`)
+	routerCatchallRe  = regexp.MustCompile(`\bapi\.Group\.Match\(anyMethods, "/\*"`)
 )
 
 // TestAPICompatDoc_MatchesRouter asserts that the committed
@@ -883,6 +885,11 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 			"POST / GET 以外のメソッドは母集団に入れていない"},
 		{"api.Add(", regexp.MustCompile(`\bapi\.Add\(`), 0,
 			"メソッドを文字列で渡す登録は api.<METHOD>( に一致しない"},
+		// echo の v5 の Any は全メソッドに合う 1 本のルート (echo.RouteAny) を登録し、
+		// ルートの一覧にメソッドとして出ず、405 の Allow も v4 と変わる (#4239)。v4 の
+		// Any と同じメソッドを Match で登録する (anyMethods)。
+		{".Any(", regexp.MustCompile(`\.Any\(`), 0,
+			"Any で登録したルートは、ルートの一覧 (dump-routes・/api/endpoints) と 405 の Allow が v4 と変わり、ここの抽出からも漏れる"},
 		{`s.echo.<METHOD>("/api`, regexp.MustCompile(`\bs\.echo\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE|Any|Match|Add|Static|File|RouteNotFound)\("/api(/|")`), 0,
 			"group を通さず /api 配下へ直接登録すると、このテストから見えない"},
 	} {
@@ -894,10 +901,11 @@ func TestAPICompatDoc_MatchesRouter(t *testing.T) {
 		}
 	}
 
-	// api.Any は catchall の 1 件と、path を抽出できた分だけのはず。path が literal
-	// でない Any は抽出から漏れ、そこに足した endpoint が生成物と照合されない。
+	// 全メソッドの登録 (api.Group.Match) は catchall の 1 件と、path を抽出できた分
+	// だけのはず。path が literal でないものは抽出から漏れ、そこに足した endpoint が
+	// 生成物と照合されない。
 	if n, catchall, matched := len(routerAnyCallRe.FindAllString(joined, -1)), len(routerCatchallRe.FindAllString(joined, -1)), len(anyRoutes); catchall != 1 || n != catchall+matched {
-		t.Fatalf(`internal/server の api.Any( は %d 件で、catchall ("/*") が %d 件、path を抽出できたのが %d 件。
+		t.Fatalf(`internal/server の api.Group.Match( は %d 件で、catchall ("/*") が %d 件、path を抽出できたのが %d 件。
 
 catchall は 1 件だけを想定している。残りは path を 1 行の literal で書くこと (定数 / 変数
 経由だと、そこに足した endpoint が生成物と照合されない)。`, n, catchall, matched)

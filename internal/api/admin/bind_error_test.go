@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -32,7 +32,7 @@ func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 	h.SetDeliveryHealthProvider(&stubDeliveryHealth{})
 	h.SetSignupApplicationReviewer(&stubReviewer{})
 	h.SetInstanceRepo(testutil.NewMockInstanceRepository())
-	cases := map[string]func(echo.Context) error{
+	cases := map[string]func(*echo.Context) error{
 		"AbuseReportNotificationRecipientDelete":  h.AbuseReportNotificationRecipientDelete,
 		"AbuseReportNotificationRecipientList":    h.AbuseReportNotificationRecipientList,
 		"AbuseReportNotificationRecipientShow":    h.AbuseReportNotificationRecipientShow,

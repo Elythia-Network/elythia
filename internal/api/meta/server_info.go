@@ -3,7 +3,7 @@ package meta
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/serverstats"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -19,7 +19,7 @@ import (
 //
 // `enableServerMachineStats` が無効なら空の shape を返す。**フィールドごと
 // 落とさない** — frontend の server-metric widget は各キーを直接読む。
-func (h *Handler) ServerInfo(c echo.Context) error {
+func (h *Handler) ServerInfo(c *echo.Context) error {
 	if h.metaRepo != nil {
 		m, err := h.metaRepo.Fetch()
 		if err == nil && m != nil && m.EnableServerMachineStats {

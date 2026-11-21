@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Error codes for the chunked upload endpoints (#2313).
@@ -54,7 +54,7 @@ type ChunkedSessionRequest struct {
 }
 
 // FilesCreateChunkedStart handles POST /api/drive/files/create-chunked/start.
-func (h *Handler) FilesCreateChunkedStart(c echo.Context) error {
+func (h *Handler) FilesCreateChunkedStart(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req ChunkedStartRequest
@@ -115,7 +115,7 @@ func (h *Handler) FilesCreateChunkedStart(c echo.Context) error {
 //
 // multipart/form-data で uploadId / index / chunk を受ける。create と同じ形に
 // 揃えているので、フロントエンドは既存の XHR 送信をほぼそのまま使える。
-func (h *Handler) FilesCreateChunkedAppend(c echo.Context) error {
+func (h *Handler) FilesCreateChunkedAppend(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	uploadID := c.FormValue("uploadId")
@@ -159,7 +159,7 @@ func (h *Handler) FilesCreateChunkedAppend(c echo.Context) error {
 
 // FilesCreateChunkedFinish handles POST /api/drive/files/create-chunked/finish.
 // レスポンスは drive/files/create と同一 shape (pack(self)) にする。
-func (h *Handler) FilesCreateChunkedFinish(c echo.Context) error {
+func (h *Handler) FilesCreateChunkedFinish(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req ChunkedSessionRequest
@@ -174,7 +174,7 @@ func (h *Handler) FilesCreateChunkedFinish(c echo.Context) error {
 }
 
 // FilesCreateChunkedAbort handles POST /api/drive/files/create-chunked/abort.
-func (h *Handler) FilesCreateChunkedAbort(c echo.Context) error {
+func (h *Handler) FilesCreateChunkedAbort(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req ChunkedSessionRequest
@@ -189,7 +189,7 @@ func (h *Handler) FilesCreateChunkedAbort(c echo.Context) error {
 
 // readMultipartChunk extracts the chunk bytes from the "chunk" form field.
 // テスト用に差し替え可能にするのは readMultipartFile と同じ理由。
-var readMultipartChunk = func(c echo.Context, maxBytes int64) ([]byte, error) {
+var readMultipartChunk = func(c *echo.Context, maxBytes int64) ([]byte, error) {
 	fileHeader, err := c.FormFile("chunk")
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ var readMultipartChunk = func(c echo.Context, maxBytes int64) ([]byte, error) {
 //
 // セッションの不存在・他人所有・期限切れはすべて NO_SUCH_UPLOAD_SESSION に
 // 畳む。区別すると他人のセッション ID の存在を確かめる oracle になる。
-func (h *Handler) chunkedError(c echo.Context, err error) error {
+func (h *Handler) chunkedError(c *echo.Context, err error) error {
 	// index 不一致は期待値を info で返す。クライアントは応答の消失と送信の
 	// 失敗を区別できないため、これが無いと再開位置を決められない。
 	var idxErr *coredrive.ChunkIndexError

@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ConnectionAcceptor receives an upgraded WebSocket connection, an optional
@@ -91,7 +91,7 @@ func NewHandler(acceptor ConnectionAcceptor) *Handler {
 // Stream handles GET /streaming. WebSocket への upgrade に成功したら接続を
 // acceptor に渡し、失敗したら 400 / 426 のまま終了する (gorilla/websocket が
 // 自動で適切な status を返す)。
-func (h *Handler) Stream(c echo.Context) error {
+func (h *Handler) Stream(c *echo.Context) error {
 	// app access_token は read:account を持っていないと WebSocket を使えない
 	// (upstream StreamingApiServerService:64)。upgrade する前に弾かないと、
 	// 権限の無いトークンでも接続だけは張れてしまう。native login token

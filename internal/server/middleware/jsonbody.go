@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // fastifyError is the error envelope Fastify's default error handler
@@ -72,7 +72,7 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // validation error), preserving the distinction between the two layers.
 func JSONBodyParse() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			req := c.Request()
 			// FastifyはGET/HEAD/TRACEのbodyを一切パースしない (bodyless
 			// method 扱い)。content-typeがJSONでもそのまま素通しする。
@@ -86,8 +86,8 @@ func JSONBodyParse() echo.MiddlewareFunc {
 			body, err := io.ReadAll(req.Body)
 			if err != nil {
 				// BodyLimitByPath (#2075) が wrap した limitedReader は body 超過時に
-				// 413 HTTPError を返す。ContentLength 経路は middleware 段で 413 に
-				// なるが、chunked 超過はここで read error になるため echo.HTTPError を
+				// 413 のエラーを返す。ContentLength 経路は middleware 段で 413 に
+				// なるが、chunked 超過はここで read error になるため、そのエラーを
 				// 伝播して upstream fastify と同じ 413 を返す (その他 read error は 400)。
 				if he := apierr.HTTPStatusError(err); he != nil {
 					return he

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,7 +21,7 @@ type field struct{ key, value string }
 
 // newUploadReq builds a drive/files/create multipart request with a file and
 // the given fields, sent to target (which may carry a query string).
-func newUploadReq(t *testing.T, target string, fields []field) (echo.Context, *httptest.ResponseRecorder) {
+func newUploadReq(t *testing.T, target string, fields []field) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)

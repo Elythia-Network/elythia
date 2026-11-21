@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/stream"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -97,7 +97,7 @@ func TestSetupRoutes_AuthCacheInvalidationReachesOtherProcess(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Header.Set(echo.HeaderAuthorization, "Bearer "+userToken)
 		var seen *model.User
-		_ = srvB.auth.Authenticate()(func(c echo.Context) error {
+		_ = srvB.auth.Authenticate()(func(c *echo.Context) error {
 			seen = middleware.GetUser(c)
 			return nil
 		})(e.NewContext(req, httptest.NewRecorder()))

@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 	"github.com/elythia-network/elythia/internal/server/paramshadow"
@@ -77,7 +77,7 @@ func (s *Server) paramShadowMiddleware() echo.MiddlewareFunc {
 // paramValidationGroupMiddleware hands shadow to withParamShadow.
 func paramValidationGroupMiddleware(shadow echo.MiddlewareFunc) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Set(paramShadowContextKey, shadow)
 			return next(c)
 		}
@@ -93,7 +93,7 @@ func paramValidationGroupMiddleware(shadow echo.MiddlewareFunc) echo.MiddlewareF
 // 権限の検査より先に走るので、そこで検証すると、本家ならajvに届かない
 // リクエスト(401 / 403になるもの)を400で拒否してしまう。
 func withParamShadow(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		if shadow, ok := c.Get(paramShadowContextKey).(echo.MiddlewareFunc); ok {
 			return shadow(next)(c)
 		}

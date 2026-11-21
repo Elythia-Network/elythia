@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -11,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,9 +29,9 @@ import (
 // registered. Upstream's direct routes are not listed: they are read from
 // directRoutes of upstream_paramdefs.json (upstreamDirectRoutes).
 var undeclaredAPIRoutes = map[string]string{
-	// router.goのapi.Any("/*", apiCatchall)。登録の無い/api/*に200と空のobjectを
+	// router.goのapi.Group.Match(anyMethods, "/*", apiCatchall)。登録の無い/api/*に200と空のobjectを
 	// 返すcatchallで、endpointではない。
-	"*": "router.go: api.Any(\"/*\", apiCatchall)",
+	"*": "router.go: api.Group.Match(anyMethods, \"/*\", apiCatchall)",
 	// 本家の旧いpathの互換。本家のendpointの一覧にもdirectRoutesにも無い。
 	"signin": "routes_auth.go: api.POST(\"/signin\", signinHandler.Signin)",
 }
@@ -100,9 +102,21 @@ func builtAPIRoutes(t *testing.T) (routes map[string]map[string]bool, pluginName
 	return routes, pluginNamespaces
 }
 
+// namedRoute is a registered echo route with the name of the function that
+// handles it.
+type namedRoute struct {
+	Method, Path string
+	// Name is the handler's function name, as echo v4 named a route.
+	Name string
+}
+
 // builtEchoRoutes builds the server like builtAPIRoutes does and returns every
 // echo route of it, with the namespaces of the plugins it was built with.
-func builtEchoRoutes(t *testing.T) (routes []*echo.Route, pluginNamespaces []string) {
+//
+// echo の v5 の RouteInfo.Name は「メソッド:パス」で、v4 のように handler の関数名
+// ではない (#4239)。登録のときに OnAddRoute で関数名を記録し、最後に残ったルートに
+// 付ける。
+func builtEchoRoutes(t *testing.T) (routes []namedRoute, pluginNamespaces []string) {
 	t.Helper()
 	t.Setenv(config.EnvOnlyServer, "1")
 	t.Setenv(config.EnvOnlyQueue, "")
@@ -128,10 +142,24 @@ func builtEchoRoutes(t *testing.T) (routes []*echo.Route, pluginNamespaces []str
 	for _, def := range defs {
 		pluginNamespaces = append(pluginNamespaces, strings.TrimPrefix(pluginRoutePrefix, "/")+def.Name+"/")
 	}
-	srv, err := newServer(cfg, serverIntegrationDB, clients, defs, noopStorage)
+	names := map[string]string{}
+	recordNames := func(s *Server) {
+		prev := s.echo.OnAddRoute
+		s.echo.OnAddRoute = func(route echo.Route) error {
+			names[route.Method+" "+route.Path] = runtime.FuncForPC(reflect.ValueOf(route.Handler).Pointer()).Name()
+			if prev != nil {
+				return prev(route)
+			}
+			return nil
+		}
+	}
+	srv, err := newServer(cfg, serverIntegrationDB, clients, defs, noopStorage, recordNames)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, srv.Shutdown(context.Background())) })
-	return srv.echo.Routes(), pluginNamespaces
+	for _, r := range srv.echo.Router().Routes() {
+		routes = append(routes, namedRoute{Method: r.Method, Path: r.Path, Name: names[r.Method+" "+r.Path]})
+	}
+	return routes, pluginNamespaces
 }
 
 // TestAPIRoutesHaveParamDefs is the gate of #3890: every /api route of the

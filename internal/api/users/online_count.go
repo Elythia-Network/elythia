@@ -3,7 +3,7 @@ package users
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/server/middleware"
 )
@@ -17,7 +17,7 @@ import (
 // admin overview が「NaN 人」を表示していた (#421)。
 //
 // 数えられなければ 0 を返す。ここで 500 にすると overview 全体が開かなくなる。
-func (h *Handler) OnlineCount(c echo.Context) error {
+func (h *Handler) OnlineCount(c *echo.Context) error {
 	var count int64
 	if h.userRepo != nil {
 		var err error

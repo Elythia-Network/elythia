@@ -3,7 +3,7 @@ package middleware
 import (
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // frameGuardSkipPrefixes lists path prefixes that must stay embeddable.
@@ -42,7 +42,7 @@ var frameGuardSkipPrefixes = []string{
 // (frameGuardSkipPrefixes) を明示する方が、route が増えたときに守り漏れない。
 func FrameGuard() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			// **マッチしたルートで判定する。**
 			//
 			// 生のリクエストパスで前方一致を取ると、`/files/` (キー無し) の

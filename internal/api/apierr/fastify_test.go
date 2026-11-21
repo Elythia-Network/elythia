@@ -6,12 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func invokeFastify(t *testing.T, fn func(echo.Context) error) (int, map[string]any) {
+func invokeFastify(t *testing.T, fn func(*echo.Context) error) (int, map[string]any) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -24,7 +24,7 @@ func invokeFastify(t *testing.T, fn func(echo.Context) error) (int, map[string]a
 }
 
 func TestFastifyReply_400DuplicatedUsername(t *testing.T) {
-	code, body := invokeFastify(t, func(c echo.Context) error {
+	code, body := invokeFastify(t, func(c *echo.Context) error {
 		return FastifyReply(c, http.StatusBadRequest, "DUPLICATED_USERNAME")
 	})
 	assert.Equal(t, http.StatusBadRequest, code)
@@ -37,7 +37,7 @@ func TestFastifyReply_400DuplicatedUsername(t *testing.T) {
 }
 
 func TestFastifyReply_410Expired(t *testing.T) {
-	code, body := invokeFastify(t, func(c echo.Context) error {
+	code, body := invokeFastify(t, func(c *echo.Context) error {
 		return FastifyReply(c, http.StatusGone, "EXPIRED")
 	})
 	assert.Equal(t, http.StatusGone, code)

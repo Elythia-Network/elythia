@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,7 +29,7 @@ func TestAccessLogConfig_RedactsToken(t *testing.T) {
 
 	e := echo.New()
 	e.Use(echomw.RequestLoggerWithConfig(accessLogConfig(&buf)))
-	e.GET("/api/notes/timeline", func(c echo.Context) error {
+	e.GET("/api/notes/timeline", func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
 

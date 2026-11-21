@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // NewEchoHandler constructs a Handler for the public `/api/test` endpoint.
@@ -22,7 +22,7 @@ func NewEchoHandler() *Handler { return &Handler{} }
 // the parameter-validation behaviour of the API framework.
 //
 // POST /api/test
-func (h *Handler) Test(c echo.Context) error {
+func (h *Handler) Test(c *echo.Context) error {
 	// 本家の test.ts は`return ps`で、宣言に無い項目 (`i`を含む) もそのまま返す
 	// (#3369)。Bind が本文を読み切るので、先に読んで戻しておく。
 	body, err := io.ReadAll(c.Request().Body)

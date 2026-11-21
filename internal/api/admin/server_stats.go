@@ -11,14 +11,14 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // GetIndexStats handles POST /api/admin/get-index-stats.
 //
 // Returns per-index row counts from pg_stat_user_indexes so the admin UI can
 // spot hot or unused indexes.
-func (h *Handler) GetIndexStats(c echo.Context) error {
+func (h *Handler) GetIndexStats(c *echo.Context) error {
 	if h.adminDB == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -43,7 +43,7 @@ func (h *Handler) GetIndexStats(c echo.Context) error {
 //
 // Returns per-table size and row estimate via pg_stat_user_tables joined with
 // pg_relation_size for quick capacity planning.
-func (h *Handler) GetTableStats(c echo.Context) error {
+func (h *Handler) GetTableStats(c *echo.Context) error {
 	if h.adminDB == nil {
 		return c.JSON(http.StatusOK, map[string]any{})
 	}
@@ -79,7 +79,7 @@ func (h *Handler) GetTableStats(c echo.Context) error {
 }
 
 // GetUserIPs handles POST /api/admin/get-user-ips.
-func (h *Handler) GetUserIPs(c echo.Context) error {
+func (h *Handler) GetUserIPs(c *echo.Context) error {
 	if h.userIPRepo == nil {
 		noStoreIPLookup(c)
 		return c.JSON(http.StatusOK, []any{})
@@ -132,7 +132,7 @@ func (h *Handler) GetUserIPs(c echo.Context) error {
 // moderator には常に live な machine 情報を返す (gate は公開 server-info.ts 側
 // のみ)。psql / redis のバージョンは system info に含まれないため DB / Redis
 // から best-effort で埋める (upstream は SHOW server_version / redis INFO を引く)。
-func (h *Handler) ServerInfo(c echo.Context) error {
+func (h *Handler) ServerInfo(c *echo.Context) error {
 	stats := serverstats.Collect()
 	stats.Psql = h.postgresVersion()
 	stats.Redis = h.redisVersion(c.Request().Context())

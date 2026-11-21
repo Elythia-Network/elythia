@@ -29,7 +29,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ChartHook is invoked after a user/show request resolves so the
@@ -511,7 +511,7 @@ func (h *Handler) applyModerationNote(d *entity.UserDetailed, iAmModerator bool,
 // Show handles POST /api/users/show.
 // TS互換: userIds (配列) が渡された場合は UserDetailed の配列を返す (#1547)。
 // userId / username が渡された場合は単体 UserDetailed を返す。
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -732,7 +732,7 @@ type SearchRequest struct {
 }
 
 // Search handles POST /api/users/search.
-func (h *Handler) Search(c echo.Context) error {
+func (h *Handler) Search(c *echo.Context) error {
 	var req SearchRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -801,7 +801,7 @@ type NotesRequest struct {
 }
 
 // Notes handles POST /api/users/notes.
-func (h *Handler) Notes(c echo.Context) error {
+func (h *Handler) Notes(c *echo.Context) error {
 	var req NotesRequest
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -934,12 +934,12 @@ type FollowersRequest struct {
 }
 
 // Followers handles POST /api/users/followers.
-func (h *Handler) Followers(c echo.Context) error {
+func (h *Handler) Followers(c *echo.Context) error {
 	return h.listRelations(c, true)
 }
 
 // Following handles POST /api/users/following.
-func (h *Handler) Following(c echo.Context) error {
+func (h *Handler) Following(c *echo.Context) error {
 	return h.listRelations(c, false)
 }
 
@@ -948,7 +948,7 @@ func (h *Handler) Following(c echo.Context) error {
 //
 // 本家のこのエラーは httpStatusCode を持たないので 400 (#3369)。404 を明示して
 // いるのは users/show だけ。
-func jsonNoSuchUserForRelations(c echo.Context, followers bool) error {
+func jsonNoSuchUserForRelations(c *echo.Context, followers bool) error {
 	nsuID := "63e4aba4-4156-4e53-be25-c9559e42d71b" // users/following
 	if followers {
 		nsuID = "27fa5435-88ab-43de-9360-387de88727cd" // users/followers
@@ -956,7 +956,7 @@ func jsonNoSuchUserForRelations(c echo.Context, followers bool) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_USER", "No such user.", nsuID))
 }
 
-func (h *Handler) listRelations(c echo.Context, followers bool) error {
+func (h *Handler) listRelations(c *echo.Context, followers bool) error {
 	var req FollowersRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -1048,7 +1048,7 @@ func (h *Handler) listRelations(c echo.Context, followers bool) error {
 // (denied=false, nil) when the request should proceed. followers=true gates
 // the "followers" list (uses FollowersVisibility), followers=false gates the
 // "following" list (uses FollowingVisibility).
-func (h *Handler) gateRelationVisibility(c echo.Context, targetID string, viewer *model.User, followers bool) (bool, error) {
+func (h *Handler) gateRelationVisibility(c *echo.Context, targetID string, viewer *model.User, followers bool) (bool, error) {
 	// upstream forbidden error UUID は endpoint ごとに別 (drop-in 互換維持)。
 	forbiddenID := "f6cdb0df-c19f-ec5c-7dbb-0ba84a1f92ba" // users/following
 	if followers {

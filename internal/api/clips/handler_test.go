@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,7 +57,7 @@ func newHandlerWithFollowing(t *testing.T) (
 	return h, repo, noteRepo, notes, followingRepo
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -66,7 +66,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 	return e.NewContext(req, rec), rec
 }
 
-func setUser(c echo.Context, userID string) {
+func setUser(c *echo.Context, userID string) {
 	c.Set(string(middleware.UserContextKey), &model.User{ID: userID})
 }
 

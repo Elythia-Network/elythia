@@ -23,7 +23,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -147,7 +147,7 @@ func TestUser_ResponseValidationReusesLoadedActor(t *testing.T) {
 	assert.Equal(t, 1, counted.findByIDCalls["u1"], "the response guard should reuse the User already loaded by the handler")
 }
 
-func newReq(t *testing.T, paramName, paramValue string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, paramName, paramValue string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -156,8 +156,7 @@ func newReq(t *testing.T, paramName, paramValue string) (echo.Context, *httptest
 	req.Header.Set(echo.HeaderAccept, "application/activity+json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames(paramName)
-	c.SetParamValues(paramValue)
+	c.SetPathValues(echo.PathValues{{Name: paramName, Value: paramValue}})
 	return c, rec
 }
 
@@ -455,15 +454,14 @@ func TestUser_WithEd25519Repo_MalformedPEM_FailsSoft(t *testing.T) {
 
 // newBrowserReq builds a non-AP request (no application/activity+json in
 // Accept). Used to exercise the SPA / redirect fallback branch.
-func newBrowserReq(t *testing.T, paramName, paramValue string) (echo.Context, *httptest.ResponseRecorder) {
+func newBrowserReq(t *testing.T, paramName, paramValue string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(echo.HeaderAccept, "text/html,application/xhtml+xml")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames(paramName)
-	c.SetParamValues(paramValue)
+	c.SetPathValues(echo.PathValues{{Name: paramName, Value: paramValue}})
 	return c, rec
 }
 
@@ -638,7 +636,7 @@ func TestNote_LocalOnlyIsNotServed(t *testing.T) {
 
 // --- API endpoint tests ---
 
-func postJSON(handler func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func postJSON(handler func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -1181,7 +1179,7 @@ func TestAPIShow_RemoteRequestFailed(t *testing.T) {
 
 // --- UserByAcct + Accept header negotiation ---
 
-func newAcctReq(t *testing.T, accept, acct string) (echo.Context, *httptest.ResponseRecorder) {
+func newAcctReq(t *testing.T, accept, acct string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1190,8 +1188,7 @@ func newAcctReq(t *testing.T, accept, acct string) (echo.Context, *httptest.Resp
 	}
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames("acct")
-	c.SetParamValues(acct)
+	c.SetPathValues(echo.PathValues{{Name: "acct", Value: acct}})
 	return c, rec
 }
 
@@ -1218,7 +1215,7 @@ func TestUserByAcct_HTMLFallsThrough(t *testing.T) {
 func TestUserByAcct_HTMLUsesFallback(t *testing.T) {
 	h, _, _, _ := newHandler(t)
 	called := false
-	h.SetNonAPFallback(func(c echo.Context) error {
+	h.SetNonAPFallback(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "FRONTEND")
 	})
@@ -1236,7 +1233,7 @@ func TestUserByAcct_HTMLUsesFallback(t *testing.T) {
 func TestUser_HTMLRedirectsToAcct(t *testing.T) {
 	h, userRepo, _, _ := newHandler(t)
 	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
-	h.SetNonAPFallback(func(c echo.Context) error {
+	h.SetNonAPFallback(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "FRONTEND")
 	})
 	e := echo.New()
@@ -1244,8 +1241,7 @@ func TestUser_HTMLRedirectsToAcct(t *testing.T) {
 	req.Header.Set(echo.HeaderAccept, "text/html")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames("id")
-	c.SetParamValues("u1")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "u1"}})
 	require.NoError(t, h.User(c))
 	assert.Equal(t, http.StatusFound, rec.Code, "browser must be redirected, not served SPA HTML")
 	assert.Equal(t, "/@alice", rec.Header().Get("Location"))
@@ -1254,7 +1250,7 @@ func TestUser_HTMLRedirectsToAcct(t *testing.T) {
 func TestNote_HTMLUsesFallback(t *testing.T) {
 	h, _, noteRepo, _ := newHandler(t)
 	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Visibility: model.NoteVisibilityPublic}
-	h.SetNonAPFallback(func(c echo.Context) error {
+	h.SetNonAPFallback(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "FRONTEND")
 	})
 	e := echo.New()
@@ -1262,8 +1258,7 @@ func TestNote_HTMLUsesFallback(t *testing.T) {
 	req.Header.Set(echo.HeaderAccept, "text/html")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames("id")
-	c.SetParamValues("n1")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "n1"}})
 	require.NoError(t, h.Note(c))
 	assert.Equal(t, "FRONTEND", rec.Body.String())
 }
@@ -1583,15 +1578,14 @@ func newHandlerWithFollowing(t *testing.T) (*Handler, *testutil.MockUserReposito
 }
 
 // newReqQuery is newReq with a raw query string (page/cursor params)。
-func newReqQuery(t *testing.T, paramName, paramValue, rawQuery string) (echo.Context, *httptest.ResponseRecorder) {
+func newReqQuery(t *testing.T, paramName, paramValue, rawQuery string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/?"+rawQuery, nil)
 	req.Header.Set(echo.HeaderAccept, "application/activity+json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames(paramName)
-	c.SetParamValues(paramValue)
+	c.SetPathValues(echo.PathValues{{Name: paramName, Value: paramValue}})
 	return c, rec
 }
 
@@ -2379,7 +2373,7 @@ func TestOutbox_RepoUnwired_NotFound(t *testing.T) {
 func TestAPServe_FederationDisabled_403(t *testing.T) {
 	cases := []struct {
 		name string
-		call func(*Handler, echo.Context) error
+		call func(*Handler, *echo.Context) error
 	}{
 		{"User", (*Handler).User},
 		{"UserByAcct", (*Handler).UserByAcct},
@@ -2610,12 +2604,12 @@ func TestFollowCollection_UnstorableCursor_400(t *testing.T) {
 			for _, ep := range []struct {
 				name string
 				vis  func(*model.UserProfile)
-				call func(*Handler, echo.Context) error
+				call func(*Handler, *echo.Context) error
 			}{
 				{"followers", func(p *model.UserProfile) { p.FollowersVisibility = model.FollowingVisibilityPublic },
-					func(h *Handler, c echo.Context) error { return h.Followers(c) }},
+					func(h *Handler, c *echo.Context) error { return h.Followers(c) }},
 				{"following", func(p *model.UserProfile) { p.FollowingVisibility = model.FollowingVisibilityPublic },
-					func(h *Handler, c echo.Context) error { return h.Following(c) }},
+					func(h *Handler, c *echo.Context) error { return h.Following(c) }},
 			} {
 				t.Run(ep.name, func(t *testing.T) {
 					h, userRepo, _ := newHandlerWithFollowing(t)

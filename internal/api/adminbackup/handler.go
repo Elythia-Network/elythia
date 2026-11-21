@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/strongauth"
 	"github.com/elythia-network/elythia/internal/misc/headreq"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Error IDs of the backup operations. Elythia-only.
@@ -46,7 +46,7 @@ func NewHandler(svc *backupadmin.Service, verifier *strongauth.Verifier, modlog 
 }
 
 // log records a moderation log. 操作が成立してから呼ぶ。
-func (h *Handler) log(c echo.Context, t moderationlog.LogType, info map[string]any) {
+func (h *Handler) log(c *echo.Context, t moderationlog.LogType, info map[string]any) {
 	if h.modlog == nil {
 		return
 	}
@@ -58,7 +58,7 @@ func (h *Handler) log(c echo.Context, t moderationlog.LogType, info map[string]a
 }
 
 // serviceError writes the response for an error of backupadmin.
-func serviceError(c echo.Context, op string, err error) error {
+func serviceError(c *echo.Context, op string, err error) error {
 	switch {
 	case errors.Is(err, backupadmin.ErrNotConfigured):
 		return c.JSON(http.StatusBadRequest, apierr.Error("BACKUP_NOT_CONFIGURED",
@@ -92,7 +92,7 @@ type idRequest struct {
 	ID string `json:"id"`
 }
 
-func bindID(c echo.Context) (string, bool) {
+func bindID(c *echo.Context) (string, bool) {
 	var req idRequest
 	if err := c.Bind(&req); err != nil || req.ID == "" {
 		return "", false
@@ -101,9 +101,9 @@ func bindID(c echo.Context) (string, bool) {
 }
 
 // List handles POST /api/admin/backup/list, after the re-authentication.
-func (h *Handler) List(c echo.Context) error { return h.guarded(c, h.list) }
+func (h *Handler) List(c *echo.Context) error { return h.guarded(c, h.list) }
 
-func (h *Handler) list(c echo.Context) error {
+func (h *Handler) list(c *echo.Context) error {
 	ov, err := h.svc.List(c.Request().Context())
 	if err != nil {
 		return serviceError(c, "list", err)
@@ -118,9 +118,9 @@ func (h *Handler) list(c echo.Context) error {
 }
 
 // Take handles POST /api/admin/backup/take, after the re-authentication.
-func (h *Handler) Take(c echo.Context) error { return h.guarded(c, h.take) }
+func (h *Handler) Take(c *echo.Context) error { return h.guarded(c, h.take) }
 
-func (h *Handler) take(c echo.Context) error {
+func (h *Handler) take(c *echo.Context) error {
 	job, err := h.svc.Take(c.Request().Context(), c.RealIP())
 	if err != nil {
 		return serviceError(c, "take", err)
@@ -130,9 +130,9 @@ func (h *Handler) take(c echo.Context) error {
 }
 
 // Verify handles POST /api/admin/backup/verify, after the re-authentication.
-func (h *Handler) Verify(c echo.Context) error { return h.guarded(c, h.verify) }
+func (h *Handler) Verify(c *echo.Context) error { return h.guarded(c, h.verify) }
 
-func (h *Handler) verify(c echo.Context) error {
+func (h *Handler) verify(c *echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -146,9 +146,9 @@ func (h *Handler) verify(c echo.Context) error {
 }
 
 // Delete handles POST /api/admin/backup/delete, after the re-authentication.
-func (h *Handler) Delete(c echo.Context) error { return h.guarded(c, h.delete) }
+func (h *Handler) Delete(c *echo.Context) error { return h.guarded(c, h.delete) }
 
-func (h *Handler) delete(c echo.Context) error {
+func (h *Handler) delete(c *echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -167,9 +167,9 @@ func (h *Handler) delete(c echo.Context) error {
 }
 
 // Download handles POST /api/admin/backup/download, after the re-authentication.
-func (h *Handler) Download(c echo.Context) error { return h.guarded(c, h.download) }
+func (h *Handler) Download(c *echo.Context) error { return h.guarded(c, h.download) }
 
-func (h *Handler) download(c echo.Context) error {
+func (h *Handler) download(c *echo.Context) error {
 	id, ok := bindID(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -193,7 +193,7 @@ func (h *Handler) download(c echo.Context) error {
 // 再認証の前段なので Guard は掛けない。代わりに、再認証以外の条件 (管理者・
 // native token・2FA の登録) をここで見る。challenge を出すだけで、何も見せず
 // 何も変えない。
-func (h *Handler) ReauthChallenge(c echo.Context) error {
+func (h *Handler) ReauthChallenge(c *echo.Context) error {
 	assertion, err := h.verifier.BeginPasskey(c.Request().Context(), subject(c))
 	if err != nil {
 		return refusal(c, err)
@@ -203,7 +203,7 @@ func (h *Handler) ReauthChallenge(c echo.Context) error {
 
 // ServeDownload handles GET /backup-download?token=..., the server-side
 // download of a directory storage. The token comes from Download.
-func (h *Handler) ServeDownload(c echo.Context) error {
+func (h *Handler) ServeDownload(c *echo.Context) error {
 	res := c.Response()
 	res.Header().Set("Cache-Control", "no-store")
 	res.Header().Set("X-Content-Type-Options", "nosniff")

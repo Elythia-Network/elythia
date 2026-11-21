@@ -26,9 +26,9 @@ func writeRouter(t *testing.T, body string) string {
 
 func TestScanInlineRoutes(t *testing.T) {
 	path := writeRouter(t, `
-	api.POST("/inline", func(c echo.Context) error { return nil })
+	api.POST("/inline", func(c *echo.Context) error { return nil })
 	api.POST("/method", h.Method)
-	bound := func(c echo.Context) error { return nil }
+	bound := func(c *echo.Context) error { return nil }
 	api.GET("/bound", bound)
 `)
 	got := scanInlineRoutes(t, path)
@@ -44,11 +44,11 @@ func TestCountInlineHandlers(t *testing.T) {
 	t.Run("counts closures under the api group tree", func(t *testing.T) {
 		path := writeRouter(t, `
 	api := s.echo.Group("/api")
-	api.POST("/direct", func(c echo.Context) error { return nil })
+	api.POST("/direct", func(c *echo.Context) error { return nil })
 	promoGroup := api.Group("/promo")
-	promoGroup.POST("/read", func(c echo.Context) error { return nil })
+	promoGroup.POST("/read", func(c *echo.Context) error { return nil })
 	nested := promoGroup.Group("/deep")
-	nested.PUT("/x", func(c echo.Context) error { return nil })
+	nested.PUT("/x", func(c *echo.Context) error { return nil })
 `)
 		// **group 経由を数えられることが要点。** `scanInlineRoutes` は endpoint
 		// パスを復元するために `api` ident に限るので、ここが同じ制限だと
@@ -61,10 +61,10 @@ func TestCountInlineHandlers(t *testing.T) {
 		// `internal/api` に移すものでもない。
 		path := writeRouter(t, `
 	api := s.echo.Group("/api")
-	s.echo.GET("/healthz", func(c echo.Context) error { return nil })
+	s.echo.GET("/healthz", func(c *echo.Context) error { return nil })
 	pprofGroup := s.echo.Group("/debug/pprof")
-	pprofGroup.GET("/:name", func(c echo.Context) error { return nil })
-	api.POST("/only-this", func(c echo.Context) error { return nil })
+	pprofGroup.GET("/:name", func(c *echo.Context) error { return nil })
+	api.POST("/only-this", func(c *echo.Context) error { return nil })
 `)
 		assert.Equal(t, []string{"/only-this"}, countInlineHandlers(t, path))
 	})
@@ -84,8 +84,8 @@ func TestCountInlineHandlers(t *testing.T) {
 		// 書くだけで guard を素通りする。
 		path := writeRouter(t, `
 	api := s.echo.Group("/api")
-	api.Group("/chain").POST("/read", func(c echo.Context) error { return nil })
-	api.Group("/a").Group("/b").PUT("/deep", func(c echo.Context) error { return nil })
+	api.Group("/chain").POST("/read", func(c *echo.Context) error { return nil })
+	api.Group("/a").Group("/b").PUT("/deep", func(c *echo.Context) error { return nil })
 `)
 		assert.Equal(t, []string{"/deep", "/read"}, countInlineHandlers(t, path))
 	})
@@ -95,10 +95,10 @@ func TestCountInlineHandlers(t *testing.T) {
 		// `api.Match` でも書ける。パス引数の位置が第 2 になる点に注意。
 		path := writeRouter(t, `
 	api := s.echo.Group("/api")
-	api.Match([]string{http.MethodGet, http.MethodPost}, "/matched", func(c echo.Context) error { return nil })
+	api.Match([]string{http.MethodGet, http.MethodPost}, "/matched", func(c *echo.Context) error { return nil })
 	api.Match([]string{http.MethodGet}, "/resolved", h.Method)
-	api.Any("/anything", func(c echo.Context) error { return nil })
-	api.Any("/*", func(c echo.Context) error { return nil })
+	api.Any("/anything", func(c *echo.Context) error { return nil })
+	api.Any("/*", func(c *echo.Context) error { return nil })
 `)
 		// catchall は endpoint ではないので数えない。
 		assert.Equal(t, []string{"/anything", "/matched"}, countInlineHandlers(t, path))
@@ -120,7 +120,7 @@ func TestCountInlineHandlers(t *testing.T) {
 	t.Run("follows ident-bound closures", func(t *testing.T) {
 		path := writeRouter(t, `
 	api := s.echo.Group("/api")
-	onlineUsersHandler := func(c echo.Context) error { return nil }
+	onlineUsersHandler := func(c *echo.Context) error { return nil }
 	api.GET("/count", onlineUsersHandler)
 	api.POST("/count", onlineUsersHandler)
 `)

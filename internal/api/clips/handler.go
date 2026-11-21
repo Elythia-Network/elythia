@@ -21,7 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles clip-related API endpoints.
@@ -220,7 +220,7 @@ func validateClipParams(name *string, description **string) bool {
 }
 
 // Create handles POST /api/clips/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	if err := c.Bind(&req); err != nil || req.Name == "" {
@@ -250,7 +250,7 @@ type ShowRequest struct {
 }
 
 // Show handles POST /api/clips/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" {
@@ -282,7 +282,7 @@ type UpdateRequest struct {
 }
 
 // Update handles POST /api/clips/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" {
@@ -332,7 +332,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/clips/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req DeleteRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" {
@@ -361,7 +361,7 @@ type ListRequest struct {
 //
 // frontend Paginator は cursor mode (untilId / sinceId) で叩いてくる。
 // offset は本家の paramDef に無いので、本家と同じく読まない (#3742)。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ListRequest
 	if err := c.Bind(&req); err != nil {
@@ -394,7 +394,7 @@ type AddNoteRequest struct {
 }
 
 // AddNote handles POST /api/clips/add-note.
-func (h *Handler) AddNote(c echo.Context) error {
+func (h *Handler) AddNote(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req AddNoteRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" || req.NoteID == "" {
@@ -439,7 +439,7 @@ type RemoveNoteRequest struct {
 }
 
 // RemoveNote handles POST /api/clips/remove-note.
-func (h *Handler) RemoveNote(c echo.Context) error {
+func (h *Handler) RemoveNote(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req RemoveNoteRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" || req.NoteID == "" {
@@ -475,7 +475,7 @@ type NotesRequest struct {
 const clipNotesSearchMaxLength = 100
 
 // Notes handles POST /api/clips/notes.
-func (h *Handler) Notes(c echo.Context) error {
+func (h *Handler) Notes(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req NotesRequest
 	if err := c.Bind(&req); err != nil || req.ClipID == "" {

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,9 +35,7 @@ func TestUDSLifecycle_EndToEnd(t *testing.T) {
 	sockPath := filepath.Join(dir, "mkgo-e2e.sock")
 
 	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-	e.GET("/ping", func(c echo.Context) error {
+	e.GET("/ping", func(c *echo.Context) error {
 		return c.String(http.StatusOK, "pong")
 	})
 
@@ -50,9 +48,12 @@ func TestUDSLifecycle_EndToEnd(t *testing.T) {
 	assert.NotZero(t, fi.Mode()&os.ModeSocket, "path should be a socket")
 	assert.Equal(t, os.FileMode(0o666), fi.Mode().Perm())
 
+	// echo の v5 は自分の http.Server を持たないので、本番の Supervisor と同じく
+	// 自前の http.Server で listen する (#4239)。
+	srv := &http.Server{Handler: e, ReadHeaderTimeout: 5 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- e.Server.Serve(ln)
+		serveErr <- srv.Serve(ln)
 	}()
 
 	// UDS 経由の http.Client を作り /ping に GET する。
@@ -85,7 +86,7 @@ func TestUDSLifecycle_EndToEnd(t *testing.T) {
 	// Graceful shutdown → Serve goroutine は http.ErrServerClosed を返して終了する。
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	require.NoError(t, e.Server.Shutdown(shutCtx))
+	require.NoError(t, srv.Shutdown(shutCtx))
 
 	select {
 	case err := <-serveErr:

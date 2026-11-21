@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/config"
@@ -121,13 +121,13 @@ func newSSRMetaHandler(
 }
 
 // render serves the shell with the given per-page overrides.
-func (h *ssrMetaHandler) render(c echo.Context, ov shellOverrides) error {
+func (h *ssrMetaHandler) render(c *echo.Context, ov shellOverrides) error {
 	return renderFrontendShell(c, h.cfg, h.metaRepo, h.proxyResolver, h.chunkedUpload, h.setup, h.adRepo, h.noteDelivery.Names, h.clientEntry, h.loader, ov)
 }
 
 // renderPlain serves the shell without any page-specific override. 対象が
 // 見つからないときに使う (upstream も 404 にせず素の shell を返す)。
-func (h *ssrMetaHandler) renderPlain(c echo.Context) error {
+func (h *ssrMetaHandler) renderPlain(c *echo.Context) error {
 	return h.render(c, shellOverrides{})
 }
 
@@ -143,7 +143,7 @@ func (h *ssrMetaHandler) renderPlain(c echo.Context) error {
 //
 // ローカル側は対象外 — 未ログインに見せない構成 (`none`) では upstream 同様
 // robots.txt の `Disallow: /@` / `/notes` が受け持つ。
-func (h *ssrMetaHandler) renderBareShell(c echo.Context, remote bool) error {
+func (h *ssrMetaHandler) renderBareShell(c *echo.Context, remote bool) error {
 	return h.render(c, shellOverrides{NoIndex: remote})
 }
 
@@ -628,7 +628,7 @@ func (h *ssrMetaHandler) acctHost(acct string) *string {
 }
 
 // UserPage serves `/@:acct` and its sub paths (`/@:acct/notes` 等)。
-func (h *ssrMetaHandler) UserPage(c echo.Context) error {
+func (h *ssrMetaHandler) UserPage(c *echo.Context) error {
 	u := h.lookupUserByAcct(c.Param("acct"))
 	if u == nil {
 		return h.renderBareShell(c, remoteHost(h.acctHost(c.Param("acct"))))
@@ -672,7 +672,7 @@ func (h *ssrMetaHandler) UserPage(c echo.Context) error {
 }
 
 // UserPagePage serves `/@:acct/pages/:page`.
-func (h *ssrMetaHandler) UserPagePage(c echo.Context) error {
+func (h *ssrMetaHandler) UserPagePage(c *echo.Context) error {
 	u := h.lookupUserByAcct(c.Param("acct"))
 	if u == nil {
 		return h.renderBareShell(c, remoteHost(h.acctHost(c.Param("acct"))))
@@ -714,7 +714,7 @@ func (h *ssrMetaHandler) UserPagePage(c echo.Context) error {
 // NotePage serves `/notes/:id` for HTML clients. AP クライアント (Accept:
 // application/activity+json) は先に AP handler が処理するので、ここには
 // 来ない。
-func (h *ssrMetaHandler) NotePage(c echo.Context) error {
+func (h *ssrMetaHandler) NotePage(c *echo.Context) error {
 	if h.noteRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -811,7 +811,7 @@ func (h *ssrMetaHandler) noteCreatedAtMs(n *model.Note) int64 {
 }
 
 // ClipPage serves `/clips/:clip`.
-func (h *ssrMetaHandler) ClipPage(c echo.Context) error {
+func (h *ssrMetaHandler) ClipPage(c *echo.Context) error {
 	if h.clipRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -839,7 +839,7 @@ func (h *ssrMetaHandler) ClipPage(c echo.Context) error {
 }
 
 // FlashPage serves `/play/:id`.
-func (h *ssrMetaHandler) FlashPage(c echo.Context) error {
+func (h *ssrMetaHandler) FlashPage(c *echo.Context) error {
 	if h.flashRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -872,7 +872,7 @@ func (h *ssrMetaHandler) FlashPage(c echo.Context) error {
 }
 
 // GalleryPage serves `/gallery/:post`.
-func (h *ssrMetaHandler) GalleryPage(c echo.Context) error {
+func (h *ssrMetaHandler) GalleryPage(c *echo.Context) error {
 	if h.galleryRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -923,12 +923,12 @@ func (h *ssrMetaHandler) GalleryPage(c echo.Context) error {
 //     タグの組み合わせは無限に増える
 //   - `/instance-info/:host` — **upstream は SSR していない** (#3030)。自鯖の
 //     情報ではないものを検索結果に出す意味が無く、連合先の数だけ URL が増える
-func (h *ssrMetaHandler) NoIndexPage(c echo.Context) error {
+func (h *ssrMetaHandler) NoIndexPage(c *echo.Context) error {
 	return h.render(c, shellOverrides{NoIndex: true})
 }
 
 // ChannelPage serves `/channels/:channel` (upstream views/channel.tsx)。
-func (h *ssrMetaHandler) ChannelPage(c echo.Context) error {
+func (h *ssrMetaHandler) ChannelPage(c *echo.Context) error {
 	if h.channelRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -955,7 +955,7 @@ func (h *ssrMetaHandler) ChannelPage(c echo.Context) error {
 }
 
 // ReversiGamePage serves `/reversi/g/:game` (upstream views/reversi-game.tsx)。
-func (h *ssrMetaHandler) ReversiGamePage(c echo.Context) error {
+func (h *ssrMetaHandler) ReversiGamePage(c *echo.Context) error {
 	if h.reversiRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -996,7 +996,7 @@ func (h *ssrMetaHandler) reversiTitle(game *model.ReversiGame) string {
 }
 
 // AnnouncementPage serves `/announcements/:id` (upstream views/announcement.tsx)。
-func (h *ssrMetaHandler) AnnouncementPage(c echo.Context) error {
+func (h *ssrMetaHandler) AnnouncementPage(c *echo.Context) error {
 	if h.announceRepo == nil {
 		return h.renderPlain(c)
 	}
@@ -1053,7 +1053,7 @@ func (h *ssrMetaHandler) userByID(id string) *model.User {
 // prefersHTML reports whether the client asked for HTML rather than
 // ActivityPub JSON. `/@:acct` と `/notes/:id` は AP actor / object の URL でも
 // あるので、Accept を見て振り分ける。
-func prefersHTML(c echo.Context) bool {
+func prefersHTML(c *echo.Context) bool {
 	accept := c.Request().Header.Get(echo.HeaderAccept)
 	if accept == "" {
 		return true

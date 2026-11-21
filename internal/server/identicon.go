@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Misskey TSのgen-identicon.tsと同じ仕様で生成する
@@ -70,7 +70,7 @@ func seedRand(seed string) *rand.Rand {
 // 404 にならず、空画像で済むのでフロントの onerror フローが乱れない)。
 // metaRepo が nil の場合は常に identicon を生成する (テストや初期セットアップ用)。
 func identiconHandler(metaRepo repository.MetaRepository) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		seed := c.Param("x")
 		if seed == "" {
 			seed = "default"
@@ -109,7 +109,7 @@ var transparentPixel = func() []byte {
 	return buf.Bytes()
 }()
 
-func serveTransparentPixel(c echo.Context) error {
+func serveTransparentPixel(c *echo.Context) error {
 	c.Response().Header().Set("Content-Type", "image/png")
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	c.Response().Header().Set("Content-Security-Policy", assetCSP)

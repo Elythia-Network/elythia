@@ -5,13 +5,13 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // UpdateRemoteUser handles POST /api/federation/update-remote-user.
 //
 // 対象のリモートユーザーを ActivityPub actor fetch で強制更新する。管理者用。
-func (h *Handler) UpdateRemoteUser(c echo.Context) error {
+func (h *Handler) UpdateRemoteUser(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

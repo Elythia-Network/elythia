@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SetIPSearchRepo wires the IP → accounts lookup (#3104)。
@@ -72,7 +72,7 @@ const (
 // **同じ IP を使ったことは同一人物であることを意味しない。** 家庭・会社・学校・
 // 共有 Wi-Fi・携帯回線の CGNAT・VPN で IP は共有される。返すのは調査の候補と
 // その根拠で、自動判定や自動処分には使わない (#3066)。
-func (h *Handler) IPAccounts(c echo.Context) error {
+func (h *Handler) IPAccounts(c *echo.Context) error {
 	if h.ipSearchRepo == nil || h.metaRepo == nil || h.userRepo == nil {
 		// **空の結果を返さない。** 「その IP を使ったアカウントは無い」という
 		// 誤った事実になる (#2792)。
@@ -303,7 +303,7 @@ func formatIPTimePtr(t *time.Time) *string {
 // キャッシュを置く構成や、将来 GET 版を足したときに黙って漏れる。
 // `private` ではなく `no-store` にするのは、ブラウザのディスクキャッシュにも
 // 残したくないため。
-func noStoreIPLookup(c echo.Context) {
+func noStoreIPLookup(c *echo.Context) {
 	c.Response().Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	c.Response().Header().Set("Pragma", "no-cache")
 }

@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // FetchSignerAuthenticator identifies the remote user who signed a GET for an
@@ -37,7 +37,7 @@ func (h *Handler) SetFetchSigner(a FetchSignerAuthenticator, delivery DeliveryGa
 //
 // Public and home notes are served to anyone, signed or not. Otherwise the
 // request must be signed by a remote user who may see the note (noteForSigner).
-func (h *Handler) showNoteForFetch(c echo.Context, noteID string) *model.Note {
+func (h *Handler) showNoteForFetch(c *echo.Context, noteID string) *model.Note {
 	n, err := h.queryService.Show(nil, noteID)
 	if err == nil {
 		return n
@@ -60,7 +60,7 @@ func (h *Handler) showNoteForFetch(c echo.Context, noteID string) *model.Note {
 //
 // Any other outcome is nil, so a caller answers 404 whether the note is missing
 // or hidden.
-func (h *Handler) noteForSigner(c echo.Context, noteID string) *model.Note {
+func (h *Handler) noteForSigner(c *echo.Context, noteID string) *model.Note {
 	req := c.Request()
 	if h.fetchSigner == nil || req.Header.Get("Signature") == "" {
 		return nil

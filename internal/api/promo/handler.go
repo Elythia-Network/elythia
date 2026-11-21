@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/misc/id"
@@ -30,7 +30,7 @@ func NewHandler(noteRepo repository.NoteRepository, promoRepo repository.PromoRe
 
 // Read marks a promoted note as read for the authenticated user.
 // POST /api/promo/read
-func (h *Handler) Read(c echo.Context) error {
+func (h *Handler) Read(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if user == nil {
 		return c.JSON(http.StatusUnauthorized, apierr.CredentialRequired())

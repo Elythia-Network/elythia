@@ -24,7 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -35,7 +35,7 @@ import (
 const verifierRetryAfterSeconds = "360"
 
 // ChangePassword handles POST /api/i/change-password.
-func (h *Handler) ChangePassword(c echo.Context) error {
+func (h *Handler) ChangePassword(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		CurrentPassword *string `json:"currentPassword"`
@@ -134,7 +134,7 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 }
 
 // DeleteAccount handles POST /api/i/delete-account.
-func (h *Handler) DeleteAccount(c echo.Context) error {
+func (h *Handler) DeleteAccount(c *echo.Context) error {
 	u := middleware.GetUser(c)
 
 	checked, ok := h.roleProvider.(checkedRoleProvider)
@@ -348,7 +348,7 @@ func (h *Handler) isProtectedSelfDelete(u *model.User) (bool, error) {
 // hideNote で本文・添付・CW が空になり `isHidden: true` で返る。行は落とさない
 // (upstream も favorite の一覧自体は返す)。#1488 はここを「upstream も content を
 // 返す」前提で現状維持としていたが、その前提は誤りだった。
-func (h *Handler) Favorites(c echo.Context) error {
+func (h *Handler) Favorites(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
@@ -415,7 +415,7 @@ func (h *Handler) Favorites(c echo.Context) error {
 }
 
 // RegenerateToken handles POST /api/i/regenerate-token.
-func (h *Handler) RegenerateToken(c echo.Context) error {
+func (h *Handler) RegenerateToken(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Password *string `json:"password"`
@@ -508,7 +508,7 @@ func (h *Handler) RegenerateToken(c echo.Context) error {
 
 // ClaimAchievement handles POST /api/i/claim-achievement.
 // ユーザーの実績を記録する。既に獲得済みの場合は何もしない。
-func (h *Handler) ClaimAchievement(c echo.Context) error {
+func (h *Handler) ClaimAchievement(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Name json.RawMessage `json:"name"`

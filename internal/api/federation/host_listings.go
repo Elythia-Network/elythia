@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // hostPageRequest is the common request body for the three per-host listing
@@ -36,7 +36,7 @@ type hostPageRequest struct {
 //
 // 指定リモートホストに属するユーザーが、このインスタンスのローカルユーザーを
 // フォローしている関係の一覧を返す。Misskey 本家互換。
-func (h *Handler) Followers(c echo.Context) error {
+func (h *Handler) Followers(c *echo.Context) error {
 	req, ok := parseHostPage(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -56,7 +56,7 @@ func (h *Handler) Followers(c echo.Context) error {
 //
 // このインスタンスのローカルユーザーが、指定リモートホストに属するユーザーを
 // フォローしている関係の一覧を返す。
-func (h *Handler) Following(c echo.Context) error {
+func (h *Handler) Following(c *echo.Context) error {
 	req, ok := parseHostPage(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -75,7 +75,7 @@ func (h *Handler) Following(c echo.Context) error {
 // Users handles POST /api/federation/users.
 //
 // 指定リモートホストに属するユーザーの一覧を返す。
-func (h *Handler) Users(c echo.Context) error {
+func (h *Handler) Users(c *echo.Context) error {
 	req, ok := parseHostPage(c)
 	if !ok {
 		return apierr.JSONInvalidParam(c)
@@ -116,7 +116,7 @@ func (h *Handler) Users(c echo.Context) error {
 // 関係・カウントのゲート (匿名含む、#1957-a / #1988)・モデレーター向けの項目・
 // ピン留め・移行先・instance・絵文字は共有の packer に任せる (#3330)。本家の
 // pack は isMe なら MeDetailed を返すので、閲覧者自身は meself.Packer.Pack で昇格する。
-func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[string]*model.UserProfile) []any {
+func (h *Handler) packUsers(c *echo.Context, users []*model.User, profiles map[string]*model.UserProfile) []any {
 	out := make([]any, len(users))
 	if len(users) == 0 {
 		return out
@@ -144,7 +144,7 @@ func (h *Handler) packUsers(c echo.Context, users []*model.User, profiles map[st
 // moderator.
 //
 // moderator checker が未配線なら moderator 扱いしない (絞る側に倒す)。
-func (h *Handler) followListViewer(c echo.Context) model.FollowListViewer {
+func (h *Handler) followListViewer(c *echo.Context) model.FollowListViewer {
 	viewerID := viewerIDOf(c)
 	return model.FollowListViewer{
 		UserID:    viewerID,
@@ -154,7 +154,7 @@ func (h *Handler) followListViewer(c echo.Context) model.FollowListViewer {
 
 // viewerIDOf returns the authenticated viewer's ID, or "" for anonymous callers.
 // federation/* は requireCredential:false なので nil viewer を許容する。
-func viewerIDOf(c echo.Context) string {
+func viewerIDOf(c *echo.Context) string {
 	if u := middleware.GetUser(c); u != nil {
 		return u.ID
 	}
@@ -198,7 +198,7 @@ func (h *Handler) userProfiles(users []*model.User) map[string]*model.UserProfil
 // parseHostPage parses + validates the common per-host page request. Returns
 // (req, true) on success; on failure the caller must write the 400 response
 // itself to avoid double-writing the body.
-func parseHostPage(c echo.Context) (hostPageRequest, bool) {
+func parseHostPage(c *echo.Context) (hostPageRequest, bool) {
 	var req hostPageRequest
 	// 空の host は本家と同じく受け、0 件を返す (#3770)。欠けだけを拒否する。
 	if err := c.Bind(&req); err != nil || req.Host == nil {
@@ -230,7 +230,7 @@ func parseHostPage(c echo.Context) (hostPageRequest, bool) {
 // User+UserProfile は ID をまとめて 1 度引いて N+1 を避け、packMany と同じく
 // まとめて pack する (#3330)。userRepo が nil の場合 (= test 等で未配線) は
 // followee を埋めずに id 系フィールドだけ返す。
-func (h *Handler) packFollowings(c echo.Context, rows []*model.Following) []packedFollowing {
+func (h *Handler) packFollowings(c *echo.Context, rows []*model.Following) []packedFollowing {
 	users, profiles := h.followees(rows)
 	packed := h.packUsers(c, users, profiles)
 	byID := make(map[string]any, len(users))

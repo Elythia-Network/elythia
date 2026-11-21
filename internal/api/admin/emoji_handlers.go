@@ -24,7 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/safehttp"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // --- Emoji Admin endpoints ---
@@ -101,7 +101,7 @@ func (h *Handler) publishEmojiUpdatedByIDs(ids []string) {
 // 画像は**system 所有の drive ファイルへ複製してから**参照する (#2999)。
 // upstream は操作者のファイルをそのまま指すので意図的な乖離
 // (docs/divergence/security.md §7)。
-func (h *Handler) EmojiAdd(c echo.Context) error {
+func (h *Handler) EmojiAdd(c *echo.Context) error {
 	var req struct {
 		Name        string   `json:"name"`
 		FileID      string   `json:"fileId"`
@@ -328,7 +328,7 @@ func (h *Handler) EmojiAdd(c echo.Context) error {
 // 共有すると**同じ endpoint が同じ code に 2 つの id を返す**ことになる
 // (`update` は drive 行が無いときに自分の id を返すので)。`error.id` で分岐する
 // クライアントは片方を取りこぼす。
-func emojiCopyFailureResponse(c echo.Context, err error, noSuchFileID string) error {
+func emojiCopyFailureResponse(c *echo.Context, err error, noSuchFileID string) error {
 	switch {
 	case errors.Is(err, coredrive.ErrObjectNotFound):
 		// 行はあるのに実体が無い (`isLink` / `accessKey` 無し / ストレージから
@@ -398,7 +398,7 @@ func preferWebpublicType(f *model.DriveFile) *string {
 // nil != 空配列でない場合に "aliases を全削除" として扱う。実装上は
 // `req.Aliases != nil` で「フロントが aliases フィールドを明示送信した」
 // と判定しており、空配列送信なら全削除、フィールド欠落なら現状維持。
-func (h *Handler) EmojiUpdate(c echo.Context) error {
+func (h *Handler) EmojiUpdate(c *echo.Context) error {
 	var req struct {
 		// 本家はanyOfの{name}の枝で通った入力でも、idの値をそのまま
 		// CustomEmojiService.updateへ渡し、`data.id ? getEmojiById : getEmojiByName`
@@ -801,7 +801,7 @@ func fieldKeys(m map[string]any) []string {
 }
 
 // EmojiDelete handles POST /api/admin/emoji/delete.
-func (h *Handler) EmojiDelete(c echo.Context) error {
+func (h *Handler) EmojiDelete(c *echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -863,7 +863,7 @@ func jsTruthy(raw json.RawMessage) bool {
 }
 
 // EmojiList handles POST /api/admin/emoji/list.
-func (h *Handler) EmojiList(c echo.Context) error {
+func (h *Handler) EmojiList(c *echo.Context) error {
 	var req struct {
 		Query string `json:"query"`
 		// categoryは本家のparamDefに無いElythia独自の引数(#3857)。#3867で
@@ -904,7 +904,7 @@ func (h *Handler) EmojiList(c echo.Context) error {
 
 // EmojiListV2 handles POST /api/v2/admin/emoji/list.
 // Returns an object with pagination info (allCount, allPages) instead of a plain array.
-func (h *Handler) EmojiListV2(c echo.Context) error {
+func (h *Handler) EmojiListV2(c *echo.Context) error {
 	var req struct {
 		Query     *emojiV2QueryReq `json:"query"`
 		SinceID   string           `json:"sinceId"`

@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -64,7 +64,7 @@ func TestRegisterFrontendAssets(t *testing.T) {
 			// `s.echo.GET("/*", frontend)`)。これが無いと echo の既定の 404 が
 			// 返るので、ビルド成果物が無いときの 404 の明示登録を消しても
 			// 「404 が返る」ままテストが通ってしまう。
-			e.GET("/*", func(c echo.Context) error {
+			e.GET("/*", func(c *echo.Context) error {
 				return c.HTML(http.StatusOK, spaShellBody)
 			})
 

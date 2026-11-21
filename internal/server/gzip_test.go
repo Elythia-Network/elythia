@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +21,7 @@ func TestGzipMiddleware_CompressesLargeJSON(t *testing.T) {
 
 	// 1KB 以上の payload。MinLength=1024 を超えさせる。
 	payload := map[string]any{"text": strings.Repeat("a", 2000)}
-	e.GET("/api/big", func(c echo.Context) error {
+	e.GET("/api/big", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, payload)
 	})
 
@@ -49,7 +49,7 @@ func TestGzipMiddleware_SkipsSmallBody(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
 
-	e.GET("/api/small", func(c echo.Context) error {
+	e.GET("/api/small", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"ok": "yes"})
 	})
 
@@ -71,7 +71,7 @@ func TestGzipMiddleware_SkipsStreamingRoute(t *testing.T) {
 
 	// 1KB 以上の本文を返しても、/streaming パスは Skipper で gzip を
 	// 切るので Content-Encoding が付かないこと。
-	e.GET("/streaming", func(c echo.Context) error {
+	e.GET("/streaming", func(c *echo.Context) error {
 		return c.String(http.StatusOK, strings.Repeat("x", 2000))
 	})
 
@@ -90,7 +90,7 @@ func TestGzipMiddleware_SkipsStreamingRoute(t *testing.T) {
 func TestGzipMiddleware_SkipsBackupDownload(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/backup-download", func(c echo.Context) error {
+	e.GET("/backup-download", func(c *echo.Context) error {
 		return c.String(http.StatusOK, strings.Repeat("x", 2000))
 	})
 	req := httptest.NewRequest(http.MethodGet, "/backup-download?token=x", nil)
@@ -107,7 +107,7 @@ func TestGzipMiddleware_DoesNotCompressWithoutAcceptEncoding(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
 
-	e.GET("/api/big", func(c echo.Context) error {
+	e.GET("/api/big", func(c *echo.Context) error {
 		return c.String(http.StatusOK, strings.Repeat("a", 2000))
 	})
 

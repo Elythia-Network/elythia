@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +48,7 @@ func TestFeed_HidesNotesByAuthorTimeWindow(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFeedWindowHandler(tc.user)
-			for _, render := range []func(echo.Context, string) error{h.RSS, h.Atom, h.JSON} {
+			for _, render := range []func(*echo.Context, string) error{h.RSS, h.Atom, h.JSON} {
 				rec := doFeedReq(t, render, "alice")
 				require.Equal(t, http.StatusOK, rec.Code)
 				body := rec.Body.String()

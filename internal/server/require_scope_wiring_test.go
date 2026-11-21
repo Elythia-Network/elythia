@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -128,7 +128,7 @@ func TestRequireScopeWiring(t *testing.T) {
 		api.Use(middleware.JSONBodyParse())
 		for _, tc := range cases {
 			// /api prefix を group が付けるので relative path で登録。
-			api.POST(tc.path[len("/api"):], func(c echo.Context) error {
+			api.POST(tc.path[len("/api"):], func(c *echo.Context) error {
 				return c.NoContent(http.StatusOK)
 			}, tc.mws...)
 		}

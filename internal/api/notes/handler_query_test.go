@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -34,7 +34,7 @@ func newQueryHandler(t *testing.T) (*Handler, *testutil.MockNoteRepository) {
 	return h, noteRepo
 }
 
-func newJSONRequest(t *testing.T, path, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newJSONRequest(t *testing.T, path, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -843,7 +843,7 @@ func TestSearch_DropsNotesHiddenFromViewer(t *testing.T) {
 		name string
 		path string
 		body string
-		call func(h *Handler, c echo.Context) error
+		call func(h *Handler, c *echo.Context) error
 	}{
 		{"search", "/api/notes/search", `{"query":"secret"}`, (*Handler).Search},
 		{"search-by-tag", "/api/notes/search-by-tag", `{"tag":"secret"}`, (*Handler).SearchByTag},

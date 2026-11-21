@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles bubble-game/* endpoints.
@@ -42,7 +42,7 @@ const seedMaxAge = 7 * 24 * time.Hour
 const bubbleGameModeMaxRunes = 128
 
 // Register handles POST /api/bubble-game/register.
-func (h *Handler) Register(c echo.Context) error {
+func (h *Handler) Register(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Score       jsnum.Int `json:"score"`
@@ -114,7 +114,7 @@ func (h *Handler) Register(c echo.Context) error {
 // allowGet:true で、frontend drop-and-fusion.vue は misskeyApiGet (GET +
 // query string) で gameMode を投げる。Echo の Bind は GET だと query を
 // `query` タグでしか拾わないため、GET では QueryParam で読む (#1774)。
-func (h *Handler) Ranking(c echo.Context) error {
+func (h *Handler) Ranking(c *echo.Context) error {
 	// 本家は GET なら query、POST なら body だけを読む。POST の query を読むと、
 	// 本家の paramDef が見た body とは別の gameMode で引くことになる (#3768)。
 	// 空文字は本家と同じく、その名前のモードとして引く。

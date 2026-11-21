@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/safemath"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )
@@ -63,7 +63,7 @@ func (h *Handler) SetDriveFileRepo(r repository.DriveFileRepository) {
 // exportHandler enqueues an export job for the authenticated user and
 // returns 204 No Content on success, matching Misskey's behavior.
 func (h *Handler) exportHandler(exportType string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		u := middleware.GetUser(c)
 		if h.transferEnqueuer == nil {
 			return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Transfer queue not configured.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -170,7 +170,7 @@ func importTooBigFileID(importType string) string {
 // NO_SUCH_FILE で弾く。所有権検証を欠くと cross-user file read が成立するため
 // driveFileRepo 未配線時は fail-closed (#1555)。空 file は EMPTY_FILE、上限超過は
 // TOO_BIG_FILE (import-antennas は upstream に tooBigFile が無いので skip)。
-func (h *Handler) validateImportRequest(c echo.Context, importType string) (*model.User, *model.DriveFile, bool, bool) {
+func (h *Handler) validateImportRequest(c *echo.Context, importType string) (*model.User, *model.DriveFile, bool, bool) {
 	u := middleware.GetUser(c)
 	var req struct {
 		FileID      string `json:"fileId"`
@@ -225,7 +225,7 @@ func (h *Handler) validateImportRequest(c echo.Context, importType string) (*mod
 // importHandler enqueues an import job using a DriveFile uploaded by the
 // user. フロントは fileId を渡してくる。本家互換。
 func (h *Handler) importHandler(importType string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		u, file, withReplies, ok := h.validateImportRequest(c, importType)
 		if !ok {
 			return nil
@@ -280,42 +280,42 @@ func (h *Handler) antennaImportWouldExceedLimit(userID, fileID string) bool {
 }
 
 // Export handler factory methods — one per endpoint for router binding.
-func (h *Handler) ExportNotes(c echo.Context) error {
+func (h *Handler) ExportNotes(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportNotes)(c)
 }
-func (h *Handler) ExportFollowing(c echo.Context) error {
+func (h *Handler) ExportFollowing(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportFollowing)(c)
 }
-func (h *Handler) ExportBlocking(c echo.Context) error {
+func (h *Handler) ExportBlocking(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportBlocking)(c)
 }
-func (h *Handler) ExportMute(c echo.Context) error {
+func (h *Handler) ExportMute(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportMuting)(c)
 }
-func (h *Handler) ExportFavorites(c echo.Context) error {
+func (h *Handler) ExportFavorites(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportFavorites)(c)
 }
-func (h *Handler) ExportUserLists(c echo.Context) error {
+func (h *Handler) ExportUserLists(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportUserLists)(c)
 }
-func (h *Handler) ExportAntennas(c echo.Context) error {
+func (h *Handler) ExportAntennas(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportAntennas)(c)
 }
-func (h *Handler) ExportClips(c echo.Context) error {
+func (h *Handler) ExportClips(c *echo.Context) error {
 	return h.exportHandler(transfer.ExportClips)(c)
 }
 
 // Import handler factory methods.
-func (h *Handler) ImportFollowing(c echo.Context) error {
+func (h *Handler) ImportFollowing(c *echo.Context) error {
 	return h.importHandler(transfer.ImportFollowing)(c)
 }
-func (h *Handler) ImportBlocking(c echo.Context) error {
+func (h *Handler) ImportBlocking(c *echo.Context) error {
 	return h.importHandler(transfer.ImportBlocking)(c)
 }
-func (h *Handler) ImportMuting(c echo.Context) error {
+func (h *Handler) ImportMuting(c *echo.Context) error {
 	return h.importHandler(transfer.ImportMuting)(c)
 }
-func (h *Handler) ImportUserLists(c echo.Context) error {
+func (h *Handler) ImportUserLists(c *echo.Context) error {
 	return h.importHandler(transfer.ImportUserLists)(c)
 }
 
@@ -327,7 +327,7 @@ func (h *Handler) ImportUserLists(c echo.Context) error {
 // なお upstream の NO_SUCH_USER (usersRepository.exists 失敗) は防御的 check で、
 // mk-go では RequireAuth が user を load 済みのため到達不能。dead code を避けて
 // 実装しない (golden には id があるが emit しないのは drift gate 上問題ない)。
-func (h *Handler) ImportAntennas(c echo.Context) error {
+func (h *Handler) ImportAntennas(c *echo.Context) error {
 	u, file, _, ok := h.validateImportRequest(c, transfer.ImportAntennas)
 	if !ok {
 		return nil

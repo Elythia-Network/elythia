@@ -35,7 +35,7 @@ func TestServer_ShutdownStepsAreInTheirOrder(t *testing.T) {
 	s := &Server{}
 	assert.Equal(t, []string{
 		"streaming", "queue", "background", "lifecycle", "chart",
-		"lateQueue", "queueDriver", "pubsub", "echo",
+		"lateQueue", "queueDriver", "pubsub",
 	}, stepNames(s.shutdownSteps()))
 	assert.Equal(t, []string{
 		"pluginGoGate", "lifecycle", "background", "releaseParts",
@@ -125,15 +125,14 @@ func (d *panickingCloseDriver) Close() error {
 
 // TestServer_StopBackgroundGoesOnAfterAPanickingStep makes the queueDriver
 // step panic, along with a part of the lifecycle list, and checks that the
-// later steps still run (the Redis subscriptions close and echo's Shutdown
-// runs), and that StopBackground returns the panic of the step naming it,
-// the panic of the part and echo's error (#3711).
+// later steps still run (the Redis subscriptions close), and that
+// StopBackground returns the panic of the step naming it and the panic of the
+// part (#3711).
 func TestServer_StopBackgroundGoesOnAfterAPanickingStep(t *testing.T) {
 	logs := captureSlog(t)
 	mr := miniredis.RunT(t)
 	s, log := panicStopServer(t, mr, []string{"first", "second", "third"}, map[string]bool{"second": true})
 	s.queueDriver = &panickingCloseDriver{closeRecordingDriver{log: log}}
-	serveBlockedRequest(t, s)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
@@ -143,7 +142,6 @@ func TestServer_StopBackgroundGoesOnAfterAPanickingStep(t *testing.T) {
 	assert.ErrorContains(t, err, `step "queueDriver" panicked: queue driver close failed`)
 	require.ErrorIs(t, err, errLifecycleStop)
 	assert.ErrorContains(t, err, `part "second" panicked`)
-	require.ErrorIs(t, err, context.DeadlineExceeded, "the echo step did not run after the panic")
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
 		assert.Zero(c, len(mr.PubSubChannels("")), "the Redis subscriptions were not closed after the panic")
 	}, 5*time.Second, 20*time.Millisecond)

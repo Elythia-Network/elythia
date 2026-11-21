@@ -5,11 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
-func newContext(method string) echo.Context {
+func newContext(method string) *echo.Context {
 	return echo.New().NewContext(httptest.NewRequest(method, "/", nil), httptest.NewRecorder())
 }
 

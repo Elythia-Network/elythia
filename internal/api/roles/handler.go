@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RoleNotesQuery provides a way to fetch notes by role.
@@ -168,7 +168,7 @@ func (h *Handler) emojiLookup() entity.EmojiLookup {
 }
 
 // List handles POST /api/roles/list.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	showAll := h.viewerIsModerator(c)
 	roles, err := h.roleService.List()
 	if err != nil {
@@ -188,7 +188,7 @@ func (h *Handler) List(c echo.Context) error {
 }
 
 // Show handles POST /api/roles/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 	}
@@ -213,7 +213,7 @@ func (h *Handler) Show(c echo.Context) error {
 // upstream users.ts: isPublic かつ isExplorable な role の roleAssignments を
 // 期限有効分だけ取得し id cursor でページングして [{id, user:UserDetailed}] を
 // 返す。!isPublic / !isExplorable は NO_SUCH_ROLE 扱い (#1544)。
-func (h *Handler) Users(c echo.Context) error {
+func (h *Handler) Users(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
@@ -342,7 +342,7 @@ func (h *Handler) assignmentProfiles(assigns []*model.RoleAssignment) map[string
 }
 
 // Notes handles POST /api/roles/notes.
-func (h *Handler) Notes(c echo.Context) error {
+func (h *Handler) Notes(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
@@ -452,7 +452,7 @@ func (h *Handler) packRole(r *model.Role, showAll bool) map[string]any {
 
 // viewerIsModerator reports whether the caller may see suspended and deleted
 // role members. Anonymous callers are not moderators.
-func (h *Handler) viewerIsModerator(c echo.Context) bool {
+func (h *Handler) viewerIsModerator(c *echo.Context) bool {
 	viewer := middleware.GetUser(c)
 	return viewer != nil && h.roleService.IsModerator(viewer.ID)
 }

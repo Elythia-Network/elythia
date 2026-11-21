@@ -21,7 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -58,7 +58,7 @@ func brokenHandler() *hashtags.Handler {
 	return hashtags.NewHandler(db, nil, nil, nil, nil)
 }
 
-func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -69,7 +69,7 @@ func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder 
 }
 
 // doPostAs is doPost with an authenticated viewer set in the context (#1957-a).
-func doPostAs(h func(echo.Context) error, body, viewerID string) *httptest.ResponseRecorder {
+func doPostAs(h func(*echo.Context) error, body, viewerID string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -786,7 +786,7 @@ func TestList_IgnoresOffset(t *testing.T) {
 func TestIntegerValuedFractionsAreAccepted(t *testing.T) {
 	h := newHandler()
 	for _, tc := range []struct {
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 	}{
 		{h.List, `{"sort":"+mentionedUsers","limit":10.0}`},

@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ReactionCreateRequest is the request body for notes/reactions/create.
@@ -25,7 +25,7 @@ type ReactionCreateRequest struct {
 }
 
 // ReactionsCreate handles POST /api/notes/reactions/create.
-func (h *Handler) ReactionsCreate(c echo.Context) error {
+func (h *Handler) ReactionsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req ReactionCreateRequest
@@ -70,7 +70,7 @@ type ReactionDeleteRequest struct {
 }
 
 // ReactionsDelete handles POST /api/notes/reactions/delete.
-func (h *Handler) ReactionsDelete(c echo.Context) error {
+func (h *Handler) ReactionsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req ReactionDeleteRequest
@@ -105,7 +105,7 @@ type ReactionsListRequest struct {
 }
 
 // Reactions handles POST /api/notes/reactions.
-func (h *Handler) Reactions(c echo.Context) error {
+func (h *Handler) Reactions(c *echo.Context) error {
 	var req ReactionsListRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)

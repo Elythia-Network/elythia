@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// withSerializer prepares an echo.Context with the fastJSONSerializer
+// withSerializer prepares an *echo.Context with the fastJSONSerializer
 // installed, mimicking what server.New does at boot. Currently backed by
 // stdlib encoding/json (#542 で goccy 0.10.x の VM compile bug が
 // timeline 経路で踏まれたため一時的に巻き戻し)。
-func withSerializer(body string) (echo.Context, *httptest.ResponseRecorder) {
+func withSerializer(body string) (*echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	e.JSONSerializer = fastJSONSerializer{}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -113,4 +113,26 @@ func TestFastJSONSerializer_DeserializeTypeError(t *testing.T) {
 	httpErr, ok := err.(*echo.HTTPError)
 	require.True(t, ok, "want *echo.HTTPError, got %T", err)
 	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
+}
+
+// TestSerialize_PrettyQueryIndents pins that ?pretty indents the JSON the way
+// echo v4's Context.JSON did, and that the answer is compact otherwise
+// (#4239). echo の v5 の Context.JSON は ?pretty を見ないので、serializer が
+// 字下げする。
+func TestSerialize_PrettyQueryIndents(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		want   string
+	}{
+		{"/api/x?pretty", "{\n  \"a\": 1\n}\n"},
+		{"/api/x?pretty=0", "{\n  \"a\": 1\n}\n"},
+		{"/api/x", "{\"a\":1}\n"},
+	} {
+		e := echo.New()
+		e.JSONSerializer = fastJSONSerializer{}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, tc.target, nil), rec)
+		require.NoError(t, c.JSON(http.StatusOK, map[string]int{"a": 1}))
+		assert.Equal(t, tc.want, rec.Body.String(), tc.target)
+	}
 }

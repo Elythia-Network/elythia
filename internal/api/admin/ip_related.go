@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -43,7 +43,7 @@ const (
 // **同じ IP を使ったことは同一人物であることを意味しない。** 家庭・会社・学校・
 // 共有 Wi-Fi・携帯回線の CGNAT・VPN で IP は共有される。返すのは調査の候補と
 // **その根拠**で、自動判定や自動処分には使わない (#3066)。
-func (h *Handler) IPRelatedAccounts(c echo.Context) error {
+func (h *Handler) IPRelatedAccounts(c *echo.Context) error {
 	if h.ipSearchRepo == nil || h.metaRepo == nil || h.userRepo == nil {
 		// **空の結果を返さない。** 「関連する候補は無い」という誤った事実になる (#2792)。
 		slog.Error("admin/ip/related-accounts: dependencies are not wired")

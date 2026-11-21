@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // legacyPermRe matches the legacy `account/read` / `notes-write` permission
@@ -65,7 +65,7 @@ func NewHandler(repo repository.AuthSessionRepository, idGen id.Generator) *Hand
 }
 
 // Create handles POST /api/app/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	var req struct {
 		Name        *string  `json:"name"`
 		Description *string  `json:"description"`
@@ -108,7 +108,7 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 // Show handles POST /api/app/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req struct {
 		AppID string `json:"appId"`
 	}
@@ -142,7 +142,7 @@ func (h *Handler) Show(c echo.Context) error {
 }
 
 // MyApps handles POST /api/my/apps.
-func (h *Handler) MyApps(c echo.Context) error {
+func (h *Handler) MyApps(c *echo.Context) error {
 	u := middleware.GetUser(c)
 	var req struct {
 		Limit  *jsnum.Int `json:"limit"`

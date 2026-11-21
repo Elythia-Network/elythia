@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ShowModerationLogs handles POST /api/admin/show-moderation-logs.
@@ -20,7 +20,7 @@ import (
 // `<MkTime :time="log.createdAt"/>` を直接読むため、handler 側で aidx
 // から派生した createdAt 文字列を response に注入する。invite/users 系
 // と同じく "2006-01-02T15:04:05.000Z" 形式 (Misskey の標準)。
-func (h *Handler) ShowModerationLogs(c echo.Context) error {
+func (h *Handler) ShowModerationLogs(c *echo.Context) error {
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
 		SinceID   string     `json:"sinceId"`

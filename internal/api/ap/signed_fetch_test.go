@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -235,8 +235,7 @@ func TestSignedFetch_RealSignature(t *testing.T) {
 		require.NoError(t, activitypub.SignRequest(req, key, "", []string{"(request-target)", "host", "date", "accept"}))
 		rec := httptest.NewRecorder()
 		c := echo.New().NewContext(req, rec)
-		c.SetParamNames("id")
-		c.SetParamValues("n-followers")
+		c.SetPathValues(echo.PathValues{{Name: "id", Value: "n-followers"}})
 		require.NoError(t, f.h.Note(c))
 		return rec.Code
 	}

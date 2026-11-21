@@ -3,7 +3,7 @@ package chat
 import (
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -14,7 +14,7 @@ import (
 // error used to be ignored (#3330).
 func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 	h, _ := newTestHandler()
-	cases := map[string]func(echo.Context) error{
+	cases := map[string]func(*echo.Context) error{
 		"RoomsOwned":       h.RoomsOwned,
 		"RoomsJoined":      h.RoomsJoined,
 		"InvitationsInbox": h.InvitationsInbox,

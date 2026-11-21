@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	coreabuse "github.com/elythia-network/elythia/internal/core/abuse"
@@ -84,7 +84,7 @@ func validSystemWebhookEvents(on []string) bool {
 // errNoSuchSystemWebhook is upstream show.ts noSuchSystemWebhook。mk-go は
 // update / delete でも同じものを返す (本家はそこで findOneByOrFail が投げて 500
 // になる。docs/divergence/security.md 7、#3262)。
-func errNoSuchSystemWebhook(c echo.Context) error {
+func errNoSuchSystemWebhook(c *echo.Context) error {
 	return c.JSON(http.StatusNotFound, apierr.ErrorWithKind("NO_SUCH_SYSTEM_WEBHOOK", "No such SystemWebhook.", "38dd1ffe-04b4-6ff5-d8ba-4e6a6ae22c9d", apierr.KindServer))
 }
 
@@ -181,7 +181,7 @@ func dummySystemWebhookBody(pk *entity.Packer, eventType string) any {
 }
 
 // SystemWebhookCreate handles POST /api/admin/system-webhook/create.
-func (h *Handler) SystemWebhookCreate(c echo.Context) error {
+func (h *Handler) SystemWebhookCreate(c *echo.Context) error {
 	if h.systemWebhookRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -224,7 +224,7 @@ func (h *Handler) SystemWebhookCreate(c echo.Context) error {
 }
 
 // SystemWebhookDelete handles POST /api/admin/system-webhook/delete.
-func (h *Handler) SystemWebhookDelete(c echo.Context) error {
+func (h *Handler) SystemWebhookDelete(c *echo.Context) error {
 	if h.systemWebhookRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -253,7 +253,7 @@ func (h *Handler) SystemWebhookDelete(c echo.Context) error {
 }
 
 // SystemWebhookList handles POST /api/admin/system-webhook/list.
-func (h *Handler) SystemWebhookList(c echo.Context) error {
+func (h *Handler) SystemWebhookList(c *echo.Context) error {
 	if h.systemWebhookRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -283,7 +283,7 @@ func (h *Handler) SystemWebhookList(c echo.Context) error {
 }
 
 // SystemWebhookShow handles POST /api/admin/system-webhook/show.
-func (h *Handler) SystemWebhookShow(c echo.Context) error {
+func (h *Handler) SystemWebhookShow(c *echo.Context) error {
 	if h.systemWebhookRepo == nil {
 		return c.JSON(http.StatusNotFound, apierr.NotFound())
 	}
@@ -309,7 +309,7 @@ func (h *Handler) SystemWebhookShow(c echo.Context) error {
 // upstream test.ts: webhook 不在なら NO_SUCH_WEBHOOK、override.url/secret を受け、
 // 配送 processor 経由で type 別 dummy payload を送る。mk-go も DispatchSystemTest
 // で real delivery (queue) を経由させ、header/envelope を本配送と一致させる (#1542)。
-func (h *Handler) SystemWebhookTest(c echo.Context) error {
+func (h *Handler) SystemWebhookTest(c *echo.Context) error {
 	var req struct {
 		WebhookID string `json:"webhookId"`
 		Type      string `json:"type"`
@@ -363,7 +363,7 @@ func (h *Handler) SystemWebhookTest(c echo.Context) error {
 // 配送 processor が並行して latestSentAt/latestStatus を書き換えるため、
 // FindByID→Save で全列上書きすると配送ステータスを古い値で踏み潰す。partial
 // update (UpdateAdminFields) を使い admin 編集可能列のみ触る。
-func (h *Handler) SystemWebhookUpdate(c echo.Context) error {
+func (h *Handler) SystemWebhookUpdate(c *echo.Context) error {
 	if h.systemWebhookRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}

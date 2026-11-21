@@ -5,7 +5,7 @@ import (
 	"net/url"
 
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // flushPageHTML is the page served at /flush. The script it loads
@@ -30,7 +30,7 @@ func flushPage(siteURL string) echo.HandlerFunc {
 	if u, err := url.Parse(siteURL); err == nil {
 		siteHost = idnhost.HostPort(u)
 	}
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		send := true
 		if origin := c.Request().Header.Get("Origin"); origin != "" {
 			u, err := url.Parse(origin)

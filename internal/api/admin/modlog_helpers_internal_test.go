@@ -13,12 +13,12 @@ import (
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
-// newCtx builds a minimal echo.Context for helper invocation. The
+// newCtx builds a minimal *echo.Context for helper invocation. The
 // helpers only touch c.Request().Context() so a stub request is enough.
-func newCtx() echo.Context {
+func newCtx() *echo.Context {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()

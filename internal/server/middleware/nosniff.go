@@ -1,6 +1,6 @@
 package middleware
 
-import "github.com/labstack/echo/v4"
+import "github.com/labstack/echo/v5"
 
 // NoSniff returns a GLOBAL middleware that sets `X-Content-Type-Options: nosniff`.
 //
@@ -23,7 +23,7 @@ import "github.com/labstack/echo/v4"
 // 推測で救われていた」応答だけで、それは直すべき側。
 func NoSniff() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 			return next(c)
 		}

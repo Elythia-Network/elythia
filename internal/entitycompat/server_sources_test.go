@@ -302,11 +302,11 @@ func TestRouteParsersReadEveryFile(t *testing.T) {
 	api := s.echo.Group("/api")
 	api.POST("/first", h.Method, middleware.RequireAuth())
 	promoGroup := api.Group("/promo")
-	promoGroup.POST("/inline-a", func(c echo.Context) error { return nil })
+	promoGroup.POST("/inline-a", func(c *echo.Context) error { return nil })
 `)
 	b := writeServerFixture(t, dir, "b.go", `
 	api.POST("/second", h.Method, middleware.RequireAdmin())
-	api.GET("/inline-b", func(c echo.Context) error { return nil })
+	api.GET("/inline-b", func(c *echo.Context) error { return nil })
 `)
 
 	regs := parseRouteRegistrations(t, a, b)

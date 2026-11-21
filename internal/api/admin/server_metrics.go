@@ -5,7 +5,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/procstats"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SetProcStatsDeps wires the process start time used by admin/server-metrics
@@ -30,7 +30,7 @@ func (h *Handler) SetProcStatsDeps(deps procstats.Deps) {
 // Prometheus /metrics を admin から読ませる案は採っていない。無認証公開のまま
 // ブラウザへ晒すことになるうえ、production では reverse proxy の ACL で塞がって
 // いて到達できない。
-func (h *Handler) ServerMetrics(c echo.Context) error {
+func (h *Handler) ServerMetrics(c *echo.Context) error {
 	stats := procstats.Collect(h.procStats, config.MisskeyVersion, config.MkGoVersion)
 	return c.JSON(http.StatusOK, stats)
 }

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -18,7 +18,7 @@ import (
 // the target user's origin instance and sets forwarded=true. Reports against
 // a local user, or reports that have already been forwarded, are rejected
 // with 400 INVALID_PARAM (upstream answers 500; see docs/divergence.md).
-func (h *Handler) ForwardAbuseUserReport(c echo.Context) error {
+func (h *Handler) ForwardAbuseUserReport(c *echo.Context) error {
 	var body struct {
 		ReportID json.RawMessage `json:"reportId"`
 	}

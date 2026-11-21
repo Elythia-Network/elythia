@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/safemath"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -189,7 +189,7 @@ func (rl *RateLimiter) SetPolicyProvider(p role.PolicyProvider) {
 // は最も逼迫した bucket (最小値) を返す。
 func (rl *RateLimiter) Middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if rl.disabled {
 				return next(c)
 			}
@@ -316,7 +316,7 @@ func (rl *RateLimiter) AllowIP(ctx context.Context, endpoint, ip string) (bool, 
 // AllowIP does.
 func RequireIPRateLimit(rl *RateLimiter, endpoint string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if rl == nil {
 				return next(c)
 			}
@@ -343,7 +343,7 @@ type rateLimitActor struct {
 // resolveActors returns all bucket actors that should be checked for this
 // request. 認証済 user は userID + IP の両方、未認証は IP のみを返す。
 // EnableIPRateLimit=false かつ未認証なら空 (= 制限スキップ、既存挙動維持)。
-func (rl *RateLimiter) resolveActors(c echo.Context) []rateLimitActor {
+func (rl *RateLimiter) resolveActors(c *echo.Context) []rateLimitActor {
 	var actors []rateLimitActor
 	if user := GetUser(c); user != nil {
 		// user.ID は ULID で `ip-` prefix と衝突しないので prefix なしで
@@ -476,7 +476,7 @@ func scaledMinInterval(base time.Duration, factor float64) time.Duration {
 // carry a per-endpoint RejectResponse override (e.g. signin returns
 // TOO_MANY_AUTHENTICATION_FAILURES instead of the generic RATE_LIMIT_EXCEEDED、
 // #1829)。
-func (rl *RateLimiter) rejectRequest(c echo.Context, info LimitInfo, limit *EndpointLimit) error {
+func (rl *RateLimiter) rejectRequest(c *echo.Context, info LimitInfo, limit *EndpointLimit) error {
 	retryAfterSec := (info.ResetMs - time.Now().UnixMilli() + 999) / 1000
 	if retryAfterSec < 0 {
 		retryAfterSec = 0

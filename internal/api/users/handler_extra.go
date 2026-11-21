@@ -22,7 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
@@ -42,7 +42,7 @@ func (h *Handler) SetAbuseRepo(r repository.AbuseReportRepository) {
 //
 // repo が wired されていない (= legacy handler test) では該当 field を false
 // に保つので production runtime には影響しない (router で必ず wired される)。
-func (h *Handler) Relation(c echo.Context) error {
+func (h *Handler) Relation(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	// upstream relation.ts:113-127 は userId を oneOf [string, array] で受け、
 	// 配列なら relation 配列を、単体なら relation オブジェクトを返す (#1547)。
@@ -221,7 +221,7 @@ func (h *Handler) computeRelation(viewer *model.User, targetID string) map[strin
 }
 
 // ReportAbuse handles POST /api/users/report-abuse.
-func (h *Handler) ReportAbuse(c echo.Context) error {
+func (h *Handler) ReportAbuse(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID  string `json:"userId"`
@@ -291,7 +291,7 @@ func (h *Handler) ReportAbuse(c echo.Context) error {
 // 最小 shape (id / userId / text) だと createdAt / visibility / user 等が
 // 欠落し、misskey_dart の Note.fromJson が非null cast に失敗して落ちる
 // (#1227、当初は #821 PR-D で最小 shape start としていた)。
-func (h *Handler) Reactions(c echo.Context) error {
+func (h *Handler) Reactions(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		UserID    string     `json:"userId"`
@@ -496,7 +496,7 @@ func (h *Handler) Reactions(c echo.Context) error {
 //     filter なので SQL push-down 対象外)。
 //   - ミュート・ブロックは本家の isUserRelated と同じ判定 (ミュートは著者を
 //     見ない、#3369)。
-func (h *Handler) FeaturedNotes(c echo.Context) error {
+func (h *Handler) FeaturedNotes(c *echo.Context) error {
 	var req struct {
 		// GET でも受ける (本家は allowGet: true) ので query の名前も付ける (#3593)。
 		UserID  string     `json:"userId" query:"userId"`
@@ -624,7 +624,7 @@ func sortAndPageFeaturedIDs(ids []string, untilID string, limit int) []string {
 }
 
 // SearchByUsernameAndHost handles POST /api/users/search-by-username-and-host.
-func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
+func (h *Handler) SearchByUsernameAndHost(c *echo.Context) error {
 	var req struct {
 		// upstream の paramDef は username / host の anyOf で、どちらか一方の
 		// キーがあればよい (値は null 可)。username 省略時は username で
@@ -678,7 +678,7 @@ func (h *Handler) SearchByUsernameAndHost(c echo.Context) error {
 
 // UpdateMemo handles POST /api/users/update-memo.
 // memo が null / 空文字なら削除、それ以外なら upsert する。
-func (h *Handler) UpdateMemo(c echo.Context) error {
+func (h *Handler) UpdateMemo(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID string  `json:"userId"`

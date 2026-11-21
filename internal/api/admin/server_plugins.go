@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ServerPluginInfo describes one compiled-in server plugin (#2497).
@@ -62,7 +62,7 @@ type serverPluginsResponse struct {
 }
 
 // ServerPlugins handles POST /api/admin/server-plugins.
-func (h *Handler) ServerPlugins(c echo.Context) error {
+func (h *Handler) ServerPlugins(c *echo.Context) error {
 	res := serverPluginsResponse{Plugins: h.serverPlugins}
 	if res.Plugins == nil {
 		// プラグイン無しは「空」であって「不明」ではないので [] を返す。

@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/poll"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // PollVoteRequest is the request body for notes/polls/vote.
@@ -18,7 +18,7 @@ type PollVoteRequest struct {
 }
 
 // PollsVote handles POST /api/notes/polls/vote.
-func (h *Handler) PollsVote(c echo.Context) error {
+func (h *Handler) PollsVote(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PollVoteRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" || req.Choice == nil {

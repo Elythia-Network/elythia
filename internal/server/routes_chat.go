@@ -4,7 +4,7 @@ import (
 	apichat "github.com/elythia-network/elythia/internal/api/chat"
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // registerChatRoutes registers the chat routes on the /api group.

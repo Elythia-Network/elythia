@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +47,7 @@ func dialServer(t *testing.T, h *Handler, withUser bool) (*websocket.Conn, *http
 	t.Helper()
 	e := echo.New()
 	e.GET("/streaming", h.Stream, func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if withUser {
 				c.Set(string(middleware.UserContextKey), &model.User{ID: "alice"})
 			}
@@ -122,7 +122,7 @@ func TestStream_NonWebSocketGetIsUnavailable(t *testing.T) {
 func TestStream_AppTokenWithoutReadAccountIsRejected(t *testing.T) {
 	h := NewHandler(&stubAcceptor{})
 	e := echo.New()
-	e.GET("/streaming", func(c echo.Context) error {
+	e.GET("/streaming", func(c *echo.Context) error {
 		c.Set(string(middleware.AuthScopeContextKey), &middleware.AuthScope{IsApp: true, Scopes: []string{"write:notes"}})
 		return h.Stream(c)
 	})
@@ -136,7 +136,7 @@ func TestStream_AppTokenWithoutReadAccountIsRejected(t *testing.T) {
 func TestStream_AppTokenWithReadAccountPasses(t *testing.T) {
 	h := NewHandler(&stubAcceptor{})
 	e := echo.New()
-	e.GET("/streaming", func(c echo.Context) error {
+	e.GET("/streaming", func(c *echo.Context) error {
 		c.Set(string(middleware.AuthScopeContextKey), &middleware.AuthScope{IsApp: true, Scopes: []string{"read:account"}})
 		return h.Stream(c)
 	})
@@ -150,7 +150,7 @@ func TestStream_AppTokenWithReadAccountPasses(t *testing.T) {
 func TestStream_NativeTokenSkipsScopeCheck(t *testing.T) {
 	h := NewHandler(&stubAcceptor{})
 	e := echo.New()
-	e.GET("/streaming", func(c echo.Context) error {
+	e.GET("/streaming", func(c *echo.Context) error {
 		c.Set(string(middleware.AuthScopeContextKey), &middleware.AuthScope{IsApp: false})
 		return h.Stream(c)
 	})
@@ -242,7 +242,7 @@ func TestStream_ForwardsScopesThroughStream(t *testing.T) {
 			h := NewHandler(acc)
 			e := echo.New()
 			e.GET("/streaming", h.Stream, func(next echo.HandlerFunc) echo.HandlerFunc {
-				return func(c echo.Context) error {
+				return func(c *echo.Context) error {
 					c.Set(string(middleware.UserContextKey), &model.User{ID: "alice"})
 					if tc.scope != nil {
 						c.Set(string(middleware.AuthScopeContextKey), tc.scope)
@@ -313,7 +313,7 @@ func TestStream_ForwardsCredentialThroughStream(t *testing.T) {
 			h := NewHandler(acc)
 			e := echo.New()
 			e.GET("/streaming", h.Stream, func(next echo.HandlerFunc) echo.HandlerFunc {
-				return func(c echo.Context) error {
+				return func(c *echo.Context) error {
 					if tc.user {
 						c.Set(string(middleware.UserContextKey), &model.User{ID: "alice"})
 					}
