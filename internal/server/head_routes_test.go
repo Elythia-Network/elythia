@@ -115,6 +115,9 @@ func newHeadRoutesFixture(t *testing.T) (*headRoutesFixture, string) {
 	e := f.e
 	e.GET("/page", f.handler("page", http.StatusOK, "<html>page</html>"))
 	e.GET("/users/:id", f.handler("user", http.StatusOK, `{"id":"u"}`))
+	// 先頭に "/" の無いパス。echo のルーターは "/relative" として持つが、
+	// OnAddRoute には正規化する前の "relative" が届く (#4241)。
+	e.GET("relative", f.handler("relative", http.StatusOK, "relative"))
 	// net/http の書き込みの buffer (4KiB) を超える本文。handler の途中で
 	// 書き出されるので、元のリクエストが HEAD に戻っていないと本文が漏れる。
 	e.GET("/large", f.handler("large", http.StatusOK, strings.Repeat("large body ", 10000)))
@@ -217,7 +220,7 @@ func resetBlobBytesRead() {
 func TestHeadRoutes_GETRouteAnswersHEADLikeGET(t *testing.T) {
 	f, base := newHeadRoutesFixture(t)
 
-	for _, path := range []string{"/page", "/users/abc", "/large", "/grp/item", "/api/emojis", "/somewhere/else", "/"} {
+	for _, path := range []string{"/page", "/users/abc", "/relative", "/large", "/grp/item", "/api/emojis", "/somewhere/else", "/"} {
 		t.Run(path, func(t *testing.T) {
 			assertHEADLikeGET(t, base, path, nil, echo.HeaderContentType, "X-Route", echo.HeaderContentLength)
 		})
@@ -420,4 +423,18 @@ func TestHeadRoutes_FilesLocalHEADSkipsTheBodyCopy(t *testing.T) {
 	assert.Equal(t, "image/png", res.Header.Get(echo.HeaderContentType))
 	assert.Empty(t, res.trailing)
 	assert.LessOrEqual(t, blobBytesRead(), int64(coredrive.MIMESniffLen))
+}
+
+// TestNormalizeRoutePath pins that a recorded route path takes the form echo's
+// router stores and Context.Path reports (#4241).
+func TestNormalizeRoutePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"":           "/",
+		"relative":   "/relative",
+		"/":          "/",
+		"/api/*":     "/api/*",
+		"/users/:id": "/users/:id",
+	} {
+		assert.Equal(t, want, normalizeRoutePath(in), "%q", in)
+	}
 }
