@@ -1009,7 +1009,7 @@ func (m *StorageMigrator) restoreFile(ctx context.Context, dst Storage, f *model
 		if v.key == nil || *v.key == "" {
 			continue
 		}
-		put, err := m.restoreVariant(dst, v.name, *v.key)
+		put, err := m.restoreVariant(dst, v.name, *v.key, storageMigrationVariantReadLimit)
 		if err != nil {
 			return err
 		}
@@ -1094,9 +1094,15 @@ func (m *StorageMigrator) restoreBody(dst Storage, f *model.DriveFile) (bool, er
 	if err == nil && matches(size, sum) {
 		return false, nil
 	}
-	b, err := readAll(dst, key)
+	// 記録した大きさを 1 バイトでも超えたら、そこで読むのをやめる (一致しないことは
+	// もう決まっている)。全部読むと、バケットで置き換えられた大きなオブジェクト 1 つで
+	// worker のメモリを使い切りうる。
+	b, err := readAllLimit(dst, key, int64(f.Size))
 	if errors.Is(err, ErrObjectNotFound) {
 		return false, errors.New("the file is neither on the local storage with the recorded size and md5 nor in the object storage")
+	}
+	if errors.Is(err, errObjectTooLarge) {
+		return false, errors.New("neither the local copy nor the copy in the object storage matches the recorded size and md5")
 	}
 	if err != nil {
 		return false, err
@@ -1120,13 +1126,15 @@ func (m *StorageMigrator) restoreBody(dst Storage, f *model.DriveFile) (bool, er
 // ローカルを確かめずに使うと、書きかけで止まったファイル (空き容量の不足や、置いて
 // いる途中の停止) を次に流したときにそのまま使い、壊れた中身を配る。行に md5 が無い
 // ので、写しと比べる。
-func (m *StorageMigrator) restoreVariant(dst Storage, name, key string) (bool, error) {
+func (m *StorageMigrator) restoreVariant(dst Storage, name, key string, limit int64) (bool, error) {
 	localSize, localSum, lerr := readObject(m.local, key)
 	if lerr != nil && !errors.Is(lerr, ErrObjectNotFound) {
 		return false, lerr
 	}
-	b, rerr := readAll(dst, key)
+	b, rerr := readAllLimit(dst, key, limit)
 	switch {
+	case errors.Is(rerr, errObjectTooLarge):
+		return false, fmt.Errorf("the %s in the object storage is larger than %d bytes", name, limit)
 	case errors.Is(rerr, ErrObjectNotFound):
 		// オブジェクトストレージに無い。ローカルがあればそれを使い、どちらにも無ければ
 		// もともと配信できていなかったもの。
@@ -1161,16 +1169,32 @@ func (m *StorageMigrator) putAndReadBack(key string, b []byte) error {
 	return nil
 }
 
-// readAll reads the object key from st.
-func readAll(st Storage, key string) ([]byte, error) {
+// errObjectTooLarge is returned by readAllLimit for an object larger than the
+// limit.
+var errObjectTooLarge = errors.New("the object is larger than expected")
+
+// storageMigrationVariantReadLimit is how many bytes of a thumbnail or a
+// webpublic variant restoreVariant reads at most.
+//
+// 行に大きさが無いので、本体の大きさでは縛らない (本体が大きな動画でも、派生は
+// 静止画)。どちらも長辺を縮めた画像なので、この上限に届くのは置き換えられた
+// オブジェクトだけになる。
+const storageMigrationVariantReadLimit = 64 << 20
+
+// readAllLimit reads the object key of st, or fails with errObjectTooLarge
+// when it is larger than limit bytes, without reading past limit+1 bytes.
+func readAllLimit(st Storage, key string, limit int64) ([]byte, error) {
 	rc, err := st.Get(key)
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	b, err := io.ReadAll(rc)
+	b, err := io.ReadAll(io.LimitReader(rc, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", key, err)
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("read %s: %w", key, errObjectTooLarge)
 	}
 	return b, nil
 }
