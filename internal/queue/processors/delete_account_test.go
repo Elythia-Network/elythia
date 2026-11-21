@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
@@ -634,4 +635,227 @@ func TestDeleteAccountProcessor_RemoteUserSkipsNoteDelivery(t *testing.T) {
 	p.SetNoteDeliveryForgetter(forgetter)
 	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "remote", Soft: true})))
 	assert.Empty(t, forgetter.users)
+}
+
+// recordingDriveObjectDeleter records the drive files whose stored objects
+// were deleted, and whether each row still existed at that moment.
+type recordingDriveObjectDeleter struct {
+	driveRepo   *testutil.MockDriveFileRepository
+	deleted     []string
+	rowsPresent []bool
+	err         error
+}
+
+func (d *recordingDriveObjectDeleter) DeleteFileObjects(f *model.DriveFile) error {
+	d.deleted = append(d.deleted, f.ID)
+	_, ok := d.driveRepo.Files[f.ID]
+	d.rowsPresent = append(d.rowsPresent, ok)
+	return d.err
+}
+
+// Deleting an account deletes the stored objects of its drive files before
+// their rows, as upstream's deleteFileSync does. Deleting only the rows left
+// the objects reachable from a public-read bucket.
+func TestDeleteAccountProcessor_DeletesDriveObjectsBeforeRows(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid, other := "target", "other"
+	driveRepo.Files["f-target"] = &model.DriveFile{ID: "f-target", UserID: &uid}
+	driveRepo.Files["f-other"] = &model.DriveFile{ID: "f-other", UserID: &other}
+	objects := &recordingDriveObjectDeleter{driveRepo: driveRepo}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Equal(t, []string{"f-target"}, objects.deleted)
+	assert.Equal(t, []bool{true}, objects.rowsPresent, "objects are deleted while the row still points at them")
+	assert.NotContains(t, driveRepo.Files, "f-target")
+	assert.Contains(t, driveRepo.Files, "f-other")
+}
+
+// Every batch is processed: an account with more files than one batch has
+// the objects and rows of all of them deleted.
+func TestDeleteAccountProcessor_DeletesDriveObjectsAcrossBatches(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "target"
+	const n = 250
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("f-%03d", i)
+		driveRepo.Files[id] = &model.DriveFile{ID: id, UserID: &uid}
+	}
+	objects := &recordingDriveObjectDeleter{driveRepo: driveRepo}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	start := time.Now()
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Len(t, objects.deleted, n)
+	assert.Empty(t, driveRepo.Files)
+	// 3 batches with a pause (deleteAccountBatchSleep, 250ms) after each full one.
+	assert.GreaterOrEqual(t, time.Since(start), 500*time.Millisecond, "batches are paced like the note deletion")
+}
+
+// A file whose objects cannot be deleted still has its row deleted, so one
+// undeletable object does not keep the account deletion from finishing.
+func TestDeleteAccountProcessor_DriveObjectFailureStillDeletesRows(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "target"
+	driveRepo.Files["f-target"] = &model.DriveFile{ID: "f-target", UserID: &uid}
+	objects := &recordingDriveObjectDeleter{driveRepo: driveRepo, err: errors.New("storage down")}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Equal(t, []string{"f-target"}, objects.deleted)
+	assert.Empty(t, driveRepo.Files)
+}
+
+// A batch whose rows are not deleted fails the job instead of reading the
+// same rows forever; a failing list or delete is returned for a retry.
+func TestDeleteAccountProcessor_DriveRowFailuresPropagate(t *testing.T) {
+	uid := "target"
+	for name, setup := range map[string]func(*testutil.MockDriveFileRepository){
+		"rows not deleted": func(r *testutil.MockDriveFileRepository) { r.DeleteByIDsNoOp = true },
+		"delete fails":     func(r *testutil.MockDriveFileRepository) { r.DeleteByIDsErr = errors.New("db down") },
+		"list fails":       func(r *testutil.MockDriveFileRepository) { r.ListByUserAllErr = errors.New("db down") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			driveRepo := testutil.NewMockDriveFileRepository()
+			driveRepo.Files["f-target"] = &model.DriveFile{ID: "f-target", UserID: &uid}
+			setup(driveRepo)
+			p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+			p.SetDriveFileObjectDeleter(&recordingDriveObjectDeleter{driveRepo: driveRepo})
+			require.Error(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+		})
+	}
+}
+
+// A remote user (Soft) has the stored objects of their drive files (cached
+// remote files) deleted too, as upstream does for every deleted account.
+func TestDeleteAccountProcessor_DeletesDriveObjectsOfRemoteUser(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "remote"
+	driveRepo.Files["f-remote"] = &model.DriveFile{ID: "f-remote", UserID: &uid}
+	objects := &recordingDriveObjectDeleter{driveRepo: driveRepo}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "remote", Soft: true})))
+	assert.Equal(t, []string{"f-remote"}, objects.deleted)
+	assert.Empty(t, driveRepo.Files)
+}
+
+// cancelingDriveObjectDeleter cancels the job's context on its first call.
+type cancelingDriveObjectDeleter struct {
+	recordingDriveObjectDeleter
+	cancel context.CancelFunc
+}
+
+func (d *cancelingDriveObjectDeleter) DeleteFileObjects(f *model.DriveFile) error {
+	d.cancel()
+	return d.recordingDriveObjectDeleter.DeleteFileObjects(f)
+}
+
+// A job canceled while deleting the drive files stops between batches and
+// returns the error for a retry, leaving the rest for the retry.
+func TestDeleteAccountProcessor_DriveDeletionStopsWhenCanceled(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "target"
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprintf("f-%03d", i)
+		driveRepo.Files[id] = &model.DriveFile{ID: id, UserID: &uid}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	objects := &cancelingDriveObjectDeleter{recordingDriveObjectDeleter: recordingDriveObjectDeleter{driveRepo: driveRepo}, cancel: cancel}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	require.ErrorIs(t, p.Handle(ctx, deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})), context.Canceled)
+	assert.Len(t, objects.deleted, 100, "the first batch finishes, the next is not read")
+	assert.Len(t, driveRepo.Files, 50)
+}
+
+// countingDriveRepo counts the ListByUserAll calls of the drive deletion.
+type countingDriveRepo struct {
+	*testutil.MockDriveFileRepository
+	lists int
+}
+
+func (r *countingDriveRepo) ListByUserAll(userID string, limit int) ([]*model.DriveFile, error) {
+	r.lists++
+	return r.MockDriveFileRepository.ListByUserAll(userID, limit)
+}
+
+// The drive deletion reads no more batches than it needs: a short batch is
+// the last one, and a canceled job does not read the next batch.
+func TestDeleteAccountProcessor_DriveDeletionReadsOnlyTheBatchesItNeeds(t *testing.T) {
+	uid := "target"
+	newRepo := func(n int) *countingDriveRepo {
+		r := &countingDriveRepo{MockDriveFileRepository: testutil.NewMockDriveFileRepository()}
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("f-%03d", i)
+			r.Files[id] = &model.DriveFile{ID: id, UserID: &uid}
+		}
+		return r
+	}
+
+	repo := newRepo(250)
+	p := processors.NewDeleteAccountProcessor(nil, repo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(&recordingDriveObjectDeleter{driveRepo: repo.MockDriveFileRepository})
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Equal(t, 3, repo.lists, "100 + 100 + 50: the short batch is the last")
+
+	repo = newRepo(150)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p = processors.NewDeleteAccountProcessor(nil, repo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(&cancelingDriveObjectDeleter{recordingDriveObjectDeleter: recordingDriveObjectDeleter{driveRepo: repo.MockDriveFileRepository}, cancel: cancel})
+	start := time.Now()
+	require.ErrorIs(t, p.Handle(ctx, deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})), context.Canceled)
+	assert.Equal(t, 1, repo.lists, "the next batch is not read")
+	// The pause (250ms) returns on the cancellation instead of running out.
+	assert.Less(t, time.Since(start), 200*time.Millisecond)
+}
+
+// Batches that queue no object storage deletion (link rows of a remote user)
+// are not paced: pausing them only makes the job longer.
+func TestDeleteAccountProcessor_LinkRowBatchesAreNotPaced(t *testing.T) {
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "remote"
+	for i := 0; i < 300; i++ {
+		id := fmt.Sprintf("f-%03d", i)
+		driveRepo.Files[id] = &model.DriveFile{ID: id, UserID: &uid, IsLink: true}
+	}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(&recordingDriveObjectDeleter{driveRepo: driveRepo})
+
+	start := time.Now()
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "remote", Soft: true})))
+	assert.Empty(t, driveRepo.Files)
+	// Pacing the 3 full batches would take 750ms.
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
+}
+
+// Only a batch with a file in object storage is paced: local files are deleted
+// inline and queue nothing, and one object storage file in a batch is enough.
+func TestDeleteAccountProcessor_PacesOnlyBatchesWithObjectStorageFiles(t *testing.T) {
+	uid := "target"
+	run := func(t *testing.T, objectStorageFirst bool) time.Duration {
+		t.Helper()
+		driveRepo := testutil.NewMockDriveFileRepository()
+		for i := 0; i < 300; i++ {
+			id := fmt.Sprintf("f-%03d", i)
+			// モックの ListByUserAll は map の順に返すので、どのバッチに入るかは決まらない。
+			// 1 件だけなので、どこに入っても、待つのはそのバッチの後の 1 回になる。
+			driveRepo.Files[id] = &model.DriveFile{ID: id, UserID: &uid, StoredInternal: !(objectStorageFirst && i == 0)}
+		}
+		p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+		p.SetDriveFileObjectDeleter(&recordingDriveObjectDeleter{driveRepo: driveRepo})
+		start := time.Now()
+		require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+		require.Empty(t, driveRepo.Files)
+		return time.Since(start)
+	}
+	assert.Less(t, run(t, false), 200*time.Millisecond, "local files only: no pause")
+	assert.GreaterOrEqual(t, run(t, true), 250*time.Millisecond, "one object storage file pauses its batch")
 }

@@ -148,7 +148,8 @@ const defaultStuckAfter = 30 * time.Minute
 //
 // **追跡対象にも長い job は残る。** deleteAccount は maintenance ではなく
 // deliver に載っており (queue.go の EnqueueDeleteAccount)、100 件ごとに 250ms
-// 空けるので 70 万ノート規模で 30 分を超える。inbox も resolver の再帰で
+// 空けるので 70 万ノート規模で 30 分を超える (オブジェクトストレージのドライブの
+// ファイルも 100 件ごとに 250ms 空けるので、その分も足される)。inbox も resolver の再帰で
 // 理論上 40 分を超えうる。どちらも隔離されるだけで job は cancel されないため
 // 実害は「一時的に Worker が 1 本増える」に留まるが、閾値を短くすると
 // その状態が定常化する。
