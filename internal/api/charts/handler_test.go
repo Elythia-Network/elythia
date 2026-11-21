@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -250,7 +250,7 @@ func newHandlerWithAllCharts(t *testing.T) (*Handler, Charts) {
 	return h, c
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -262,7 +262,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 // newGetReq builds a GET request with the given raw query string. The auth
 // middleware is not run here, so the request is unauthenticated unless the
 // caller seeds the user/token context keys via c.Set.
-func newGetReq(t *testing.T, rawQuery string) (echo.Context, *httptest.ResponseRecorder) {
+func newGetReq(t *testing.T, rawQuery string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/?"+rawQuery, nil)

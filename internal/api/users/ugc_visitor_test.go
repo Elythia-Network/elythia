@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -131,13 +131,13 @@ func TestShowBulk_UGCVisibilityForVisitor(t *testing.T) {
 func TestUsersEndpoints_UGCVisibilityNoneForVisitor(t *testing.T) {
 	endpoints := []struct {
 		name    string
-		handler func(h *Handler) func(c echo.Context) error
+		handler func(h *Handler) func(c *echo.Context) error
 		body    string
 		nonNone []string
 	}{
-		{name: "users/notes", handler: func(h *Handler) func(c echo.Context) error { return h.Notes }, body: `{"userId":"loc"}`, nonNone: []string{"n_loc", "n_rn"}},
-		{name: "users/reactions", handler: func(h *Handler) func(c echo.Context) error { return h.Reactions }, body: `{"userId":"loc"}`, nonNone: []string{"r1"}},
-		{name: "users/get-frequently-replied-users", handler: func(h *Handler) func(c echo.Context) error { return h.GetFrequentlyRepliedUsers }, body: `{"userId":"loc"}`, nonNone: []string{"rem"}},
+		{name: "users/notes", handler: func(h *Handler) func(c *echo.Context) error { return h.Notes }, body: `{"userId":"loc"}`, nonNone: []string{"n_loc", "n_rn"}},
+		{name: "users/reactions", handler: func(h *Handler) func(c *echo.Context) error { return h.Reactions }, body: `{"userId":"loc"}`, nonNone: []string{"r1"}},
+		{name: "users/get-frequently-replied-users", handler: func(h *Handler) func(c *echo.Context) error { return h.GetFrequentlyRepliedUsers }, body: `{"userId":"loc"}`, nonNone: []string{"rem"}},
 	}
 	for _, ep := range endpoints {
 		for _, tc := range []struct {

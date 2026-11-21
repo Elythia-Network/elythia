@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // PageLikes handles POST /api/i/page-likes.
@@ -22,7 +22,7 @@ import (
 //  2. page を FindManyByIDs で 1 batch fetch
 //  3. ユニークな page owner を FindManyByIDs で 1 batch fetch
 //  4. page or owner が解決できない like 行は drop (= upstream packMany と同 fail-soft)
-func (h *Handler) PageLikes(c echo.Context) error {
+func (h *Handler) PageLikes(c *echo.Context) error {
 	if h.pageLikeRepo == nil || h.pageRepo == nil || h.userService == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

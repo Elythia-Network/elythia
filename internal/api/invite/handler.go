@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/safemath"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/core/role"
 )
@@ -66,7 +66,7 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) {
 // `invite/create.ts` semantics: enforce inviteLimit / inviteLimitCycle as a
 // rolling time-window count, set expiresAt from inviteExpirationTime (0 / unset
 // = null = 無期限), then persist the ticket.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	now := time.Now()
 
@@ -126,7 +126,7 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 // List implements POST /api/invite/list.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		// limit / sinceDate / untilDate は、本家(ajv の integer)と同じく値が
@@ -227,7 +227,7 @@ func (h *Handler) List(c echo.Context) error {
 // 消せるのは**自分が作った未使用の招待**だけ。モデレーターはどちらの判定も
 // bypass する (#2812)。upstream `invite/delete.ts` の
 // `createdById !== me.id && !isModerator` / `usedAt && !isModerator` と同じ。
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		InviteID string `json:"inviteId"`
@@ -277,7 +277,7 @@ func (h *Handler) Delete(c echo.Context) error {
 // the current inviteLimitCycle window. Upstream `invite/limit.ts` returns
 // `remaining: null` when policies.inviteLimit is falsy (= 無制限), otherwise
 // `max(0, inviteLimit - count)`.
-func (h *Handler) Limit(c echo.Context) error {
+func (h *Handler) Limit(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	policies := h.policies(user.ID)
 	invLimit, hasLimit := role.PolicyNumber(policies["inviteLimit"])

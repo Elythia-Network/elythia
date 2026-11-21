@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -159,8 +159,7 @@ func (f *rangedFixture) do(t *testing.T, method, key string, headers map[string]
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/files/:accessKey")
-	c.SetParamNames("accessKey")
-	c.SetParamValues(key)
+	c.SetPathValues(echo.PathValues{{Name: "accessKey", Value: key}})
 	require.NoError(t, f.handler(c))
 	return rec
 }
@@ -392,8 +391,7 @@ func TestFilesHandler_ObjectStorageClientDisconnect(t *testing.T) {
 	w := &failingWriter{ResponseRecorder: httptest.NewRecorder()}
 	c := e.NewContext(req, w)
 	c.SetPath("/files/:accessKey")
-	c.SetParamNames("accessKey")
-	c.SetParamValues("k")
+	c.SetPathValues(echo.PathValues{{Name: "accessKey", Value: "k"}})
 	require.NoError(t, f.handler(c))
 	assert.Equal(t, http.StatusOK, w.Code)
 }

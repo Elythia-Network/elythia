@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -14,7 +14,7 @@ import (
 )
 
 // PromoCreate handles POST /api/admin/promo/create.
-func (h *Handler) PromoCreate(c echo.Context) error {
+func (h *Handler) PromoCreate(c *echo.Context) error {
 	if h.promoNoteRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}

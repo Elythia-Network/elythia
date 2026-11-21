@@ -24,7 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // UpdateRequest is the request body for i/update.
@@ -402,7 +402,7 @@ func driveIDUpdate(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req UpdateRequest

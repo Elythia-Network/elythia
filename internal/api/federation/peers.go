@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Peers handles GET /api/v1/instance/peers.
@@ -21,7 +21,7 @@ import (
 //
 // federation/instances (Misskey 独自 API) とは別物で、あちらは instance
 // オブジェクトの詳細を返す。こちらは host 文字列のみ。
-func (h *Handler) Peers(c echo.Context) error {
+func (h *Handler) Peers(c *echo.Context) error {
 	if h.svc == nil {
 		return c.JSON(http.StatusOK, []string{})
 	}

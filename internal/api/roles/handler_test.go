@@ -21,7 +21,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,7 +179,7 @@ func newTestHandlerWithMeta(t *testing.T, meta repository.MetaRepository) (*role
 	return h, roleRepo
 }
 
-func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -189,11 +189,11 @@ func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder 
 	return rec
 }
 
-// viewerCtx bundles an echo.Context that carries an authenticated viewer with
+// viewerCtx bundles an *echo.Context that carries an authenticated viewer with
 // its response recorder so mute/block/channel filter tests can drive Notes and
 // inspect the result.
 type viewerCtx struct {
-	ctx echo.Context
+	ctx *echo.Context
 	rec *httptest.ResponseRecorder
 }
 

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // apiEndpointNames returns the deduped names of every registered POST /api/*
@@ -20,7 +20,7 @@ import (
 func apiEndpointNames(e *echo.Echo) []string {
 	names := make([]string, 0)
 	seen := make(map[string]struct{})
-	for _, r := range e.Routes() {
+	for _, r := range e.Router().Routes() {
 		if r.Method != http.MethodPost {
 			continue
 		}

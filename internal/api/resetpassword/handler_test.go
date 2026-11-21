@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -179,7 +179,7 @@ func newTestHandler() (*Handler, *mockUserRepo, *mockResetRepo) {
 	return h, userRepo, resetRepo
 }
 
-func post(handler func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

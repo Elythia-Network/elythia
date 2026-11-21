@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,7 +64,7 @@ func newTestHandlerWithService() (*Handler, *testutil.MockChatRepository) {
 	return h, repo
 }
 
-func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -1123,12 +1123,12 @@ func TestReactions_AccessErrorIsIndistinguishable(t *testing.T) {
 	// DM の送った側も自分のリアクションを外せる。
 	for _, ep := range []struct {
 		name    string
-		handler func(*Handler) func(echo.Context) error
+		handler func(*Handler) func(*echo.Context) error
 		id      string
 		denied  []string
 	}{
-		{"react", func(h *Handler) func(echo.Context) error { return h.ReactionsCreate }, reactID, []string{"dm", "room", "own"}},
-		{"unreact", func(h *Handler) func(echo.Context) error { return h.ReactionsDelete }, unreactID, []string{"dm", "room"}},
+		{"react", func(h *Handler) func(*echo.Context) error { return h.ReactionsCreate }, reactID, []string{"dm", "room", "own"}},
+		{"unreact", func(h *Handler) func(*echo.Context) error { return h.ReactionsDelete }, unreactID, []string{"dm", "room"}},
 	} {
 		t.Run(ep.name, func(t *testing.T) {
 			h, repo, pub := newH(t)

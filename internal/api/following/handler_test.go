@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -797,7 +797,7 @@ func TestListsAcceptIntegerValuedFractions(t *testing.T) {
 	bob := addUser(repo, "bob", false)
 	for _, tc := range []struct {
 		name string
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 	}{
 		{"list", h.List},
 		{"requests/list", h.ListRequests},

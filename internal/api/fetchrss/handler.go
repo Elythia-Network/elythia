@@ -24,7 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/safehttp"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/mmcdole/gofeed"
 	"golang.org/x/sync/singleflight"
 )
@@ -173,7 +173,7 @@ func (h *Handler) SetClock(now func() time.Time) {
 //
 // URL 検証と error 体系は upstream 2026.7.0 の GHSA hardening (normalizeUrl +
 // INVALID_URL / FETCH_RSS_FAILED / FETCH_RSS_UNAVAILABLE) に揃える。
-func (h *Handler) Fetch(c echo.Context) error {
+func (h *Handler) Fetch(c *echo.Context) error {
 	rawURL, provided, mistyped := h.extractURL(c)
 	if mistyped {
 		// object でない body (requireObjectBody が先に弾く) か、url が文字列で
@@ -275,7 +275,7 @@ func (h *Handler) Fetch(c echo.Context) error {
 //
 // mistyped is true when a POST body could not be read as {url: string}; the
 // caller answers it with INVALID_PARAM like upstream's ajv.
-func (h *Handler) extractURL(c echo.Context) (rawURL string, provided, mistyped bool) {
+func (h *Handler) extractURL(c *echo.Context) (rawURL string, provided, mistyped bool) {
 	if c.Request().Method != http.MethodGet {
 		// 本家は POST では body しか params にしない (ApiCallService.ts の
 		// handleRequest)。bind に失敗したときや url が文字列でないときに
@@ -399,7 +399,7 @@ func (h *Handler) inflightLeave(key string) {
 // 書き出す。Cache-Control / Content-Type を echo の既定挙動と揃えることで、
 // cache hit / miss どちらの経路でもクライアントから見た response shape は
 // 同一になる (TS upstream とも整合)。
-func writeCachedJSON(c echo.Context, body []byte) error {
+func writeCachedJSON(c *echo.Context, body []byte) error {
 	resp := c.Response()
 	// upstream fetch-rss.ts は cacheSec:180 + allowGet:true。ApiCallService は
 	// `GET && cacheSec && !token && !user` のときだけ Cache-Control を付ける。

@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SigninWithPasskey handles POST /api/signin-with-passkey.
@@ -32,7 +32,7 @@ import (
 //  2. { credential, context }: 1 で受け取った context を round-trip し、ブラウザ
 //     から返ってきた assertion を検証する。成功すると `usePasswordLessLogin` が
 //     有効なユーザに対し signinResponse: { finished, id, i } を返す。
-func (h *Handler) SigninWithPasskey(c echo.Context) error {
+func (h *Handler) SigninWithPasskey(c *echo.Context) error {
 	credential, ctxRaw, err := readPasskeyBody(c)
 	if err != nil {
 		return err
@@ -172,7 +172,7 @@ func passkeyCredentialID(credential json.RawMessage) (string, credentialIDKind) 
 // id (`ed1d7571-…`) の 400 にしていたが、本家では配列や文字列の body は
 // credential が undefined になって challenge を返し、文字列でない context は
 // 1658cc2e の 400 になる (#3330)。
-func readPasskeyBody(c echo.Context) (credential, ctx json.RawMessage, err error) {
+func readPasskeyBody(c *echo.Context) (credential, ctx json.RawMessage, err error) {
 	obj, err := readSigninObject(c)
 	if err != nil {
 		return nil, nil, err
@@ -228,7 +228,7 @@ func (h *Handler) resolvePasskeyKey(credentialID string, kind credentialIDKind) 
 // suspended check, passwordless flag check, counter update, and response shape.
 // 切り出してあるのは webauthn signature の verify success path をユニットテスト
 // しやすくするため。
-func (h *Handler) finishPasskeySignin(c echo.Context, user *model.User, cred *webauthn.Credential) error {
+func (h *Handler) finishPasskeySignin(c *echo.Context, user *model.User, cred *webauthn.Credential) error {
 	if user == nil {
 		// upstream SigninWithPasskeyApiService:155 の user==null ケースは 652f899f
 		// (authorizedUserId は得たが user row が無い)。932c904e は upstream の

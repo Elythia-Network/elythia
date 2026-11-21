@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,14 +52,14 @@ func TestCursorForm_MyAndAliases(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		call    func(*Handler) func(echo.Context) error
+		call    func(*Handler) func(*echo.Context) error
 		cursors *[][2]string
 		want    [2]string
 	}{
-		{name: "flash/my drops the date", call: func(h *Handler) func(echo.Context) error { return h.My }, cursors: &repo.cursors, want: [2]string{"a1", ""}},
-		{name: "i/flashs keeps the date", call: func(h *Handler) func(echo.Context) error { return h.IFlashs }, cursors: &repo.cursors, want: [2]string{"a1", datePrefix}},
-		{name: "flash/my-likes drops the date", call: func(h *Handler) func(echo.Context) error { return h.MyLikes }, cursors: &likeRepo.cursors, want: [2]string{"a1", ""}},
-		{name: "i/flashs/likes keeps the date", call: func(h *Handler) func(echo.Context) error { return h.IFlashsLikes }, cursors: &likeRepo.cursors, want: [2]string{"a1", datePrefix}},
+		{name: "flash/my drops the date", call: func(h *Handler) func(*echo.Context) error { return h.My }, cursors: &repo.cursors, want: [2]string{"a1", ""}},
+		{name: "i/flashs keeps the date", call: func(h *Handler) func(*echo.Context) error { return h.IFlashs }, cursors: &repo.cursors, want: [2]string{"a1", datePrefix}},
+		{name: "flash/my-likes drops the date", call: func(h *Handler) func(*echo.Context) error { return h.MyLikes }, cursors: &likeRepo.cursors, want: [2]string{"a1", ""}},
+		{name: "i/flashs/likes keeps the date", call: func(h *Handler) func(*echo.Context) error { return h.IFlashsLikes }, cursors: &likeRepo.cursors, want: [2]string{"a1", datePrefix}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

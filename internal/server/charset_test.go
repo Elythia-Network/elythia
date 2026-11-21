@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,7 +44,7 @@ func TestRewriteCharset(t *testing.T) {
 // middleware として通したときに実際のヘッダが書き換わること。
 func TestLowercaseCharset_Middleware(t *testing.T) {
 	e := echo.New()
-	h := lowercaseCharset(func(c echo.Context) error {
+	h := lowercaseCharset(func(c *echo.Context) error {
 		return c.HTML(http.StatusOK, "<html></html>")
 	})
 
@@ -60,7 +60,7 @@ func TestLowercaseCharset_Middleware(t *testing.T) {
 // charset を持たない応答はそのまま通す。
 func TestLowercaseCharset_LeavesOtherTypes(t *testing.T) {
 	e := echo.New()
-	h := lowercaseCharset(func(c echo.Context) error {
+	h := lowercaseCharset(func(c *echo.Context) error {
 		return c.Blob(http.StatusOK, "image/png", []byte{0x89, 'P', 'N', 'G'})
 	})
 

@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/captcha"
 	"github.com/elythia-network/elythia/internal/metasecret"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // supportedCaptchaProviders mirrors upstream CaptchaService.supportedCaptchaProviders.
@@ -22,7 +22,7 @@ var supportedCaptchaProviders = map[string]struct{}{
 // in the nested shape upstream `CaptchaService.get` produces (current.ts res).
 // 旧実装は flat な {provider, siteKey} のみで、frontend が res.hcaptcha.siteKey
 // 等を読むと undefined になっていた。
-func (h *Handler) CaptchaCurrent(c echo.Context) error {
+func (h *Handler) CaptchaCurrent(c *echo.Context) error {
 	if h.metaRepo == nil {
 		// frontend は res.hcaptcha.siteKey 等を無条件に参照するので、未配線でも
 		// full nested shape (値は nil) を返して shape を崩さない。
@@ -87,7 +87,7 @@ func captchaCurrentShape(provider string, meta *model.Meta) map[string]any {
 // のみ per-provider の sitekey/secret/instanceUrl を保存する (CaptchaService.save)。
 // 旧実装は per-provider key (hcaptchaSiteKey 等) を期待しており frontend の保存
 // 値が DB に書かれず、captchaResult の検証も無かった。
-func (h *Handler) CaptchaSave(c echo.Context) error {
+func (h *Handler) CaptchaSave(c *echo.Context) error {
 	var req struct {
 		Provider      string  `json:"provider"`
 		CaptchaResult *string `json:"captchaResult"`
@@ -199,7 +199,7 @@ func (h *Handler) CaptchaSave(c echo.Context) error {
 
 // mapCaptchaError writes the upstream save.ts error response for a captcha
 // verification error (sentinel errors from internal/core/captcha).
-func mapCaptchaError(c echo.Context, err error) error {
+func mapCaptchaError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, captcha.ErrNoResponse):
 		return c.JSON(http.StatusBadRequest, apierr.Error("NO_RESPONSE_PROVIDED", "No response provided.", "40acbba8-0937-41fb-bb3f-474514d40afe"))
@@ -233,7 +233,7 @@ func (h *Handler) buildCaptchaVerifier(provider, secret, sitekey, instanceURL st
 	return nil
 }
 
-func invalidCaptchaParams(c echo.Context) error {
+func invalidCaptchaParams(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAMETERS", "Invalid parameters.", "26654194-410e-44e2-b42e-460ff6f92476"))
 }
 

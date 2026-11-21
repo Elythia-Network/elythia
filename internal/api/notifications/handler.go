@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ModeratorChecker reports whether a user has moderation privileges.
@@ -335,7 +335,7 @@ type ListRequest struct {
 // Show handles POST /api/i/notifications - returns the authenticated user's
 // notification timeline. 既定は降順だが、sinceId 単独のページだけは昇順になる
 // (upstream と同じ。Service.List の ascending)。
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	req, ok := h.bindListRequest(c)
 	if !ok {
@@ -513,7 +513,7 @@ func validNotificationTypes(types []string) bool {
 // bindListRequest binds the shared i/notifications(-grouped) request body and
 // normalizes the cursor / limit. Returns ok=false on a bind error so callers
 // can emit INVALID_PARAM.
-func (h *Handler) bindListRequest(c echo.Context) (ListRequest, bool) {
+func (h *Handler) bindListRequest(c *echo.Context) (ListRequest, bool) {
 	var req ListRequest
 	if err := c.Bind(&req); err != nil {
 		return req, false
@@ -554,7 +554,7 @@ func (h *Handler) bindListRequest(c echo.Context) (ListRequest, bool) {
 // #1953 以降、note-required 通知でその note が map に無いものは**行ごと**落ちる
 // (noteId だけの行を返さない)。#1444 当初の「行は残して detail だけ落とす」形では
 // ないので、他経路をここに揃えにいくときは注意すること。
-func (h *Handler) collectNotifications(c echo.Context, user *model.User, req ListRequest) ([]*notification.Notification, map[string]*model.User, map[string]*model.Note, error) {
+func (h *Handler) collectNotifications(c *echo.Context, user *model.User, req ListRequest) ([]*notification.Notification, map[string]*model.User, map[string]*model.Note, error) {
 	all, dropped, notifierByID, noteByID, err := h.collectNotificationsWithDropped(c, user, req, false)
 	if err != nil {
 		return nil, nil, nil, err
@@ -591,7 +591,7 @@ func survivors(all []*notification.Notification, dropped map[string]struct{}) []
 // **id 集合だけでは足りない。** 区切りになるかは両隣との pair 述語 (type /
 // noteId / renote の target) で決まるので、落とした通知の中身そのものが要る。
 // resolveAllNotes は drop 済み行の note まで引くかどうか。grouped だけが true。
-func (h *Handler) collectNotificationsWithDropped(c echo.Context, user *model.User, req ListRequest, resolveAllNotes bool) ([]*notification.Notification, map[string]struct{}, map[string]*model.User, map[string]*model.Note, error) {
+func (h *Handler) collectNotificationsWithDropped(c *echo.Context, user *model.User, req ListRequest, resolveAllNotes bool) ([]*notification.Notification, map[string]struct{}, map[string]*model.User, map[string]*model.Note, error) {
 	// 明示的な includeTypes:[] は空配列を返す (= 何も含めない)。omit (nil) は全
 	// type を通す。Go の []string は absent→nil / []→non-nil(len 0) で区別できる
 	// (#1546)。
@@ -910,7 +910,7 @@ func (h *Handler) anyNotifierSuspended(rows []*notification.Notification, notifi
 // 副作用で全通知を既読化し、main stream に readAllNotifications を publish
 // する。これが無いとフロントエンドが /my/notifications を開いてもバッジ
 // カウントが残り続ける (#420)。
-func (h *Handler) maybeMarkAsRead(c echo.Context, user *model.User, req ListRequest) {
+func (h *Handler) maybeMarkAsRead(c *echo.Context, user *model.User, req ListRequest) {
 	if req.MarkAsRead != nil && !*req.MarkAsRead {
 		return
 	}
@@ -931,7 +931,7 @@ func (h *Handler) maybeMarkAsRead(c echo.Context, user *model.User, req ListRequ
 // #2831)。バッジのカウンタはクライアント側にしか無く、readAllNotifications を
 // 取りこぼすと読み取り位置だけが進んで guard に阻まれる。次の通知が来るまで
 // バッジが残るので、その場で復帰させる手段としてこのボタンを force にする。
-func (h *Handler) MarkAllAsRead(c echo.Context) error {
+func (h *Handler) MarkAllAsRead(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if err := h.svc.MarkAllAsRead(c.Request().Context(), user.ID, true); err != nil {
 		return apierr.JSONInternalError(c)
@@ -953,7 +953,7 @@ func (h *Handler) MarkAllAsRead(c echo.Context) error {
 // 無し)。'app' 通知の header/icon は schema 上 required + nullable なので、
 // 値が無くても null で常に present にする。appAccessTokenId も記録する
 // (内部メタデータ、レスポンスには出さない)。
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Body   *string `json:"body"`
@@ -1011,7 +1011,7 @@ func (h *Handler) Create(c echo.Context) error {
 // resolveRequestToken re-resolves the request's raw token to its AccessToken
 // row (#1557)。native session login token は access_token 行を持たないので nil
 // (= header/icon fallback 無し)。repo 未配線 / token 無し / 解決失敗も nil。
-func (h *Handler) resolveRequestToken(c echo.Context) *model.AccessToken {
+func (h *Handler) resolveRequestToken(c *echo.Context) *model.AccessToken {
 	if h.accessTokenRepo == nil {
 		return nil
 	}
@@ -1028,7 +1028,7 @@ func (h *Handler) resolveRequestToken(c echo.Context) *model.AccessToken {
 }
 
 // Flush handles POST /api/notifications/flush.
-func (h *Handler) Flush(c echo.Context) error {
+func (h *Handler) Flush(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.svc != nil {
 		if err := h.svc.Flush(c.Request().Context(), user.ID); err != nil {
@@ -1041,7 +1041,7 @@ func (h *Handler) Flush(c echo.Context) error {
 // TestNotification handles POST /api/notifications/test-notification.
 // 本人へ 'test' 通知を送り、web push / streaming の疎通を確認できるようにする
 // (upstream notifications/test-notification、#1559)。
-func (h *Handler) TestNotification(c echo.Context) error {
+func (h *Handler) TestNotification(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.testNotifier != nil && user != nil {
 		h.testNotifier.OnTest(user.ID)

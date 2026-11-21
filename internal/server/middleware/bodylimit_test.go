@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,7 +21,7 @@ func TestBodyLimitByPath(t *testing.T) {
 	e := echo.New()
 	e.Use(BodyLimitByPath(testMaxFileSize, nil))
 	// body を読む handler。chunked 超過時に limitedReader の 413 を伝播する。
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
 			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
@@ -124,7 +124,7 @@ func TestUploadBodyLimit(t *testing.T) {
 func TestBodyLimitByPathUploadIsNeverUnlimited(t *testing.T) {
 	e := echo.New()
 	e.Use(BodyLimitByPath(0, nil))
-	e.POST("/api/drive/files/create", func(c echo.Context) error {
+	e.POST("/api/drive/files/create", func(c *echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
 			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
@@ -154,7 +154,7 @@ func TestBodyLimitByPath_PluginPeer(t *testing.T) {
 	e.Use(BodyLimitByPath(0, map[string]int64{
 		"/api/plugin/small/_peer": small,
 	}))
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		if _, err := io.ReadAll(c.Request().Body); err != nil {
 			if he := apierr.HTTPStatusError(err); he != nil {
 				return he
@@ -201,13 +201,13 @@ func TestBodyLimitByPath_AppliesToUnregisteredPaths(t *testing.T) {
 	// auth.Authenticate の extractToken がこれを行う。
 	var read int64
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			n, _ := io.Copy(io.Discard, c.Request().Body)
 			atomic.AddInt64(&read, n)
 			return next(c)
 		}
 	})
-	e.POST("/api/meta", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	e.POST("/api/meta", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 
 	post := func(path string, n int) int {
 		req := httptest.NewRequest(http.MethodPost, path,

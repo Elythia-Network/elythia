@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -269,8 +269,8 @@ func (r *inMemorySKInternal) Delete(string, string) error             { return n
 func (r *inMemorySKInternal) DeleteByUser(string) error               { return nil }
 func (r *inMemorySKInternal) CountByUser(string) (int64, error)       { return 0, nil }
 
-// helper: build an echo.Context with empty body.
-func newCtx() echo.Context {
+// helper: build an *echo.Context with empty body.
+func newCtx() *echo.Context {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/signin-with-passkey", strings.NewReader(""))
 	rec := httptest.NewRecorder()
@@ -283,7 +283,7 @@ func newCtx() echo.Context {
 func TestFinishPasskeySignin_NilUser(t *testing.T) {
 	h := &Handler{}
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	require.NoError(t, h.finishPasskeySignin(c, nil, nil))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	// #2081: user==null は upstream SigninWithPasskeyApiService:155 の 652f899f。
@@ -295,7 +295,7 @@ func TestFinishPasskeySignin_NilUser(t *testing.T) {
 func TestFinishPasskeySignin_Suspended(t *testing.T) {
 	h := &Handler{}
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1", IsSuspended: true}
 	require.NoError(t, h.finishPasskeySignin(c, user, nil))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -311,7 +311,7 @@ func TestFinishPasskeySignin_NoProfile(t *testing.T) {
 	// プロフィールを登録しない → FindProfileByUserID が err
 	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1"}
 	require.NoError(t, h.finishPasskeySignin(c, user, nil))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -323,7 +323,7 @@ func TestFinishPasskeySignin_PasswordlessNotEnabled(t *testing.T) {
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: false}
 	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1"}
 	require.NoError(t, h.finishPasskeySignin(c, user, nil))
 	assert.Equal(t, http.StatusForbidden, rec.Code)
@@ -372,7 +372,7 @@ func TestFinishPasskeySignin_FailuresDoNotRecordIP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, ipRec := newHandler(t, true, true)
 			c := newCtx()
-			rec := c.Response().Writer.(*httptest.ResponseRecorder)
+			rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 			require.NoError(t, h.finishPasskeySignin(c, tc.user, nil))
 			require.Equal(t, http.StatusForbidden, rec.Code)
 			assert.Zero(t, ipRec.n(), "失敗したパスキー認証の IP を記録している")
@@ -390,7 +390,7 @@ func TestFinishPasskeySignin_FailuresDoNotRecordIP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, ipRec := newHandler(t, tc.passwordless, tc.withProfile)
 			c := newCtx()
-			rec := c.Response().Writer.(*httptest.ResponseRecorder)
+			rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 			require.NoError(t, h.finishPasskeySignin(c, &model.User{ID: "u1"}, nil))
 			require.Equal(t, http.StatusForbidden, rec.Code)
 			assert.Zero(t, ipRec.n(), "失敗したパスキー認証の IP を記録している")
@@ -400,7 +400,7 @@ func TestFinishPasskeySignin_FailuresDoNotRecordIP(t *testing.T) {
 	t.Run("success records", func(t *testing.T) {
 		h, ipRec := newHandler(t, true, true)
 		c := newCtx()
-		rec := c.Response().Writer.(*httptest.ResponseRecorder)
+		rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 		require.NoError(t, h.finishPasskeySignin(c, &model.User{ID: "u1"}, nil))
 		require.Equal(t, http.StatusOK, rec.Code)
 		got := ipRec.seen()
@@ -445,7 +445,7 @@ func TestFinishPasskeySignin_Success(t *testing.T) {
 	repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: true}
 	h := NewHandler(repo, nil, nil, nil)
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1", Token: &tok}
 	require.NoError(t, h.finishPasskeySignin(c, user, nil))
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -543,7 +543,7 @@ func TestFinishPasskeySignin_HooksFire(t *testing.T) {
 	h.SetSigninRepo(signinRepo, fixedIDGen{})
 
 	c := newCtx()
-	rec := c.Response().Writer.(*httptest.ResponseRecorder)
+	rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 	user := &model.User{ID: "u1", Token: &tok}
 
 	// ダミー credential — go-webauthn の Credential 型を使う。

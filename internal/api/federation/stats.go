@@ -7,14 +7,14 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/api/pagination"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Stats handles POST /api/federation/stats.
 //
 // 連合統計: followers / following がもっとも多いリモートインスタンス上位
 // N 件と、そのほかのインスタンスをまとめた残り総計を返す。
-func (h *Handler) Stats(c echo.Context) error {
+func (h *Handler) Stats(c *echo.Context) error {
 	// admin/overview は GET で叩いてくるので `query` タグも必要
 	// (#421 Devin review: charts.Request と同じ pattern)。
 	var req struct {

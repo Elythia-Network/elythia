@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -252,7 +252,7 @@ func TestWritePluginBlobAppliesDeadlineThroughWWWAuthenticate(t *testing.T) {
 	e := echo.New()
 	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/blob", nil), inner)
 	start := time.Now()
-	handler := middleware.WWWAuthenticate()(func(c echo.Context) error {
+	handler := middleware.WWWAuthenticate()(func(c *echo.Context) error {
 		return writePluginBlob(c, plugin.Blob{ContentType: "video/mp4", Body: []byte("mp4"), WriteTimeout: 30 * time.Second})
 	})
 
@@ -436,7 +436,7 @@ func TestWrapPluginHandler_BlobWithoutCacheControl(t *testing.T) {
 	e := echo.New()
 	api := e.Group("/api")
 	api.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set("Cache-Control", "private, max-age=0")
 			return next(c)
 		}
@@ -602,7 +602,7 @@ func (r *stubUserRepo) FindByID(string) (*model.User, error) { return r.user, r.
 // assert on the auth header and body the caller produced.
 func apiTestEcho() *echo.Echo {
 	e := echo.New()
-	e.POST("/api/echo", func(c echo.Context) error {
+	e.POST("/api/echo", func(c *echo.Context) error {
 		var body map[string]any
 		_ = json.NewDecoder(c.Request().Body).Decode(&body)
 		return c.JSON(http.StatusOK, map[string]any{
@@ -611,10 +611,10 @@ func apiTestEcho() *echo.Echo {
 			"body": body,
 		})
 	})
-	e.POST("/api/boom", func(c echo.Context) error {
+	e.POST("/api/boom", func(c *echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]any{"error": map[string]any{"code": "NO_SUCH_NOTE"}})
 	})
-	e.POST("/api/empty", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.POST("/api/empty", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	return e
 }
 
@@ -906,7 +906,7 @@ func TestSetupPlugins_CheckedPolicyResolversReachContextAndRoute(t *testing.T) {
 	s, api := newPluginTestServer(config.RoleServer)
 	s.roleService = svc
 	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Set(string(middleware.UserContextKey), &model.User{ID: "u1"})
 			return next(c)
 		}
@@ -1925,7 +1925,7 @@ func TestSetupPlugins_RoutesRejectAppTokens(t *testing.T) {
 	// token を DB で解決するので、ここでは結果だけを与える)。
 	var scope *middleware.AuthScope
 	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if scope != nil {
 				c.Set(string(middleware.AuthScopeContextKey), scope)
 			}

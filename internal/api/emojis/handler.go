@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles emoji-related API endpoints.
@@ -38,7 +38,7 @@ func NewHandler(emojiRepo repository.EmojiRepository) *Handler {
 // reused until the repository hands out a different list. The server's gzip
 // middleware skips this route (selfEncodedRoutes in internal/server), so the
 // handler negotiates Content-Encoding itself.
-func (h *Handler) Emojis(c echo.Context) error {
+func (h *Handler) Emojis(c *echo.Context) error {
 	emojis, err := h.emojiRepo.ListLocal()
 	if err != nil {
 		// エラー時は空配列で返却 (best-effort)。本家はエラーになりキャッシュされない
@@ -153,7 +153,7 @@ func encodeEmojis(emojis []*model.Emoji) *encodedEmojis {
 
 // Emoji returns a single custom emoji by name.
 // POST /api/emoji
-func (h *Handler) Emoji(c echo.Context) error {
+func (h *Handler) Emoji(c *echo.Context) error {
 	var req struct {
 		Name *string `json:"name" query:"name"`
 	}

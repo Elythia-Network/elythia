@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -98,7 +98,7 @@ func TestGzipMiddleware_CompressionByContentType(t *testing.T) {
 			payload := strings.Repeat("a", 4000)
 			e := echo.New()
 			e.Use(gzipMiddleware())
-			e.GET("/x", func(c echo.Context) error {
+			e.GET("/x", func(c *echo.Context) error {
 				c.Response().Header().Set(echo.HeaderContentLength, strconv.Itoa(len(payload)))
 				return c.Blob(tc.status, tc.contentType, []byte(payload))
 			})
@@ -126,7 +126,7 @@ func TestGzipMiddleware_SniffedImageIsNotCompressed(t *testing.T) {
 	body := pngLikeBody(4000)
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/x", func(c echo.Context) error {
+	e.GET("/x", func(c *echo.Context) error {
 		c.Response().WriteHeader(http.StatusOK)
 		_, err := c.Response().Write(body)
 		return err
@@ -141,10 +141,10 @@ func TestGzipMiddleware_SniffedImageIsNotCompressed(t *testing.T) {
 func TestGzipMiddleware_BodylessResponsesKeepStatusAndLength(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/redirect", func(c echo.Context) error {
+	e.GET("/redirect", func(c *echo.Context) error {
 		return c.Redirect(http.StatusFound, "/elsewhere")
 	})
-	e.HEAD("/img", func(c echo.Context) error {
+	e.HEAD("/img", func(c *echo.Context) error {
 		c.Response().Header().Set(echo.HeaderContentType, "image/png")
 		c.Response().Header().Set(echo.HeaderContentLength, "5000")
 		return c.NoContent(http.StatusOK)
@@ -165,11 +165,11 @@ func TestGzipMiddleware_BodylessResponsesKeepStatusAndLength(t *testing.T) {
 func TestGzipMiddleware_FlushedStreamIsStillCompressed(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/sse", func(c echo.Context) error {
+	e.GET("/sse", func(c *echo.Context) error {
 		res := c.Response()
 		res.Header().Set(echo.HeaderContentType, "text/event-stream")
 		res.WriteHeader(http.StatusOK)
-		res.Flush()
+		_ = http.NewResponseController(res).Flush()
 		_, err := res.Write([]byte("data: hello\n\n"))
 		return err
 	})
@@ -194,7 +194,7 @@ func TestGzipMiddleware_DoesNotRecompressEncodedBody(t *testing.T) {
 
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/pre", func(c echo.Context) error {
+	e.GET("/pre", func(c *echo.Context) error {
 		c.Response().Header().Set(echo.HeaderContentEncoding, "gzip")
 		return c.Blob(http.StatusOK, "text/plain", pre)
 	})
@@ -212,8 +212,8 @@ func TestGzipMiddleware_DoesNotRecompressEncodedBody(t *testing.T) {
 func TestGzipMiddleware_HijackThroughTypeAssertion(t *testing.T) {
 	e := echo.New()
 	e.Use(gzipMiddleware())
-	e.GET("/ws", func(c echo.Context) error {
-		hj, ok := c.Response().Writer.(http.Hijacker)
+	e.GET("/ws", func(c *echo.Context) error {
+		hj, ok := c.Response().(http.Hijacker)
 		if !ok {
 			return c.String(http.StatusInternalServerError, "not a hijacker")
 		}

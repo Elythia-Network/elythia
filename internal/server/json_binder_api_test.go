@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -50,7 +50,7 @@ func TestDeserialize_ReadErrorPassesThrough(t *testing.T) {
 
 // bindAt runs apiBinder.Bind for a request with the given method, route
 // pattern, content type and body.
-func bindAt(t *testing.T, method, path, contentType, body string, dst any) (echo.Context, error) {
+func bindAt(t *testing.T, method, path, contentType, body string, dst any) (*echo.Context, error) {
 	t.Helper()
 	e := echo.New()
 	e.JSONSerializer = fastJSONSerializer{}
@@ -60,7 +60,7 @@ func bindAt(t *testing.T, method, path, contentType, body string, dst any) (echo
 	}
 	c := e.NewContext(req, httptest.NewRecorder())
 	c.SetPath(path)
-	return c, (&apiBinder{}).Bind(dst, c)
+	return c, (&apiBinder{}).Bind(c, dst)
 }
 
 // TestAPIBinder_NonObjectBody pins upstream's ajv `type: 'object'` failure
@@ -143,7 +143,9 @@ func TestAPIBinder_OutOfScope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := bindAt(t, tc.method, tc.path, tc.ct, tc.body, tc.dst)
 			if tc.wantErr {
-				assert.ErrorIs(t, err, echo.ErrUnsupportedMediaType)
+				// echo の v5 の binder は 415 を echo.ErrUnsupportedMediaType ではなく
+				// Code だけの HTTPError で返す (#4239)。応答の本文は同じ。
+				assert.Equal(t, http.StatusUnsupportedMediaType, echo.StatusCode(err), err)
 			} else {
 				assert.NoError(t, err)
 			}
@@ -341,7 +343,7 @@ func TestRequireObjectBody(t *testing.T) {
 			c.SetPath(tc.path)
 			var seen string
 			called := false
-			err := requireObjectBody(func(c echo.Context) error {
+			err := requireObjectBody(func(c *echo.Context) error {
 				called = true
 				b, _ := io.ReadAll(c.Request().Body)
 				seen = string(b)
@@ -377,7 +379,7 @@ func TestRequireObjectBody_ReadErrorPassesThrough(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	c := e.NewContext(req, httptest.NewRecorder())
 	c.SetPath("/api/x")
-	err := requireObjectBody(func(echo.Context) error { return nil })(c)
+	err := requireObjectBody(func(*echo.Context) error { return nil })(c)
 	assert.Same(t, readErr, err)
 }
 
@@ -388,9 +390,9 @@ func TestAPIRoutes_AttachCheckAfterRouteMiddleware(t *testing.T) {
 	e := echo.New()
 	api := apiRoutes{e.Group("/api")}
 	deny := func(echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
+		return func(c *echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
 	}
-	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
+	ok := func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/post", ok)
 	api.POST("/denied", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/match", ok)
@@ -426,7 +428,7 @@ func TestAPIBinder_GetIgnoresBody(t *testing.T) {
 			c := e.NewContext(req, httptest.NewRecorder())
 			c.SetPath(path)
 			var got params
-			require.NoError(t, (&apiBinder{}).Bind(&got, c), "%s %s", method, path)
+			require.NoError(t, (&apiBinder{}).Bind(c, &got), "%s %s", method, path)
 			assert.Equal(t, "foo", got.Name, "%s %s: the query wins over the body", method, path)
 			assert.Nil(t, got.Limit, "%s %s: the body is not read", method, path)
 		}
@@ -462,7 +464,7 @@ func TestRequireObjectBody_UnsupportedMediaType(t *testing.T) {
 			c := e.NewContext(req, rec)
 			c.SetPath(tc.path)
 			called := false
-			require.NoError(t, requireObjectBody(func(c echo.Context) error { called = true; return nil })(c))
+			require.NoError(t, requireObjectBody(func(c *echo.Context) error { called = true; return nil })(c))
 			assert.False(t, called, "unsupported media type reached the handler")
 			assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
 			var body map[string]any
@@ -493,7 +495,7 @@ func TestAPIBinder_GetBindsExactQueryKeysOnly(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		c := e.NewContext(req, httptest.NewRecorder())
 		c.SetPath("/api/emoji")
-		require.NoError(t, (&apiBinder{}).Bind(dst, c))
+		require.NoError(t, (&apiBinder{}).Bind(c, dst))
 	}
 	var got params
 	bind(t, "/api/emoji?Name=foo&LIMIT=5&SinceId=x", &got)
@@ -510,4 +512,24 @@ func TestAPIBinder_GetBindsExactQueryKeysOnly(t *testing.T) {
 	var m map[string]any
 	bind(t, "/api/emoji?Name=foo", &m)
 	assert.Equal(t, "foo", m["Name"])
+}
+
+// TestAPIBinder_BindErrorKeepsTheReason pins that a value echo's binder
+// cannot convert answers with the reason in the message, as echo v4 did, not
+// only "Bad Request" (#4239). v5 はフィールド名を前に付ける。
+func TestAPIBinder_BindErrorKeepsTheReason(t *testing.T) {
+	type formTarget struct {
+		N int `form:"n"`
+	}
+	_, err := bindAt(t, http.MethodPost, "/oauth/x", echo.MIMEApplicationForm, "n=abc", &formTarget{})
+	var he *echo.HTTPError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, http.StatusBadRequest, he.Code)
+	assert.Equal(t, `n: strconv.ParseInt: parsing "abc": invalid syntax`, he.Message)
+
+	// 理由を持たない 400 と、binder の外の答えはそのまま返す。
+	assert.Equal(t, errBodyNotObject, v4BindError(errBodyNotObject))
+	plain := echo.NewHTTPError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
+	assert.Equal(t, plain, v4BindError(plain))
+	assert.NoError(t, v4BindError(nil))
 }

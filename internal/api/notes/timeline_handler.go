@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // TimelineRequest is the common request body for the four timeline endpoints.
@@ -71,7 +71,7 @@ func (r *TimelineRequest) normalize() bool {
 // 扱い) と挙動を揃える。production 経路では DefaultPolicies が常に bool を
 // 返すのでこの差は発火しないが、厳密互換性のため fail-closed で揃える
 // (#1038 review)。
-func (h *Handler) timelineAvailable(c echo.Context, policyKey string) bool {
+func (h *Handler) timelineAvailable(c *echo.Context, policyKey string) bool {
 	if h.policyProvider == nil {
 		return true
 	}
@@ -85,7 +85,7 @@ func (h *Handler) timelineAvailable(c echo.Context, policyKey string) bool {
 }
 
 // Timeline handles POST /api/notes/timeline (home timeline).
-func (h *Handler) Timeline(c echo.Context) error {
+func (h *Handler) Timeline(c *echo.Context) error {
 	return h.serveTimeline(c, "home", id.NormalizeCursor, func(viewer *model.User, req TimelineRequest) ([]*model.Note, error) {
 		f := timeline.TimelineFilter{
 			WithFiles:                  req.WithFiles,
@@ -110,7 +110,7 @@ func (h *Handler) Timeline(c echo.Context) error {
 }
 
 // LocalTimeline handles POST /api/notes/local-timeline.
-func (h *Handler) LocalTimeline(c echo.Context) error {
+func (h *Handler) LocalTimeline(c *echo.Context) error {
 	if !h.timelineAvailable(c, role.PolicyLtlAvailable) {
 		return apierr.JSONLtlDisabled(c)
 	}
@@ -134,7 +134,7 @@ func (h *Handler) LocalTimeline(c echo.Context) error {
 }
 
 // GlobalTimeline handles POST /api/notes/global-timeline.
-func (h *Handler) GlobalTimeline(c echo.Context) error {
+func (h *Handler) GlobalTimeline(c *echo.Context) error {
 	if !h.timelineAvailable(c, role.PolicyGtlAvailable) {
 		return apierr.JSONGtlDisabled(c)
 	}
@@ -162,7 +162,7 @@ func (h *Handler) GlobalTimeline(c echo.Context) error {
 }
 
 // HybridTimeline handles POST /api/notes/hybrid-timeline.
-func (h *Handler) HybridTimeline(c echo.Context) error {
+func (h *Handler) HybridTimeline(c *echo.Context) error {
 	// upstream: hybrid-timeline は ltlAvailable で gate する (gtl ではなく
 	// ltl 側 policy を見るのは「ローカルタイムライン + social の hybrid」だから)。
 	// ただしエラーコードは STL_DISABLED (Social TimeLine) で local の LTL_DISABLED
@@ -396,7 +396,7 @@ func (h *Handler) loadMutedInstances(viewer *model.User) []string {
 // ので id.NormalizeCursorIDFirst、ほかの 3 つは向きごとに組み合わせるので
 // id.NormalizeCursor (#3369)。
 func (h *Handler) serveTimeline(
-	c echo.Context,
+	c *echo.Context,
 	kind string,
 	normalizeCursor id.CursorNormalizer,
 	fn func(*model.User, TimelineRequest) ([]*model.Note, error),

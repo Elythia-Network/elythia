@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SignupApplicationReviewer is the review-side surface of the signup
@@ -64,7 +64,7 @@ func packSignupApplication(a *model.SignupApplication) map[string]any {
 // は upstream misskey-js と完全一致させる契約があり mk-go 固有 scope を足せない
 // (admin/federation/delivery-health が `read:admin:server-info` を再利用するのと
 // 同じ判断)。
-func (h *Handler) SignupApplicationList(c echo.Context) error {
+func (h *Handler) SignupApplicationList(c *echo.Context) error {
 	if h.signupApplications == nil {
 		return c.JSON(http.StatusServiceUnavailable,
 			apierr.Error("UNAVAILABLE", "Approval-based signup is not configured.", "0c5b7d0e-2b7e-4d0e-9f0e-6a3f4b1f5c21"))
@@ -127,14 +127,14 @@ func (h *Handler) SignupApplicationList(c echo.Context) error {
 // SignupApplicationApprove handles POST /api/admin/signup-application/approve.
 //
 // 承認は状態を変えるだけで、registration_ticket はここでは発行しない (#2555)。
-func (h *Handler) SignupApplicationApprove(c echo.Context) error {
+func (h *Handler) SignupApplicationApprove(c *echo.Context) error {
 	return h.reviewSignupApplication(c, moderationlog.LogApproveSignupApplication, func(id, moderatorID string) error {
 		return h.signupApplications.Approve(id, moderatorID)
 	})
 }
 
 // SignupApplicationReject handles POST /api/admin/signup-application/reject.
-func (h *Handler) SignupApplicationReject(c echo.Context) error {
+func (h *Handler) SignupApplicationReject(c *echo.Context) error {
 	return h.reviewSignupApplication(c, moderationlog.LogRejectSignupApplication, func(id, moderatorID string) error {
 		return h.signupApplications.Reject(id, moderatorID)
 	})
@@ -142,7 +142,7 @@ func (h *Handler) SignupApplicationReject(c echo.Context) error {
 
 // reviewSignupApplication is shared by approve / reject: the parameter shape and
 // the error mapping are identical, so they are not duplicated.
-func (h *Handler) reviewSignupApplication(c echo.Context, logType moderationlog.LogType, act func(id, moderatorID string) error) error {
+func (h *Handler) reviewSignupApplication(c *echo.Context, logType moderationlog.LogType, act func(id, moderatorID string) error) error {
 	if h.signupApplications == nil {
 		return c.JSON(http.StatusServiceUnavailable,
 			apierr.Error("UNAVAILABLE", "Approval-based signup is not configured.", "0c5b7d0e-2b7e-4d0e-9f0e-6a3f4b1f5c21"))

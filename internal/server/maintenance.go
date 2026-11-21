@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -569,7 +569,7 @@ func maintenanceStaticRoutes() []maintmode.StaticRoute {
 
 // maintenanceStatusOff answers maintmode.StatusPath while serving normally,
 // so the maintenance page knows when to reload.
-func maintenanceStatusOff(c echo.Context) error {
+func maintenanceStatusOff(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, maintmode.StatusOf(nil, false))
 }

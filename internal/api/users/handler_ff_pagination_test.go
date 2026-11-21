@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -40,7 +40,7 @@ func setupRelationPageFixture(t *testing.T, count int) *Handler {
 }
 
 // relationPage posts to the handler and returns the row ids in response order.
-func relationPage(t *testing.T, fn func(echo.Context) error, body string) []string {
+func relationPage(t *testing.T, fn func(*echo.Context) error, body string) []string {
 	t.Helper()
 	rec := post(fn, body)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -63,10 +63,10 @@ func relationPage(t *testing.T, fn func(echo.Context) error, body string) []stri
 func TestRelationList_PaginatesWithUntilID(t *testing.T) {
 	cases := []struct {
 		name string
-		fn   func(*Handler) func(echo.Context) error
+		fn   func(*Handler) func(*echo.Context) error
 	}{
-		{"followers", func(h *Handler) func(echo.Context) error { return h.Followers }},
-		{"following", func(h *Handler) func(echo.Context) error { return h.Following }},
+		{"followers", func(h *Handler) func(*echo.Context) error { return h.Followers }},
+		{"following", func(h *Handler) func(*echo.Context) error { return h.Following }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,10 +111,10 @@ func TestRelationList_PaginatesWithUntilID(t *testing.T) {
 func TestRelationList_SinceIDReturnsAscending(t *testing.T) {
 	cases := []struct {
 		name string
-		fn   func(*Handler) func(echo.Context) error
+		fn   func(*Handler) func(*echo.Context) error
 	}{
-		{"followers", func(h *Handler) func(echo.Context) error { return h.Followers }},
-		{"following", func(h *Handler) func(echo.Context) error { return h.Following }},
+		{"followers", func(h *Handler) func(*echo.Context) error { return h.Followers }},
+		{"following", func(h *Handler) func(*echo.Context) error { return h.Following }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

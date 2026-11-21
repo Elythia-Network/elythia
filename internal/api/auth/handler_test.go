@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -199,7 +199,7 @@ func newTestHandler() (*Handler, *mockAuthSessionRepo) {
 	return h, repo
 }
 
-func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -596,8 +596,7 @@ func postMiAuthCheck(h *Handler, session string, userRepo *testutil.MockUserRepo
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetParamNames("session")
-	c.SetParamValues(session)
+	c.SetPathValues(echo.PathValues{{Name: "session", Value: session}})
 	if userRepo != nil {
 		h.SetUserRepo(userRepo)
 	}
@@ -703,7 +702,7 @@ func TestEmptyStringsAreLookedUpNotRejected(t *testing.T) {
 	user := &model.User{ID: "u1"}
 	for _, tc := range []struct {
 		name string
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 		code string
 	}{

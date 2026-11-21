@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/paramschema"
@@ -28,7 +28,7 @@ func serveEnforced(t *testing.T, opts []Option, method, target, contentType, bod
 	t.Helper()
 	e := echo.New()
 	var res enforcedResult
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		res.called = true
 		b, _ := io.ReadAll(c.Request().Body)
 		res.read = string(b)

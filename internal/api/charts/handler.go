@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -109,66 +109,66 @@ type paramError struct {
 // --- instance-wide endpoints -------------------------------------------------
 
 // Notes handles POST /api/charts/notes.
-func (h *Handler) Notes(c echo.Context) error {
+func (h *Handler) Notes(c *echo.Context) error {
 	return h.serveInstance(c, h.c.Notes, false)
 }
 
 // Users handles POST /api/charts/users.
-func (h *Handler) Users(c echo.Context) error {
+func (h *Handler) Users(c *echo.Context) error {
 	return h.serveInstance(c, h.c.Users, false)
 }
 
 // Drive handles POST /api/charts/drive.
-func (h *Handler) Drive(c echo.Context) error {
+func (h *Handler) Drive(c *echo.Context) error {
 	return h.serveInstance(c, h.c.Drive, false)
 }
 
 // Federation handles POST /api/charts/federation.
-func (h *Handler) Federation(c echo.Context) error {
+func (h *Handler) Federation(c *echo.Context) error {
 	return h.serveInstance(c, h.c.Federation, false)
 }
 
 // Instance handles POST /api/charts/instance. The chart is grouped by
 // host so the request must supply host; an empty host is accepted, like
 // upstream, and gets an empty chart.
-func (h *Handler) Instance(c echo.Context) error {
+func (h *Handler) Instance(c *echo.Context) error {
 	return h.serveInstance(c, h.c.Instance, true)
 }
 
 // ApRequest handles POST /api/charts/ap-request.
-func (h *Handler) ApRequest(c echo.Context) error {
+func (h *Handler) ApRequest(c *echo.Context) error {
 	return h.serveInstance(c, h.c.ApRequest, false)
 }
 
 // ActiveUsers handles POST /api/charts/active-users.
-func (h *Handler) ActiveUsers(c echo.Context) error {
+func (h *Handler) ActiveUsers(c *echo.Context) error {
 	return h.serveInstance(c, h.c.ActiveUsers, false)
 }
 
 // --- per-user endpoints ------------------------------------------------------
 
 // UserNotes handles POST /api/charts/user/notes.
-func (h *Handler) UserNotes(c echo.Context) error {
+func (h *Handler) UserNotes(c *echo.Context) error {
 	return h.servePerUser(c, h.c.PerUserNotes)
 }
 
 // UserDrive handles POST /api/charts/user/drive.
-func (h *Handler) UserDrive(c echo.Context) error {
+func (h *Handler) UserDrive(c *echo.Context) error {
 	return h.servePerUser(c, h.c.PerUserDrive)
 }
 
 // UserFollowing handles POST /api/charts/user/following.
-func (h *Handler) UserFollowing(c echo.Context) error {
+func (h *Handler) UserFollowing(c *echo.Context) error {
 	return h.servePerUser(c, h.c.PerUserFollowing)
 }
 
 // UserPv handles POST /api/charts/user/pv.
-func (h *Handler) UserPv(c echo.Context) error {
+func (h *Handler) UserPv(c *echo.Context) error {
 	return h.servePerUser(c, h.c.PerUserPv)
 }
 
 // UserReactions handles POST /api/charts/user/reactions.
-func (h *Handler) UserReactions(c echo.Context) error {
+func (h *Handler) UserReactions(c *echo.Context) error {
 	return h.servePerUser(c, h.c.PerUserReaction)
 }
 
@@ -176,7 +176,7 @@ func (h *Handler) UserReactions(c echo.Context) error {
 
 // serveInstance executes an instance-wide chart query. requireHost is
 // true for the host-grouped "instance" chart and false otherwise.
-func (h *Handler) serveInstance(c echo.Context, ch *chart.Chart, requireHost bool) error {
+func (h *Handler) serveInstance(c *echo.Context, ch *chart.Chart, requireHost bool) error {
 	if ch == nil {
 		return chartUnavailable(c)
 	}
@@ -214,7 +214,7 @@ func (h *Handler) serveInstance(c echo.Context, ch *chart.Chart, requireHost boo
 
 // servePerUser executes a per-user chart query. The chart is always
 // grouped so the request must supply a non-empty userId.
-func (h *Handler) servePerUser(c echo.Context, ch *chart.Chart) error {
+func (h *Handler) servePerUser(c *echo.Context, ch *chart.Chart) error {
 	if ch == nil {
 		return chartUnavailable(c)
 	}
@@ -234,7 +234,7 @@ func (h *Handler) servePerUser(c echo.Context, ch *chart.Chart) error {
 }
 
 // respond runs the actual GetChart call and writes the JSON response.
-func (h *Handler) respond(c echo.Context, ch *chart.Chart, span chart.Span, amount int, cursor *time.Time, group string) error {
+func (h *Handler) respond(c *echo.Context, ch *chart.Chart, span chart.Span, amount int, cursor *time.Time, group string) error {
 	result, err := ch.GetChart(c.Request().Context(), span, amount, cursor, group)
 	if err != nil {
 		return internalError(c)
@@ -305,7 +305,7 @@ func (h *Handler) parseRequest(req *Request) (chart.Span, int, *time.Time, *para
 // POST / 認証済みリクエストには付けない。auth は e.Use(Authenticate()) で全
 // request に optional 適用済みのため、RequireAuth 無しの chart route でも
 // GetUser/GetToken が populate される (未認証なら nil / "")。
-func setCacheControl(c echo.Context) {
+func setCacheControl(c *echo.Context) {
 	// upstream `!token && !user` の token は raw token なので、無効/suspended token を
 	// 付けた GET でも cache を付けない (HasRawToken、#2049)。
 	if c.Request().Method == http.MethodGet &&
@@ -317,15 +317,15 @@ func setCacheControl(c echo.Context) {
 
 // --- error helpers -----------------------------------------------------------
 
-func invalidParam(c echo.Context, perr *paramError) error {
+func invalidParam(c *echo.Context, perr *paramError) error {
 	return c.JSON(http.StatusBadRequest, apierr.InvalidParamClient(perr.param, perr.reason))
 }
 
-func internalError(c echo.Context) error {
+func internalError(c *echo.Context) error {
 	return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "9c2cb6b3-ec89-4ce4-9b3a-2f5c66c2af6b"))
 }
 
-func chartUnavailable(c echo.Context) error {
+func chartUnavailable(c *echo.Context) error {
 	return c.JSON(http.StatusServiceUnavailable, apierr.Error("CHART_UNAVAILABLE", "Chart not available.", "5e3a8d12-6c4f-4d70-b3bc-1f3dd0c7a37a"))
 }
 

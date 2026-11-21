@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	corefollowing "github.com/elythia-network/elythia/internal/core/following"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Invalidate handles POST /api/following/invalidate.
@@ -15,7 +15,7 @@ import (
 // 認証ユーザーが自分のフォロワーのうち userId 指定の相手を強制的に外す。
 // Misskey 本家互換で RequireAuth レベル (moderator 不要) のため、嫌がらせ
 // フォロワーに対して本人がいつでも解除できる。
-func (h *Handler) Invalidate(c echo.Context) error {
+func (h *Handler) Invalidate(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID string `json:"userId"`
@@ -51,7 +51,7 @@ func (h *Handler) Invalidate(c echo.Context) error {
 // "none" を SQL NULL に変換する仕様 (#17385)。これがないと `following/list`
 // の `notification=true` filter (= `notify IS NOT NULL`) が機能不全になる
 // (mk-go では旧来 "none" 文字列がそのまま入って null 扱いされなかった)。
-func (h *Handler) UpdateFollow(c echo.Context) error {
+func (h *Handler) UpdateFollow(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		UserID      string  `json:"userId"`
@@ -119,7 +119,7 @@ func normalizeNotify(v string) any {
 //
 // 呼び出しユーザーの全フォロー関係に対して同じ partial update を適用する。
 // 旅行期間中 notify を一括で無効にする等の運用に使う。
-func (h *Handler) UpdateFollowAll(c echo.Context) error {
+func (h *Handler) UpdateFollowAll(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		Notify      *string `json:"notify"`

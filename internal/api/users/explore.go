@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -26,7 +26,7 @@ func (h *Handler) SetLocalHost(host string) { h.localHost = host }
 // **DB から読めなくても 200 で空配列を返す。** upstream の explore ページは
 // 配列前提で `.map()` するので、ここで 500 にするとページ全体が開かなくなる。
 // 引数の不正は本家と同じく 400 INVALID_PARAM にする (#3330)。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	var req struct {
 		Limit    *jsnum.Int `json:"limit"`
 		Offset   jsnum.Int  `json:"offset"`
@@ -109,7 +109,7 @@ func (h *Handler) profilesByUserIDs(users []*model.User) map[string]*model.UserP
 // 引けない acct は**黙って飛ばす**。`meta.pinnedUsers` は管理者が手で書く
 // 文字列で、typo や退会済みの指定が混ざりうる。1 件のせいで全体が空になる
 // ほうが困る。
-func (h *Handler) PinnedUsers(c echo.Context) error {
+func (h *Handler) PinnedUsers(c *echo.Context) error {
 	if h.metaRepo == nil || h.userRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

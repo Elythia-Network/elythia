@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,11 +47,10 @@ func (o *quoteFederationObserver) ObserveExternalReference(userID, reason, host 
 	return true, nil
 }
 
-func qaReq(t *testing.T, noteID, authID string) (echo.Context, func() (int, string, http.Header)) {
+func qaReq(t *testing.T, noteID, authID string) (*echo.Context, func() (int, string, http.Header)) {
 	t.Helper()
 	c, rec := newReq(t, "id", noteID)
-	c.SetParamNames("id", "authId")
-	c.SetParamValues(noteID, authID)
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: noteID}, {Name: "authId", Value: authID}})
 	return c, func() (int, string, http.Header) { return rec.Code, rec.Body.String(), rec.Header() }
 }
 

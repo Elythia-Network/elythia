@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +26,7 @@ func TestHandlers_IntegerParamsAcceptFractionForms(t *testing.T) {
 	const cursor = `{"limit":10.0,"sinceDate":1e1,"untilDate":4102444800000.0}`
 	cases := []struct {
 		name string
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 	}{
 		{"i/favorites", h.Favorites, cursor},
@@ -80,7 +80,7 @@ func TestHandlers_OffsetIsNotRead(t *testing.T) {
 	h.SetGalleryRepo(gallery)
 	h.SetPageRepo(testutil.NewMockPageRepository())
 	h.SetPageLikeRepo(pageLikes)
-	for name, fn := range map[string]func(echo.Context) error{
+	for name, fn := range map[string]func(*echo.Context) error{
 		"i/gallery/likes": h.GalleryLikes,
 		"i/gallery/posts": h.GalleryPosts,
 		"i/page-likes":    h.PageLikes,
@@ -114,26 +114,26 @@ func errorOf(t *testing.T, body []byte) (code, id string) {
 func TestHandlers_EmptyPasswordIsIncorrect(t *testing.T) {
 	cases := []struct {
 		name            string
-		fn              func(*Handler) func(echo.Context) error
+		fn              func(*Handler) func(*echo.Context) error
 		empty, missing  string
 		incorrectID     string
 		requireWebAuthn bool
 	}{
-		{"i/2fa/register", func(h *Handler) func(echo.Context) error { return h.TwoFARegister },
+		{"i/2fa/register", func(h *Handler) func(*echo.Context) error { return h.TwoFARegister },
 			`{"password":""}`, `{}`, "78d6c839-20c9-4c66-b90a-fc0542168b48", false},
-		{"i/2fa/unregister", func(h *Handler) func(echo.Context) error { return h.TwoFAUnregister },
+		{"i/2fa/unregister", func(h *Handler) func(*echo.Context) error { return h.TwoFAUnregister },
 			`{"password":""}`, `{}`, "7add0395-9901-4098-82f9-4f67af65f775", false},
-		{"i/2fa/register-key", func(h *Handler) func(echo.Context) error { return h.TwoFARegisterKey },
+		{"i/2fa/register-key", func(h *Handler) func(*echo.Context) error { return h.TwoFARegisterKey },
 			`{"password":""}`, `{}`, "38769596-efe2-4faf-9bec-abbb3f2cd9ba", true},
-		{"i/2fa/key-done", func(h *Handler) func(echo.Context) error { return h.TwoFAKeyDone },
+		{"i/2fa/key-done", func(h *Handler) func(*echo.Context) error { return h.TwoFAKeyDone },
 			`{"password":"","name":"k","credential":{}}`, `{"name":"k","credential":{}}`, "0d7ec6d2-e652-443e-a7bf-9ee9a0cd77b0", true},
-		{"i/2fa/remove-key", func(h *Handler) func(echo.Context) error { return h.TwoFARemoveKey },
+		{"i/2fa/remove-key", func(h *Handler) func(*echo.Context) error { return h.TwoFARemoveKey },
 			`{"password":"","credentialId":"k"}`, `{"credentialId":"k"}`, "141c598d-a825-44c8-9173-cfb9d92be493", true},
-		{"i/change-password", func(h *Handler) func(echo.Context) error { return h.ChangePassword },
+		{"i/change-password", func(h *Handler) func(*echo.Context) error { return h.ChangePassword },
 			`{"currentPassword":"","newPassword":"next"}`, `{"newPassword":"next"}`, "932c904e-9460-45b7-9ce6-7ed33be7eb2c", false},
-		{"i/delete-account", func(h *Handler) func(echo.Context) error { return h.DeleteAccount },
+		{"i/delete-account", func(h *Handler) func(*echo.Context) error { return h.DeleteAccount },
 			`{"password":""}`, `{}`, "932c904e-9460-45b7-9ce6-7ed33be7eb2c", false},
-		{"i/regenerate-token", func(h *Handler) func(echo.Context) error { return h.RegenerateToken },
+		{"i/regenerate-token", func(h *Handler) func(*echo.Context) error { return h.RegenerateToken },
 			`{"password":""}`, `{}`, "932c904e-9460-45b7-9ce6-7ed33be7eb2c", false},
 	}
 	for _, tc := range cases {
@@ -236,7 +236,7 @@ func TestRegistry_EmptyKeyIsLookedUp(t *testing.T) {
 	require.NoError(t, reg.Set(&model.RegistryItem{ID: "r1", UserID: stubUser.ID, Key: "a", Scope: model.StringArray{}}))
 	h.SetRegistryRepo(reg)
 
-	for name, fn := range map[string]func(echo.Context) error{
+	for name, fn := range map[string]func(*echo.Context) error{
 		"i/registry/get":        h.RegistryGet,
 		"i/registry/get-detail": h.RegistryGetDetail,
 	} {

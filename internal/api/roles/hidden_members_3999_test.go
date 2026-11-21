@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/roles"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,7 +92,7 @@ func TestShowAndList_UsersCountMatchesVisibleMembers(t *testing.T) {
 		{name: "moderator", viewer: "mod", want: 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			call := func(handler func(echo.Context) error, body string) []byte {
+			call := func(handler func(*echo.Context) error, body string) []byte {
 				if tc.viewer == "" {
 					rec := doPost(handler, body)
 					require.Equal(t, http.StatusOK, rec.Code)

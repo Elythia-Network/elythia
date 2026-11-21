@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -54,7 +54,7 @@ func (h *Handler) SetEmojiApplicationRepo(r repository.EmojiApplicationRepositor
 }
 
 // EmojiApplicationList handles POST /api/admin/emoji-application/list.
-func (h *Handler) EmojiApplicationList(c echo.Context) error {
+func (h *Handler) EmojiApplicationList(c *echo.Context) error {
 	if h.emojiApplicationRepo == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -92,7 +92,7 @@ func (h *Handler) EmojiApplicationList(c echo.Context) error {
 }
 
 // EmojiApplicationApprove handles POST /api/admin/emoji-application/approve.
-func (h *Handler) EmojiApplicationApprove(c echo.Context) error {
+func (h *Handler) EmojiApplicationApprove(c *echo.Context) error {
 	if h.emojiApplicationReviewer == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -129,7 +129,7 @@ func (h *Handler) EmojiApplicationApprove(c echo.Context) error {
 }
 
 // EmojiApplicationReject handles POST /api/admin/emoji-application/reject.
-func (h *Handler) EmojiApplicationReject(c echo.Context) error {
+func (h *Handler) EmojiApplicationReject(c *echo.Context) error {
 	if h.emojiApplicationReviewer == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -169,7 +169,7 @@ func (h *Handler) EmojiApplicationReject(c echo.Context) error {
 }
 
 // emojiApplicationReviewError maps service errors onto the wire.
-func emojiApplicationReviewError(c echo.Context, err error) error {
+func emojiApplicationReviewError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, emojiapplication.ErrNotFound):
 		return c.JSON(http.StatusNotFound, apierr.Error(
@@ -763,7 +763,7 @@ func derefString(s *string) string {
 //
 // **過去に却下されていたことを理由に自動拒否はしない。** ライセンスの変更・
 // 画像の修正・運用方針の変更がありうるので、これは審査を補助する情報。
-func (h *Handler) EmojiApplicationRelated(c echo.Context) error {
+func (h *Handler) EmojiApplicationRelated(c *echo.Context) error {
 	if h.emojiApplicationRepo == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -846,7 +846,7 @@ var emojiApplicationUserStatuses = map[string]bool{
 //
 // ユーザーモデレーション画面の申請履歴 (#2961)。**一般ユーザー向けには公開
 // しない** — 却下理由とモデレーターへの補足が載る。
-func (h *Handler) EmojiApplicationListByUser(c echo.Context) error {
+func (h *Handler) EmojiApplicationListByUser(c *echo.Context) error {
 	if h.emojiApplicationRepo == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -893,7 +893,7 @@ func (h *Handler) EmojiApplicationListByUser(c echo.Context) error {
 // EmojiApplicationUserSummary handles POST /api/admin/emoji-application/user-summary.
 //
 // 件数の内訳と、期間上限の使用状況 (#2961)。
-func (h *Handler) EmojiApplicationUserSummary(c echo.Context) error {
+func (h *Handler) EmojiApplicationUserSummary(c *echo.Context) error {
 	if h.emojiApplicationReviewer == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -966,7 +966,7 @@ func packQuotaReset(row *model.EmojiApplicationQuotaReset) any {
 //
 // **申請の行は触らない。** 履歴を消して枠を空けると、過去の判断 (#2960 が
 // 審査の材料として出している却下理由や同じ画像かどうか) も同時に消える。
-func (h *Handler) EmojiApplicationResetUserQuota(c echo.Context) error {
+func (h *Handler) EmojiApplicationResetUserQuota(c *echo.Context) error {
 	if h.emojiApplicationReviewer == nil || h.userRepo == nil {
 		return apierr.JSONInternalError(c)
 	}

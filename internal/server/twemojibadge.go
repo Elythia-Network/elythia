@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
 	xdraw "golang.org/x/image/draw"
@@ -75,7 +75,7 @@ func newTwemojiBadgeHandler(dir string) *twemojiBadgeHandler {
 //	-> 512x512 の透明キャンバスと XOR 合成 -> resize(96) -> png
 //
 // 結果は「絵文字の形が抜けた黒い四角」で、通知バッジとして使われる。
-func (h *twemojiBadgeHandler) Serve(c echo.Context) error {
+func (h *twemojiBadgeHandler) Serve(c *echo.Context) error {
 	name := c.Param("*")
 	if name == "" {
 		name = c.Param("name")

@@ -18,13 +18,13 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // AccountsCreate handles POST /api/admin/accounts/create.
 // 初回セットアップ (rootUserId未設定) の場合は認証不要。
 // それ以外はadmin権限が必要。
-func (h *Handler) AccountsCreate(c echo.Context) error {
+func (h *Handler) AccountsCreate(c *echo.Context) error {
 	var req struct {
 		Username         string                 `json:"username"`
 		Password         string                 `json:"password"`
@@ -215,7 +215,7 @@ func (h *Handler) AccountsCreate(c echo.Context) error {
 }
 
 // ShowUser handles POST /api/admin/show-user.
-func (h *Handler) ShowUser(c echo.Context) error {
+func (h *Handler) ShowUser(c *echo.Context) error {
 	var req struct {
 		UserID      string `json:"userId"`
 		WithSignins *bool  `json:"withSignins"`
@@ -313,7 +313,7 @@ func (h *Handler) ShowUser(c echo.Context) error {
 }
 
 // ShowUsers handles POST /api/admin/show-users.
-func (h *Handler) ShowUsers(c echo.Context) error {
+func (h *Handler) ShowUsers(c *echo.Context) error {
 	var req struct {
 		State    string     `json:"state"`
 		Origin   string     `json:"origin"`
@@ -580,7 +580,7 @@ func (h *Handler) packUserRoleAssigns(userID string) []map[string]any {
 }
 
 // SuspendUser handles POST /api/admin/suspend-user.
-func (h *Handler) SuspendUser(c echo.Context) error {
+func (h *Handler) SuspendUser(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}
@@ -665,7 +665,7 @@ func (h *Handler) SuspendUser(c echo.Context) error {
 }
 
 // UnsuspendUser handles POST /api/admin/unsuspend-user.
-func (h *Handler) UnsuspendUser(c echo.Context) error {
+func (h *Handler) UnsuspendUser(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

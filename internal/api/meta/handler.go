@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/signup"
 	"github.com/elythia-network/elythia/internal/misc/json5"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -129,7 +129,7 @@ func (h *Handler) chunkedUploadInfo() map[string]any {
 // POST /api/meta
 // Meta handles POST /api/meta.
 // TS互換: detail (boolean, default true)。falseの場合は簡易レスポンスを返す。
-func (h *Handler) Meta(c echo.Context) error {
+func (h *Handler) Meta(c *echo.Context) error {
 	var params struct {
 		Detail *bool `json:"detail"`
 	}
@@ -158,8 +158,8 @@ func (h *Handler) Meta(c echo.Context) error {
 		h.respCache.putIfCurrent(detail, body, gen)
 	}
 
-	// echo は ?pretty のとき indent 付きで書く (context.JSON。echo の Debug でも
-	// 同じだが、Elythia は Debug を立てない。v5 で消えるので見ない、#4236)。cache は
+	// ?pretty のとき、サーバーの JSONSerializer は indent 付きで書く (echo の v4 の
+	// context.JSON と同じ字下げ、#4239)。cache は
 	// compact な bytes しか持たないので、ここで同じ形に整える。**cache を
 	// 素通しにはしない**: /api/meta は未認証で叩けて per-endpoint の rate limit も
 	// 無いので、素通しにすると ?pretty を付けるだけで誰でもキャッシュを外せる。
@@ -354,7 +354,7 @@ func (h *Handler) buildMeta(detail bool) (map[string]any, error) {
 
 // Ping returns a simple pong response.
 // POST /api/ping
-func (h *Handler) Ping(c echo.Context) error {
+func (h *Handler) Ping(c *echo.Context) error {
 	// upstream ping.ts は `{ pong: Date.now() }` (epoch-ms number) を返す。
 	// misskey-js PingResponse.pong も number 型 (boolean ではない、#2027)。
 	return c.JSON(http.StatusOK, map[string]any{

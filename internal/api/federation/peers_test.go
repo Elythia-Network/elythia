@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // getStub drives a handler through a GET request (peers は GET only)。
-func getStub(handler func(echo.Context) error) *httptest.ResponseRecorder {
+func getStub(handler func(*echo.Context) error) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/instance/peers", nil)
 	rec := httptest.NewRecorder()

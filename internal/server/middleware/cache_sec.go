@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // APICacheSec maps an API endpoint name (the route path without "/api/") to
@@ -54,7 +54,7 @@ var APICacheSec = map[string]int{
 // できたかに関係なく、送られてきたかで見る (無効な token でも付けない、#2049)。
 func APICacheControl() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if c.Request().Method != http.MethodGet {
 				return next(c)
 			}
@@ -62,7 +62,10 @@ func APICacheControl() echo.MiddlewareFunc {
 			if !ok {
 				return next(c)
 			}
-			res := c.Response()
+			res, err := echo.UnwrapResponse(c.Response())
+			if err != nil {
+				return next(c)
+			}
 			res.Before(func() {
 				if res.Status < 200 || res.Status >= 300 {
 					return
@@ -85,11 +88,11 @@ const skipPublicCacheKey = "misskeySkipPublicCache"
 // Handlers call it when they answer a failure with a 200 fallback (an empty
 // list, a zero count): upstream answers those with an error, which is never
 // cached, so a shared cache must not keep the fallback for cacheSec.
-func SkipPublicCache(c echo.Context) {
+func SkipPublicCache(c *echo.Context) {
 	c.Set(skipPublicCacheKey, true)
 }
 
-func publicCacheSkipped(c echo.Context) bool {
+func publicCacheSkipped(c *echo.Context) bool {
 	v, _ := c.Get(skipPublicCacheKey).(bool)
 	return v
 }

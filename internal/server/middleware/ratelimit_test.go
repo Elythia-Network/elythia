@@ -13,7 +13,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +51,7 @@ func (m *mockLimitStore) Check(_ context.Context, key string, duration time.Dura
 
 func setupEcho(rl *RateLimiter) (*echo.Echo, echo.HandlerFunc) {
 	e := echo.New()
-	handler := func(c echo.Context) error {
+	handler := func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}
 	return e, handler
@@ -93,7 +93,7 @@ func TestRateLimiterForEndpoint_AfterRequireSecure(t *testing.T) {
 	rl := NewRateLimiter(store, false, map[string]*EndpointLimit{})
 	limit := rl.ForEndpoint("i/update-federation", &EndpointLimit{Duration: time.Hour, Max: 1})
 	e := echo.New()
-	handler := func(c echo.Context) error { return c.NoContent(http.StatusOK) }
+	handler := func(c *echo.Context) error { return c.NoContent(http.StatusOK) }
 
 	request := func(userID, token string, isApp bool) *httptest.ResponseRecorder {
 		nativeToken := "native-" + userID
@@ -1051,7 +1051,7 @@ func TestRateLimiter_NilLimitsBypassesAllEndpoints(t *testing.T) {
 	rl := NewRateLimiter(store, true, nil)
 
 	e := echo.New()
-	handler := func(c echo.Context) error {
+	handler := func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}
 	mw := rl.Middleware()
@@ -1078,7 +1078,7 @@ func TestRateLimiter_EmptyLimitsBypassesAllEndpoints(t *testing.T) {
 	rl := NewRateLimiter(store, true, map[string]*EndpointLimit{})
 
 	e := echo.New()
-	handler := func(c echo.Context) error {
+	handler := func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}
 	mw := rl.Middleware()
@@ -1108,7 +1108,7 @@ func TestNewRedisRateLimiter_Integration(t *testing.T) {
 	rl := NewRedisRateLimiter(tr.Client, true, limits)
 
 	e := echo.New()
-	handler := func(c echo.Context) error {
+	handler := func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	}
 	mw := rl.Middleware()

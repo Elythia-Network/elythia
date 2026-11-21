@@ -113,7 +113,7 @@ func TestErrorIDDrift(t *testing.T) {
 
 	// **internal/server にインラインで書かれた endpoint も見る** (#2784)。
 	// `internal/api` の walk は `handlerVar.Method` の形しか解決できないので、
-	// `api.POST("/promo/read", func(c echo.Context) error { ... })` のような
+	// `api.POST("/promo/read", func(c *echo.Context) error { ... })` のような
 	// closure が丸ごと gate の外にあった。golden が正しい id を持っているのに
 	// 検出されない状態だった (`promo/read` の NO_SUCH_NOTE で実際に起きていた)。
 	inline := scanInlineRoutes(t, serverSourcePaths(t)...)
@@ -205,7 +205,7 @@ var (
 	// funcDeclRe matches a function declaration — both methods `func (recv T) Name(`
 	// and package-level free functions `func Name(`. Recognizing free functions is
 	// essential: handlers delegate error responses to package-level helpers (e.g.
-	// `func notFound(c echo.Context) error`), and without matching their boundary
+	// `func notFound(c *echo.Context) error`), and without matching their boundary
 	// their emissions would be mis-attributed to the preceding method.
 	funcDeclRe = regexp.MustCompile(`func (?:\(\w+ \*?\w+\) )?(\w+)\(`)
 	// inlineErrRe matches apierr.Error("CODE", <msg>, <id>) and the kind-aware
@@ -406,8 +406,8 @@ func routesByHandler(refs []routeRef) map[string][]string {
 //
 // 拾うのは `api.<METHOD>("/path", ...)` で、第 2 引数が
 //
-//   - `func(c echo.Context) error { ... }` の直書き
-//   - 同じファイルで `x := func(c echo.Context) error { ... }` に束縛された識別子
+//   - `func(c *echo.Context) error { ... }` の直書き
+//   - 同じファイルで `x := func(c *echo.Context) error { ... }` に束縛された識別子
 //
 // のいずれかのもの。`handlerVar.Method` の形は `parseRoutes` 側が解決するので
 // ここでは拾わない。
@@ -453,7 +453,7 @@ func scanInlineRoutesFile(t *testing.T, path string) map[string][]string {
 		return string(src[int(fn.Body.Pos())-base : int(fn.Body.End())-base])
 	}
 
-	// `x := func(c echo.Context) error { ... }` を先に集める。route 登録より
+	// `x := func(c *echo.Context) error { ... }` を先に集める。route 登録より
 	// 前に書かれるとは限らないので、走査を 2 段に分ける。
 	//
 	// **スコープは見ない (同じファイルの中の同名は最後の束縛が勝つ)。**

@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -380,7 +380,7 @@ func TestRevokeToken_NoParams(t *testing.T) {
 // postExtraWithScope は AuthScope を明示して叩く。**auth middleware は native
 // token でも AuthScope を立てる** (IsApp=false) ので、native 側を「AuthScope 無し」
 // で模すと IsApp を見ない実装でもテストが通ってしまう (変異検証で確認済み)。
-func postExtraWithScope(h func(echo.Context) error, body string, user *model.User, sc *middleware.AuthScope) *httptest.ResponseRecorder {
+func postExtraWithScope(h func(*echo.Context) error, body string, user *model.User, sc *middleware.AuthScope) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -392,7 +392,7 @@ func postExtraWithScope(h func(echo.Context) error, body string, user *model.Use
 	return rec
 }
 
-func postExtraAsApp(h func(echo.Context) error, body string, user *model.User, tokenID string) *httptest.ResponseRecorder {
+func postExtraAsApp(h func(*echo.Context) error, body string, user *model.User, tokenID string) *httptest.ResponseRecorder {
 	return postExtraWithScope(h, body, user, &middleware.AuthScope{IsApp: true, TokenID: tokenID})
 }
 

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -32,7 +32,7 @@ func TestHideAppUserWithoutReadEndToEnd(t *testing.T) {
 	e.Use(middleware.NewAuthMiddleware(userRepo, tokenRepo).Authenticate())
 	api := e.Group("/api")
 	api.Use(middleware.HideAppUserWithoutRead())
-	whoami := func(c echo.Context) error {
+	whoami := func(c *echo.Context) error {
 		if u := middleware.GetUser(c); u != nil {
 			return c.String(http.StatusOK, u.ID)
 		}

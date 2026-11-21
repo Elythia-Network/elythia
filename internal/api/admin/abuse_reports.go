@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // --- Abuse Report endpoints ---
@@ -43,7 +43,7 @@ import (
 // 既存 e2e 互換)。`state` と `resolved` の両方が来た場合は `state` を優先
 // する (= upstream paramDef での enum 優先 pattern と同じ)。`state` が 'all'・
 // 空文字・null のときだけ `resolved` を見る。
-func (h *Handler) AbuseReports(c echo.Context) error {
+func (h *Handler) AbuseReports(c *echo.Context) error {
 	var req struct {
 		Resolved         *bool      `json:"resolved"`
 		State            string     `json:"state"`
@@ -284,7 +284,7 @@ func isValidOrigin(s string) bool {
 // abuse handling の判定結果が反映されない drop-in regression があった
 // (PR #1108 sweep)。本 fix で upstream paramDef 通り `resolvedAs` を
 // accept し enum 検証する。
-func (h *Handler) ResolveAbuseReport(c echo.Context) error {
+func (h *Handler) ResolveAbuseReport(c *echo.Context) error {
 	var req struct {
 		ReportID   string  `json:"reportId"`
 		ResolvedAs *string `json:"resolvedAs"`

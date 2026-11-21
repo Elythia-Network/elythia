@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // 列幅は migration/000001_initial の `emoji` テーブル定義に対応する。
@@ -108,7 +108,7 @@ func emojiFileURLFits(f *model.DriveFile) bool {
 // 別の設定だったころに作られていた場合だけ)。**message では対処を指示せず、長さが
 // どこで決まるかを書く** — 保存先はオブジェクトストレージとは限らず、モデレーターが
 // 設定を変えられるとも限らないため。
-func emojiFileURLTooLong(c echo.Context) error {
+func emojiFileURLTooLong(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
 		"The drive file URL is too long to store on an emoji (max 512 characters). Its length is determined by the file storage base URL and prefix.",
 		"3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -119,7 +119,7 @@ func emojiFileURLTooLong(c echo.Context) error {
 // **`INVALID_PARAM` を共有する。** upstream の paramDef に maxLength は無いので
 // 対応する error code / id が存在せず、新しい id を作ると misskey-js の型にも
 // 載せることになる (`admin/emoji/copy` の名前検証 #2998 と同じ判断)。
-func emojiValueTooLong(c echo.Context, field string) error {
+func emojiValueTooLong(c *echo.Context, field string) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM",
 		field+" is too long or contains an invalid character.",
 		"3d81ceae-475f-4600-b2a8-2bc116157532"))
@@ -208,7 +208,7 @@ func dropUnstorableElements(in []string, max int) []string {
 // DB 往復が線形に増える。FindManyByIDs で一括取得 → 個別に alias を merge →
 // UpdateFields で書き戻す (alias はレコード毎に異なるため UpdateFieldsMany
 // では一括化できない)。
-func (h *Handler) EmojiAddAliasesBulk(c echo.Context) error {
+func (h *Handler) EmojiAddAliasesBulk(c *echo.Context) error {
 	var req struct {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
@@ -269,7 +269,7 @@ func (h *Handler) EmojiAddAliasesBulk(c echo.Context) error {
 // 維持する (テスト容易性 + 未配線環境での graceful degradation 用)。
 //
 // ref: 本家の packages/backend/src/server/api/endpoints/admin/emoji/copy.ts
-func (h *Handler) EmojiCopy(c echo.Context) error {
+func (h *Handler) EmojiCopy(c *echo.Context) error {
 	// **上書き項目は mk-go 独自の additive パラメータ** (#2698)。upstream の
 	// paramDef は `emojiId` のみ必須なので、足しても既存の呼び出しは通る。
 	//
@@ -450,7 +450,7 @@ func (h *Handler) EmojiCopy(c echo.Context) error {
 // 一件ずつ処理し、絵文字ごとに deleteCustomEmoji moderation log を書く。
 // 互換性のため mk-go も削除前の snapshot を取得して per-emoji log を出力
 // する。bulk 削除自体は 1 SQL (DeleteMany) で完結。
-func (h *Handler) EmojiDeleteBulk(c echo.Context) error {
+func (h *Handler) EmojiDeleteBulk(c *echo.Context) error {
 	var req struct {
 		IDs []string `json:"ids"`
 	}
@@ -516,7 +516,7 @@ func dedupe(in []string) []string {
 // fileId で Drive にアップロード済みの ZIP を指定し、非同期ジョブで展開して
 // ローカルカスタム絵文字として登録する。本家 Misskey 互換
 // (QueueService.createImportCustomEmojisJob 相当)。
-func (h *Handler) EmojiImportZip(c echo.Context) error {
+func (h *Handler) EmojiImportZip(c *echo.Context) error {
 	var req struct {
 		FileID string `json:"fileId"`
 	}
@@ -544,7 +544,7 @@ func (h *Handler) EmojiImportZip(c echo.Context) error {
 }
 
 // EmojiListRemote handles POST /api/admin/emoji/list-remote.
-func (h *Handler) EmojiListRemote(c echo.Context) error {
+func (h *Handler) EmojiListRemote(c *echo.Context) error {
 	if h.emojiRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -605,7 +605,7 @@ func (h *Handler) EmojiListRemote(c echo.Context) error {
 }
 
 // EmojiRemoveAliasesBulk handles POST /api/admin/emoji/remove-aliases-bulk.
-func (h *Handler) EmojiRemoveAliasesBulk(c echo.Context) error {
+func (h *Handler) EmojiRemoveAliasesBulk(c *echo.Context) error {
 	var req struct {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
@@ -653,7 +653,7 @@ func (h *Handler) EmojiRemoveAliasesBulk(c echo.Context) error {
 //
 // 全 id で同じ aliases 値を設定するため UpdateFieldsMany (WHERE IN UPDATE) で
 // 1 文に集約できる。
-func (h *Handler) EmojiSetAliasesBulk(c echo.Context) error {
+func (h *Handler) EmojiSetAliasesBulk(c *echo.Context) error {
 	var req struct {
 		IDs     []string `json:"ids"`
 		Aliases []string `json:"aliases"`
@@ -695,7 +695,7 @@ func (h *Handler) EmojiSetAliasesBulk(c echo.Context) error {
 }
 
 // EmojiSetCategoryBulk handles POST /api/admin/emoji/set-category-bulk.
-func (h *Handler) EmojiSetCategoryBulk(c echo.Context) error {
+func (h *Handler) EmojiSetCategoryBulk(c *echo.Context) error {
 	var req struct {
 		IDs      []string `json:"ids"`
 		Category *string  `json:"category"`
@@ -736,7 +736,7 @@ func nullableString(p *string) any {
 }
 
 // EmojiSetLicenseBulk handles POST /api/admin/emoji/set-license-bulk.
-func (h *Handler) EmojiSetLicenseBulk(c echo.Context) error {
+func (h *Handler) EmojiSetLicenseBulk(c *echo.Context) error {
 	var req struct {
 		IDs     []string `json:"ids"`
 		License *string  `json:"license"`

@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/move"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Move handles POST /api/i/move.
@@ -34,7 +34,7 @@ import (
 // acct 形式の解決は alsoKnownAs と同じ lookupAlsoKnownAsTarget (local DB の
 // FindByURI / FindByUsernameLower) を再利用する。移行先は事前に alsoKnownAs で
 // src を指している必要があり、その時点で local に解決済のため local lookup で足りる。
-func (h *Handler) Move(c echo.Context) error {
+func (h *Handler) Move(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	if me != nil && h.localFederationObserver != nil && !h.localFederationObserver.IsExternallyAvailable(me) {
 		return c.JSON(http.StatusBadRequest, apierr.Error(

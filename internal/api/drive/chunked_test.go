@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +63,7 @@ func newChunkedHandler(t *testing.T) (*Handler, *mockChunkedSessionRepo, *testut
 }
 
 // newChunkReq builds the multipart request the append endpoint expects.
-func newChunkReq(t *testing.T, uploadID string, index int, chunk []byte, omitChunk bool) (echo.Context, *httptest.ResponseRecorder) {
+func newChunkReq(t *testing.T, uploadID string, index int, chunk []byte, omitChunk bool) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
@@ -605,7 +605,7 @@ func TestReadMultipartChunk_DoesNotOpenWhenSizeExceeds(t *testing.T) {
 	assert.False(t, opened, "上限超過が申告で分かるのに本体を開いている")
 }
 
-func newChunkMultipart(t *testing.T, content string) echo.Context {
+func newChunkMultipart(t *testing.T, content string) *echo.Context {
 	t.Helper()
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)

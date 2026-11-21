@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -148,7 +148,7 @@ func newTestHandler() (*Handler, *mockSwRepo) {
 	return NewHandler(repo, metaRepo, idGen, nil), repo
 }
 
-func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

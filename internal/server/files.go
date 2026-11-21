@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	coredrive "github.com/elythia-network/elythia/internal/core/drive"
 	"github.com/elythia-network/elythia/internal/misc/colfit"
@@ -80,7 +80,7 @@ func storableAccessKey(key string) bool {
 // (33KB 程度) なファイルが truncate される問題があった (#730)。明示
 // Content-Length + Cache-Control: no-transform でこれを回避する。
 func filesHandler(lookup filesDriveLookup, primary, local coredrive.Storage) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		key := c.Param("accessKey")
 		// **オブジェクトを名指しできないキーは、引く前に 404 (#3037)。**
 		//
@@ -204,7 +204,7 @@ const fileCacheControl = "max-age=31536000, immutable, no-transform"
 
 // setFileResponseHeaders sets the headers every `/files/:accessKey` response
 // carries, whichever storage served it.
-func setFileResponseHeaders(c echo.Context, contentType string) {
+func setFileResponseHeaders(c *echo.Context, contentType string) {
 	// `Cache-Control: no-transform` で Cloudflare Polish 等 CDN 中間層
 	// による画像再エンコードを抑止する (#730)。Polish は animated WebP
 	// を別 size で出力するため UDS デプロイ環境で「絵文字がチカチカ
@@ -234,7 +234,7 @@ var sniffRangeSpec = "bytes=0-" + strconv.Itoa(coredrive.MIMESniffLen-1)
 // `http.ServeContent` は seek できる全体を要求するので使わず、Range・HEAD・
 // If-None-Match・If-Modified-Since をここで扱う。Range の意味の解釈 (範囲外、
 // 末尾からの指定) は S3 に任せる。
-func serveRangedFile(c echo.Context, rg coredrive.RangeGetter, key string) error {
+func serveRangedFile(c *echo.Context, rg coredrive.RangeGetter, key string) error {
 	req := c.Request()
 	spec, ok := singleRangeSpec(req.Header.Get("Range"))
 	// 以前の http.ServeContent は ETag も Last-Modified も無い状態で If-Range を

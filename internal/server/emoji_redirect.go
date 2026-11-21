@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/remoteurl"
@@ -55,7 +55,7 @@ type emojiLookup interface {
 // Cache-Control header mirrors upstream so the browser stops
 // re-fetching reaction images on every notification render.
 func emojiRedirectHandler(pk *entity.Packer, repo emojiLookup) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		path := c.Param("path")
 
 		c.Response().Header().Set(echo.HeaderCacheControl, "public, max-age=86400")

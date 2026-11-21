@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,8 +14,8 @@ func serveHeaderMW(t *testing.T, mw echo.MiddlewareFunc, path string) *httptest.
 	t.Helper()
 	e := echo.New()
 	e.Use(mw)
-	e.Any("/*", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
-	e.Any("/", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	e.Any("/*", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	e.Any("/", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

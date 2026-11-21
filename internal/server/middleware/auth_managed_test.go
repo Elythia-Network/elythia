@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,7 +56,7 @@ func TestAuthenticate_PluginManagedTokenOnlyInternal_RealDB(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		var got *model.User
-		require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+		require.NoError(t, auth.Authenticate()(func(c *echo.Context) error {
 			got = GetUser(c)
 			return c.String(http.StatusOK, "ok")
 		})(e.NewContext(req, rec)))

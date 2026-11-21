@@ -33,7 +33,7 @@ import (
 	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles note-related API endpoints.
@@ -189,7 +189,7 @@ func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederatio
 	h.localFederationObserver = observer
 }
 
-func (h *Handler) gateRemoteNoteAction(c echo.Context, user *model.User, noteID string) bool {
+func (h *Handler) gateRemoteNoteAction(c *echo.Context, user *model.User, noteID string) bool {
 	if h.localFederationObserver == nil || user == nil || !user.IsLocal() || h.noteRepo == nil {
 		return true
 	}
@@ -565,7 +565,7 @@ type PollRequest struct {
 }
 
 // Create handles POST /api/notes/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req CreateRequest
@@ -790,7 +790,7 @@ type ShowRequest struct {
 }
 
 // Show handles POST /api/notes/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -867,7 +867,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/notes/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 
 	var req DeleteRequest
@@ -924,27 +924,27 @@ func (r *listRequest) resolve() bool {
 }
 
 // Renotes handles POST /api/notes/renotes.
-func (h *Handler) Renotes(c echo.Context) error {
+func (h *Handler) Renotes(c *echo.Context) error {
 	return h.serveList(c, "12908022-2e21-46cd-ba6a-3edaf6093f46", func(viewer *model.User, req listRequest) ([]*model.Note, error) {
 		return h.queryService.ListRenotes(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
 // Replies handles POST /api/notes/replies.
-func (h *Handler) Replies(c echo.Context) error {
+func (h *Handler) Replies(c *echo.Context) error {
 	return h.serveList(c, apierr.UUIDNoSuchNote, func(viewer *model.User, req listRequest) ([]*model.Note, error) {
 		return h.queryService.ListReplies(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
 // Children handles POST /api/notes/children.
-func (h *Handler) Children(c echo.Context) error {
+func (h *Handler) Children(c *echo.Context) error {
 	return h.serveList(c, apierr.UUIDNoSuchNote, func(viewer *model.User, req listRequest) ([]*model.Note, error) {
 		return h.queryService.ListChildren(viewer, req.NoteID, req.UntilID, req.SinceID, int(*req.Limit))
 	})
 }
 
-func (h *Handler) serveList(c echo.Context, noSuchNoteID string, fn func(*model.User, listRequest) ([]*model.Note, error)) error {
+func (h *Handler) serveList(c *echo.Context, noSuchNoteID string, fn func(*model.User, listRequest) ([]*model.Note, error)) error {
 	var req listRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -1136,7 +1136,7 @@ type SearchRequest struct {
 }
 
 // Search handles POST /api/notes/search.
-func (h *Handler) Search(c echo.Context) error {
+func (h *Handler) Search(c *echo.Context) error {
 	var req SearchRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -1311,7 +1311,7 @@ func nextSearchPage(page searchPage, raw []*model.Note) searchPage {
 }
 
 // State handles POST /api/notes/state.
-func (h *Handler) State(c echo.Context) error {
+func (h *Handler) State(c *echo.Context) error {
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -1337,7 +1337,7 @@ type ConversationRequest struct {
 }
 
 // Conversation handles POST /api/notes/conversation.
-func (h *Handler) Conversation(c echo.Context) error {
+func (h *Handler) Conversation(c *echo.Context) error {
 	var req ConversationRequest
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
@@ -1394,7 +1394,7 @@ func (h *Handler) Conversation(c echo.Context) error {
 // (visibility filter 付き)、不在時は upstream 互換の public note 一覧を返す。これで
 // misskey-js SDK の {local:true,limit:30} 呼び出しも、既存の {noteIds:[...]} 呼び出しも
 // 両立する。
-func (h *Handler) BulkShow(c echo.Context) error {
+func (h *Handler) BulkShow(c *echo.Context) error {
 	var req struct {
 		NoteIDs []string `json:"noteIds"`
 		// upstream notes.ts public-note timeline params (noteIds 不在時に使用)。

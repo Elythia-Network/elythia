@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // newAppReadCtx builds a context as Authenticate leaves it for a resolved
 // token: the user and the scope view are both set.
-func newAppReadCtx(scope *AuthScope) (echo.Context, *model.User) {
+func newAppReadCtx(scope *AuthScope) (*echo.Context, *model.User) {
 	c, _ := newScopeCtx(scope)
 	tok := "native-token"
 	u := &model.User{ID: "u1", Token: &tok}
@@ -28,9 +28,9 @@ func newAppReadCtx(scope *AuthScope) (echo.Context, *model.User) {
 // runChain runs HideAppUserWithoutRead, then the given route middlewares, and
 // reports the user the handler saw (nil when it was not reached) and the
 // response status.
-func runChain(t *testing.T, c echo.Context, mws ...echo.MiddlewareFunc) (seen *model.User, reached bool) {
+func runChain(t *testing.T, c *echo.Context, mws ...echo.MiddlewareFunc) (seen *model.User, reached bool) {
 	t.Helper()
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		reached = true
 		seen = GetUser(c)
 		return c.NoContent(http.StatusOK)
@@ -105,7 +105,7 @@ func TestHideAppUserWithoutRead_RequireScopeStillRejectsMissingKind(t *testing.T
 	c, _ := newAppReadCtx(&AuthScope{IsApp: true, Scopes: []string{"write:notes"}})
 	_, reached := runChain(t, c, RequireScope("write:reactions"))
 	assert.False(t, reached)
-	assert.Equal(t, http.StatusForbidden, c.Response().Status)
+	assert.Equal(t, http.StatusForbidden, c.Response().(*echo.Response).Status)
 }
 
 // RequireSecure must see the user to answer 403 ACCESS_DENIED (an app token
@@ -114,7 +114,7 @@ func TestHideAppUserWithoutRead_RequireSecureKeepsAccessDenied(t *testing.T) {
 	c, _ := newAppReadCtx(&AuthScope{IsApp: true, Scopes: []string{"write:notes"}})
 	_, reached := runChain(t, c, RequireSecure())
 	assert.False(t, reached)
-	assert.Equal(t, http.StatusForbidden, c.Response().Status)
+	assert.Equal(t, http.StatusForbidden, c.Response().(*echo.Response).Status)
 }
 
 // A second admit is a no-op once the user is back.

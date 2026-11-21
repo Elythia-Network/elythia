@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // cspReportMaxBody bounds the accepted report size.
@@ -47,7 +47,7 @@ type cspReport struct {
 // 公開インスタンスで有効にする場合は、前段の nginx / CDN でこの path に
 // レート制限を掛けることを推奨する (docs/configuration.md に記載)。
 func cspReportHandler() echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		body, err := io.ReadAll(io.LimitReader(c.Request().Body, cspReportMaxBody+1))
 		if err != nil {
 			return c.NoContent(http.StatusNoContent)

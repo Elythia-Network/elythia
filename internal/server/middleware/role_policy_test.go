@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func (s *stubPolicyChecker) set(userID, policyKey string, allow bool) {
 // newRolePolicyReq is a small helper that wires an Echo context with the
 // given authenticated user attached. nil user simulates an unauthenticated
 // request.
-func newRolePolicyReq(t *testing.T, user *model.User) (echo.Context, *httptest.ResponseRecorder) {
+func newRolePolicyReq(t *testing.T, user *model.User) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -49,7 +49,7 @@ func TestRequireRolePolicy_Unauthenticated(t *testing.T) {
 
 	c, rec := newRolePolicyReq(t, nil)
 	called := false
-	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c echo.Context) error {
+	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -66,7 +66,7 @@ func TestRequireRolePolicy_PolicyAllowed(t *testing.T) {
 
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
 	called := false
-	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c echo.Context) error {
+	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -82,7 +82,7 @@ func TestRequireRolePolicy_PolicyDenied(t *testing.T) {
 
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
 	called := false
-	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c echo.Context) error {
+	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -106,7 +106,7 @@ func TestRequireRolePolicy_PolicyDenied(t *testing.T) {
 func TestRequireRolePolicy_NilCheckerDenies(t *testing.T) {
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
 	called := false
-	handler := RequireRolePolicy(nil, "canSearchNotes")(func(c echo.Context) error {
+	handler := RequireRolePolicy(nil, "canSearchNotes")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -124,7 +124,7 @@ func TestRequireRolePolicy_DifferentPolicyKey(t *testing.T) {
 	checker.set("alice", "canInvite", true)
 
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
-	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c echo.Context) error {
+	handler := RequireRolePolicy(checker, "canSearchNotes")(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -140,7 +140,7 @@ func TestRequireRolePolicyPublic_AnonymousAllowedByBasePolicy(t *testing.T) {
 
 	c, rec := newRolePolicyReq(t, nil)
 	called := false
-	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c echo.Context) error {
+	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -156,7 +156,7 @@ func TestRequireRolePolicyPublic_AnonymousDenied(t *testing.T) {
 
 	c, rec := newRolePolicyReq(t, nil)
 	called := false
-	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c echo.Context) error {
+	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -173,7 +173,7 @@ func TestRequireRolePolicyPublic_AuthedUser(t *testing.T) {
 	checker.set("alice", "canSearchUsers", true)
 
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
-	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c echo.Context) error {
+	handler := RequireRolePolicyPublic(checker, "canSearchUsers")(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 	require.NoError(t, handler(c))
@@ -184,7 +184,7 @@ func TestRequireRolePolicyPublic_AuthedUser(t *testing.T) {
 func TestRequireRolePolicyPublic_NilCheckerDenies(t *testing.T) {
 	c, rec := newRolePolicyReq(t, nil)
 	called := false
-	handler := RequireRolePolicyPublic(nil, "canSearchUsers")(func(c echo.Context) error {
+	handler := RequireRolePolicyPublic(nil, "canSearchUsers")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -214,7 +214,7 @@ func TestChatAvailabilityAllows(t *testing.T) {
 func TestRequireChatAvailability_ReadonlyWriteDenied(t *testing.T) {
 	c, rec := newRolePolicyReq(t, &model.User{ID: "u1"})
 	called := false
-	h := RequireChatAvailability(&stubChatAvail{policy: "readonly"}, "write")(func(c echo.Context) error {
+	h := RequireChatAvailability(&stubChatAvail{policy: "readonly"}, "write")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -226,7 +226,7 @@ func TestRequireChatAvailability_ReadonlyWriteDenied(t *testing.T) {
 
 func TestRequireChatAvailability_ReadonlyReadAllowed(t *testing.T) {
 	c, rec := newRolePolicyReq(t, &model.User{ID: "u1"})
-	h := RequireChatAvailability(&stubChatAvail{policy: "readonly"}, "read")(func(c echo.Context) error {
+	h := RequireChatAvailability(&stubChatAvail{policy: "readonly"}, "read")(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 	require.NoError(t, h(c))
@@ -235,7 +235,7 @@ func TestRequireChatAvailability_ReadonlyReadAllowed(t *testing.T) {
 
 func TestRequireChatAvailability_UnavailableReadDenied(t *testing.T) {
 	c, rec := newRolePolicyReq(t, &model.User{ID: "u1"})
-	h := RequireChatAvailability(&stubChatAvail{policy: "unavailable"}, "read")(func(c echo.Context) error {
+	h := RequireChatAvailability(&stubChatAvail{policy: "unavailable"}, "read")(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 	require.NoError(t, h(c))
@@ -247,7 +247,7 @@ func TestRequireChatAvailability_UnavailableReadDenied(t *testing.T) {
 func TestRequireChatAvailability_NilCheckerDenies(t *testing.T) {
 	c, rec := newRolePolicyReq(t, &model.User{ID: "alice"})
 	called := false
-	handler := RequireChatAvailability(nil, "write")(func(c echo.Context) error {
+	handler := RequireChatAvailability(nil, "write")(func(c *echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})

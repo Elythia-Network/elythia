@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +25,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
 	return NewHandler(urls, svc, "example.com", "https://example.com"), userRepo
 }
 
-func newReq(t *testing.T, target string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, target string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -328,7 +328,7 @@ func TestDiscovery_FederationNone403(t *testing.T) {
 	h, _ := newHandlerWithFederation(t, "none")
 	cases := []struct {
 		name string
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 	}{
 		{"host-meta", h.HostMeta},
 		{"host-meta.json", h.HostMetaJSON},

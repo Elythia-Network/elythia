@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/signin"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,10 +78,10 @@ func TestSignin_FailedAttemptsDoNotRecordIP(t *testing.T) {
 
 	endpoints := []struct {
 		name string
-		pick func(*signin.Handler) func(echo.Context) error
+		pick func(*signin.Handler) func(*echo.Context) error
 	}{
-		{"signin-flow", func(h *signin.Handler) func(echo.Context) error { return h.SigninFlow }},
-		{"signin", func(h *signin.Handler) func(echo.Context) error { return h.Signin }},
+		{"signin-flow", func(h *signin.Handler) func(*echo.Context) error { return h.SigninFlow }},
+		{"signin", func(h *signin.Handler) func(*echo.Context) error { return h.Signin }},
 	}
 
 	// **endpoint ごとに fixture を作り直す。** 共有すると、前の subtest が拾った

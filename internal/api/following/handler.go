@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles following-related API endpoints.
@@ -40,7 +40,7 @@ func (h *Handler) SetLocalFederationObserver(observer activitypub.LocalFederatio
 	h.localFederationObserver = observer
 }
 
-func (h *Handler) gateExternalAction(c echo.Context, me *model.User, _ string) bool {
+func (h *Handler) gateExternalAction(c *echo.Context, me *model.User, _ string) bool {
 	if h.localFederationObserver == nil || me == nil || !me.IsLocal() {
 		return true
 	}
@@ -72,7 +72,7 @@ type CreateRequest struct {
 }
 
 // Create handles POST /api/following/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req CreateRequest
@@ -125,7 +125,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/following/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req DeleteRequest
@@ -161,7 +161,7 @@ type RequestActionRequest struct {
 }
 
 // AcceptRequest handles POST /api/following/requests/accept.
-func (h *Handler) AcceptRequest(c echo.Context) error {
+func (h *Handler) AcceptRequest(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req RequestActionRequest
@@ -193,7 +193,7 @@ func (h *Handler) AcceptRequest(c echo.Context) error {
 }
 
 // RejectRequest handles POST /api/following/requests/reject.
-func (h *Handler) RejectRequest(c echo.Context) error {
+func (h *Handler) RejectRequest(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req RequestActionRequest
@@ -222,7 +222,7 @@ func (h *Handler) RejectRequest(c echo.Context) error {
 // upstream requests/cancel.ts は followee を getUser で先に解決して
 // NO_SUCH_USER を返し、request 不在は FOLLOW_REQUEST_NOT_FOUND (service 内部
 // error とは別の公開 id) に変換し、成功時は packed followee を返す (#1562)。
-func (h *Handler) CancelRequest(c echo.Context) error {
+func (h *Handler) CancelRequest(c *echo.Context) error {
 	me := middleware.GetUser(c)
 
 	var req RequestActionRequest
@@ -268,7 +268,7 @@ type ListRequest struct {
 // List handles POST /api/following/list (upstream 2026.5.2 #17385 + #17416)。
 // 自分が follow している人の一覧を Following[] で返す (populateFollowee=true 相当)。
 // notification=true で `notify IS NOT NULL` 絞り込み。kind は read:following。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req ListRequest
 	if err := c.Bind(&req); err != nil {
@@ -328,7 +328,7 @@ func (h *Handler) List(c echo.Context) error {
 // packDetailed packs users as upstream packMany(users, viewer) through the
 // shared list packer. Without one it falls back to the bare UserDetailed
 // (packer の既定で非公開のカウントは伏せたまま)。
-func (h *Handler) packDetailed(c echo.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []entity.UserDetailed {
+func (h *Handler) packDetailed(c *echo.Context, viewer *model.User, users []*model.User, profiles map[string]*model.UserProfile) []entity.UserDetailed {
 	if h.packer != nil {
 		return h.packer.DetailedMany(c.Request().Context(), viewer, users, profiles)
 	}
@@ -383,7 +383,7 @@ func (h *Handler) packRequests(rows []*model.FollowRequest) []ListRequestsRespon
 }
 
 // ListRequests handles POST /api/following/requests/list.
-func (h *Handler) ListRequests(c echo.Context) error {
+func (h *Handler) ListRequests(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`

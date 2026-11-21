@@ -1,6 +1,6 @@
 package middleware
 
-import "github.com/labstack/echo/v4"
+import "github.com/labstack/echo/v5"
 
 // IPObserver records the IP an authenticated request arrived from.
 // Implemented by core/iplog.Service。interface で受けるのは、middleware から
@@ -22,7 +22,7 @@ type IPObserver interface {
 // ここで meta を読むと、middleware が meta repository を持つことになる。
 func RecordClientIP(observer IPObserver) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			// **プロセス内の呼び出しは記録しない。** 実在しない
 			// `127.0.0.1` が `user_ip` に入ると、関連アカウント検索
 			// (#3105) の材料が汚れる。

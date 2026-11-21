@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Me handles POST /api/i - returns the authenticated user's info.
@@ -46,7 +46,7 @@ func (h *Handler) recordLoginDay(userID string, profile *model.UserProfile) {
 	profile.LoggedInDates = newDates
 }
 
-func (h *Handler) Me(c echo.Context) error {
+func (h *Handler) Me(c *echo.Context) error {
 	return h.me(c, true)
 }
 
@@ -54,7 +54,7 @@ func (h *Handler) Me(c echo.Context) error {
 // includeSecrets ブロック (email / emailVerified / securityKeysList) を落とす。
 // upstream の i/pin / i/unpin は `pack(me, me, {schema: 'MeDetailed'})` を
 // includeSecrets 無しで呼ぶので、同じ応答を使い回す mk-go 側もここで落とす。
-func (h *Handler) me(c echo.Context, allowSecrets bool) error {
+func (h *Handler) me(c *echo.Context, allowSecrets bool) error {
 	u := middleware.GetUser(c)
 
 	// middleware が渡す user は tokenCache (token → user、30 秒 TTL) 由来で、
@@ -296,7 +296,7 @@ func (h *Handler) meDetailedWithUnread(ctx context.Context, u *model.User, profi
 // /api/i (Me) は同等の判定を inline で持つ (#1824)。/api/i/update もこの helper で
 // native session に email 系を返す (#1919)。両者が drift しないよう、変更時は
 // Me handler の isSecure ブロックと揃えること。
-func (h *Handler) appendIncludeSecrets(c echo.Context, u *model.User, profile *model.UserProfile, resp map[string]any) {
+func (h *Handler) appendIncludeSecrets(c *echo.Context, u *model.User, profile *model.UserProfile, resp map[string]any) {
 	if u == nil || u.Token == nil || *u.Token != middleware.GetToken(c) {
 		return
 	}

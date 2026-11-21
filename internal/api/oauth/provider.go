@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc"
 	"github.com/elythia-network/elythia/internal/misc/permissions"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // tokenLen is the length of generated authorization codes and access tokens.
@@ -58,7 +58,7 @@ type ConsentMeta struct {
 
 // ConsentRenderer serves the frontend shell HTML with the OAuth meta tags for
 // the consent prompt. Wired from the server to frontendHTML.
-type ConsentRenderer func(c echo.Context, m ConsentMeta) error
+type ConsentRenderer func(c *echo.Context, m ConsentMeta) error
 
 // Handler implements the OAuth2 authorization-code provider endpoints.
 type Handler struct {
@@ -117,7 +117,7 @@ func NewHandler(store Store, httpClient *http.Client, userRepo UserResolver, tok
 // client, store the transaction, and serve the consent page. Errors that occur
 // before the redirect_uri is validated return a direct 400 (never redirect to
 // an unvalidated URI); errors after redirect to the client with ?error=.
-func (h *Handler) Authorize(c echo.Context) error {
+func (h *Handler) Authorize(c *echo.Context) error {
 	q := c.Request().URL.Query()
 	clientID := q.Get("client_id")
 	redirectURI := q.Get("redirect_uri")
@@ -199,7 +199,7 @@ func (h *Handler) Authorize(c echo.Context) error {
 // Decision handles POST /oauth/decision: the consent form posts the user's
 // native login_token, the transaction_id, and an optional cancel flag. On
 // allow it issues an authorization code and redirects to the client.
-func (h *Handler) Decision(c echo.Context) error {
+func (h *Handler) Decision(c *echo.Context) error {
 	ctx := c.Request().Context()
 	transactionID := c.FormValue("transaction_id")
 	loginToken := c.FormValue("login_token")
@@ -268,7 +268,7 @@ func (h *Handler) Decision(c echo.Context) error {
 
 // Token handles POST /oauth/token: exchange an authorization code (+ PKCE
 // verifier) for an access token. Accepts urlencoded or JSON bodies.
-func (h *Handler) Token(c echo.Context) error {
+func (h *Handler) Token(c *echo.Context) error {
 	ctx := c.Request().Context()
 	// CORS (cross-origin SPA / native client) は root の CORS middleware が
 	// 付与するのでここでは設定しない (二重 header 回避、#1899 review)。
@@ -385,7 +385,7 @@ func (h *Handler) Token(c echo.Context) error {
 
 // NotFound replies 404 for unknown /oauth/* paths so clients can probe endpoint
 // support, mirroring upstream's catch-all.
-func (h *Handler) NotFound(c echo.Context) error {
+func (h *Handler) NotFound(c *echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]any{
 		"error": map[string]any{
 			"message": "Unknown OAuth endpoint.",
@@ -462,7 +462,7 @@ func appendQuery(base string, params map[string]string) string {
 
 // directError returns a plain 400 for authorization errors that occur before a
 // trusted redirect_uri is established.
-func directError(c echo.Context, desc string) error {
+func directError(c *echo.Context, desc string) error {
 	return c.JSON(http.StatusBadRequest, map[string]any{
 		"error":             "invalid_request",
 		"error_description": desc,
@@ -472,7 +472,7 @@ func directError(c echo.Context, desc string) error {
 // directAccessDenied returns the 403 access_denied upstream's
 // createForbiddenAccessDenied produces. 無効 / 期限切れの transaction ID に
 // 使う (invalid_request の 400 とは別種別)。
-func directAccessDenied(c echo.Context, desc string) error {
+func directAccessDenied(c *echo.Context, desc string) error {
 	return c.JSON(http.StatusForbidden, map[string]any{
 		"error":             "access_denied",
 		"error_description": desc,
@@ -481,14 +481,14 @@ func directAccessDenied(c echo.Context, desc string) error {
 
 // applyOAuthNoStore sets the no-cache headers upstream's applyNoStore applies to
 // authorization-endpoint responses (#2079)。
-func applyOAuthNoStore(c echo.Context) {
+func applyOAuthNoStore(c *echo.Context) {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	c.Response().Header().Set("Pragma", "no-cache")
 }
 
 // redirectError redirects to the (validated) client redirect_uri with the OAuth
 // error parameters, including the RFC9207 iss.
-func (h *Handler) redirectError(c echo.Context, redirectURI, state, code, desc string) error {
+func (h *Handler) redirectError(c *echo.Context, redirectURI, state, code, desc string) error {
 	// #2106 L22: upstream は redirect error に error / state / iss のみ載せ、error_description は
 	// 付与しない (RFC 上 optional、token endpoint の JSON error にのみ含める)。desc は log に残す。
 	slog.Debug("oauth: redirect error", "code", code, "desc", desc)
@@ -502,7 +502,7 @@ func (h *Handler) redirectError(c echo.Context, redirectURI, state, code, desc s
 }
 
 // tokenError returns an OAuth token-endpoint JSON error.
-func tokenError(c echo.Context, status int, code, desc string) error {
+func tokenError(c *echo.Context, status int, code, desc string) error {
 	applyOAuthNoStore(c)
 	return c.JSON(status, map[string]any{
 		"error":             code,

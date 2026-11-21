@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,14 +42,11 @@ func ssrGet(t *testing.T, handler echo.HandlerFunc, path string, params map[stri
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, path, nil), rec)
-	names := make([]string, 0, len(params))
-	values := make([]string, 0, len(params))
+	values := make(echo.PathValues, 0, len(params))
 	for k, v := range params {
-		names = append(names, k)
-		values = append(values, v)
+		values = append(values, echo.PathValue{Name: k, Value: v})
 	}
-	c.SetParamNames(names...)
-	c.SetParamValues(values...)
+	c.SetPathValues(values)
 	require.NoError(t, handler(c))
 	return rec
 }
@@ -236,7 +233,7 @@ func TestSSRUserHead_ProfileCrawlerDirectives(t *testing.T) {
 
 func TestPrefersHTML(t *testing.T) {
 	e := echo.New()
-	newCtx := func(accept string) echo.Context {
+	newCtx := func(accept string) *echo.Context {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		if accept != "" {
 			req.Header.Set(echo.HeaderAccept, accept)

@@ -40,8 +40,8 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/stream"
 	"github.com/elythia-network/elythia/plugin"
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 	"gorm.io/gorm"
 )
 
@@ -525,43 +525,93 @@ func corsRestrictedPath(p string) bool {
 // recoverMiddleware returns the global middleware that turns a panic in a
 // handler into a 500 and logs it with the stack.
 //
-// **ログは slog に出す (#4236)。** echo の Recover は既定で echo の logger に
-// 書くが、echo の v5 の Recover はログを書かずにエラーを返すだけになる。今の
-// うちに自分で書く形にしておき、v5 へ上げても panic の記録が消えないようにする。
-// 応答は今までどおり echo のエラーハンドラが書く (LogErrorFunc が err を返すので)。
-// v5 の Recover には LogErrorFunc が無いので、上げるときは Recover の返すエラー
-// から errors.As で *PanicStackError を取り出し、その Stack と元の Err をここで
-// slog に書いてから返す形に書き直す (PanicStackError の Error() は stack を含む
-// ので、そのまま err に渡すと stack が二重に出る)。
+// **ログは slog に出す (#4236)。** echo の v5 の Recover はログを書かず、stack を
+// 持つ *PanicStackError を返すだけなので、ここで取り出して書く (#4239)。返すのは
+// panic の元の値 (v4 の Recover が echo のエラーハンドラに渡していたもの) なので、
+// 応答は echo のエラーハンドラが今までどおり書く。PanicStackError の Error() は
+// stack を含むので、そのまま返すとエラーを記録する側に stack が二重に出る。
 func recoverMiddleware() echo.MiddlewareFunc {
-	cfg := echomw.DefaultRecoverConfig
-	cfg.LogErrorFunc = func(c echo.Context, err error, stack []byte) error {
-		slog.Error("panic recovered in a handler",
-			"method", c.Request().Method, "route", c.Path(), "err", err, "stack", string(stack))
-		return err
+	recoverPanic := echomw.Recover()
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		h := recoverPanic(next)
+		return func(c *echo.Context) error {
+			err := h(c)
+			var panicked *echomw.PanicStackError
+			if !errors.As(err, &panicked) {
+				return err
+			}
+			slog.Error("panic recovered in a handler",
+				"method", c.Request().Method, "route", c.Path(), "err", panicked.Err, "stack", string(panicked.Stack))
+			return panicked.Err
+		}
 	}
-	return echomw.RecoverWithConfig(cfg)
+}
+
+// wildcardCORS returns a CORS middleware that allows every origin ("*")
+// with the given methods and headers, answering the way echo v4's CORS
+// middleware did with that config.
+//
+// **echo の v5 の CORS は使わない (#4239)。** v5 は Origin と
+// Access-Control-Request-Method の両方がある OPTIONS だけを preflight として扱い、
+// それ以外の OPTIONS を後ろのルートへ流す。/api では catch-all が 200 と {} を
+// 返し、/oauth/token ではルートの CORS が別のヘッダを付ける。v4 は OPTIONS なら
+// 必ずここで 204 を返していたので、その答えを保つ。許す origin は "*" だけなので、
+// v4 の origin の照合 (サブドメイン、正規表現) と credentials の扱いは要らない。
+func wildcardCORS(skipper func(*echo.Context) bool, allowMethods, allowHeaders []string) echo.MiddlewareFunc {
+	methods := strings.Join(allowMethods, ",")
+	headers := strings.Join(allowHeaders, ",")
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if skipper(c) {
+				return next(c)
+			}
+			req := c.Request()
+			h := c.Response().Header()
+			h.Add(echo.HeaderVary, echo.HeaderOrigin)
+			preflight := req.Method == http.MethodOptions
+			if preflight {
+				// ルーターが 405 のときに決める Allow を、OPTIONS の答えにも付ける。
+				if allow, ok := c.Get(echo.ContextKeyHeaderAllow).(string); ok && allow != "" {
+					h.Set(echo.HeaderAllow, allow)
+				}
+			}
+			if req.Header.Get(echo.HeaderOrigin) == "" {
+				if !preflight {
+					return next(c)
+				}
+				return c.NoContent(http.StatusNoContent)
+			}
+			h.Set(echo.HeaderAccessControlAllowOrigin, "*")
+			if !preflight {
+				return next(c)
+			}
+			h.Add(echo.HeaderVary, echo.HeaderAccessControlRequestMethod)
+			h.Add(echo.HeaderVary, echo.HeaderAccessControlRequestHeaders)
+			h.Set(echo.HeaderAccessControlAllowMethods, methods)
+			h.Set(echo.HeaderAccessControlAllowHeaders, headers)
+			return c.NoContent(http.StatusNoContent)
+		}
+	}
 }
 
 // corsMiddleware returns the global CORS middleware.
 // Shared with cors_test.go so production and tests stay in sync.
 func corsMiddleware() echo.MiddlewareFunc {
-	inner := echomw.CORSWithConfig(echomw.CORSConfig{
+	inner := wildcardCORS(
 		// discovery endpoint は upstream が専用の hook で
 		// `Access-Control-Allow-Headers: Accept` だけを広告する。ここで
 		// グローバル CORS を通すと preflight に Origin/Content-Type/
 		// Authorization まで載って乖離するので除外する (handler 側が
 		// setDiscoveryCORS で必要なヘッダを全て付ける)。
-		Skipper: func(c echo.Context) bool {
+		func(c *echo.Context) bool {
 			return strings.HasPrefix(c.Request().URL.Path, "/.well-known/")
 		},
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
-	})
+		[]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		[]string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		wrapped := inner(next)
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			// **`c.Request().URL.Path` で見る。** グローバル middleware の
 			// 時点では `c.Path()` が `/api/*` に解決されていることがある。
 			if !corsRestrictedPath(c.Request().URL.Path) {
@@ -575,7 +625,7 @@ func corsMiddleware() echo.MiddlewareFunc {
 			// middleware は無い (gzip は後段) ので `Set` でも同じ結果になるが、
 			// 順序を入れ替えたときに他の `Vary` を消さないため。
 			c.Response().Header().Add(echo.HeaderVary, echo.HeaderOrigin)
-			// **プリフライトはここで打ち切る。** 通すと `api.Any("/*")` の
+			// **プリフライトはここで打ち切る。** 通すと `/api/*` の
 			// catchall が拾って `200 + {}` を返し、プリフライトのたびに
 			// 「unimplemented API endpoint」の警告ログを吐く。auth の
 			// `io.ReadAll` やレート制限にも OPTIONS が流れる。
@@ -616,7 +666,7 @@ func accessLogConfig(out io.Writer) echomw.RequestLoggerConfig {
 		// `LogURI` は `req.RequestURI` をそのまま入れる (query 込み)。自分で
 		// `c.Request().RequestURI` を読んでも同じだが、フラグと使う値を対応させておく。
 		LogURI: true,
-		LogValuesFunc: func(_ echo.Context, v echomw.RequestLoggerValues) error {
+		LogValuesFunc: func(_ *echo.Context, v echomw.RequestLoggerValues) error {
 			// 旧 `LoggerWithConfig` の
 			// `${time_rfc3339} ${method} ${custom} ${status} ${latency_human}` と
 			// 同じ並び・同じ書式。**時刻は `v.StartTime` ではなく `time.Now()`** —
@@ -655,7 +705,7 @@ func gzipConfig() echomw.GzipConfig {
 	// MinLength=1024 で小さい body の gzip overhead を回避し、/streaming は
 	// WebSocket frame を壊さないよう Skipper で除外する (#413 Phase 3 #12)。
 	return echomw.GzipConfig{
-		Skipper: func(c echo.Context) bool {
+		Skipper: func(c *echo.Context) bool {
 			// WebSocket upgrade 経路 (/streaming) は frame 単位の bidirectional
 			// 通信で gzip すると壊れる。
 			// /backup-download は数 GB の dump をそのまま渡す。gzip し直すと CPU を
@@ -782,12 +832,6 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	// GET のルートを HEAD にも応えさせる (#3925)。ルートの記録と最も外側の
 	// middleware を兼ねるので、ルートと他の middleware より先に置く。
 	headRouting := installHeadRoutes(e)
-	e.HideBanner = true
-	e.HidePort = true
-	applyServerTimeouts(e.Server)
-	// TLSServer は使っていない (TLS 終端は前段の reverse proxy) が、将来
-	// e.StartTLS を使ったときに timeout 無しの server が生えるのを防ぐ。
-	applyServerTimeouts(e.TLSServer)
 	// 全 endpoint の c.JSON / c.Bind を共通 serializer に通す。実体は stdlib
 	// encoding/json (fastJSONSerializer の doc 参照: goccy は #542 の panic で
 	// revert、高速 encoder 化は #1142 で見送り)。
@@ -833,7 +877,7 @@ func newServer(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients, plugi
 	accessLog := echomw.RequestLoggerWithConfig(accessLogConfig(os.Stdout))
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		logged := accessLog(next)
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			_ = logged(c)
 			return nil
 		}
@@ -1094,7 +1138,7 @@ type DumpedRoutes struct {
 // Phase 2 で TS の api.json ベースに切り替える際もこの method の出力形式は
 // そのまま使える想定 (input source 側だけ差し替え)。
 func (s *Server) DumpRoutes(w io.Writer) error {
-	routes := s.echo.Routes()
+	routes := s.echo.Router().Routes()
 	dumped := make([]DumpedRoute, 0, len(routes))
 	for _, r := range routes {
 		dumped = append(dumped, DumpedRoute{Method: r.Method, Path: r.Path})
@@ -1605,16 +1649,8 @@ func (s *Server) shutdownSteps() []shutdownStep {
 			s.closePubSubs()
 			return nil
 		}},
-		{name: "echo", run: func(ctx context.Context) error {
-			// listener は Supervisor が持つ。echo は listen していないので、Shutdown は
-			// echo が自分で張った server を持っていた場合 (テストなど) にだけ効く。
-			// 戻り値は段のエラーとして返す。ほかに失敗した段が無ければ、runShutdownStepsは
-			// これをそのまま返す(#3707より前と同じ値)。
-			if s.echo != nil {
-				return s.echo.Shutdown(ctx)
-			}
-			return nil
-		}},
+		// echo を止める段は無い。listener は Supervisor が持ち、echo の v5 は自分の
+		// server も Shutdown も持たない (#4239)。
 	}
 }
 
@@ -1648,8 +1684,11 @@ func (s *Server) queueRuntimeStatsObserver(setter interface{ SetObserver(driver.
 // simpleGet) がまさにそれで、`text/html; charset=utf-8` に一致しないと HTML を
 // パースせず body を null にしてしまう。drop-in 互換として表記を揃える。
 func lowercaseCharset(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		res := c.Response()
+	return func(c *echo.Context) error {
+		res := echoResponse(c)
+		if res == nil {
+			return next(c)
+		}
 		res.Before(func() {
 			ct := res.Header().Get(echo.HeaderContentType)
 			if fixed, ok := rewriteCharset(ct); ok {

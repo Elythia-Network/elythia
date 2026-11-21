@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,7 +102,7 @@ func authenticateOnce(t *testing.T, auth *AuthMiddleware, token string) *model.U
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	var seen *model.User
-	require.NoError(t, auth.Authenticate()(func(c echo.Context) error {
+	require.NoError(t, auth.Authenticate()(func(c *echo.Context) error {
 		seen = GetUser(c)
 		return c.NoContent(http.StatusOK)
 	})(e.NewContext(req, rec)))

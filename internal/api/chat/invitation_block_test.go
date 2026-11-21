@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,10 +75,10 @@ func TestInvitationsCreate_UnrelatedBlockDoesNotPrevent(t *testing.T) {
 func TestAcceptAndJoin_BlockedEitherWay(t *testing.T) {
 	endpoints := []struct {
 		name    string
-		handler func(h *Handler) func(echo.Context) error
+		handler func(h *Handler) func(*echo.Context) error
 	}{
-		{name: "invitations/accept", handler: func(h *Handler) func(echo.Context) error { return h.InvitationsAccept }},
-		{name: "rooms/join", handler: func(h *Handler) func(echo.Context) error { return h.RoomsJoin }},
+		{name: "invitations/accept", handler: func(h *Handler) func(*echo.Context) error { return h.InvitationsAccept }},
+		{name: "rooms/join", handler: func(h *Handler) func(*echo.Context) error { return h.RoomsJoin }},
 	}
 	blocks := []struct {
 		name             string

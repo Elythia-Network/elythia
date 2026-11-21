@@ -7,11 +7,11 @@ import (
 	"github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Federation returns the authenticated account's federation state and first external reference.
-func (h *Handler) Federation(c echo.Context) error {
+func (h *Handler) Federation(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if user == nil || h.localFederationService == nil {
 		return apierr.JSONInternalError(c)
@@ -27,7 +27,7 @@ func (h *Handler) Federation(c echo.Context) error {
 }
 
 // UpdateFederation changes whether the authenticated local account may federate.
-func (h *Handler) UpdateFederation(c echo.Context) error {
+func (h *Handler) UpdateFederation(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if user == nil || h.localFederationService == nil {
 		return apierr.JSONInternalError(c)

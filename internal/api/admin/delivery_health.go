@@ -11,7 +11,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/deliveryhealth"
 	"github.com/elythia-network/elythia/internal/core/federation"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // DeliveryHealthProvider exposes the aggregated per-host delivery view.
@@ -54,7 +54,7 @@ const defaultDeliveryHealthWindow = time.Hour
 // 観測値に加えて、配送を止めているホスト (ブレーカー / 429 の間隔、#3048) を
 // `breakers` に出す。「開いたまま戻らない」が最悪の失敗形なので、見えて、
 // 手で閉じられる (close-delivery-breaker) ようにする。
-func (h *Handler) FederationDeliveryHealth(c echo.Context) error {
+func (h *Handler) FederationDeliveryHealth(c *echo.Context) error {
 	return h.federationHealth(c, h.deliveryHealth, h.deliveryBreaker)
 }
 
@@ -66,7 +66,7 @@ func (h *Handler) FederationDeliveryHealth(c echo.Context) error {
 // 相手は次に試す時刻で、最大 66 分後、#4222) に送らせる。**429 の予約も
 // 消す** — 予約の列は溜まった件数 x 間隔まで伸びるので、残すと手で解けない。
 // 相手がまだ 429 を返せば、また止まり直すだけ。
-func (h *Handler) FederationCloseDeliveryBreaker(c echo.Context) error {
+func (h *Handler) FederationCloseDeliveryBreaker(c *echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -102,7 +102,7 @@ func (h *Handler) FederationCloseDeliveryBreaker(c echo.Context) error {
 // 窓の扱いも同じなので、方向ごとに複製しない (#2471)。
 //
 // breaker は送信側だけ (受信側は nil)。nil なら `breakers` を空で返す。
-func (h *Handler) federationHealth(c echo.Context, provider DeliveryHealthProvider, breaker DeliveryBreakerAdmin) error {
+func (h *Handler) federationHealth(c *echo.Context, provider DeliveryHealthProvider, breaker DeliveryBreakerAdmin) error {
 	breakers := []deliveryhealth.BreakerState{}
 	if breaker != nil {
 		list, err := breaker.List(c.Request().Context())
@@ -175,6 +175,6 @@ type deliveryHealthResponse struct {
 //
 // inbox processor は活動を捨てる分岐を 5 つ持ち、うち「ブロック済みホスト」は
 // ログすら出さない。ここが唯一の観測点になる。
-func (h *Handler) FederationInboxHealth(c echo.Context) error {
+func (h *Handler) FederationInboxHealth(c *echo.Context) error {
 	return h.federationHealth(c, h.inboxHealth, nil)
 }

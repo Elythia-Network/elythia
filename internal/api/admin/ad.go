@@ -13,11 +13,11 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/jsdate"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // AdCreate handles POST /api/admin/ad/create.
-func (h *Handler) AdCreate(c echo.Context) error {
+func (h *Handler) AdCreate(c *echo.Context) error {
 	if h.adRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -112,7 +112,7 @@ func packAds(ads []*model.Ad) []map[string]any {
 }
 
 // AdDelete handles POST /api/admin/ad/delete.
-func (h *Handler) AdDelete(c echo.Context) error {
+func (h *Handler) AdDelete(c *echo.Context) error {
 	if h.adRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -146,7 +146,7 @@ func (h *Handler) AdDelete(c echo.Context) error {
 }
 
 // AdList handles POST /api/admin/ad/list.
-func (h *Handler) AdList(c echo.Context) error {
+func (h *Handler) AdList(c *echo.Context) error {
 	if h.adRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -186,7 +186,7 @@ func (h *Handler) AdList(c echo.Context) error {
 }
 
 // AdUpdate handles POST /api/admin/ad/update.
-func (h *Handler) AdUpdate(c echo.Context) error {
+func (h *Handler) AdUpdate(c *echo.Context) error {
 	// 旧実装が `c.Request().Body` を `Updates` に直接渡しており部分更新が機能して
 	// いなかった。partial field map に差し替え、リクエストで明示された項目のみ
 	// 書き換える。

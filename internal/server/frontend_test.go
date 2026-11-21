@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -961,17 +961,17 @@ func TestShells_ReadLoaderAtConstruction(t *testing.T) {
 		}},
 		{name: "OAuth consent", dir: spa, build: func() echo.HandlerFunc {
 			render := frontendConsentHTML(cfg, repo, nil, nil, nil, nil, nil)
-			return func(c echo.Context) error {
+			return func(c *echo.Context) error {
 				return render(c, oauth.ConsentMeta{TransactionID: "tx", ClientName: "client", Scope: "read:account"})
 			}
 		}},
 		{name: "permalink SSR", dir: spa, build: func() echo.HandlerFunc {
 			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, nil, ssrMetaDeps{}, nil, nil)
-			return func(c echo.Context) error { return h.render(c, shellOverrides{}) }
+			return func(c *echo.Context) error { return h.render(c, shellOverrides{}) }
 		}},
 		{name: "embed", dir: embedDir, build: func() echo.HandlerFunc {
 			h := newEmbedHandlers(cfg, repo, nil, nil, nil, nil, nil, EmbedDeps{})
-			return func(c echo.Context) error { return h.render(c, nil) }
+			return func(c *echo.Context) error { return h.render(c, nil) }
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

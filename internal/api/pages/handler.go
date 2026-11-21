@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // MainStreamPublisher emits events to a user's `main` WebSocket channel.
@@ -114,7 +114,7 @@ type CreateRequest struct {
 }
 
 // Create handles POST /api/pages/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	// 空の title は本家と同じく受ける (#3772)。欠けだけを拒否する。
@@ -236,7 +236,7 @@ func rawString(raw json.RawMessage) (s string, ok bool) {
 }
 
 // Show handles POST /api/pages/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil {
@@ -328,7 +328,7 @@ type UpdateRequest struct {
 }
 
 // Update handles POST /api/pages/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.PageID == "" {
@@ -410,7 +410,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/pages/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req DeleteRequest
 	if err := c.Bind(&req); err != nil || req.PageID == "" {
@@ -447,7 +447,7 @@ type MyRequest struct {
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
 // 全 row が同一 owner なので middleware.GetUser を直接 owner として attach し、
 // 追加 round-trip 無しで `page.user` を埋める (#1134)。
-func (h *Handler) My(c echo.Context) error {
+func (h *Handler) My(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req MyRequest
 	if err := c.Bind(&req); err != nil {
@@ -478,7 +478,7 @@ const featuredPageLimit = 10
 // 複数 owner なので FindManyByIDs で 1 round-trip batch 取得し、行毎の owner を
 // pagesToList に owner closure で渡す (#1134)。userSource が未配線の test 経路
 // では owner 取得不能なので空 list を返す (= silent fail-soft、501 にしない)。
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	// upstream pages/featured は paramDef 空。limit/offset/sinceId/untilId を一切
 	// 受け取らず、常に visibility=public かつ likedCount>0 の page を likedCount
 	// DESC で固定 10 件返す (#1830)。REST 経由で順序・件数を変えさせない。
@@ -530,7 +530,7 @@ type LikeRequest struct {
 }
 
 // Like handles POST /api/pages/like.
-func (h *Handler) Like(c echo.Context) error {
+func (h *Handler) Like(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req LikeRequest
 	if err := c.Bind(&req); err != nil || req.PageID == "" {
@@ -568,7 +568,7 @@ type PagePushRequest struct {
 // a custom event to the page owner's `main` WebSocket channel. Body shape
 // mirrors the Misskey original endpoints/page-push.ts
 // (pageId / event / var / userId / user).
-func (h *Handler) PagePush(c echo.Context) error {
+func (h *Handler) PagePush(c *echo.Context) error {
 	caller := middleware.GetUser(c)
 	var req PagePushRequest
 	// 空の event は本家と同じく受ける (#3772)。欠けだけを拒否する。
@@ -628,7 +628,7 @@ func rawJSONBytes(b []byte) any {
 }
 
 // Unlike handles POST /api/pages/unlike.
-func (h *Handler) Unlike(c echo.Context) error {
+func (h *Handler) Unlike(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req LikeRequest
 	if err := c.Bind(&req); err != nil || req.PageID == "" {

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 )
 
 // gzipMiddleware returns the global response compression middleware: echo's
@@ -23,17 +23,17 @@ import (
 func gzipMiddleware() echo.MiddlewareFunc {
 	gz := echomw.GzipWithConfig(gzipConfig())
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			raw := c.Response().Writer
-			return gz(func(c echo.Context) error {
-				res := c.Response()
-				wrapped := res.Writer
+		return func(c *echo.Context) error {
+			// echo の v5 の gzip は c.SetResponse で writer を差し替える (#4239)。
+			raw := c.Response()
+			return gz(func(c *echo.Context) error {
+				wrapped := c.Response()
 				if wrapped == raw {
 					// Skipper に当たったか、クライアントが gzip を受け取らない。
 					return next(c)
 				}
 				sw := &gzipSwitchWriter{gz: wrapped, raw: raw}
-				res.Writer = sw
+				c.SetResponse(sw)
 				err := next(c)
 				sw.finish()
 				return err

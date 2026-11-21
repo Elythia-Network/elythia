@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/emojimeta"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RemoteEmojiMetaFetcher retrieves emoji metadata from the origin server.
@@ -39,7 +39,7 @@ func (h *Handler) SetRemoteEmojiMetaFetcher(f RemoteEmojiMetaFetcher) {
 //
 // **失敗を 5xx にしない。** 相手が落ちている / per-name endpoint を持たない、は
 // どちらも正常な結果なので、`fetched: false` を返して手入力に倒す。
-func (h *Handler) EmojiFetchRemoteMeta(c echo.Context) error {
+func (h *Handler) EmojiFetchRemoteMeta(c *echo.Context) error {
 	// **`emojiId` と `name`+`host` の両方で引ける。** 投稿本文やリアクションの
 	// 右クリックから呼ぶとき、frontend が持っているのは `name@host` だけで
 	// emoji の id を知らない。id を引くためだけに `admin/emoji/list` を叩かせると

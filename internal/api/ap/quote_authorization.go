@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	coreuser "github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/model"
@@ -28,7 +28,7 @@ func (h *Handler) SetQuoteAuthorizationStore(s QuoteAuthorizationStore) {
 // **公開範囲では絞らない。** followers 限定の投稿への引用でも、第三者 (引用を
 // 表示するサーバー) はこれを取得して確かめる。出すのは URI だけで、投稿の中身は
 // 埋め込まない (FEP の MUST NOT) ので、見る権限の無い相手に中身は渡らない。
-func (h *Handler) QuoteAuthorization(c echo.Context) error {
+func (h *Handler) QuoteAuthorization(c *echo.Context) error {
 	c.Response().Header().Set("Vary", "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {

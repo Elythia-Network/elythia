@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/paramschema"
 )
@@ -29,7 +29,7 @@ func testEndpoints(t *testing.T) map[string]paramschema.Endpoint {
 	}
 }
 
-func ok(c echo.Context) error { return c.JSON(http.StatusOK, map[string]any{"ok": true}) }
+func ok(c *echo.Context) error { return c.JSON(http.StatusOK, map[string]any{"ok": true}) }
 
 // TestMiddlewarePassesTheRoutesWithoutAParamDef checks that a request to a
 // route outside /api or without a paramDef in eps reaches the handler with
@@ -37,7 +37,7 @@ func ok(c echo.Context) error { return c.JSON(http.StatusOK, map[string]any{"ok"
 func TestMiddlewarePassesTheRoutesWithoutAParamDef(t *testing.T) {
 	e := echo.New()
 	var read string
-	h := func(c echo.Context) error {
+	h := func(c *echo.Context) error {
 		b, _ := io.ReadAll(c.Request().Body)
 		read = string(b)
 		return ok(c)
@@ -62,7 +62,7 @@ func TestMiddlewareReadErrorReachesTheHandler(t *testing.T) {
 	boom := errors.New("boom")
 	e := echo.New()
 	var handlerErr error
-	e.POST("/api/t/post", func(c echo.Context) error {
+	e.POST("/api/t/post", func(c *echo.Context) error {
 		_, handlerErr = io.ReadAll(c.Request().Body)
 		return ok(c)
 	}, Middleware(testEndpoints(t)))

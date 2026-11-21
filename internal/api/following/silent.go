@@ -3,7 +3,7 @@ package following
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -32,7 +32,7 @@ type SilentFollowItem struct {
 // It returns the follows toward the caller that succeeded without a
 // notification because of followApprovalAction "silentFollow", newest first.
 // The parameters are the same as following/requests/list.
-func (h *Handler) ListSilent(c echo.Context) error {
+func (h *Handler) ListSilent(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`

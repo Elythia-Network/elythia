@@ -22,7 +22,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/webpush"
 	"github.com/elythia-network/elythia/internal/misc/jsstr"
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/datatypes"
 )
 
@@ -58,7 +58,7 @@ func metaJSONValue(raw []byte, fallback any) any {
 }
 
 // AdminMeta handles POST /api/admin/meta.
-func (h *Handler) AdminMeta(c echo.Context) error {
+func (h *Handler) AdminMeta(c *echo.Context) error {
 	m, err := h.metaRepo.Fetch()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -213,7 +213,7 @@ func (h *Handler) AdminMeta(c echo.Context) error {
 }
 
 // UpdateMeta handles POST /api/admin/update-meta.
-func (h *Handler) UpdateMeta(c echo.Context) error {
+func (h *Handler) UpdateMeta(c *echo.Context) error {
 	var fields map[string]any
 	if err := c.Bind(&fields); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid parameters.", "3d81ceae-475f-4600-b2a8-2bc116157532"))

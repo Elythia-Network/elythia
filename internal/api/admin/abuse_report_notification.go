@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // packedRecipient mirrors the upstream AbuseReportNotificationRecipient schema:
@@ -76,7 +76,7 @@ func (h *Handler) validateEmailAddress(userID *string) (int, map[string]any) {
 }
 
 // AbuseReportNotificationRecipientCreate handles POST /api/admin/abuse-report/notification-recipient/create.
-func (h *Handler) AbuseReportNotificationRecipientCreate(c echo.Context) error {
+func (h *Handler) AbuseReportNotificationRecipientCreate(c *echo.Context) error {
 	var req struct {
 		Name            string  `json:"name"`
 		Method          string  `json:"method"`
@@ -142,7 +142,7 @@ func (h *Handler) AbuseReportNotificationRecipientCreate(c echo.Context) error {
 }
 
 // AbuseReportNotificationRecipientDelete handles POST /api/admin/abuse-report/notification-recipient/delete.
-func (h *Handler) AbuseReportNotificationRecipientDelete(c echo.Context) error {
+func (h *Handler) AbuseReportNotificationRecipientDelete(c *echo.Context) error {
 	if h.recipientRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -166,7 +166,7 @@ func (h *Handler) AbuseReportNotificationRecipientDelete(c echo.Context) error {
 }
 
 // AbuseReportNotificationRecipientList handles POST /api/admin/abuse-report/notification-recipient/list.
-func (h *Handler) AbuseReportNotificationRecipientList(c echo.Context) error {
+func (h *Handler) AbuseReportNotificationRecipientList(c *echo.Context) error {
 	if h.recipientRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -217,7 +217,7 @@ func recipientMatchesMethod(r *model.AbuseReportNotificationRecipient, methodSet
 }
 
 // AbuseReportNotificationRecipientShow handles POST /api/admin/abuse-report/notification-recipient/show.
-func (h *Handler) AbuseReportNotificationRecipientShow(c echo.Context) error {
+func (h *Handler) AbuseReportNotificationRecipientShow(c *echo.Context) error {
 	if h.recipientRepo == nil {
 		return c.JSON(http.StatusNotFound, apierr.NoSuchRecipient())
 	}
@@ -246,7 +246,7 @@ func (h *Handler) AbuseReportNotificationRecipientShow(c echo.Context) error {
 // 素通し + correlation check を一切しておらず、admin が無効な method に
 // silent 書き換えできた。本 fix で Create と同等の enum / correlation
 // validation を追加。
-func (h *Handler) AbuseReportNotificationRecipientUpdate(c echo.Context) error {
+func (h *Handler) AbuseReportNotificationRecipientUpdate(c *echo.Context) error {
 	if h.recipientRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}

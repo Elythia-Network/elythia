@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,7 +19,7 @@ import (
 // independent of DB / Redis wiring.
 func TestDumpRoutes(t *testing.T) {
 	e := echo.New()
-	noop := func(c echo.Context) error { return nil }
+	noop := func(c *echo.Context) error { return nil }
 	// 故意に登録順を逆順 (z → a) にして、出力が path string sort で安定する
 	// ことを担保する。同 path 内では method sort が効くかも検証。
 	e.POST("/api/zeta", noop)

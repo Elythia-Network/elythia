@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,7 +17,7 @@ import (
 
 // deserializeAt runs fastJSONSerializer.Deserialize on body for a request
 // routed to path (the registered route pattern, as c.Path() reports it).
-func deserializeAt(t *testing.T, path, body string, dst any) (echo.Context, error) {
+func deserializeAt(t *testing.T, path, body string, dst any) (*echo.Context, error) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))

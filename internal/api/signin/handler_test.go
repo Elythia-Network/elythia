@@ -23,7 +23,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/password"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/argon2"
@@ -46,7 +46,7 @@ func newTestHandler(t *testing.T) (*signin.Handler, *testutil.MockUserRepository
 	return signin.NewHandler(userRepo, nil, nil, nil), userRepo
 }
 
-func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/signin", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -62,7 +62,7 @@ func doPost(h func(echo.Context) error, body string) *httptest.ResponseRecorder 
 // セマフォを実際に占有する手段だと production 側にテスト専用の export が要り、
 // しかも acquire timeout 分 (3 秒) 待つことになる。`Acquire` は ctx が死んで
 // いれば即座に失敗するので、同じ分岐を待ち時間ゼロで踏める。
-func doPostCanceled(h func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func doPostCanceled(h func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

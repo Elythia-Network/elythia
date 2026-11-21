@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elythia-network/elythia/internal/core/selfcheck"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SelfCheckRunner runs the federation / dependency self-checks.
@@ -26,7 +26,7 @@ func (h *Handler) SetSelfCheckRunner(r SelfCheckRunner) {
 // 検査の宛先は config の `url` に固定されており、**リクエストから指定できない**。
 // 自ホストは loopback / private IP に解決されうるため検査用の client は SSRF
 // ガードを通さないので、宛先を外から与えられる口を作らないことが安全性の前提。
-func (h *Handler) SelfCheck(c echo.Context) error {
+func (h *Handler) SelfCheck(c *echo.Context) error {
 	if h.selfCheck == nil {
 		return c.JSON(http.StatusOK, selfcheck.Report{Results: []selfcheck.Result{}, OK: true})
 	}

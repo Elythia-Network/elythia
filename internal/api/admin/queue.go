@@ -17,7 +17,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
 	"github.com/elythia-network/elythia/internal/queue"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // operatorProtectedTaskTypes are job types the queue-wide admin operations
@@ -51,7 +51,7 @@ func isOperatorProtectedTask(t *QueueTaskSummary) bool {
 }
 
 // QueueClear handles POST /api/admin/queue/clear.
-func (h *Handler) QueueClear(c echo.Context) error {
+func (h *Handler) QueueClear(c *echo.Context) error {
 	// upstream Misskey TS は paramDef で queue + state を required にしている (#929)。
 	// mk-go も同 shape に揃え、permissive な「全 queue 一括 clear」を弾く。
 	var req struct {
@@ -195,7 +195,7 @@ func walkQueueTasks(queue, state string, list queueTaskLister, fn func(*QueueTas
 //
 // admin/control panel の "Errored Instances" panel は b[1] で count に
 // アクセスするので、object 配列 (旧 mk-go shape) では NaN 表示になる (#1179)。
-func (h *Handler) QueueDeliverDelayed(c echo.Context) error {
+func (h *Handler) QueueDeliverDelayed(c *echo.Context) error {
 	tasks := h.fetchAllDelayedTasks("deliver")
 	return c.JSON(http.StatusOK, aggregateByHost(tasks, deliverHostFromPayload))
 }
@@ -207,7 +207,7 @@ func (h *Handler) QueueDeliverDelayed(c echo.Context) error {
 // upstream Misskey TS は `new URL(job.data.signature.keyId).host` と
 // 同等の処理。mk-go の `InboxPayload.Host` は enqueue 時に未設定なので
 // signature header 経由でしか引けない (#1179)。
-func (h *Handler) QueueInboxDelayed(c echo.Context) error {
+func (h *Handler) QueueInboxDelayed(c *echo.Context) error {
 	tasks := h.fetchAllDelayedTasks("inbox")
 	return c.JSON(http.StatusOK, aggregateByHost(tasks, inboxHostFromPayload))
 }
@@ -344,7 +344,7 @@ func inboxHostFromPayload(t *QueueTaskSummary) string {
 // (`['completed', 'failed', 'active', 'delayed', 'wait']` など)。
 // mk-go は Bull state 名を driver の list 呼び出しにマッピングする。
 // 合計 limit を超えないよう走査中に切り詰める。
-func (h *Handler) QueueJobs(c echo.Context) error {
+func (h *Handler) QueueJobs(c *echo.Context) error {
 	// state は string でも string[] でも受け取れるようにする (frontend は
 	// 配列、既存テストや admin CLI からは単一文字列でくる可能性がある)。
 	var req struct {
@@ -564,7 +564,7 @@ func (h *Handler) listTasksForState(queue, state string, page, limit int) ([]*Qu
 }
 
 // QueuePromoteJobs handles POST /api/admin/queue/promote-jobs.
-func (h *Handler) QueuePromoteJobs(c echo.Context) error {
+func (h *Handler) QueuePromoteJobs(c *echo.Context) error {
 	// driver に bulk promote API が無いため、対象 queue の delayed を最後まで
 	// たどってから RunTask で逐次 promote する。upstream の `queue.promoteJobs()`
 	// と同じく全件が対象 (#3169。以前は先頭の 100 件だけだった)。
@@ -632,15 +632,15 @@ var queuePauseResumeTypes = func() map[string]struct{} {
 }()
 
 // QueuePause handles POST /api/admin/queue/pause (upstream #17436)。
-func (h *Handler) QueuePause(c echo.Context) error { return h.queuePauseResume(c, true) }
+func (h *Handler) QueuePause(c *echo.Context) error { return h.queuePauseResume(c, true) }
 
 // QueueResume handles POST /api/admin/queue/resume (upstream #17436)。
-func (h *Handler) QueueResume(c echo.Context) error { return h.queuePauseResume(c, false) }
+func (h *Handler) QueueResume(c *echo.Context) error { return h.queuePauseResume(c, false) }
 
 // queuePauseResume は pause / resume 共通処理。queue param を QUEUE_TYPES で検証し、
 // queueInspector の PauseQueue/UnpauseQueue を呼んで moderationLog に記録する。
 // upstream pause.ts / resume.ts と同じく res は無し (204)。
-func (h *Handler) queuePauseResume(c echo.Context, pause bool) error {
+func (h *Handler) queuePauseResume(c *echo.Context, pause bool) error {
 	var req struct {
 		Queue string `json:"queue"`
 	}
@@ -808,7 +808,7 @@ func metricsToFrontend(m *QueueMetricsResult, fallbackCount int64) ([]int64, int
 // export) と完全には一致しない。存在しない queue を叩かれたときは 500 で
 // はなくゼロ埋めの shape を返して、フロント側の queueInfo が stale に
 // ならないようにする。
-func (h *Handler) QueueQueueStats(c echo.Context) error {
+func (h *Handler) QueueQueueStats(c *echo.Context) error {
 	// upstream Misskey TS は paramDef で queue を required にしている (#929)。
 	var req struct {
 		Queue string `json:"queue"`
@@ -844,7 +844,7 @@ func (h *Handler) fetchQueueMetrics(qname string) (completed, failed *QueueMetri
 }
 
 // QueueQueues handles POST /api/admin/queue/queues.
-func (h *Handler) QueueQueues(c echo.Context) error {
+func (h *Handler) QueueQueues(c *echo.Context) error {
 	if h.queueInspector == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -867,7 +867,7 @@ func (h *Handler) QueueQueues(c echo.Context) error {
 }
 
 // QueueRemoveJob handles POST /api/admin/queue/remove-job.
-func (h *Handler) QueueRemoveJob(c echo.Context) error {
+func (h *Handler) QueueRemoveJob(c *echo.Context) error {
 	queue, id, ok := bindQueueJobReq(c)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
@@ -897,7 +897,7 @@ func (h *Handler) QueueRemoveJob(c echo.Context) error {
 // 呼び出し側が見つからない job として扱う (本家は getJob("") で見つからない。
 // #3865)。以前は jobId の代わりに `id` も受けていたが、同梱の frontend は送らず、
 // #3865 で消した。
-func bindQueueJobReq(c echo.Context) (queue, id string, ok bool) {
+func bindQueueJobReq(c *echo.Context) (queue, id string, ok bool) {
 	var req struct {
 		Queue string  `json:"queue"`
 		JobID *string `json:"jobId"`
@@ -909,7 +909,7 @@ func bindQueueJobReq(c echo.Context) (queue, id string, ok bool) {
 }
 
 // QueueRetryJob handles POST /api/admin/queue/retry-job.
-func (h *Handler) QueueRetryJob(c echo.Context) error {
+func (h *Handler) QueueRetryJob(c *echo.Context) error {
 	queue, id, ok := bindQueueJobReq(c)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
@@ -932,7 +932,7 @@ func (h *Handler) QueueRetryJob(c echo.Context) error {
 }
 
 // QueueShowJob handles POST /api/admin/queue/show-job.
-func (h *Handler) QueueShowJob(c echo.Context) error {
+func (h *Handler) QueueShowJob(c *echo.Context) error {
 	queue, id, ok := bindQueueJobReq(c)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
@@ -956,7 +956,7 @@ func (h *Handler) QueueShowJob(c echo.Context) error {
 // 現状 log を書かないが、**drop-in で TS が書いた job** や、将来 processor が
 // Job.Log を使った場合にそのまま読める (#2689)。持たない driver は空を
 // 返す。存在しない job と log 0 件の job は BullMQ 同様に区別しない。
-func (h *Handler) QueueShowJobLogs(c echo.Context) error {
+func (h *Handler) QueueShowJobLogs(c *echo.Context) error {
 	queue, id, ok := bindQueueJobReq(c)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, apierr.InvalidParam("queue and jobId are required."))
@@ -1334,7 +1334,7 @@ func rawJSONOrString(payload []byte) any {
 // QueueCount = {waiting, active, completed, failed, delayed} (全 required)。
 // mk-go は db / objectStorage を独立 queue として運用しないため、その 2 つは
 // ゼロ埋め QueueCount を返して shape parity を満たす。deliver / inbox は実値。
-func (h *Handler) QueueStats(c echo.Context) error {
+func (h *Handler) QueueStats(c *echo.Context) error {
 	zero := func() map[string]any {
 		return map[string]any{"waiting": 0, "active": 0, "completed": 0, "failed": 0, "delayed": 0}
 	}

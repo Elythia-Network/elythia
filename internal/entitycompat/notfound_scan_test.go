@@ -27,7 +27,7 @@ func TestScanCollapsedLookups_APILayer(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "api", "probe")
 	p := writeGoFile(t, dir, "h.go", `
-func (h *Handler) Collapsed(c echo.Context) error {
+func (h *Handler) Collapsed(c *echo.Context) error {
 	u, err := h.repo.FindByID("x")
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.NotFound())
@@ -36,7 +36,7 @@ func (h *Handler) Collapsed(c echo.Context) error {
 	return nil
 }
 
-func (h *Handler) Guarded(c echo.Context) error {
+func (h *Handler) Guarded(c *echo.Context) error {
 	u, err := h.repo.FindByID("x")
 	if err != nil {
 		if !repository.IsNotFound(err) {

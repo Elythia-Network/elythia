@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -61,15 +61,14 @@ func (m *memStorage) Get(key string) (io.ReadCloser, error) {
 }
 func (m *memStorage) Delete(string) error { return nil }
 
-func newFilesTestContext(t *testing.T, key string) (echo.Context, *httptest.ResponseRecorder) {
+func newFilesTestContext(t *testing.T, key string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/files/"+key, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/files/:accessKey")
-	c.SetParamNames("accessKey")
-	c.SetParamValues(key)
+	c.SetPathValues(echo.PathValues{{Name: "accessKey", Value: key}})
 	return c, rec
 }
 
@@ -396,8 +395,7 @@ func TestFilesHandler_UnstorableAccessKeyIs404(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 			c.SetPath("/files/:accessKey")
-			c.SetParamNames("accessKey")
-			c.SetParamValues(key)
+			c.SetPathValues(echo.PathValues{{Name: "accessKey", Value: key}})
 
 			h := filesHandler(nil, primary, local)
 			require.NoError(t, h(c))

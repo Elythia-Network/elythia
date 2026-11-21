@@ -13,7 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/misc/permissions"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles webfinger / host-meta / nodeinfo discovery.
@@ -64,7 +64,7 @@ func (h *Handler) federationDisabled() bool {
 // TS本家は well-known ルートに preHandler hook で無条件に
 // CORSヘッダーを設定しているため、Echo の CORS middleware (Originヘッダー
 // がある場合のみ発動) とは別に明示的に付与する。
-func setDiscoveryCORS(c echo.Context) {
+func setDiscoveryCORS(c *echo.Context) {
 	h := c.Response().Header()
 	h.Set("Access-Control-Allow-Origin", "*")
 	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -78,7 +78,7 @@ func setDiscoveryCORS(c echo.Context) {
 // Echo のグローバル CORS middleware は Allow-Headers に Origin/Content-Type/
 // Authorization まで載せてしまうので、discovery だけ Skipper で除外して
 // upstream と同じ `Accept` のみを広告する。
-func (h *Handler) Preflight(c echo.Context) error {
+func (h *Handler) Preflight(c *echo.Context) error {
 	setDiscoveryCORS(c)
 	return c.NoContent(http.StatusNoContent)
 }
@@ -90,7 +90,7 @@ func (h *Handler) Preflight(c echo.Context) error {
 // マッチするローカルユーザーが存在しない場合は 404、別ホスト指定は 422、
 // 形式不正は 400 を返す。Accept ヘッダで application/xrd+xml が優先された
 // ときは XRD(XML)、それ以外は JRD(JSON) を返す。
-func (h *Handler) Webfinger(c echo.Context) error {
+func (h *Handler) Webfinger(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
@@ -182,7 +182,7 @@ func (h *Handler) Webfinger(c echo.Context) error {
 }
 
 // HostMeta handles GET /.well-known/host-meta.
-func (h *Handler) HostMeta(c echo.Context) error {
+func (h *Handler) HostMeta(c *echo.Context) error {
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
@@ -201,7 +201,7 @@ func (h *Handler) HostMeta(c echo.Context) error {
 // (同ファイルの WebFinger は `public, max-age=180` を返している)。max-age は
 // ここが advertise する `/nodeinfo/2.x` と同じ 600 に揃える — 参照先より短く
 // しても、先に discovery だけが失効して得るものが無い。
-func (h *Handler) NodeInfoDiscovery(c echo.Context) error {
+func (h *Handler) NodeInfoDiscovery(c *echo.Context) error {
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
@@ -224,7 +224,7 @@ func (h *Handler) NodeInfoDiscovery(c echo.Context) error {
 
 // HostMetaJSON handles GET /.well-known/host-meta.json.
 // host-metaのJSON版。TS本家と同じレスポンスを返す。
-func (h *Handler) HostMetaJSON(c echo.Context) error {
+func (h *Handler) HostMetaJSON(c *echo.Context) error {
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
 	}
@@ -243,7 +243,7 @@ func (h *Handler) HostMetaJSON(c echo.Context) error {
 
 // OAuthAuthorizationServer handles GET /.well-known/oauth-authorization-server.
 // RFC 8414 OAuth 2.0 Authorization Server Metadata。
-func (h *Handler) OAuthAuthorizationServer(c echo.Context) error {
+func (h *Handler) OAuthAuthorizationServer(c *echo.Context) error {
 	setDiscoveryCORS(c)
 	resp := map[string]any{
 		"issuer":                                         h.origin,
@@ -267,7 +267,7 @@ func (h *Handler) OAuthAuthorizationServer(c echo.Context) error {
 // federationDisabled() は通さない。upstream が federation off で 403 を返すのは
 // host-meta / host-meta.json / nodeinfo / webfinger の 4 本で、この endpoint は
 // 連合ではなくローカル利用者のパスワード変更導線なので対象外。
-func (h *Handler) ChangePassword(c echo.Context) error {
+func (h *Handler) ChangePassword(c *echo.Context) error {
 	// upstream の `fastify.addHook('onRequest')` は plugin scope 全体に張られるので
 	// この endpoint にも discovery 用 CORS が付く。**global CORS middleware は
 	// `/.well-known/` を Skipper で丸ごと除外している** ので、ここで付けないと

@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,7 @@ func TestFinishPasskeySignin_PluginManagedRefused(t *testing.T) {
 			repo.Profiles["u1"] = &model.UserProfile{UserID: "u1", UsePasswordLessLogin: true}
 			h := NewHandler(repo, nil, nil, nil)
 			c := newCtx()
-			rec := c.Response().Writer.(*httptest.ResponseRecorder)
+			rec := c.Response().(*echo.Response).ResponseWriter.(*httptest.ResponseRecorder)
 			require.NoError(t, h.finishPasskeySignin(c, user, makeStubWebauthnCred()))
 			assert.Equal(t, tc.want, rec.Code, rec.Body.String())
 			if tc.managed != nil {

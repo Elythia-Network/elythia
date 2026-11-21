@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/federation"
@@ -42,7 +42,7 @@ func (h *Handler) SetRemoteChecker(r RemoteChecker, selfHost string) {
 // private IP に解決されうるため SSRF ガードを通さない client を使い、宛先を
 // config に固定することを安全性の前提にしている。こちらは宛先を外から受け取る
 // ので、あちらの経路へ分岐させない (入力によってガードの無い経路に入る口になる)。
-func (h *Handler) FederationCheckHost(c echo.Context) error {
+func (h *Handler) FederationCheckHost(c *echo.Context) error {
 	var req struct {
 		Host    string `json:"host"`
 		Account string `json:"account"`

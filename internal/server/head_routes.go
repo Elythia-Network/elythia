@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/misc/headreq"
 )
@@ -32,7 +32,7 @@ import (
 //     以外 GET と同じ」に合わせて、handler からは GET として扱わせる。本文を
 //     作らずに済ませたい handler は headreq.Is で HEAD を見分ける
 //
-// 明示した HEAD のルートを見分けるため、登録されたルートを OnAddRouteHandler
+// 明示した HEAD のルートを見分けるため、登録されたルートを OnAddRoute
 // で記録する。Echo の Routes() には handler が無く、group の 404 用の
 // catch-all (RouteNotFound) も同じ位置に入るので、ルーターの引き直しだけでは
 // 「本物の GET のルートに当たったか」が分からない。
@@ -48,12 +48,13 @@ type headRoutes struct {
 // The returned value's presentAsGET still has to be added by the caller.
 func installHeadRoutes(e *echo.Echo) *headRoutes {
 	h := &headRoutes{get: map[string]struct{}{}, head: map[string]struct{}{}}
-	prev := e.OnAddRouteHandler
-	e.OnAddRouteHandler = func(host string, route echo.Route, handler echo.HandlerFunc, mw []echo.MiddlewareFunc) {
+	prev := e.OnAddRoute
+	e.OnAddRoute = func(route echo.Route) error {
 		h.record(route)
 		if prev != nil {
-			prev(host, route, handler, mw)
+			return prev(route)
 		}
+		return nil
 	}
 	e.Pre(h.pre)
 	e.Use(h.restore)
@@ -80,7 +81,7 @@ func (h *headRoutes) record(route echo.Route) {
 // least as specific.
 //
 // Fastify はパスでルートを決めてからメソッドを見るので、GET のルートが
-// `api.Any("/*")` のような HEAD も持つ catch-all より具体的なら、HEAD もその
+// `/api/*` の catch-all (`api.Group.Match(anyMethods, "/*")`) のような HEAD も持つ catch-all より具体的なら、HEAD もその
 // GET のルートに当たる。Echo は HEAD を持つノードだけを探すので、そのままだと
 // catch-all に落ちる (本番で HEAD /api/* が 200 だったのはこれで、GET と違う
 // 応答だった)。
@@ -92,22 +93,18 @@ func (h *headRoutes) record(route echo.Route) {
 // (e.HEAD) に当たったときは、どちらが具体的か分からないので、明示した HEAD を
 // 優先する。今はそういうルートは無い。
 func (h *headRoutes) routesAsGET(e *echo.Echo, r *http.Request) bool {
-	path := echo.GetPath(r)
-	c := e.NewContext(r, nil)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	// Find はパスに一致したノードの位置を入れる。group の 404 用の catch-all
+	// Route はパスに一致したルートの位置を c に入れる。group の 404 用の catch-all
 	// (RouteNotFound) に当たったときや、ノードにそのメソッドが無いとき (405) も
 	// 位置は入るが、そのメソッドで登録したルートの集合には無い。集合にあれば、
-	// そのルートに当たっている。
-	e.Router().Find(http.MethodGet, path, c)
-	getPath := c.Path()
+	// そのルートに当たっている。echo の v5 のルーターは c.Request() の Method と
+	// パスで引くので、Method だけを変えた浅い複製で引く (#4239)。
+	getPath := matchedPath(e, r, http.MethodGet)
 	if _, ok := h.get[getPath]; !ok {
 		return false
 	}
-	c.Reset(r, nil)
-	e.Router().Find(http.MethodHead, path, c)
-	headPath := c.Path()
+	headPath := matchedPath(e, r, http.MethodHead)
 	if _, ok := h.head[headPath]; !ok {
 		return true
 	}
@@ -115,8 +112,18 @@ func (h *headRoutes) routesAsGET(e *echo.Echo, r *http.Request) bool {
 	return headHasGET && headPath != getPath
 }
 
+// matchedPath returns the path of the route e's router matches for r with
+// the given method.
+func matchedPath(e *echo.Echo, r *http.Request, method string) string {
+	asMethod := r.WithContext(r.Context())
+	asMethod.Method = method
+	c := e.NewContext(asMethod, nil)
+	e.Router().Route(c)
+	return c.Path()
+}
+
 func (h *headRoutes) pre(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		r := c.Request()
 		// Upgrade を求める HEAD は振り分けない。handler には GET に見えるので、
 		// /streaming が WebSocket へ切り替えてしまう。本家 (ws の handleUpgrade)
@@ -136,7 +143,7 @@ func (h *headRoutes) pre(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 func (h *headRoutes) restore(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		if headreq.Rerouted(c) {
 			c.Request().Method = http.MethodHead
 		}
@@ -145,7 +152,7 @@ func (h *headRoutes) restore(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 func (h *headRoutes) presentAsGET(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		if headreq.Rerouted(c) {
 			r := c.Request()
 			// 元の *http.Request は net/http と共有しているので書き換えず、

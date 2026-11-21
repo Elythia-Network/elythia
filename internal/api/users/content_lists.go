@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Clips handles POST /api/users/clips.
@@ -22,7 +22,7 @@ import (
 // frontend Paginator が cursor mode で投げてくる sinceId / untilId を
 // 拾って repo に渡し、Paginator が次ページ取得で同じ row 集合を返さない
 // ようにする (#487 兄弟ケース)。
-func (h *Handler) Clips(c echo.Context) error {
+func (h *Handler) Clips(c *echo.Context) error {
 	var req struct {
 		UserID    string     `json:"userId"`
 		Limit     *jsnum.Int `json:"limit"`
@@ -99,7 +99,7 @@ func (h *Handler) Clips(c echo.Context) error {
 // Flashs handles POST /api/users/flashs.
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
-func (h *Handler) Flashs(c echo.Context) error {
+func (h *Handler) Flashs(c *echo.Context) error {
 	var req struct {
 		UserID    string     `json:"userId"`
 		Limit     *jsnum.Int `json:"limit"`
@@ -167,7 +167,7 @@ func (h *Handler) Flashs(c echo.Context) error {
 // GalleryPosts handles POST /api/users/gallery/posts.
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
-func (h *Handler) GalleryPosts(c echo.Context) error {
+func (h *Handler) GalleryPosts(c *echo.Context) error {
 	var req struct {
 		UserID    string     `json:"userId"`
 		Limit     *jsnum.Int `json:"limit"`
@@ -275,7 +275,7 @@ func (h *Handler) resolveGalleryFiles(fileIDs []string) []any {
 // shape で返す (#1134)。旧 inline map 6 field では frontend MkPagePreview の
 // `page.user.username` template が落ちて list が空になる drop-in regression
 // を起こしていた。
-func (h *Handler) Pages(c echo.Context) error {
+func (h *Handler) Pages(c *echo.Context) error {
 	var req struct {
 		UserID    string     `json:"userId"`
 		Limit     *jsnum.Int `json:"limit"`

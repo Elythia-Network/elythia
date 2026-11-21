@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
@@ -57,7 +57,7 @@ func (h *Handler) SetDriveBulkDeleter(d DriveBulkDeleter) { h.driveBulkDeleter =
 // 物理削除を行う (#1772。以前は row のみ削除で S3 オブジェクトが orphan 化 +
 // 使用量カウンタが未減算だった)。driveBulkDeleter 未配線時は row のみ削除に
 // degrade。host 空 / repo 未配線は no-op 204。
-func (h *Handler) FederationDeleteAllFiles(c echo.Context) error {
+func (h *Handler) FederationDeleteAllFiles(c *echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -86,7 +86,7 @@ func (h *Handler) FederationDeleteAllFiles(c echo.Context) error {
 // InstanceMetadataFetcher (= coreinstance.FetchMetadataService) 経由で指定ホストの
 // nodeinfo + iconUrl / faviconUrl を再取得する。fetcher 未設定または host 未指定
 // の場合は no-op で 204 を返す (本家 TS も失敗時エラーコードは返さない挙動)。
-func (h *Handler) FederationRefreshRemoteInstanceMetadata(c echo.Context) error {
+func (h *Handler) FederationRefreshRemoteInstanceMetadata(c *echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -177,7 +177,7 @@ func (h *Handler) cleanupSuspendedUserRelations(userID string) {
 	}
 }
 
-func (h *Handler) FederationRemoveAllFollowing(c echo.Context) error {
+func (h *Handler) FederationRemoveAllFollowing(c *echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -281,7 +281,7 @@ func (req federationUpdateInstanceRequest) updates() map[string]any {
 //
 // instance 行の lookup / 更新は `InstanceRepository` (#676 で DI 化) を経由する。
 // 未配線時は no-op で 204 を返す (元の挙動と一貫)。
-func (h *Handler) FederationUpdateInstance(c echo.Context) error {
+func (h *Handler) FederationUpdateInstance(c *echo.Context) error {
 	if h.instanceRepo == nil {
 		return c.NoContent(http.StatusNoContent)
 	}

@@ -31,8 +31,9 @@ var errShutdownStep = errors.New("server: a shutdown step failed")
 // error of a step that panicked wraps errShutdownStep and names the step; a
 // step that returned an error contributes that error.
 //
-// 失敗が1つのときに包まずに返すのは、panicが無い停止の戻り値(echoのShutdownの
-// エラー)を、段の表にする前(#3711より前)と同じ値のままにするため。
+// 失敗が1つのときに包まずに返すのは、段のエラーを呼び出し元がそのまま見分け
+// られるようにするため (#3711 の時点では、echo の Shutdown のエラーをこの形で
+// 返していた。その段は echo の v5 で無くなった、#4239)。
 func runShutdownSteps(ctx context.Context, steps []shutdownStep) error {
 	var errs []error
 	for _, st := range steps {

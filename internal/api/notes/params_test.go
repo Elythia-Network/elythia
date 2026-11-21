@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +26,7 @@ func TestHandlers_IntegerParamsAcceptFractionForms(t *testing.T) {
 	const cursor = `"limit":10.0,"sinceDate":1e1,"untilDate":4102444800000.0`
 	cases := []struct {
 		name string
-		fn   func(echo.Context) error
+		fn   func(*echo.Context) error
 		body string
 	}{
 		{"notes", h.BulkShow, `{` + cursor + `}`},
@@ -58,7 +58,7 @@ func TestHandlers_IntegerParamsAcceptFractionForms(t *testing.T) {
 
 // postRecovering posts body to h like postExtra, and turns a panic of a
 // handler whose dependencies the test leaves nil into a 500.
-func postRecovering(h func(echo.Context) error, body string, user *model.User) (rec *httptest.ResponseRecorder) {
+func postRecovering(h func(*echo.Context) error, body string, user *model.User) (rec *httptest.ResponseRecorder) {
 	defer func() {
 		if r := recover(); r != nil {
 			rec = httptest.NewRecorder()

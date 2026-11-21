@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
@@ -81,7 +81,7 @@ func (h *Handler) SetModLog(m ModLogger) { h.modLog = m }
 // id IN で取得して packMany する (#1548)。mk-go は upstream の 30 分メモリ
 // キャッシュは持たず毎回 Redis を読む (= 常に最新、API shape は同一)。ranking
 // 未配線時は空配列に degrade する。
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	var req struct {
 		Limit   *jsnum.Int `json:"limit"`
 		UntilID string     `json:"untilId"`
@@ -135,7 +135,7 @@ func (h *Handler) Featured(c echo.Context) error {
 //
 // upstream popular.ts は likedCount>0 の post を likedCount DESC で 10 件返す
 // (#1548)。featured (Redis ランキング) とは別ロジック。
-func (h *Handler) Popular(c echo.Context) error {
+func (h *Handler) Popular(c *echo.Context) error {
 	var posts []*model.GalleryPost
 	if err := h.db.Preload("User").Where("\"likedCount\" > 0").Order("\"likedCount\" DESC").Limit(10).Find(&posts).Error; err != nil {
 		return c.JSON(http.StatusInternalServerError, apierr.Error("INTERNAL_ERROR", "Internal error.", "5d37dbcb-891e-41ca-a3d6-e690c97775ac"))
@@ -147,7 +147,7 @@ func (h *Handler) Popular(c echo.Context) error {
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を投げてくる。
 // id 範囲フィルタ + paginationOrder 同等の ASC/DESC を直接組み立てる。
-func (h *Handler) Posts(c echo.Context) error {
+func (h *Handler) Posts(c *echo.Context) error {
 	// offset は本家の paramDef に無いので読まない。limit と sinceDate /
 	// untilDate は、本家(ajv の integer)と同じく値が整数の小数を受ける (#3754)。
 	var req struct {
@@ -190,7 +190,7 @@ func (h *Handler) Posts(c echo.Context) error {
 }
 
 // PostsCreate handles POST /api/gallery/posts/create.
-func (h *Handler) PostsCreate(c echo.Context) error {
+func (h *Handler) PostsCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Title       string   `json:"title"`
@@ -265,7 +265,7 @@ func (h *Handler) ownedFileIDs(fileIDs []string, userID string) ([]string, error
 }
 
 // PostsShow handles POST /api/gallery/posts/show.
-func (h *Handler) PostsShow(c echo.Context) error {
+func (h *Handler) PostsShow(c *echo.Context) error {
 	var req struct {
 		PostID string `json:"postId"`
 	}
@@ -280,7 +280,7 @@ func (h *Handler) PostsShow(c echo.Context) error {
 }
 
 // PostsDelete handles POST /api/gallery/posts/delete.
-func (h *Handler) PostsDelete(c echo.Context) error {
+func (h *Handler) PostsDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PostID string `json:"postId"`
@@ -336,12 +336,12 @@ const noSuchFileID = "04b23109-5e19-4cbf-a6a0-bbf371b254b5"
 // INVALID_PARAM は本家の paramDef の検証で拒否した意味で使うので、本家の
 // 検証を通った入力には、本家の notes/create などと同じ名前の NO_SUCH_FILE
 // を返す (#3754)。
-func noValidFiles(c echo.Context) error {
+func noValidFiles(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FILE", "No such file.", noSuchFileID))
 }
 
 // PostsUpdate handles POST /api/gallery/posts/update.
-func (h *Handler) PostsUpdate(c echo.Context) error {
+func (h *Handler) PostsUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PostID string  `json:"postId"`
@@ -405,7 +405,7 @@ func (h *Handler) PostsUpdate(c echo.Context) error {
 }
 
 // PostsLike handles POST /api/gallery/posts/like.
-func (h *Handler) PostsLike(c echo.Context) error {
+func (h *Handler) PostsLike(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PostID string `json:"postId"`
@@ -453,7 +453,7 @@ func (h *Handler) PostsLike(c echo.Context) error {
 }
 
 // PostsUnlike handles POST /api/gallery/posts/unlike.
-func (h *Handler) PostsUnlike(c echo.Context) error {
+func (h *Handler) PostsUnlike(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PostID string `json:"postId"`

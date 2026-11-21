@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/mmcdole/gofeed"
 	ext "github.com/mmcdole/gofeed/extensions"
 	"github.com/stretchr/testify/assert"
@@ -76,7 +76,7 @@ func newTestHandler(_ *testing.T, srv *httptest.Server) *Handler {
 	return New(&http.Client{Timeout: FetchTimeout, Transport: srv.Client().Transport}, testUserAgent)
 }
 
-func newRequestCtx(method, target string) (echo.Context, *httptest.ResponseRecorder) {
+func newRequestCtx(method, target string) (*echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	req := httptest.NewRequest(method, target, nil)
 	req.Header.Set("Content-Type", "application/json")

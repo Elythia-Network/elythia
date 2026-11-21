@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/gonecleanup"
@@ -40,7 +40,7 @@ type goneInstanceResponse struct {
 //
 // **mk-go 独自 endpoint** (#3067)。goneSuspended のホストと、そのホストとの間に
 // 残っているフォロー関係の件数を返す。upstream に対応物は無い。
-func (h *Handler) FederationGoneInstances(c echo.Context) error {
+func (h *Handler) FederationGoneInstances(c *echo.Context) error {
 	out := []goneInstanceResponse{}
 	if h.goneCleaner == nil {
 		return c.JSON(http.StatusOK, out)
@@ -66,7 +66,7 @@ func (h *Handler) FederationGoneInstances(c echo.Context) error {
 //
 // upstream の `admin/federation/remove-all-following` と違い、**ローカルの利用者の
 // フォローも消す**。相手はもう存在しないので、残しておいても意味の無い行になる。
-func (h *Handler) FederationCleanGoneInstance(c echo.Context) error {
+func (h *Handler) FederationCleanGoneInstance(c *echo.Context) error {
 	var req struct {
 		Host string `json:"host"`
 	}

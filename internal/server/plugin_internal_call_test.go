@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +26,7 @@ import (
 func TestPluginCaller_MarksInternalCall(t *testing.T) {
 	e := echo.New()
 	var seen []bool
-	e.POST("/api/probe", func(c echo.Context) error {
+	e.POST("/api/probe", func(c *echo.Context) error {
 		seen = append(seen, middleware.IsInternalCall(c.Request().Context()))
 		return c.JSON(http.StatusOK, map[string]any{"ok": true})
 	})
@@ -48,7 +48,7 @@ func TestPluginCaller_MarksInternalCall(t *testing.T) {
 func TestPluginCaller_OrdinaryRequestIsNotMarked(t *testing.T) {
 	e := echo.New()
 	var seen []bool
-	e.POST("/api/probe", func(c echo.Context) error {
+	e.POST("/api/probe", func(c *echo.Context) error {
 		seen = append(seen, middleware.IsInternalCall(c.Request().Context()))
 		return c.NoContent(http.StatusNoContent)
 	})

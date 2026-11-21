@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/core/role"
@@ -45,7 +45,7 @@ func (h *Handler) SetUserListRepo(r repository.UserListRepository) {
 // userListLimit gate (TOO_MANY_USERLISTS)、各メンバーで getUser (NO_SUCH_USER) /
 // blocking (YOU_HAVE_BEEN_BLOCKED) / 既存 (ALREADY_ADDED) / member 上限
 // (TOO_MANY_USERS) を検証し、最初の失敗で中断・エラーを返す (#1550)。
-func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
+func (h *Handler) ListsCreateFromPublic(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		Name   string `json:"name"`
@@ -160,7 +160,7 @@ func (h *Handler) ListsCreateFromPublic(c echo.Context) error {
 }
 
 // ListsFavorite handles POST /api/users/lists/favorite.
-func (h *Handler) ListsFavorite(c echo.Context) error {
+func (h *Handler) ListsFavorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ListID string `json:"listId"`
@@ -208,7 +208,7 @@ func (h *Handler) ListsFavorite(c echo.Context) error {
 }
 
 // ListsUnfavorite handles POST /api/users/lists/unfavorite.
-func (h *Handler) ListsUnfavorite(c echo.Context) error {
+func (h *Handler) ListsUnfavorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ListID string `json:"listId"`
@@ -247,7 +247,7 @@ func (h *Handler) ListsUnfavorite(c echo.Context) error {
 }
 
 // ListsUpdate handles POST /api/users/lists/update.
-func (h *Handler) ListsUpdate(c echo.Context) error {
+func (h *Handler) ListsUpdate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ListID   string  `json:"listId"`
@@ -312,7 +312,7 @@ func (h *Handler) listMemberIDs(listID string) []string {
 }
 
 // ListsUpdateMembership handles POST /api/users/lists/update-membership.
-func (h *Handler) ListsUpdateMembership(c echo.Context) error {
+func (h *Handler) ListsUpdateMembership(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ListID string `json:"listId"`
@@ -371,7 +371,7 @@ func (h *Handler) ListsUpdateMembership(c echo.Context) error {
 // [{id, createdAt, userId, user(UserLite), withReplies}] を返す
 // (requireCredential:false の public endpoint)。可視性は forPublic=false かつ
 // 認証済なら own list のみ、それ以外は public list のみ (#1550)。
-func (h *Handler) ListsGetMemberships(c echo.Context) error {
+func (h *Handler) ListsGetMemberships(c *echo.Context) error {
 	viewer := middleware.GetUser(c)
 	var req struct {
 		ListID    string     `json:"listId"`

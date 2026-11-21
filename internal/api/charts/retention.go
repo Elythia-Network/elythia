@@ -3,7 +3,7 @@ package charts
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -25,7 +25,7 @@ func (h *Handler) SetRetentionRepo(r repository.RetentionAggregationRepository) 
 // `retentionAggregationsRepository.find()` の結果をそのまま返すだけで、
 // frontend 側は配列前提で `.map()` する。ここで 500 にすると管理画面の
 // チャートページ全体が開かなくなるので、空で描かせるほうが害が小さい。
-func (h *Handler) Retention(c echo.Context) error {
+func (h *Handler) Retention(c *echo.Context) error {
 	if h.retentionRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

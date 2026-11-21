@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/adminbackup"
 	"github.com/elythia-network/elythia/internal/api/apierr"
@@ -55,7 +55,7 @@ const (
 //
 // **Elythia 独自 endpoint** (#4180)。ローカルに置いたファイルを、オブジェクト
 // ストレージへ写すジョブを積んで、すぐに 204 を返す。進み具合は status で読む。
-func (h *Handler) DriveStorageMigrationStart(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationStart(c *echo.Context) error {
 	if h.driveStorageMigration == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -69,7 +69,7 @@ func (h *Handler) DriveStorageMigrationStart(c echo.Context) error {
 // **Elythia 独自 endpoint** (#4181)。オブジェクトストレージへ写したファイルを読み、
 // 大きさと md5 が記録と一致するかを確かめるジョブを積んで、すぐに 204 を返す。
 // 結果は status で読む。移す処理と同時には走らない。
-func (h *Handler) DriveStorageMigrationVerify(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationVerify(c *echo.Context) error {
 	if h.driveStorageMigration == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -87,7 +87,7 @@ func (h *Handler) DriveStorageMigrationVerify(c echo.Context) error {
 // 取り消せない操作なので、DB のバックアップ (admin/backup/*) と同じ再認証を課す
 // (#4184)。再認証は route の middleware でなく、ここ (引数の検証の後) で行う。
 // 前に置くと、形の誤った本文でも TOTP のコードを使い切ってから 400 になる (#3878)。
-func (h *Handler) DriveStorageMigrationPurgeLocal(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationPurgeLocal(c *echo.Context) error {
 	if h.driveStorageMigration == nil || h.driveStorageMigrationReauth == nil {
 		// 再認証を配線し忘れたら、通さずに閉じる。
 		return apierr.JSONInternalError(c)
@@ -106,7 +106,7 @@ func (h *Handler) DriveStorageMigrationPurgeLocal(c echo.Context) error {
 // ストレージからローカルへ戻すジョブを積んで、すぐに 204 を返す。初めから
 // オブジェクトストレージへアップロードしたファイルは戻さない。進み具合は status で
 // 読む。他の処理と同時には走らない。
-func (h *Handler) DriveStorageMigrationRestore(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationRestore(c *echo.Context) error {
 	if h.driveStorageMigration == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -125,7 +125,7 @@ func (h *Handler) DriveStorageMigrationRestore(c echo.Context) error {
 //
 // ローカルを消す口と違い、再認証は求めない。消すのはローカルへ戻した後の写しで、
 // 実体はローカルにある。
-func (h *Handler) DriveStorageMigrationCleanupCopies(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationCleanupCopies(c *echo.Context) error {
 	if h.driveStorageMigration == nil {
 		return apierr.JSONInternalError(c)
 	}
@@ -134,7 +134,7 @@ func (h *Handler) DriveStorageMigrationCleanupCopies(c echo.Context) error {
 }
 
 // driveStorageMigrationStarted writes the response of starting a run.
-func (h *Handler) driveStorageMigrationStarted(c echo.Context, err error, endpoint string, log moderationlog.LogType) error {
+func (h *Handler) driveStorageMigrationStarted(c *echo.Context, err error, endpoint string, log moderationlog.LogType) error {
 	switch {
 	case err == nil:
 		// 始めたことだけを残す (#4184)。断ったときは何も変えていないので残さない。
@@ -177,7 +177,7 @@ type driveStorageMigrationFailure struct {
 
 // DriveStorageMigrationStatus handles POST
 // /api/admin/drive/object-storage-migration/status (#4180).
-func (h *Handler) DriveStorageMigrationStatus(c echo.Context) error {
+func (h *Handler) DriveStorageMigrationStatus(c *echo.Context) error {
 	if h.driveStorageMigration == nil {
 		return apierr.JSONInternalError(c)
 	}

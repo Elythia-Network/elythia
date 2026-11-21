@@ -85,7 +85,7 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/stream"
 	"github.com/elythia-network/elythia/plugin"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage pluginStorageOpener) {
@@ -1364,7 +1364,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	deleteAccountProcessor.SetWebhookCache(cachedWebhook)
 
 	// Health check
-	s.echo.GET("/healthz", func(c echo.Context) error {
+	s.echo.GET("/healthz", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 	// メンテナンスの画面が「終わった」を知るための口 (#3463)。メンテナンス中は
@@ -1384,7 +1384,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ランタイムプロファイリング用。本番では絶対に有効化してはならない。
 	if s.config.EnablePprof {
 		pprofGroup := s.echo.Group("/debug/pprof")
-		pprofGroup.GET("", func(c echo.Context) error {
+		pprofGroup.GET("", func(c *echo.Context) error {
 			return c.Redirect(http.StatusMovedPermanently, "/debug/pprof/")
 		})
 		pprofGroup.GET("/", echo.WrapHandler(http.HandlerFunc(pprof.Index)))
@@ -1393,7 +1393,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		pprofGroup.GET("/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)))
 		pprofGroup.POST("/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)))
 		pprofGroup.GET("/trace", echo.WrapHandler(http.HandlerFunc(pprof.Trace)))
-		pprofGroup.GET("/:name", func(c echo.Context) error {
+		pprofGroup.GET("/:name", func(c *echo.Context) error {
 			pprof.Handler(c.Param("name")).ServeHTTP(c.Response(), c.Request())
 			return nil
 		})
@@ -1415,7 +1415,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// public, max-age=... に上書きする (表は middleware.APICacheSec、#3593)。非 cacheSec の
 	// allowGet GET を中間 proxy が誤キャッシュするのを防ぐ。
 	api.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
 			return next(c)
 		}
@@ -1430,12 +1430,14 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 完全一致で body を採るか捨てるかを決めており、この差だけで全レスポンスが
 	// 空として扱われる。drop-in 互換のため本家に合わせる。
 	api.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			c.Response().Before(func() {
-				if c.Response().Header().Get(echo.HeaderContentType) == "application/json" {
-					c.Response().Header().Set(echo.HeaderContentType, "application/json; charset=utf-8")
-				}
-			})
+		return func(c *echo.Context) error {
+			if res := echoResponse(c); res != nil {
+				res.Before(func() {
+					if res.Header().Get(echo.HeaderContentType) == "application/json" {
+						res.Header().Set(echo.HeaderContentType, "application/json; charset=utf-8")
+					}
+				})
+			}
 			return next(c)
 		}
 	})
@@ -2359,7 +2361,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// Charts API endpoints (engines + hooks already wired earlier).
 	// フロントエンドは `misskeyApiGet` (GET) でチャートを取得し、
 	// `misskeyApi` (POST) も使う場面があるので両方受ける。POST のみ登録だと
-	// GET が `api.Any("/*")` の catchall (= 200 + 空オブジェクト) に落ちて、
+	// GET が `/api/*` の catchall (= 200 + 空オブジェクト) に落ちて、
 	// 受信側で `chart.pubActive[0]` 等が `undefined` 例外を起こす (#421)。
 	chartsHandler := apicharts.NewHandler(chartCharts)
 	// /retention は chart engine ではなく集計済みテーブルを読む (#2791 で
@@ -2788,13 +2790,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// GET 以外は意図的に 200 + 空オブジェクトのまま。未登録エンドポイントへの
 	// 404 は Misskey 公式フロントの一部ページで例外を投げてしまうため、
 	// 実装が出揃うまで pass-through にしている。実装漏れは warn ログで検知する。
-	api.Any("/*", apiCatchall)
+	api.Group.Match(anyMethods, "/*", apiCatchall)
 
 	// clear-browser-cache — 本家が endpoint の仕組みの外で fastify.all に直接
 	// 登録する route (ApiServerService.ts)。どのメソッドでも受け、GET と POST
 	// 以外は handler が 405 を返す。endpoint ではないので、本文の検査
 	// (apiRoutes の requireObjectBody) と引数の検証を通さない (#3926)。
-	api.Any("/clear-browser-cache", meta.ClearBrowserCache)
+	api.Group.Match(anyMethods, "/clear-browser-cache", meta.ClearBrowserCache)
 
 	// フロントエンドの配信と SPA の catchall (#3901 で関数へ移した。呼ぶ位置と中の文の順は
 	// 元のまま。プラグインの準備に失敗したときの return より後)。

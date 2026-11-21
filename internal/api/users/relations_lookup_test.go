@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -62,7 +62,7 @@ func newRelationsLookupHandler(t *testing.T) (*Handler, *countingRemoteResolver)
 	return h, resolver
 }
 
-func relationsStatus(t *testing.T, fn func(echo.Context) error, body string, viewer *model.User) *httptest.ResponseRecorder {
+func relationsStatus(t *testing.T, fn func(*echo.Context) error, body string, viewer *model.User) *httptest.ResponseRecorder {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/users/followers", strings.NewReader(body))
@@ -78,11 +78,11 @@ func relationsStatus(t *testing.T, fn func(echo.Context) error, body string, vie
 
 var relationEndpoints = []struct {
 	name string
-	pick func(*Handler) func(echo.Context) error
+	pick func(*Handler) func(*echo.Context) error
 	nsu  string
 }{
-	{"followers", func(h *Handler) func(echo.Context) error { return h.Followers }, "27fa5435-88ab-43de-9360-387de88727cd"},
-	{"following", func(h *Handler) func(echo.Context) error { return h.Following }, "63e4aba4-4156-4e53-be25-c9559e42d71b"},
+	{"followers", func(h *Handler) func(*echo.Context) error { return h.Followers }, "27fa5435-88ab-43de-9360-387de88727cd"},
+	{"following", func(h *Handler) func(*echo.Context) error { return h.Following }, "63e4aba4-4156-4e53-be25-c9559e42d71b"},
 }
 
 // 本家 followers.ts / following.ts は usersRepository.findOneBy だけで利用者を

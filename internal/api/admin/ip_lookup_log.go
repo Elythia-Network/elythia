@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -30,7 +30,7 @@ func (h *Handler) SetIPLookupLogRepo(r repository.IPLookupLogRepository) { h.ipL
 //
 // **この応答自体が機密。** 照会に使った IP がそのまま入るので、照会と同じ 3 段の
 // 権限で守り、`Cache-Control: no-store` を付ける。
-func (h *Handler) IPLookupLog(c echo.Context) error {
+func (h *Handler) IPLookupLog(c *echo.Context) error {
 	if h.ipLookupLogRepo == nil || h.userRepo == nil {
 		// **空の一覧を返さない。** 「誰も照会していない」という誤った事実になる (#2792)。
 		slog.Error("admin/ip/lookup-log: dependencies are not wired")

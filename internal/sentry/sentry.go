@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/misc/redact"
 	sentrygo "github.com/getsentry/sentry-go"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // flushTimeout is the maximum duration to block draining queued events when
@@ -119,7 +119,7 @@ func Middleware(cfg *config.Config) echo.MiddlewareFunc {
 		return func(next echo.HandlerFunc) echo.HandlerFunc { return next }
 	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) (err error) {
+		return func(c *echo.Context) (err error) {
 			// 各リクエスト毎に hub を分離 (タグ・ユーザー情報がリクエスト境界で混ざらない)
 			hub := sentrygo.CurrentHub().Clone()
 			hub.Scope().SetRequest(c.Request())

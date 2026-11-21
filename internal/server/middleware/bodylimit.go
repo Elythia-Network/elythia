@@ -1,11 +1,10 @@
 package middleware
 
 import (
-	"strconv"
 	"strings"
 
-	"github.com/labstack/echo/v4"
-	emiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	emiddleware "github.com/labstack/echo/v5/middleware"
 )
 
 // BodyLimitByPath returns a GLOBAL middleware that caps the request body size by
@@ -27,7 +26,7 @@ import (
 //
 // 超過時は upstream fastify と同じ 413 (echo BodyLimit が ContentLength 即時 reject /
 // chunked は limitedReader が 413 error を返す。後者は JSONBodyParse / inbox handler が
-// echo.HTTPError を伝播する)。
+// その 413 のエラーを伝播する。apierr.HTTPStatusError で見分ける)。
 //
 // upload endpoint (drive/files/create) は 1MiB ではなく maxFileSize ベースの上限に
 // する。content-type が multipart というだけで /api 全体を除外すると、非 upload
@@ -52,8 +51,8 @@ import (
 // いる (global な auth.Authenticate が token 抽出で読む) ので、handler 側で
 // 判定しても消費は止まらない。nil / 空なら /api の 1MiB に倒れる。
 func BodyLimitByPath(maxFileSize int64, pluginPeerLimits map[string]int64) echo.MiddlewareFunc {
-	apiBL := emiddleware.BodyLimit("1MiB")    // = 1024*1024 = 1048576
-	inboxBL := emiddleware.BodyLimit("64KiB") // = 1024*64   = 65536
+	apiBL := emiddleware.BodyLimit(1 << 20)    // = 1024*1024 = 1048576
+	inboxBL := emiddleware.BodyLimit(64 << 10) // = 1024*64   = 65536
 	// **既知のパス以外も上限を持たせる。**
 	//
 	// かつてここは `next(c)` で無制限だった。上の doc が /api について
@@ -67,19 +66,17 @@ func BodyLimitByPath(maxFileSize int64, pluginPeerLimits map[string]int64) echo.
 	// fastify 既定の 1MiB が **404 ルートを含む全ルート**に効く。加えて
 	// upstream は body を読む global hook を持たない (token を読むのは
 	// /api のルート内だけ)。ここを同値にすることで揃う。
-	defaultBL := emiddleware.BodyLimit("1MiB")
+	defaultBL := emiddleware.BodyLimit(1 << 20)
 	// upstream の limits.fileSize は **ファイル本体**に掛かるが、こちらは body
 	// 全体に掛かる。boundary / part header / 同送される他フィールド (i など) の
 	// 分だけ余白を足さないと、maxFileSize ちょうどのファイルが弾かれる。
-	uploadBL := emiddleware.BodyLimit(
-		strconv.FormatInt(uploadBodyLimit(maxFileSize), 10),
-	)
+	uploadBL := emiddleware.BodyLimit(uploadBodyLimit(maxFileSize))
 	// chunked upload の append (#2313)。1 リクエスト = 1 チャンクなので、
 	// create のように無制限にはせず固定上限を掛ける。値は
 	// drive.MaxChunkSizeMb (32MiB) + multipart framing の余白。実際に受理する
 	// サイズはセッションに固定された chunkSize ちょうどであることを handler が
 	// 別途強制するので、ここは「それ以上は読み込ませない」ための粗い上限。
-	chunkBL := emiddleware.BodyLimit("33MiB")
+	chunkBL := emiddleware.BodyLimit(33 << 20)
 	const (
 		driveUploadPath = "/api/drive/files/create"
 		chunkAppendPath = "/api/drive/files/create-chunked/append"
@@ -95,9 +92,9 @@ func BodyLimitByPath(maxFileSize int64, pluginPeerLimits map[string]int64) echo.
 		uploadNext := uploadBL(next)
 		peerNext := make(map[string]echo.HandlerFunc, len(pluginPeerLimits))
 		for path, limit := range pluginPeerLimits {
-			peerNext[path] = emiddleware.BodyLimit(strconv.FormatInt(limit, 10))(next)
+			peerNext[path] = emiddleware.BodyLimit(limit)(next)
 		}
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			p := c.Request().URL.Path
 			// **/api の分岐より先に見る。** 後ろに置くと 1MiB 側に吸われる。
 			if h, ok := peerNext[p]; ok {

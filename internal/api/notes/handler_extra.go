@@ -24,7 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SetFavoriteRepo attaches a NoteFavoriteRepository for favorites endpoints.
@@ -33,7 +33,7 @@ func (h *Handler) SetFavoriteRepo(r repository.NoteFavoriteRepository) {
 }
 
 // FavoritesCreate handles POST /api/notes/favorites/create.
-func (h *Handler) FavoritesCreate(c echo.Context) error {
+func (h *Handler) FavoritesCreate(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		NoteID string `json:"noteId"`
@@ -90,7 +90,7 @@ func (h *Handler) FavoritesCreate(c echo.Context) error {
 }
 
 // FavoritesDelete handles POST /api/notes/favorites/delete.
-func (h *Handler) FavoritesDelete(c echo.Context) error {
+func (h *Handler) FavoritesDelete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		NoteID string `json:"noteId"`
@@ -128,7 +128,7 @@ func (h *Handler) FavoritesDelete(c echo.Context) error {
 // channelId 指定時は該当チャンネル内のノートだけを返す (channel.vue の
 // ハイライトタブから叩かれる経路)。過去はこの絞り込みが無く、無関係な
 // グローバルノートが混ざっていた (#489)。untilId は cursor pagination 用。
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	// GET でも受ける (本家は allowGet: true) ので query の名前も付ける。無いと GET の
 	// channelId / limit が読まれず、別の内容の応答が public でキャッシュされる (#3593)。
 	// 本家の paramDef は limit・untilId・channelId だけを持つ。以前は本家に無い
@@ -320,7 +320,7 @@ func sortAndFilterFeaturedIDs(ids []string, untilID string) []string {
 }
 
 // Unrenote handles POST /api/notes/unrenote.
-func (h *Handler) Unrenote(c echo.Context) error {
+func (h *Handler) Unrenote(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		NoteID string `json:"noteId"`
@@ -349,7 +349,7 @@ func (h *Handler) Unrenote(c echo.Context) error {
 }
 
 // Mentions handles POST /api/notes/mentions.
-func (h *Handler) Mentions(c echo.Context) error {
+func (h *Handler) Mentions(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		Limit      *jsnum.Int `json:"limit"`
@@ -408,7 +408,7 @@ func (h *Handler) Mentions(c echo.Context) error {
 }
 
 // UserListTimeline handles POST /api/notes/user-list-timeline.
-func (h *Handler) UserListTimeline(c echo.Context) error {
+func (h *Handler) UserListTimeline(c *echo.Context) error {
 	me := middleware.GetUser(c)
 	var req struct {
 		ListID                string     `json:"listId"`
@@ -501,7 +501,7 @@ const maxSearchByTagGroups = 32
 // TS互換: tag (string) または query (string[][] — 外側 OR・内側 AND の複合タグ
 // 検索) を受け付ける (#1683、upstream search-by-tag.ts)。tag が指定されれば
 // 単一タグ、無ければ query を OR-of-AND で検索する。
-func (h *Handler) SearchByTag(c echo.Context) error {
+func (h *Handler) SearchByTag(c *echo.Context) error {
 	var req struct {
 		Tag       string     `json:"tag"`
 		Query     [][]string `json:"query"`
@@ -642,7 +642,7 @@ func (h *Handler) SetClipRepos(clip repository.ClipRepository, clipNote reposito
 // clipNotesRepository.findBy({noteId}) で note を含む clip を引き →
 // clipsRepository.findBy({id IN, isPublic:true}) → clipEntityService.packMany。
 // owner / 他人を問わず「その note を含む public clip」を返す (#1554)。
-func (h *Handler) Clips(c echo.Context) error {
+func (h *Handler) Clips(c *echo.Context) error {
 	var req struct {
 		NoteID string `json:"noteId"`
 	}
@@ -704,7 +704,7 @@ func (h *Handler) Clips(c echo.Context) error {
 }
 
 // Translate handles POST /api/notes/translate.
-func (h *Handler) Translate(c echo.Context) error {
+func (h *Handler) Translate(c *echo.Context) error {
 	var req struct {
 		NoteID     string  `json:"noteId"`
 		TargetLang *string `json:"targetLang"`
@@ -896,7 +896,7 @@ func (h *Handler) translateHiddenByAuthorPrefs(viewer *model.User, n *model.Note
 }
 
 // ShowPartialBulk handles POST /api/notes/show-partial-bulk.
-func (h *Handler) ShowPartialBulk(c echo.Context) error {
+func (h *Handler) ShowPartialBulk(c *echo.Context) error {
 	var req struct {
 		NoteIDs []string `json:"noteIds"`
 	}

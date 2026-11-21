@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/pquerna/otp/totp"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -89,7 +89,7 @@ func newPurgeVerifier(t *testing.T, replay bool) (*strongauth.Verifier, func() s
 
 // doNativePost posts body as userID signed in with its native token, as the
 // browser does.
-func doNativePost(h func(echo.Context) error, body, userID string) *httptest.ResponseRecorder {
+func doNativePost(h func(*echo.Context) error, body, userID string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -182,12 +182,12 @@ func TestDriveStorageMigrationPurgeLocal_RefusesUsedCode(t *testing.T) {
 func TestDriveStorageMigration_WritesModerationLog(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
-		call    func(h *apiadmin.Handler) func(echo.Context) error
+		call    func(h *apiadmin.Handler) func(*echo.Context) error
 		logType string
 	}{
-		{"start", func(h *apiadmin.Handler) func(echo.Context) error { return h.DriveStorageMigrationStart }, "migrateDriveFilesToObjectStorage"},
-		{"verify", func(h *apiadmin.Handler) func(echo.Context) error { return h.DriveStorageMigrationVerify }, "verifyMigratedDriveFiles"},
-		{"restore", func(h *apiadmin.Handler) func(echo.Context) error { return h.DriveStorageMigrationRestore }, "restoreMigratedDriveFiles"},
+		{"start", func(h *apiadmin.Handler) func(*echo.Context) error { return h.DriveStorageMigrationStart }, "migrateDriveFilesToObjectStorage"},
+		{"verify", func(h *apiadmin.Handler) func(*echo.Context) error { return h.DriveStorageMigrationVerify }, "verifyMigratedDriveFiles"},
+		{"restore", func(h *apiadmin.Handler) func(*echo.Context) error { return h.DriveStorageMigrationRestore }, "restoreMigratedDriveFiles"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, _, _, _ := newTestHandler(t)

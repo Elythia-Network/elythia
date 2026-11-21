@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -55,15 +55,15 @@ func TestListPaths_PackLikeUpstreamPackMany(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
-		call func(h *Handler) func(echo.Context) error
+		call func(h *Handler) func(*echo.Context) error
 		meta bool
 	}{
-		{"explore", `{}`, func(h *Handler) func(echo.Context) error { return h.List }, false},
-		{"pinned-users", `{}`, func(h *Handler) func(echo.Context) error { return h.PinnedUsers }, true},
-		{"recommendation", `{}`, func(h *Handler) func(echo.Context) error { return h.UserRecommendation }, false},
-		{"search", `{"query":"target person"}`, func(h *Handler) func(echo.Context) error { return h.Search }, false},
-		{"search-by-username-and-host", `{"username":"tgtuser"}`, func(h *Handler) func(echo.Context) error { return h.SearchByUsernameAndHost }, false},
-		{"show-userIds", `{"userIds":["tgt"]}`, func(h *Handler) func(echo.Context) error { return h.Show }, false},
+		{"explore", `{}`, func(h *Handler) func(*echo.Context) error { return h.List }, false},
+		{"pinned-users", `{}`, func(h *Handler) func(*echo.Context) error { return h.PinnedUsers }, true},
+		{"recommendation", `{}`, func(h *Handler) func(*echo.Context) error { return h.UserRecommendation }, false},
+		{"search", `{"query":"target person"}`, func(h *Handler) func(*echo.Context) error { return h.Search }, false},
+		{"search-by-username-and-host", `{"username":"tgtuser"}`, func(h *Handler) func(*echo.Context) error { return h.SearchByUsernameAndHost }, false},
+		{"show-userIds", `{"userIds":["tgt"]}`, func(h *Handler) func(*echo.Context) error { return h.Show }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, repo := newTestHandler(t)

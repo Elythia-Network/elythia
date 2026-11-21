@@ -16,7 +16,7 @@ import (
 	miscsmtp "github.com/elythia-network/elythia/internal/misc/smtp"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // EmailSender sends an email message (subject + text + optional HTML).
@@ -61,7 +61,7 @@ func (h *Handler) SetServerURL(u string) { h.serverURL = u }
 
 // RequestReset handles POST /api/request-reset-password.
 // ユーザーが見つからない/email不一致/未認証でも成功レスポンスを返す（情報漏洩防止）。
-func (h *Handler) RequestReset(c echo.Context) error {
+func (h *Handler) RequestReset(c *echo.Context) error {
 	var raw struct {
 		Username *string `json:"username"`
 		Email    *string `json:"email"`
@@ -133,7 +133,7 @@ func (h *Handler) RequestReset(c echo.Context) error {
 }
 
 // Reset handles POST /api/reset-password.
-func (h *Handler) Reset(c echo.Context) error {
+func (h *Handler) Reset(c *echo.Context) error {
 	var raw struct {
 		Token    *string `json:"token"`
 		Password *string `json:"password"`

@@ -12,7 +12,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/mediaproxy"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // statusClientClosedRequest is nginx's non-standard 499, used when the client
@@ -51,7 +51,7 @@ func NewHandler(service MediaProxy, cfg *config.Config) *Handler {
 //   - Otherwise, path after /proxy/ is treated as the URL (prefixed with "https://")
 //
 // Query params: emoji, avatar, static, preview, badge, origin, fallback, sig
-func (h *Handler) Handle(c echo.Context) error {
+func (h *Handler) Handle(c *echo.Context) error {
 	rawURL := c.QueryParam("url")
 	if rawURL == "" {
 		// パスからURLを取り出す: /proxy/image.webp → 無効、/proxy/example.com/img.png → https://example.com/img.png
@@ -320,7 +320,7 @@ func (h *Handler) Handle(c echo.Context) error {
 // 塞いでいるのだから、こちらだけ 1 枚薄いままにしない。
 //
 // 値は `filesHandler` と同じ。
-func setProxyContentSecurityHeaders(c echo.Context) {
+func setProxyContentSecurityHeaders(c *echo.Context) {
 	c.Response().Header().Set("Content-Security-Policy",
 		"default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'")
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
@@ -328,7 +328,7 @@ func setProxyContentSecurityHeaders(c echo.Context) {
 }
 
 // redirectToExternalProxy sends a 301 redirect to the configured external proxy.
-func (h *Handler) redirectToExternalProxy(c echo.Context, rawURL string) error {
+func (h *Handler) redirectToExternalProxy(c *echo.Context, rawURL string) error {
 	pathAfterProxy := strings.TrimPrefix(c.Request().URL.Path, "/proxy/")
 	u, err := url.Parse(h.config.MediaProxy + "/" + pathAfterProxy)
 	if err != nil {
@@ -353,7 +353,7 @@ func (h *Handler) redirectToExternalProxy(c echo.Context, rawURL string) error {
 }
 
 // serveFallback returns a 1x1 transparent PNG with short cache.
-func (h *Handler) serveFallback(c echo.Context) error {
+func (h *Handler) serveFallback(c *echo.Context) error {
 	return h.serveFallbackWithCache(c, "max-age=300")
 }
 
@@ -361,7 +361,7 @@ func (h *Handler) serveFallback(c echo.Context) error {
 //
 // **一時的な失敗と恒久的な失敗でキャッシュ時間を分けるために要る (#3032)。**
 // 過負荷で落とした応答が CDN に載ると、輻輳が去っても壊れたままになる。
-func (h *Handler) serveFallbackWithCache(c echo.Context, cacheControl string) error {
+func (h *Handler) serveFallbackWithCache(c *echo.Context, cacheControl string) error {
 	dummy := mediaproxy.DummyPNG()
 	defer dummy.Body.Close()
 	c.Response().Header().Set("Cache-Control", cacheControl)
@@ -371,7 +371,7 @@ func (h *Handler) serveFallbackWithCache(c echo.Context, cacheControl string) er
 }
 
 // parseMode determines the processing mode from query parameters.
-func parseMode(c echo.Context) mediaproxy.ProxyMode {
+func parseMode(c *echo.Context) mediaproxy.ProxyMode {
 	if c.QueryParam("emoji") != "" {
 		return mediaproxy.ModeEmoji
 	}
@@ -396,7 +396,7 @@ func parseMode(c echo.Context) mediaproxy.ProxyMode {
 // 静止画」を意味する。parseMode は emoji を先に見るので mode は ModeEmoji のままで、
 // 静止画かどうかはここで別に判定する (upstream の
 // `animated: !('static' in query)` と同じ)。
-func parseAnimated(c echo.Context) bool {
+func parseAnimated(c *echo.Context) bool {
 	// **存在で見る (値は問わない)。** upstream は fastify の `'static' in query`
 	// なので `?static=` (空値) でも静止画になる。値の非空で判定すると
 	// 同じリポジトリ内の emoji_redirect.go (存在判定) と食い違い、
@@ -412,7 +412,7 @@ func parseAnimated(c echo.Context) bool {
 //
 // AVIF は CPU 重めなので「ブラウザが本当に使う」ケースだけに絞る。Misskey
 // TS の sharp().avif() 経路と同じ semantics。
-func parseOutputFormat(c echo.Context) mediaproxy.OutputFormat {
+func parseOutputFormat(c *echo.Context) mediaproxy.OutputFormat {
 	if c.QueryParam("avif") != "" {
 		return mediaproxy.FormatAVIF
 	}

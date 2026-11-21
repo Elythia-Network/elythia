@@ -5,7 +5,7 @@ package avatardecorations
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	corerole "github.com/elythia-network/elythia/internal/core/role"
@@ -54,7 +54,7 @@ func NewHandler(db *gorm.DB, roles, publicRoles RoleSetProvider) *Handler {
 // **未ログインで公開ロールの一覧を引けないときは、ロール ID を全て落とす。**
 // verbatim で返すと非公開ロールの ID が匿名に漏れる。未ログインの利用者は
 // デコレーションを付けられないので、空にしても機能は失われない。
-func (h *Handler) Get(c echo.Context) error {
+func (h *Handler) Get(c *echo.Context) error {
 	if h.db == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

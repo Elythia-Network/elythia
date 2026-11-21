@@ -3,7 +3,7 @@ package middleware
 import (
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // hstsValue mirrors upstream ServerService exactly (6 months + preload).
@@ -25,7 +25,7 @@ const hstsValue = "max-age=15552000; preload"
 func HSTS(serverURL string, disabled bool) echo.MiddlewareFunc {
 	enabled := !disabled && strings.HasPrefix(strings.ToLower(serverURL), "https://")
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if enabled {
 				c.Response().Header().Set("Strict-Transport-Security", hstsValue)
 			}
@@ -65,7 +65,7 @@ func COOP(mode string) echo.MiddlewareFunc {
 		value = mode
 	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if value != "" {
 				c.Response().Header().Set("Cross-Origin-Opener-Policy", value)
 			}

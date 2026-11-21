@@ -5,7 +5,8 @@ import (
 	urlpkg "net/url"
 	"path/filepath"
 
-	"github.com/labstack/echo/v4"
+	"github.com/elythia-network/elythia/internal/frontendutil"
+	"github.com/labstack/echo/v5"
 )
 
 // staticAssetCacheControl is the Cache-Control header value used for
@@ -38,7 +39,7 @@ const assetCSP = "default-src 'none'; style-src 'unsafe-inline'"
 // pattern (path traversal is rejected via `filepath.Clean` per Echo's
 // own implementation) and adds the header before serving.
 func serveStaticAssetDir(e *echo.Echo, prefix, root string) {
-	e.GET(prefix+"/*", func(c echo.Context) error {
+	e.GET(prefix+"/*", func(c *echo.Context) error {
 		p, err := urlpkg.PathUnescape(c.Param("*"))
 		if err != nil {
 			// malformed URL escape は client 起因なので 400 にする。echo.Static
@@ -48,6 +49,6 @@ func serveStaticAssetDir(e *echo.Echo, prefix, root string) {
 		}
 		c.Response().Header().Set("Cache-Control", staticAssetCacheControl)
 		c.Response().Header().Set("Content-Security-Policy", assetCSP)
-		return c.File(filepath.Join(root, filepath.Clean("/"+p)))
+		return frontendutil.ServeFile(c, filepath.Join(root, filepath.Clean("/"+p)))
 	})
 }

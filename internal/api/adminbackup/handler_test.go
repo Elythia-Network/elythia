@@ -27,7 +27,7 @@ import (
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/pquerna/otp/totp"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -270,7 +270,7 @@ func newFixture(t *testing.T, guardOnly bool) *fixture {
 
 	e := echo.New()
 	setUser := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if id := c.Request().Header.Get("X-Test-User"); id != "" {
 				tok := userToken + id
 				c.Set(string(middleware.UserContextKey), &model.User{ID: id, Token: &tok})
@@ -296,7 +296,7 @@ func newFixture(t *testing.T, guardOnly bool) *fixture {
 	e.GET("/backup-download", hd.ServeDownload)
 	// サーバーが GET のルートへ振り分けた HEAD と同じ形 (#3925)。
 	e.GET("/backup-download-head", hd.ServeDownload, func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			headreq.Mark(c)
 			return next(c)
 		}

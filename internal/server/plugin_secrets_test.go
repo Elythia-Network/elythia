@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,7 +87,7 @@ func TestRegisterPluginSecretRoutes_UnwiredRolesDenyAll(t *testing.T) {
 	s.pluginSecrets = svc
 	token := "native-token"
 	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Set(string(middleware.UserContextKey), &model.User{ID: "u", Token: &token})
 			c.Set(string(middleware.TokenContextKey), token)
 			return next(c)
@@ -114,7 +114,7 @@ func TestRegisterPluginSecretRoutes_RequiresNativeToken(t *testing.T) {
 	native := "native-token"
 	presented := ""
 	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Set(string(middleware.UserContextKey), &model.User{ID: "admin", Token: &native})
 			c.Set(string(middleware.TokenContextKey), presented)
 			return next(c)

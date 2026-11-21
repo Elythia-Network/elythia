@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 )
 
@@ -120,7 +120,7 @@ func (h *Handler) SetModeratorChecker(m ModeratorChecker) {
 // requesterIsModerator reports whether the (optionally authenticated) caller
 // is a moderator. The global Authenticate middleware populates the user when a
 // valid token is presented; unauthenticated callers return false.
-func (h *Handler) requesterIsModerator(c echo.Context) bool {
+func (h *Handler) requesterIsModerator(c *echo.Context) bool {
 	if h.moderator == nil {
 		return false
 	}
@@ -158,7 +158,7 @@ type InstancesRequest struct {
 // Instances handles POST /api/federation/instances.
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
-func (h *Handler) Instances(c echo.Context) error {
+func (h *Handler) Instances(c *echo.Context) error {
 	var req InstancesRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -221,7 +221,7 @@ type ShowInstanceRequest struct {
 }
 
 // ShowInstance handles POST /api/federation/show-instance.
-func (h *Handler) ShowInstance(c echo.Context) error {
+func (h *Handler) ShowInstance(c *echo.Context) error {
 	var req ShowInstanceRequest
 	// 空の host は本家と同じく受け、該当が無いので 204 を返す (#3770)。
 	if err := c.Bind(&req); err != nil || req.Host == nil {

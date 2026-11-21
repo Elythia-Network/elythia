@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,15 +38,14 @@ func (s *stubAvatarLookup) FindByUsernameLower(username string, host *string) (*
 	return u, nil
 }
 
-func newAvatarTestContext(t *testing.T, acct string) (echo.Context, *httptest.ResponseRecorder) {
+func newAvatarTestContext(t *testing.T, acct string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/avatar/@"+acct, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/avatar/@:acct")
-	c.SetParamNames("acct")
-	c.SetParamValues(acct)
+	c.SetPathValues(echo.PathValues{{Name: "acct", Value: acct}})
 	return c, rec
 }
 
@@ -155,15 +154,14 @@ func TestAvatarHandler_EmptyAcctFallback(t *testing.T) {
 // avatar 経路は構築時に localHost を小文字化して渡す (avatar.go)。
 
 // newAvatarStaticContext builds a request with `?static=1` (#2908).
-func newAvatarStaticContext(t *testing.T, acct string) (echo.Context, *httptest.ResponseRecorder) {
+func newAvatarStaticContext(t *testing.T, acct string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/avatar/@"+acct+"?static=1", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/avatar/@:acct")
-	c.SetParamNames("acct")
-	c.SetParamValues(acct)
+	c.SetPathValues(echo.PathValues{{Name: "acct", Value: acct}})
 	return c, rec
 }
 

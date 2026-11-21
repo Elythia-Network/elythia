@@ -15,7 +15,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -38,7 +38,7 @@ func newHandlerWithMeta(t *testing.T) (*Handler, *testutil.MockInstanceRepositor
 	return NewHandler(svc, nil, nil), repo, metaRepo
 }
 
-func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+func newReq(t *testing.T, body string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -50,7 +50,7 @@ func newReq(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder
 // postBody invokes a handler with the given JSON body and returns the recorded
 // response. Used by the per-handler test files (host_listings_test.go,
 // stats_test.go, update_remote_user_test.go).
-func postBody(handler func(echo.Context) error, body string) *httptest.ResponseRecorder {
+func postBody(handler func(*echo.Context) error, body string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -61,13 +61,13 @@ func postBody(handler func(echo.Context) error, body string) *httptest.ResponseR
 }
 
 // postStub is a shorthand for postBody with an empty JSON body.
-func postStub(handler func(echo.Context) error) *httptest.ResponseRecorder {
+func postStub(handler func(*echo.Context) error) *httptest.ResponseRecorder {
 	return postBody(handler, `{}`)
 }
 
 // postBodyAs is postBody with an authenticated viewer set in the context, used
 // to exercise viewer-relative relation packing (#1957-a).
-func postBodyAs(handler func(echo.Context) error, body, viewerID string) *httptest.ResponseRecorder {
+func postBodyAs(handler func(*echo.Context) error, body, viewerID string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

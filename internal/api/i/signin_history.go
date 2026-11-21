@@ -7,11 +7,11 @@ import (
 	"github.com/elythia-network/elythia/internal/api/jsnum"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SigninHistory handles POST /api/i/signin-history.
-func (h *Handler) SigninHistory(c echo.Context) error {
+func (h *Handler) SigninHistory(c *echo.Context) error {
 	if h.signinRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

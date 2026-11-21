@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 
 	"github.com/elythia-network/elythia/internal/misc/headreq"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -71,7 +71,7 @@ func frontendDynamicGzip() echo.MiddlewareFunc {
 func serveFrontendBuild(dir string) echo.HandlerFunc {
 	fsys := os.DirFS(dir)
 	fallback := frontendDynamicGzip()(echo.StaticDirectoryHandler(fsys, false))
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		name, ok := frontendAssetName(c.Param("*"))
 		if !ok {
 			return fallback(c)
@@ -85,7 +85,10 @@ func serveFrontendBuild(dir string) echo.HandlerFunc {
 			// 変わるので、作り直されなかった古い .br / .gz を返しうる (#3593)。
 			return fallback(c)
 		}
-		res := c.Response()
+		res := echoResponse(c)
+		if res == nil {
+			return fallback(c)
+		}
 		res.Before(func() {
 			// 応答を書く直前に status を見て付ける。Stat の後でも、読み出しの失敗や
 			// Range の誤りで 4xx / 5xx になりうるので、それには付けない。
@@ -137,7 +140,7 @@ func frontendAssetName(param string) (string, bool) {
 // and the request accepts its encoding. Among the existing variants it takes
 // the one with the highest q-value (q=0 refuses), the earlier one on a tie.
 // It reports whether it wrote a response.
-func servePrecompressed(c echo.Context, fsys fs.FS, name string, orig fs.FileInfo) bool {
+func servePrecompressed(c *echo.Context, fsys fs.FS, name string, orig fs.FileInfo) bool {
 	ctype := mime.TypeByExtension(path.Ext(name))
 	if ctype == "" {
 		return false
@@ -174,11 +177,14 @@ func servePrecompressed(c echo.Context, fsys fs.FS, name string, orig fs.FileInf
 		return false
 	}
 	defer bestF.Close()
+	res := echoResponse(c)
+	if res == nil {
+		return false
+	}
 	req := headreq.Request(c)
 	h := c.Response().Header()
 	h.Set(echo.HeaderContentType, ctype)
 	h.Set(echo.HeaderContentEncoding, bestEnc)
-	res := c.Response()
 	res.Before(func() {
 		// ServeContent は Content-Encoding があると、Range の無い応答に
 		// Content-Length を付けない。200 は本文がファイルそのものなので、ここで

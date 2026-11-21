@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -20,7 +20,7 @@ import (
 func TestAuth_MissingParamsUseAjvID(t *testing.T) {
 	h, _ := newTestHandler()
 	user := &model.User{ID: "u1"}
-	for name, fn := range map[string]func(echo.Context) error{
+	for name, fn := range map[string]func(*echo.Context) error{
 		"auth/session/generate": h.SessionGenerate,
 		"auth/session/show":     h.SessionShow,
 		"auth/session/userkey":  h.SessionUserkey,

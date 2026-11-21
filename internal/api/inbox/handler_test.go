@@ -18,8 +18,8 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
-	emiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	emiddleware "github.com/labstack/echo/v5/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,7 +75,7 @@ func newHandler(t *testing.T, pubKeyPEM string) (*Handler, *testutil.MockUserRep
 	return NewHandler(resolver, processor, "", nil, nil), repo, followingRepo
 }
 
-func newPost(t *testing.T, body []byte) (echo.Context, *httptest.ResponseRecorder) {
+func newPost(t *testing.T, body []byte) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "https://example.com/inbox", bytes.NewReader(body))
@@ -801,8 +801,7 @@ func TestInbox_PathTargetIsObservedBeforeAdmission(t *testing.T) {
 	observer := &localFederationObserverStub{available: true}
 	h.SetLocalFederationObserver(observer)
 	c, rec := newPost(t, []byte(`{"type":"Follow"}`))
-	c.SetParamNames("id")
-	c.SetParamValues("bob")
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: "bob"}})
 	require.NoError(t, h.Inbox(c))
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Equal(t, []string{"bob:inbox:"}, observer.recorded)
@@ -1001,7 +1000,7 @@ func TestInbox_BodyLimit(t *testing.T) {
 
 	e := echo.New()
 	// router.go と同じ wiring (BodyLimit("64KiB")=65536 + handler)。
-	e.POST("/inbox", h.Inbox, emiddleware.BodyLimit("64KiB"))
+	e.POST("/inbox", h.Inbox, emiddleware.BodyLimit(64<<10))
 
 	serve := func(body []byte, chunked bool) int {
 		req := httptest.NewRequest(http.MethodPost, "https://example.com/inbox", bytes.NewReader(body))

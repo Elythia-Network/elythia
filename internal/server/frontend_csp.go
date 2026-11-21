@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/model"
@@ -324,7 +324,7 @@ func objectStorageOrigin(baseURL string) string {
 //
 // mode が未知 / off なら何もしない。**判定できない値で enforce に倒さない**の
 // が要点で、設定ミスでフロントが動かなくなるより無効の方が安全。
-func applyFrontendCSP(c echo.Context, mode string, extras cspExtras) {
+func applyFrontendCSP(c *echo.Context, mode string, extras cspExtras) {
 	switch mode {
 	case CSPModeReportOnly:
 		c.Response().Header().Set("Content-Security-Policy-Report-Only",

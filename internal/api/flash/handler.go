@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RoleChecker reports whether a user is a moderator. Satisfied by
@@ -74,7 +74,7 @@ type CreateRequest struct {
 }
 
 // Create handles POST /api/flash/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	// upstream paramDef required: ['title','summary','script','permissions']。
@@ -113,7 +113,7 @@ type ShowRequest struct {
 //
 // frontend MkPlay.vue は user / createdAt / isLiked を読んでカード描画
 // および「いいね」ボタン状態を決めるので、handler 側で embed する。
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.FlashID == "" {
@@ -148,7 +148,7 @@ type UpdateRequest struct {
 }
 
 // Update handles POST /api/flash/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.FlashID == "" {
@@ -187,7 +187,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/flash/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req DeleteRequest
 	if err := c.Bind(&req); err != nil || req.FlashID == "" {
@@ -272,7 +272,7 @@ type SearchRequest struct {
 // My handles POST /api/flash/my (own list).
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する (#493)。
-func (h *Handler) My(c echo.Context) error {
+func (h *Handler) My(c *echo.Context) error {
 	return h.my(c, id.NormalizeCursorIDFirst)
 }
 
@@ -280,11 +280,11 @@ func (h *Handler) My(c echo.Context) error {
 //
 // 本家の flash/my は ID があれば日付を捨てる (makePaginationQuery) が、本家に無い
 // i/flashs は以前の向きごとの組み合わせを残す (#3369)。
-func (h *Handler) IFlashs(c echo.Context) error {
+func (h *Handler) IFlashs(c *echo.Context) error {
 	return h.my(c, id.NormalizeCursor)
 }
 
-func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+func (h *Handler) my(c *echo.Context, normalizeCursor id.CursorNormalizer) error {
 	user := middleware.GetUser(c)
 	var req PaginationRequest
 	if err := c.Bind(&req); err != nil {
@@ -311,7 +311,7 @@ func (h *Handler) my(c echo.Context, normalizeCursor id.CursorNormalizer) error 
 }
 
 // Featured handles POST /api/flash/featured.
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	var req FeaturedRequest
 	if err := c.Bind(&req); err != nil {
 		return apierr.JSONInvalidParam(c)
@@ -331,7 +331,7 @@ func (h *Handler) Featured(c echo.Context) error {
 }
 
 // Search handles POST /api/flash/search.
-func (h *Handler) Search(c echo.Context) error {
+func (h *Handler) Search(c *echo.Context) error {
 	var req SearchRequest
 	if err := c.Bind(&req); err != nil || req.Query == "" {
 		return apierr.JSONInvalidParam(c)
@@ -358,7 +358,7 @@ type LikeRequest struct {
 }
 
 // Like handles POST /api/flash/like.
-func (h *Handler) Like(c echo.Context) error {
+func (h *Handler) Like(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req LikeRequest
 	if err := c.Bind(&req); err != nil || req.FlashID == "" {
@@ -379,7 +379,7 @@ func (h *Handler) Like(c echo.Context) error {
 }
 
 // Unlike handles POST /api/flash/unlike.
-func (h *Handler) Unlike(c echo.Context) error {
+func (h *Handler) Unlike(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req LikeRequest
 	if err := c.Bind(&req); err != nil || req.FlashID == "" {
@@ -402,17 +402,17 @@ func (h *Handler) Unlike(c echo.Context) error {
 // upstream Misskey TS は `{id, flash: Flash}` を返す (id = flash_like
 // row id, frontend は it.flash で MkPlayPreview を描画)。mk-go は元々
 // flatten された Flash 配列を返しており frontend が空表示になっていた。
-func (h *Handler) MyLikes(c echo.Context) error {
+func (h *Handler) MyLikes(c *echo.Context) error {
 	return h.myLikes(c, id.NormalizeCursorIDFirst)
 }
 
 // IFlashsLikes handles POST /api/i/flashs/likes, Elythia's alias of
 // flash/my-likes. IFlashs と同じく、以前の向きごとの組み合わせを残す (#3369)。
-func (h *Handler) IFlashsLikes(c echo.Context) error {
+func (h *Handler) IFlashsLikes(c *echo.Context) error {
 	return h.myLikes(c, id.NormalizeCursor)
 }
 
-func (h *Handler) myLikes(c echo.Context, normalizeCursor id.CursorNormalizer) error {
+func (h *Handler) myLikes(c *echo.Context, normalizeCursor id.CursorNormalizer) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		PaginationRequest

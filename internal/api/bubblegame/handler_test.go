@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +44,7 @@ func newTestHandler() (*Handler, *mockBubbleGameRepo) {
 	return NewHandler(repo, idGen, nil), repo
 }
 
-func post(handler func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func post(handler func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -184,7 +184,7 @@ func TestRanking_Empty(t *testing.T) {
 
 // getRanking issues a GET request with gameMode in the query string, mirroring
 // the frontend's misskeyApiGet call (#1774)。
-func getRanking(handler func(echo.Context) error, query string) *httptest.ResponseRecorder {
+func getRanking(handler func(*echo.Context) error, query string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/?"+query, nil)
 	rec := httptest.NewRecorder()

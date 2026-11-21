@@ -16,7 +16,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // MainStreamPublisher emits events to a user's `main` WebSocket channel.
@@ -70,7 +70,7 @@ func (h *Handler) SetArchiveScheduler(s ArchiveScheduler) {
 // 積めなくても API は失敗させない (本家は失敗を返す)。お知らせは既に保存済みで、
 // 読むときに期限を見るので見え方は変わらず、DB の isActive は起動時の処理か日次の
 // 保険が落とす。
-func (h *Handler) scheduleArchive(c echo.Context, a *model.Announcement) {
+func (h *Handler) scheduleArchive(c *echo.Context, a *model.Announcement) {
 	if h.archiveScheduler == nil || a == nil || !a.IsActive || a.AutoArchiveAt == nil {
 		return
 	}
@@ -134,7 +134,7 @@ func (h *Handler) SetUserRepo(r repository.UserRepository) {
 // {userId, userUsername, userHost} を **追記** する。caller は呼び出し後
 // に info を再利用しない前提で渡すこと。同 map を別目的で保持する場合は
 // あらかじめコピーしてから渡す。
-func (h *Handler) logAnnouncementAction(c echo.Context, globalType, userType moderationlog.LogType, a *model.Announcement, info map[string]any) {
+func (h *Handler) logAnnouncementAction(c *echo.Context, globalType, userType moderationlog.LogType, a *model.Announcement, info map[string]any) {
 	if h.modLogService == nil || a == nil {
 		return
 	}
@@ -160,7 +160,7 @@ func (h *Handler) logAnnouncementAction(c echo.Context, globalType, userType mod
 }
 
 // List handles POST /api/announcements.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
 		SinceID   string     `json:"sinceId"`
@@ -225,7 +225,7 @@ func (h *Handler) List(c echo.Context) error {
 }
 
 // ReadAnnouncement handles POST /api/i/read-announcement.
-func (h *Handler) ReadAnnouncement(c echo.Context) error {
+func (h *Handler) ReadAnnouncement(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		AnnouncementID string `json:"announcementId"`
@@ -282,7 +282,7 @@ func (h *Handler) ReadAnnouncement(c echo.Context) error {
 // display を `enum: ['normal', 'banner', 'dialog']` で制約する (#1108 sweep)。
 // 旧 mk-go は enum validation 無く silent fallback で任意値を accept していた
 // (admin の typo が DB に書かれる drift)。本 fix で upstream 同等の enum reject。
-func (h *Handler) AdminCreate(c echo.Context) error {
+func (h *Handler) AdminCreate(c *echo.Context) error {
 	var req struct {
 		Title string `json:"title"`
 		Text  string `json:"text"`
@@ -433,7 +433,7 @@ func isValidAnnouncementDisplay(v string) bool {
 // 等の更新が一切 DB に書かれない drop-in regression があった (= PR #1102
 // RolesUpdate と同種の field 欠落 drift)。本 fix で upstream 全 field に
 // 拡張 + icon / display は enum 検証で silent 書き換えを防ぐ。
-func (h *Handler) AdminUpdate(c echo.Context) error {
+func (h *Handler) AdminUpdate(c *echo.Context) error {
 	var req struct {
 		ID                     string  `json:"id"`
 		Title                  *string `json:"title"`
@@ -559,7 +559,7 @@ func (h *Handler) AdminUpdate(c echo.Context) error {
 }
 
 // AdminDelete handles POST /api/admin/announcements/delete.
-func (h *Handler) AdminDelete(c echo.Context) error {
+func (h *Handler) AdminDelete(c *echo.Context) error {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -595,7 +595,7 @@ func (h *Handler) AdminDelete(c echo.Context) error {
 //     (userId IS NULL).
 //   - status: "active" / "archived" / "all" (default "active").
 //   - Each row carries a reads count (announcement_read row count).
-func (h *Handler) AdminList(c echo.Context) error {
+func (h *Handler) AdminList(c *echo.Context) error {
 	// 本家のparamDefにoffsetは無いので読まない(#3854)。読むと、本家が無視する値で
 	// 件数を飛ばし、型の違う値を400にする。同梱のfrontendはuntilIdで送るので影響しない。
 	var req struct {

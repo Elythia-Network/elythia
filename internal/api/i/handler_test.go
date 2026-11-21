@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
@@ -2986,14 +2986,14 @@ func TestRegistryRejectsUnstorableKeyAndDomain(t *testing.T) {
 	user := &model.User{ID: "u1"}
 	for _, tt := range []struct {
 		name string
-		call func(h *Handler) func(echo.Context) error
+		call func(h *Handler) func(*echo.Context) error
 		body string
 	}{
-		{"set の key", func(h *Handler) func(echo.Context) error { return h.RegistrySet }, `{"key":"a\u0000b","value":"x"}`},
-		{"set の domain", func(h *Handler) func(echo.Context) error { return h.RegistrySet }, `{"key":"theme","value":"x","domain":"a\u0000b"}`},
-		{"get-all の domain", func(h *Handler) func(echo.Context) error { return h.RegistryGetAll }, `{"domain":"a\u0000b"}`},
-		{"keys の domain", func(h *Handler) func(echo.Context) error { return h.RegistryKeys }, `{"domain":"a\u0000b"}`},
-		{"remove の key", func(h *Handler) func(echo.Context) error { return h.RegistryRemove }, `{"key":"a\u0000b"}`},
+		{"set の key", func(h *Handler) func(*echo.Context) error { return h.RegistrySet }, `{"key":"a\u0000b","value":"x"}`},
+		{"set の domain", func(h *Handler) func(*echo.Context) error { return h.RegistrySet }, `{"key":"theme","value":"x","domain":"a\u0000b"}`},
+		{"get-all の domain", func(h *Handler) func(*echo.Context) error { return h.RegistryGetAll }, `{"domain":"a\u0000b"}`},
+		{"keys の domain", func(h *Handler) func(*echo.Context) error { return h.RegistryKeys }, `{"domain":"a\u0000b"}`},
+		{"remove の key", func(h *Handler) func(*echo.Context) error { return h.RegistryRemove }, `{"key":"a\u0000b"}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, _ := newHandlerWithRegistry(t)

@@ -10,7 +10,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -219,12 +219,12 @@ func TestImport_InvalidJSON(t *testing.T) {
 // (cross-user import ownership bypass #1555 の回帰防止)。全 import handler で
 // 同じ fail-closed 挙動を確認する。
 func TestImport_OtherUsersFileRejected(t *testing.T) {
-	for name, makeFn := range map[string]func(*Handler) func(c echo.Context) error{
-		"following":  func(h *Handler) func(c echo.Context) error { return h.ImportFollowing },
-		"blocking":   func(h *Handler) func(c echo.Context) error { return h.ImportBlocking },
-		"muting":     func(h *Handler) func(c echo.Context) error { return h.ImportMuting },
-		"user-lists": func(h *Handler) func(c echo.Context) error { return h.ImportUserLists },
-		"antennas":   func(h *Handler) func(c echo.Context) error { return h.ImportAntennas },
+	for name, makeFn := range map[string]func(*Handler) func(c *echo.Context) error{
+		"following":  func(h *Handler) func(c *echo.Context) error { return h.ImportFollowing },
+		"blocking":   func(h *Handler) func(c *echo.Context) error { return h.ImportBlocking },
+		"muting":     func(h *Handler) func(c *echo.Context) error { return h.ImportMuting },
+		"user-lists": func(h *Handler) func(c *echo.Context) error { return h.ImportUserLists },
+		"antennas":   func(h *Handler) func(c *echo.Context) error { return h.ImportAntennas },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, enq, driveRepo := newTransferHandlerWithDrive()
@@ -292,12 +292,12 @@ func TestImport_OwnedFileAccepted(t *testing.T) {
 // 空 file (size==0) は EMPTY_FILE で弾かれ、enqueue されない (#1555)。
 // 全 import endpoint で per-endpoint UUID を確認する。
 func TestImport_EmptyFileRejected(t *testing.T) {
-	for name, makeFn := range map[string]func(*Handler) func(c echo.Context) error{
-		"following":  func(h *Handler) func(c echo.Context) error { return h.ImportFollowing },
-		"blocking":   func(h *Handler) func(c echo.Context) error { return h.ImportBlocking },
-		"muting":     func(h *Handler) func(c echo.Context) error { return h.ImportMuting },
-		"user-lists": func(h *Handler) func(c echo.Context) error { return h.ImportUserLists },
-		"antennas":   func(h *Handler) func(c echo.Context) error { return h.ImportAntennas },
+	for name, makeFn := range map[string]func(*Handler) func(c *echo.Context) error{
+		"following":  func(h *Handler) func(c *echo.Context) error { return h.ImportFollowing },
+		"blocking":   func(h *Handler) func(c *echo.Context) error { return h.ImportBlocking },
+		"muting":     func(h *Handler) func(c *echo.Context) error { return h.ImportMuting },
+		"user-lists": func(h *Handler) func(c *echo.Context) error { return h.ImportUserLists },
+		"antennas":   func(h *Handler) func(c *echo.Context) error { return h.ImportAntennas },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, enq, driveRepo := newTransferHandlerWithDrive()
@@ -321,11 +321,11 @@ func TestImport_EmptyFileRejected(t *testing.T) {
 
 // 64KB 超の file は TOO_BIG_FILE で弾かれる (import-antennas を除く)。
 func TestImport_TooBigFileRejected(t *testing.T) {
-	for name, makeFn := range map[string]func(*Handler) func(c echo.Context) error{
-		"following":  func(h *Handler) func(c echo.Context) error { return h.ImportFollowing },
-		"blocking":   func(h *Handler) func(c echo.Context) error { return h.ImportBlocking },
-		"muting":     func(h *Handler) func(c echo.Context) error { return h.ImportMuting },
-		"user-lists": func(h *Handler) func(c echo.Context) error { return h.ImportUserLists },
+	for name, makeFn := range map[string]func(*Handler) func(c *echo.Context) error{
+		"following":  func(h *Handler) func(c *echo.Context) error { return h.ImportFollowing },
+		"blocking":   func(h *Handler) func(c *echo.Context) error { return h.ImportBlocking },
+		"muting":     func(h *Handler) func(c *echo.Context) error { return h.ImportMuting },
+		"user-lists": func(h *Handler) func(c *echo.Context) error { return h.ImportUserLists },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, enq, driveRepo := newTransferHandlerWithDrive()
@@ -435,11 +435,11 @@ func (s stubMoveInValidator) HasRecentConfirmedMoveIn(*model.User) bool { return
 
 // 相互確認の取れた移行直後は 32MB まで許可する (#2415)。
 func TestImport_MovedInRelaxesSizeLimit(t *testing.T) {
-	makers := map[string]func(*Handler) func(c echo.Context) error{
-		"following":  func(h *Handler) func(c echo.Context) error { return h.ImportFollowing },
-		"blocking":   func(h *Handler) func(c echo.Context) error { return h.ImportBlocking },
-		"muting":     func(h *Handler) func(c echo.Context) error { return h.ImportMuting },
-		"user-lists": func(h *Handler) func(c echo.Context) error { return h.ImportUserLists },
+	makers := map[string]func(*Handler) func(c *echo.Context) error{
+		"following":  func(h *Handler) func(c *echo.Context) error { return h.ImportFollowing },
+		"blocking":   func(h *Handler) func(c *echo.Context) error { return h.ImportBlocking },
+		"muting":     func(h *Handler) func(c *echo.Context) error { return h.ImportMuting },
+		"user-lists": func(h *Handler) func(c *echo.Context) error { return h.ImportUserLists },
 	}
 	for name, makeFn := range makers {
 		t.Run(name+"/移行直後は64KB超を通す", func(t *testing.T) {

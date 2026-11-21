@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,9 +66,9 @@ func TestParamShadowRunsAfterTheRouteMiddleware(t *testing.T) {
 	api := apiRoutes{e.Group("/api")}
 	api.Use(mw)
 	deny := func(echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
+		return func(c *echo.Context) error { return c.NoContent(http.StatusUnauthorized) }
 	}
-	ok := func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
+	ok := func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }
 	api.POST("/admin/update-meta", ok)
 	api.POST("/notes/create", ok, deny)
 	api.Match([]string{http.MethodGet, http.MethodPost}, "/federation/instances", ok)
@@ -102,7 +102,7 @@ func TestWithParamShadowWithoutTheGroupMiddleware(t *testing.T) {
 	e := echo.New()
 	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/notes/show", nil), httptest.NewRecorder())
 	called := false
-	require.NoError(t, withParamShadow(func(echo.Context) error { called = true; return nil })(c))
+	require.NoError(t, withParamShadow(func(*echo.Context) error { called = true; return nil })(c))
 	assert.True(t, called)
 }
 
@@ -165,10 +165,10 @@ func newParamServerOn(t *testing.T, redisClient *redis.Client, redisOptions conf
 // purpose, with the path by which each is reached.
 var apiRegistrationAllowed = map[string]string{
 	// 登録の無い/api/*に200と空のobjectを返すcatchall。goldenのendpointではない。
-	`api.Any("/*", apiCatchall)`: "router.go",
+	`api.Group.Match(anyMethods, "/*", apiCatchall)`: "router.go",
 	// 本家がendpointの外でfastify.allに直接登録するroute(#3926)。frontendが
 	// 設定画面のキャッシュの削除からGETで呼ぶ。本文を読まないので本文の検査は要らない。
-	`api.Any("/clear-browser-cache", meta.ClearBrowserCache)`: "router.go",
+	`api.Group.Match(anyMethods, "/clear-browser-cache", meta.ClearBrowserCache)`: "router.go",
 	// プラグインのroute(/api/plugin/<名前>/...)。Elythia独自で、goldenに無い。
 	`api.Group(pluginRoutePrefix+def.Name, middleware.RejectAppToken())`: "plugin_wiring.go",
 	// 上の登録をするsetupPluginsへ、/apiのgroupを渡す。

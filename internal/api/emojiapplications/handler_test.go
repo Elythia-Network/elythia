@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -90,7 +90,7 @@ func (s *stubApps) UpdateIfPending(a *model.EmojiApplication) (bool, error) {
 	return true, nil
 }
 
-func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

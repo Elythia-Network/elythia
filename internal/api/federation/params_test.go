@@ -8,7 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +39,7 @@ func TestHostListings_EmptyHostReturnsEmptyList(t *testing.T) {
 	followRepo.Followings["f2"] = &model.Following{ID: "f2", FollowerID: "r2", FollowerHost: &remote, FolloweeID: "local2"}
 	h.SetFollowingRepo(followRepo)
 
-	for name, handler := range map[string]func(echo.Context) error{
+	for name, handler := range map[string]func(*echo.Context) error{
 		"followers": h.Followers,
 		"following": h.Following,
 		"users":     h.Users,
@@ -56,7 +56,7 @@ func TestHostListings_AcceptIntegerValuedFractions(t *testing.T) {
 	seedRemoteUsers(h, "remote.example", "r1")
 	h.SetFollowingRepo(testutil.NewMockFollowingRepository())
 
-	for name, handler := range map[string]func(echo.Context) error{
+	for name, handler := range map[string]func(*echo.Context) error{
 		"followers": h.Followers,
 		"following": h.Following,
 		"users":     h.Users,

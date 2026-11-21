@@ -12,7 +12,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/openapi"
 	"github.com/elythia-network/elythia/internal/config"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +20,7 @@ import (
 func newOpenAPITestServer(t *testing.T) (*Server, *echo.Echo) {
 	t.Helper()
 	e := echo.New()
-	noop := func(c echo.Context) error { return nil }
+	noop := func(c *echo.Context) error { return nil }
 	e.POST("/api/notes/create", noop)
 	e.POST("/api/notes/show", noop)
 	e.POST("/api/i", noop)
@@ -105,7 +105,7 @@ func TestOpenAPISpec_BuiltOnce(t *testing.T) {
 	s, e := newOpenAPITestServer(t)
 	_, first := getAPIJSON(t, s, e)
 	// 組み立ての後にルートは増えないので、文書は最初に作ったものを返し続ける。
-	e.POST("/api/notes/delete", func(c echo.Context) error { return nil })
+	e.POST("/api/notes/delete", func(c *echo.Context) error { return nil })
 	_, second := getAPIJSON(t, s, e)
 	assert.Equal(t, first, second)
 	assert.NotContains(t, second["paths"], "/notes/delete")

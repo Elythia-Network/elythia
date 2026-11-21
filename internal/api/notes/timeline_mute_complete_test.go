@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,11 +56,11 @@ func (failingRenoteMuteeLister) ListMuteeIDs(string) ([]string, error) {
 // failed to load must keep the subqueries; otherwise the mutes would silently
 // stop applying to the SQL.
 func TestTimelines_MuteListsCompleteOnlyWhenRead(t *testing.T) {
-	endpoints := map[string]func(h *Handler) func(echo.Context) error{
-		"home":   func(h *Handler) func(echo.Context) error { return h.Timeline },
-		"local":  func(h *Handler) func(echo.Context) error { return h.LocalTimeline },
-		"global": func(h *Handler) func(echo.Context) error { return h.GlobalTimeline },
-		"hybrid": func(h *Handler) func(echo.Context) error { return h.HybridTimeline },
+	endpoints := map[string]func(h *Handler) func(*echo.Context) error{
+		"home":   func(h *Handler) func(*echo.Context) error { return h.Timeline },
+		"local":  func(h *Handler) func(*echo.Context) error { return h.LocalTimeline },
+		"global": func(h *Handler) func(*echo.Context) error { return h.GlobalTimeline },
+		"hybrid": func(h *Handler) func(*echo.Context) error { return h.HybridTimeline },
 	}
 	viewer := &model.User{ID: "viewer"}
 	for name, endpoint := range endpoints {

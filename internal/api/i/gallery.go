@@ -9,7 +9,7 @@ import (
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // paginationFromRequest reads optional limit / sinceId / untilId / sinceDate /
@@ -22,7 +22,7 @@ import (
 //
 // ok=false は bind の失敗か列に入らないカーソルで、呼び出し側は 400 を返すこと
 // (#3025 / #3330)。
-func paginationFromRequest(c echo.Context) (limit int, sinceID, untilID string, ok bool) {
+func paginationFromRequest(c *echo.Context) (limit int, sinceID, untilID string, ok bool) {
 	var req struct {
 		Limit     *jsnum.Int `json:"limit"`
 		SinceID   string     `json:"sinceId"`
@@ -60,7 +60,7 @@ func paginationFromRequest(c echo.Context) (limit int, sinceID, untilID string, 
 // しか返しておらず frontend が空表示になっていた (#493 関連)。
 // 同じ shape に揃えるため like 行ごとに対応する gallery_post を fetch
 // して埋める。
-func (h *Handler) GalleryLikes(c echo.Context) error {
+func (h *Handler) GalleryLikes(c *echo.Context) error {
 	if h.galleryRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}
@@ -182,7 +182,7 @@ func packGalleryPost(pk *entity.Packer, p *model.GalleryPost, idGen id.Generator
 
 // GalleryPosts handles POST /api/i/gallery/posts.
 // 自分が投稿した gallery_post を返却する。
-func (h *Handler) GalleryPosts(c echo.Context) error {
+func (h *Handler) GalleryPosts(c *echo.Context) error {
 	if h.galleryRepo == nil {
 		return c.JSON(http.StatusOK, []any{})
 	}

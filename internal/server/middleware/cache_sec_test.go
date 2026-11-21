@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -39,7 +39,7 @@ func TestAPICacheControl(t *testing.T) {
 			e := echo.New()
 			g := e.Group("/api")
 			g.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-				return func(c echo.Context) error {
+				return func(c *echo.Context) error {
 					c.Response().Header().Set(echo.HeaderCacheControl, privateDefault)
 					if tt.user {
 						c.Set(string(UserContextKey), &model.User{ID: "u1"})
@@ -51,7 +51,7 @@ func TestAPICacheControl(t *testing.T) {
 				}
 			})
 			g.Use(APICacheControl())
-			h := func(c echo.Context) error {
+			h := func(c *echo.Context) error {
 				if tt.skip {
 					SkipPublicCache(c)
 				}

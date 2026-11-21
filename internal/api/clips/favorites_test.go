@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +30,7 @@ func newStubHandler(t *testing.T) (*Handler, *testutil.MockClipRepository, *test
 	return h, repo, favRepo
 }
 
-func postStubWithBody(t *testing.T, handler func(echo.Context) error, body string, userID string) *httptest.ResponseRecorder {
+func postStubWithBody(t *testing.T, handler func(*echo.Context) error, body string, userID string) *httptest.ResponseRecorder {
 	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))

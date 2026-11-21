@@ -20,7 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Handler handles antenna-related API endpoints.
@@ -210,12 +210,12 @@ func nameTooLong(name string) bool {
 	return utf8.RuneCountInString(name) > antennaNameMaxLength
 }
 
-func invalidName(c echo.Context) error {
+func invalidName(c *echo.Context) error {
 	return apierr.JSONInvalidParamClient(c, "#/properties/name/maxLength", "must NOT have more than 100 characters")
 }
 
 // Create handles POST /api/antennas/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req CreateRequest
 	if err := c.Bind(&req); err != nil || req.missingRequired() {
@@ -270,7 +270,7 @@ type ShowRequest struct {
 }
 
 // Show handles POST /api/antennas/show.
-func (h *Handler) Show(c echo.Context) error {
+func (h *Handler) Show(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ShowRequest
 	if err := c.Bind(&req); err != nil || req.AntennaID == "" {
@@ -312,7 +312,7 @@ type UpdateRequest struct {
 }
 
 // Update handles POST /api/antennas/update.
-func (h *Handler) Update(c echo.Context) error {
+func (h *Handler) Update(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil || req.AntennaID == "" {
@@ -369,7 +369,7 @@ type DeleteRequest struct {
 }
 
 // Delete handles POST /api/antennas/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req DeleteRequest
 	if err := c.Bind(&req); err != nil || req.AntennaID == "" {
@@ -391,7 +391,7 @@ func (h *Handler) Delete(c echo.Context) error {
 // antenna TL から特定ノートを除去する。upstream は findOneBy({id, userId}) で
 // not-found / not-owner を区別せず NO_SUCH_ANTENNA を返すので、mk-go も両方を
 // NO_SUCH_ANTENNA に倒す。
-func (h *Handler) RemoveNote(c echo.Context) error {
+func (h *Handler) RemoveNote(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		AntennaID string `json:"antennaId"`
@@ -410,7 +410,7 @@ func (h *Handler) RemoveNote(c echo.Context) error {
 }
 
 // List handles POST /api/antennas/list.
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	rows, err := h.svc.ListByUser(user.ID)
 	if err != nil {
@@ -438,7 +438,7 @@ type NotesRequest struct {
 }
 
 // Notes handles POST /api/antennas/notes.
-func (h *Handler) Notes(c echo.Context) error {
+func (h *Handler) Notes(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req NotesRequest
 	if err := c.Bind(&req); err != nil || req.AntennaID == "" {

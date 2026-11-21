@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -95,7 +95,7 @@ func TestFrontendBuild_PrecompressedVariants(t *testing.T) {
 // 写せば本文に出る。
 func TestFrontendBuild_PrecompressedHEADSkipsTheBodyCopy(t *testing.T) {
 	e := newFrontendBuildEcho(t, func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			headreq.Mark(c)
 			return next(c)
 		}

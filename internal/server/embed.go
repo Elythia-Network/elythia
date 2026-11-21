@@ -12,7 +12,7 @@ import (
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // embedCacheControl mirrors upstream's `public, max-age=3600` on embed pages.
@@ -37,9 +37,9 @@ type EmbedDeps struct {
 	UserRepo repository.UserRepository
 	ClipRepo repository.ClipRepository
 
-	PackNote func(c echo.Context, note *model.Note) (any, error)
-	PackUser func(c echo.Context, user *model.User) (any, error)
-	PackClip func(c echo.Context, clip *model.Clip) (any, error)
+	PackNote func(c *echo.Context, note *model.Note) (any, error)
+	PackUser func(c *echo.Context, user *model.User) (any, error)
+	PackClip func(c *echo.Context, clip *model.Clip) (any, error)
 }
 
 // embedHandlers renders the embed shell for the four upstream embed routes.
@@ -95,7 +95,7 @@ func newEmbedHandlers(
 //
 // upstream は該当時に何も返さず fastify の既定 (空応答) に落ちるが、mk-go は
 // 常にシェルを返す。「ノートが無い」と「非公開」を応答の形で区別させないため。
-func (h *embedHandlers) Note(c echo.Context) error {
+func (h *embedHandlers) Note(c *echo.Context) error {
 	// upstream は `relations: { user: true, reply: true, renote: true }` で引く。
 	// FindByID だと author が空のまま pack され、埋め込みに投稿者名が出ない。
 	note, err := h.deps.NoteRepo.FindByIDWithRelations(c.Param("note"))
@@ -123,7 +123,7 @@ func embedNoteIsPublic(note *model.Note) bool {
 // User renders /embed/user-timeline/:user.
 //
 // リモートユーザーは埋め込まない (upstream と同じ)。
-func (h *embedHandlers) User(c echo.Context) error {
+func (h *embedHandlers) User(c *echo.Context) error {
 	user, err := h.deps.UserRepo.FindByID(c.Param("user"))
 	if err != nil || user == nil || (user.Host != nil && *user.Host != "") {
 		return h.render(c, nil)
@@ -136,7 +136,7 @@ func (h *embedHandlers) User(c echo.Context) error {
 }
 
 // Clip renders /embed/clips/:clip.
-func (h *embedHandlers) Clip(c echo.Context) error {
+func (h *embedHandlers) Clip(c *echo.Context) error {
 	clip, err := h.deps.ClipRepo.FindByID(c.Param("clip"))
 	if err != nil || clip == nil {
 		return h.render(c, nil)
@@ -155,12 +155,12 @@ func (h *embedHandlers) Clip(c echo.Context) error {
 }
 
 // Fallback renders /embed/* for paths without a dedicated handler.
-func (h *embedHandlers) Fallback(c echo.Context) error {
+func (h *embedHandlers) Fallback(c *echo.Context) error {
 	return h.render(c, nil)
 }
 
 // render writes the embed HTML shell with the optional context payload.
-func (h *embedHandlers) render(c echo.Context, ctx *embedContext) error {
+func (h *embedHandlers) render(c *echo.Context, ctx *embedContext) error {
 	instanceName := config.DisplayName
 	// upstream base-embed.tsx:46-47 と同じ fallback (SPA shell と共通)。
 	iconURL := "/favicon.ico"

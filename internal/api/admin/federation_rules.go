@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/api/jsnum"
@@ -100,12 +100,12 @@ func hoursOf(h *int) *jsnum.Int {
 	return &v
 }
 
-func noSuchFederationRule(c echo.Context) error {
+func noSuchFederationRule(c *echo.Context) error {
 	return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_RULE", "No such federation rule.", "3706c21c-8123-4a06-94ba-56115cae8cd9"))
 }
 
 // federationRuleError maps the manager's errors to responses.
-func federationRuleError(c echo.Context, err error) error {
+func federationRuleError(c *echo.Context, err error) error {
 	var v *fedrule.ValidationError
 	switch {
 	case errors.As(err, &v):
@@ -128,7 +128,7 @@ func federationRuleLogInfo(r *model.FederationRule) map[string]any {
 //
 // **mk-go 独自 endpoint** (#3090)。連合のルールを評価順に、直近 24 時間に
 // 当たった件数を付けて返す。upstream に対応物は無い。
-func (h *Handler) FederationRules(c echo.Context) error {
+func (h *Handler) FederationRules(c *echo.Context) error {
 	out := []federationRuleResponse{}
 	if h.fedRules == nil {
 		return c.JSON(http.StatusOK, out)
@@ -153,7 +153,7 @@ func (h *Handler) FederationRules(c echo.Context) error {
 //
 // **mk-go 独自 endpoint** (#3090)。ルールに当たった直近の投稿 / activity を
 // 新しい順に返す。record のルールで誤爆していないかを確かめるためのもの。
-func (h *Handler) FederationRuleHits(c echo.Context) error {
+func (h *Handler) FederationRuleHits(c *echo.Context) error {
 	var req struct {
 		RuleID string    `json:"ruleId"`
 		Limit  jsnum.Int `json:"limit"`
@@ -177,7 +177,7 @@ func (h *Handler) FederationRuleHits(c echo.Context) error {
 // FederationRuleCreate handles POST /api/admin/federation/rules/create.
 //
 // **mk-go 独自 endpoint** (#3090)。
-func (h *Handler) FederationRuleCreate(c echo.Context) error {
+func (h *Handler) FederationRuleCreate(c *echo.Context) error {
 	var req federationRuleBody
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "Invalid rule.", "8efb928f-23d5-4af2-8459-e0b2e6c72e3c"))
@@ -197,7 +197,7 @@ func (h *Handler) FederationRuleCreate(c echo.Context) error {
 //
 // **mk-go 独自 endpoint** (#3090)。ルール全体を置き換える (部分更新はしない)。
 // 条件を変えると、それまでに当たった記録は捨てる。
-func (h *Handler) FederationRuleUpdate(c echo.Context) error {
+func (h *Handler) FederationRuleUpdate(c *echo.Context) error {
 	var req struct {
 		RuleID string `json:"ruleId"`
 		federationRuleBody
@@ -226,7 +226,7 @@ func (h *Handler) FederationRuleUpdate(c echo.Context) error {
 // FederationRuleDelete handles POST /api/admin/federation/rules/delete.
 //
 // **mk-go 独自 endpoint** (#3090)。
-func (h *Handler) FederationRuleDelete(c echo.Context) error {
+func (h *Handler) FederationRuleDelete(c *echo.Context) error {
 	var req struct {
 		RuleID string `json:"ruleId"`
 	}

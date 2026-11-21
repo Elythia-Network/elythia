@@ -7,7 +7,7 @@ import (
 	neturl "net/url"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -39,7 +39,7 @@ func (s *stubEmojiLookup) FindByNameAndHost(name string, host *string) (*model.E
 	return e, nil
 }
 
-func newEmojiTestContext(t *testing.T, path, query string) (echo.Context, *httptest.ResponseRecorder) {
+func newEmojiTestContext(t *testing.T, path, query string) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()
 	url := "/emoji/" + path
@@ -50,8 +50,7 @@ func newEmojiTestContext(t *testing.T, path, query string) (echo.Context, *httpt
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/emoji/:path")
-	c.SetParamNames("path")
-	c.SetParamValues(path)
+	c.SetPathValues(echo.PathValues{{Name: "path", Value: path}})
 	return c, rec
 }
 

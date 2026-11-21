@@ -11,12 +11,12 @@ import (
 
 	"github.com/elythia-network/elythia/internal/core/backupadmin"
 	"github.com/elythia-network/elythia/internal/core/strongauth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newCtx() (echo.Context, *httptest.ResponseRecorder) {
+func newCtx() (*echo.Context, *httptest.ResponseRecorder) {
 	rec := httptest.NewRecorder()
 	return echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", nil), rec), rec
 }

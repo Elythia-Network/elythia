@@ -6,7 +6,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/moderationlog"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // UpdateProxyAccount handles POST /api/admin/update-proxy-account.
@@ -16,7 +16,7 @@ import (
 // frontend admin/settings 画面の proxyAccountForm が `{ description }` 形式で
 // 呼び出すのでこれに合わせる。Response は upstream update-proxy-account.ts と同じく
 // MeDetailed schema で返す (#1539)。
-func (h *Handler) UpdateProxyAccount(c echo.Context) error {
+func (h *Handler) UpdateProxyAccount(c *echo.Context) error {
 	// descriptionは、欠け(変えない)とnull(消す)を見分ける。本家のparamDefは
 	// nullableで、本家はnullをそのまま書いて説明を消す。以前は*stringで受けて
 	// いたので、nullを欠けと同じに扱い、説明を消せなかった (#3861)。

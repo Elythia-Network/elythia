@@ -9,7 +9,7 @@ import (
 	corerole "github.com/elythia-network/elythia/internal/core/role"
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // AssignmentShow handles POST /api/roles/assignment-show.
@@ -22,7 +22,7 @@ import (
 // endpoint の存在理由である「(userId, roleId) の unique index を 1 回引くだけ」が
 // 失われる。effective 判定が要るなら #2608 (プラグイン向け effective-policy
 // provider) 側で扱う。
-func (h *Handler) AssignmentShow(c echo.Context) error {
+func (h *Handler) AssignmentShow(c *echo.Context) error {
 	var req struct {
 		RoleID string `json:"roleId"`
 	}

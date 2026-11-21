@@ -11,11 +11,11 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // AccountsDelete handles POST /api/admin/accounts/delete.
-func (h *Handler) AccountsDelete(c echo.Context) error {
+func (h *Handler) AccountsDelete(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}
@@ -73,7 +73,7 @@ func (h *Handler) markAccountDeleted(userID string, user *model.User) error {
 // AccountsFindByEmail handles POST /api/admin/accounts/find-by-email.
 // user_profile.email 列を検索して、紐づく user を返す。本家 Misskey の
 // admin/accounts/find-by-email と同等。
-func (h *Handler) AccountsFindByEmail(c echo.Context) error {
+func (h *Handler) AccountsFindByEmail(c *echo.Context) error {
 	var req struct {
 		Email *string `json:"email"`
 	}
@@ -116,7 +116,7 @@ func (h *Handler) AccountsFindByEmail(c echo.Context) error {
 // DeleteAccount handles POST /api/admin/delete-account. AccountsDelete と
 // 機能的には同じだが、本家 Misskey が両 endpoint を持つので互換性のため
 // 別 handler として保持する。
-func (h *Handler) DeleteAccount(c echo.Context) error {
+func (h *Handler) DeleteAccount(c *echo.Context) error {
 	var req struct {
 		UserID string `json:"userId"`
 	}

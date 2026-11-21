@@ -12,7 +12,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -326,13 +326,13 @@ func TestCreateFromApplicationChecksOwner(t *testing.T) {
 func TestEmojiApplicationLogsEmojiForModLogUI(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		call   func(*apiadmin.Handler) func(echo.Context) error
+		call   func(*apiadmin.Handler) func(*echo.Context) error
 		app    *model.EmojiApplication
 		decide string
 	}{
-		{"承認", func(h *apiadmin.Handler) func(echo.Context) error { return h.EmojiApplicationApprove },
+		{"承認", func(h *apiadmin.Handler) func(*echo.Context) error { return h.EmojiApplicationApprove },
 			approvedApp(), "approved"},
-		{"却下", func(h *apiadmin.Handler) func(echo.Context) error { return h.EmojiApplicationReject },
+		{"却下", func(h *apiadmin.Handler) func(*echo.Context) error { return h.EmojiApplicationReject },
 			&model.EmojiApplication{ID: "a1", UserID: "u1", Name: "kusa", Status: model.EmojiApplicationRejected},
 			"rejected"},
 	} {

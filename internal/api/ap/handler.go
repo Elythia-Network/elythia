@@ -28,7 +28,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
@@ -153,7 +153,7 @@ type apReferenceMemo struct {
 	observedUsers map[string]bool
 }
 
-func (h *Handler) referenceMemo(c echo.Context) *apReferenceMemo {
+func (h *Handler) referenceMemo(c *echo.Context) *apReferenceMemo {
 	if memo, ok := c.Get(apReferenceMemoContextKey).(*apReferenceMemo); ok {
 		return memo
 	}
@@ -166,13 +166,13 @@ func (h *Handler) referenceMemo(c echo.Context) *apReferenceMemo {
 	return memo
 }
 
-func (h *Handler) seedAPUser(c echo.Context, user *model.User) {
+func (h *Handler) seedAPUser(c *echo.Context, user *model.User) {
 	if user != nil {
 		h.referenceMemo(c).users[user.ID] = user
 	}
 }
 
-func (h *Handler) seedAPNote(c echo.Context, note *model.Note) {
+func (h *Handler) seedAPNote(c *echo.Context, note *model.Note) {
 	if note != nil {
 		h.referenceMemo(c).notes[note.ID] = note
 	}
@@ -180,7 +180,7 @@ func (h *Handler) seedAPNote(c echo.Context, note *model.Note) {
 
 // lookupAPUser returns the user row for userID, reusing a row already read
 // while serving this request. Repository errors are returned unchanged.
-func (h *Handler) lookupAPUser(c echo.Context, userID string) (*model.User, error) {
+func (h *Handler) lookupAPUser(c *echo.Context, userID string) (*model.User, error) {
 	memo := h.referenceMemo(c)
 	if user := memo.users[userID]; user != nil {
 		return user, nil
@@ -198,7 +198,7 @@ func (h *Handler) lookupAPUser(c echo.Context, userID string) (*model.User, erro
 
 // resolveAPUser is lookupAPUser with a missing user reported as
 // coreuser.ErrUserNotFound, like userService.ShowByID.
-func (h *Handler) resolveAPUser(c echo.Context, userID string) (*model.User, error) {
+func (h *Handler) resolveAPUser(c *echo.Context, userID string) (*model.User, error) {
 	user, err := h.lookupAPUser(c, userID)
 	if err != nil {
 		// **DB 障害を not-found に丸めない** (ShowByID と同じ、#2799)。
@@ -212,7 +212,7 @@ func (h *Handler) resolveAPUser(c echo.Context, userID string) (*model.User, err
 
 // resolveAPAuthor returns the author of n for the reference check, reusing the
 // author row the note query loaded with n.
-func (h *Handler) resolveAPAuthor(c echo.Context, n *model.Note) (*model.User, error) {
+func (h *Handler) resolveAPAuthor(c *echo.Context, n *model.Note) (*model.User, error) {
 	// queryService.Show は投稿と同じ読み取りで作者の行も読んでいる (hydrateNoteRelations)。
 	// 同じ要求の中なので、それを使い回して作者をもう一度引かない (#3989)。
 	h.seedAPUser(c, n.User)
@@ -222,7 +222,7 @@ func (h *Handler) resolveAPAuthor(c echo.Context, n *model.Note) (*model.User, e
 // referenceRenderer returns the renderer for a response whose references are
 // checked. Mentioned users are looked up through the request memo, so the
 // check reuses the rows rendering read instead of reading them again (#3989).
-func (h *Handler) referenceRenderer(c echo.Context) *activitypub.Renderer {
+func (h *Handler) referenceRenderer(c *echo.Context) *activitypub.Renderer {
 	if h.localFederationObserver == nil {
 		return h.renderer
 	}
@@ -231,7 +231,7 @@ func (h *Handler) referenceRenderer(c echo.Context) *activitypub.Renderer {
 	})
 }
 
-func (h *Handler) resolveAPNote(c echo.Context, noteID string) (*model.Note, error) {
+func (h *Handler) resolveAPNote(c *echo.Context, noteID string) (*model.Note, error) {
 	memo := h.referenceMemo(c)
 	if note := memo.notes[noteID]; note != nil {
 		return note, nil
@@ -247,7 +247,7 @@ func (h *Handler) resolveAPNote(c echo.Context, noteID string) (*model.Note, err
 	return note, nil
 }
 
-func (h *Handler) observeLocalUserOnce(c echo.Context, user *model.User, reason string) (bool, error) {
+func (h *Handler) observeLocalUserOnce(c *echo.Context, user *model.User, reason string) (bool, error) {
 	if user == nil || !user.IsLocal() || h.localFederationObserver == nil {
 		return true, nil
 	}
@@ -263,7 +263,7 @@ func (h *Handler) observeLocalUserOnce(c echo.Context, user *model.User, reason 
 	return available, err
 }
 
-func (h *Handler) requireAPUser(c echo.Context, user *model.User, reason string) (bool, error) {
+func (h *Handler) requireAPUser(c *echo.Context, user *model.User, reason string) (bool, error) {
 	available, err := h.observeLocalUserOnce(c, user, reason)
 	if errors.Is(err, corelocalfederation.ErrFederationDisabled) || !available && err == nil {
 		return false, nil
@@ -327,7 +327,7 @@ func (h *Handler) SetNonAPFallback(fn echo.HandlerFunc) {
 // it renders the frontend HTML; otherwise (tests) it returns ErrNotFound
 // so the behavior degrades gracefully when the handler is used in
 // isolation.
-func (h *Handler) serveNonAP(c echo.Context) error {
+func (h *Handler) serveNonAP(c *echo.Context) error {
 	if h.nonAPFallback != nil {
 		return h.nonAPFallback(c)
 	}
@@ -498,7 +498,7 @@ func (h *Handler) parseEd25519PublicKeyOrLog(userID, pemStr string) ed25519.Publ
 // 確実に SPA で開けるよう backend で redirect する (#691)。リモート user
 // の場合は SPA 側でも canonical な remote URI を開かせるため Host 付きで
 // `/@username@host` 形式に redirect する。
-func (h *Handler) User(c echo.Context) error {
+func (h *Handler) User(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要。
 	// content-negotiation 実行前に header を立てておけば、redirect / Person /
 	// 404 のいずれが返っても intermediate cache が誤配信しない (#691 review)。
@@ -541,7 +541,7 @@ func (h *Handler) User(c echo.Context) error {
 
 // apUserInfo serves the AP branch shared by User (/users/:id) and UserByAcct
 // (/@:acct)。upstream ActivityPubServerService.userInfo に相当する。
-func (h *Handler) apUserInfo(c echo.Context, bundle *coreuser.UserWithProfile) error {
+func (h *Handler) apUserInfo(c *echo.Context, bundle *coreuser.UserWithProfile) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	// suspended は upstream の route query (isSuspended: false) 相当で、
 	// ローカル・リモートを問わず 404 (Person も redirect も返さない)。retention
@@ -581,7 +581,7 @@ func (h *Handler) apUserInfo(c echo.Context, bundle *coreuser.UserWithProfile) e
 	return h.writeAPJSON(c, person)
 }
 
-func (h *Handler) filterActorLocalReferences(c echo.Context, user *model.User) (*model.User, error) {
+func (h *Handler) filterActorLocalReferences(c *echo.Context, user *model.User) (*model.User, error) {
 	return corefederation.FilterLocalActorReferences(user, h.renderer.URLs(), func(id string) (*model.User, error) {
 		target, err := h.resolveAPUser(c, id)
 		if errors.Is(err, coreuser.ErrUserNotFound) {
@@ -599,7 +599,7 @@ func (h *Handler) filterActorLocalReferences(c echo.Context, user *model.User) (
 // WebFinger or a raw link), return the Person document. Otherwise
 // delegate to the non-AP fallback so browser reloads render the SPA
 // frontend instead of a bare 404.
-func (h *Handler) UserByAcct(c echo.Context) error {
+func (h *Handler) UserByAcct(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要
 	// (User と同じ規約。upstream も /@:acct の先頭で立てる)。
 	c.Response().Header().Set("Vary", "Accept")
@@ -647,12 +647,12 @@ func (h *Handler) UserByAcct(c echo.Context) error {
 // content type. Remote implementations (Misskey, Mastodon, ...) check
 // Content-Type before treating a response as an AP document, so a plain
 // application/json would cause them to reject it.
-func writeActivityJSON(c echo.Context, v any) error {
+func writeActivityJSON(c *echo.Context, v any) error {
 	return writeActivityJSONBytes(c, mustMarshal(v))
 }
 
 // writeActivityJSONBytes writes an already serialized ActivityPub document.
-func writeActivityJSONBytes(c echo.Context, data []byte) error {
+func writeActivityJSONBytes(c *echo.Context, data []byte) error {
 	return c.Blob(http.StatusOK, `application/activity+json; charset=utf-8`, data)
 }
 
@@ -672,7 +672,7 @@ func extractLocalAPReferences(v any, urls *activitypub.URLBuilder) (localAPRefer
 	return localAPReferences{users: users, notes: notes}, nil
 }
 
-func (h *Handler) validateAPReferences(c echo.Context, v any) (bool, error) {
+func (h *Handler) validateAPReferences(c *echo.Context, v any) (bool, error) {
 	if h.localFederationObserver == nil {
 		return true, nil
 	}
@@ -685,12 +685,12 @@ func (h *Handler) validateAPReferences(c echo.Context, v any) (bool, error) {
 
 // validateAPReferenceData is validateAPReferences for a document that is
 // already serialized. The caller checks that the observer is wired.
-func (h *Handler) validateAPReferenceData(c echo.Context, data []byte) (bool, error) {
+func (h *Handler) validateAPReferenceData(c *echo.Context, data []byte) (bool, error) {
 	users, notes := activitypub.ExtractLocalAPReferences(h.renderer.URLs().BaseURL(), data)
 	return h.validateLocalAPReferences(c, localAPReferences{users: users, notes: notes})
 }
 
-func (h *Handler) validateLocalAPReferences(c echo.Context, refs localAPReferences) (bool, error) {
+func (h *Handler) validateLocalAPReferences(c *echo.Context, refs localAPReferences) (bool, error) {
 	users := make(map[string]*model.User, len(refs.users)+len(refs.notes))
 	reasons := make(map[string]string, len(refs.users)+len(refs.notes))
 	for _, userID := range refs.users {
@@ -752,7 +752,7 @@ func (h *Handler) validateLocalAPReferences(c echo.Context, refs localAPReferenc
 	return true, nil
 }
 
-func (h *Handler) writeAPJSON(c echo.Context, v any) error {
+func (h *Handler) writeAPJSON(c *echo.Context, v any) error {
 	if h.localFederationObserver == nil {
 		return writeActivityJSON(c, v)
 	}
@@ -783,7 +783,7 @@ func wantsActivityJSON(accept string) bool {
 }
 
 // APIGet handles POST /api/ap/get — Admin専用。URIからActivityPubオブジェクトを取得。
-func (h *Handler) APIGet(c echo.Context) error {
+func (h *Handler) APIGet(c *echo.Context) error {
 	var req struct {
 		URI *string `json:"uri"`
 	}
@@ -815,7 +815,7 @@ func (h *Handler) APIGet(c echo.Context) error {
 }
 
 // APIShow handles POST /api/ap/show — URIからUser/Noteを解決して返す。
-func (h *Handler) APIShow(c echo.Context) error {
+func (h *Handler) APIShow(c *echo.Context) error {
 	var req struct {
 		URI *string `json:"uri"`
 	}
@@ -1136,7 +1136,7 @@ func (h *Handler) packUserForAPI(viewer *model.User, u *model.User, profile *mod
 // Note handles GET /notes/:id with ActivityPub content negotiation.
 // AP clients receive the AS Note object; browser reloads are handed
 // off to the frontend fallback so the SPA renders the note permalink.
-func (h *Handler) Note(c echo.Context) error {
+func (h *Handler) Note(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要
 	// (upstream も /notes/:note の先頭で立てる)。302 が加わったことで、これが
 	// 無いと中間キャッシュが AP 向け 302 をブラウザに配る混線が現実になる。
@@ -1221,7 +1221,7 @@ func (h *Handler) Note(c echo.Context) error {
 //
 // upstream と同じく !localOnly かつ visibility ∈ {public, home} の note のみ serve し、
 // followers/specified/localOnly な pinned note を unauthenticated AP へ leak させない。
-func (h *Handler) Featured(c echo.Context) error {
+func (h *Handler) Featured(c *echo.Context) error {
 	c.Response().Header().Set("Vary", "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
@@ -1292,12 +1292,12 @@ func (h *Handler) Featured(c echo.Context) error {
 }
 
 // Followers handles GET /users/:id/followers (#1877)。
-func (h *Handler) Followers(c echo.Context) error {
+func (h *Handler) Followers(c *echo.Context) error {
 	return h.serveFollowCollection(c, true)
 }
 
 // Following handles GET /users/:id/following (#1877)。
-func (h *Handler) Following(c echo.Context) error {
+func (h *Handler) Following(c *echo.Context) error {
 	return h.serveFollowCollection(c, false)
 }
 
@@ -1309,7 +1309,7 @@ func (h *Handler) Following(c echo.Context) error {
 // (unauthenticated AP request では公開リストのみ serve、upstream と同じ)。
 // base (page!=true) は totalItems + first link、?page=true は cursor ページングで
 // 相手側の actor URI を返す。
-func (h *Handler) serveFollowCollection(c echo.Context, followers bool) error {
+func (h *Handler) serveFollowCollection(c *echo.Context, followers bool) error {
 	c.Response().Header().Set("Vary", "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
@@ -1426,7 +1426,7 @@ func (h *Handler) serveFollowCollection(c echo.Context, followers bool) error {
 // resolveActorURIs maps a list of user IDs to their actor URIs (local:
 // /users/<id>, remote: user.uri), preserving order and dropping unresolved /
 // URI-less users. upstream renderFollowUser → getUserUri 相当 (#1877)。
-func (h *Handler) resolveActorURIs(c echo.Context, ids []string) ([]any, error) {
+func (h *Handler) resolveActorURIs(c *echo.Context, ids []string) ([]any, error) {
 	if len(ids) == 0 {
 		return []any{}, nil
 	}
@@ -1473,7 +1473,7 @@ func (h *Handler) actorURI(u *model.User) string {
 // Outbox handles GET /users/:id/outbox, serving the local user's public/home
 // (non-localOnly) notes as Create/Announce activities in an OrderedCollection
 // (upstream ActivityPubServerService.outbox, #1878)。
-func (h *Handler) Outbox(c echo.Context) error {
+func (h *Handler) Outbox(c *echo.Context) error {
 	c.Response().Header().Set("Vary", "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
@@ -1581,7 +1581,7 @@ func (h *Handler) Outbox(c echo.Context) error {
 // renderer は Create / Announce の activity id として `<note URI>/activity` を
 // **外向きに広告している** (RenderCreate / RenderAnnounce)。この route が無いと、
 // 広告した id を dereference しに来た他サーバーが 404 を受け取る。
-func (h *Handler) NoteActivity(c echo.Context) error {
+func (h *Handler) NoteActivity(c *echo.Context) error {
 	// upstream も vary(Accept) を立てる。この route は AP 専用で HTML 変種は
 	// 無く、Accept で分岐しない点も upstream と同じ。
 	c.Response().Header().Set("Vary", "Accept")
@@ -1639,7 +1639,7 @@ func (h *Handler) NoteActivity(c echo.Context) error {
 // packOutboxActivity renders an outbox item: a pure renote becomes an Announce,
 // everything else a Create (upstream packActivity, #1878)。embed するので
 // per-activity @context は外す (collection 側が持つ)。
-func (h *Handler) packOutboxActivity(c echo.Context, author *model.User, n *model.Note) any {
+func (h *Handler) packOutboxActivity(c *echo.Context, author *model.User, n *model.Note) any {
 	if corenote.IsPureRenote(n) && n.RenoteID != nil && *n.RenoteID != "" {
 		if targetURI := h.renoteTargetURI(c, *n.RenoteID); targetURI != "" {
 			ann := h.renderer.RenderAnnounce(author, n.ID, targetURI, n.Visibility, h.idGen)
@@ -1655,7 +1655,7 @@ func (h *Handler) packOutboxActivity(c echo.Context, author *model.User, n *mode
 
 // renoteTargetURI resolves a renote target note id to its AP URI
 // (local → /notes/<id>, remote → stored uri)。
-func (h *Handler) renoteTargetURI(c echo.Context, targetID string) string {
+func (h *Handler) renoteTargetURI(c *echo.Context, targetID string) string {
 	// 未配線なら解決不能として扱う (呼び出し側が Create にフォールバックする)。
 	// panic で 500 になるより shape の valid な Create を返す方が良い。
 	if h.noteRepo == nil {

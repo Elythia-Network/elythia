@@ -18,7 +18,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ModeratorChecker reports whether a user holds moderator privileges. Used to
@@ -74,7 +74,7 @@ type PairRequest struct {
 }
 
 // Create handles POST /api/renote-mute/create.
-func (h *Handler) Create(c echo.Context) error {
+func (h *Handler) Create(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PairRequest
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
@@ -95,7 +95,7 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 // Delete handles POST /api/renote-mute/delete.
-func (h *Handler) Delete(c echo.Context) error {
+func (h *Handler) Delete(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req PairRequest
 	if err := c.Bind(&req); err != nil || req.UserID == "" {
@@ -132,7 +132,7 @@ type ListRequest struct {
 //
 // frontend Paginator (cursor mode) は untilId / sinceId を forward する。
 // 本 endpoint は #493 で cursor 対応に切り替えた。
-func (h *Handler) List(c echo.Context) error {
+func (h *Handler) List(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req ListRequest
 	if err := c.Bind(&req); err != nil {

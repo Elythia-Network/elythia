@@ -17,7 +17,7 @@ Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを 
 
 ```
 ┌─────────────────────────────────────────────┐
-│  api (HTTP ハンドラ)            Echo v4       │  ← server/api/endpoints/* + server/*Service
+│  api (HTTP ハンドラ)            Echo v5       │  ← server/api/endpoints/* + server/*Service
 ├─────────────────────────────────────────────┤
 │  core (ビジネスロジック)        ドメインサービス │  ← core/*Service.ts
 ├─────────────────────────────────────────────┤
@@ -2540,7 +2540,9 @@ roleの判定もすでに真になっている)。
    もう一度保存する。止まっていれば何もしない
 7. `queueDriver`: queueのdriverを閉じる
 8. `pubsub`: この世代のRedisの購読(`internalPubSub` / `streamPubSub`)を閉じる
-9. `echo`: echoをShutdownする
+
+echoを止める段は無い。listenerは`Supervisor`が持ち、echoのv5は自分のserverも`Shutdown`も持たない
+(#4239で段を消した。それまでは9番目の`echo`の段がechoの`Shutdown`を呼んでいたが、本番では何も止めていなかった)。
 
 queueが止まったかどうか(2の結果)は、表を作る関数の中の変数に置き、3と6がそれを読む。
 
@@ -2613,7 +2615,7 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
   このエラーで変わらない
 - `startGenerationLocked`(`StartBackground`に失敗した世代)は、今までどおり停止のエラーを捨てる
 
-**一覧の外の段(上の1〜3・5〜9)は、一覧に入れていない。** 動きを変えずには入れられないため。
+**一覧の外の段(上の1〜3・5〜8)は、一覧に入れていない。** 動きを変えずには入れられないため。
 #3711で段の表にした後も、一覧とは別の表に置いている。
 
 | 段 | 入れない理由 |
@@ -2624,7 +2626,6 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 | `chart` (`chartMgmt.Stop`) | 起動するのは `StartBackground` で、構築の途中ではない。後始末では止めない (起動していない) |
 | `queueDriver` (`queueDriver.Close`) | エラーを返し、6 で止まらなかった worker を待った後に閉じる。後始末では nil に戻す |
 | `pubsub` (pubsub の `Close`) | 購読は stream の節で始めるが、閉じるのは driver の後。一覧に入れると、一覧より後に止める 5〜7 より先に閉じることになる |
-| `echo` (echo の `Shutdown`) | 戻り値が `StopBackground` の戻り値になる(ほかの段が失敗していれば、そのエラーと`errors.Join`でまとめる。#3707、#3711) |
 
 **テストが見ている範囲は次のとおり** (`internal/server/lifecycle_parts_test.go`・
 `lifecycle_parts_value_test.go`・`lifecycle_start_test.go`・`lifecycle_startonce_test.go`・`lifecycle_stop_test.go`・`lifecycle_steps_test.go`。多くは実際に`newServer`で作ったサーバーで見る)。部品を足す・動かすときは、テストの表とこの節の表を一緒に直す。
@@ -3391,7 +3392,7 @@ CLAUDE.md の Section 1 / 2 にあった表とツリーを、#3248 でここへ�
 | Component | Library | 用途 |
 |-----------|---------|------|
 | 言語 | **Go 1.27** | `go.mod`でバージョン管理 |
-| Webフレームワーク | **Echo v4** (`labstack/echo/v4`) | HTTPルーティング、ミドルウェア、WebSocket |
+| Webフレームワーク | **Echo v5** (`labstack/echo/v5`。#4239 で v4 から上げた) | HTTPルーティング、ミドルウェア、WebSocket |
 | ORM | **GORM** (`gorm.io/gorm`) | PostgreSQLアクセス |
 | Migration | **golang-migrate** (`golang-migrate/migrate/v4`) | SQLベースのマイグレーション |
 | Config | **Viper** (`spf13/viper`) | YAML + 環境変数オーバーライド |

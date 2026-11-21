@@ -7,7 +7,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/server/middleware"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // SetFavoriteRepo attaches a ChannelFavoriteRepository for favorite endpoints.
@@ -16,7 +16,7 @@ func (h *Handler) SetFavoriteRepo(r ChannelFavoriteRepository) {
 }
 
 // Favorite handles POST /api/channels/favorite.
-func (h *Handler) Favorite(c echo.Context) error {
+func (h *Handler) Favorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ChannelID string `json:"channelId"`
@@ -46,7 +46,7 @@ func (h *Handler) Favorite(c echo.Context) error {
 }
 
 // Unfavorite handles POST /api/channels/unfavorite.
-func (h *Handler) Unfavorite(c echo.Context) error {
+func (h *Handler) Unfavorite(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	var req struct {
 		ChannelID string `json:"channelId"`
@@ -70,7 +70,7 @@ func (h *Handler) Unfavorite(c echo.Context) error {
 }
 
 // MyFavorites handles POST /api/channels/my-favorites.
-func (h *Handler) MyFavorites(c echo.Context) error {
+func (h *Handler) MyFavorites(c *echo.Context) error {
 	user := middleware.GetUser(c)
 	if h.favoriteRepo == nil {
 		return c.JSON(http.StatusOK, []any{})

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,8 +30,7 @@ func doBadgeReq(t *testing.T, h *twemojiBadgeHandler, name string) *httptest.Res
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
-	c.SetParamNames("*")
-	c.SetParamValues(name)
+	c.SetPathValues(echo.PathValues{{Name: "*", Value: name}})
 	if err := h.Serve(c); err != nil {
 		if he, ok := err.(*echo.HTTPError); ok {
 			rec.Code = he.Code

@@ -10,7 +10,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/passwordguard"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -40,7 +40,7 @@ func (h *Handler) SetPasswordFailureGuard(g passwordguard.Guard) {
 // **予約と取り消しはリクエストの取り消しに引きずられない ctx で行う。**
 // クライアントが切断すると ctx が取り消されて予約が失敗し、下の fail-open で
 // 数えられない照合が走る。取り消しも同じで、成功直後の切断が失敗として残る。
-func (h *Handler) beginPasswordCheck(c echo.Context, userID string) (passwordguard.Attempt, bool) {
+func (h *Handler) beginPasswordCheck(c *echo.Context, userID string) (passwordguard.Attempt, bool) {
 	if h.passwordGuard == nil {
 		return passwordguard.NoopAttempt(), true
 	}
@@ -65,7 +65,7 @@ func (h *Handler) beginPasswordCheck(c echo.Context, userID string) (passwordgua
 //
 // It writes the response (429, or 400 INCORRECT_PASSWORD with incorrectID)
 // and returns false when the check did not pass.
-func (h *Handler) comparePassword(c echo.Context, userID, stored, plain, incorrectID string) bool {
+func (h *Handler) comparePassword(c *echo.Context, userID, stored, plain, incorrectID string) bool {
 	attempt, ok := h.beginPasswordCheck(c, userID)
 	if !ok {
 		return false

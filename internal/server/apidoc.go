@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // scalarVersion is the @scalar/api-reference version /api-doc loads.
@@ -199,7 +199,7 @@ func renderAPIDocHTML() string {
 // 許さない)。他のページのCSPは変えない。styleはScalarが実行時に`<style>`を
 // 差し込むので、frontendの既定のまま'unsafe-inline'で通す。hashを足すと
 // 'unsafe-inline'が無視され、Scalarの差し込むstyleが全部止まる。
-func (s *Server) APIDoc(c echo.Context) error {
+func (s *Server) APIDoc(c *echo.Context) error {
 	applyFrontendCSP(c, s.config.FrontendContentSecurityPolicy, cspExtras{Script: []string{scalarScriptURL}})
 	// 本家と同じ。中身はビルド時に決まる。
 	c.Response().Header().Set(echo.HeaderCacheControl, "public, max-age=86400")

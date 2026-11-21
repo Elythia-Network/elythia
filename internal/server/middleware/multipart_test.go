@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +51,7 @@ func runMultipartGuard(t *testing.T, method, path, contentType string, body io.R
 	c := e.NewContext(req, rec)
 	c.SetPath(path)
 	ran := false
-	err := RequireMultipartFile(uploadRoute)(func(c echo.Context) error {
+	err := RequireMultipartFile(uploadRoute)(func(c *echo.Context) error {
 		ran = true
 		// 後段が同じ body をもう一度読めることも確かめる。
 		if IsJSONContentType(c.Request().Header.Get(echo.HeaderContentType)) {

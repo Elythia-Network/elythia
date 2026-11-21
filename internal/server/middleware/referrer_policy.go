@@ -1,6 +1,6 @@
 package middleware
 
-import "github.com/labstack/echo/v4"
+import "github.com/labstack/echo/v5"
 
 // referrerPolicyValue is the policy applied to every response.
 //
@@ -30,7 +30,7 @@ const referrerPolicyValue = "strict-origin-when-cross-origin"
 // cross-origin でも origin は送られるので hotlink 判定なども壊れない。
 func ReferrerPolicy() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set("Referrer-Policy", referrerPolicyValue)
 			return next(c)
 		}

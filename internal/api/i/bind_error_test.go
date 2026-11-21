@@ -3,7 +3,7 @@ package i
 import (
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/elythia/internal/testutil"
 )
@@ -21,7 +21,7 @@ func TestHandlers_BindErrorIsInvalidParam(t *testing.T) {
 	h.SetGalleryRepo(&stubGalleryRepo{})
 	h.SetPageRepo(testutil.NewMockPageRepository())
 	h.SetPageLikeRepo(testutil.NewMockPageLikeRepository())
-	cases := map[string]func(echo.Context) error{
+	cases := map[string]func(*echo.Context) error{
 		"Apps":            h.Apps,
 		"AuthorizedApps":  h.AuthorizedApps,
 		"RegistryKeys":    h.RegistryKeys,

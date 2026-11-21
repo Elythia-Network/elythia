@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/model"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestDriveParams_AcceptIntegerValuedFractions(t *testing.T) {
 	fileRepo.Files["f1"] = &model.DriveFile{ID: "f1", UserID: &uid}
 	for _, tc := range []struct {
 		name    string
-		handler func(echo.Context) error
+		handler func(*echo.Context) error
 		body    string
 	}{
 		{"drive/files", h.FilesList, `{"limit":10.0,"sinceDate":1e1,"untilDate":4102444800000.0}`},

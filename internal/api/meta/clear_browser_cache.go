@@ -3,7 +3,7 @@ package meta
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // clearSiteData is the Clear-Site-Data value upstream's /api/clear-browser-cache
@@ -18,7 +18,7 @@ const clearSiteData = `"cache", "prefetchCache", "prerenderCache", "executionCon
 // frontend の「キャッシュを消す」(utility/clear-cache.ts) はこれを GET で呼び、
 // 失敗を握り潰す。無いと 404 になっても画面には出ず、キャッシュが消えないまま
 // になる (#3926)。
-func ClearBrowserCache(c echo.Context) error {
+func ClearBrowserCache(c *echo.Context) error {
 	switch c.Request().Method {
 	case http.MethodGet, http.MethodPost:
 		c.Response().Header().Set("Clear-Site-Data", clearSiteData)

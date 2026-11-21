@@ -14,7 +14,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/ugcvisibility"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 
 	"github.com/elythia-network/mfm"
 )
@@ -292,7 +292,7 @@ func newFeedHandler(
 //
 // upstream は存在しないユーザーに 404 を返す。SPA catchall より前に登録して
 // あるので、ここで 404 を返せばそのままクライアントに届く。
-func (h *feedHandler) serve(c echo.Context, username string, render func(*feedData) ([]byte, error), contentType string) error {
+func (h *feedHandler) serve(c *echo.Context, username string, render func(*feedData) ([]byte, error), contentType string) error {
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return echo.NewHTTPError(http.StatusNotFound, http.StatusText(http.StatusNotFound))
@@ -437,15 +437,15 @@ func (h *feedHandler) describe(u *model.User) string {
 	return desc
 }
 
-func (h *feedHandler) RSS(c echo.Context, username string) error {
+func (h *feedHandler) RSS(c *echo.Context, username string) error {
 	return h.serve(c, username, (*feedData).rss2, "application/rss+xml; charset=utf-8")
 }
 
-func (h *feedHandler) Atom(c echo.Context, username string) error {
+func (h *feedHandler) Atom(c *echo.Context, username string) error {
 	return h.serve(c, username, (*feedData).atom1, "application/atom+xml; charset=utf-8")
 }
 
-func (h *feedHandler) JSON(c echo.Context, username string) error {
+func (h *feedHandler) JSON(c *echo.Context, username string) error {
 	return h.serve(c, username, (*feedData).jsonFeed, "application/json; charset=utf-8")
 }
 
@@ -455,7 +455,7 @@ func (h *feedHandler) JSON(c echo.Context, username string) error {
 // Echo のルータは Fastify と違い `/@:user.rss` のような「セグメント内に
 // リテラルを含むパターン」を解釈できず、パラメータ名が `user.rss` になって
 // しまう。そのため既存の /@:acct ハンドラで受けて、ここで拡張子を見て振り分ける。
-func (h *feedHandler) TryServe(c echo.Context, acct string) (bool, error) {
+func (h *feedHandler) TryServe(c *echo.Context, acct string) (bool, error) {
 	switch {
 	case strings.HasSuffix(acct, ".rss"):
 		return true, h.RSS(c, strings.TrimSuffix(acct, ".rss"))

@@ -19,7 +19,7 @@ import (
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/elythia-network/elythia/internal/testutil"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -148,8 +148,7 @@ func TestBuiltHandlersWireLocalFederationService(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/users/:id")
-	c.SetParamNames("id")
-	c.SetParamValues(userID)
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: userID}})
 	require.NoError(t, handlers.ap.User(c))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
@@ -165,8 +164,7 @@ func TestBuiltHandlersWireLocalFederationService(t *testing.T) {
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
 	c.SetPath("/users/:id")
-	c.SetParamNames("id")
-	c.SetParamValues(userID)
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: userID}})
 	require.NoError(t, handlers.ap.User(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 	cached, err = userRepo.FindByID(userID)
@@ -213,8 +211,7 @@ func TestBuiltHandlersWireLocalFederationService(t *testing.T) {
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
 	c.SetPath("/users/:id")
-	c.SetParamNames("id")
-	c.SetParamValues(systemUser.ID)
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: systemUser.ID}})
 	require.NoError(t, handlers.ap.User(c))
 	assert.Equal(t, http.StatusOK, rec.Code, "system actor remains available to AP clients")
 

@@ -8,7 +8,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/apierr"
 	"github.com/elythia-network/elythia/internal/core/urlpreview"
 	"github.com/elythia-network/elythia/internal/entity"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // MaxPreviewURLBytes is the longest `url` the preview endpoint accepts.
@@ -34,7 +34,7 @@ func NewHandler(fetcher *urlpreview.Fetcher, entityPacker *entity.Packer) *Handl
 
 // Preview handles GET /url (matches Misskey's endpoint path).
 // フロントエンドがリンクプレビューカード表示のために呼ぶ。
-func (h *Handler) Preview(c echo.Context) error {
+func (h *Handler) Preview(c *echo.Context) error {
 	// #2106 L44: upstream は lang query を summaly に渡し OGP の言語別 alternate を選ぶが、
 	// mk-go は HTML を直接 parse する設計のため lang を honor できず無視する (preview の
 	// 言語選択のみ乖離、実害は軽微)。
