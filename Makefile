@@ -918,7 +918,7 @@ UDS_CONFIG=deploy/uds/config/default.yml
 # **専用のビルダーでビルドするのは mkgo だけ。** postgres (deploy/postgres-bigm) など
 # 他のサービスは既定のビルダーのまま。専用のビルダーは dockerd の image store と
 # キャッシュを見ない。postgres-bigm の base は digest で固定しているが、最初の
-# ビルドで RUN の層 (apk add と pg_bigm のビルド) を作り直すので、image が変わり
+# ビルドで RUN の層 (apk upgrade・apk add と pg_bigm のビルド) を作り直すので、image が変わり
 # うる。変われば、次の `up -d` で本番の PostgreSQL のコンテナが作り直される。
 # 既定のビルダーは手元のキャッシュを使うので、キャッシュを消していなければ、従来
 # どおり image は変わらない。

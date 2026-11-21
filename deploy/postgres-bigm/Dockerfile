@@ -29,6 +29,14 @@ FROM postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe2
 # 上げるときは、ルートの Dockerfile の backup stage (バックアップを戻す側) も同じ値にする。
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
 
+# **base の既存のパッケージを上げる。** base を digest で固定しているので、公式の image が
+# 作り直されるまで、base に入っている openssl・zlib などは古い版のままになる (apk add は
+# 既に入っているものを上げない)。2026-11 には、固定した base の openssl が修正前の版で、
+# alpine:3.24 は最新の digest でも同じだった。
+# **この層は build cache に残る。** base の digest が変わらない限り、2 回目からは実行
+# されない。新しく出た修正は、build cache を使わずに作り直すまで入らない。
+RUN apk upgrade --no-cache
+
 RUN apk add --no-cache --virtual .build-deps build-base curl icu-dev \
  && curl -fsSL "https://github.com/pgbigm/pg_bigm/archive/${PG_BIGM_COMMIT}.tar.gz" -o /tmp/pg_bigm.tar.gz \
  && tar xzf /tmp/pg_bigm.tar.gz -C /tmp \
