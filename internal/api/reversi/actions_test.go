@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
@@ -324,4 +325,18 @@ func TestPutStone_EchoesTheOperationIDInTheLog(t *testing.T) {
 	}
 	require.NotNil(t, log)
 	assert.Equal(t, "op-42", log["id"])
+}
+
+// Changing the ready state more often than the service allows answers 429,
+// like the other rate limits of the API.
+func TestReady_TooManyChangesIs429(t *testing.T) {
+	h, repo := newActionsHandler(t)
+	seedPendingGame(t, repo, "g-many")
+	body := `{"gameId":"g-many","ready":false}`
+	require.Equal(t, http.StatusNoContent, post(h.Ready, body, u1).Code)
+	// u1 は上限 (1 分に 300 回) まで変えた後。
+	require.NoError(t, apiReversiRedis.Client.Set(context.Background(), "reversi:game:preStartChanges:g-many:u1", 300, time.Minute).Err())
+	rec := post(h.Ready, body, u1)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "RATE_LIMIT_EXCEEDED")
 }

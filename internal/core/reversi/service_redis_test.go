@@ -159,3 +159,107 @@ func TestService_PutStone_EndsGame_SmallBoard(t *testing.T) {
 	assert.Contains(t, pub.types(), "ended")
 	_ = time.Now
 }
+
+// A game without a turn time limit (0 seconds, settable only through the API)
+// never times out: no turn timer is set, which used to read as expired, so the
+// player who just moved could claim a timeout and win at once.
+func TestService_CheckTimeout_NoTimeLimitNeverExpires(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	repo := newFakeRepo()
+	svc := NewService(repo, &capturePublisher{}, reversiTestRedis.Client)
+	game := &model.ReversiGame{
+		ID:                   "rg0",
+		User1ID:              "alice",
+		User2ID:              "bob",
+		Map:                  model.StringArray{"--------", "--------", "--------", "---wb---", "---bw---", "--------", "--------", "--------"},
+		BW:                   "1",
+		TimeLimitForEachTurn: 0,
+		Logs:                 datatypes.JSON("[]"),
+	}
+	require.NoError(t, repo.Create(game))
+	ctx := context.Background()
+	require.NoError(t, svc.UpdateReady(ctx, game.ID, "alice", true))
+	require.NoError(t, svc.UpdateReady(ctx, game.ID, "bob", true))
+
+	expired, err := svc.turnExpired(ctx, game.ID)
+	require.NoError(t, err)
+	assert.False(t, expired, "the claim does not even take the lock")
+	require.NoError(t, svc.CheckTimeout(ctx, game.ID))
+	require.NoError(t, svc.checkTimeout(ctx, game.ID), "the check under the lock agrees")
+	got, _ := repo.FindByID(game.ID)
+	assert.True(t, got.IsStarted)
+	assert.False(t, got.IsEnded)
+	assert.Nil(t, got.TimeoutUserID)
+}
+
+// One player may change their ready state or the settings of a game before it
+// starts at most preStartChangeLimit times per window: each change publishes
+// to the opponent, the plugin queue of a bot and the federated opponent.
+func TestService_PreStartChangesAreLimited(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	repo := newFakeRepo()
+	svc := NewService(repo, &capturePublisher{}, reversiTestRedis.Client)
+	game := &model.ReversiGame{
+		ID: "rgl", User1ID: "alice", User2ID: "bob",
+		Map:  model.StringArray{"--------", "--------", "--------", "---wb---", "---bw---", "--------", "--------", "--------"},
+		BW:   "random",
+		Logs: datatypes.JSON("[]"),
+	}
+	require.NoError(t, repo.Create(game))
+	ctx := context.Background()
+	for i := 0; i < preStartChangeLimit/2; i++ {
+		require.NoError(t, svc.UpdateReady(ctx, game.ID, "alice", false), "ready change %d", i)
+		require.NoError(t, svc.UpdateSettings(ctx, game.ID, "alice", "isLlotheo", []byte("true")), "settings change %d", i)
+	}
+	assert.ErrorIs(t, svc.UpdateReady(ctx, game.ID, "alice", false), ErrTooManyChanges)
+	assert.ErrorIs(t, svc.UpdateSettings(ctx, game.ID, "alice", "isLlotheo", []byte("false")), ErrTooManyChanges)
+	// 数えるのは対局と利用者ごと。
+	require.NoError(t, svc.UpdateReady(ctx, game.ID, "bob", false), "the opponent has their own count")
+	// 拒んだ設定は数えない。
+	reversiTestRedis.FlushAll(ctx)
+	for i := 0; i < preStartChangeLimit+1; i++ {
+		require.ErrorIs(t, svc.UpdateSettings(ctx, game.ID, "alice", "no-such-key", []byte("1")), ErrInvalidSetting)
+	}
+	require.NoError(t, svc.UpdateReady(ctx, game.ID, "alice", false))
+	// 数えた鍵には期限がある。
+	ttl, err := reversiTestRedis.Client.TTL(ctx, "reversi:game:preStartChanges:rgl:alice").Result()
+	require.NoError(t, err)
+	assert.Greater(t, ttl, time.Duration(0))
+	assert.LessOrEqual(t, ttl, preStartChangeWindow)
+}
+
+func TestService_PreStartChangesWithoutRedisAreAllowed(t *testing.T) {
+	svc := NewService(newFakeRepo(), nil, nil)
+	for i := 0; i < preStartChangeLimit+1; i++ {
+		require.NoError(t, svc.allowPreStartChange(context.Background(), "g", "u"))
+	}
+}
+
+// The window starts at the first change and is not extended by the later
+// ones: extending it would keep refusing a player who changes every few
+// seconds once they reach the limit.
+func TestService_PreStartChangeWindowIsNotExtended(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	svc := NewService(newFakeRepo(), nil, reversiTestRedis.Client)
+	ctx := context.Background()
+	key := "reversi:game:preStartChanges:g:u"
+	require.NoError(t, reversiTestRedis.Client.Set(ctx, key, 1, 10*time.Second).Err())
+	require.NoError(t, svc.allowPreStartChange(ctx, "g", "u"))
+	ttl, err := reversiTestRedis.Client.TTL(ctx, key).Result()
+	require.NoError(t, err)
+	assert.LessOrEqual(t, ttl, 10*time.Second)
+}
+
+// The opponent's changes over federation have the larger limit.
+func TestService_FederatedChangesHaveTheLargerLimit(t *testing.T) {
+	reversiTestRedis.FlushAll(context.Background())
+	svc := NewService(newFakeRepo(), nil, reversiTestRedis.Client)
+	ctx := context.Background()
+	key := "reversi:game:preStartChanges:g:u"
+	require.NoError(t, reversiTestRedis.Client.Set(ctx, key, preStartChangeLimit, time.Minute).Err())
+	assert.ErrorIs(t, svc.allowPreStartChange(ctx, "g", "u"), ErrTooManyChanges)
+	require.NoError(t, reversiTestRedis.Client.Set(ctx, key, preStartChangeLimit, time.Minute).Err())
+	require.NoError(t, svc.allowPreStartChange(WithFederatedChange(ctx), "g", "u"))
+	require.NoError(t, reversiTestRedis.Client.Set(ctx, key, preStartChangeLimitFederated, time.Minute).Err())
+	assert.ErrorIs(t, svc.allowPreStartChange(WithFederatedChange(ctx), "g", "u"), ErrTooManyChanges)
+}
