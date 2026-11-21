@@ -560,3 +560,71 @@ func TestStorageRestoreClearsTheOtherFailures(t *testing.T) {
 	assert.NotContains(t, f.repo.failures, "a1/purge")
 	assert.Contains(t, f.repo.failures, "a1/migrate", "only the failures that no longer apply are cleared")
 }
+
+// countingGetStorage counts the bytes read from the objects Get returns.
+type countingGetStorage struct {
+	Storage
+	read int64
+}
+
+func (s *countingGetStorage) Get(key string) (io.ReadCloser, error) {
+	rc, err := s.Storage.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	return &countingReadCloser{ReadCloser: rc, n: &s.read}, nil
+}
+
+type countingReadCloser struct {
+	io.ReadCloser
+	n *int64
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	*r.n += int64(n)
+	return n, err
+}
+
+// A copy in the object storage larger than the recorded size is refused
+// without being read past the recorded size, so a replaced object cannot make
+// the worker hold all of it.
+func TestStorageRestoreStopsReadingAnOversizedCopy(t *testing.T) {
+	f := migratedFixture(t, "a1")
+	require.NoError(t, f.local.Delete("ak-a1"))
+	size := int64(f.repo.file("a1").Size)
+	f.dst.objects["ak-a1"] = []byte(strings.Repeat("x", 1<<20))
+	dst := &countingGetStorage{Storage: f.dst}
+	m := NewStorageMigrator(f.repo, f.local, dst, f.enq, f.lock)
+	require.NoError(t, m.StartRestore(context.Background()))
+	j, ok := f.enq.popRestore()
+	require.True(t, ok)
+	require.NoError(t, m.RunRestoreBatch(context.Background(), j.token, j.afterID))
+
+	assert.False(t, f.repo.file("a1").StoredInternal)
+	assert.Contains(t, f.repo.failures["a1/restore"].Error, "neither the local copy nor the copy in the object storage matches")
+	assert.LessOrEqual(t, dst.read, size+1, "read past the recorded size")
+	assert.Empty(t, f.localBody(t, "ak-a1"))
+}
+
+func TestReadAllLimit(t *testing.T) {
+	st := newMemObjectStorage()
+	st.objects["k"] = []byte("12345")
+	b, err := readAllLimit(st, "k", 5)
+	require.NoError(t, err)
+	assert.Equal(t, "12345", string(b))
+	_, err = readAllLimit(st, "k", 4)
+	assert.ErrorIs(t, err, errObjectTooLarge)
+	_, err = readAllLimit(st, "missing", 4)
+	assert.ErrorIs(t, err, ErrObjectNotFound)
+}
+
+// A thumbnail or a webpublic variant in the object storage larger than the
+// limit fails the restore of the file instead of being read whole.
+func TestStorageRestoreRefusesAnOversizedVariant(t *testing.T) {
+	f := migratedFixture(t, "a1")
+	require.NoError(t, f.local.Delete("wk-a1"))
+	f.dst.objects["wk-a1"] = []byte("0123456789")
+	_, err := f.m.restoreVariant(f.dst, "webpublic", "wk-a1", 4)
+	assert.ErrorContains(t, err, "the webpublic in the object storage is larger than 4 bytes")
+}
