@@ -109,6 +109,8 @@ func newViewerFetchFixture(t *testing.T) *viewerFetchFixture {
 	h.SetRemote(fetcher, resolver)
 	h.SetFollowingRepo(following)
 	h.SetNoteRepo(notes)
+	// 照会先のホストは配送を止めていない (鍵を見せてよい相手)。
+	h.SetFetchSigner(nil, stubDeliveryGate{}, apShowSoftwareBlocker{})
 	return &viewerFetchFixture{h: h, fetcher: fetcher, resolver: resolver, following: following, keypairs: keypairs, notes: notes, viewer: viewer, resolved: resolved}
 }
 
@@ -170,6 +172,16 @@ func TestAPIShow_DoesNotRetryWithViewerKey(t *testing.T) {
 		},
 		"viewer not federated": func(_ *testing.T, f *viewerFetchFixture) {
 			f.h.SetLocalFederationObserver(&localFederationObserverStub{available: false})
+		},
+		// 配送を止めたホストには、フォローしていても鍵を見せない。
+		"host blocked or suspended from delivery": func(_ *testing.T, f *viewerFetchFixture) {
+			f.h.SetFetchSigner(nil, stubDeliveryGate{"remote.example": true}, apShowSoftwareBlocker{})
+		},
+		"host's software suspended from delivery": func(_ *testing.T, f *viewerFetchFixture) {
+			f.h.SetFetchSigner(nil, stubDeliveryGate{}, apShowSoftwareBlocker{suspended: map[string]bool{"remote.example": true}})
+		},
+		"delivery checks not wired": func(_ *testing.T, f *viewerFetchFixture) {
+			f.h.SetFetchSigner(nil, nil, nil)
 		},
 		// 照会先のホストの誰もフォローしていなければ、鍵を見せない。
 		"follows no one on the host": func(t *testing.T, f *viewerFetchFixture) {

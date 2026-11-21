@@ -31,10 +31,17 @@ type LocalFollowerKeys struct {
 	blocking  repository.BlockingRepository
 	urls      *activitypub.URLBuilder
 	observer  activitypub.LocalFederationObserver
+	// hostAllowed は鍵を見せてよいホストか (配送を止めていない相手か) を答える。
+	hostAllowed func(host string) bool
 }
 
 // NewLocalFollowerKeys returns a picker. observer may be nil (every local user
-// is then treated as externally available).
+// is then treated as externally available). hostAllowed reports whether a
+// local user's key may sign a GET to the host; with nil no key is picked.
+//
+// **配送を止めたホストには鍵を見せない。** 署名付きの GET を受け入れる側
+// (ap の signedFetchHostAllowed) と同じく、配送する相手にだけローカルの利用者の
+// keyId を出す。
 func NewLocalFollowerKeys(
 	following repository.FollowingRepository,
 	users repository.UserRepository,
@@ -42,8 +49,9 @@ func NewLocalFollowerKeys(
 	blocking repository.BlockingRepository,
 	urls *activitypub.URLBuilder,
 	observer activitypub.LocalFederationObserver,
+	hostAllowed func(host string) bool,
 ) *LocalFollowerKeys {
-	return &LocalFollowerKeys{following: following, users: users, keypairs: keypairs, blocking: blocking, urls: urls, observer: observer}
+	return &LocalFollowerKeys{following: following, users: users, keypairs: keypairs, blocking: blocking, urls: urls, observer: observer, hostAllowed: hostAllowed}
 }
 
 // KeyForFollowerOf returns the key of the first usable local follower of actor
@@ -52,7 +60,7 @@ func NewLocalFollowerKeys(
 // **いつも同じ人を選ぶ。** 相手のサーバーに伝わる「こちらの誰か」を、取り直す
 // たびに変えない。
 func (k *LocalFollowerKeys) KeyForFollowerOf(actor *model.User) *activitypub.PrivateKey {
-	if k == nil || actor == nil || actor.IsLocal() {
+	if k == nil || actor == nil || actor.IsLocal() || k.hostAllowed == nil || !k.hostAllowed(*actor.Host) {
 		return nil
 	}
 	ids, err := k.following.ListLocalFollowerIDsLimit(actor.ID, followerKeyCandidates)
@@ -92,4 +100,35 @@ func (k *LocalFollowerKeys) keyFor(followerID, actorID string) *activitypub.Priv
 		return nil
 	}
 	return key
+}
+
+// OptionalRemoteDataGate reports whether data the server does not need may be
+// exchanged with a host (the instance is neither blocked nor suspended).
+// core/instance.Service implements it.
+type OptionalRemoteDataGate interface {
+	CanFetchOptionalRemoteData(host string) bool
+}
+
+// SoftwareSuspension reports whether a host runs software the server suspended
+// (from delivery or from the inbox). *SuspendedChecker implements it.
+type SoftwareSuspension interface {
+	IsSuspended(host string) bool
+}
+
+// FetchKeyHostAllowed returns the hostAllowed of NewLocalFollowerKeys: a local
+// user's key may sign a GET only to a host the server delivers to, the same
+// hosts ap accepts a signed GET from (instance, delivery-suspended software
+// and inbox-suspended software). A check passed as an untyped nil makes it
+// refuse every host (a typed nil pointer is not caught).
+//
+// ap の signedFetchHostAllowed と違い、受信拒否のソフトウェアの判定が無くても断る
+// (あちらは配線されていなければ通す)。本番はどちらも配線している。
+func FetchKeyHostAllowed(instances OptionalRemoteDataGate, deliverSoftware, inboxSoftware SoftwareSuspension) func(host string) bool {
+	return func(host string) bool {
+		if host == "" || instances == nil || deliverSoftware == nil || inboxSoftware == nil {
+			return false
+		}
+		return instances.CanFetchOptionalRemoteData(host) && !deliverSoftware.IsSuspended(host) &&
+			!inboxSoftware.IsSuspended(host)
+	}
 }

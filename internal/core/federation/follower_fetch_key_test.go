@@ -33,6 +33,8 @@ type followerKeysFixture struct {
 	blocking  *testutil.MockBlockingRepository
 	observer  *availabilityObserver
 	actor     *model.User
+	// stoppedHosts are the hosts the server stopped delivering to.
+	stoppedHosts map[string]bool
 }
 
 func newFollowerKeysFixture(t *testing.T) *followerKeysFixture {
@@ -47,8 +49,9 @@ func newFollowerKeysFixture(t *testing.T) *followerKeysFixture {
 	host, uri := "remote.example", "https://remote.example/users/alice"
 	f.actor = &model.User{ID: "alice", Username: "alice", Host: &host, URI: &uri}
 	f.users.Users[f.actor.ID] = f.actor
+	f.stoppedHosts = map[string]bool{}
 	f.keys = federation.NewLocalFollowerKeys(f.following, f.users, f.keypairs, f.blocking,
-		activitypub.NewURLBuilder("https://example.com"), f.observer)
+		activitypub.NewURLBuilder("https://example.com"), f.observer, func(host string) bool { return !f.stoppedHosts[host] })
 	return f
 }
 
@@ -115,6 +118,20 @@ func TestLocalFollowerKeys_ReturnsNil(t *testing.T) {
 		f.addFollower(t, "a")
 		f.blocking.ExistsErr = errors.New("db down")
 		assert.Nil(t, f.keys.KeyForFollowerOf(f.actor))
+	})
+	// 配送を止めたホストの actor には、フォロワーの鍵を見せない。
+	t.Run("delivery to the actor's host stopped", func(t *testing.T) {
+		f := newFollowerKeysFixture(t)
+		f.addFollower(t, "a")
+		f.stoppedHosts["remote.example"] = true
+		assert.Nil(t, f.keys.KeyForFollowerOf(f.actor))
+	})
+	t.Run("host check not wired", func(t *testing.T) {
+		f := newFollowerKeysFixture(t)
+		f.addFollower(t, "a")
+		keys := federation.NewLocalFollowerKeys(f.following, f.users, f.keypairs, f.blocking,
+			activitypub.NewURLBuilder("https://example.com"), f.observer, nil)
+		assert.Nil(t, keys.KeyForFollowerOf(f.actor))
 	})
 	t.Run("local actor", func(t *testing.T) {
 		f := newFollowerKeysFixture(t)
@@ -374,4 +391,35 @@ func TestProcess_AnnounceTargetsQuoteIsNotRetried(t *testing.T) {
 	assert.Contains(t, f.plain, hiddenOwnNoteURI, "the quote target is tried with the instance actor (the test's premise)")
 	assert.Empty(t, f.keyed)
 	assert.Empty(t, keys.calls)
+}
+
+type fetchKeyGate map[string]bool
+
+func (g fetchKeyGate) CanFetchOptionalRemoteData(host string) bool { return !g[host] }
+
+type fetchKeySoftware map[string]bool
+
+func (s fetchKeySoftware) IsSuspended(host string) bool { return s[host] }
+
+// A local user's key signs a GET only to a host the server delivers to:
+// neither the instance nor its software is stopped, and every check is wired.
+func TestFetchKeyHostAllowed(t *testing.T) {
+	allowed := federation.FetchKeyHostAllowed(fetchKeyGate{"blocked.example": true},
+		fetchKeySoftware{"deliver-stopped.example": true}, fetchKeySoftware{"inbox-stopped.example": true})
+	for host, want := range map[string]bool{
+		"remote.example":          true,
+		"blocked.example":         false,
+		"deliver-stopped.example": false,
+		"inbox-stopped.example":   false,
+		"":                        false,
+	} {
+		assert.Equal(t, want, allowed(host), host)
+	}
+	for name, f := range map[string]func(string) bool{
+		"no instance check":         federation.FetchKeyHostAllowed(nil, fetchKeySoftware{}, fetchKeySoftware{}),
+		"no deliver software check": federation.FetchKeyHostAllowed(fetchKeyGate{}, nil, fetchKeySoftware{}),
+		"no inbox software check":   federation.FetchKeyHostAllowed(fetchKeyGate{}, fetchKeySoftware{}, nil),
+	} {
+		assert.False(t, f("remote.example"), name)
+	}
 }
