@@ -12,6 +12,7 @@ import (
 	corelocalfederation "github.com/elythia-network/elythia/internal/core/localfederation"
 	"github.com/elythia-network/elythia/internal/core/user"
 	"github.com/elythia-network/elythia/internal/misc/permissions"
+	"github.com/elythia-network/elythia/internal/misc/vary"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/labstack/echo/v5"
 )
@@ -145,7 +146,7 @@ func (h *Handler) Webfinger(c *echo.Context) error {
 	subscribe := h.origin + "/authorize-follow?acct={uri}"
 
 	setDiscoveryCORS(c)
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 
 	// content negotiation: Accept が xrd を jrd より優先するときだけ XRD(XML)。
 	if wantsXRD(c.Request().Header.Get("Accept")) {
