@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -31,11 +32,23 @@ import (
 // 捨てられる。Date は受付が署名の対象として必須にしているので改変できず、捕まえた
 // リクエストの再投函では同じ値、正当な送り直しでは新しい値になる。これが「同じ
 // リクエスト」の過不足ない定義になる (2026-10-31 の監査とそのレビュー)。
+//
+// **処理の前に「処理中」の印を原子的に置く** (Claim)。見てから処理して覚える順だと、
+// 捕まえたリクエストを最初の処理が終わる前に並行に投げれば、どれも「まだ見ていない」
+// と判断して通る (2026-11-22 の監査)。印にはジョブの ID を持たせ、ワーカーが処理の途中で
+// 落ちて同じジョブを取り直したときは、残った自分の印を通れるようにする (失敗して戻ったときは
+// 印を外すので、再試行はそのまま通る)。
 type InboxReplayGuard interface {
-	// Seen reports whether a request with this replay key was already processed.
-	Seen(ctx context.Context, key string) (bool, error)
+	// Claim marks the replay key as being processed by owner unless it is
+	// marked already, and reports whether owner holds the mark: it placed the
+	// mark now, or placed it before (a retry of the same job). A processed key
+	// or another owner's mark is not held.
+	Claim(ctx context.Context, key, owner string) (bool, error)
 	// Remember records the replay key as processed.
 	Remember(ctx context.Context, key string) error
+	// Release drops owner's processing mark on the key. A processed record and
+	// another owner's mark are left as they are.
+	Release(ctx context.Context, key, owner string) error
 }
 
 // activityReplayKey derives the replay guard's key from the signed Date header
@@ -147,16 +160,35 @@ func inboxReplayKey(activityID string) string {
 	return inboxReplayKeyPrefix + hex.EncodeToString(sum[:])
 }
 
-// Seen reports whether the activity was already processed.
-func (g *RedisInboxReplayGuard) Seen(ctx context.Context, activityID string) (bool, error) {
+// inboxReplayProcessed is the value of a processed key. 処理中の印は
+// inboxReplayClaimPrefix + owner で、ジョブの ID ("1" など) と取り違えない。
+const (
+	inboxReplayProcessed   = "1"
+	inboxReplayClaimPrefix = "claim:"
+)
+
+// Claim marks the activity as being processed by owner.
+//
+// 印の期限は処理済みの記録と同じ。処理の途中でワーカーが落ちても、同じジョブの
+// 再試行は自分の印を通れるので、期限が切れるのを待たなくてよい。
+func (g *RedisInboxReplayGuard) Claim(ctx context.Context, activityID, owner string) (bool, error) {
 	if g == nil || g.client == nil || activityID == "" {
-		return false, nil
+		return true, nil
 	}
-	n, err := g.client.Exists(ctx, inboxReplayKey(activityID)).Result()
+	key, mark := inboxReplayKey(activityID), inboxReplayClaimPrefix+owner
+	placed, err := g.client.SetNX(ctx, key, mark, g.ttl).Result()
+	if err != nil || placed {
+		return placed, err
+	}
+	held, err := g.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		// 見た直後に期限が切れた。もう一度だけ置いてみる。
+		return g.client.SetNX(ctx, key, mark, g.ttl).Result()
+	}
 	if err != nil {
 		return false, err
 	}
-	return n > 0, nil
+	return held == mark, nil
 }
 
 // Remember records the activity as processed.
@@ -164,5 +196,16 @@ func (g *RedisInboxReplayGuard) Remember(ctx context.Context, activityID string)
 	if g == nil || g.client == nil || activityID == "" {
 		return nil
 	}
-	return g.client.Set(ctx, inboxReplayKey(activityID), "1", g.ttl).Err()
+	return g.client.Set(ctx, inboxReplayKey(activityID), inboxReplayProcessed, g.ttl).Err()
+}
+
+// releaseClaim deletes KEYS[1] only when it still holds the mark ARGV[1].
+var releaseClaim = redis.NewScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
+
+// Release drops owner's processing mark on the activity.
+func (g *RedisInboxReplayGuard) Release(ctx context.Context, activityID, owner string) error {
+	if g == nil || g.client == nil || activityID == "" {
+		return nil
+	}
+	return releaseClaim.Run(ctx, g.client, []string{inboxReplayKey(activityID)}, inboxReplayClaimPrefix+owner).Err()
 }
