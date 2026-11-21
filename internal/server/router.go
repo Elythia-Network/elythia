@@ -1362,6 +1362,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	})
 	// 退会で webhook の行を消した後に、有効な webhook のキャッシュを捨てる (#4218)。
 	deleteAccountProcessor.SetWebhookCache(cachedWebhook)
+	// 退会でドライブのファイルの行を消す前に、実体も消す。行だけを消すと、
+	// public-read のバケットでは消したアカウントのファイルが公開 URL から取れ続ける。
+	deleteAccountProcessor.SetDriveFileObjectDeleter(driveService)
 
 	// Health check
 	s.echo.GET("/healthz", func(c *echo.Context) error {

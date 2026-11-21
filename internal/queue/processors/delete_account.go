@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/queue"
 	"github.com/elythia-network/elythia/internal/queue/driver"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -37,6 +38,92 @@ type DeleteAccountProcessor struct {
 	// noteDelivery は配送先を絞るプラグイン (#4202)。ローカルの利用者のノートを
 	// 消した後に、プラグインが書いた条件を片付けさせる。nil なら何もしない。
 	noteDelivery NoteDeliveryUserForgetter
+	// driveObjects はドライブのファイルの実体 (本体・サムネイル・webpublic・移行の写し) を
+	// 消す。行だけを消すと実体が残り、public-read のバケットでは公開 URL から取れ続ける。
+	// nil なら従来どおり行だけを消す (テストと、ドライブを持たない組み立て)。
+	driveObjects DriveFileObjectDeleter
+}
+
+// DriveFileObjectDeleter removes the stored objects of one drive file without
+// deleting its row. *drive.Service satisfies it (DeleteFileObjects).
+type DriveFileObjectDeleter interface {
+	DeleteFileObjects(f *model.DriveFile) error
+}
+
+// SetDriveFileObjectDeleter wires what deletes the stored objects of the
+// deleted account's drive files before their rows are deleted. nil keeps
+// deleting only the rows.
+func (p *DeleteAccountProcessor) SetDriveFileObjectDeleter(d DriveFileObjectDeleter) {
+	p.driveObjects = d
+}
+
+// deleteAccountDriveBatchSize is how many drive files one loop of
+// deleteDriveFiles reads, deletes the objects of, and then deletes.
+const deleteAccountDriveBatchSize = 100
+
+// deleteDriveFiles deletes the drive files of userID, their stored objects
+// first and then the rows, and returns how many rows it deleted.
+//
+// **実体を消してから行を消す** (本家の deleteFileSync と同じ順)。行を先に消すと、
+// 失敗したときに実体を指す記録が無くなる。実体を消した後に行を消せなかったときは、
+// ジョブの再試行で同じ行を読み直し、無い実体をもう一度消すだけになる。
+//
+// 実体を消せなかったファイルも行は消す。止めると、消せない実体が 1 つあるだけで
+// アカウントの削除が終わらなくなる。失敗はログに残す (管理画面の掃除と同じ扱い)。
+func (p *DeleteAccountProcessor) deleteDriveFiles(ctx context.Context, userID string) (int64, error) {
+	if p.driveObjects == nil {
+		return p.driveFileRepo.DeleteByUser(userID)
+	}
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		files, err := p.driveFileRepo.ListByUserAll(userID, deleteAccountDriveBatchSize)
+		if err != nil {
+			return total, err
+		}
+		if len(files) == 0 {
+			return total, nil
+		}
+		ids := make([]string, 0, len(files))
+		queued := false
+		for _, f := range files {
+			// オブジェクトストレージの実体は削除のジョブに積む (ローカルはその場で消し、
+			// リンク行は何もしない)。待つのは、積んだバッチの後だけにする。移行の実行中に
+			// ローカルの行の写しを消すジョブ (deleteMigrationCopies) は数えない。
+			queued = queued || (!f.StoredInternal && !f.IsLink)
+			if err := p.driveObjects.DeleteFileObjects(f); err != nil {
+				slog.Warn("delete-account: drive object delete failed (the object may be orphaned)",
+					"userId", userID, "fileId", f.ID, "err", err)
+			}
+			ids = append(ids, f.ID)
+		}
+		n, err := p.driveFileRepo.DeleteByIDs(ids)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		// 読んだ行を 1 件も消せなければ、次も同じ行を読んで回り続ける。
+		if n == 0 {
+			return total, fmt.Errorf("delete-account: no drive file row of the batch was deleted")
+		}
+		if len(files) < deleteAccountDriveBatchSize {
+			return total, nil
+		}
+		// ノートの削除と同じく、バッチの間を空ける。オブジェクトストレージのファイルは 1 件で
+		// 最大 3 件の削除のジョブを積むので、空けないと、ファイルの多いアカウントで
+		// objectStorage のキューへ積む速さに上限が無くなる。リモートの利用者のリンク行の
+		// ように何も積まないバッチでは待たない (待つと、ジョブが長くなるだけになる)。
+		if !queued {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return total, ctx.Err()
+		case <-time.After(deleteAccountBatchSleep):
+		}
+	}
 }
 
 // WebhookCacheInvalidator drops the cached active webhooks in every process.
@@ -128,7 +215,8 @@ func NewDeleteAccountProcessor(noteRepo repository.NoteRepository, driveFileRepo
 const deleteAccountNoteBatchSize = 100
 
 // deleteAccountBatchSleep throttles DB I/O between note batches to avoid
-// saturating the write path for accounts with very large note histories.
+// saturating the write path for accounts with very large note histories, and
+// paces the drive file batches that queue object storage deletions.
 const deleteAccountBatchSleep = 250 * time.Millisecond
 
 // Handle implements driver.HandlerFunc.
@@ -176,8 +264,14 @@ func (p *DeleteAccountProcessor) Handle(ctx context.Context, t driver.Task) erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		deleted, err := p.driveFileRepo.DeleteByUser(payload.UserID)
+		deleted, err := p.deleteDriveFiles(ctx, payload.UserID)
 		if err != nil {
+			// 中断はノートの削除と同じく Warn にする (再試行で続きから消す)。
+			if ctx.Err() != nil {
+				slog.Warn("delete-account: drive purge interrupted",
+					"userId", payload.UserID, "deleted", deleted, "err", err)
+				return err
+			}
 			slog.Error("delete-account: drive purge failed",
 				"userId", payload.UserID, "err", err)
 			return err
