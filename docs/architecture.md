@@ -75,9 +75,10 @@ Elythia は Misskey (TypeScript/NestJS) から生まれ、バックエンドを 
 upstream `server/api/endpoints/` の endpoint 群を、ディレクトリ単位で実装。**upstream の 446 endpoint をすべて実装済み** (coverage 100.0%)。一次情報は `make apicompat` が生成する [api-compat.md](api-compat.md)。
 
 ルート数は `internal/server` が `/api/*` に静的登録する数 (`api.POST` 516 + `api.GET` 14 +
-`api.Match(chartMethods, …)` 12 × 2 methods = 554 と、`api.Any` 2。test mode でだけ登録する
-`/api/reset-db` を含む)。`api.Any` は catchall と、全メソッドで受ける `/api/clear-browser-cache`
-(#3926)。登録は、この 2 つと `/api/reset-db` が `router.go` の `setupRoutes()`、ほかは領域ごとの
+`api.Match(chartMethods, …)` 12 × 2 methods = 554 と、全メソッドで受ける
+`api.Group.Match(anyMethods, …)` 2。test mode でだけ登録する `/api/reset-db` を含む)。後者は
+catchall と `/api/clear-browser-cache` (#3926) で、echo の v5 の `Any` の代わりに v4 の `Any` と
+同じメソッドを `Match` で登録する (#4239)。登録は、この 2 つと `/api/reset-db` が `router.go` の `setupRoutes()`、ほかは領域ごとの
 `routes_<領域>.go` にある (#3697、4.2)。実行時はこれに同梱プラグインのルートが乗る。
 `docs/api-compat.md` の 446 + 110 = 556 は、554 に `/api/clear-browser-cache` の GET と POST を
 足した数と一致する (api-compat.md は GET と POST だけを数え、catchall を数えない)。パッケージ数は、`git ls-files internal/api` のうちテストでない `.go` を持つ
@@ -91,11 +92,12 @@ api-compat.md の 444 + 58) は、ルート数の段落を最後に直した 202
 #3926 でも同じ数え方で数え直した (`api.POST` は #3926 より前から 516 で、514 のままだった)。
 
 `/api` の外は `s.echo` へ直接登録していて、`setupRoutes()` とその節 (4.2 の「setupRoutes の節」、
-#3901) の本文の登録の式文は 65 (`GET` 51 / `POST` 5 / `OPTIONS` 2 / `Any` 1 / `File` 4 / `Static` 2。
+#3901) の本文の登録の式文は 65 (`GET` 51 / `POST` 5 / `OPTIONS` 2 / `Match` 1 / `FileFS` 4 / `Static` 2。
+#4239 で `Any` を全メソッドの `Match` に、`File` を `FileFS` に置き換えた。数は変わらない。
 4.2 の「/api のルートの登録」の前後の数の表と同じ数え方で、`if` の中も数える)。内訳は
 `wireFederationRoutes` 41・`wireFrontendRoutes` 17・`setupRoutes()` 5・`wireAdmin` 1・
 `wireStreaming` 1。前に書いていた 64 (`GET` 50) は、#3901 で節へ移す前の `develop`
-(`e083dfe4b7`) を同じ数え方で数えると 65 (`GET` 51) で、1 つ足りなかった。`Any` は 1 呼び出しで全メソッドを登録するので、
+(`e083dfe4b7`) を同じ数え方で数えると 65 (`GET` 51) で、1 つ足りなかった。全メソッドの `Match` (`anyMethods`) は 1 呼び出しで v4 の `Any` と同じ 11 のメソッドを登録するので、
 ルート単位に展開すると増える。ほかに `/debug/pprof` 配下が 8 (`pprofGroup` への登録)。
 `setupRoutes()` から呼ぶ関数の中の登録 (`registerFrontendAssets` の `/vite/*` と `/embed_vite/*`、
 `wireMetricsEndpoint` の `/metrics`、`serveStaticAssetDir` の `/twemoji/*` と `/fluent-emoji/*`) は、
@@ -1943,7 +1945,7 @@ setupRoutes()
   …                                              // routes_<領域>.go の 24 個を 1 回ずつ
   registerFetchRoutes(api, fetchExternalHandler, fetchRSSHandler)
   …                                              // プラグインの準備 (失敗したら return)
-  api.Any("/*", apiCatchall)                     // catchall は元の位置
+  api.Group.Match(anyMethods, "/*", apiCatchall) // catchall は元の位置 (#4239 の前は api.Any)
 ```
 
 - **領域ごとのファイル `routes_<領域>.go` に、`func register<領域>Routes(api apiRoutes, …)` を
@@ -2028,19 +2030,22 @@ setupRoutes()
   `backupGuard` を受け取らない)
 - /api の行には、handler を関数リテラルで書いたものが無い
 
-**echo の登録の順は変わる。** `Echo.Routes()` は map から作るので順を持たない。
+**echo の登録の順は変わる。** (#3901 の当時の echo v4 での計測。v5 の `Router().Routes()` は
+登録の順を持つ、#4239) `Echo.Routes()` は map から作るので順を持たない。
 `Echo.OnAddRouteHandler` で登録の順に並べると、前後で同じ位置にある登録は、test mode でない
-構成で 667 のうち 61、test mode と pprof を有効にした構成で 676 のうち 69 だった。順が効くのは
-同じ method と path を 2 回登録したとき (後の登録が勝つ) だけで、2 回登録しているのは
+構成で 667 のうち 61、test mode と pprof を有効にした構成で 676 のうち 69 だった。当時の v4 で順が
+効くのは同じ method と path を 2 回登録したとき (後の登録が勝つ。v5 は既定の `echo.New` でも
+上書きを許すが、`AllowOverwritingRoute` を立てないルーターを渡すと重複の登録は panic になる。下の
+group の 404 のルートは、上書きを許す形で登録されるので当たらない) だけで、2 回登録しているのは
 `api.Use` が足す `echo_route_not_found` の `/api` と `/api/*` だけ (順は前後で同じ)。catchall
-(`/api/*` の `Any`) とプラグインのルートは、前と同じく /api のほかのルートより後に登録する。
+(`/api/*` の、当時の `Any`) とプラグインのルートは、前と同じく /api のほかのルートより後に登録する。
 
 **残したもの**
 
 | 登録 | 理由 |
 |---|---|
 | test mode の `/api/reset-db` | handler を test mode の `if` の中で作る。`if` ごと元の位置に残した (`apiRoutesOutsideRegistrars` に、どの経路で登録するかを書いた) |
-| catchall の `api.Any("/*", apiCatchall)` | プラグインのルートより後に置く (読み手のため。echo は静的な path を wildcard より優先するので、順には依存しない)。`apiRoutes` を通らない登録なので、`apiRegistrationAllowed` でファイル (`router.go`) まで決めてある |
+| catchall の `api.Group.Match(anyMethods, "/*", apiCatchall)` (#4239 の前は `api.Any`) | プラグインのルートより後に置く (読み手のため。echo は静的な path を wildcard より優先するので、順には依存しない)。`apiRoutes` を通らない登録なので、`apiRegistrationAllowed` でファイル (`router.go`) まで決めてある |
 | /api の外の `s.echo` の 64 文 (ActivityPub・SSR・well-known・oauth・nodeinfo・inbox・streaming・`/files`・`/proxy`・`/url`・`/backup-download`・静的配信・SPA) | `apiRoutes` を通らない別の層で、この段の関数の形 (`api apiRoutes` を受ける) に当てはまらない。`/notes/:id` や `/@:acct` のように `s` と `ssrMeta` などを捕まえる closure、構築の呼び出しを行の中に持つもの (`filesHandler(…)`、`newTwemojiBadgeHandler(…)`。後者は #3776 で変数に取り出した) があり、評価の時刻の確認がこの段より重い。静的配信と SPA の catchall はプラグインの準備の `return` より後にある |
 | `/debug/pprof` の 8 文 | `s.config.EnablePprof` の `if` の中で、/api の外 |
 
