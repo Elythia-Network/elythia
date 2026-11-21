@@ -2112,3 +2112,29 @@ func TestServer_HandlerWritesJobLog(t *testing.T) {
 	assert.Equal(t, []string{"first line", "second line"}, logs)
 	assert.Equal(t, int64(2), count)
 }
+
+// The handler's context carries the ID of the running job (driver.JobID), the
+// owner of the inbox replay guard's processing mark.
+func TestServer_HandlerSeesJobID(t *testing.T) {
+	d := newDriver(t)
+	srv := d.Server()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var got string
+	srv.Handle("test:jobid", func(ctx context.Context, _ driver.Task) error {
+		defer wg.Done()
+		got = driver.JobID(ctx)
+		return nil
+	})
+	require.NoError(t, srv.Start())
+	t.Cleanup(srv.Shutdown)
+
+	ctx := context.Background()
+	require.NoError(t, d.Client().Enqueue(ctx, "test:jobid", nil, driver.WithQueue("deliver")))
+	if !waitGroupTimeout(&wg, 5*time.Second) {
+		t.Fatal("handler not invoked within timeout")
+	}
+	id, err := testRedis.Client.Get(ctx, "bull:deliver:id").Result()
+	require.NoError(t, err)
+	assert.Equal(t, id, got)
+}

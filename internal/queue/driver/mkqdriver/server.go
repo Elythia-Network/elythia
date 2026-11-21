@@ -1401,6 +1401,9 @@ func newDispatchHandler(handlers map[string]driver.HandlerFunc, qname string, ob
 			c = driver.WithJobLogger(c, func(lc context.Context, line string) error {
 				return job.Log(lc, line)
 			})
+			// 処理中の印を、同じジョブの再試行と別のジョブとで見分けるのに使う (受信の
+			// 再投函ガード)。
+			c = driver.WithJobID(c, job.ID)
 			d := handlerDeadlineFor(taskType, deadline)
 			return runBounded(c, h, mkqTask{taskType: taskType, payload: job.Data.payload()},
 				d, graceFor(d),
