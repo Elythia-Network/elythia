@@ -10,8 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elythia-network/elythia/internal/core/notedelivery"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
+	"github.com/elythia-network/elythia/plugin"
 )
 
 type qaStore map[string]*model.NoteQuoteAuthorization
@@ -266,4 +268,41 @@ func TestQuoteAuthorization_LocalFederationGateAndObservation(t *testing.T) {
 		assert.Empty(t, body)
 		assert.Equal(t, "no-store", hdr.Get("Cache-Control"))
 	})
+}
+
+// A note a plugin keeps from the requester's host has its approvals answered
+// like its /notes/:id (#4199): 404 when hidden, 503 while the plugin is down.
+// The quoting note is judged too when it is local.
+func TestQuoteAuthorization_NoteDeliveryRules(t *testing.T) {
+	h, userRepo, noteRepo, _ := newHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+	text := "hi"
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Text: &text, Visibility: model.NoteVisibilityPublic}
+	noteRepo.Notes["q1"] = &model.Note{ID: "q1", UserID: "u1", Text: &text, Visibility: model.NoteVisibilityPublic}
+	h.SetNoteRepo(noteRepo)
+	h.SetQuoteAuthorizationStore(qaStore{
+		"remote": {ID: "remote", NoteID: "n1", QuotingURI: "https://remote.example/statuses/1"},
+		"local":  {ID: "local", NoteID: "n1", QuotingURI: "https://example.com/notes/q1"},
+	})
+	// 署名も User-Agent も無い照会は、自分のホスト (この registry では "") として判定される。
+	hidden := plugin.DeliveryTargets{Mode: plugin.DeliveryTargetsInclude, Hosts: []string{"other.example"}}
+	shown := plugin.DeliveryTargets{Mode: plugin.DeliveryTargetsExclude, Hosts: []string{"other.example"}}
+	for name, tc := range map[string]struct {
+		rules *notedelivery.Registry
+		auth  string
+		want  int
+	}{
+		"shown":                 {apDeliveryRules(t, map[string]plugin.DeliveryTargets{"n1": shown}), "remote", http.StatusOK},
+		"approved note hidden":  {apDeliveryRules(t, map[string]plugin.DeliveryTargets{"n1": hidden}), "remote", http.StatusNotFound},
+		"quoting note hidden":   {apDeliveryRules(t, map[string]plugin.DeliveryTargets{"q1": hidden}), "local", http.StatusNotFound},
+		"quoting note shown":    {apDeliveryRules(t, map[string]plugin.DeliveryTargets{"q1": shown}), "local", http.StatusOK},
+		"plugin down":           {failingDeliveryRules(t), "remote", http.StatusServiceUnavailable},
+		"no rules for the note": {apDeliveryRules(t, nil), "remote", http.StatusOK},
+	} {
+		h.SetNoteDeliveryRules(tc.rules)
+		c, res := qaReq(t, "n1", tc.auth)
+		require.NoError(t, h.QuoteAuthorization(c))
+		code, _, _ := res()
+		assert.Equal(t, tc.want, code, name)
+	}
 }

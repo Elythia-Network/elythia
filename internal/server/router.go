@@ -1112,8 +1112,11 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// instance actor に見せなかった Announce の対象を、actor をフォローして
 	// いるローカルの利用者の鍵で取り直す (#3916)。連合に出していない利用者の鍵は
 	// 使わない (coreSvcs.localFederation で判定)。
+	// 鍵を見せるのは、署名付きの GET を受け入れる相手と同じく、配送を止めていない
+	// ホストだけ (インスタンスのブロック・配送停止、配送停止と受信拒否のソフトウェア)。
 	federationProcessor.SetFollowerFetchKeys(corefederation.NewLocalFollowerKeys(followingRepo, userRepo, keypairRepo, blockingRepo,
-		apURLs, coreSvcs.localFederation))
+		apURLs, coreSvcs.localFederation, corefederation.FetchKeyHostAllowed(instanceService,
+			corefederation.NewSuspendedChecker(metaRepo, instanceRepo), inboxSoftwareChecker)))
 
 	// users/show 経由で host が指定されたリモートユーザーをローカル DB に
 	// キャッシュが無くても解決できるようにする (#269)。webfinger で actor URI

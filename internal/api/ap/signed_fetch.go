@@ -107,10 +107,20 @@ func (h *Handler) noteForSigner(c *echo.Context, noteID string) *model.Note {
 // 止めたインスタンス、配送停止のソフトウェア) にここで返すと、止めた意味が
 // 無くなる。
 func (h *Handler) signerHostAllowed(signer *model.User) bool {
-	if signer.Host == nil || h.fetchDelivery == nil || h.fetchDeliverSoftware == nil {
+	return signer.Host != nil && h.signedFetchHostAllowed(*signer.Host)
+}
+
+// signedFetchHostAllowed reports whether a signed GET may be exchanged with
+// host: the same hosts the server delivers to (the instance is neither
+// blocked nor suspended, and its software is not suspended from delivery or
+// from the inbox). It fails closed when the checks are not wired.
+//
+// 受け入れ (署名した人のホスト) と外へ出す側 (ap/show で照会した人の鍵を見せる相手)
+// で同じ判定を使う。配送を止めた相手に、ローカルの利用者の keyId を出さない。
+func (h *Handler) signedFetchHostAllowed(host string) bool {
+	if host == "" || h.fetchDelivery == nil || h.fetchDeliverSoftware == nil {
 		return false
 	}
-	host := *signer.Host
 	if !h.fetchDelivery.CanFetchOptionalRemoteData(host) || h.fetchDeliverSoftware.IsSuspended(host) {
 		return false
 	}

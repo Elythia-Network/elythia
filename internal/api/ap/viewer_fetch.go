@@ -60,9 +60,12 @@ func (h *Handler) refetchAsViewer(viewer *model.User, uri string, fetchErr error
 // 経路 (frontend の share ページ) もあり、条件が無いと、任意のホストが照会した
 // 人の actor を知れる。フォロワー限定の投稿を見られるのはフォローしている人だけ
 // なので、この条件で目的は損なわない。
+//
+// 配送を止めたホストにも見せない (署名付きの GET を受け入れない相手と同じ。
+// signedFetchHostAllowed)。
 func (h *Handler) viewerFollowsHostOf(viewer *model.User, uri string) bool {
 	host := apShowGateHost(uri)
-	if viewer == nil || host == "" || h.followingRepo == nil {
+	if viewer == nil || host == "" || h.followingRepo == nil || !h.signedFetchHostAllowed(host) {
 		return false
 	}
 	follows, err := h.followingRepo.FollowsAnyOnHost(viewer.ID, host)
