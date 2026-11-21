@@ -78,6 +78,13 @@
 			"names": [
 				"アンテナ > のノート > が取得できること（削除ユーザーのノートも含まれる）"
 			]
+		},
+		{
+			"file": "test/e2e/well-known.ts",
+			"reason": "Vary を上書きせずに足す (2026-11-22 の監査)。本家のテストは webfinger の Vary を 'Accept' と完全一致で見るが、Elythia は handler より前に gzip の middleware が足した Accept-Encoding を残して 'Accept-Encoding, Accept' を返す。上書きすると、共有キャッシュが符号化の違う応答を取り違えうる。webfinger の本文は tests/e2e/well_known_test.go でも確かめている。",
+			"names": [
+				".well-known > webfinger"
+			]
 		}
 	]
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/elythia-network/elythia/internal/misc/vary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +60,9 @@ func TestWellKnown(t *testing.T) {
 		assert.True(t, resp.StatusCode >= 200 && resp.StatusCode < 300)
 		assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 		assert.Equal(t, "Vary", resp.Header.Get("Access-Control-Expose-Headers"))
-		assert.Equal(t, "Accept", resp.Header.Get("Vary"))
+		// handler の Accept は、gzip が先に足した Accept-Encoding を消さずに足す。
+		assert.True(t, vary.Has(resp.Header, "Accept"), resp.Header.Values("Vary"))
+		assert.True(t, vary.Has(resp.Header, "Accept-Encoding"), resp.Header.Values("Vary"))
 
 		body := readJSON(t, resp)
 		assert.Equal(t, "acct:alice@"+host, body["subject"])

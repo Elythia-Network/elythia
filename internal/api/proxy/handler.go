@@ -12,6 +12,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/mediaproxy"
+	"github.com/elythia-network/elythia/internal/misc/vary"
 	"github.com/labstack/echo/v5"
 )
 
@@ -300,7 +301,7 @@ func (h *Handler) Handle(c *echo.Context) error {
 	// otherwise WebP), so shared caches MUST key on Accept to avoid serving
 	// AVIF to a Safari 15 / WebP-only client cached behind a CDN, and
 	// vice-versa (#637 review UR-012).
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	setProxyContentSecurityHeaders(c)
 	if result.Size > 0 {
 		c.Response().Header().Set(echo.HeaderContentLength, strconv.FormatInt(result.Size, 10))

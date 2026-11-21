@@ -20,6 +20,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/frontendutil"
 	"github.com/elythia-network/elythia/internal/misc/id"
+	"github.com/elythia-network/elythia/internal/misc/vary"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -212,7 +213,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	s.echo.GET("/notes/:id", func(c *echo.Context) error {
 		// 同一 URL が Accept 次第で HTML / AP JSON / 302 を返すので、HTML 変種
 		// (ssrMeta 側) にも Vary が要る。閉包で立てれば両分岐に載る (#2506)。
-		c.Response().Header().Set("Vary", "Accept")
+		vary.Add(c.Response().Header(), "Accept")
 		if prefersHTML(c) {
 			return ssrMeta.NotePage(c)
 		}
@@ -260,7 +261,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		// 同一 URL が Accept 次第で HTML / AP JSON / 301 を返すので、HTML 変種
 		// (ssrMeta 側) にも Vary が要る (#2506)。feed は拡張子で URL 自体が
 		// 変わるが、同じ閉包を通るので付いていて害は無い。
-		c.Response().Header().Set("Vary", "Accept")
+		vary.Add(c.Response().Header(), "Accept")
 		if handled, err := feedH.TryServe(c, c.Param("acct")); handled {
 			return err
 		}

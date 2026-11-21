@@ -25,6 +25,7 @@ import (
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/misc/idnhost"
+	"github.com/elythia-network/elythia/internal/misc/vary"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/server/middleware"
@@ -502,7 +503,7 @@ func (h *Handler) User(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要。
 	// content-negotiation 実行前に header を立てておけば、redirect / Person /
 	// 404 のいずれが返っても intermediate cache が誤配信しない (#691 review)。
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 
 	id := c.Param("id")
 	bundle, err := h.userService.ShowByID(id)
@@ -602,7 +603,7 @@ func (h *Handler) filterActorLocalReferences(c *echo.Context, user *model.User) 
 func (h *Handler) UserByAcct(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要
 	// (User と同じ規約。upstream も /@:acct の先頭で立てる)。
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	if !wantsActivityJSON(c.Request().Header.Get("Accept")) {
 		return h.serveNonAP(c)
 	}
@@ -1140,7 +1141,7 @@ func (h *Handler) Note(c *echo.Context) error {
 	// Vary: Accept は AP / browser の両分岐を持つすべての response に必要
 	// (upstream も /notes/:note の先頭で立てる)。302 が加わったことで、これが
 	// 無いと中間キャッシュが AP 向け 302 をブラウザに配る混線が現実になる。
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if !wantsActivityJSON(c.Request().Header.Get("Accept")) {
 		return h.serveNonAP(c)
@@ -1222,7 +1223,7 @@ func (h *Handler) Note(c *echo.Context) error {
 // upstream と同じく !localOnly かつ visibility ∈ {public, home} の note のみ serve し、
 // followers/specified/localOnly な pinned note を unauthenticated AP へ leak させない。
 func (h *Handler) Featured(c *echo.Context) error {
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
@@ -1310,7 +1311,7 @@ func (h *Handler) Following(c *echo.Context) error {
 // base (page!=true) は totalItems + first link、?page=true は cursor ページングで
 // 相手側の actor URI を返す。
 func (h *Handler) serveFollowCollection(c *echo.Context, followers bool) error {
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
@@ -1474,7 +1475,7 @@ func (h *Handler) actorURI(u *model.User) string {
 // (non-localOnly) notes as Create/Announce activities in an OrderedCollection
 // (upstream ActivityPubServerService.outbox, #1878)。
 func (h *Handler) Outbox(c *echo.Context) error {
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
@@ -1584,7 +1585,7 @@ func (h *Handler) Outbox(c *echo.Context) error {
 func (h *Handler) NoteActivity(c *echo.Context) error {
 	// upstream も vary(Accept) を立てる。この route は AP 専用で HTML 変種は
 	// 無く、Accept で分岐しない点も upstream と同じ。
-	c.Response().Header().Set("Vary", "Accept")
+	vary.Add(c.Response().Header(), "Accept")
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.federationDisabled() {
 		return c.NoContent(http.StatusForbidden)
