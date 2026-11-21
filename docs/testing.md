@@ -193,7 +193,7 @@ func newTestHandler(t *testing.T) (*Handler, *testutil.MockUserRepository) {
     return h, userRepo
 }
 
-func doPost(h func(echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
+func doPost(h func(*echo.Context) error, body string, user *model.User) *httptest.ResponseRecorder {
     e := echo.New()
     req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
     req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

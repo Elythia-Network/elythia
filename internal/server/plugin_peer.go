@@ -762,7 +762,7 @@ func apiCatchall(c *echo.Context) error {
 	//
 	// **HEAD も GET と同じく 404 (#3925)。** 本家の `fastify.get('/*')` は
 	// Fastify の exposeHeadRoutes で HEAD にも応える。この catch-all は
-	// api.Any で HEAD も持つので、GET のルートへの振り分け (headRoutes) を
+	// 全メソッドの Match (anyMethods) で HEAD も持つので、GET のルートへの振り分け (headRoutes) を
 	// 通らず HEAD のまま届く。
 	method := c.Request().Method
 	if method == http.MethodGet || method == http.MethodHead || isPluginPeerPath(path) {

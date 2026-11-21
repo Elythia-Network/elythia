@@ -244,7 +244,7 @@ echo wrapperはhandlerの最頻送出経路なので外すとgateが大半のrou
 
 gateは「golden と突合できた数の下限」から**「inlineが復活したら落とす」向きに反転**させた。判定に使うのは`countInlineHandlers`で、`/api` group tree配下のroute登録のうち**`handlerVar.Method`で解決できない形**を数える:
 
-- closure直書き (`api.POST("/x", func(c echo.Context) error {...})`)
+- closure直書き (`api.POST("/x", func(c *echo.Context) error {...})`)
 - ident束縛のclosure (`h := func(...); api.GET("/x", h)`)
 - **コンストラクタ直渡し** (`api.POST("/x", pkg.NewHandler(a).Read)`)。closureではないが`parseRoutes`の解決からも外れるので、error idが丸ごと無検査になる
 
@@ -534,9 +534,10 @@ route dump には stack が要るのでテストからは呼べない。代わ�
 1. どちらかの集合が 0 件なら `t.Fatal` (書式が変わって空集合同士が一致するのを防ぐ)
 2. 抽出できた数 == 呼び出しの総数 (path が定数 / 変数経由、複数行に分かれている形を検出)
 3. `/api` 配下を生やす別経路を想定件数で固定 — `api.Group(` は 1
-   (`plugin_wiring.go` がプラグイン用に使う)、`s.echo.Group("/api"` と catchall の
-   `api.Any(` は各 1、`api.Add(` / `api.PUT|DELETE|PATCH|HEAD|CONNECT|TRACE(` /
-   `s.echo.<METHOD>("/api` は 0
+   (`plugin_wiring.go` がプラグイン用に使う)、`s.echo.Group("/api"` は 1、全メソッドで受ける
+   `api.Group.Match(` は catchall (`"/*"`) の 1 と path を抽出できた分 (今は
+   `/clear-browser-cache` の 1) の和 (echo の v5 の `Any` の代わりにこの形で書く。#4239)、`.Any(` / `api.Add(` /
+   `api.PUT|DELETE|PATCH|HEAD|CONNECT|TRACE(` / `s.echo.<METHOD>("/api` は 0
 
 **0 件チェックだけでは足りない** — 部分的な取りこぼしは router 側の集合が小さく
 なるだけで、生成物との差が出ずに黙って一致する。走査は `internal/server/` の

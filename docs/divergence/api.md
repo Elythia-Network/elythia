@@ -202,7 +202,7 @@ Elythia独自のエンドポイントは、2つのファイルの宣言から組
 
 ## GETのルートへのHEAD (#3925)
 
-GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で有効)と同じくHEADにも応え、GETと同じstatusとheaderを本文なしで返す。Echo v4はGETのルートをHEADに広げないので、`internal/server/head_routes.go`がルーターの手前でまとめて振り分ける。#3925より前は、GETのルートへのHEADは405を返していた(`/api`の下では、`api.Any("/*")`のcatch-allが200と空のobjectで答えていた)。例外は、`Upgrade`を求めるHEADで、振り分けずに405のままにする。handlerにはGETに見えるので、振り分けると`/streaming`がWebSocketへ切り替えてしまう(本家の`ws`もRFC 6455も、切り替えはGETに限る)。
+GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で有効)と同じくHEADにも応え、GETと同じstatusとheaderを本文なしで返す。echoは既定ではGETのルートをHEADに広げないので、`internal/server/head_routes.go`がルーターの手前でまとめて振り分ける。echoのv5の`RouterConfig.AutoHandleHEAD`は使わない。handlerにHEADのまま届くので(下の表の1行目がGETでなくなる)、GETと見せる補いを足すことになり、それに伴って`Upgrade`を求めるHEADの除外と`headreq`の印も要る。得るものが小さいので今の振り分けを残す(理由の詳細は`head_routes.go`のコメント、#4241)。#3925より前は、GETのルートへのHEADは405を返していた(`/api`の下では、`/api/*`のcatch-allが200と空のobjectで答えていた)。例外は、`Upgrade`を求めるHEADで、振り分けずに405のままにする。handlerにはGETに見えるので、振り分けると`/streaming`がWebSocketへ切り替えてしまう(本家の`ws`もRFC 6455も、切り替えはGETに限る)。
 
 細部は次のとおり本家と違う。
 
@@ -210,9 +210,33 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 |---|---|---|
 | handlerから見たメソッド | `HEAD` | `GET`。本文が無いこと以外はGETと同じに扱わせる(RFC 9110)。本文を読まずに済ませたいhandler(`/files`、`/backup-download`、圧縮済みの静的ファイル)だけが、`internal/misc/headreq`でHEADを見分ける。それ以外(`c.File`で返す静的ファイルなど)は本文を作り、net/httpが捨てる |
 | `allowGet`の`/api/<名前>`へのHEAD | `fastify.all`で登録しているので、`ApiCallService`の`request.method === 'GET'`の分岐に入らない。引数をquery stringでなく本文(HEADなので無い)から読み、`cacheSec`の`Cache-Control`も付けない | GETと同じく引数をquery stringから読み、`Cache-Control`もGETと同じに付ける |
-| POSTだけの`/api/<名前>`へのHEAD | `allowGet`の検査はGETだけを見るので、HEADでもエンドポイントを引数なしで実行する | GETと同じく、`api.Any("/*")`のcatch-allが404(`UNKNOWN_API_ENDPOINT`)を返す |
+| POSTだけの`/api/<名前>`へのHEAD | `allowGet`の検査はGETだけを見るので、HEADでもエンドポイントを引数なしで実行する | GETと同じく、`/api/*`のcatch-allが404(`UNKNOWN_API_ENDPOINT`)を返す |
 
-`e.Any`で登録したルート(`/api/*`のcatch-all、`/oauth/*`など)はHEADのルートを持つので振り分けず、handlerにはHEADのまま届く。ただし、それより具体的なGETのルートがあるパス(`/api/emojis`など)は、本家と同じくそのGETのルートが答える。`/api/*`のcatch-allは、HEADにもGETと同じ404を返す(本家の`fastify.get('/*')`と同じ)。
+全メソッドで登録したルート(`/api/*`のcatch-all、`/oauth/*`など。echoのv4の`Any`と同じメソッドを`Match`で登録する。`internal/server/echo_v5.go`の`anyMethods`)はHEADのルートを持つので振り分けず、handlerにはHEADのまま届く。ただし、それより具体的なGETのルートがあるパス(`/api/emojis`など)は、本家と同じくそのGETのルートが答える。`/api/*`のcatch-allは、HEADにもGETと同じ404を返す(本家の`fastify.get('/*')`と同じ)。
+
+## エンコードした`/`を含む静的ファイルのURL (#4241)
+
+echoのv5へ上げて (#4239)、frontendのビルドの配信 (`/vite/*`・`/embed_vite/*`) で、`*`の部分に`%2F` (エンコードした`/`) を含むURLが404になった。v4.16.3は配信していた。この経路は、ファイルの解決をアンエスケープを有効にした`StaticDirectoryHandler`に任せる。v5の`StaticDirectoryHandler`は、次の2つのどちらでも`/vite/%2Fx.js`を断る。
+
+- パスの検査`hasUncleanPath`が、`RawPath`があってもデコードした`URL.Path` (`/vite//x.js`) を先に見て、空のセグメントを見つける (v4は`RawPath`があればそれだけを見ていた)
+- アンエスケープした後の検査`hasUncleanWildcardPath`が、`/*`のルートでは`*`の部分の先頭の`/` (`%2Fx.js`をデコードした`/x.js`) を空のセグメントとして扱う (v4は先頭の`/`を外してから見ていた)
+
+ルートの外のファイルを開かせないための検査なので、v4の挙動には戻していない。
+
+経路ごとの答えは次のとおりで、v4とv5で変わったのは太字のものだけ。値は`internal/server/static_path_forms_test.go`で、本番と同じhandlerを登録した素のechoへ送って、v4.16.3とv5.4.6のそれぞれで測った (2026-11-21)。`dev: false`でfrontendのビルドがある、通常の運転のときの答えで、devモードの`/vite/*`・`/embed_vite/*`はViteのdev serverへ転送し、メンテナンス中は別の経路 (`internal/maintmode`) が配る。
+
+| 経路 | `x.js` | `/x.js` (`//`) | `%2Fx.js` | `./x.js` | `sub/../x.js` |
+|---|---|---|---|---|---|
+| `/vite/*`・`/embed_vite/*` (hashの無い名前) | 200 | 404 | **200 → 404** | 404 | 404 |
+| `/vite/*` (hashの付いた名前を`Accept-Encoding: br`で求め、`.br`の変種がある) | 200 (`br`) | 200 (`br`) | **200 → 404** | 404 | 404 |
+| `/twemoji/*`・`/fluent-emoji/*` | 200 | 200 | 200 | 200 | 200 |
+| `/assets/*` | 200 | 200 | 404 | 200 | 200 |
+| `e.Static("/client-assets")`・`e.Static("/static-assets")` (ルートは`<prefix>*`) | 200 | 404 | 404 | 404 | 404 |
+
+- `/vite/*`のhashの付いた名前の`//`の形が200になるのは、事前圧縮の変種を返すとき (`Content-Encoding: br`) だけで、変種を求めなければ404になる。事前圧縮の経路 (`frontendAssetName`) が先頭の`/`を外してから空のセグメントを見るため。hashの無い名前と答えが揃っておらず、`frontendAssetName`のコメントにある#3369の意図 (空のセグメントを含むパスは配信しない) からも外れている。echoの版とは関係なく、別に扱う
+- `/twemoji/*`・`/fluent-emoji/*` (`serveStaticAssetDir`) と`/assets/*` (`frontendutil.AssetsHandler`) は、echoの検査を通らずに自前でパスを`filepath.Clean`で解決するので、根の外へ出ない範囲でこれらの形も配信する。`/assets/*`はアンエスケープしないので`%2F`は404
+- `e.Static`はアンエスケープしない (`EnablePathUnescapingStaticFiles`を立てていない) ので、`%2F`はv4でも404だった
+- 本家 (`@fastify/static`) がこれらのURLにどう答えるかは確かめていない
 
 ## `/api/clear-browser-cache`に無効なtokenを付けたとき (#3926)
 

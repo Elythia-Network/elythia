@@ -270,7 +270,7 @@ func runReactionFlushWorker(ctx context.Context, enqueue func() error) {
 
 // buildIPExtractor returns an echo.IPExtractor that wraps Echo's standard
 // XFF extractor with a UDS-safe fallback. Echo 標準の ExtractIPFromXFFHeader
-// (echo/ip.go:252) は req.RemoteAddr が空文字 (UNIX domain socket 経由のとき
+// (echo/ip.go の ExtractIPFromXFFHeader) は req.RemoteAddr が空文字 (UNIX domain socket 経由のとき
 // net.SplitHostPort が "" を返す) のとき XFF 逆順走査で net.ParseIP("") が
 // nil → directIP="" を早期 return してしまい、c.RealIP() が常に空文字を
 // 返す。signin record / user_ip 記録 / rate-limit が破壊されるため (#703)、
