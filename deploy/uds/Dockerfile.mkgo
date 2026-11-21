@@ -72,6 +72,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
+# **base の既存のパッケージを上げる。** base を digest で固定しているので、公式の image が
+# 作り直されるまで、base に入っている openssl・zlib などは古い版のままになる (apk add は
+# 既に入っているものを上げない)。2026-11 には、固定した base の openssl が修正前の版で、
+# alpine:3.24 は最新の digest でも同じだった。
+# **この層は build cache に残る。** base の digest が変わらない限り、2 回目からは実行
+# されない。新しく出た修正は、build cache を使わずに作り直すまで入らない。
+RUN apk upgrade --no-cache
+
 # curl は healthcheck で `--unix-socket` を使って mk-go を叩くので必須。
 # wget は UDS をサポートしていないため不可。
 RUN apk add --no-cache ca-certificates tzdata curl
