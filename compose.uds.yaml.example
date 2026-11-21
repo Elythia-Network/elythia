@@ -256,7 +256,11 @@ services:
 
   nginx:
     logging: *default-logging
-    image: nginx:1.27-alpine
+    # stable の系列 (1.30) を digest で固定する。1.27 は更新が止まり、公開された
+    # 脆弱性の修正が出ない (修正は 1.30.7 / 1.31.9 から)。floating tag だと、手元に
+    # 一度 pull した古い image を使い続ける。compose はルートの Dockerfile と違い
+    # Dependabot の docker の対象に入らないので、上げるのは手で行う。
+    image: nginx:1.30-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
     depends_on:
       mkgo:
         condition: service_healthy
