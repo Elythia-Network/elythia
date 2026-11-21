@@ -916,16 +916,27 @@ func TestInboxProcessor_SignerIsActor_ForbiddenDirectiveDropped(t *testing.T) {
 // memReplayGuard is an in-memory InboxReplayGuard for tests.
 type memReplayGuard struct {
 	seen map[string]bool
-	err  error
+	// claims are the processing marks, by key, holding their owner.
+	claims map[string]string
+	err    error
 }
 
-func newMemReplayGuard() *memReplayGuard { return &memReplayGuard{seen: map[string]bool{}} }
+func newMemReplayGuard() *memReplayGuard {
+	return &memReplayGuard{seen: map[string]bool{}, claims: map[string]string{}}
+}
 
-func (g *memReplayGuard) Seen(_ context.Context, id string) (bool, error) {
+func (g *memReplayGuard) Claim(_ context.Context, id, owner string) (bool, error) {
 	if g.err != nil {
 		return false, g.err
 	}
-	return g.seen[id], nil
+	if g.seen[id] {
+		return false, nil
+	}
+	if held, ok := g.claims[id]; ok {
+		return held == owner, nil
+	}
+	g.claims[id] = owner
+	return true, nil
 }
 
 func (g *memReplayGuard) Remember(_ context.Context, id string) error {
@@ -933,6 +944,17 @@ func (g *memReplayGuard) Remember(_ context.Context, id string) error {
 		return g.err
 	}
 	g.seen[id] = true
+	delete(g.claims, id)
+	return nil
+}
+
+func (g *memReplayGuard) Release(_ context.Context, id, owner string) error {
+	if g.err != nil {
+		return g.err
+	}
+	if g.claims[id] == owner {
+		delete(g.claims, id)
+	}
 	return nil
 }
 
@@ -970,6 +992,84 @@ func TestInboxProcessor_DropsReplayedActivity(t *testing.T) {
 	// 同じ payload をそのまま投げ直す (= 捕まえた署名付きリクエストの再投函)。
 	require.NoError(t, p.Handle(context.Background(), task))
 	assert.Len(t, stub.calls, 1, "再投函が処理されている")
+}
+
+// **処理中の再投函も捨てる。** 見てから処理して覚える順だと、最初の処理が終わる
+// 前に投げ直した同じリクエストも「まだ見ていない」と判断して通っていた。
+func TestInboxProcessor_DropsReplayWhileTheFirstIsProcessing(t *testing.T) {
+	body := []byte(`{"id":"https://remote.example/follows/c","type":"Follow","actor":"https://remote.example/users/alice"}`)
+	verifier, payload := signedReplayFixture(t, body)
+	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
+
+	var p *processors.InboxProcessor
+	var nestedErr error
+	nested := false
+	stub := &stubFedProcessor{returnFn: func([]byte) error {
+		if !nested {
+			nested = true
+			// 最初の処理の途中で、別のジョブとして同じリクエストが届く。
+			nestedErr = p.Handle(driver.WithJobID(context.Background(), "2"), task)
+		}
+		return nil
+	}}
+	guard := newMemReplayGuard()
+	p = processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "1"), task))
+	require.NoError(t, nestedErr)
+	assert.Len(t, stub.calls, 1, "the replay sent while the first was processing went through")
+	assert.Empty(t, guard.claims, "the processing marks became processed records")
+}
+
+// **同じジョブの再試行は、自分の印を通れる。** ワーカーが処理の途中で落ちると印が
+// 残るが、取り直した同じジョブまで再投函として捨てると、活動が失われる。
+func TestInboxProcessor_RetryOfTheSameJobPassesItsMark(t *testing.T) {
+	body := []byte(`{"id":"https://remote.example/follows/r","type":"Follow","actor":"https://remote.example/users/alice"}`)
+	verifier, payload := signedReplayFixture(t, body)
+	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
+	stub := &stubFedProcessor{}
+	guard := newMemReplayGuard()
+	// 落ちたジョブ 7 が残した印。
+	for _, key := range []string{digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"]), replayKeyOf(payload.Headers["Date"], payload.Body)} {
+		guard.claims[key] = "job:7"
+	}
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
+	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "8"), task))
+	assert.Empty(t, stub.calls, "another job is a replay")
+	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "7"), task))
+	assert.Len(t, stub.calls, 1, "the same job's retry is processed")
+}
+
+// **一部の鍵だけを取れたときは、取った印を外して再投函として扱う。** 外さないと、
+// 取った鍵に印が残り、印の期限まで同じリクエストを処理し直せない。
+func TestInboxProcessor_PartialClaimReleasesTheMarksItTook(t *testing.T) {
+	body := []byte(`{"id":"https://remote.example/follows/p","type":"Follow","actor":"https://remote.example/users/alice"}`)
+	verifier, payload := signedReplayFixture(t, body)
+	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
+	stub := &stubFedProcessor{}
+	guard := newMemReplayGuard()
+	// 前の形の鍵 (2 つ目) だけが処理済み。
+	guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)] = true
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
+	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "1"), task))
+	assert.Empty(t, stub.calls, "a request processed under the previous key is a replay")
+	assert.Empty(t, guard.claims, "the mark on the first key was left behind")
+}
+
+// **処理が失敗したら、印を外す。** 外さないと、印の期限まで同じリクエストを処理し
+// 直せない。
+func TestInboxProcessor_FailureReleasesTheMark(t *testing.T) {
+	body := []byte(`{"id":"https://remote.example/follows/f","type":"Follow","actor":"https://remote.example/users/alice"}`)
+	verifier, payload := signedReplayFixture(t, body)
+	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
+	stub := &stubFedProcessor{returnFn: func([]byte) error { return errors.New("transient") }}
+	guard := newMemReplayGuard()
+	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
+	require.Error(t, p.Handle(driver.WithJobID(context.Background(), "1"), task))
+	assert.Empty(t, guard.claims)
+	assert.Empty(t, guard.seen)
 }
 
 // **処理が失敗したら覚えない。** 先に覚えると、キューの再試行を自分で

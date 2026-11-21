@@ -3,6 +3,8 @@ package processors
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -321,11 +323,21 @@ func (p *InboxProcessor) recordInboxTelemetry(host string, class deliveryhealth.
 	})
 }
 
-func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
+func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 	payload, err := queue.DecodeInboxPayload(t.Payload())
 	if err != nil {
 		return fmt.Errorf("decode inbox payload: %w: %w", err, driver.ErrSkipRetry)
 	}
+	// 再投函ガードの処理中の印の持ち主。処理が成功しないまま戻るときは印を外す
+	// (外さないと、印の期限まで、同じリクエストを別のジョブで処理し直せない)。
+	owner := replayOwner(ctx)
+	var claimed []string
+	remembered := false
+	defer func() {
+		if !remembered {
+			p.releaseReplayKeys(claimed, owner)
+		}
+	}()
 
 	// payload に Headers が含まれている = #565 の fast-write handler から
 	// 来た payload。worker 側で signature を verify する。Headers が無い
@@ -481,7 +493,9 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 		// そのまま投げ直す形なので、署名された Date を足せば過不足なく捕まえられる。
 		// 本文は、受付が本文との一致を確かめた Digest で表す (#3988)。
 		replayKeys = p.replayKeys(payload.Headers, payload.Body, digestSigned)
-		if p.isReplay(replayKeys) {
+		var replay bool
+		claimed, replay = p.claimReplayKeys(replayKeys, owner)
+		if replay {
 			slog.Debug("inbox: activity already processed, dropping replay",
 				"host", host, "activityId", activityID)
 			p.recordInboxTelemetry(host, deliveryhealth.ClassDuplicate, started, "")
@@ -543,33 +557,62 @@ func (p *InboxProcessor) Handle(_ context.Context, t driver.Task) error {
 	// **成功してから覚える。** 先に覚えると、処理が落ちてキューが再試行した
 	// ときに自分の再試行を再投函として捨ててしまう。
 	p.rememberActivity(replayKeys, activityID)
+	remembered = true
 	p.recordInboxTelemetry(host, deliveryhealth.ClassAccepted, started, "")
 	return nil
 }
 
-// isReplay reports whether a request with any of these replay keys was
-// already processed.
+// claimReplayKeys places owner's processing mark on every replay key, and
+// reports replay when a key is already processed or marked by another job;
+// claimed are the keys it marked (Release them when the processing does not
+// succeed). 1 つでも取れなければ、取った印を外して再投函として扱う。
 //
 // guard の障害では**落とさない** (fail-open)。Redis が不調なだけで連合の受信が
 // 止まると、再投函を防ぐより害が大きい。
-func (p *InboxProcessor) isReplay(replayKeys []string) bool {
+func (p *InboxProcessor) claimReplayKeys(replayKeys []string, owner string) (claimed []string, replay bool) {
 	if p.replayGuard == nil {
-		return false
+		return nil, false
 	}
 	for _, key := range replayKeys {
 		if key == "" {
 			continue
 		}
-		seen, err := p.replayGuard.Seen(context.Background(), key)
+		held, err := p.replayGuard.Claim(context.Background(), key, owner)
 		if err != nil {
 			slog.Warn("inbox: replay guard degraded, accepting without the check", "err", err)
-			return false
+			return claimed, false
 		}
-		if seen {
-			return true
+		if !held {
+			p.releaseReplayKeys(claimed, owner)
+			return nil, true
+		}
+		claimed = append(claimed, key)
+	}
+	return claimed, false
+}
+
+// releaseReplayKeys drops owner's processing marks on keys.
+func (p *InboxProcessor) releaseReplayKeys(keys []string, owner string) {
+	if p.replayGuard == nil {
+		return
+	}
+	for _, key := range keys {
+		if err := p.replayGuard.Release(context.Background(), key, owner); err != nil {
+			slog.Warn("inbox: failed to release the replay guard's processing mark", "err", err)
 		}
 	}
-	return false
+}
+
+// replayOwner returns the owner of the replay guard's processing marks for the
+// running job: the job ID the driver passes, or a token of this call when the
+// driver passes none (then a retry of the job is treated as another job).
+func replayOwner(ctx context.Context) string {
+	if id := driver.JobID(ctx); id != "" {
+		return "job:" + id
+	}
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return "call:" + hex.EncodeToString(b[:])
 }
 
 // rememberActivity records a successfully processed request by its replay
