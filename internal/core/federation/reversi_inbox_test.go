@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	coreblocking "github.com/elythia-network/elythia/internal/core/blocking"
@@ -1021,4 +1022,54 @@ func TestReversiInbox_Invite_UnblockedActorPasses(t *testing.T) {
 	g := b.gameRepo.findGameBySession(t, b.fedCache, "sess-unblocked")
 	require.NotNil(t, g)
 	assert.Equal(t, "bob", g.User2ID)
+}
+
+// A pre-start change from the federated opponent past its limit is dropped,
+// not retried: a retry would apply the old change after the window, out of
+// order, and the two servers' games would drift apart. The federated limit is
+// larger than the local one (300), so a sending Elythia's changes pass even
+// when they arrive bunched.
+func TestReversiInbox_Update_TooManyChangesAreDropped(t *testing.T) {
+	update := func(state string) []byte {
+		return []byte(`{
+			"type": "Update",
+			"actor": "https://remote.example/users/alice",
+			"object": {
+				"type": "Game",
+				"game_type_uuid": "1c086295-25e3-4b82-b31e-3e3959906312",
+				"game_state": ` + state + `
+			}
+		}`)
+	}
+	for name, tc := range map[string]struct {
+		set, unset string
+		value      func(*model.ReversiGame) bool
+	}{
+		"ready": {
+			`{"game_session_id": "sess-many", "type": "ready_states", "ready": true}`,
+			`{"game_session_id": "sess-many", "type": "ready_states", "ready": false}`,
+			func(g *model.ReversiGame) bool { return g.User2Ready },
+		},
+		"settings": {
+			`{"game_session_id": "sess-many", "type": "settings", "key": "isLlotheo", "value": true}`,
+			`{"game_session_id": "sess-many", "type": "settings", "key": "isLlotheo", "value": false}`,
+			func(g *model.ReversiGame) bool { return g.IsLlotheo },
+		},
+	} {
+		b := newReversiProcessor(t)
+		registerRemoteAlice(t, b.userRepo)
+		seedFederatedGame(t, b, "sess-many", false)
+		g := b.gameRepo.findGameBySession(t, b.fedCache, "sess-many")
+		require.NotNil(t, g)
+		key := "reversi:game:preStartChanges:" + g.ID + ":alice"
+		// ローカルの上限 (300) を超えていても、連合の相手の変更は通る。
+		require.NoError(t, fedTestRedis.Client.Set(context.Background(), key, 300, time.Minute).Err())
+		require.NoError(t, b.processor.Process(update(tc.set)), name)
+		require.True(t, tc.value(b.gameRepo.findGameBySession(t, b.fedCache, "sess-many")), name)
+
+		// 連合の上限 (900) まで変えた後の変更は捨てる。
+		require.NoError(t, fedTestRedis.Client.Set(context.Background(), key, 900, time.Minute).Err())
+		assert.ErrorIs(t, b.processor.Process(update(tc.unset)), federation.ErrUnsupportedActivity, name)
+		assert.True(t, tc.value(b.gameRepo.findGameBySession(t, b.fedCache, "sess-many")), name)
+	}
 }

@@ -310,12 +310,12 @@ func (p *Processor) handleReversiUpdate(act genericActivity) error {
 			return errors.New("reversi update settings: missing key")
 		}
 		raw, _ := json.Marshal(state.Value)
-		return p.reversiSvc.UpdateSettings(ctx, game.ID, actor.ID, state.Key, raw)
+		return dropTooManyChanges(p.reversiSvc.UpdateSettings(corereversi.WithFederatedChange(ctx), game.ID, actor.ID, state.Key, raw), game.ID)
 	case "ready_states":
 		if state.Ready == nil {
 			return errors.New("reversi update ready: missing ready flag")
 		}
-		return p.reversiSvc.UpdateReady(ctx, game.ID, actor.ID, *state.Ready)
+		return dropTooManyChanges(p.reversiSvc.UpdateReady(corereversi.WithFederatedChange(ctx), game.ID, actor.ID, *state.Ready), game.ID)
 	case "putstone":
 		if state.Pos == nil {
 			return errors.New("reversi update putstone: missing pos")
@@ -390,4 +390,18 @@ func defaultReversiMap() []string {
 		"--------",
 		"--------",
 	}
+}
+
+// dropTooManyChanges turns the refusal of a pre-start change past the limit
+// (corereversi.ErrTooManyChanges) into ErrUnsupportedActivity, so the inbox
+// drops the activity instead of retrying it.
+//
+// 再試行すると、窓が明けた後に古い設定や準備完了が順序を無視して当たり、両方の
+// サーバーで対局の状態がずれる。相手が上限を超えて送ってきた分は捨てる。
+func dropTooManyChanges(err error, gameID string) error {
+	if errors.Is(err, corereversi.ErrTooManyChanges) {
+		slog.Info("reversi inbox: dropped a pre-start change past the limit", "gameId", gameID)
+		return ErrUnsupportedActivity
+	}
+	return err
 }

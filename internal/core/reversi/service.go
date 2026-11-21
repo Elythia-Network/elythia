@@ -153,7 +153,69 @@ var (
 	ErrInvalidMove = errors.New("invalid move")
 	// ErrInvalidSetting is returned when an updateSettings key/value is refused.
 	ErrInvalidSetting = errors.New("invalid setting")
+	// ErrTooManyChanges is returned when a player changes their ready state or
+	// the settings of a game more often than preStartChangeLimit allows.
+	ErrTooManyChanges = errors.New("too many changes to the game before it starts")
 )
+
+// preStartChangeLimit and preStartChangeWindow bound how often one player may
+// change their ready state or the settings of one game before it starts.
+//
+// Elythia: 変更のたびに、相手の画面への配信、プラグインのキュー (相手が bot のとき)、
+// 連合の対局なら相手への配送が 1 本ずつ積まれる。準備完了を切り替え続けるだけで、
+// bot のほかの通知を遅らせられた (2026-11-22 の監査)。画面から押す回数なら届かない量にする。
+// カスタムのマップは 1 マスのクリックごとに 1 回の変更になり、1 マスは 4 つの状態を
+// 巡るので、8x8 を作り直すと 1 分で 200 回ほどになる。
+const (
+	preStartChangeLimit  = 300
+	preStartChangeWindow = time.Minute
+	// preStartChangeLimitFederated is the limit for the changes the federated
+	// opponent sends (WithFederatedChange). 送る側の Elythia も同じ上限を持つが、窓の
+	// 始まりが違い、配送の再試行や相手の障害の後には届く時刻が固まるので、送る側が
+	// 通した変更を受ける側が捨てないよう、余裕を持たせる (捨てると再試行しないので、
+	// 両方のサーバーで対局がずれたまま戻らない)。
+	preStartChangeLimitFederated = 3 * preStartChangeLimit
+)
+
+type federatedChangeKey struct{}
+
+// WithFederatedChange marks ctx as carrying a change the federated opponent
+// sent, which preStartChangeLimitFederated bounds instead of
+// preStartChangeLimit.
+func WithFederatedChange(ctx context.Context) context.Context {
+	return context.WithValue(ctx, federatedChangeKey{}, true)
+}
+
+// allowPreStartChange counts one change by userID to gameID before it starts,
+// and returns ErrTooManyChanges past the limit. Without Redis, or when Redis
+// fails, the change is allowed (the limit only keeps a player from flooding
+// the notifications).
+func (s *Service) allowPreStartChange(ctx context.Context, gameID, userID string) error {
+	if s.redis == nil {
+		return nil
+	}
+	key := fmt.Sprintf("reversi:game:preStartChanges:%s:%s", gameID, userID)
+	// 数えるのと期限を付けるのを 1 つのトランザクションにする。分けると、期限を付ける
+	// 前に失敗したときに期限の無い数が残り、その対局ではずっと断られる。
+	var incr *redis.IntCmd
+	_, err := s.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		incr = pipe.Incr(ctx, key)
+		pipe.ExpireNX(ctx, key, preStartChangeWindow)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("reversi: count a pre-start change failed", "gameId", gameID, "err", err)
+		return nil
+	}
+	limit := int64(preStartChangeLimit)
+	if federated, _ := ctx.Value(federatedChangeKey{}).(bool); federated {
+		limit = preStartChangeLimitFederated
+	}
+	if incr.Val() > limit {
+		return ErrTooManyChanges
+	}
+	return nil
+}
 
 // --- PubSub publisher interface ---
 
@@ -417,6 +479,9 @@ func (s *Service) UpdateReady(ctx context.Context, gameID, userID string, ready 
 	if !isPlayer(game, userID) {
 		return ErrNotPlayer
 	}
+	if err := s.allowPreStartChange(ctx, gameID, userID); err != nil {
+		return err
+	}
 	// ローカルWS経由のreadyと連合inbox経由の相手readyが並行して走ると、
 	// Get→full-row Saveのread-modify-writeでは相手のready=trueをstale値で
 	// 上書きするlost updateが起きる (#1626)。自分のカラムだけをguard付き
@@ -481,6 +546,10 @@ func (s *Service) UpdateSettings(ctx context.Context, gameID, userID, key string
 		return ErrInvalidSetting
 	}
 	if err := applySetting(game, key, value); err != nil {
+		return err
+	}
+	// 読める設定だけを数える (拒んだ変更は配信を起こさない)。
+	if err := s.allowPreStartChange(ctx, gameID, userID); err != nil {
 		return err
 	}
 	// 設定変更は ready 状態をリセットする (本家挙動)
@@ -871,7 +940,7 @@ func (s *Service) turnExpired(ctx context.Context, gameID string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	if !game.IsStarted || game.IsEnded {
+	if !game.IsStarted || game.IsEnded || !hasTurnTimeLimit(game) {
 		return false, nil
 	}
 	var logs [][]int
@@ -885,12 +954,22 @@ func (s *Service) turnExpired(ctx context.Context, gameID string) (bool, error) 
 	return !exists, nil
 }
 
+// hasTurnTimeLimit reports whether the turns of game have a time limit.
+//
+// Elythia: 0 秒 (API からだけ設定できる。frontend の選択肢には無い) は時間制限なしとして
+// 扱い、時間切れにしない。setTurnTimer は 0 秒ではタイマーを置かないので、本家と同じく
+// 「タイマーが無い = 時間切れ」と読むと、手を打った直後に時間切れを申告するだけで相手を
+// 負けにできる (#3942 で REST の申告の入口ができ、打つ処理と続けて送れる)。
+func hasTurnTimeLimit(game *model.ReversiGame) bool {
+	return game.TimeLimitForEachTurn > 0
+}
+
 func (s *Service) checkTimeout(ctx context.Context, gameID string) error {
 	game, err := s.Get(ctx, gameID)
 	if err != nil {
 		return err
 	}
-	if !game.IsStarted || game.IsEnded {
+	if !game.IsStarted || game.IsEnded || !hasTurnTimeLimit(game) {
 		return nil
 	}
 	var logs [][]int

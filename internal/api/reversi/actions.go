@@ -85,6 +85,9 @@ func (h *Handler) Ready(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, apierr.InternalError())
 	}
 	if err := h.svc.UpdateReady(actionContext(c), req.GameID, user.ID, *req.Ready); err != nil {
+		if errors.Is(err, corereversi.ErrTooManyChanges) {
+			return apierr.JSONRateLimitExceeded(c)
+		}
 		return readyErrors.respond(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
