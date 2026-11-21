@@ -234,3 +234,42 @@ func TestDeleteAllByHost_FailedDeleteStillDeletesTheLocalCopy(t *testing.T) {
 	assert.Equal(t, int64(1), n)
 	assert.Equal(t, []string{"a1", "t1", "w1"}, local.deleted)
 }
+
+// DeleteFileObjects deletes the stored objects the way Delete does, and
+// leaves the row for the caller (the delete-account job deletes the rows of
+// a whole account at once).
+func TestDeleteFileObjects_DeletesObjectsAndKeepsTheRow(t *testing.T) {
+	svc, storage, enq, repo := svcWithEnqueuer(t, objectStoredFile())
+	require.NoError(t, svc.DeleteFileObjects(repo.Files["f1"]))
+	assert.Equal(t, []string{"a1", "t1", "w1"}, enq.keys)
+	assert.Empty(t, storage.deleted)
+	assert.Contains(t, repo.Files, "f1", "the row is the caller's to delete")
+
+	local := objectStoredFile()
+	local.StoredInternal = true
+	svc, storage, enq, repo = svcWithEnqueuer(t, local)
+	require.NoError(t, svc.DeleteFileObjects(repo.Files["f1"]))
+	assert.Empty(t, enq.keys)
+	assert.Equal(t, []string{"a1", "t1", "w1"}, storage.deleted)
+	assert.Contains(t, repo.Files, "f1")
+}
+
+// When the primary object cannot be deleted, DeleteFileObjects still deletes
+// the local copy of a migrated file: the caller deletes the row anyway, so
+// nothing would point at the copy any more.
+func TestDeleteFileObjects_FailedDeleteStillDeletesTheLocalCopy(t *testing.T) {
+	f := objectStoredFile()
+	at := time.Now()
+	f.ObjectStorageMigratedAt = &at
+	repo := testutil.NewMockDriveFileRepository()
+	repo.Files[f.ID] = f
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	svc := drive.NewService(repo, testutil.NewMockDriveFolderRepository(),
+		failingDeleteStorage{drive.NewLocalStorage(t.TempDir(), "")}, idGen, nil, nil, nil, nil)
+	local := &countingStorage{LocalStorage: drive.NewLocalStorage(t.TempDir(), "")}
+	svc.SetLocalStorage(local)
+
+	require.Error(t, svc.DeleteFileObjects(f))
+	assert.Equal(t, []string{"a1", "t1", "w1"}, local.deleted)
+}

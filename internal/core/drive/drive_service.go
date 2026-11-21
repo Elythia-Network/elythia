@@ -414,6 +414,27 @@ func (s *Service) deleteFileObjects(f *model.DriveFile) error {
 	return primaryErr
 }
 
+// DeleteFileObjects removes the stored objects of f (the primary, thumbnail
+// and webpublic objects, the local copy the migration to object storage left,
+// and the copies left in object storage by moving a file back) the way
+// deleting the file from the drive does, without deleting its row. The
+// caller deletes the row whatever the result; the error is that of the
+// primary object.
+//
+// アカウントの削除 (delete-account のジョブ) が、行をまとめて消す前に呼ぶ。行だけを
+// 消すと、実体がローカルにもオブジェクトストレージにも残り、public-read のバケットでは
+// 公開 URL から取れ続ける (本家の DeleteAccountProcessorService は deleteFileSync で消す)。
+//
+// **本体を消せなくても写しは消す** (DeleteAllByHost と同じ)。呼ぶ側は必ず行を消すので、
+// deleteFileObjects のように写しを残すと、誰も指さない写しになる。
+func (s *Service) DeleteFileObjects(f *model.DriveFile) error {
+	err := s.deleteFileObjects(f)
+	if err != nil {
+		s.deleteMigrationCopies(f)
+	}
+	return err
+}
+
 // HasMigratedLocalCopy reports whether f was copied to object storage by the
 // local-to-object-storage migration (#4180), which leaves the local copy in
 // place until the purge (#4182) deletes it. Deleting such a file must delete
@@ -433,12 +454,13 @@ func HasMigratedLocalCopy(f *model.DriveFile) bool {
 //     残らない孤児になるので、移す処理の実行中は消すジョブを積む。無いキーを消しても
 //     失敗にはならない。実行中でなければ積まない (本家と同じく、ローカルの行の削除で
 //     オブジェクトストレージには触れない)。積んだジョブが写しの Put より先に動き、その
-//     後で印が付いてから行が消えると写しが残る (数ミリ秒の窓で、塞がない)
+//     後で印が付いてから行が消えると写しが残る (数ミリ秒の窓で、塞がない。アカウントの
+//     削除は 100 件を読んでから行を消すので、窓はそのバッチを処理する時間に広がる)
 func (s *Service) deleteMigrationCopies(f *model.DriveFile) {
 	// ローカルへ戻したファイル (#4183) の写しはバケットに残っている。どの写しかは記録に
 	// あるので、記録のある行だけ消す (#4197)。管理画面の掃除と違い、行を消す前に消す。
-	// 1 件ずつ消す経路で、行の削除が失敗するのは DB の障害のときだけなので、消そうとした
-	// ファイルの写しが先に無くなるだけになる。
+	// 行の削除が失敗するのは DB の障害のときだけなので、消そうとしたファイルの写しが先に
+	// 無くなるだけになる (アカウントの削除は、ジョブの再試行で同じ行を消し直す)。
 	if f.StoredInternal && !f.IsLink && s.restoredCopies != nil {
 		s.restoredCopies.ReleaseRestoredCopies(context.Background(), f.ID)
 	}
