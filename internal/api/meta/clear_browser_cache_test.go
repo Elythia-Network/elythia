@@ -38,3 +38,27 @@ func TestClearBrowserCache(t *testing.T) {
 		})
 	}
 }
+
+// A request another site started (an <img>, a navigation) answers 204 without
+// Clear-Site-Data, so another site cannot make every open tab reload; the
+// frontend calls it from its own origin.
+func TestClearBrowserCache_NotForAnotherSite(t *testing.T) {
+	for value, clears := range map[string]bool{
+		"cross-site":  false,
+		"same-site":   false,
+		"same-origin": true,
+		"none":        true,
+		"":            true,
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			req := httptest.NewRequest(method, "/api/clear-browser-cache", nil)
+			if value != "" {
+				req.Header.Set("Sec-Fetch-Site", value)
+			}
+			rec := httptest.NewRecorder()
+			require.NoError(t, ClearBrowserCache(echo.New().NewContext(req, rec)))
+			assert.Equal(t, http.StatusNoContent, rec.Code, value)
+			assert.Equal(t, clears, rec.Header().Get("Clear-Site-Data") != "", "%s %q", method, value)
+		}
+	}
+}

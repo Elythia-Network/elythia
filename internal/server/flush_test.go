@@ -63,3 +63,33 @@ func TestFlushPage_RegisteredOnBuiltServer(t *testing.T) {
 	}
 	t.Fatal("GET /flush is not registered")
 }
+
+// When another site sent the browser to /flush (a link, a script), nothing is
+// cleared: the page asks first, and its link (a same-origin navigation) clears.
+func TestFlushPage_AsksWhenAnotherSiteSentTheBrowser(t *testing.T) {
+	for value, asks := range map[string]bool{
+		"cross-site":  true,
+		"same-site":   true,
+		"same-origin": false,
+		"none":        false,
+		"":            false,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/flush", nil)
+		if value != "" {
+			req.Header.Set("Sec-Fetch-Site", value)
+		}
+		rec := httptest.NewRecorder()
+		require.NoError(t, flushPage("https://example.test")(echo.New().NewContext(req, rec)))
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"), value)
+		if asks {
+			assert.Empty(t, rec.Header().Get("Clear-Site-Data"), value)
+			assert.Empty(t, rec.Header().Get("Set-Cookie"), value)
+			assert.NotContains(t, rec.Body.String(), "flush.js", value)
+			assert.Contains(t, rec.Body.String(), `<a href="/flush">`, value)
+		} else {
+			assert.Equal(t, `"*"`, rec.Header().Get("Clear-Site-Data"), value)
+			assert.Contains(t, rec.Body.String(), "flush.js", value)
+		}
+	}
+}

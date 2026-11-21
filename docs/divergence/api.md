@@ -240,9 +240,11 @@ echoのv5へ上げて (#4239)、frontendのビルドの配信 (`/vite/*`・`/emb
 
 ## `/api/clear-browser-cache`に無効なtokenを付けたとき (#3926)
 
-`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは全ルートに掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenの検索がDBの失敗で落ちたときは500を返し、同じく`Clear-Site-Data`を付けない(#4212)。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
+`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し (別のサイトが起こした要求は下の例外)、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは全ルートに掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenの検索がDBの失敗で落ちたときは500を返し、同じく`Clear-Site-Data`を付けない(#4212)。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
 
 本体のfrontendは、tokenを付けずに呼ぶ(`misskeyApiGet('clear-browser-cache', {})`)ので、この違いを踏まない。踏むのは、失効したtokenを付けたまま呼ぶ他のクライアントだけなので、全体の認証にこのパスの例外を足すことはしていない。
+
+**別のサイトが起こした要求 (`Sec-Fetch-Site`が`cross-site`か`same-site`) には、204を返すが`Clear-Site-Data`を付けない。** 本家は付ける。`executionContexts`は、このサーバーの開いているタブをすべて読み込み直させるので、別のサイトの`<img>`や遷移で、書きかけの投稿などを失わせられる。本体のfrontendは自分のオリジンから呼ぶ (`same-origin`) ので、この違いを踏まない。`Sec-Fetch-Site`を送らないクライアントでは本家と同じ。
 
 ## ロールのメンバー一覧と`usersCount`から、凍結中と削除済みを外す (#3999)
 
