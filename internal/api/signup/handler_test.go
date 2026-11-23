@@ -587,6 +587,30 @@ func TestSignupPending_InvalidParam(t *testing.T) {
 	testutil.AssertFastifyError(t, rec, http.StatusBadRequest, "INVALID_PARAM")
 }
 
+// codeが無い・null・空文字・文字列でない本文では、確認待ちの行からアカウントを作らない。
+// 行のcodeを空にして、照会に進めば当たってしまう状態で確かめる。
+func TestSignupPending_MissingCodeDoesNotPromote(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
+	pendingRepo := testutil.NewMockUserPendingRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
+	svc.SetUserPendingRepo(pendingRepo)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
+
+	row, err := svc.CreatePending("bob", "bob@example.com", "secret", nil)
+	require.NoError(t, err)
+	row.Code = ""
+
+	for _, body := range []string{`{}`, `{"code":null}`, `{"code":""}`, `{"code":123}`} {
+		rec := doPost(h.SignupPending, body)
+		assert.Empty(t, userRepo.Users, body)
+		assert.Len(t, pendingRepo.Rows, 1, body)
+		testutil.AssertFastifyError(t, rec, http.StatusBadRequest, "INVALID_PARAM")
+	}
+}
+
 func TestSignupPending_NotFound(t *testing.T) {
 	userRepo := testutil.NewMockUserRepository()
 	metaRepo := testutil.NewMockMetaRepository()
