@@ -18,6 +18,7 @@
 | Playwright e2e | Elythia と Misskey TS の両 backend で API/frontend 統合互換を検証 | Docker Compose 全部 | `tests/playwright/` 配下 (#744、397 spec ファイル。PR ごとに Elythia、upstream 追従時に TS backend) |
 | fuzz | 連合の相手が中身を決める入力を読む関数(署名のヘッダ、公開鍵、JSON-LDの正規化、ActivityPubの型、リモートのHTML、ホスト、ソフトウェアの照合) | 不要(`internal/core/federation`と`mkqdriver`はRedisをtestcontainersで立てる) | `make fuzz` (詳細は[fuzz](#fuzz-4116)) |
 | 前のリリースからの更新 | 前のリリースの image で作った DB を、今のコードで`migrate up`して引き継げるか | PostgreSQL / Redis (compose) + 前の版の image + Elythia バイナリ | `make upgrade-test` (詳細は[前のリリースからの更新](#前のリリースからの更新-4123)) |
+| CherryPick からの移行 | CherryPick 4.18.0-beta.1 で作った DB を、今のコードで運営者の手順どおりに移せるか | PostgreSQL / Redis / CherryPick (compose) + Elythia バイナリ | `make cherrypick-test` (詳細は[CherryPick からの移行](#cherrypick-からの移行-4249)) |
 | /api.json から入力を作る検査 | 全エンドポイント (外す一覧を除く) の 5xx・宣言に無い status・宣言の型に合わない応答 | PostgreSQL / Redis (compose) + Elythia バイナリ | `make schemathesis-test` (詳細は[/api.json から入力を作る検査](#apijson-から入力を作る検査-4118)) |
 | fuzz (画像デコーダ) | `internal/misc/imagedecode` のデコーダと判定関数 | 不要 | `make fuzz-imagedecode` (詳細は[画像デコーダの fuzz](#画像デコーダの-fuzz-3480)) |
 | 本家 backend e2e | Misskey 本家の `test/e2e/**` をテスト本体正本のまま Elythia に向けて実行 (UserLite の期待DTOにローカル連合状態を追加) | PostgreSQL / Redis + Elythia バイナリ | `make upstream-e2e` (#2347、25 ファイル 1256 テスト。詳細は[upstream-backend-e2e.md](upstream-backend-e2e.md)) |
@@ -451,6 +452,16 @@ make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
 - **作るデータ:** 利用者3人(管理者を含む)、公開範囲ごとのノート、CW、返信、リノート、フォロー、リアクション、ドライブのファイル(行だけ。ファイルの中身は引き継がない)、クリップ、アンテナ、ロールの割り当て
 - **確かめること:** 前の版のmigrationの後と今のコードの`migrate up`の後の版(`schema_migrations`)を出し、後のほうが最新のmigrationの番号と一致すること(新しいmigrationが無ければ注意を出す)、seedとverifyの相手が前の版と今のビルドであること(`/api/meta`の`mkGoVersion`と`mkGoCommit`)、tokenがそのまま使えること、パスワードでサインインできること、ノートの本文・公開範囲・返信・リノート・数、宛先指定のノートが宛先でない人に伏せられたままであること、フォロー、リアクションの行と数、ドライブのファイルの行、クリップ、アンテナ、ロール、更新した後にノートとリアクションを書き足せてタイムラインに出ること
 - **リリースの前に、`upgrade` workflowを手動で回す**([ci.md](ci.md))。PRでは、サーバーのコードかmigrationを変えたときに回る
+
+## CherryPick からの移行 (#4249)
+
+CherryPick 4.18.0-beta.1のimageで作ったDBを、今のコードで運営者の手順([migration-from-cherrypick.md](migration-from-cherrypick.md))どおりに移し、起動して確かめる。
+
+- **`make cherrypick-test`で回す。** `tests/cherrypick/run.sh`が、DBとRedisを作り直してCherryPickを起動し、`scenario.py seed`でデータを作る。CherryPickを止めて、`go build`した今のコードで次を流し、それぞれの終了コードを確かめる: `check`(3) → `migrate`(1) → `migrate -allow-cherrypick`(0) → `migrate`(1) → 選ばない`convert`(2) → `convert -apply`(0) → `migrate`(0) → `check`(0)。起動して`scenario.py verify`で確かめ、止めてから`cleanup -apply -backup-taken`を流す。もう一度`migrate`して起動し、`scenario.py verify-after-cleanup`で読み書きを確かめる。片付けは`make cherrypick-down`
+- **作るデータ:** 管理者と利用者、投稿、予約削除の投稿(期限を過去にする)、編集した投稿、通報の自動処理の規則、承認制を有効にした後の承認待ち、隔離したホスト(CherryPickに設定する口が無いので行を直接入れる)
+- **確かめること:** CherryPickのトークンとパスワードでのサインイン、承認待ちだった利用者がサインインできず凍結されていること、投稿と編集後の本文、期限を過ぎた予約削除の投稿が消えていること、隔離したホストがブロックに入ること、`repositoryUrl`と`feedbackUrl`、規則の書き出し、移った後に投稿できること
+- 単体のテストのfixture(`internal/testutil/testdata/cherrypick-4.18.0-beta.1.sql.gz`)も同じcomposeで作る(`tests/cherrypick/gen-fixture.sh`)
+- PRでは、サーバーのコードかmigrationを変えたときに回る(`upgrade`と同じ範囲)
 
 ## /api.json から入力を作る検査 (#4118)
 

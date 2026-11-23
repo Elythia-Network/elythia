@@ -5,7 +5,7 @@
 #
 # 書き出すのは schema (表・型・索引・制約) と migrations の表の記録だけで、行は含めない。
 # テストは自分の schema に読み込むので、`public.` の修飾と、search_path を空にする
-# 行を落とす。
+# 行を落とす。run.sh (make cherrypick-test) と同じ compose を使うので、同時に流さない。
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

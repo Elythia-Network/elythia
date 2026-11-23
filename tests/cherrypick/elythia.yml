@@ -1,0 +1,22 @@
+# Elythia の設定。compose.yml の postgres / redis (CherryPick と同じ DB) に繋ぐ。
+# url は CherryPick と同じにする (ローカルの利用者の ActivityPub の id が変わらないように)。
+url: http://cherrypick.local:53095/
+port: 61815
+
+db:
+  host: 127.0.0.1
+  port: 54395
+  db: misskey
+  user: misskey
+  pass: testpass
+
+redis:
+  host: 127.0.0.1
+  port: 56395
+
+id: aidx
+
+jobQueueDriver: mkq
+
+disableEndpointRateLimits: true
+enableIpRateLimit: false
