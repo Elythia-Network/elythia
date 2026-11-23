@@ -41,7 +41,9 @@ func (h *Handler) AccountsDelete(c *echo.Context) error {
 		h.revokeUserStreams(req.UserID)
 		h.logUserAction(c, moderationlog.LogDeleteAccount, req.UserID)
 	}
-	h.scheduleAccountCascade(req.UserID, user != nil && user.Host != nil)
+	// 積めなかったことは scheduleAccountCascade がログに残す。管理画面の削除は、flag が
+	// 立っていれば成功として返す (もう一度消せば積み直せる)。
+	_ = h.scheduleAccountCascade(req.UserID, user != nil && user.Host != nil)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -152,7 +154,7 @@ func (h *Handler) DeleteAccount(c *echo.Context) error {
 	// 復活を防ぐため tombstone として残す (Soft=true)。upstream DeleteAccountService の
 	// isLocalUser 分岐に対応する。
 	soft := user != nil && user.Host != nil
-	h.scheduleAccountCascade(req.UserID, soft)
+	_ = h.scheduleAccountCascade(req.UserID, soft) // 失敗はログに残す (上の AccountsDelete と同じ)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -176,17 +178,60 @@ func (h *Handler) DeletePluginManagedAccount(user *model.User) error {
 	if user == nil || !user.IsPluginManaged() || !user.IsLocal() {
 		return errors.New("admin: not a plugin-managed local account")
 	}
+	// 後片付けのジョブを積めなかったことは、管理画面からの削除と同じく失敗にしない。
+	if err := h.deleteLocalAccount(user); err != nil && !errors.Is(err, ErrCascadeNotQueued) {
+		return err
+	}
+	slog.Info("plugin-managed account deleted", "userId", user.ID, "plugin", *user.ManagedByPlugin)
+	return nil
+}
+
+// DeleteMigratedAccount deletes a local account that "elythia cherrypick
+// convert" was told to delete (#4248), with the same effects as
+// admin/delete-account. The root account and system accounts are refused.
+//
+// 管理画面からの削除と同じ流れを通す (DeletePluginManagedAccount と同じ理由)。
+// モデレーションログには残さない。操作したのは移行のコマンドを流した運営者で、
+// モデレーターのアカウントが無いので、slog に残す。
+func (h *Handler) DeleteMigratedAccount(user *model.User) error {
+	if user == nil || !user.IsLocal() {
+		return errors.New("admin: not a local account")
+	}
+	switch protected, undetermined := h.isProtectedAccount(user.ID); {
+	case undetermined:
+		return errors.New("admin: cannot determine whether the account is protected")
+	case protected:
+		return errors.New("admin: cannot delete a root or system account")
+	}
+	// 後片付けのジョブを積めなかったら失敗にする。convert は flag が立った利用者を
+	// 処理済みとして数えるので、ここで黙ると行とデータが残ったまま印が付く。
+	if err := h.deleteLocalAccount(user); err != nil {
+		return err
+	}
+	slog.Info("account deleted while migrating from CherryPick", "userId", user.ID, "username", user.Username)
+	return nil
+}
+
+// ErrCascadeNotQueued is returned by DeleteMigratedAccount when the account was
+// flagged deleted but its cascade deletion could not be queued. 管理画面から
+// もう一度消すと積み直せる。
+var ErrCascadeNotQueued = errors.New("admin: the account is flagged deleted, but its cleanup was not queued; delete it again from the admin page")
+
+// deleteLocalAccount flags a local account deleted, drops its tokens and
+// streams, delivers Delete(actor) and queues the cascade deletion.
+func (h *Handler) deleteLocalAccount(user *model.User) error {
 	if err := h.userRepo.UpdateUser(user.ID, map[string]any{"isSuspended": true, "isDeleted": true}); err != nil {
 		return fmt.Errorf("admin: flag the account deleted: %w", err)
 	}
 	h.recordLocalSuspensionOrigin(user.ID)
 	h.invalidateUserTokenCache(user.ID)
 	h.revokeUserStreams(user.ID)
-	slog.Info("plugin-managed account deleted", "userId", user.ID, "plugin", *user.ManagedByPlugin)
 	if h.userModerationFed != nil {
 		h.userModerationFed.OnUserDeleted(user)
 	}
-	h.scheduleAccountCascade(user.ID, false)
+	if err := h.scheduleAccountCascade(user.ID, false); err != nil {
+		return fmt.Errorf("%w: %w", ErrCascadeNotQueued, err)
+	}
 	return nil
 }
 
@@ -239,15 +284,17 @@ func (h *Handler) isProtectedAccount(userID string) (protected bool, undetermine
 	return isSystemAccountUser(u), false
 }
 
-// scheduleAccountCascade queues the background cascade deletion. Errors
-// from the enqueuer are logged but never surfaced — the admin flag flip
-// is the user-visible source of truth, so a failed enqueue only delays
-// the cleanup until the next manual retry.
-func (h *Handler) scheduleAccountCascade(userID string, soft bool) {
+// scheduleAccountCascade queues the background cascade deletion and returns
+// the error of the enqueuer after logging it. The admin API ignores it — the
+// flag flip is the user-visible source of truth, and deleting again queues
+// it again — while "elythia cherrypick convert" reports it (#4248).
+func (h *Handler) scheduleAccountCascade(userID string, soft bool) error {
 	if h.deleteAccountEnqueuer == nil || userID == "" {
-		return
+		return nil
 	}
 	if err := h.deleteAccountEnqueuer.EnqueueDeleteAccount(queue.DeleteAccountPayload{UserID: userID, Soft: soft}); err != nil {
 		slog.Warn("admin: enqueue delete-account failed", "userId", userID, "err", err)
+		return err
 	}
+	return nil
 }
