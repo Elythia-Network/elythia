@@ -214,3 +214,74 @@ func MarkCherryPickConverted(ctx context.Context, db *gorm.DB) error {
 func ElythiaMigrated(ctx context.Context, db *gorm.DB) (bool, error) {
 	return elythiaMigrated(db.WithContext(ctx))
 }
+
+// CherryPickLeftover is a column or table of CherryPick that "elythia
+// cherrypick cleanup" drops.
+type CherryPickLeftover struct {
+	// Table is the table; Column is empty when the whole table is dropped.
+	Table, Column string
+}
+
+func (l CherryPickLeftover) String() string {
+	if l.Column == "" {
+		return l.Table
+	}
+	return l.Table + "." + l.Column
+}
+
+// cherryPickLeftovers are what cleanup drops (#4249): the columns and the
+// table whose meaning convert replaced. 編集の履歴やイベントなど、読まれなく
+// なるだけのデータは消さない (運営者が後で取り出せるように残す)。
+var cherryPickLeftovers = []CherryPickLeftover{
+	{Table: "user", Column: "approved"},
+	{Table: "instance", Column: "quarantineLimited"},
+	{Table: "abuse_report_resolver"},
+	{Table: "note", Column: "deleteAt"},
+}
+
+// CherryPickLeftovers returns the leftovers of cherryPickLeftovers still in
+// the database.
+func CherryPickLeftovers(ctx context.Context, db *gorm.DB) ([]CherryPickLeftover, error) {
+	db = db.WithContext(ctx)
+	var left []CherryPickLeftover
+	for _, l := range cherryPickLeftovers {
+		var ok bool
+		var err error
+		if l.Column == "" {
+			ok, err = hasTable(db, l.Table)
+		} else {
+			ok, err = hasColumns(db, l.Table, l.Column)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			left = append(left, l)
+		}
+	}
+	return left, nil
+}
+
+// DropCherryPickLeftovers drops the leftovers in one transaction.
+//
+// 文は固定で、名前を組み立てない (IF EXISTS なので、途中まで消えた DB で
+// 流し直しても通る)。abuse_report_resolver の expiresAt の enum 型も表と一緒に消す。
+func DropCherryPickLeftovers(ctx context.Context, db *gorm.DB) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, sql := range []string{
+			// 列を消す ALTER は ACCESS EXCLUSIVE を取る。動いている本体の読み取りと
+			// 取り合ったときに、後ろの全クエリを詰まらせ続けないよう、待つのは30秒まで。
+			`SET LOCAL lock_timeout = '30s'`,
+			`ALTER TABLE "user" DROP COLUMN IF EXISTS approved`,
+			`ALTER TABLE instance DROP COLUMN IF EXISTS "quarantineLimited"`,
+			`DROP TABLE IF EXISTS abuse_report_resolver`,
+			`DROP TYPE IF EXISTS abuse_report_resolver_expiresat_enum`,
+			`ALTER TABLE note DROP COLUMN IF EXISTS "deleteAt"`,
+		} {
+			if err := tx.Exec(sql).Error; err != nil {
+				return fmt.Errorf("cherrypick: cleanup: %w", err)
+			}
+		}
+		return nil
+	})
+}

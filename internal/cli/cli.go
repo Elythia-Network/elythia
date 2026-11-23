@@ -58,6 +58,7 @@ func Commands() []Command {
 		{Name: "cherrypick", Summary: "move a CherryPick 4.18.0-beta.1 database to Elythia", Sub: []Command{
 			{Name: "check", Summary: "count what Elythia would drop from a CherryPick database (read-only)", Run: cherrypick.Check},
 			{Name: "convert", Summary: "replace what Elythia would drop with Elythia's own mechanisms (dry-run unless -apply)", Run: cherrypick.Convert},
+			{Name: "cleanup", Summary: "drop the CherryPick columns and table convert replaced (optional; dry-run unless -apply)", Run: cherrypick.Cleanup},
 		}},
 		{Name: "maintenance", Summary: "enter or leave maintenance mode (every process lets go of the database)", Sub: []Command{
 			{Name: "enter", Summary: "start a maintenance and wait until every process has let go of the database", Run: maintenance.Enter},
