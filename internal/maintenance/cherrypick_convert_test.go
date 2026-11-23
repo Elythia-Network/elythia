@@ -194,3 +194,51 @@ func TestCherryPickConvertedMarker(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, converted)
 }
+
+func TestCherryPickLeftovers(t *testing.T) {
+	ctx := context.Background()
+	db := openCherryPickDB(t)
+	left, err := CherryPickLeftovers(ctx, db)
+	require.NoError(t, err)
+	var names []string
+	for _, l := range left {
+		names = append(names, l.String())
+	}
+	assert.Equal(t, []string{"user.approved", "instance.quarantineLimited", "abuse_report_resolver", "note.deleteAt"}, names)
+
+	require.NoError(t, DropCherryPickLeftovers(ctx, db))
+	left, err = CherryPickLeftovers(ctx, db)
+	require.NoError(t, err)
+	assert.Empty(t, left)
+	var types int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+		WHERE n.nspname = current_schema() AND t.typname = 'abuse_report_resolver_expiresat_enum'`).Scan(&types).Error)
+	assert.Zero(t, types, "表の enum 型も消す")
+	// 消さないもの
+	ok, err := hasColumns(db, "user", "signupReason")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = hasTable(db, "note_history")
+	require.NoError(t, err)
+	assert.True(t, ok, "読まれなくなるだけのデータは残す")
+
+	require.NoError(t, DropCherryPickLeftovers(ctx, db), "流し直しても通る")
+	r := inspect(t, db)
+	assert.Equal(t, CherryPickSupported, r.Status)
+	assert.Zero(t, r.Unprocessed(), "消した後も check は通る")
+}
+
+// 素の Elythia の schema には、cleanup が消すものが無い。Elythia が同じ名前の列や表を
+// 使い始めたら (本家の追従など)、cleanup が Elythia のものを消してしまうので、ここで落とす。
+func TestCherryPickLeftovers_NotInElythia(t *testing.T) {
+	left, err := CherryPickLeftovers(context.Background(), testDB)
+	require.NoError(t, err)
+	assert.Empty(t, left)
+	var types int64
+	require.NoError(t, testDB.Raw(`SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+		WHERE n.nspname = current_schema() AND t.typname = 'abuse_report_resolver_expiresat_enum'`).Scan(&types).Error)
+	assert.Zero(t, types, "cleanup は型も無条件に消す")
+	var n int64
+	require.NoError(t, testDB.Raw(`SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'note'`).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "testDB は Elythia の migration を流した schema")
+}
