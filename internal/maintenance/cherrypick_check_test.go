@@ -35,9 +35,15 @@ var cherryPickNow = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
 
 // requireApproval turns on CherryPick's approval for signup. CherryPick は
 // meta の行を起動したときに作る (fixture には行が無い)。
+//
+// repositoryURL が CherryPick のものなら、feedbackUrl も CherryPick の既定のまま残す。
+// そうでなければ feedbackUrl を空にして、リンクの項目を数えないようにする。
 func requireApproval(t *testing.T, db *gorm.DB, repositoryURL string) {
 	t.Helper()
 	require.NoError(t, db.Exec(`INSERT INTO meta (id, "approvalRequiredForSignup", "repositoryUrl") VALUES ('x', true, ?)`, repositoryURL).Error)
+	if !isCherryPickRepository(repositoryURL) {
+		require.NoError(t, db.Exec(`UPDATE meta SET "feedbackUrl" = NULL`).Error)
+	}
 }
 
 func inspect(t *testing.T, db *gorm.DB) CherryPickReport {
@@ -112,6 +118,7 @@ func TestInspectCherryPick_CountsWhatElythiaDrops(t *testing.T) {
 	assert.EqualValues(t, 2, r.ScheduledDeletesDue, "期限ちょうどは期限切れに数える。リモートは数えない")
 	assert.EqualValues(t, 1, r.ScheduledDeletesLater)
 	assert.Equal(t, "https://github.com/kokonect-link/cherrypick", r.RepositoryURL)
+	assert.Equal(t, "https://github.com/kokonect-link/cherrypick/issues/new", r.FeedbackURL, "CherryPick の列の既定値")
 	assert.EqualValues(t, 1, r.NoteHistories)
 	assert.EqualValues(t, 1, r.Events)
 	assert.EqualValues(t, 1, r.RemoteScheduledDeletes)
@@ -150,7 +157,32 @@ func TestInspectCherryPick_ResolvedRowsAreNotCounted(t *testing.T) {
 	r := inspect(t, db)
 	assert.Empty(t, r.PendingUsers)
 	assert.Empty(t, r.RepositoryURL)
+	assert.Empty(t, r.FeedbackURL)
 	assert.Zero(t, r.Unprocessed())
+}
+
+// feedbackUrl だけが CherryPick を指していても、リンクの項目として数える。
+func TestInspectCherryPick_FeedbackURLOnly(t *testing.T) {
+	db := openCherryPickDB(t)
+	require.NoError(t, db.Exec(`INSERT INTO meta (id, "repositoryUrl") VALUES ('x', 'https://github.com/elythia-network/elythia')`).Error)
+	r := inspect(t, db)
+	assert.Empty(t, r.RepositoryURL)
+	assert.Equal(t, "https://github.com/kokonect-link/cherrypick/issues/new", r.FeedbackURL)
+	assert.Equal(t, 1, r.Unprocessed())
+}
+
+func TestIsCherryPickFeedback(t *testing.T) {
+	for u, want := range map[string]bool{
+		"https://github.com/kokonect-link/cherrypick/issues/new":     true,
+		"https://github.com/kokonect-link/cherrypick/issues/new/":    true,
+		"https://GitHub.com/Kokonect-Link/CherryPick/issues/new":     true,
+		"https://github.com/kokonect-link/cherrypick":                false,
+		"https://github.com/Elythia-Network/elythia/issues/new":      false,
+		"https://gitlab.example/kokonect-link/cherrypick/issues/new": false,
+		"": false,
+	} {
+		assert.Equal(t, want, isCherryPickFeedback(u), u)
+	}
 }
 
 // 後始末 (cleanup) で列と表を消した後も、判定が通って 0 件になる。
@@ -287,7 +319,8 @@ func TestIsCherryPickRepository(t *testing.T) {
 	}
 }
 
-// Elythia が一度流した DB は、migrate の前の確認では数えない。
+// migrate の前の確認は、Elythia が流した後も convert が済むまで数え、済んだら
+// 数えない (#4248)。
 func TestInspectCherryPickBeforeMigrate(t *testing.T) {
 	db := openCherryPickDB(t)
 	require.NoError(t, db.Exec(`INSERT INTO "user" (id, username, "usernameLower", approved, "signupReason") VALUES ('u1', 'carol', 'carol', false, 'hi')`).Error)
@@ -295,19 +328,60 @@ func TestInspectCherryPickBeforeMigrate(t *testing.T) {
 
 	r, err := InspectCherryPickBeforeMigrate(context.Background(), db, cherryPickNow)
 	require.NoError(t, err)
-	assert.False(t, r.ElythiaMigrated)
+	assert.False(t, r.Converted)
+	assert.False(t, r.Migrated)
 	assert.Len(t, r.PendingUsers, 1)
 
-	// -force や down を先に当てると、golang-migrate は空の表だけを作る。
 	require.NoError(t, db.Exec(`CREATE TABLE schema_migrations (version bigint PRIMARY KEY, dirty boolean NOT NULL)`).Error)
-	r, err = InspectCherryPickBeforeMigrate(context.Background(), db, cherryPickNow)
-	require.NoError(t, err)
-	assert.False(t, r.ElythiaMigrated, "空の表は流したことにならない")
-	assert.Len(t, r.PendingUsers, 1)
-
 	require.NoError(t, db.Exec(`INSERT INTO schema_migrations VALUES (1, false)`).Error)
 	r, err = InspectCherryPickBeforeMigrate(context.Background(), db, cherryPickNow)
 	require.NoError(t, err)
-	assert.Equal(t, CherryPickReport{ElythiaMigrated: true}, r)
-	assert.Len(t, inspect(t, db).PendingUsers, 1, "check は流した後も数える")
+	assert.False(t, r.Converted)
+	assert.True(t, r.Migrated)
+	assert.Len(t, r.PendingUsers, 1, "流した後も、convert が済むまでは数える")
+
+	require.NoError(t, MarkCherryPickConverted(context.Background(), db))
+	r, err = InspectCherryPickBeforeMigrate(context.Background(), db, cherryPickNow)
+	require.NoError(t, err)
+	assert.Equal(t, CherryPickReport{Converted: true}, r)
+	full := inspect(t, db)
+	assert.True(t, full.Converted)
+	assert.Len(t, full.PendingUsers, 1, "check は済んだ後も数える")
+}
+
+// 接続文字列から繋いで数える経路。繋げなければ CherryPickStatusError を返す。
+func TestInspectCherryPickDSN(t *testing.T) {
+	db := openCherryPickDB(t)
+	require.NoError(t, db.Exec(`INSERT INTO "user" (id, username, "usernameLower", approved, "signupReason") VALUES ('u1', 'carol', 'carol', false, 'hi')`).Error)
+	requireApproval(t, db, "")
+
+	r, err := InspectCherryPickDSN(testutil.TestDSNForSchema("internal_maintenance_cherrypick"), cherryPickNow, InspectCherryPick)
+	require.NoError(t, err)
+	assert.Equal(t, CherryPickSupported, r.Status, r.Reason)
+	require.Len(t, r.PendingUsers, 1)
+
+	_, err = InspectCherryPickDSN("host=127.0.0.1 port=1 user=x dbname=x sslmode=disable connect_timeout=1", cherryPickNow, InspectCherryPick)
+	var statusErr *CherryPickStatusError
+	assert.ErrorAs(t, err, &statusErr)
+}
+
+// Elythia が流した後で要対応が無ければ、migrate の前の確認が印を付ける。流す前は付けない。
+func TestInspectCherryPickBeforeMigrate_MarksWhenNothingToDo(t *testing.T) {
+	ctx := context.Background()
+	db := openCherryPickDB(t)
+	r, err := InspectCherryPickBeforeMigrate(ctx, db, cherryPickNow)
+	require.NoError(t, err)
+	assert.False(t, r.Converted, "流す前は付けない")
+	converted, err := CherryPickConverted(ctx, db)
+	require.NoError(t, err)
+	assert.False(t, converted)
+
+	require.NoError(t, db.Exec(`CREATE TABLE schema_migrations (version bigint PRIMARY KEY, dirty boolean NOT NULL)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO schema_migrations VALUES (1, false)`).Error)
+	r, err = InspectCherryPickBeforeMigrate(ctx, db, cherryPickNow)
+	require.NoError(t, err)
+	assert.True(t, r.Converted)
+	converted, err = CherryPickConverted(ctx, db)
+	require.NoError(t, err)
+	assert.True(t, converted)
 }

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // CherryPickVersion is the only CherryPick version whose database
@@ -124,6 +126,9 @@ type CherryPickReport struct {
 	ScheduledDeletesLater int64
 	// RepositoryURL is meta.repositoryUrl when it still points at CherryPick.
 	RepositoryURL string
+	// FeedbackURL is meta.feedbackUrl when it is still CherryPick's issue
+	// form. 利用者が Elythia の不具合を CherryPick へ報告しないように直す。
+	FeedbackURL string
 
 	// Kept in the database but not read by Elythia; reported only.
 	NoteHistories int64
@@ -143,9 +148,12 @@ type CherryPickReport struct {
 	// password sign-in but keeps their sessions; Elythia lets them sign in.
 	UnapprovedMembers int64
 
-	// ElythiaMigrated is set by InspectCherryPickBeforeMigrate when Elythia has
-	// already migrated the database; nothing else is filled then.
-	ElythiaMigrated bool
+	// Converted is set when "elythia cherrypick convert" has finished
+	// (#4248). InspectCherryPickBeforeMigrate fills nothing else then.
+	Converted bool
+	// Migrated is set when Elythia has migrated the database, so the next
+	// step is "elythia cherrypick convert".
+	Migrated bool
 }
 
 // Unprocessed returns the number of kinds of items that need action. An
@@ -160,7 +168,7 @@ func (r CherryPickReport) Unprocessed() int {
 		r.AbuseReportResolvers > 0,
 		len(r.QuarantinedHosts) > 0,
 		r.ScheduledDeletesDue+r.ScheduledDeletesLater > 0,
-		r.RepositoryURL != "",
+		r.RepositoryURL != "" || r.FeedbackURL != "",
 	} {
 		if has {
 			n++
@@ -192,23 +200,36 @@ func (e *CherryPickStatusError) Error() string { return e.Err.Error() }
 func (e *CherryPickStatusError) Unwrap() error { return e.Err }
 
 // InspectCherryPickBeforeMigrate is InspectCherryPick for "elythia migrate":
-// once Elythia has migrated the database (schema_migrations has a row), it
-// only reports ElythiaMigrated.
+// once "elythia cherrypick convert" has finished, it only reports Converted.
+// When Elythia has migrated the database and nothing needs action, it records
+// the conversion itself (the only write it makes).
 //
-// migrate up は起動のたびに流れる。止める判断が要るのは、Elythia が最初に流す
-// ときだけで、その後も数えると、大きな note の表を起動のたびに読むことになる。
-//
-// 表があるだけでは流したとみなさない。golang-migrate は開いた時点で表を作るので、
-// CherryPick の DB に先に -force や down を当てると、空の表だけができる。
+// convert は Elythia の migrate up の後に流す (Elythia の削除の処理を使うため)。
+// その間に本体が起動しないように、Elythia が流した後でも、convert が済むまでは
+// 数えて止める。済んだら数えない。migrate up は起動のたびに流れるので、大きな
+// note の表を毎回読まないようにするため。
 func InspectCherryPickBeforeMigrate(ctx context.Context, db *gorm.DB, now time.Time) (CherryPickReport, error) {
-	migrated, err := elythiaMigrated(db.WithContext(ctx))
+	converted, err := CherryPickConverted(ctx, db)
 	if err != nil {
 		return CherryPickReport{}, &CherryPickStatusError{Err: err}
 	}
-	if migrated {
-		return CherryPickReport{ElythiaMigrated: true}, nil
+	if converted {
+		return CherryPickReport{Converted: true}, nil
 	}
-	return InspectCherryPick(ctx, db, now)
+	r, err := InspectCherryPick(ctx, db, now)
+	if err != nil {
+		return r, err
+	}
+	// Elythia が流した後で要対応が無ければ、ここで印を付ける。付けないと、convert を
+	// 流さない限り、起動のたびに note の表を全部読み続ける。Elythia はこれらの行を
+	// 新しく作らないので、後から要対応が増えることは無い。
+	if r.Status == CherryPickSupported && r.Migrated && r.Unprocessed() == 0 {
+		if err := MarkCherryPickConverted(ctx, db); err != nil {
+			return r, err
+		}
+		r.Converted = true
+	}
+	return r, nil
 }
 
 // elythiaMigrated reports whether golang-migrate has recorded a version.
@@ -240,6 +261,12 @@ func InspectCherryPick(ctx context.Context, db *gorm.DB, now time.Time) (CherryP
 	r.Status, r.Reason = status, reason
 	if status != CherryPickSupported {
 		return r, nil
+	}
+	if r.Converted, err = CherryPickConverted(ctx, db); err != nil {
+		return r, err
+	}
+	if r.Migrated, err = elythiaMigrated(db); err != nil {
+		return r, err
 	}
 
 	approval, err := approvalRequired(db)
@@ -308,6 +335,17 @@ func InspectCherryPick(ctx context.Context, db *gorm.DB, now time.Time) (CherryP
 	for _, u := range urls {
 		if isCherryPickRepository(u) {
 			r.RepositoryURL = u
+			break
+		}
+	}
+	var feedback []string
+	if err := db.Raw(`SELECT "feedbackUrl" FROM meta WHERE "feedbackUrl" IS NOT NULL`).
+		Pluck("feedbackUrl", &feedback).Error; err != nil {
+		return r, fmt.Errorf("cherrypick: meta.feedbackUrl: %w", err)
+	}
+	for _, u := range feedback {
+		if isCherryPickFeedback(u) {
+			r.FeedbackURL = u
 			break
 		}
 	}
@@ -393,12 +431,25 @@ func cherryPickStatus(db *gorm.DB) (CherryPickStatus, string, error) {
 // isCherryPickRepository reports whether u is the repository CherryPick sets
 // as meta.repositoryUrl.
 func isCherryPickRepository(u string) bool {
+	path, ok := githubPath(u)
+	return ok && strings.TrimSuffix(path, ".git") == "/kokonect-link/cherrypick"
+}
+
+// isCherryPickFeedback reports whether u is the issue form CherryPick sets as
+// meta.feedbackUrl.
+func isCherryPickFeedback(u string) bool {
+	path, ok := githubPath(u)
+	return ok && path == "/kokonect-link/cherrypick/issues/new"
+}
+
+// githubPath returns the lower-cased path of a github.com URL without a
+// trailing slash.
+func githubPath(u string) (string, bool) {
 	p, err := url.Parse(strings.TrimSpace(u))
 	if err != nil || !strings.EqualFold(p.Host, "github.com") {
-		return false
+		return "", false
 	}
-	path := strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(p.Path), "/"), ".git")
-	return path == "/kokonect-link/cherrypick"
+	return strings.TrimSuffix(strings.ToLower(p.Path), "/"), true
 }
 
 // hasTable reports whether the current schema has table.
@@ -420,4 +471,30 @@ func hasColumns(db *gorm.DB, table string, columns ...string) (bool, error) {
 		return false, fmt.Errorf("cherrypick: look up columns of %s: %w", table, err)
 	}
 	return int(n) == len(columns), nil
+}
+
+// CherryPickInspectTimeout bounds one inspection. 予約削除を数えるのに note の表を
+// 全部読む (deleteAt に索引が無い) ので、大きな DB でも終わる長さにする。
+const CherryPickInspectTimeout = 10 * time.Minute
+
+// CherryPickInspectFunc is InspectCherryPick or InspectCherryPickBeforeMigrate.
+type CherryPickInspectFunc func(context.Context, *gorm.DB, time.Time) (CherryPickReport, error)
+
+// InspectCherryPickDSN connects to dsn and runs inspect within
+// CherryPickInspectTimeout.
+//
+// "elythia cherrypick check" と "elythia migrate" が共有する。テストは search_path を
+// 付けた接続文字列を渡す (設定からは search_path を渡せない)。
+func InspectCherryPickDSN(dsn string, now time.Time, inspect CherryPickInspectFunc) (CherryPickReport, error) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		// 繋げなければ版も確かめられないので、migrate は -allow-cherrypick でも止める。
+		return CherryPickReport{}, &CherryPickStatusError{Err: fmt.Errorf("open database: %w", err)}
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		defer sqlDB.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), CherryPickInspectTimeout)
+	defer cancel()
+	return inspect(ctx, db, now)
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elythia-network/elythia/internal/cli/cherrypick"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/maintenance"
 	"github.com/elythia-network/elythia/internal/testutil"
@@ -45,10 +44,24 @@ func TestRun_CherryPickRefusesUp(t *testing.T) {
 	assert.Empty(t, *opened, "止めたときは migrator を開かない")
 	assert.Empty(t, m.calls)
 	assert.Contains(t, out.String(), "this database came from CherryPick and needs action")
+	assert.Contains(t, out.String(), "then `elythia migrate -allow-cherrypick` and `elythia cherrypick convert`")
 	assert.Contains(t, out.String(), "kindsNeedingAction=1")
 }
 
 // 対応していない版は -allow-cherrypick でも通さない。
+// Elythia が流した後に止まったときは、convert を案内する。
+func TestRun_CherryPickAfterMigratedPointsToConvert(t *testing.T) {
+	m := &fakeMigrator{}
+	e, out, _ := testEnv(t, m, nil)
+	r := pendingCherryPick
+	r.Migrated = true
+	withCherryPick(&e, r, nil)
+
+	assert.Equal(t, 1, run(e, &bytes.Buffer{}, []string{"-config", writeConfig(t)}))
+	assert.Contains(t, out.String(), "run `elythia cherrypick convert`")
+	assert.NotContains(t, out.String(), "-allow-cherrypick`")
+}
+
 func TestRun_CherryPickUnsupportedVersion(t *testing.T) {
 	for _, args := range [][]string{nil, {"-allow-cherrypick"}} {
 		m := &fakeMigrator{}
@@ -77,8 +90,8 @@ func TestRun_CherryPickNothingToDo(t *testing.T) {
 	for name, r := range map[string]maintenance.CherryPickReport{
 		"not CherryPick":    {Status: maintenance.NotCherryPick},
 		"already converted": {Status: maintenance.CherryPickSupported, NoteHistories: 3},
-		// 印が付いていれば、他の欄に何があっても止めない。
-		"migrated before": {ElythiaMigrated: true, Status: maintenance.CherryPickSupported, PendingUsers: pendingCherryPick.PendingUsers},
+		// convert が済んでいれば、他の欄に何があっても止めない。
+		"converted": {Converted: true, Status: maintenance.CherryPickSupported, PendingUsers: pendingCherryPick.PendingUsers},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := &fakeMigrator{}
@@ -148,7 +161,7 @@ func TestRun_CherryPickDoesNotBlockDownOrForce(t *testing.T) {
 }
 
 func TestDefaultEnv_ChecksCherryPick(t *testing.T) {
-	assert.Equal(t, reflect.ValueOf(cherrypick.InspectBeforeMigrate).Pointer(), reflect.ValueOf(defaultEnv().cherrypick).Pointer())
+	assert.Equal(t, reflect.ValueOf(inspectCherryPick).Pointer(), reflect.ValueOf(defaultEnv().cherrypick).Pointer())
 }
 
 // CherryPick 4.18.0-beta.1 の DB に、本物の migration を流す。承認待ちが残っている間は
@@ -179,7 +192,12 @@ func TestMigrateDB_CherryPickDatabase(t *testing.T) {
 	assert.Equal(t, maintenance.CherryPickSupported, r.Status, r.Reason)
 	assert.Len(t, r.PendingUsers, 1, "流した後も、check では数えられる")
 
-	// 一度流した後は、起動のたびの migrate up を止めない。
+	// convert が済むまでは、起動のたびの migrate up も止める (#4248)。
+	code, out = f.migrateWith(t, inspect)
+	assert.Equal(t, 1, code, out)
+
+	// 済んだら止めない。
+	require.NoError(t, maintenance.MarkCherryPickConverted(context.Background(), f.db))
 	code, out = f.migrateWith(t, inspect)
 	assert.Equal(t, 0, code, out)
 }

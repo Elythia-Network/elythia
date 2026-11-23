@@ -7,16 +7,11 @@
 package cherrypick
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"time"
-
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
 	"github.com/elythia-network/elythia/internal/config"
@@ -28,9 +23,8 @@ import (
 // supported.
 const ExitNeedsAction = 3
 
-// inspectTimeout bounds one inspection. 予約削除を数えるのに note の表を全部読む
-// (deleteAt に索引が無い) ので、大きな DB でも終わる長さにする。
-const inspectTimeout = 10 * time.Minute
+// inspectTimeout bounds one inspection of convert (maintenance.CherryPickInspectTimeout).
+const inspectTimeout = maintenance.CherryPickInspectTimeout
 
 // env carries the process-level dependencies so tests can replace them.
 type env struct {
@@ -51,31 +45,7 @@ func defaultEnv() env {
 // Inspect connects to the database of cfg and inspects it with
 // maintenance.InspectCherryPick.
 func Inspect(cfg *config.Config) (maintenance.CherryPickReport, error) {
-	return inspectDSN(cfg.DSN(), time.Now(), maintenance.InspectCherryPick)
-}
-
-// InspectBeforeMigrate is Inspect with maintenance.InspectCherryPickBeforeMigrate,
-// for "elythia migrate".
-func InspectBeforeMigrate(cfg *config.Config) (maintenance.CherryPickReport, error) {
-	return inspectDSN(cfg.DSN(), time.Now(), maintenance.InspectCherryPickBeforeMigrate)
-}
-
-type inspectFunc func(context.Context, *gorm.DB, time.Time) (maintenance.CherryPickReport, error)
-
-// inspectDSN runs inspect on a connection string. テストは search_path を付けた
-// 接続文字列を渡す (設定からは search_path を渡せない)。
-func inspectDSN(dsn string, now time.Time, inspect inspectFunc) (maintenance.CherryPickReport, error) {
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		// 繋げなければ版も確かめられないので、migrate は -allow-cherrypick でも止める。
-		return maintenance.CherryPickReport{}, &maintenance.CherryPickStatusError{Err: fmt.Errorf("open database: %w", err)}
-	}
-	if sqlDB, err := db.DB(); err == nil {
-		defer sqlDB.Close()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), inspectTimeout)
-	defer cancel()
-	return inspect(ctx, db, now)
+	return maintenance.InspectCherryPickDSN(cfg.DSN(), time.Now(), maintenance.InspectCherryPick)
 }
 
 // Check implements "elythia cherrypick check": it reads the database and
@@ -143,6 +113,9 @@ func WriteReport(w io.Writer, r maintenance.CherryPickReport) {
 	fmt.Fprintf(w, "  scheduled deletes (not deleted): not yet due              %d\n", r.ScheduledDeletesLater)
 	if r.RepositoryURL != "" {
 		fmt.Fprintf(w, "  repositoryUrl still points at CherryPick                  %s\n", r.RepositoryURL)
+	}
+	if r.FeedbackURL != "" {
+		fmt.Fprintf(w, "  feedbackUrl still points at CherryPick                    %s\n", r.FeedbackURL)
 	}
 
 	fmt.Fprintln(w, "\nkept in the database but not read by Elythia:")

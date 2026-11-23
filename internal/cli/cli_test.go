@@ -170,6 +170,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"backup restore":               clibackup.Restore,
 		"backup daemon":                clibackup.Daemon,
 		"cherrypick check":             cherrypick.Check,
+		"cherrypick convert":           cherrypick.Convert,
 		"maintenance enter":            maintenance.Enter,
 		"maintenance exit":             maintenance.Exit,
 		"maintenance status":           maintenance.Status,
