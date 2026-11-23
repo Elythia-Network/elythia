@@ -5,14 +5,11 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/maintenance"
-	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 func testEnv(r maintenance.CherryPickReport, inspectErr error) (env, *bytes.Buffer, *bytes.Buffer, *string) {
@@ -119,29 +116,6 @@ func TestCheck_Errors(t *testing.T) {
 	})
 }
 
-// 実 DB に繋いで数える経路。CherryPick 4.18.0-beta.1 の形の schema に承認待ちを 1 人置く。
-func TestInspectDSN_AgainstDatabase(t *testing.T) {
-	db, err := testutil.OpenTestDBSchema("cherrypick")
-	require.NoError(t, err)
-	var schema string
-	require.NoError(t, db.Raw("SELECT current_schema()").Scan(&schema).Error)
-	require.Equal(t, "internal_cli_cherrypick_cherrypick", schema)
-	require.NoError(t, db.Exec(`DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`).Error)
-	require.NoError(t, db.Exec(`CREATE SCHEMA "`+schema+`"`).Error)
-	require.NoError(t, testutil.LoadCherryPickSchema(db))
-	require.NoError(t, db.Exec(`INSERT INTO "user" (id, username, "usernameLower", approved, "signupReason") VALUES ('u1', 'carol', 'carol', false, 'hi')`).Error)
-	require.NoError(t, db.Exec(`INSERT INTO meta (id, "approvalRequiredForSignup") VALUES ('x', true)`).Error)
-
-	r, err := inspectDSN(testutil.TestDSNForSchema(schema), time.Now(), maintenance.InspectCherryPick)
-	require.NoError(t, err)
-	assert.Equal(t, maintenance.CherryPickSupported, r.Status, r.Reason)
-	require.Len(t, r.PendingUsers, 1)
-	assert.Equal(t, "carol", r.PendingUsers[0].Username)
-
-	_, err = inspectDSN("host=127.0.0.1 port=1 user=x dbname=x sslmode=disable connect_timeout=1", time.Now(), maintenance.InspectCherryPick)
-	assert.Error(t, err)
-}
-
 // 設定の接続先に繋げなければ、エラーを返す (数えずに 0 件と答えない)。
 func TestInspect_UnreachableDatabase(t *testing.T) {
 	cfg := &config.Config{}
@@ -151,8 +125,6 @@ func TestInspect_UnreachableDatabase(t *testing.T) {
 	cfg.DB.DB = "x"
 	var statusErr *maintenance.CherryPickStatusError
 	_, err := Inspect(cfg)
-	assert.ErrorAs(t, err, &statusErr)
-	_, err = InspectBeforeMigrate(cfg)
 	assert.ErrorAs(t, err, &statusErr, "繋げなければ版も確かめられない")
 }
 

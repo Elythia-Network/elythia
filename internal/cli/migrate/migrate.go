@@ -22,7 +22,6 @@ import (
 	"github.com/golang-migrate/migrate/v4/source"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
-	"github.com/elythia-network/elythia/internal/cli/cherrypick"
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
@@ -118,8 +117,14 @@ func defaultEnv() env {
 		coreDir:     CoreDir,
 		localDir:    LocalDir,
 		maintenance: readMaintenance,
-		cherrypick:  cherrypick.InspectBeforeMigrate,
+		cherrypick:  inspectCherryPick,
 	}
+}
+
+// inspectCherryPick connects to the database of cfg and runs
+// maintenance.InspectCherryPickBeforeMigrate (#4247).
+func inspectCherryPick(cfg *config.Config) (maintenance.CherryPickReport, error) {
+	return maintenance.InspectCherryPickDSN(cfg.DSN(), time.Now(), maintenance.InspectCherryPickBeforeMigrate)
 }
 
 // readMaintenance opens the default Redis of cfg and reads the maintenance
@@ -251,13 +256,16 @@ func (e env) checkMaintenance(logger *slog.Logger, cfg *config.Config, opID stri
 }
 
 // checkCherryPick refuses to migrate up a database that came from CherryPick
-// before Elythia has migrated it, while `elythia cherrypick check` reports
-// something. allow lets items that need action through, never an unsupported
-// version. It returns 0 to go on, or 1.
+// until "elythia cherrypick convert" has finished, while `elythia cherrypick
+// check` reports something. allow lets items that need action through, never
+// an unsupported version. It returns 0 to go on, or 1.
+//
+// convert は migrate up の後に流すので、最初の 1 回は -allow-cherrypick で通し、
+// その後の (起動のたびの) migrate up は convert が済むまで止める。
 //
 // CherryPick の DB はそのまま up が通って起動するが、承認待ちの利用者がサインイン
 // できるようになるなど、制限が黙って外れる (#4246)。起動の前に気付けるのはここだけ。
-// 見るのは Elythia が最初に流すときだけ (InspectCherryPickBeforeMigrate)。
+// 見るのは convert が済むまで (InspectCherryPickBeforeMigrate)。
 // down と -force は止めない (戻す操作を妨げない)。
 //
 // **対応していない版は allow でも通さない。** 一度流すと Elythia が本家の記録を
@@ -278,7 +286,7 @@ func (e env) checkCherryPick(logger *slog.Logger, cfg *config.Config, allow bool
 		logDBError(logger, cfg, "failed to check whether the database came from CherryPick", err)
 		return 1
 	}
-	if r.ElythiaMigrated || r.Status == maintenance.NotCherryPick || r.Unprocessed() == 0 {
+	if r.Converted || r.Status == maintenance.NotCherryPick || r.Unprocessed() == 0 {
 		return 0
 	}
 	if r.Status == maintenance.CherryPickUnsupported {
@@ -291,8 +299,15 @@ func (e env) checkCherryPick(logger *slog.Logger, cfg *config.Config, allow bool
 		logger.Warn("this database came from CherryPick and needs action; migrating because of -allow-cherrypick", attrs...)
 		return 0
 	}
+	if r.Migrated {
+		// 一度 -allow-cherrypick で流した後。次にすることは convert。
+		logger.Error("this database came from CherryPick and needs action before Elythia serves it; "+
+			"run `elythia cherrypick convert` (see `elythia cherrypick check` for what)", attrs...)
+		return 1
+	}
 	logger.Error("this database came from CherryPick and needs action before Elythia serves it; "+
-		"run `elythia cherrypick check` to see what, or pass -allow-cherrypick to migrate anyway", attrs...)
+		"run `elythia cherrypick check` to see what, then `elythia migrate -allow-cherrypick` and "+
+		"`elythia cherrypick convert`", attrs...)
 	return 1
 }
 
