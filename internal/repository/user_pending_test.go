@@ -39,6 +39,24 @@ func TestUserPendingRepository_CRUD(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// 空のcodeでも条件を落とさず、既にある確認待ちの行を引かない。
+func TestUserPendingRepository_FindByCodeEmpty(t *testing.T) {
+	repo := NewUserPendingRepository(testDB)
+
+	p := &model.UserPending{
+		ID:       "up_empty_code_1",
+		Code:     "test_code_empty_guard",
+		Username: "pendingemptycode",
+		Email:    "pendingemptycode@example.com",
+		Password: "$2a$10$fakehash",
+	}
+	require.NoError(t, repo.Create(p))
+	defer testDB.Exec(`DELETE FROM "user_pending" WHERE id = ?`, p.ID)
+
+	_, err := repo.FindByCode("")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
 func TestUserPendingRepository_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
