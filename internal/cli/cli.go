@@ -13,6 +13,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/cli/backfill"
 	clibackup "github.com/elythia-network/elythia/internal/cli/backup"
+	"github.com/elythia-network/elythia/internal/cli/cherrypick"
 	"github.com/elythia-network/elythia/internal/cli/diag"
 	"github.com/elythia-network/elythia/internal/cli/maintenance"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
@@ -53,6 +54,9 @@ func Commands() []Command {
 			{Name: "verify", Summary: "check that a backup can be restored (writes verify.json)", Run: clibackup.Verify},
 			{Name: "restore", Summary: "restore a backup into this server's database (-mode swap or empty)", Run: clibackup.Restore},
 			{Name: "daemon", Summary: "take, verify and prune backups on a schedule and serve the control API", Run: clibackup.Daemon},
+		}},
+		{Name: "cherrypick", Summary: "move a CherryPick 4.18.0-beta.1 database to Elythia", Sub: []Command{
+			{Name: "check", Summary: "count what Elythia would drop from a CherryPick database (read-only)", Run: cherrypick.Check},
 		}},
 		{Name: "maintenance", Summary: "enter or leave maintenance mode (every process lets go of the database)", Sub: []Command{
 			{Name: "enter", Summary: "start a maintenance and wait until every process has let go of the database", Run: maintenance.Enter},

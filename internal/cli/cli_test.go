@@ -11,6 +11,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/cli/backfill"
 	clibackup "github.com/elythia-network/elythia/internal/cli/backup"
+	"github.com/elythia-network/elythia/internal/cli/cherrypick"
 	"github.com/elythia-network/elythia/internal/cli/diag"
 	"github.com/elythia-network/elythia/internal/cli/maintenance"
 	"github.com/elythia-network/elythia/internal/cli/migrate"
@@ -168,6 +169,7 @@ func TestCommands_WiresEveryNameToItsRunner(t *testing.T) {
 		"backup verify":                clibackup.Verify,
 		"backup restore":               clibackup.Restore,
 		"backup daemon":                clibackup.Daemon,
+		"cherrypick check":             cherrypick.Check,
 		"maintenance enter":            maintenance.Enter,
 		"maintenance exit":             maintenance.Exit,
 		"maintenance status":           maintenance.Status,
