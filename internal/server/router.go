@@ -1275,10 +1275,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// local user が remote user を (un)block した際に Block / Undo(Block) を
 	// 相手 inbox へ配信する (#1560)。
 	blockingService.SetFederationHook(corefederation.NewBlockingDeliveryHook(deliverService, userRepo, apRenderer))
+	noteDeleteRunner := newAsyncHookRunner(s.background, s.config.NoteHookConcurrency)
 	noteDeleteService.SetFederationHook(asyncNoteDeleteFederationHook{
 		inner:  noteDeleteHook,
-		runner: newAsyncHookRunner(s.background, s.config.NoteHookConcurrency),
+		runner: noteDeleteRunner,
 	})
+	// elythia cherrypick convert が、削除の配送を積み終わるのを待つ (#4248)。
+	s.noteDeleteRunner = noteDeleteRunner
 	// suspend / block されたインスタンスへは dispatch 時に配送を止める (#1404。第 2 引数)。
 	// enqueue 時の isBlockedInbox を通り抜ける retry-backoff 中・積み残しジョブも弾く。
 	// **署名鍵は payload に載せず、配送時に引く (第 3 引数)。** queue の job は
@@ -2556,6 +2559,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		selfPacker:                   selfPacker,
 		announcementHandler:          announcementHandler,
 	})
+	// elythia cherrypick convert が同じ削除の処理を呼べるように残す (#4248)。
+	s.migratedAccounts = adminHandler
+	s.migratedNotes = noteDeleteService
 
 	// --- Phase 7.6b: chat/*, auth/*, ap/*, sw/*, reversi/*, bubble-game/*, misc ---
 

@@ -117,6 +117,14 @@ type Server struct {
 	// 渡す。setupPlugins が中身を登録する (登録は配線より後になるため、値ではなく
 	// 共有の参照で渡す)。
 	noteDelivery *notedelivery.Registry
+	// migratedAccounts / migratedNotes are what "elythia cherrypick convert"
+	// deletes with (#4248, migration.go). setupRoutes が組み立てた管理 API の
+	// ハンドラと投稿の削除のサービスで、HTTP の経路と同じ処理を通す。
+	migratedAccounts migratedAccountDeleter
+	migratedNotes    migratedNoteDeleter
+	// noteDeleteRunner runs the federation hook of note deletes; convert waits
+	// for it (WaitNoteDeletes).
+	noteDeleteRunner *asyncHookRunner
 	// roleService は HTTP と queue が共有する process-local policy registry。
 	// 有効な plugin provider の登録は起動時だけ行い、enabled の変更には
 	// 再起動を要求する。
