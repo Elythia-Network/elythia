@@ -22,9 +22,11 @@ import (
 	"github.com/golang-migrate/migrate/v4/source"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
+	"github.com/elythia-network/elythia/internal/cli/cherrypick"
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
 	"github.com/elythia-network/elythia/internal/config"
 	"github.com/elythia-network/elythia/internal/core/cache"
+	"github.com/elythia-network/elythia/internal/maintenance"
 	"github.com/elythia-network/elythia/internal/maintmode"
 )
 
@@ -90,6 +92,9 @@ type env struct {
 	// maintenance reads the maintenance state from Redis (#3463). nil State
 	// means none is active.
 	maintenance func(*config.Config) (*maintmode.State, error)
+	// cherrypick inspects whether the database came from CherryPick (#4247).
+	// nil skips the check.
+	cherrypick func(*config.Config) (maintenance.CherryPickReport, error)
 }
 
 func defaultEnv() env {
@@ -113,6 +118,7 @@ func defaultEnv() env {
 		coreDir:     CoreDir,
 		localDir:    LocalDir,
 		maintenance: readMaintenance,
+		cherrypick:  cherrypick.InspectBeforeMigrate,
 	}
 }
 
@@ -143,6 +149,8 @@ func run(e env, flagOut io.Writer, args []string) int {
 		"without running any migration. The version must be a migration of that track")
 	maintenanceOp := fs.String("maintenance-op", "", "run even though a maintenance is active, "+
 		"if this is its opId (elythia maintenance status shows it)")
+	allowCherryPick := fs.Bool("allow-cherrypick", false, "migrate up a database that came from CherryPick "+
+		"4.18.0-beta.1 even though `elythia cherrypick check` reports items that need action")
 	if code, ok := cliflag.Parse(fs, args); !ok {
 		return code
 	}
@@ -186,6 +194,12 @@ func run(e env, flagOut io.Writer, args []string) int {
 
 	if set["force"] {
 		return e.forceTrack(logger, cfg, *track, forceVersion)
+	}
+
+	if *direction == "up" {
+		if code := e.checkCherryPick(logger, cfg, *allowCherryPick); code != 0 {
+			return code
+		}
 	}
 
 	tracks := []string{*track}
@@ -234,6 +248,52 @@ func (e env) checkMaintenance(logger *slog.Logger, cfg *config.Config, opID stri
 		"Run it again after `elythia maintenance exit`, or pass -maintenance-op <opId> to run it during the maintenance",
 		"opId", st.OpID, "phase", st.Phase)
 	return ExitMaintenance
+}
+
+// checkCherryPick refuses to migrate up a database that came from CherryPick
+// before Elythia has migrated it, while `elythia cherrypick check` reports
+// something. allow lets items that need action through, never an unsupported
+// version. It returns 0 to go on, or 1.
+//
+// CherryPick の DB はそのまま up が通って起動するが、承認待ちの利用者がサインイン
+// できるようになるなど、制限が黙って外れる (#4246)。起動の前に気付けるのはここだけ。
+// 見るのは Elythia が最初に流すときだけ (InspectCherryPickBeforeMigrate)。
+// down と -force は止めない (戻す操作を妨げない)。
+//
+// **対応していない版は allow でも通さない。** 一度流すと Elythia が本家の記録を
+// 足し、以後は版を見分けられなくなる (convert が対応していない版に当たる)。版を
+// 確かめられなかったとき (CherryPickStatusError) も同じ理由で通さない。allow で
+// 飛ばせるのは、件数を数えるところの失敗 (大きな DB での時間切れなど) だけ。
+func (e env) checkCherryPick(logger *slog.Logger, cfg *config.Config, allow bool) int {
+	if e.cherrypick == nil {
+		return 0
+	}
+	r, err := e.cherrypick(cfg)
+	if err != nil {
+		var statusErr *maintenance.CherryPickStatusError
+		if allow && !errors.As(err, &statusErr) {
+			logger.Warn("could not check whether the database came from CherryPick; migrating because of -allow-cherrypick", "error", err)
+			return 0
+		}
+		logDBError(logger, cfg, "failed to check whether the database came from CherryPick", err)
+		return 1
+	}
+	if r.ElythiaMigrated || r.Status == maintenance.NotCherryPick || r.Unprocessed() == 0 {
+		return 0
+	}
+	if r.Status == maintenance.CherryPickUnsupported {
+		logger.Error("this database came from a CherryPick version Elythia does not support; refusing to migrate",
+			"supportedVersion", maintenance.CherryPickVersion, "reason", r.Reason)
+		return 1
+	}
+	attrs := []any{"supportedVersion", maintenance.CherryPickVersion, "kindsNeedingAction", r.Unprocessed()}
+	if allow {
+		logger.Warn("this database came from CherryPick and needs action; migrating because of -allow-cherrypick", attrs...)
+		return 0
+	}
+	logger.Error("this database came from CherryPick and needs action before Elythia serves it; "+
+		"run `elythia cherrypick check` to see what, or pass -allow-cherrypick to migrate anyway", attrs...)
+	return 1
 }
 
 // validateFlags returns a message for an invalid flag combination, or "".
