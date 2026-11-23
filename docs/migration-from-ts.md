@@ -2,6 +2,8 @@
 
 本ガイドでは、既存のMisskey-TSインスタンスを、データベースとRedisを引き継いだままElythiaへ移行する手順を説明する。移行した後にMisskey-TSへ戻すことは保証しない (#3191)。
 
+CherryPick 4.18.0-beta.1から移すときは、この手順に加えて[migration-from-cherrypick.md](migration-from-cherrypick.md)の確認と置き換えが要る。
+
 ## 前提条件
 
 - Go 1.27+
