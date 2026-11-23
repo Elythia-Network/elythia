@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/elythia-network/elythia/internal/config"
+	"github.com/elythia-network/elythia/internal/maintenance"
 	"github.com/elythia-network/elythia/internal/testutil"
 )
 
@@ -70,7 +71,15 @@ func (f *dbFixture) migrateURL() string {
 // fixture and returns the exit code and log output.
 func (f *dbFixture) migrate(t *testing.T, args ...string) (int, string) {
 	t.Helper()
+	return f.migrateWith(t, nil, args...)
+}
+
+// migrateWith is migrate with the CherryPick check replaced by cherrypick
+// (nil skips it). 本物の判定は設定の接続先 (db.example) に繋ぎに行くため。
+func (f *dbFixture) migrateWith(t *testing.T, cherrypick func(*config.Config) (maintenance.CherryPickReport, error), args ...string) (int, string) {
+	t.Helper()
 	e := defaultEnv()
+	e.cherrypick = cherrypick
 	var out bytes.Buffer
 	e.stdout = &out
 	e.setLogger = func(*slog.Logger) {}
