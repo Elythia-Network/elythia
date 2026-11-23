@@ -1,0 +1,13 @@
+# CherryPick の設定。compose.yml の postgres / redis に繋ぐ
+url: http://cherrypick.local:53095/
+port: 3000
+db:
+  host: postgres
+  port: 5432
+  db: misskey
+  user: misskey
+  pass: testpass
+redis:
+  host: redis
+  port: 6379
+id: aidx

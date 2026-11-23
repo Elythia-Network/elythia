@@ -1,0 +1,46 @@
+# tests/cherrypick/compose.yml — CherryPick 4.18.0-beta.1 の DB を作る (#4247)
+#
+# CherryPick からの移行 (elythia cherrypick) のテストの fixture を作り直すのに使う。
+# 使い方は gen-fixture.sh。CherryPick が migration を流し終えたら止め、DB の形だけを
+# 書き出す。ポートはホストの 127.0.0.1 にだけ出す。
+name: elythia-cherrypick
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:1018733457011bf88d81db98cf43aac6d5150afc18787dbe204771fedf80ff95
+    ports:
+      - "127.0.0.1:54395:5432"
+    environment:
+      POSTGRES_DB: misskey
+      POSTGRES_USER: misskey
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U misskey -d misskey"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    ports:
+      - "127.0.0.1:56395:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # 対象の版は 4.18.0-beta.1 だけ (#4246)。版を変えるときは、判定の記録
+  # (internal/maintenance/cherrypick_check.go) も合わせて作り直す
+  # compose のネットワークの中で postgres / redis に繋ぎ、ホストには 127.0.0.1 だけで出す
+  cherrypick:
+    image: noridev/cherrypick:4.18.0-beta.1@sha256:948cd8ac1d360041a8d0e8755c24604620db92bba18dd2d03edd31b02ec44ebb
+    ports:
+      - "127.0.0.1:53095:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./cherrypick.yml:/cherrypick/.config/default.yml:ro
