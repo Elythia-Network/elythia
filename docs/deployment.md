@@ -87,6 +87,126 @@ docker compose exec -T redis sh -c "redis-cli --scan --pattern '<prefix>list:*' 
 
 dumpから戻す方法は、DBの大きさに比例して止まる時間が延びる。止まる時間が長くなりすぎるサーバーでは、`pg_upgrade`で上げる方法がある。data volumeを新しい版の形式へその場で変換するので、表の中身を書き直さず、`--link`を付ければコピーもしない。ただし、両方の版のサーバーのプログラムが同じ場所に要り、`--link`で上げた後は古い版では開けなくなる。手順はPostgreSQLの文書(`pg_upgrade`)に従い、**上げる前に上の手順2・3でバックアップを取って確かめておく**。
 
+## systemd の PostgreSQL と Docker の PostgreSQL の間で移す
+
+ホストにsystemdで入れたPostgreSQLと、composeの`db`(DockerのPostgreSQL)の間でDBを移す手順(#4250)。どちらの向きも、`elythia backup take`で移行元から世代を取り、`elythia backup restore -mode empty`で移行先の空のDBへ戻す。**既定はDockerのPostgreSQL**(同梱のcompose)で、systemdは、すでにホストで動かしているPostgreSQLを使いたいときのための構成。
+
+手順は、上の[PostgreSQL 16 → 18 への移行](#postgresql-16--18-への移行-既存環境)と同じ流れで、取る側と戻す側で別の設定ファイルを使うところだけが違う。`backup`サービスの設定(保存先と、暗号化するなら鍵)は、先に[DBのバックアップ](backup.md)に従って済ませておく。
+
+### 前提
+
+- **取る側と戻す側の設定ファイルは、`db:`の節だけを変え、`backup:`の節(保存先)は同じにする。** 保存先が違うと、戻す側から世代が見えない。設定ファイルはDBのパスワードを含むので、誰でも読める権限にせず、`backup`のコンテナ(UID 70)から読めるようにする(例: `chown root:70`と`chmod 640`。composeで動かす本体(UID 991)にもmountするなら、そちらからも読めるようにする)
+- **戻す先のサーバーは、取ったサーバーと同じか新しい版にする(マイナー版も含む。`SELECT version()`で比べる)。** 版を下げて戻す道は無い。`backup`のimageの`pg_restore`は18で、それより古いサーバーへ戻すと`pg_restore is 18 but the server is 16`で止まる(何も作る前に止まる)。PG18で動いているDBをsystemdの側へ移すなら、systemdのPostgreSQLを18以上(同じか新しいマイナー版)にする
+- **systemdのPostgreSQLから取るのは、古い版(16など)からでもよい。** `pg_dump`は自分より古いサーバーから取れる。逆に、`backup`のimageの`pg_dump`は18なので、19以降のサーバーからは取れない。手順の`backup verify`は`backup`のimageのPostgreSQLへ戻して確かめるので、systemdのPostgreSQLの方が新しいマイナー版だと止まりうる([確かめる](backup.md#確かめる))
+- **移行元で`pg_bigm`の拡張を使っているなら、移行先にも入れる。** 無いと`lacks extensions the backup uses: pg_bigm`で止まる。Dockerの側は、[pg_bigm](#pg_bigm-日本語の部分一致検索を高速化)のimage(`deploy/postgres-bigm`)を使う。systemdの側は、下の[pg_bigmをソースから入れる](#pg_bigmをソースから入れる)で入れる
+- 戻す先には、空のDBと、そのDBの持ち主のロールを先に作っておく。**文字コードとロケールが世代と違うと止まる**(`backup restore`の検査。止めたときは、合うDBを作る`CREATE DATABASE`の文を表示する)。世代のロケールは、保存先の世代の`meta.json`の`databaseLocale`にある
+
+### 接続先の書き方
+
+systemdのPostgreSQLにUnixソケットで繋ぐときは、`db.host`にソケットのディレクトリを書く(`port`はソケットのファイル名の数字)。
+
+```yaml
+db:
+  host: /var/run/postgresql
+  port: 5432
+  db: misskey
+  user: misskey
+  pass: <パスワード>
+```
+
+コンテナ(`backup`サービスや、composeで動かす本体)からソケットで繋ぐときは、`-v /var/run/postgresql:/var/run/postgresql`でソケットのディレクトリをmountする。コンテナの中のユーザーはホストのユーザーと違うので、`pg_hba.conf`に、Elythiaのユーザーをパスワードで通す`local`の行を、既定の`peer`の行より上に書き、PostgreSQLを読み直す。DBは絞らない。Elythiaは、本体のDBのほかに、メンテナンスモードの判定で`maintenance.maintenanceDb`(既定`postgres`)へ、`backup restore -mode swap`で`<DB名>_restore_<日時>`へ繋ぐ。
+
+```text
+# pg_hba.conf (local all all peer より上)
+local   all   <ユーザー>   scram-sha-256
+```
+
+```bash
+sudo systemctl reload postgresql
+```
+
+TCPで繋ぐなら、`db.host`はコンテナから見たホストの宛先にする(コンテナの中の`127.0.0.1`はコンテナ自身を指す)。たとえば、composeのサービスに`extra_hosts: ["host.docker.internal:host-gateway"]`を足して`host.docker.internal`を書く。PostgreSQLの側は、`listen_addresses`でその宛先を待ち受け、`pg_hba.conf`にコンテナの網からの`host`の行を足す。
+
+### 手順
+
+`.config/systemd.yml`(systemdのPostgreSQLを指す)と`.config/docker.yml`(composeの`db`を指す)の2つの設定を用意する。`backup`サービスは`.config/docker.yml`を`/app/.config/default.yml`にmountしているので、もう一方は別の名前でmountして`-config`で選ぶ。
+
+systemd → Docker:
+
+```bash
+# 1. 書き込みを止める (Elythia の本体と backup-daemon)
+sudo systemctl stop elythia          # ユニットの名前は環境に合わせる。compose で動かしているなら docker compose stop app
+docker compose stop backup-daemon    # 使っているなら
+# 2. systemd の PostgreSQL から取る。出力の世代 ID を控える
+docker compose run --rm --no-deps \
+  -v "$PWD/.config/systemd.yml:/app/.config/systemd.yml:ro" -v /var/run/postgresql:/var/run/postgresql \
+  backup take -config .config/systemd.yml
+docker compose run --rm --no-deps backup verify <世代ID>
+# 3. compose の db を空で立て、戻す
+docker compose up -d db
+docker compose run --rm --no-deps backup restore -id <世代ID> -mode empty -confirm <DB名>
+docker compose exec db vacuumdb -U <DBのユーザー> -d <DB名> --analyze-in-stages
+# 4. 本体と backup-daemon の設定の db: を compose の db に向けて起動し、確かめる
+docker compose up -d
+docker compose exec app /app/elythia doctor
+```
+
+- 手順3で`restore`がロケールの違いで止まったときは、表示された`CREATE DATABASE`の文で、composeの`db`のDBを作り直してから流し直す(`docker compose exec db psql -U <DBのユーザー> -d postgres`で、空のDBを`DROP DATABASE`してから作る)。systemdのクラスタは、ホストのロケール(`C.UTF-8`や`ja_JP.UTF-8`など)で作られていることが多く、composeの`db`が作るDBと合わないことがある
+- composeの`db`はホストにポートを公開していない。本体をホストのバイナリのまま動かすなら、`db`のポートを`127.0.0.1`へ公開するなどして、本体から届くようにする
+
+Docker → systemd(systemdのPostgreSQLは、取ったサーバーと同じか新しい版):
+
+```bash
+# 1. systemd の PostgreSQL に、ロールと空の DB を作る。ロケールは世代の meta.json の
+#    databaseLocale の collate / ctype (provider が libc のとき) に合わせる
+sudo -u postgres createuser -P <ユーザー>
+sudo -u postgres createdb -O <ユーザー> -T template0 -E UTF8 \
+  --locale-provider=libc --lc-collate=<collate> --lc-ctype=<ctype> <DB名>
+# 2. 書き込みを止める
+docker compose stop app backup-daemon
+# 3. compose の db から取る
+docker compose run --rm --no-deps backup take
+docker compose run --rm --no-deps backup verify <世代ID>
+# 4. systemd の PostgreSQL へ戻す
+docker compose run --rm --no-deps \
+  -v "$PWD/.config/systemd.yml:/app/.config/systemd.yml:ro" -v /var/run/postgresql:/var/run/postgresql \
+  backup restore -config .config/systemd.yml -id <世代ID> -mode empty -confirm <DB名>
+sudo -u postgres vacuumdb -d <DB名> --analyze-in-stages
+# 5. 本体と backup-daemon の設定の db: を systemd の PostgreSQL に向けて起動し、確かめる
+```
+
+- 手順1の`createdb`が`invalid locale name`で落ちるときは、ホストにそのロケールを作る(`locale-gen`)。どの値を渡すか迷ったら、一度`restore`を流すと、合うDBを作る`CREATE DATABASE`の文を表示して止まる
+- **手順5では、本体と`backup-daemon`の両方を向け直す。** `backup`・`backup-daemon`サービスは`.config/docker.yml`を読むので、その`db:`をsystemdのPostgreSQLへ向け、ソケットで繋ぐならこれらのサービス(composeで動かす本体も)に`/var/run/postgresql`のmountを足す(`compose.uds.yaml`がPostgreSQLのソケットをmountしているのと同じ形)。向け直さないまま`backup-daemon`を再開すると、composeの古い`db`を取り続け、`keep`を超えた世代の整理も進む。向け直したことを確かめてから再開する
+- 移す間に止まる時間は、書き込みを止めてから、戻し終わって起動するまで
+- Redisは消さない(`-mode empty`で最新の世代を戻すときの既定)。止めた時点のDBを戻すので、Redisと食い違わない。理由は上の16 → 18の手順の説明と同じ。**これは、本体が使うRedisを移す前後で変えないときに限る。** 本体をホストからcomposeへ(またはその逆へ)移してRedisも替えるなら、元のRedisに残った配送待ち(`Delete`の再試行など)は届かなくなる。移した先のRedisに以前の中身が残っているなら、`restore`に`-redis clean`を渡して片付ける
+- 移行元のDBとvolumeは、移した先で動くことを確かめるまで消さない。元に戻すときは、本体と`backup-daemon`の設定の`db:`を移行元へ向け直して起動する(移行先で起動した後に戻すなら、上の16 → 18の手順と同じくRedisを片付ける)
+
+### pg_bigmをソースから入れる
+
+PGDGのaptリポジトリ(Debian・Ubuntu向けにPostgreSQLを配っているもの)には、`pg_bigm`のパッケージが無い(Debian bookwormで確かめた)。同梱のimage(`deploy/postgres-bigm/Dockerfile`)と同じcommitを、ソースからビルドして入れる。`pg_config`は、動かしている版のものを名指しする(複数の版の開発用のパッケージが入っていると、別の版を指すことがある)。
+
+```bash
+sudo apt install build-essential postgresql-server-dev-18 curl
+commit=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71   # deploy/postgres-bigm/Dockerfile の PG_BIGM_COMMIT
+curl -fsSL "https://github.com/pgbigm/pg_bigm/archive/$commit.tar.gz" | tar xz
+cd "pg_bigm-$commit"
+make USE_PGXS=1 with_llvm=no PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+sudo make USE_PGXS=1 with_llvm=no PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
+```
+
+世代に`pg_bigm`の拡張が含まれていれば、`backup restore`が戻すときに拡張を作る。戻すのは設定のDBユーザーで、拡張を作れるのはそのDBの持ち主かsuperuserに限られることがある。手順どおりにそのユーザーをDBの持ち主にしておくか、作れなければ、superuserで先に`CREATE EXTENSION pg_bigm`を流してから戻す。
+
+### 確かめた範囲
+
+隔離した環境で、Debianの`postgres:<版>-bookworm`のimageをsystemdの代わりにし(Unixソケットで接続)、`pg_bigm`入りのPG18をDockerの側にして、両方の向きを試した(2026-11-23)。`backup`のimageを直接動かし、取る側と戻す側で設定ファイルを分けて流した。この環境では、両側のDBのロケールの名前が既定で一致していた(実際のsystemdのクラスタでは、上のとおり合わないことがある)。名前が同じでも、glibc(Debian)とmusl(alpine)では文字列の並び順が違う。索引は戻すときに作り直されるので壊れないが、並び順に依る結果は変わりうる。
+
+| 向き | 移行先 | 結果 |
+|---|---|---|
+| systemd(PG16)→ Docker | PG18 | 成功。行の数が一致し、トークン・サインイン・投稿・リアクションがそのまま使えた |
+| Docker → systemd | PG16 | `pg_restore is 18 but the server is 16`で、書き込む前に止まった |
+| Docker → systemd | PG18、`pg_bigm`無し | `lacks extensions the backup uses: pg_bigm`で、書き込む前に止まった |
+| Docker → systemd | PG18、`pg_bigm`をソースからビルド | 成功 |
+
 ## バックアップから戻す (restore)
 
 `elythia backup restore`は、保存先の世代からDBを戻す(#3461)。同じサーバーで今のDBと入れ替える形は、管理画面からも行える([画面から戻す](backup.md#画面から戻す-3463)。本体を止めずに、バックアップ用のサービスがメンテナンスに入れて行う)。バックアップ用のimage(`pg_restore`を持つ)の中で動かす。戻す先によって2つの形がある。

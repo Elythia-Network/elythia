@@ -272,6 +272,9 @@ func TestRestoreStopConditions(t *testing.T) {
 		require.ErrorIs(t, err, ErrRestoreExtension)
 		assert.Contains(t, err.Error(), "no_such_ext")
 		assert.NotContains(t, err.Error(), "plpgsql")
+		// Docker の image と、systemd で動かすサーバーへの入れ方の両方を案内する (#4250)。
+		assert.Contains(t, err.Error(), "deploy/postgres-bigm")
+		assert.Contains(t, err.Error(), "build it from source on a host")
 		noLeftovers(t)
 		pg.exec(t, "postgres", "CREATE DATABASE ext_empty")
 		t.Cleanup(func() { pg.exec(t, "postgres", "DROP DATABASE ext_empty") })
