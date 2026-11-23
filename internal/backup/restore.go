@@ -632,7 +632,11 @@ func checkTargetExtensions(ctx context.Context, q Queryer, exts []ExtensionInfo)
 		return fmt.Errorf("backup: %w", err)
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%w: %s; install them on the target server first (pg_bigm: deploy/postgres-bigm)",
+		// pg_bigm は Debian・Ubuntu のパッケージに無いので、systemd で動かすサーバーへ戻す
+		// ときの入れ方 (ソースからビルド) も案内する (#4250)。
+		return fmt.Errorf("%w: %s; install them on the target server first "+
+			"(pg_bigm: the image of deploy/postgres-bigm on Docker, or build it from source on a host; "+
+			"see docs/deployment.md \"pg_bigmをソースから入れる\")",
 			ErrRestoreExtension, strings.Join(missing, ", "))
 	}
 	return nil
