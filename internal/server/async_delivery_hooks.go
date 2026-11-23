@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/elythia-network/elythia/internal/bgwork"
 	corenote "github.com/elythia-network/elythia/internal/core/note"
@@ -48,7 +49,14 @@ type asyncHookRunner struct {
 	// tails holds, per key, the done channel of the hook last called with it
 	// (it may still be waiting for the one before).
 	tails map[string]chan struct{}
+	// inflight counts the hooks called and not finished (#4248).
+	// elythia cherrypick convert が、投稿の削除の配送を積み終わるのを待つのに使う。
+	// 世代の箱の Running は、プラグインの常駐の処理なども数えるので使えない。
+	inflight atomic.Int64
 }
+
+// idle reports whether every hook called on r has finished.
+func (r *asyncHookRunner) idle() bool { return r.inflight.Load() == 0 }
 
 // newAsyncHookRunner returns a runner of background with n slots. n <= 0
 // selects the default of the note hooks (GOMAXPROCS * 2).
@@ -64,12 +72,14 @@ func newAsyncHookRunner(background *bgwork.Group, n int) *asyncHookRunner {
 }
 
 func (r *asyncHookRunner) run(what, key string, fn func()) {
+	r.inflight.Add(1)
 	done := make(chan struct{})
 	r.mu.Lock()
 	prev := r.tails[key]
 	r.tails[key] = done
 	r.mu.Unlock()
 	finish := func() {
+		defer r.inflight.Add(-1)
 		close(done)
 		r.mu.Lock()
 		if r.tails[key] == done {
