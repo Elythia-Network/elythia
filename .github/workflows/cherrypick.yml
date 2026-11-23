@@ -1,0 +1,57 @@
+name: Move from CherryPick
+
+# CherryPick 4.18.0-beta.1 で作った DB を、今のコードで運営者の手順どおりに移せるかを
+# 確かめる (#4249)。手順は tests/cherrypick/run.sh の冒頭。
+#
+# - pull_request: サーバーのコードか migration を変えたときに回す。移行のコマンドと
+#   判定のほか、convert が呼ぶ本体の削除の経路 (core)、接続 (db / config)、起動した後に
+#   確かめる口も通るため。upgrade と同じ範囲に、検査そのものを足す
+# - workflow_dispatch: リリースの前などに回す
+# - **必須にしない。** CherryPick の image を Docker Hub から取るので、外の都合でも落ちうる
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "migration/**"
+      - "internal/**"
+      - "cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "tests/cherrypick/**"
+      - ".github/workflows/cherrypick.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cherrypick:
+    runs-on: ubuntu-latest
+    # ビルド 3〜5 分、CherryPick の image の取得と起動 (migration を流す) が数分
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Move a CherryPick database and verify
+        run: make cherrypick-test
+
+      - name: Upload logs on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cherrypick-logs
+          path: tests/cherrypick/out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: make cherrypick-down >/dev/null 2>&1 || true

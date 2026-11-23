@@ -252,6 +252,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 | `upstream-backend-e2e` | PR(paths限定) | | 本家backend e2eを実行。UserLiteの期待DTOにローカル連合状態のみ追加 (4 shard)、叩いたAPIの集計 |
 | `diff-e2e` | PR(paths限定) | | TSとの値レベルの差分、叩いたAPIの集計 |
 | `upgrade` | PR(paths限定) | | 前のリリースのimageで作ったDBを、今のコードで`migrate up`して引き継げるか |
+| `cherrypick` | PR(paths限定) | | CherryPick 4.18.0-beta.1のimageで作ったDBを、今のコードで運営者の手順どおりに移せるか |
 | `apicompat` | PR(paths限定) | | `docs/api-compat.md`が実態と一致しているか、goldenと`frontend/locales`が本家の版に追いついているか(`make upstream-check`) |
 | `build-with-plugins-selftest` | PR(paths限定) | | 運営者向けreusable workflowのビルド |
 | `docker` | `main` / `develop` / tagへのpush、PR | | imageがビルドできるか。PR以外ではimageをpublishする |
@@ -309,6 +310,7 @@ docを直すと、直した先で新しい誤りを作りやすくなります�
 
 このファイル自体を変えたときだけ、1行で追記します(新しいものを上に)。経緯の本文はリンク先にあります。個別のfixの履歴は`CHANGELOG.md`にあります。
 
+- 2026-11-23: CherryPickのDBを移せるかを確かめる`cherrypick` workflowを足したので、Section 8の表に1行を足した (#4249) → [docs/testing.md](docs/testing.md#cherrypick-からの移行-4249)
 - 2026-11-21: echoをv5へ上げたので、Section 1の表を直した (#4239) → [docs/architecture.md](docs/architecture.md)
 - 2026-11-14: `vulncheck`をMakefileの`make vulncheck`から呼び、govulncheckの結果を許可の一覧と突き合わせるようにしたので、Section 8の行を直した (#4176) → [docs/ci.md](docs/ci.md)
 - 2026-11-14: Claude Code以外のコーディングエージェントも読めるよう、このファイルを指すシンボリックリンク`AGENTS.md`を置き、冒頭と読み方の節を直した (#4167)

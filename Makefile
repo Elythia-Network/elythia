@@ -1,4 +1,4 @@
-.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all schemathesis-test schemathesis-down upgrade-test upgrade-down \
+.PHONY: help check gates version plugin-test frontend-check diff-check playwright-check e2e-down-all schemathesis-test schemathesis-down upgrade-test upgrade-down cherrypick-test cherrypick-down \
 	update pull pull-plugins docker-update docker-rebuild docker-restart uds-update uds-deploy uds-backup-refresh \
 	image-up image-down image-down-v image-logs image-build \
 	build run dev clean tidy test fmt lint plugin-doc-check migrate-up migrate-down migrate-down-local migrate-create migrate-create-local \
@@ -154,6 +154,7 @@ E2E_COMPOSE_FILES = \
 	tests/playwright/backup-stack/compose.yml \
 	tests/schemathesis/compose.yml \
 	tests/upgrade/compose.yml \
+	tests/cherrypick/compose.yml \
 	tests/dropin/compose.yml \
 	tests/dropin-frontend/compose.yml \
 	tests/federation/compose.misskey.yml \
@@ -1396,6 +1397,16 @@ upgrade-test: build ## 前のリリースで作った DB を、今のコード�
 
 upgrade-down: ## 前のリリースからの更新の検査のスタックを撤去 (volume ごと)
 	docker compose -f tests/upgrade/compose.yml --profile old down -v
+
+##@ e2e: CherryPick からの移行
+# CherryPick 4.18.0-beta.1 で作った DB を、今のコードで運営者の手順どおりに移せるかを
+# 確かめる (#4249)。手順は tests/cherrypick/run.sh の冒頭。DB と Redis は毎回作り直す。
+# 結果は tests/cherrypick/out/
+cherrypick-test: build ## CherryPick 4.18.0-beta.1 の DB を、今のコードで移せるかを確かめる
+	tests/cherrypick/run.sh
+
+cherrypick-down: ## CherryPick からの移行の検査のスタックを撤去 (volume ごと)
+	docker compose -f tests/cherrypick/compose.yml down -v
 
 ##@ e2e: /api.json から入力を作る検査
 # schemathesis で、/api.json の宣言から入力を作って全エンドポイントへ送る (#4118)。
