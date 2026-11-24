@@ -68,7 +68,7 @@ func newHandler(t *testing.T) (*Handler, *testutil.MockUserRepository, *testutil
 	keypairRepo := &memoryKeypairRepo{items: map[string]*model.UserKeypair{}}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	renderer := activitypub.NewRenderer(urls)
-	return NewHandler(renderer, userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "", nil, nil), userRepo, noteRepo, keypairRepo
+	return NewHandler(renderer, userSvc, querySvc, keypairRepo, idGen, nil, nil, nil, "example.com", nil, nil), userRepo, noteRepo, keypairRepo
 }
 
 type localFederationObserverStub struct {
@@ -811,17 +811,76 @@ func TestAPIShow_RemoteUser(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestExtractLocalID(t *testing.T) {
-	assert.Equal(t, "abc123", extractLocalID("https://example.com/notes/abc123", "/notes/"))
-	assert.Equal(t, "xyz", extractLocalID("https://example.com/users/xyz", "/users/"))
-	assert.Equal(t, "", extractLocalID("https://example.com/other", "/notes/"))
-	assert.Equal(t, "", extractLocalID("", "/notes/"))
+func TestLocalObjectID(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	assert.Equal(t, "abc123", h.localObjectID("https://example.com/notes/abc123", "notes"))
+	assert.Equal(t, "xyz", h.localObjectID("https://example.com/users/xyz", "users"))
+	assert.Equal(t, "xyz", h.localObjectID("https://EXAMPLE.com/users/xyz?x=1", "users"), "host is case-insensitive and the query is ignored")
+	assert.Equal(t, "", h.localObjectID("https://example.com/other", "notes"))
+	assert.Equal(t, "", h.localObjectID("https://example.com/users/xyz", "notes"), "kind must match")
+	assert.Equal(t, "", h.localObjectID("https://example.com/notes/abc/activity", "notes"), "extra path segments are not a local object")
+	assert.Equal(t, "", h.localObjectID("https://example.com/x/notes/abc", "notes"), "kind must be the first segment")
+	assert.Equal(t, "", h.localObjectID("https://example.com/notes/", "notes"))
+	assert.Equal(t, "", h.localObjectID("ftp://example.com/notes/abc", "notes"))
+	assert.Equal(t, "", h.localObjectID("", "notes"))
 }
 
-func TestExtractLocalID_Fragment(t *testing.T) {
+func TestLocalObjectID_Fragment(t *testing.T) {
+	h, _, _, _ := newHandler(t)
 	// #main-key 等のフラグメントが除去されること
-	assert.Equal(t, "u1", extractLocalID("https://example.com/users/u1#main-key", "/users/"))
-	assert.Equal(t, "n1", extractLocalID("https://example.com/notes/n1#fragment", "/notes/"))
+	assert.Equal(t, "u1", h.localObjectID("https://example.com/users/u1#main-key", "users"))
+	assert.Equal(t, "n1", h.localObjectID("https://example.com/notes/n1#fragment", "notes"))
+}
+
+func TestLocalObjectID_OtherHostIsNotLocal(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	assert.Equal(t, "", h.localObjectID("https://remote.example/notes/abc", "notes"))
+	assert.Equal(t, "", h.localObjectID("https://remote.example/users/abc", "users"))
+	assert.Equal(t, "", h.localObjectID("https://example.com.remote.example/users/abc", "users"))
+}
+
+func TestLocalObjectID_SelfURLComparesPort(t *testing.T) {
+	h, _, _, _ := newHandler(t)
+	h.SetExternalRedirectPolicy(func() bool { return true }, "https://example.com:8443/")
+	assert.Equal(t, "abc", h.localObjectID("https://example.com:8443/notes/abc", "notes"))
+	assert.Equal(t, "", h.localObjectID("https://example.com/notes/abc", "notes"), "same hostname on another port is another server")
+
+	h.SetExternalRedirectPolicy(func() bool { return true }, "https://example.com/")
+	assert.Equal(t, "abc", h.localObjectID("https://example.com:443/notes/abc", "notes"), "the default port is the same authority")
+}
+
+func TestAPIShow_OtherHostURLIsNotResolvedLocally(t *testing.T) {
+	h, userRepo, noteRepo, keypairRepo := newHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "bob"}
+	// 鍵の組を置き、自ホストの URL なら ap/get が利用者を描けることを先に確かめる
+	// (無いと、ホストの判定に関係なく resolveLocal が失敗して 400 になる)。
+	keypairRepo.items["u1"] = &model.UserKeypair{UserID: "u1", PublicKey: "PUBKEY"}
+	noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "u1", Text: ptr("local text"), Visibility: model.NoteVisibilityPublic, User: &model.User{ID: "u1", Username: "bob"}}
+	for _, uri := range []string{"https://example.com/users/u1", "https://example.com/notes/n1"} {
+		rec := postJSON(h.APIGet, `{"uri":"`+uri+`"}`)
+		require.Equal(t, http.StatusOK, rec.Code, "precondition: the local URL resolves: %s", uri)
+	}
+
+	for _, uri := range []string{"https://remote.example/users/u1", "https://remote.example/notes/n1"} {
+		rec := postJSON(h.APIShow, `{"uri":"`+uri+`"}`)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, uri)
+		assert.NotContains(t, rec.Body.String(), "bob", uri)
+		assert.NotContains(t, rec.Body.String(), "local text", uri)
+
+		rec = postJSON(h.APIGet, `{"uri":"`+uri+`"}`)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, uri)
+	}
+	// リモートの解決へは今までどおり進む。
+	h.SetRemote(&mockFetcher{data: []byte(`{"type":"Note","id":"https://remote.example/notes/n1","content":"remote text"}`)}, &mockResolver{noteErr: assert.AnError})
+	rec := postJSON(h.APIShow, `{"uri":"https://remote.example/notes/n1"}`)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "remote text")
+	assert.NotContains(t, rec.Body.String(), "local text")
+}
+
+func TestLocalObjectID_UnwiredHostIsNotLocal(t *testing.T) {
+	h := &Handler{}
+	assert.Equal(t, "", h.localObjectID("https://example.com/notes/abc", "notes"))
 }
 
 func ptr[T any](v T) *T { return &v }
