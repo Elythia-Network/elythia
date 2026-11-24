@@ -44,6 +44,9 @@ var (
 // wiring).
 type Resolver interface {
 	ResolveActor(uri string) (*model.User, error)
+	// RefreshActor re-fetches the stored remote actor at uri and returns the
+	// updated row, failing when the fetch fails (upstream updatePerson).
+	RefreshActor(uri string) (*model.User, error)
 	// ExtractLocalUserID returns the local user id when uri points at this
 	// instance, or "" otherwise.
 	//
@@ -302,6 +305,21 @@ func (s *Service) resolveDestination(dstURI string) (dst *model.User, viaLocalUR
 		return dst, true, err
 	}
 	dst, err = s.resolver.ResolveActor(dstURI)
+	if err != nil || dst == nil {
+		return dst, false, err
+	}
+	// **移行先は取り直してから照合する。** ResolveActor は TTL の間は DB の行を
+	// そのまま返すので、移行先が別名を外した後でも古い alsoKnownAs で移行が通り、
+	// 別名を足した直後は通らない。本家の i/move も updatePerson で取り直してから
+	// alsoKnownAs を見る。取り直せなければ移行しない。応答は本家と違う: 本家は
+	// updatePerson の例外を ApiError にせずに投げるので 500 の INTERNAL_ERROR に
+	// なるが、ここでは Move が ErrNoSuchUser にまとめ、i/move は 400 の
+	// NO_SUCH_USER を返す (docs/divergence/api.md)。
+	refreshURI := dstURI
+	if dst.URI != nil && *dst.URI != "" {
+		refreshURI = *dst.URI
+	}
+	dst, err = s.resolver.RefreshActor(refreshURI)
 	return dst, false, err
 }
 
