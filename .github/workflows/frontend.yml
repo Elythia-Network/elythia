@@ -118,7 +118,7 @@ jobs:
       # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
       # ので、frontend をビルドする前に書き出す。同梱サンプルの frontend も型と
       # ビルドの対象に入れるため、既定無効のものも含める plugins-all を使う。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
 
@@ -248,7 +248,7 @@ jobs:
       # pluginbuild の生成物 (server-plugins.generated.ts) は追跡していない (#3379)
       # ので、frontend をビルドする前に書き出す。同梱サンプルの frontend も型と
       # ビルドの対象に入れるため、既定無効のものも含める plugins-all を使う。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
 
