@@ -8207,6 +8207,139 @@ func TestProcessRemoteMove_LocalDestination(t *testing.T) {
 	assert.Equal(t, "localDst", mp.dst.ID)
 }
 
+// moveActorDoc renders a remote actor document for the move tests. aka and
+// movedTo are omitted when empty, like Mastodon does.
+func moveActorDoc(uri, name, movedTo string, aka ...string) string {
+	extra := ""
+	if movedTo != "" {
+		extra += `"movedTo": "` + movedTo + `",`
+	}
+	if len(aka) > 0 {
+		extra += `"alsoKnownAs": ["` + strings.Join(aka, `","`) + `"],`
+	}
+	return `{ "@context": "https://www.w3.org/ns/activitystreams",
+		"id": "` + uri + `",
+		"type": "Person",
+		"preferredUsername": "` + name + `",
+		"inbox": "` + uri + `/inbox",
+		` + extra + `
+		"publicKey": {"publicKeyPem": "FAKE"}
+	}`
+}
+
+// 既知のリモートの移行先は、DB の古い行ではなく取り直した document で照合する。
+// 本家 processRemoteMove も updatePerson で取り直してから alsoKnownAs を見る。
+// 取り直しに失敗したときと、削除・凍結済みの移行先へは引き継がない。
+func TestProcessRemoteMove_RefetchesKnownRemoteDestination(t *testing.T) {
+	const srcURI = "https://remote.example/users/src"
+	const dstURI = "https://elsewhere.example/users/dst"
+	dstHost := "elsewhere.example"
+
+	cases := []struct {
+		name string
+		// DB にある移行先の行
+		dst *model.User
+		// 移行先の今の document ("" なら取得に失敗する)
+		dstDoc   string
+		wantCall bool
+	}{
+		{
+			name:     "stale DB aliases but refetched document claims the source",
+			dst:      &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI)},
+			dstDoc:   moveActorDoc(dstURI, "dst", "", srcURI),
+			wantCall: true,
+		},
+		{
+			name:   "DB aliases claim the source but refetched document dropped them",
+			dst:    &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI), AlsoKnownAs: strPtr(srcURI)},
+			dstDoc: moveActorDoc(dstURI, "dst", "", "https://other.example/users/x"),
+		},
+		{
+			name:   "refetched document without alsoKnownAs is rejected",
+			dst:    &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI), AlsoKnownAs: strPtr(srcURI)},
+			dstDoc: moveActorDoc(dstURI, "dst", ""),
+		},
+		{
+			name: "refetch failure does not fall back to DB aliases",
+			dst:  &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI), AlsoKnownAs: strPtr(srcURI)},
+		},
+		{
+			name:   "deleted destination is rejected",
+			dst:    &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI), AlsoKnownAs: strPtr(srcURI), IsDeleted: true},
+			dstDoc: moveActorDoc(dstURI, "dst", "", srcURI),
+		},
+		{
+			name:   "suspended destination is rejected",
+			dst:    &model.User{ID: "dstUser", Username: "dst", Host: &dstHost, URI: strPtr(dstURI), AlsoKnownAs: strPtr(srcURI), IsSuspended: true},
+			dstDoc: moveActorDoc(dstURI, "dst", "", srcURI),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testutil.NewMockUserRepository()
+			repo.Users["dstUser"] = tc.dst
+			docs := map[string]string{}
+			if tc.dstDoc != "" {
+				docs[dstURI] = tc.dstDoc
+			}
+			fetcher := &countingDocFetcher{docs: docs}
+			urls := activitypub.NewURLBuilder("https://local.example")
+			idGen, _ := id.NewGenerator("aidx")
+			r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, fetcher, idGen)
+			mp := &fakeMoveProcessor{}
+			r.SetMoveProcessor(mp)
+
+			src := &model.User{ID: "s", URI: strPtr(srcURI), MovedToURI: strPtr(dstURI)}
+			r.ProcessRemoteMove(src, nil, nil)
+
+			if tc.wantCall {
+				require.Equal(t, 1, mp.calls, "the move must be carried over")
+				assert.Equal(t, "dstUser", mp.dst.ID)
+			} else {
+				assert.Zero(t, mp.calls, "the move must NOT be carried over")
+			}
+			if !tc.dst.IsDeleted {
+				assert.True(t, fetcher.fetched(dstURI), "a known remote destination must be refetched")
+			}
+		})
+	}
+}
+
+// 互いを movedTo に指す 2 つの既知の actor でも、移行先の取り直しが循環せずに
+// 終わり、引き継ぎもしない。取り直した移行先がさらに移行していれば、その先の
+// 処理に辿った URI を渡して循環を止める。
+func TestProcessRemoteMove_RefetchedDestinationMoveCycleTerminates(t *testing.T) {
+	const aURI = "https://remote.example/users/a"
+	const bURI = "https://elsewhere.example/users/b"
+	hostA, hostB := "remote.example", "elsewhere.example"
+
+	repo := testutil.NewMockUserRepository()
+	repo.Users["a"] = &model.User{ID: "a", Username: "a", Host: &hostA, URI: strPtr(aURI), MovedToURI: strPtr(bURI)}
+	repo.Users["b"] = &model.User{ID: "b", Username: "b", Host: &hostB, URI: strPtr(bURI)}
+	fetcher := &countingDocFetcher{docs: map[string]string{
+		aURI: moveActorDoc(aURI, "a", bURI, bURI),
+		bURI: moveActorDoc(bURI, "b", aURI, aURI),
+	}}
+	urls := activitypub.NewURLBuilder("https://local.example")
+	idGen, _ := id.NewGenerator("aidx")
+	r := federation.NewResolverNilDeps(repo, testutil.NewMockNoteRepository(), urls, fetcher, idGen)
+	mp := &fakeMoveProcessor{}
+	r.SetMoveProcessor(mp)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.ProcessRemoteMove(repo.Users["a"], nil, nil)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("refetching a move destination that moves back did not terminate")
+	}
+	assert.Zero(t, mp.calls, "a move cycle must not be carried over")
+	assert.LessOrEqual(t, len(fetcher.calls), 3, "the cycle must be cut after a bounded number of fetches")
+}
+
 // --- #3121: 「確かめられなかった」と「引けなかった」を ack に潰さない ---
 
 // AP 投票の判定に使う poll の lookup が落ちたとき、**普通の返信ノートとして
