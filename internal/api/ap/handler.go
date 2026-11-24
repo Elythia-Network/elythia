@@ -84,6 +84,7 @@ type Handler struct {
 	// allowExternalRedirect は meta.allowExternalApRedirect を返す (未配線なら許す)。
 	allowExternalRedirect func() bool
 	// selfOrigin は config.url。外部への転送かどうかを scheme とポートまで見て決める。
+	// ap/show・ap/get が URI を自分のものとみなすかもポート込みのホストで決める。
 	selfOrigin *url.URL
 	// softwareBlocker は受信を拒否するソフトウェア (meta.inboxSuspendedSoftware) の
 	// 判定。ドメインブロックと同じく FEDERATION_NOT_ALLOWED にする (#3563)。resolver
@@ -856,8 +857,8 @@ func (h *Handler) APIShow(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, apierr.Error("FEDERATION_NOT_ALLOWED", "Federation for this host is not allowed.", "974b799e-1a29-4889-b706-18d4dd93e266"))
 	}
 
-	// ローカルのノートURIかチェック (/notes/ を含む)
-	if noteID := extractLocalID(uri, "/notes/"); noteID != "" {
+	// 自ホストの /notes/<id> ならローカルのノートを返す
+	if noteID := h.localObjectID(uri, "notes"); noteID != "" {
 		n, err := h.queryService.Show(nil, noteID)
 		if err == nil && n.UserHost == nil {
 			return c.JSON(http.StatusOK, map[string]any{
@@ -867,8 +868,8 @@ func (h *Handler) APIShow(c *echo.Context) error {
 		}
 	}
 
-	// ローカルのユーザーURIかチェック (/users/ を含む)
-	if userID := extractLocalID(uri, "/users/"); userID != "" {
+	// 自ホストの /users/<id> ならローカルの利用者を返す
+	if userID := h.localObjectID(uri, "users"); userID != "" {
 		bundle, err := h.userService.ShowByID(userID)
 		if err == nil && bundle.User.Host == nil {
 			// **凍結・退会した利用者は、users/show と同じくモデレーター以外には
@@ -1053,7 +1054,7 @@ func apShowGateHost(uri string) string {
 
 // resolveLocal attempts to resolve a local URI to an AP object.
 func (h *Handler) resolveLocal(uri string) (any, error) {
-	if noteID := extractLocalID(uri, "/notes/"); noteID != "" {
+	if noteID := h.localObjectID(uri, "notes"); noteID != "" {
 		n, err := h.queryService.Show(nil, noteID)
 		if err != nil {
 			return nil, err
@@ -1066,7 +1067,7 @@ func (h *Handler) resolveLocal(uri string) (any, error) {
 		}
 		return h.renderer.RenderNote(n, h.idGen), nil
 	}
-	if userID := extractLocalID(uri, "/users/"); userID != "" {
+	if userID := h.localObjectID(uri, "users"); userID != "" {
 		bundle, err := h.userService.ShowByID(userID)
 		if err != nil {
 			return nil, err
@@ -1087,32 +1088,46 @@ func (h *Handler) resolveLocal(uri string) (any, error) {
 	return nil, http.ErrNotSupported
 }
 
-func extractLocalID(uri, pathPrefix string) string {
-	// URI末尾の /notes/{id} や /users/{id} からIDを抽出
-	idx := len(uri) - 1
-	for idx >= 0 && uri[idx] != '/' {
-		idx--
-	}
-	if idx < 0 {
+// localObjectID returns <id> when uri is this server's /<kind>/<id> URL
+// (kind is "notes" or "users"), and "" otherwise.
+//
+// **ホスト (punycode、ポート込み) が自分の URL と一致するときだけローカルと
+// みなす。** ホストの判定は upstream の ApDbResolverService.parseUri と同じ。
+// 以前は URI のどこかに /notes/ があれば後ろを ID としていたので、他のホストの
+// URL がこちらの同じ ID の投稿・利用者に解決されていた。ホストが違えば "" を返し、
+// 呼び出し側はリモートの解決へ進む。パスは parseUri より狭く、2 つの要素
+// ちょうどに限る (parseUri は /notes/<id>/<rest> や末尾のスラッシュも <id> として
+// 引く。旧実装は <id>/<rest> を ID として引いて見つからなかったので、以前から
+// ローカルとしては引けていない)。
+// クエリとフラグメント (#main-key) は見ない。
+func (h *Handler) localObjectID(uri, kind string) string {
+	u, err := url.Parse(uri)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
 	}
-	// pathPrefixが含まれているか確認
-	prefixIdx := -1
-	for i := 0; i+len(pathPrefix) <= len(uri); i++ {
-		if uri[i:i+len(pathPrefix)] == pathPrefix {
-			prefixIdx = i
-			break
-		}
-	}
-	if prefixIdx < 0 {
+	if !h.isLocalHost(u) {
 		return ""
 	}
-	id := uri[prefixIdx+len(pathPrefix):]
-	// フラグメント (#main-key 等) を除去
-	if i := strings.IndexByte(id, '#'); i >= 0 {
-		id = id[:i]
+	segs := strings.Split(u.Path, "/")
+	if len(segs) != 3 || segs[0] != "" || segs[1] != kind || segs[2] == "" {
+		return ""
 	}
-	return id
+	return segs[2]
+}
+
+// isLocalHost reports whether u's authority is this server's.
+//
+// 自分の URL (config.url) が配線されていればポート込みで比べる。無ければ
+// config.Hostname (ポートなし) と比べ、どちらも無ければローカルとみなさない
+// (見知らぬホストを自分と取り違える向きには倒さない)。
+func (h *Handler) isLocalHost(u *url.URL) bool {
+	if h.selfOrigin != nil {
+		return idnhost.HostPort(u) == idnhost.HostPort(h.selfOrigin)
+	}
+	if h.localHost != "" {
+		return idnhost.Puny(u.Hostname()) == idnhost.Puny(h.localHost)
+	}
+	return false
 }
 
 // viewerIsModerator reports whether viewer is a moderator. 匿名と未配線は false。
