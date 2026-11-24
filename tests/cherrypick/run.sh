@@ -6,7 +6,7 @@
 #    通報の自動処理の規則、隔離したホスト)。CherryPick を止める
 # 2. make build したものを、運営者の手順 (docs/migration-from-cherrypick.md) どおりに流し、
 #    それぞれの終了コードを確かめる: check → migrate up (止まる) → migrate up
-#    -allow-cherrypick → migrate up (convert まで止まる) → convert -apply → migrate up
+#    -allow-cherrypick → migrate up と serve (convert まで止まる) → convert -apply → migrate up
 # 3. 起動して scenario.py verify で確かめ、止めてから cleanup -apply を流す。もう一度
 #    migrate up して起動し、列と表を消した後も読み書きできることを確かめる
 #
@@ -98,6 +98,8 @@ expect 3 check "$bin" cherrypick check -config "$cfg"
 expect 1 migrate-refused "$bin" migrate -config "$cfg"
 expect 0 migrate-allowed "$bin" migrate -config "$cfg" -allow-cherrypick
 expect 1 migrate-before-convert "$bin" migrate -config "$cfg"
+expect 1 serve-before-convert "$bin" serve -config "$cfg"
+expect_log serve-before-convert 'refusing to start'
 expect_log migrate-before-convert 'run `elythia cherrypick convert`'
 expect 2 convert-unchosen "$bin" cherrypick convert -config "$cfg"
 expect_log convert-unchosen '-unapproved-members suspend|delete|approve'

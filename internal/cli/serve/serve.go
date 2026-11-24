@@ -24,6 +24,7 @@ import (
 	"github.com/elythia-network/elythia/internal/core/cache"
 	mkdb "github.com/elythia-network/elythia/internal/db"
 	"github.com/elythia-network/elythia/internal/db/pgstat"
+	"github.com/elythia-network/elythia/internal/maintenance"
 	"github.com/elythia-network/elythia/internal/maintmode"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/redislog"
@@ -107,12 +108,54 @@ func defaultEnv() env {
 	}
 }
 
+// cherryPickCheckTimeout bounds checkCherryPick. 読むのは
+// migrations の記録だけなので短くてよい。
+const cherryPickCheckTimeout = 30 * time.Second
+
+// errCherryPickNotConverted refuses a database that came from CherryPick
+// before "elythia cherrypick convert" has finished on it.
+//
+// 印が無いのは convert が要る DB だけではない。要対応が無い DB でも、初めての
+// migrate up が印を付けられずに終わる (警告だけ出して 0 で終わる) ことがあり、
+// そのときは migrate をもう一度流すだけで付く。どちらの直し方も分かる文面にする。
+var errCherryPickNotConverted = errors.New("this database came from CherryPick and is not marked as converted; refusing to start. " +
+	"If `elythia cherrypick check` reports nothing that needs action, run `elythia migrate` again to mark it. " +
+	"Otherwise run `elythia migrate -allow-cherrypick` and `elythia cherrypick convert` first " +
+	"(docs/migration-from-cherrypick.md)")
+
+// cherryPickNeedsConvert is what checkCherryPick asks. Tests replace it.
+var cherryPickNeedsConvert = maintenance.CherryPickNeedsConvert
+
+// checkCherryPick is the Supervisor's CheckDB: it refuses a CherryPick
+// database that convert has not finished on.
+//
+// **CherryPick の DB は、convert が済むまで世代を作らない。** 止めているのは
+// migrate up だけで、migrate を挟まずに起動すると、承認待ちの利用者や隔離した
+// インスタンスの制限が黙って外れる。読むのは migrations の記録だけ (大きな表は
+// 読まない)。確かめられないときも作らない。Supervisor が DB を開いた直後に
+// 呼ぶので、メンテナンス中に起動したプロセスは、抜けるまでここへ来ない
+// (DB を開かない、#3463)。メンテナンスの後に作り直すときも確かめる (戻した DB が
+// 別物でありうる)。
+func checkCherryPick(db *gorm.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), cherryPickCheckTimeout)
+	defer cancel()
+	needs, err := cherryPickNeedsConvert(ctx, db)
+	if err != nil {
+		return fmt.Errorf("check whether the database came from CherryPick: %w", err)
+	}
+	if needs {
+		return errCherryPickNotConverted
+	}
+	return nil
+}
+
 // supervisorDeps is what the Supervisor of `elythia serve` is built with.
 func supervisorDeps(cfg *config.Config, redis *cache.RedisClients) server.SupervisorDeps {
 	return server.SupervisorDeps{
 		OpenDB:    model.NewDatabase,
 		NewServer: server.New,
 		CloseDB:   mkdb.Close,
+		CheckDB:   checkCherryPick,
 		// shared_preload_libraries に pg_stat_statements があれば、拡張を
 		// 作る (#3909)。世代を作るたびに確かめる。
 		PrepareDB:   func(db *gorm.DB) { prepareDatabase(db, slog.Default(), ensurePgStatStatements) },

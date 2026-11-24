@@ -52,3 +52,44 @@ func TestSupervisor_BuildGenerationPreparesTheDatabase(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, []string{"open"}, steps, "nothing is prepared without a database")
 }
+
+// CheckDB runs first on every newly opened database. When it refuses, the
+// pool is closed and no generation is built, at start and on a rebuild.
+func TestSupervisor_BuildGenerationChecksTheDatabase(t *testing.T) {
+	f := newFakeGenerations(t)
+	deps := f.deps(0)
+	var steps []string
+	open := deps.OpenDB
+	deps.OpenDB = func(cfg *config.Config) (*gorm.DB, error) {
+		steps = append(steps, "open")
+		return open(cfg)
+	}
+	build := deps.NewServer
+	deps.NewServer = func(cfg *config.Config, db *gorm.DB, r *cache.RedisClients) (*Server, error) {
+		steps = append(steps, "build")
+		return build(cfg, db, r)
+	}
+	deps.PrepareDB = func(*gorm.DB) { steps = append(steps, "prepare") }
+	var refuse error
+	deps.CheckDB = func(*gorm.DB) error {
+		steps = append(steps, "check")
+		return refuse
+	}
+
+	s, err := NewSupervisor(&config.Config{}, nil, deps)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"open", "check", "prepare", "build"}, steps)
+
+	steps = nil
+	refuse = errors.New("unconverted")
+	closed := f.closed.Load()
+	_, _, err = s.buildGeneration()
+	require.ErrorIs(t, err, refuse)
+	assert.Equal(t, []string{"open", "check"}, steps, "nothing is prepared or built on a refused database")
+	assert.Equal(t, closed+1, f.closed.Load(), "the refused pool is closed")
+
+	steps = nil
+	_, err = NewSupervisor(&config.Config{}, nil, deps)
+	require.ErrorIs(t, err, refuse, "a refused database fails the start")
+	assert.Equal(t, []string{"open", "check"}, steps)
+}

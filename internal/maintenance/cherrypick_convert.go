@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 
 	"github.com/elythia-network/elythia/internal/pgarray"
 )
@@ -252,8 +253,36 @@ func CherryPickConverted(ctx context.Context, db *gorm.DB) (bool, error) {
 	return n > 0, nil
 }
 
+// CherryPickNeedsConvert reports whether db came from CherryPick and
+// "elythia cherrypick convert" has not finished on it. "elythia serve" calls it
+// on every database it opens. It reads only the migrations records (no large
+// table).
+//
+// 対応していない版の CherryPick の DB も、変換が済んでいないものとして答える
+// (migrate がそもそも通さないので、ここまで来るのは手順を飛ばしたときだけ)。
+func CherryPickNeedsConvert(ctx context.Context, db *gorm.DB) (bool, error) {
+	// **プライマリを読む (dbresolver.Write)。** serve の DB は SELECT をレプリカへ
+	// 振る。レプリカが遅れていると convert の直後の印が見えずに起動を拒み、
+	// レプリカが落ちていると、これまで起動を止めなかったレプリカの障害で世代を
+	// 作れなくなる。Clauses が返す *gorm.DB は使い回す前提の形ではない (GORM の
+	// chain method) ので、Session で包んでから続けて問い合わせる。
+	db = db.WithContext(ctx).Clauses(dbresolver.Write).Session(&gorm.Session{})
+	status, _, err := cherryPickStatus(db)
+	if err != nil {
+		return false, err
+	}
+	if status == NotCherryPick {
+		return false, nil
+	}
+	converted, err := CherryPickConverted(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	return !converted, nil
+}
+
 // MarkCherryPickConverted records that "elythia cherrypick convert" has
-// finished. Marking twice adds one record.
+// finished. Marking an already marked database adds nothing.
 func MarkCherryPickConverted(ctx context.Context, db *gorm.DB) error {
 	if err := db.WithContext(ctx).Exec(`INSERT INTO migrations ("timestamp", name)
 		SELECT 0, ? WHERE NOT EXISTS (SELECT 1 FROM migrations WHERE name = ?)`,

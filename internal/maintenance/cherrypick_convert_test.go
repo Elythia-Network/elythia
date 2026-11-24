@@ -7,7 +7,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+	"gorm.io/plugin/dbresolver"
+
+	"github.com/elythia-network/elythia/internal/testutil"
 )
 
 // seedConvert puts one of each kind of item into a CherryPick database.
@@ -261,4 +266,70 @@ func TestCherryPickLeftovers_NotInElythia(t *testing.T) {
 	var n int64
 	require.NoError(t, testDB.Raw(`SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'note'`).Scan(&n).Error)
 	require.EqualValues(t, 1, n, "testDB は Elythia の migration を流した schema")
+}
+
+// serve が DB を開いたときの確認。CherryPick の DB で convert の印が無ければ true、印を付けた
+// 後と CherryPick ではない DB では false。
+func TestCherryPickNeedsConvert(t *testing.T) {
+	ctx := context.Background()
+	db := openCherryPickDB(t)
+	needs, err := CherryPickNeedsConvert(ctx, db)
+	require.NoError(t, err)
+	assert.True(t, needs, "変換していない CherryPick の DB")
+
+	require.NoError(t, MarkCherryPickConverted(ctx, db))
+	needs, err = CherryPickNeedsConvert(ctx, db)
+	require.NoError(t, err)
+	assert.False(t, needs, "変換した後")
+
+	require.NoError(t, db.Exec(`DELETE FROM migrations`).Error)
+	needs, err = CherryPickNeedsConvert(ctx, db)
+	require.NoError(t, err)
+	assert.False(t, needs, "CherryPick の記録が無い DB")
+
+}
+
+// CherryPickNeedsConvert reads the primary even when the pool routes SELECTs
+// to a replica. A lagging replica that does not have the CherryPick records
+// yet must not let serve start on an unconverted database.
+func TestCherryPickNeedsConvert_ReadsPrimary(t *testing.T) {
+	ctx := context.Background()
+	db := openCherryPickDB(t)
+	var primarySchema string
+	require.NoError(t, db.Raw("SELECT current_schema()").Scan(&primarySchema).Error)
+	// レプリカの遅れを空の schema で模す (migrations の表がまだ届いていない)。
+	replicaSchema := primarySchema + "_replica"
+	require.NoError(t, db.Exec(`DROP SCHEMA IF EXISTS "`+replicaSchema+`" CASCADE`).Error)
+	require.NoError(t, db.Exec(`CREATE SCHEMA "`+replicaSchema+`"`).Error)
+	t.Cleanup(func() { db.Exec(`DROP SCHEMA IF EXISTS "` + replicaSchema + `" CASCADE`) })
+
+	gdb, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: testutil.TestDSNForSchema(primarySchema), PreferSimpleProtocol: true,
+	}), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if sqlDB, err := gdb.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, gdb.Use(dbresolver.Register(dbresolver.Config{
+		Replicas: []gorm.Dialector{postgres.New(postgres.Config{
+			DSN: testutil.TestDSNForSchema(replicaSchema), PreferSimpleProtocol: true,
+		})},
+		Policy: dbresolver.RandomPolicy{},
+	})))
+
+	// 前提: 素の SELECT はレプリカを読み、migrations の表が見えない。
+	var tables int64
+	require.NoError(t, gdb.Raw(`SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'migrations'`).Scan(&tables).Error)
+	require.Zero(t, tables, "the plain SELECT reads the replica")
+
+	needs, err := CherryPickNeedsConvert(ctx, gdb)
+	require.NoError(t, err)
+	assert.True(t, needs, "the primary holds the unconverted CherryPick database")
+
+	require.NoError(t, MarkCherryPickConverted(ctx, db))
+	needs, err = CherryPickNeedsConvert(ctx, gdb)
+	require.NoError(t, err)
+	assert.False(t, needs, "the marker on the primary is seen at once")
 }

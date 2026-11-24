@@ -88,8 +88,9 @@ func TestRun_CherryPickAllowFlag(t *testing.T) {
 
 func TestRun_CherryPickNothingToDo(t *testing.T) {
 	for name, r := range map[string]maintenance.CherryPickReport{
-		"not CherryPick":    {Status: maintenance.NotCherryPick},
-		"already converted": {Status: maintenance.CherryPickSupported, NoteHistories: 3},
+		"not CherryPick": {Status: maintenance.NotCherryPick},
+		// Elythia が流した後で要対応が無ければ、確認が印を付けて Converted を返す。
+		"marked by the check": {Status: maintenance.CherryPickSupported, Migrated: true, Converted: true, NoteHistories: 3},
 		// convert が済んでいれば、他の欄に何があっても止めない。
 		"converted": {Converted: true, Status: maintenance.CherryPickSupported, PendingUsers: pendingCherryPick.PendingUsers},
 	} {
@@ -100,6 +101,66 @@ func TestRun_CherryPickNothingToDo(t *testing.T) {
 			assert.Equal(t, 0, run(e, &bytes.Buffer{}, []string{"-config", writeConfig(t)}))
 			assert.Equal(t, []string{"up"}, m.calls)
 			assert.NotContains(t, out.String(), "came from CherryPick")
+		})
+	}
+}
+
+// 要対応の無い CherryPick の DB は、初めての migrate up の後に確かめ直して印を
+// 付けさせる。付けないと、serve が次の migrate up まで起動しない。
+func TestRun_CherryPickMarksAfterFirstUp(t *testing.T) {
+	before := maintenance.CherryPickReport{Status: maintenance.CherryPickSupported, NoteHistories: 3}
+	for _, tt := range []struct {
+		name     string
+		after    maintenance.CherryPickReport
+		afterErr error
+		wantCode int
+		wantLog  string
+	}{
+		{name: "marked", after: maintenance.CherryPickReport{Status: maintenance.CherryPickSupported, Migrated: true, Converted: true}},
+		{name: "not marked", after: maintenance.CherryPickReport{Status: maintenance.CherryPickSupported, Migrated: true},
+			wantLog: "was not marked as converted"},
+		// 流し終えた後の数え直しの失敗は、警告だけで 0 を返す (次の migrate で付く)。
+		{name: "check failed", afterErr: errors.New("connection refused"),
+			wantLog: "could not be marked as converted"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &fakeMigrator{}
+			e, out, _ := testEnv(t, m, nil)
+			calls := 0
+			e.cherrypick = func(*config.Config) (maintenance.CherryPickReport, error) {
+				calls++
+				if calls == 1 {
+					return before, nil
+				}
+				// 確かめ直すのは流し終えてから。
+				assert.Equal(t, []string{"up"}, m.calls)
+				return tt.after, tt.afterErr
+			}
+			assert.Equal(t, tt.wantCode, run(e, &bytes.Buffer{}, []string{"-config", writeConfig(t), "-track", "core"}))
+			assert.Equal(t, 2, calls, "流した後に確かめ直す")
+			if tt.wantLog == "" {
+				assert.NotContains(t, out.String(), "came from CherryPick")
+			} else {
+				assert.Contains(t, out.String(), tt.wantLog)
+			}
+		})
+	}
+	// 既に流した DB、要対応がある DB、CherryPick ではない DB では確かめ直さない。
+	for name, r := range map[string]maintenance.CherryPickReport{
+		"migrated":       {Status: maintenance.CherryPickSupported, Migrated: true},
+		"needs action":   pendingCherryPick,
+		"not CherryPick": {Status: maintenance.NotCherryPick},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := &fakeMigrator{}
+			e, _, _ := testEnv(t, m, nil)
+			calls := withCherryPick(&e, r, nil)
+			args := []string{"-config", writeConfig(t), "-track", "core"}
+			if name == "needs action" {
+				args = append(args, "-allow-cherrypick")
+			}
+			assert.Equal(t, 0, run(e, &bytes.Buffer{}, args))
+			assert.Equal(t, 1, *calls)
 		})
 	}
 }
@@ -200,4 +261,21 @@ func TestMigrateDB_CherryPickDatabase(t *testing.T) {
 	require.NoError(t, maintenance.MarkCherryPickConverted(context.Background(), f.db))
 	code, out = f.migrateWith(t, inspect)
 	assert.Equal(t, 0, code, out)
+}
+
+// 要対応の無い CherryPick の DB は、初めての migrate up で変換済みの印が付く。
+// serve はこの印が無いと起動しない。
+func TestMigrateDB_CherryPickNothingToDoIsMarked(t *testing.T) {
+	f := newDBFixture(t, "cherrypick")
+	require.NoError(t, testutil.LoadCherryPickSchema(f.db))
+	f.coreDir = filepath.Join("..", "..", "..", "migration")
+	f.localDir = filepath.Join(t.TempDir(), "absent-local")
+	inspect := func(*config.Config) (maintenance.CherryPickReport, error) {
+		return maintenance.InspectCherryPickBeforeMigrate(context.Background(), f.db, time.Now())
+	}
+	code, out := f.migrateWith(t, inspect)
+	require.Equal(t, 0, code, out)
+	needs, err := maintenance.CherryPickNeedsConvert(context.Background(), f.db)
+	require.NoError(t, err)
+	assert.False(t, needs, "初めての migrate up の後に印が付いている")
 }
