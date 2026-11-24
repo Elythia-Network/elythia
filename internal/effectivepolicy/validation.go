@@ -219,8 +219,8 @@ func ValidatePolicyValue(key string, value any) bool {
 	// `uploadableFileTypes` の編集 UI は `MkTextarea` を `split('\n')` する
 	// だけなので、**末尾で Enter を押す / 欄を空にするだけ**で `[""]` が飛ぶ。
 	// 受け側の `aggregateStringSetUnion` は元から「trim して空は読み飛ばす」
-	// fail-soft なので、書き込み時に拒否するのは**今まで通っていた入力を
-	// 落とす回帰**になる。
+	// ので、書き込み時に拒否するのは**今まで通っていた入力を落とす回帰**になる。
+	// 読み飛ばした結果が 0 件なら空の一覧 (本家と同じく全部拒否) になる。
 	if _, isStrings := native.([]string); isStrings {
 		return stringSliceValue(value)
 	}

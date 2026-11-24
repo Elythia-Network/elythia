@@ -398,6 +398,28 @@ func TestUpload_UploadableFileTypesRejectsMismatch(t *testing.T) {
 	require.ErrorIs(t, err, drive.ErrUnallowedFileType)
 }
 
+// uploadableFileTypes を空にしたロールは、何も上げられない (本家と同じ)。
+// policy が無い (未集約) ときは従来どおり制限しない。
+func TestUpload_UploadableFileTypesEmptyListRejects(t *testing.T) {
+	svc, fileRepo, _ := newSvc(t)
+	svc.SetRoleCheckerForTest(&fakeMod{
+		policies: map[string]map[string]any{
+			"u1": {"uploadableFileTypes": []string{}},
+			"u2": {},
+		},
+	})
+	_, err := svc.Upload(context.Background(), drive.UploadInput{
+		User: &model.User{ID: "u1"}, Body: []byte("hello text body content"), Name: "x.txt",
+	})
+	require.ErrorIs(t, err, drive.ErrUnallowedFileType)
+	assert.Empty(t, fileRepo.Files)
+
+	_, err = svc.Upload(context.Background(), drive.UploadInput{
+		User: &model.User{ID: "u2"}, Body: []byte("hello text body content"), Name: "x.txt",
+	})
+	require.NoError(t, err)
+}
+
 // uploadableFileTypes に wildcard ("*") があれば全許可。
 func TestUpload_UploadableFileTypesWildcardAllows(t *testing.T) {
 	svc, _, _ := newSvc(t)
@@ -748,7 +770,11 @@ func TestMimeAllowedByPolicy_PatternMatching(t *testing.T) {
 		{"no match", "application/zip", []string{"image/*", "text/*"}, false},
 		{"empty string entries are skipped", "image/png", []string{"", "image/*"}, true},
 		{"nil policy is fail-soft allow", "image/png", nil, true},
-		{"empty list is fail-soft allow", "image/png", []string{}, true},
+		{"empty list denies everything", "image/png", []string{}, false},
+		{"empty []any denies everything", "image/png", []any{}, false},
+		{"typed nil []string is an unset policy", "image/png", []string(nil), true},
+		{"typed nil []any is an unset policy", "image/png", []any(nil), true},
+		{"list of blank entries denies everything", "image/png", []any{"", "  "}, false},
 		{"[]any from JSON unmarshal", "image/png", []any{"image/*"}, true},
 		{"[]any with non-string entries skipped", "image/png", []any{42, "image/*"}, true},
 		{"wrong type fail-soft allow", "image/png", "image/*", true},
