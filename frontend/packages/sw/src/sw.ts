@@ -14,6 +14,8 @@ import { swLang } from '@/scripts/lang.js';
 import { MAINTENANCE_CACHE, keepCacheOnActivate, maintenanceAwareNavigation } from '@/scripts/maintenance.js';
 import type { MaintenanceStore } from '@/scripts/maintenance.js';
 import * as swos from '@/scripts/operations.js';
+import { fallbackRules, respondsToFetch, routerRules } from '@/scripts/routes.js';
+import type { URLPatternInit } from '@/scripts/routes.js';
 
 // Elythia: メンテナンスの画面を覚えておく先 (#3463)。
 const MAINTENANCE_MARK_KEY = 'elythia-maintenance-at';
@@ -84,20 +86,12 @@ globalThis.addEventListener('install', (ev) => {
 		const addRoutes = (rules: unknown) => (ev.addRoutes as (rules: unknown) => Promise<void>).call(ev, rules);
 
 		// doc: https://developer.mozilla.org/ja/docs/Web/API/URLPattern
-		const anyUrl = new URLPattern({});
-		const urlEndsWithSlash = new URLPattern({ pathname: '*/', search: '' });
+		const makePattern = (init: URLPatternInit) => new URLPattern(init);
 
-		ev.waitUntil(addRoutes([
-			{ condition: { requestMode: 'navigate' }, source: 'fetch-event' },
-			// fetchハンドラーはURLが/で終わるリクエストもHTMLとして扱う (クエリが付くと/では終わらない)
-			{ condition: { urlPattern: urlEndsWithSlash }, source: 'fetch-event' },
-			// ルールは先に一致したものが優先されるので、これは上記以外のすべてに当たる
-			{ condition: { urlPattern: anyUrl }, source: 'network' },
-		]).catch(() => addRoutes({
+		// Elythia: 規則は scripts/routes.ts に置き、/flush を Service Worker に通さない。
+		ev.waitUntil(addRoutes(routerRules(makePattern))
 			// 上記のルールを受け付けないブラウザでも、オプトアウトは維持する
-			condition: { urlPattern: anyUrl },
-			source: 'fetch-event',
-		})).catch(() => {
+			.catch(() => addRoutes(fallbackRules(makePattern))).catch(() => {
 			// ルールの登録に失敗してもインストールは止めない
 		}));
 	}
@@ -117,16 +111,8 @@ globalThis.addEventListener('activate', ev => {
 });
 
 globalThis.addEventListener('fetch', ev => {
-	let isHTMLRequest = false;
-	if (ev.request.headers.get('sec-fetch-dest') === 'document') {
-		isHTMLRequest = true;
-	} else if (ev.request.headers.get('accept')?.includes('/html')) {
-		isHTMLRequest = true;
-	} else if (ev.request.url.endsWith('/')) {
-		isHTMLRequest = true;
-	}
-
-	if (!isHTMLRequest) return;
+	// Elythia: 判定は scripts/routes.ts に置き、/flush は受けない。
+	if (!respondsToFetch(ev.request)) return;
 	ev.respondWith(respondToNavigation(ev.request));
 });
 
