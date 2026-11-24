@@ -61,6 +61,9 @@ func TestCheck_NeedsAction(t *testing.T) {
 		DraftScheduledDeletes:  8,
 		RemoteScheduledDeletes: 9,
 		UnapprovedMembers:      10,
+		UnapprovedMemberNames:  []string{"erin", "frank"},
+		UnapprovedStaff:        []string{"root"},
+		ConditionalStaffRoles:  []string{"auto mods"},
 	}, nil)
 	assert.Equal(t, ExitNeedsAction, check(e, nil))
 	out := stdout.String()
@@ -78,8 +81,11 @@ func TestCheck_NeedsAction(t *testing.T) {
 		"users with automatic deletion of old notes 7",
 		"drafts with a scheduled delete             8",
 		"remote notes with a scheduled delete       9",
-		"members without the approval flag          10",
-		"5 kind(s) of items need action",
+		"members without approval (they can sign in on Elythia)    10\n    @erin\n    @frank\n    ... and 8 more\n",
+		"left as they are: the root user, administrators and moderators without approval  1\n    @root\n",
+		"warning: conditional roles make users administrators or moderators",
+		"check the lists: auto mods",
+		"6 kind(s) of items need action",
 	} {
 		assert.Contains(t, out, want)
 	}

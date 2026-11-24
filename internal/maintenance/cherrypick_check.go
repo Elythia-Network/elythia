@@ -116,6 +116,16 @@ type CherryPickReport struct {
 	// was on and wait for an administrator. Elythia does not read
 	// user.approved, so they can sign in.
 	PendingUsers []CherryPickPendingUser
+	// UnapprovedMembers are local users with approved = false and no signup
+	// reason while approval is on: members from before approval was turned
+	// on, accounts an administrator created, and applicants who confirmed
+	// their email only after approval was turned on. CherryPick refuses their
+	// password sign-in; Elythia lets them sign in, so they need action like
+	// PendingUsers (convert -unapproved-members).
+	UnapprovedMembers int64
+	// UnapprovedMemberNames are the usernames of the first
+	// CherryPickListLimit users of UnapprovedMembers, in username order.
+	UnapprovedMemberNames []string
 	// AbuseReportResolvers are rules Elythia does not apply.
 	AbuseReportResolvers int64
 	// QuarantinedHosts lose the restriction (instance.quarantineLimited).
@@ -142,11 +152,17 @@ type CherryPickReport struct {
 	// DraftScheduledDeletes are drafts with deleteAt: the note posted from it
 	// is not deleted.
 	DraftScheduledDeletes int64
-	// UnapprovedMembers are local users with approved = false and no signup
-	// reason while approval is on: members from before approval was turned
-	// on, or accounts an administrator created. CherryPick refuses their
-	// password sign-in but keeps their sessions; Elythia lets them sign in.
-	UnapprovedMembers int64
+	// UnapprovedStaff are the usernames of the local users with approved =
+	// false that PendingUsers and UnapprovedMembers leave out because they are
+	// the root user (meta.rootUserId) or hold an administrator or moderator
+	// role. convert leaves them as they are: Elythia does not read approved,
+	// so they keep signing in.
+	UnapprovedStaff []string
+	// ConditionalStaffRoles are the names of the conditional roles that make
+	// users administrators or moderators. Their members are not left out of
+	// PendingUsers and UnapprovedMembers (the formula is not evaluated here),
+	// so the operator checks the listed users.
+	ConditionalStaffRoles []string
 
 	// Converted is set when "elythia cherrypick convert" has finished
 	// (#4248). InspectCherryPickBeforeMigrate fills nothing else then.
@@ -165,6 +181,7 @@ func (r CherryPickReport) Unprocessed() int {
 	n := 0
 	for _, has := range []bool{
 		len(r.PendingUsers) > 0,
+		r.UnapprovedMembers > 0,
 		r.AbuseReportResolvers > 0,
 		len(r.QuarantinedHosts) > 0,
 		r.ScheduledDeletesDue+r.ScheduledDeletesLater > 0,
@@ -186,8 +203,37 @@ func (r CherryPickReport) Unprocessed() int {
 // システムアカウント (instance.actor など) も approved を持たずに作られるが、
 // サインインしないので除く。凍結した・消した利用者もサインインできないので数えない
 // (convert の「凍結」はこれで処理済みになる)。
+//
+// 初期ユーザー (meta.rootUserId) と、管理者・モデレーターのロールを割り当てた
+// 利用者も除く (cherryPickStaff)。CherryPick の初めの管理者は管理画面の外で作られ、
+// approved が false のまま残りうる。凍結・削除の対象に入ると、運営者が管理画面に
+// 入れなくなる (凍結を解く手順そのものが使えない) か、管理者のアカウントが連合ごと
+// 消える。
 const unapprovedUsersWhere = ` WHERE host IS NULL AND approved = false AND "isSuspended" = false AND "isDeleted" = false
-	AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = "user".id)`
+	AND NOT EXISTS (SELECT 1 FROM system_account s WHERE s."userId" = "user".id)
+	AND NOT ` + cherryPickStaff
+
+// cherryPickStaff matches a "user" row that is the root user or holds an
+// unexpired administrator or moderator role assignment. 条件付きのロールは
+// 式を SQL で評価できないので見ない (ConditionalStaffRoles で知らせる)。
+const cherryPickStaff = `("user".id IN (SELECT "rootUserId" FROM meta WHERE "rootUserId" IS NOT NULL)
+	OR EXISTS (SELECT 1 FROM role_assignment ra JOIN role ro ON ro.id = ra."roleId"
+		WHERE ra."userId" = "user".id AND (ro."isAdministrator" OR ro."isModerator")
+		AND (ra."expiresAt" IS NULL OR ra."expiresAt" > now())))`
+
+// CherryPickListLimit bounds the usernames a report lists for a group of
+// users; the count is always given.
+const CherryPickListLimit = 20
+
+// unapprovedMembersWhere selects the users of UnapprovedMembers: the users of
+// unapprovedUsersWhere without a signup reason (all of them when the column is
+// missing).
+func unapprovedMembersWhere(withReason bool) string {
+	if withReason {
+		return unapprovedUsersWhere + ` AND "signupReason" IS NULL`
+	}
+	return unapprovedUsersWhere
+}
 
 // CherryPickStatusError is an error of InspectCherryPick that happened while
 // telling the version, before anything was counted.
@@ -279,21 +325,35 @@ func InspectCherryPick(ctx context.Context, db *gorm.DB, now time.Time) (CherryP
 		// 承認待ち (申請した人) は、登録のときに理由が必須なので、理由を持つ。理由の無い
 		// 行は、承認制にする前からの利用者か、管理者が作ったアカウント。例外は、承認制が
 		// 無効の間にメールの確認待ちになり、有効にした後で確認した人で、理由を持たない
-		// まま承認待ちになる。この人は表示だけの件数 (UnapprovedMembers) に入る。
+		// まま承認待ちになる。どれも CherryPick ではパスワードでサインインできず、
+		// Elythia ではできるので、理由の無い行 (UnapprovedMembers) も要対応に数える。
+		// 管理者が承認していない申請者が混ざりうるので、通さずに選ばせる。
 		withReason, err := hasColumns(db, "user", "signupReason")
 		if err != nil {
 			return r, err
 		}
-		unapproved := `SELECT count(*) FROM "user"` + unapprovedUsersWhere
 		if withReason {
-			unapproved += ` AND "signupReason" IS NULL`
 			if err := db.Raw(`SELECT id, username, "signupReason" AS signup_reason FROM "user"` + unapprovedUsersWhere +
 				` AND "signupReason" IS NOT NULL ORDER BY id`).Scan(&r.PendingUsers).Error; err != nil {
 				return r, fmt.Errorf("cherrypick: pending users: %w", err)
 			}
 		}
-		if err := db.Raw(unapproved).Scan(&r.UnapprovedMembers).Error; err != nil {
+		if err := db.Raw(`SELECT count(*) FROM "user"` + unapprovedMembersWhere(withReason)).Scan(&r.UnapprovedMembers).Error; err != nil {
 			return r, fmt.Errorf("cherrypick: unapproved members: %w", err)
+		}
+		// 件数だけでは、誰を凍結・削除するのか確かめられない。多いときは先頭だけ。
+		if err := db.Raw(`SELECT username FROM "user"`+unapprovedMembersWhere(withReason)+
+			` ORDER BY "usernameLower", id LIMIT ?`, CherryPickListLimit).Scan(&r.UnapprovedMemberNames).Error; err != nil {
+			return r, fmt.Errorf("cherrypick: unapproved member names: %w", err)
+		}
+		if err := db.Raw(`SELECT username FROM "user" WHERE host IS NULL AND approved = false
+			AND "isSuspended" = false AND "isDeleted" = false AND ` + cherryPickStaff +
+			` ORDER BY "usernameLower", id`).Scan(&r.UnapprovedStaff).Error; err != nil {
+			return r, fmt.Errorf("cherrypick: unapproved administrators and moderators: %w", err)
+		}
+		if err := db.Raw(`SELECT name FROM role WHERE target = 'conditional' AND ("isAdministrator" OR "isModerator")
+			ORDER BY name`).Scan(&r.ConditionalStaffRoles).Error; err != nil {
+			return r, fmt.Errorf("cherrypick: conditional administrator and moderator roles: %w", err)
 		}
 	}
 

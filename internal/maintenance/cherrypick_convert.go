@@ -37,6 +37,10 @@ type CherryPickPlan struct {
 	// approved (CherryPickApprove). CherryPickDelete changes nothing here.
 	PendingUserIDs []string
 	PendingAction  string
+	// UnapprovedAction is applied to the users of UnapprovedMembers as
+	// PendingAction is to PendingUserIDs. Empty leaves them. 件数が多くなりうる
+	// (承認制の前からの会員全員) ので、id を並べずに条件で更新する。
+	UnapprovedAction string
 	// QuarantinedHosts are added to meta.blockedHosts (CherryPickBlock) or
 	// not (CherryPickLift); either way their quarantineLimited is cleared.
 	QuarantinedHosts []string
@@ -124,6 +128,12 @@ func ApplyCherryPickSQL(ctx context.Context, db *gorm.DB, plan CherryPickPlan) e
 			}
 		}
 
+		if plan.UnapprovedAction != "" {
+			if err := applyUnapprovedMembers(tx, plan.UnapprovedAction); err != nil {
+				return err
+			}
+		}
+
 		if len(plan.QuarantinedHosts) > 0 {
 			switch plan.QuarantineAction {
 			case CherryPickBlock:
@@ -165,6 +175,50 @@ func ApplyCherryPickSQL(ctx context.Context, db *gorm.DB, plan CherryPickPlan) e
 		}
 		return nil
 	})
+}
+
+// applyUnapprovedMembers suspends or approves the users of UnapprovedMembers.
+// CherryPickDelete changes nothing here: those go through the server's delete
+// path (CherryPickUnapprovedMemberIDs).
+func applyUnapprovedMembers(tx *gorm.DB, action string) error {
+	var set string
+	switch action {
+	case CherryPickSuspend:
+		set = `"isSuspended" = true`
+	case CherryPickApprove:
+		set = `approved = true`
+	case CherryPickDelete:
+		return nil
+	default:
+		return fmt.Errorf("cherrypick: unknown unapproved member action %q", action)
+	}
+	withReason, err := hasColumns(tx, "user", "signupReason")
+	if err != nil {
+		return err
+	}
+	if err := tx.Exec(`UPDATE "user" SET ` + set + unapprovedMembersWhere(withReason)).Error; err != nil {
+		return fmt.Errorf("cherrypick: %s unapproved members: %w", action, err)
+	}
+	return nil
+}
+
+// CherryPickUnapprovedMemberIDs returns the ids of the users of
+// UnapprovedMembers in id order, for deleting them.
+func CherryPickUnapprovedMemberIDs(ctx context.Context, db *gorm.DB) ([]string, error) {
+	db = db.WithContext(ctx)
+	if ok, err := hasColumns(db, "user", "approved"); err != nil || !ok {
+		return nil, err
+	}
+	withReason, err := hasColumns(db, "user", "signupReason")
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	if err := db.Raw(`SELECT id FROM "user"` + unapprovedMembersWhere(withReason) + ` ORDER BY id`).
+		Scan(&ids).Error; err != nil {
+		return nil, fmt.Errorf("cherrypick: read unapproved members: %w", err)
+	}
+	return ids, nil
 }
 
 // addBlockedHosts adds hosts to meta.blockedHosts, keeping the hosts already
