@@ -210,7 +210,7 @@ upstream / 他実装が出してくる variant に対するロバスト性:
 | `actor` が embedded object のケースを救済 | 対応済 (#999、upstream #17340)。`normalizeActor` が inner activity にも効く |
 | `alsoKnownAs` の array / string 双方受け入れ | 対応済 (#1000、upstream #17275)。`APIDList` (単一 string / 配列に加えて `{"id": ...}` 要素も拾い、読めない要素は落とす) |
 | 存在しない Actor の Delete を ignore | 対応済 (#1001、upstream #17294)。無いと 404 で queue retry に乗り続ける |
-| リレー由来 Announce で renote を作らず元 note を直接 publish | 対応済 (#1002、upstream #17308) |
+| リレー由来 Announce で renote を作らず元 note を直接 publish | 対応済 (#1002、upstream #17308)。本家と同じく、新しく取り込んだ note だけを流し、既に知っている note (ローカルの note を含む) は流し直さない |
 | ブロック中インスタンスの inbox job 蓄積防止 | **設計上不要** (#1003)。upstream は NoteCreate 深部の `Instance is blocked` を error handler で捕まえて retry を防ぐが、Elythia は verify-in-worker (#565) で signature verify 直後に block check するので body parse にすら届かない |
 
 ## RemoteStatsFetcher (Elythia 独自拡張、#943)

@@ -138,6 +138,8 @@ var cacheEntries = map[string]cacheEntry{
 		[]string{"done", "err", "val", "waiters"}, nil},
 	"internal/core/federation.resolveGroup": {kindNotCache, "同じ対象への並行な解決を1回にまとめる。Resolverから届くが、DropLocalは捨てない。解決が終われば何も残さない",
 		[]string{"m", "mu"}, nil},
+	"internal/core/federation.resolvedNote": {kindPerCall, "singleflightで1回の解決の結果を相乗りした呼び出しへ渡す入れ物。claimedは新規の取り込みを1つの呼び出しだけに伝える印。解決が終われば捨てられる",
+		[]string{"claimed", "created", "note"}, nil},
 	"internal/core/federation.resolveWaits": {kindNotCache, "実行中の解決の待ちの関係(循環の検出)。Resolverから届くが、DropLocalは捨てない。解決が終われば消える",
 		[]string{"chains", "holders", "mu"}, nil},
 	"internal/core/federation.treeBudget": {kindPerCall, "1回の解決の木で使った取得の数。解決が終われば捨てられる",
