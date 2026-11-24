@@ -60,6 +60,26 @@ describe('MkCustomEmoji follows a refreshed emoji list', () => {
 	});
 });
 
+// メディアプロキシを通さずに読み込むのは、`/emoji/<名前>.webp` の形の URL だけ。
+describe('MkCustomEmoji loads only the /emoji/ image path without the proxy', () => {
+	test.each([
+		['/emoji/blob_cat.webp', true],
+		['/emoji/blob_cat@remote.example.webp', true],
+		['/emoji/../x', false],
+		['/emoji/x.png', false],
+	])('%s', (url, direct) => {
+		const r = render(MkCustomEmoji, { props: { name: 'blob_cat', url }, global: { directives, components } });
+		const src = r.container.querySelector('img')?.getAttribute('src');
+		if (direct) {
+			expect(src).toBe(url);
+		} else {
+			expect(src).not.toBe(url);
+			// テストの環境では、メディアプロキシの接頭辞が空になる。
+			expect(src).toContain(`/image.webp?url=${encodeURIComponent(url)}&`);
+		}
+	});
+});
+
 describe('MkReactionsViewer re-sorts when reactability changes', () => {
 	function order(container: Element): string[] {
 		return Array.from(container.querySelectorAll('button')).map(b => b.querySelector('img')?.getAttribute('title') ?? '');

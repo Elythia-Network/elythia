@@ -97,6 +97,23 @@ describe('embed refreshCustomEmojisOnBoot', () => {
 	});
 });
 
+// メディアプロキシを通さずに読み込むのは、`/emoji/<名前>.webp` の形の URL だけ。
+describe('EmCustomEmoji loads only the /emoji/ image path without the proxy', () => {
+	test.each([
+		['/emoji/blob_cat.webp', true],
+		['/emoji/blob_cat@remote.example.webp', true],
+		['/emoji/../x', false],
+		['/emoji/x.png', false],
+	])('%s', (url, direct) => {
+		const mediaProxy = { getProxiedImageUrl: (u: string) => `proxied:${u}` };
+		const r = render(EmCustomEmoji, {
+			props: { name: 'blob_cat', url },
+			global: { provide: { [DI.mediaProxy as symbol]: mediaProxy } },
+		});
+		expect(r.container.querySelector('img')?.getAttribute('src')).toBe(direct ? url : `proxied:${url}`);
+	});
+});
+
 // 手元の一覧で先に描いた絵文字が、取り直した一覧に追従する (#3992)。
 describe('EmCustomEmoji follows a refreshed emoji list', () => {
 	test('a name drawn before it was known becomes an image, and back', async () => {
