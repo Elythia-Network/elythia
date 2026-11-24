@@ -236,13 +236,16 @@ func TestCoerceToBaseType_StringSlice(t *testing.T) {
 	got = coerceToBaseType(base, []any{"image/*", "", "  "})
 	assert.Equal(t, []string{"image/*"}, got)
 
-	// 完全に空 (normalize 後 0 件) は base にフォールバック
+	// 完全に空 (normalize 後 0 件) は空の一覧として採る。管理画面で欄を空にすると
+	// `[""]` が届き、本家ではそれが「何も許さない」になる。
 	got = coerceToBaseType(base, []any{"", "  "})
-	assert.Equal(t, base, got)
+	assert.Equal(t, []string{}, got)
+	assert.Equal(t, []string{}, coerceToBaseType(base, []any{}))
 
-	// 型不一致 (string / object 等) は base にフォールバック
+	// 型不一致 (string / object / null 等) は base にフォールバック
 	assert.Equal(t, base, coerceToBaseType(base, "not a slice"))
 	assert.Equal(t, base, coerceToBaseType(base, 42))
+	assert.Equal(t, base, coerceToBaseType(base, nil))
 }
 
 // coerce は NaN / +-Inf / int レンジ超過の float64 を silently truncate せず
@@ -368,8 +371,8 @@ func TestAggregatePolicyValues_SliceSetUnionFromJSONAny(t *testing.T) {
 	assert.Equal(t, []string{"image/*", "video/*"}, got)
 }
 
-// 全候補から取り出せた entry が 0 個なら base を返す (= fail-soft)。
-func TestAggregatePolicyValues_SliceSetUnionEmptyFallsBackToBase(t *testing.T) {
+// 空の一覧も候補として数える。全候補が空なら結果は空 (本家の calc と同じ)。
+func TestAggregatePolicyValues_SliceSetUnionEmptyListsStayEmpty(t *testing.T) {
 	base := []string{"image/*"}
 	// values は空 slice の override / 空文字のみの override / 型不一致の混在。
 	got := aggregatePolicyValues("uploadableFileTypes", base, []any{
@@ -377,7 +380,13 @@ func TestAggregatePolicyValues_SliceSetUnionEmptyFallsBackToBase(t *testing.T) {
 		[]string{""}, // 空文字のみ
 		42,           // 型不一致
 	})
-	// 結果 set が空なので base が返る。
+	assert.Equal(t, []string{}, got)
+}
+
+// 型の合う候補が 1 つも無いときだけ base を返す (= fail-soft)。
+func TestAggregatePolicyValues_SliceSetUnionAllMalformedFallsBackToBase(t *testing.T) {
+	base := []string{"image/*"}
+	got := aggregatePolicyValues("uploadableFileTypes", base, []any{42, "image/*", nil})
 	assert.Equal(t, base, got)
 }
 

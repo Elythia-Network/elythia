@@ -1415,13 +1415,14 @@ func coerceToBaseType(base, override any) any {
 		if s, ok := override.([]string); ok {
 			return s
 		}
-		// normalizeStringSlice は 0 件のときも non-nil な空 slice を返すので、
-		// len で判定する (= 「override は slice だが全 entry が空文字 / 型
-		// 不一致で 0 件残らなかった」case は base にフォールバック)。
-		if normalized := normalizeStringSlice(override); len(normalized) > 0 {
+		// **空の一覧は空の一覧として採る。** uploadableFileTypes を空にするのは、
+		// 本家では「何も上げさせない」の意味になる。以前は normalize して 0 件
+		// なら base に戻していたので、欄を空にして保存しても既定の許可に戻った。
+		// base に倒すのは型不一致 (object / bool / null。normalizeStringSlice が
+		// nil を返す) のときだけにする。
+		if normalized := normalizeStringSlice(override); normalized != nil {
 			return normalized
 		}
-		// 型不一致 (object / bool 等) や normalize 後 0 件は base に倒す。
 		return base
 	}
 	return override
@@ -1663,16 +1664,25 @@ func aggregatePolicyValues(key string, baseVal any, values []any) any {
 // 空文字 skip で upstream Misskey TS `RoleService.calc` の per-entry trim と
 // 一致させる。
 //
-// 全候補から取り出せた string が 1 個も無いときは baseVal をそのまま返す
-// (= "全 role が空 list / 不正 値の場合 base default を維持" の fail-soft)。
+// **空の一覧も候補として数える。** 本家の calc は空の配列もそのまま和集合に
+// 入れるので、全候補が空なら結果は空 (uploadableFileTypes なら全部拒否) になる。
+// baseVal に戻すのは、型の合う候補が 1 つも無い (全部が型不一致か型付きの
+// nil) ときだけ。以前は和集合が 0 件なら baseVal に戻していたので、管理者が
+// 空にした一覧が既定の許可に化けていた。
 func aggregateStringSetUnion(values []any, baseVal any) any {
 	set := make(map[string]struct{})
+	valid := false
 	for _, v := range values {
-		for _, s := range normalizeStringSlice(v) {
+		norm := normalizeStringSlice(v)
+		if norm == nil {
+			continue
+		}
+		valid = true
+		for _, s := range norm {
 			set[s] = struct{}{}
 		}
 	}
-	if len(set) == 0 {
+	if !valid {
 		return baseVal
 	}
 	out := make([]string, 0, len(set))
@@ -1735,9 +1745,10 @@ func aggregateStringSetIntersection(values []any, baseVal any) any {
 // []string / []any / nil。型不一致は nil で返す (= caller 側で fail-soft)。
 //
 // 戻り値の semantics:
-//   - 型不一致 (string / int / map など slice 以外) → nil
-//   - slice 型で 0 件入力 / 全 entry が空文字 / 型不一致 → 非 nil の空 slice
-//     ([]string{})
+//   - 型不一致 (string / int / map など slice 以外) と型付きの nil
+//     ([]string(nil) / []any(nil)) → nil
+//   - nil でない slice で 0 件入力 / 全 entry が空文字 / 型不一致 → 非 nil の空
+//     slice ([]string{})
 //
 // caller は「使える entry の有無」を見るときは `len(...) > 0` で判定する
 // (`!= nil` だと 0 件の空 slice も「あり」扱いになる)。
@@ -1750,6 +1761,11 @@ func normalizeStringSlice(raw any) []string {
 	case nil:
 		return nil
 	case []string:
+		// 型付きの nil (プラグインが「何も言わない」で返す []string(nil)) は
+		// 未設定として扱う。明示的な空の一覧は nil でない []string{} だけ。
+		if v == nil {
+			return nil
+		}
 		out := make([]string, 0, len(v))
 		for _, s := range v {
 			s = strings.TrimSpace(s)
@@ -1759,6 +1775,9 @@ func normalizeStringSlice(raw any) []string {
 		}
 		return out
 	case []any:
+		if v == nil {
+			return nil
+		}
 		out := make([]string, 0, len(v))
 		for _, e := range v {
 			if s, ok := e.(string); ok {
@@ -2353,9 +2372,17 @@ func cloneMutablePolicyValue(value any) (any, bool) {
 	switch value := value.(type) {
 	case []string:
 		// 空 slice を nil に潰さない (#2898)。JSON で `null` になり、
-		// 配列を期待する frontend が壊れる。
+		// 配列を期待する frontend が壊れる。逆に nil も空 slice に変えない。
+		// 型付きの nil は「未設定」、空 slice は「空の一覧」で、集約での意味が
+		// 違う (normalizeStringSlice)。
+		if value == nil {
+			return value, true
+		}
 		return append(make([]string, 0, len(value)), value...), true
 	case []any:
+		if value == nil {
+			return value, true
+		}
 		return append(make([]any, 0, len(value)), value...), true
 	default:
 		return value, false

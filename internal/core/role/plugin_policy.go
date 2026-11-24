@@ -332,6 +332,13 @@ func (s *Service) resolvePolicies(userID string, providerKeys map[string]struct{
 			continue
 		}
 		for _, c := range res {
+			// **型付きの nil の一覧は「何も言わない」として積まない。** 積むと、その
+			// 優先度の段に有効な候補が 0 件の entry が入り、computePolicy が段だけで
+			// 集約して base に戻す。低い優先度のロールが設定した値まで消えるので、
+			// contribution を出さなかったときと結果が食い違う。置換も受けない。
+			if !c.UseDefault && isNilPolicyList(c.Value) {
+				continue
+			}
 			if c.ReplaceRoleID != "" {
 				collectPolicyReplacement(replacements, conflicted, overridesByRole, c, base[c.Key])
 				continue
@@ -639,6 +646,19 @@ func encodePolicyProviderAssignments(assignments []plugin.ActiveRoleAssignment) 
 		encoded.WriteString(a.AssignmentID)
 	}
 	return encoded.String()
+}
+
+// isNilPolicyList reports whether value is a typed nil list ([]string(nil) or
+// []any(nil)), which a provider returns to say nothing about the policy.
+func isNilPolicyList(value any) bool {
+	switch v := value.(type) {
+	case []string:
+		return v == nil
+	case []any:
+		return v == nil
+	default:
+		return false
+	}
 }
 
 func clonePolicyContributions(contributions []plugin.EffectivePolicyContribution) []plugin.EffectivePolicyContribution {

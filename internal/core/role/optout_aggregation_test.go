@@ -255,3 +255,70 @@ func TestDefaultPoliciesClone_DoesNotShareSlices(t *testing.T) {
 	a[0] = "mutated"
 	require.NotEqual(t, "mutated", b[0])
 }
+
+// TestUploadableFileTypesEmptyListIsNotTheDefault pins that an explicitly
+// empty uploadableFileTypes denies every type, while useDefault keeps the
+// base allowlist.
+//
+// 本家の calc は空の配列もそのまま和集合に入れる。以前は 0 件なら base に戻して
+// いたので、管理者が一覧を空にしても既定の許可が残った。
+func TestUploadableFileTypesEmptyListIsNotTheDefault(t *testing.T) {
+	base := []string{"image/*", "text/*"}
+	tests := []struct {
+		name   string
+		inputs []map[string]rolePolicyOverride
+		want   any
+	}{
+		{
+			name:   "explicit empty list",
+			inputs: []map[string]rolePolicyOverride{{"uploadableFileTypes": {Priority: 1, Value: []any{}}}},
+			want:   []string{},
+		},
+		{
+			name:   "blank textarea from the admin UI",
+			inputs: []map[string]rolePolicyOverride{{"uploadableFileTypes": {Priority: 1, Value: []any{""}}}},
+			want:   []string{},
+		},
+		{
+			name:   "useDefault keeps the base",
+			inputs: []map[string]rolePolicyOverride{{"uploadableFileTypes": {Priority: 1, UseDefault: true, Value: []any{}}}},
+			want:   base,
+		},
+		{
+			name:   "no override keeps the base",
+			inputs: []map[string]rolePolicyOverride{nil},
+			want:   base,
+		},
+		{
+			name: "another role at the same priority still allows its types",
+			inputs: []map[string]rolePolicyOverride{
+				{"uploadableFileTypes": {Priority: 1, Value: []any{}}},
+				{"uploadableFileTypes": {Priority: 1, Value: []any{"video/*"}}},
+			},
+			want: []string{"video/*"},
+		},
+		{
+			name:   "malformed value keeps the base",
+			inputs: []map[string]rolePolicyOverride{{"uploadableFileTypes": {Priority: 1, Value: "video/*"}}},
+			want:   base,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computePolicy("uploadableFileTypes", base, policyInputs(tt.inputs...), nil)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestOptOutNotificationTypesUnaffectedByEmptyListHandling pins that the
+// other []string policy keeps its result: optOutNotificationTypes is merged
+// by intersection and its base is already empty.
+func TestOptOutNotificationTypesUnaffectedByEmptyListHandling(t *testing.T) {
+	require.Equal(t, []string{}, coerceToBaseType([]string{}, []any{""}))
+	got := computePolicy(PolicyOptOutNotificationTypes, []string{}, policyInputs(
+		map[string]rolePolicyOverride{PolicyOptOutNotificationTypes: {Priority: 0, Value: []any{}}},
+		map[string]rolePolicyOverride{PolicyOptOutNotificationTypes: {Priority: 0, Value: []any{"follow"}}},
+	), nil)
+	require.Equal(t, []string{}, got)
+}

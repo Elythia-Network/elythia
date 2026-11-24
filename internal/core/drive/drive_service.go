@@ -2076,9 +2076,10 @@ func newAccessKey() (string, error) {
 
 // mimeAllowedByPolicy reports whether mime matches any pattern in the
 // `uploadableFileTypes` role policy. raw は GetUserPolicies map から取り出した
-// any 値で、想定は `[]string` または `[]any` (JSON unmarshal 経由)。型不一致や
-// 空 / nil は **deny** ではなく upstream 互換のため **allow** に倒す (= policy
-// 未設定 / 未集約のときは制限を加えない fail-soft)。
+// any 値で、想定は `[]string` または `[]any` (JSON unmarshal 経由)。nil (型付きの
+// nil を含む) や型不一致 (= policy 未集約) は制限を加えず **allow** に倒す。**空の一覧は
+// deny** にする (本家の `[].some(...)` が false になるのと同じ)。管理者が一覧を
+// 空にしたのは「何も上げさせない」の意味なので、既定の許可に戻さない。
 //
 // パターン:
 //   - "*" / "*/*" → 全許可
@@ -2086,8 +2087,9 @@ func newAccessKey() (string, error) {
 //   - それ以外 → 完全一致
 func mimeAllowedByPolicy(mime string, raw any) bool {
 	patterns := normalizeMimePatterns(raw)
-	// 取り出せなかった (= policy 未集約) ケースは fail-soft で許可。
-	if len(patterns) == 0 {
+	// 取り出せなかった (= policy 未集約) ケースは fail-soft で許可。空の一覧
+	// (non-nil で 0 件) は下のループを抜けて拒否になる。
+	if patterns == nil {
 		return true
 	}
 	for _, p := range patterns {
@@ -2116,6 +2118,11 @@ func normalizeMimePatterns(raw any) []string {
 	case nil:
 		return nil
 	case []string:
+		// 型付きの nil (プラグインが「何も言わない」で返す []string(nil)) は
+		// 未設定として扱う。明示的な空の一覧は nil でない []string{} だけ。
+		if v == nil {
+			return nil
+		}
 		out := make([]string, 0, len(v))
 		for _, s := range v {
 			s = strings.TrimSpace(s)
@@ -2125,6 +2132,9 @@ func normalizeMimePatterns(raw any) []string {
 		}
 		return out
 	case []any:
+		if v == nil {
+			return nil
+		}
 		out := make([]string, 0, len(v))
 		for _, e := range v {
 			if s, ok := e.(string); ok {

@@ -2008,11 +2008,12 @@ func TestMergeMetaPolicies(t *testing.T) {
 		assert.Equal(t, []string{"text/*", "image/*"}, merged["uploadableFileTypes"])
 	})
 
-	t.Run("empty slice override falls back to default", func(t *testing.T) {
-		// coerceToBaseType の slice 経路は normalize 後 0 件で default に巻き戻す
-		// (aggregation helper 由来の意味論)。空配列にする運用は degenerate なので
-		// この挙動を仕様として固定する。
+	t.Run("empty slice override stays empty", func(t *testing.T) {
+		// 空の一覧は本家と同じく「何も許さない」なので、既定に巻き戻さない。
+		// null (未設定) と型不一致だけが既定に戻る。
 		merged := role.MergeMetaPolicies([]byte(`{"uploadableFileTypes":[]}`))
+		assert.Equal(t, []string{}, merged["uploadableFileTypes"])
+		merged = role.MergeMetaPolicies([]byte(`{"uploadableFileTypes":null}`))
 		assert.Equal(t, role.DefaultPolicies()["uploadableFileTypes"], merged["uploadableFileTypes"])
 	})
 

@@ -1001,7 +1001,7 @@ func TestEffectivePolicy_FailedProviderKeysUseExactNativePolicy(t *testing.T) {
 
 			assertSafe := func(policies map[string]any) {
 				t.Helper()
-				assert.Equal(t, []string{"image/png"}, policies["uploadableFileTypes"], "empty means allow-all to the upload consumer")
+				assert.Equal(t, []string{"image/png"}, policies["uploadableFileTypes"], "a failed provider falls back to the native allowlist, not the permissive provider")
 				assert.Equal(t, 7, policies["maxFileSizeMb"], "zero disables the upload-size gate and the final cap would grant 100")
 				assert.Equal(t, 2, policies[role.PolicyChunkedUploadMaxConcurrentSessions], "zero disables the session gate and the final cap would grant 50")
 				assert.Equal(t, 11, policies[role.PolicyChunkedUploadMaxPendingMb], "zero disables the pending-size gate and the final cap would grant 500")
