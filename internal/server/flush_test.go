@@ -51,6 +51,47 @@ func TestFlushPage_ClearSiteDataOnlyForOwnHTTPSOrigin(t *testing.T) {
 	}
 }
 
+// Clear-Site-Data is sent only for a top-level navigation to /flush, not when
+// the page is loaded as a subresource, even from the same origin. A browser
+// that sends no Sec-Fetch-* headers still gets it.
+func TestFlushPage_NoClearSiteDataForSubresource(t *testing.T) {
+	cases := []struct {
+		dest, mode string
+		want       bool
+	}{
+		{"document", "navigate", true},
+		{"", "", true},
+		{"document", "", true},
+		{"", "navigate", true},
+		{"image", "no-cors", false},
+		{"empty", "cors", false},
+		{"iframe", "navigate", false},
+		{"document", "same-origin", false},
+		{"document", "no-cors", false},
+		{"document", "cors", false},
+		{"empty", "same-origin", false},
+		{"image", "", false},
+		{"", "cors", false},
+		{"", "same-origin", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/flush", nil)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		if tc.dest != "" {
+			req.Header.Set("Sec-Fetch-Dest", tc.dest)
+		}
+		if tc.mode != "" {
+			req.Header.Set("Sec-Fetch-Mode", tc.mode)
+		}
+		rec := httptest.NewRecorder()
+		require.NoError(t, flushPage("https://example.test")(echo.New().NewContext(req, rec)))
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, tc.want, rec.Header().Get("Clear-Site-Data") != "", "dest %q mode %q", tc.dest, tc.mode)
+		// Cookie は付けない場合も付ける (flush.js が自分で消す合図。本家と同じ)。
+		assert.NotEmpty(t, rec.Header().Get("Set-Cookie"), "dest %q mode %q", tc.dest, tc.mode)
+	}
+}
+
 // 登録されていないと、/flush は SPA catchall の通常の画面になって何も消えない
 // (起動の失敗の画面 (public/loader/boot.js) のリンクも効かない)。
 func TestFlushPage_RegisteredOnBuiltServer(t *testing.T) {

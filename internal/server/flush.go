@@ -34,9 +34,9 @@ const flushConfirmHTML = `<!DOCTYPE html>
 //
 // 本家と同じく、Origin が付いた要求では、https かつ自分と同じホストのときだけ
 // Clear-Site-Data を付ける (Clear-Site-Data は https でしか効かない)。Origin を
-// 読めないときも付けない (本家は new URL() が投げて 500 になる)。付けられなかった
-// ときは、Cookie が残ることを flush.js が見て、localStorage と IndexedDB を自分で
-// 消す。ホストは大文字・既定のポート・punycode をそろえてから比べる。
+// 読めないとき (`Origin: null` など) も付けない。
+// 付けられなかったときは、Cookie が残ることを flush.js が見て、localStorage と
+// IndexedDB を自分で消す。ホストは大文字・既定のポート・punycode をそろえてから比べる。
 func flushPage(siteURL string) echo.HandlerFunc {
 	var siteHost string
 	if u, err := url.Parse(siteURL); err == nil {
@@ -58,6 +58,14 @@ func flushPage(siteURL string) echo.HandlerFunc {
 			if err != nil || u.Scheme != "https" || idnhost.HostPort(u) != siteHost {
 				send = false
 			}
+		}
+		// ページとしての遷移でなく、部品として読まれたときは付けない。見出しを送らない古いブラウザでは付ける。frontend の Service Worker
+		// は /flush を受けない (sw/src/scripts/routes.ts) ので、ブラウザの見出しのまま届く。
+		if d := c.Request().Header.Get("Sec-Fetch-Dest"); d != "" && d != "document" {
+			send = false
+		}
+		if m := c.Request().Header.Get("Sec-Fetch-Mode"); m != "" && m != "navigate" {
+			send = false
 		}
 		if send {
 			h.Set("Clear-Site-Data", `"*"`)
