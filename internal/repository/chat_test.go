@@ -1144,3 +1144,50 @@ func TestChat_MigrationBackfillUsesCanonicalURI(t *testing.T) {
 		"生の actor id の綴りをそのまま刻んでいる (実行時の引き当てと食い違う)")
 	assert.Equal(t, idnhost.CanonicalURI(*got.URI), *got.URI, "実行時の正規形と一致しない")
 }
+
+// リモートの招待の上限 (招待した人ごと) を数える 2 つの問い合わせ。数えるのは
+// owner が一致し、id が境より大きいものだけ。ローカルの room は room の写しに数えない。
+func TestChatRepository_CountRemoteInvitesByOwnerSince(t *testing.T) {
+	repo := NewChatRepository(testDB)
+	owner := insertTestUser(t, "u_chat_lim1", "chatlim1")
+	other := insertTestUser(t, "u_chat_lim2", "chatlim2")
+	invitee := insertTestUser(t, "u_chat_lim3", "chatlim3")
+	defer cleanupUser(t, owner.ID)
+	defer cleanupUser(t, other.ID)
+	defer cleanupUser(t, invitee.ID)
+
+	host := "remote.example"
+	room := func(id, ownerID string, remote bool) {
+		t.Helper()
+		r := &model.ChatRoom{ID: id, Name: "R", OwnerID: ownerID}
+		if remote {
+			uri := "https://remote.example/chat/rooms/" + id
+			r.Host, r.URI = &host, &uri
+		}
+		require.NoError(t, repo.CreateRoom(r))
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "chat_room" WHERE id = ?`, id) })
+	}
+	room("lim_b_old", owner.ID, true)
+	room("lim_c_new", owner.ID, true)
+	room("lim_d_new", owner.ID, true)
+	room("lim_e_local", owner.ID, false)
+	room("lim_f_other", other.ID, true)
+
+	n, err := repo.CountRemoteRoomsByOwnerSince(owner.ID, "lim_c")
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, n, "境より新しいリモートの room の写しだけ (ローカルと他の人の room は数えない)")
+
+	for _, inv := range []*model.ChatRoomInvitation{
+		{ID: "lim_b_inv", UserID: invitee.ID, RoomID: "lim_b_old"},
+		{ID: "lim_c_inv", UserID: invitee.ID, RoomID: "lim_c_new"},
+		{ID: "lim_d_inv", UserID: invitee.ID, RoomID: "lim_e_local"},
+		{ID: "lim_e_inv", UserID: invitee.ID, RoomID: "lim_f_other"},
+	} {
+		require.NoError(t, repo.CreateInvitation(inv))
+		id := inv.ID
+		t.Cleanup(func() { testDB.Exec(`DELETE FROM "chat_room_invitation" WHERE id = ?`, id) })
+	}
+	n, err = repo.CountInvitationsByRoomOwnerSince(owner.ID, "lim_c")
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, n, "境より新しい、owner の room への招待だけ")
+}

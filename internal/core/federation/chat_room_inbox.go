@@ -204,16 +204,23 @@ func (p *Processor) handleChatRoomInvite(act genericActivity) error {
 			slog.Warn("chat room invite: room uri cannot be stored", "actor", act.Actor)
 			return ErrUnsupportedActivity
 		}
+		// 招待した人ごとの上限を超えた招待は捨てる。再試行させると上限の窓が
+		// 開くまで同じ招待が積まれ続ける。
+		if errors.Is(err, corechat.ErrRemoteInviteLimit) {
+			slog.Warn("chat room invite: too many rooms from the inviter", "actor", act.Actor)
+			return ErrUnsupportedActivity
+		}
 		return fmt.Errorf("chat room invite: ensure room: %w", err)
 	}
 	if err := p.chatRoomReceiver.CreateInvitationViaAP(roomURI, invitee.ID); err != nil {
-		// block されている / room が定員 / room が消えた、はいずれも retry しても
-		// 解決しない条件なので drop する。それ以外 (DB 一過性エラー等) は
-		// retryable のまま伝播させる。
+		// block されている / room が定員 / room が消えた / 招待した人ごとの上限、
+		// はいずれも retry しても解決しない条件なので drop する。それ以外 (DB
+		// 一過性エラー等) は retryable のまま伝播させる。
 		if errors.Is(err, corechat.ErrChatBlocked) ||
 			errors.Is(err, corechat.ErrRoomFull) ||
 			errors.Is(err, corechat.ErrNotFound) ||
-			errors.Is(err, corechat.ErrInvalidTarget) {
+			errors.Is(err, corechat.ErrInvalidTarget) ||
+			errors.Is(err, corechat.ErrRemoteInviteLimit) {
 			slog.Warn("chat room invite: invitation rejected", "roomURI", roomURI, "err", err)
 			return ErrUnsupportedActivity
 		}

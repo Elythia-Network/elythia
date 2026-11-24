@@ -95,6 +95,13 @@ type ChatRepository interface {
 	ListInvitationsByUser(userID string, ignored bool, sinceID, untilID string, limit int) ([]*model.ChatRoomInvitation, error)
 	ListInvitationsByRoom(roomID, sinceID, untilID string, limit int) ([]*model.ChatRoomInvitation, error)
 
+	// CountRemoteRoomsByOwnerSince counts the remote room copies (uri set)
+	// owned by ownerID whose id is greater than sinceID.
+	CountRemoteRoomsByOwnerSince(ownerID, sinceID string) (int64, error)
+	// CountInvitationsByRoomOwnerSince counts the invitations to rooms owned
+	// by ownerID whose id is greater than sinceID.
+	CountInvitationsByRoomOwnerSince(ownerID, sinceID string) (int64, error)
+
 	// UpdateDeliveryStatus sets the AP delivery flags on a chat message.
 	UpdateDeliveryStatus(messageID string, delivering, failed bool) error
 
@@ -670,6 +677,27 @@ func (r *chatRepository) ListInvitationsByRoom(roomID, sinceID, untilID string, 
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *chatRepository) CountRemoteRoomsByOwnerSince(ownerID, sinceID string) (int64, error) {
+	var count int64
+	if err := r.db.Model(&model.ChatRoom{}).
+		Where(`"ownerId" = ? AND "uri" IS NOT NULL AND "id" > ?`, ownerID, sinceID).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *chatRepository) CountInvitationsByRoomOwnerSince(ownerID, sinceID string) (int64, error) {
+	var count int64
+	if err := r.db.Model(&model.ChatRoomInvitation{}).
+		Joins(`JOIN "chat_room" ON "chat_room"."id" = "chat_room_invitation"."roomId"`).
+		Where(`"chat_room"."ownerId" = ? AND "chat_room_invitation"."id" > ?`, ownerID, sinceID).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (r *chatRepository) UpdateDeliveryStatus(messageID string, delivering, failed bool) error {
