@@ -321,6 +321,32 @@ func TestProcess_ChatRoomInvite_OwnerMismatchNotRetried(t *testing.T) {
 	assert.Empty(t, recv.inviteCalls)
 }
 
+// 招待した人ごとの上限を超えた招待は捨てる。受信のジョブは成功扱い
+// (ErrUnsupportedActivity) にして、再試行させない。
+func TestProcess_ChatRoomInvite_InviterLimitNotRetried(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		recv *fakeChatRoomReceiver
+	}{
+		{"room の写し", &fakeChatRoomReceiver{ensureErr: corechat.ErrRemoteInviteLimit}},
+		{"招待", &fakeChatRoomReceiver{inviteErr: corechat.ErrRemoteInviteLimit}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, repo, _, _ := newProcessor(t, aliceActor)
+			p.SetChatRoomReceiver(tc.recv)
+			bobURI := "https://example.com/users/bob"
+			repo.Users["bob"] = &model.User{ID: "bob", Username: "bob", URI: &bobURI}
+			body := []byte(`{
+				"type": "Invite",
+				"actor": "https://remote.example/users/alice",
+				"target": "https://example.com/users/bob",
+				"object": {"type": "Group", "id": "https://remote.example/chat/rooms/room1", "name": "G"}
+			}`)
+			assert.ErrorIs(t, p.Process(body), federation.ErrUnsupportedActivity)
+		})
+	}
+}
+
 func TestProcess_ChatRoomInvite_CreateInvitationError(t *testing.T) {
 	p, repo, _, _ := newProcessor(t, aliceActor)
 	recv := &fakeChatRoomReceiver{inviteErr: errors.New("boom")}

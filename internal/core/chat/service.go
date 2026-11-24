@@ -96,6 +96,12 @@ var (
 	// createRoomInvitation's 'room is full' (upstream counts memberships only).
 	// Permanent: callers must not retry.
 	ErrRoomFull = errors.New("chat room is full")
+	// ErrRemoteInviteLimit is returned by EnsureRoomViaAP and
+	// CreateInvitationViaAP when the remote inviter has already brought in
+	// remoteRoomsPerDay rooms or remoteInvitationsPerDay invitations in the
+	// last remoteInviteWindow. Permanent: callers drop the activity and must
+	// not retry.
+	ErrRemoteInviteLimit = errors.New("chat room federation: too many invitations from the inviter")
 	// ErrFederationDisabled is returned before persisting an outbound chat
 	// interaction when its remote peer would require federation.
 	ErrFederationDisabled = corelocalfederation.ErrFederationDisabled
@@ -112,6 +118,32 @@ const maxReactionsPerMessage = 100
 // が同じ値を自前で持っており、片側だけ動かすと AP 経路とローカル API で定員が
 // 食い違う。`TestMaxRoomMembersMatchesAPILayer` が両者の一致を固定する。
 const maxRoomMembers = 50
+
+// remoteRoomsPerDay and remoteInvitationsPerDay bound the room copies and
+// invitations one remote inviter (the room owner) can bring in within
+// remoteInviteWindow, like the local API's limits on chat/rooms/create and
+// chat/rooms/invitations/create (internal/server/middleware/ratelimit_defs.go).
+//
+// Elythia: リモートの招待は署名が通れば誰でも送れて、1 通ごとに room の写し・
+// 招待・通知が 1 つずつ増える。ローカルの API と同じく招待した人ごとに数える。
+// ホストごとに数えると、同じホストの 1 人が他の人の正当な招待まで止められる。
+// 招待された人ごとに数えると、送りつける側が上限を使い切って、その人への正当な
+// 招待を止められる。actor を作り替えれば外れるので、悪意のあるサーバーからの
+// 量そのものは抑えられない (docs/divergence/security.md)。数えてから作るまでは
+// アトミックでなく、並行の受信ワーカーの数だけ上限を少し超えうる。上限は
+// おおよその目安で足りるので、ロックは取らない。
+const (
+	remoteRoomsPerDay       = 10
+	remoteInvitationsPerDay = 50
+	remoteInviteWindow      = 24 * time.Hour
+)
+
+// remoteInviteCutoff returns the smallest id the last remoteInviteWindow can
+// hold. id は採番の時刻で並ぶ (どの方式でも時刻が先頭) ので、`id > cutoff` で
+// 窓の中の行を数えられる。
+func (s *Service) remoteInviteCutoff() string {
+	return s.idGen.Generate(time.Now().Add(-remoteInviteWindow))
+}
 
 // chatCustomEmojiPattern matches a local custom-emoji reaction (`:name:` or the
 // canonical `:name@.:` form). upstream isCustomEmojiRegexp は local emoji だけを
@@ -770,6 +802,15 @@ func (s *Service) EnsureRoomViaAP(roomURI, name, summary, ownerUserID string) er
 		}
 		return nil
 	}
+	// 招待した人ごとの上限。数えられないまま作ると上限を素通りするので、
+	// 数え損ねたら作らない (一過性の障害として再試行させる)。
+	rooms, err := s.repo.CountRemoteRoomsByOwnerSince(ownerUserID, s.remoteInviteCutoff())
+	if err != nil {
+		return fmt.Errorf("chat remote room count: %w", err)
+	}
+	if rooms >= remoteRoomsPerDay {
+		return ErrRemoteInviteLimit
+	}
 	// name / description は表示用の本文なので切って NUL を落とす。
 	return s.repo.CreateRoom(&model.ChatRoom{
 		ID:          s.idGen.Generate(time.Now()),
@@ -951,6 +992,14 @@ func (s *Service) CreateInvitationViaAP(roomURI, inviteeUserID string) error {
 	}
 	if len(members)+len(pending) >= maxRoomMembers {
 		return ErrRoomFull
+	}
+	// 招待した人 (= room の owner) ごとの上限。数え損ねたら作らない。
+	invited, err := s.repo.CountInvitationsByRoomOwnerSince(room.OwnerID, s.remoteInviteCutoff())
+	if err != nil {
+		return fmt.Errorf("chat room invitation count by owner: %w", err)
+	}
+	if invited >= remoteInvitationsPerDay {
+		return ErrRemoteInviteLimit
 	}
 	inv := &model.ChatRoomInvitation{
 		ID: s.idGen.Generate(time.Now()), UserID: inviteeUserID, RoomID: roomID,

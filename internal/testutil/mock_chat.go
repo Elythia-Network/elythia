@@ -582,6 +582,31 @@ func (m *MockChatRepository) ListInvitationsByRoom(roomID, sinceID, untilID stri
 	return rows, nil
 }
 
+func (m *MockChatRepository) CountRemoteRoomsByOwnerSince(ownerID, sinceID string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, room := range m.Rooms {
+		if room.OwnerID == ownerID && room.URI != nil && room.ID > sinceID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *MockChatRepository) CountInvitationsByRoomOwnerSince(ownerID, sinceID string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, inv := range m.Invitations {
+		room, ok := m.Rooms[inv.RoomID]
+		if ok && room.OwnerID == ownerID && inv.ID > sinceID {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // --- Read tracking / unread count ---
 
 func (m *MockChatRepository) CountUnread(_ string) (int64, error) { return 0, nil }
