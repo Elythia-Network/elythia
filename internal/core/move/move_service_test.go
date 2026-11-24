@@ -25,6 +25,22 @@ type fakeResolver struct {
 	// localIDs maps a local actor URI to the user id the resolver would
 	// extract. 本番の resolver は自ホストの URI をここで短絡する。
 	localIDs map[string]string
+	// refreshed, when it has uri, is what RefreshActor returns for it
+	// (otherwise the byURI row). refreshErr fails every refresh.
+	refreshed  map[string]*model.User
+	refreshErr error
+	refreshes  []string
+}
+
+func (f *fakeResolver) RefreshActor(uri string) (*model.User, error) {
+	f.refreshes = append(f.refreshes, uri)
+	if f.refreshErr != nil {
+		return nil, f.refreshErr
+	}
+	if u, ok := f.refreshed[uri]; ok {
+		return u, nil
+	}
+	return f.byURI[uri], nil
 }
 
 func (f *fakeResolver) ExtractLocalUserID(uri string) string { return f.localIDs[uri] }
@@ -1324,4 +1340,70 @@ func TestMove_LocalDestinationStoresCanonicalURI(t *testing.T) {
 	require.NotEmpty(t, deliverer.body)
 	assert.Contains(t, string(deliverer.body), canonical)
 	assert.NotContains(t, string(deliverer.body), givenURI)
+}
+
+// A remote destination is re-fetched before its alsoKnownAs is checked, like
+// upstream i/move: a stale row cannot let the move through after the
+// destination dropped the alias, nor refuse it just after the alias was added.
+// A failed re-fetch refuses the move.
+func TestMove_RefetchesTheRemoteDestination(t *testing.T) {
+	srcURI := "https://local.example/users/me"
+	dstURI := "https://other.example/users/new"
+	stale := func(aka *string) *model.User { return &model.User{ID: "dst", URI: strPtr(dstURI), AlsoKnownAs: aka} }
+
+	t.Run("alias dropped since the row was fetched", func(t *testing.T) {
+		resolver := &fakeResolver{
+			byURI:     map[string]*model.User{dstURI: stale(strPtr(srcURI))},
+			refreshed: map[string]*model.User{dstURI: stale(nil)},
+		}
+		svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+		me := &model.User{ID: "me"}
+		userRepo.Users[me.ID] = me
+		assert.ErrorIs(t, svc.Move(me, dstURI), move.ErrDestinationForbids)
+		assert.Equal(t, []string{dstURI}, resolver.refreshes)
+		assert.Nil(t, me.MovedToURI)
+	})
+	t.Run("alias added since the row was fetched", func(t *testing.T) {
+		resolver := &fakeResolver{
+			byURI:     map[string]*model.User{dstURI: stale(nil)},
+			refreshed: map[string]*model.User{dstURI: stale(strPtr(srcURI))},
+		}
+		svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+		me := &model.User{ID: "me"}
+		userRepo.Users[me.ID] = me
+		require.NoError(t, svc.Move(me, dstURI))
+		require.NotNil(t, me.MovedToURI)
+	})
+	t.Run("re-fetch failed", func(t *testing.T) {
+		resolver := &fakeResolver{
+			byURI:      map[string]*model.User{dstURI: stale(strPtr(srcURI))},
+			refreshErr: errors.New("unreachable"),
+		}
+		svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+		me := &model.User{ID: "me"}
+		userRepo.Users[me.ID] = me
+		assert.ErrorIs(t, svc.Move(me, dstURI), move.ErrNoSuchUser)
+		assert.Nil(t, me.MovedToURI)
+	})
+	t.Run("the stored actor id is re-fetched, not the URL given", func(t *testing.T) {
+		alt := "https://other.example/@new"
+		resolver := &fakeResolver{
+			byURI:     map[string]*model.User{alt: stale(strPtr(srcURI))},
+			refreshed: map[string]*model.User{dstURI: stale(strPtr(srcURI))},
+		}
+		svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+		me := &model.User{ID: "me"}
+		userRepo.Users[me.ID] = me
+		require.NoError(t, svc.Move(me, alt))
+		assert.Equal(t, []string{dstURI}, resolver.refreshes)
+	})
+	t.Run("a local destination is not fetched", func(t *testing.T) {
+		resolver := &fakeResolver{localIDs: map[string]string{"https://local.example/users/dst": "dst"}}
+		svc, userRepo, _ := newService(resolver, &fakeDeliverer{})
+		userRepo.Users["dst"] = &model.User{ID: "dst", AlsoKnownAs: strPtr(srcURI)}
+		me := &model.User{ID: "me"}
+		userRepo.Users[me.ID] = me
+		require.NoError(t, svc.Move(me, "https://local.example/users/dst"))
+		assert.Empty(t, resolver.refreshes)
+	})
 }

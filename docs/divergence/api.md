@@ -269,6 +269,10 @@ echoのv5へ上げて (#4239)、frontendのビルドの配信 (`/vite/*`・`/emb
 
 Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると行を残す(#3207)ので、`users/show`だけで隠しても、他の経路からプロフィールが読めてしまう。ローカルの利用者の扱いを、経路によって違わないように揃えた。
 
+## `i/move`で移行先を取り直せなかったとき
+
+`i/move`は、リモートの移行先を取り直してから`alsoKnownAs`を照合する(本家と同じ)。取り直しに失敗したら移行せず、400の`NO_SUCH_USER`を返す。本家は取り直し(`ApPersonService.updatePerson`)の例外を`ApiError`にせずに投げるので、500の`INTERNAL_ERROR`になる。移行先の解決(`resolveUser`)に失敗したときは、どちらも`NO_SUCH_USER`。移行先を読めなかったことは同じなので、応答を分けていない。
+
 ## 削除したアカウントのトークンで、認証が要るエンドポイントを呼んだとき (#4208)
 
 認証が要るエンドポイント(`RequireAuth` / `RequireSecure` / `RequireAdmin` / `RequireModerator`)に、削除したアカウントのトークンを付けて来たら、401の`AUTHENTICATION_FAILED`を返す。トークンが無効なときと同じ応答。それまでは401の`CREDENTIAL_REQUIRED`を返していた。認証が要らないエンドポイントでは、これまでどおり匿名として扱う。これらのgateを通らずに認証を確かめるエンドポイント(`i/revoke-token`、`RequireRolePolicy`だけで守る`admin/emoji/*`など)は変えておらず、`CREDENTIAL_REQUIRED`のまま。
