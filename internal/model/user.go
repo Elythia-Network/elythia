@@ -111,6 +111,16 @@ func (u *User) IsLocal() bool {
 	return u.Host == nil || *u.Host == ""
 }
 
+// HiddenFromNonModerators reports whether a profile lookup must treat the user
+// as missing for a viewer who is not a moderator: suspended users, and local
+// users who deleted their account (users/show, ap/show, the user embed).
+//
+// 退会したローカルの利用者は、canPurgeAccount が false なら行が残る (#3207)。
+// 経路ごとに条件を書くと 1 つだけずれるので、判定はここ 1 箇所に集める。
+func (u *User) HiddenFromNonModerators() bool {
+	return u.IsSuspended || (u.IsDeleted && u.IsLocal())
+}
+
 // UserListFilter holds filter/sort/pagination for admin/show-users.
 type UserListFilter struct {
 	State    string // "all", "admin", "moderator", "suspended", "alive"

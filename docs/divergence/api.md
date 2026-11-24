@@ -258,6 +258,17 @@ echoのv5へ上げて (#4239)、frontendのビルドの配信 (`/vite/*`・`/emb
 
 本家では、ローカルの利用者は退会すると削除のジョブで行ごと消え、割り当ても消えるので、一覧に残るのは管理者が凍結した利用者と、ジョブが終わるまでの間に限られる。Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると行を残す(#3207)ので、絞らないとずっと一覧に出る。`admin/roles/users`と`admin/roles/show`は、本家と同じく絞らない。
 
+## `ap/show`と利用者の埋め込みで、凍結中と退会済みのローカルの利用者を隠す
+
+`ap/show`に自ホストの`/users/<id>`を渡したとき、モデレーターでない人には、凍結中の利用者とローカルの退会済みの利用者を`NO_SUCH_OBJECT`にする。`/embed/user-timeline/:user`は、同じ利用者を文脈なしのシェルにする。どちらも`users/show`の`NO_SUCH_USER`と同じ判定(`model.User.HiddenFromNonModerators`)を使う。
+
+| 経路 | Elythia |
+|---|---|
+| `ap/show`の自ホストの利用者 | モデレーターでない人には、凍結中と退会済みを返さない。モデレーターには返す(`users/show`と同じ) |
+| `/embed/user-timeline/:user` | 凍結中と退会済みは文脈なしのシェルにする |
+
+Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると行を残す(#3207)ので、`users/show`だけで隠しても、他の経路からプロフィールが読めてしまう。ローカルの利用者の扱いを、経路によって違わないように揃えた。
+
 ## 削除したアカウントのトークンで、認証が要るエンドポイントを呼んだとき (#4208)
 
 認証が要るエンドポイント(`RequireAuth` / `RequireSecure` / `RequireAdmin` / `RequireModerator`)に、削除したアカウントのトークンを付けて来たら、401の`AUTHENTICATION_FAILED`を返す。トークンが無効なときと同じ応答。それまでは401の`CREDENTIAL_REQUIRED`を返していた。認証が要らないエンドポイントでは、これまでどおり匿名として扱う。これらのgateを通らずに認証を確かめるエンドポイント(`i/revoke-token`、`RequireRolePolicy`だけで守る`admin/emoji/*`など)は変えておらず、`CREDENTIAL_REQUIRED`のまま。

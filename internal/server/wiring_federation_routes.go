@@ -155,6 +155,8 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		}
 		return m.AllowExternalApRedirect
 	}, s.config.URL)
+	// ap/show は凍結・退会した利用者を users/show と同じくモデレーターにだけ見せる。
+	apHandler.SetModeratorChecker(roleService)
 	// FEP-521a Multikey 対応で actor JSON に assertionMethod[] を expose する
 	// ため Ed25519 keypair repo を wire (#1067 / #1069)。
 	apHandler.SetKeypairExtraRepo(keypairExtraRepo)
