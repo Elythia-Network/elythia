@@ -70,6 +70,13 @@ func (r *Resolver) shouldRefreshActor(u *model.User) bool {
 // 戻り値は actor document の取得・検証の error だけ。DB への書き込みの失敗は
 // 従来どおり握る (次の refresh で再試行される)。
 func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured bool, chain *resolveChain) error {
+	return r.refreshActorInMove(existing, uri, skipFeatured, chain, nil)
+}
+
+// refreshActorInMove is refreshActor carrying the move chain visited so far.
+// processRemoteMove uses it to refetch a known destination (upstream passes
+// movePreventUris to updatePerson for the same reason).
+func (r *Resolver) refreshActorInMove(existing *model.User, uri string, skipFeatured bool, chain *resolveChain, visited map[string]bool) error {
 	// **削除済みの行は取り直さない** (#4106)。本家の updatePerson と同じく何もせずに
 	// 戻る (`isDeleted: false` を条件に更新し、0 件なら skip)。取り直すと、削除した
 	// 利用者のプロフィールとピン留めを、相手が好きな内容に書き換えられる。削除済みの
@@ -206,9 +213,17 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	// 欠いた actor JSON を返しただけでクリアすると、次の取得が「無→有」の
 	// 遷移に見えて movedAt が打ち直され、上の修正が骨抜きになるため。
 	// 移行の取り消しに追従できない代わりに、時間窓の基準を安定させる。
+	// alsoKnownAs は、上の規約の例外として、無ければ消す (本家 updatePerson の
+	// `person.alsoKnownAs ? toArray(...) : null` と同じ)。Mastodon は別名を全部
+	// 外すと欄ごと出さなくなるので、残すと取り下げた別名で移行の照合
+	// (moveDestinationAccepts) を通してしまう。
 	if akaStr := remoteURIList(actor.ID, "user.alsoKnownAs", actor.AlsoKnownAs); akaStr != "" {
 		fields["alsoKnownAs"] = &akaStr
 		existing.AlsoKnownAs = &akaStr
+	} else if existing.AlsoKnownAs != nil {
+		var none *string
+		fields["alsoKnownAs"] = none
+		existing.AlsoKnownAs = nil
 	}
 	// アカウントの作成日時 (#3465)。送られてくるたびに最新の値で上書きする。
 	// 無い・読めないときは保存済みの値を残す (他のフィールドと同じ規約。
@@ -341,7 +356,7 @@ func (r *Resolver) refreshActor(existing *model.User, uri string, skipFeatured b
 	// 移行を検知したらフォロワー等の引き継ぎを起動する。DB 更新の後に置くのは、
 	// 引き継ぎ処理が movedToUri の永続化済みを前提にするため。
 	if movedThisRefresh {
-		r.processRemoteMove(existing, prevMovedAt, nil, chain)
+		r.processRemoteMove(existing, prevMovedAt, visited, chain)
 	}
 	// 既に観測済みのユーザーはここでピン留めが埋まる (#2552)。actor の TTL が
 	// 切れるたびに引き直すので、featured を後から公開した相手にも追従する。
@@ -412,6 +427,22 @@ func (r *Resolver) processRemoteMove(src *model.User, prevMovedAt *time.Time, vi
 	visited[srcURI] = true
 
 	dst, err := r.userRepo.FindByURI(dstURI)
+	if err == nil && dst != nil && !dst.IsLocal() {
+		// **既知のリモートの移行先は取り直してから照合する。** DB の行は actor の
+		// TTL でしか更新されないので、移行先が別名 (alsoKnownAs) を取り下げた後でも
+		// 古い値のままなら移行を受けてしまい、逆に別名を足す前に取り込まれた移行先は
+		// 正当な移行を拒み続ける。本家 processRemoteMove も updatePerson で取り直して
+		// から照合する。
+		//
+		// 取り直しに失敗したら移行を処理しない (古い値で通さない)。featured は取らず
+		// (#2684 の形の待ちを増やさないため)、chain と辿った URI を引き継ぐ。移行先も
+		// 移行していれば、その先の処理が visited で循環を止める。
+		if rerr := r.refreshActorInMove(dst, dstURI, true, chain, visited); rerr != nil {
+			slog.Warn("federation: refresh remote move destination failed",
+				"srcURI", srcURI, "dstURI", dstURI, "err", rerr)
+			return
+		}
+	}
 	if err != nil || dst == nil {
 		// ローカルユーザーは user.uri を持たない (NULL) ので URI では引けない。
 		// upstream fetchPerson と同じく、自インスタンスを指す URI は id に
@@ -450,6 +481,14 @@ func (r *Resolver) processRemoteMove(src *model.User, prevMovedAt *time.Time, vi
 		}
 	}
 
+	// 削除・凍結済みの移行先へは引き継がない。本家の fetchPerson は削除済みの行を
+	// 引かない (`isDeleted: false`)。凍結は本家は見ないが、凍結した相手へフォロワーや
+	// ブロック・ミュートを移しても使えないので、ここで打ち切る。
+	if dst.IsDeleted || dst.IsSuspended {
+		slog.Warn("federation: remote move destination is deleted or suspended",
+			"srcURI", srcURI, "dstURI", dstURI, "deleted", dst.IsDeleted, "suspended", dst.IsSuspended)
+		return
+	}
 	if !r.moveDestinationAccepts(src, dst, srcURI, dstURI) {
 		return
 	}
