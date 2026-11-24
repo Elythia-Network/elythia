@@ -1,6 +1,7 @@
 package federation_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -436,8 +437,45 @@ func (h *recordingFanoutHook) OnNoteCreated(note *model.Note, author *model.User
 	h.calls <- recordingFanoutCall{noteID: noteID, author: authorID}
 }
 
+// relayAnnounceDocs serves the announcer alice, the author bob and the remote
+// notes in uris (each a public note by bob).
+func relayAnnounceDocs(uris ...string) map[string]string {
+	docs := map[string]string{
+		"https://remote.example/users/alice": aliceActor,
+		"https://remote.example/users/bob": `{
+			"@context": "https://www.w3.org/ns/activitystreams",
+			"id": "https://remote.example/users/bob",
+			"type": "Person",
+			"preferredUsername": "bob",
+			"inbox": "https://remote.example/users/bob/inbox",
+			"publicKey": {"publicKeyPem": "PEM"}
+		}`,
+	}
+	for _, uri := range uris {
+		docs[uri] = `{
+			"@context": "https://www.w3.org/ns/activitystreams",
+			"id": "` + uri + `",
+			"type": "Note",
+			"attributedTo": "https://remote.example/users/bob",
+			"content": "relayed",
+			"to": ["https://www.w3.org/ns/activitystreams#Public"]
+		}`
+	}
+	return docs
+}
+
+func relayAnnounce(id, object string) []byte {
+	return []byte(`{
+		"type": "Announce",
+		"id": "` + id + `",
+		"actor": "https://remote.example/users/alice",
+		"object": "` + object + `"
+	}`)
+}
+
 func TestProcess_AnnounceFromRelay_PublishesTargetWithoutRenote(t *testing.T) {
-	env := newFullProcessor(t, aliceActor)
+	const targetURI = "https://remote.example/notes/relayed-1"
+	env := newFullProcessorDocs(t, relayAnnounceDocs(targetURI))
 	// announcer alice を relay actor として扱う
 	checker := &stubRelayActorChecker{relayActorURI: "https://remote.example/users/alice"}
 	env.processor.SetRelayActorChecker(checker)
@@ -445,37 +483,138 @@ func TestProcess_AnnounceFromRelay_PublishesTargetWithoutRenote(t *testing.T) {
 	// ので channel 受信で待ち合わせる)
 	hook := newRecordingFanoutHook()
 	env.processor.SetFanoutHook(hook)
-	// target note (= 原投稿) と原投稿者 bob をローカル DB に
-	env.noteRepo.Notes["n1"] = &model.Note{
-		ID: "n1", UserID: "bob", Visibility: model.NoteVisibilityPublic,
-	}
-	env.userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
 
-	body := []byte(`{
-		"type": "Announce",
-		"id": "https://remote.example/announces/relay-1",
-		"actor": "https://remote.example/users/alice",
-		"object": "https://example.com/notes/n1"
-	}`)
-	require.NoError(t, env.processor.Process(body))
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/relay-1", targetURI)))
 
+	target := findIngestedRemoteNote(t, env.noteRepo, targetURI)
 	// renote は作られないこと
 	var renotes int
 	for _, n := range env.noteRepo.Notes {
-		if n.RenoteID != nil && *n.RenoteID == "n1" {
+		if n.RenoteID != nil && *n.RenoteID == target.ID {
 			renotes++
 		}
 	}
 	assert.Equal(t, 0, renotes, "relay 由来 Announce は renote を作らない")
 
-	// fanoutHook が target (= n1) を author=bob で publish した
+	bob, err := env.userRepo.FindByURI("https://remote.example/users/bob")
+	require.NoError(t, err)
+	// fanoutHook が target を author=bob で publish した
 	select {
 	case call := <-hook.calls:
-		assert.Equal(t, "n1", call.noteID, "publish 対象は target note")
-		assert.Equal(t, "bob", call.author, "author は relay actor でなく原投稿者")
+		assert.Equal(t, target.ID, call.noteID, "publish 対象は target note")
+		assert.Equal(t, bob.ID, call.author, "author は relay actor でなく原投稿者")
 	case <-time.After(2 * time.Second):
 		t.Fatal("fanoutHook was not called within timeout")
 	}
+}
+
+// リレーの Announce が既に知っている投稿 (取り込み済みのリモートの投稿と、
+// ローカルの投稿) を指すときは、もう一度流さない。本家 ApInboxService.announce も
+// fetchNote で引けたら何もせずに戻る。流すと古い投稿がストリームとタイムラインへ
+// 重複して出る。
+func TestProcess_AnnounceFromRelay_SkipsKnownNote(t *testing.T) {
+	const knownURI = "https://remote.example/notes/relayed-known"
+	const freshURI = "https://remote.example/notes/relayed-fresh"
+	env := newFullProcessorDocs(t, relayAnnounceDocs(knownURI, freshURI))
+	env.processor.SetRelayActorChecker(&stubRelayActorChecker{relayActorURI: "https://remote.example/users/alice"})
+	hook := newRecordingFanoutHook()
+	env.processor.SetFanoutHook(hook)
+	env.userRepo.Users["localbob"] = &model.User{ID: "localbob", Username: "localbob"}
+	env.noteRepo.Notes["n1"] = &model.Note{ID: "n1", UserID: "localbob", Visibility: model.NoteVisibilityPublic}
+
+	// 1 回目は新しく取り込むので流す (前提の確認)。
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/k1", knownURI)))
+	known := findIngestedRemoteNote(t, env.noteRepo, knownURI)
+	select {
+	case call := <-hook.calls:
+		require.Equal(t, known.ID, call.noteID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first relay Announce must publish the new note")
+	}
+
+	// 取り込み済みのリモートの投稿と、ローカルの投稿。
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/k2", knownURI)))
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/l1", "https://example.com/notes/n1")))
+	// 番兵として新しい投稿を流し、それが届くまでに既知の投稿が来ないことを見る。
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/f1", freshURI)))
+	fresh := findIngestedRemoteNote(t, env.noteRepo, freshURI)
+
+	seenFresh := false
+	deadline := time.After(3 * time.Second)
+	for !seenFresh {
+		select {
+		case call := <-hook.calls:
+			require.NotEqual(t, known.ID, call.noteID, "a known remote note was published again")
+			require.NotEqual(t, "n1", call.noteID, "a local note was published again")
+			seenFresh = call.noteID == fresh.ID
+		case <-deadline:
+			t.Fatal("the sentinel relay Announce was not published")
+		}
+	}
+	select {
+	case call := <-hook.calls:
+		t.Fatalf("a known note was published again (late): %s", call.noteID)
+	case <-time.After(1500 * time.Millisecond):
+	}
+}
+
+// リレーの本番の経路 (ephemeral ストアに置く) でも、ストアで既に知っている投稿は
+// もう一度流さない。既知の判定は DB ではなくストアの URI の索引で行う。
+func TestProcess_AnnounceFromRelay_SkipsKnownEphemeralNote(t *testing.T) {
+	const knownURI = "https://remote.example/notes/relayed-eph-known"
+	const freshURI = "https://remote.example/notes/relayed-eph-fresh"
+	// 別名の URL。取得すると knownURI の document が返る (取り込みの段で、document
+	// の id でストアを引き直して既知と分かる経路)。
+	const aliasURI = "https://remote.example/@bob/relayed-eph-known"
+	docs := relayAnnounceDocs(knownURI, freshURI)
+	docs[aliasURI] = docs[knownURI]
+	env := newFullProcessorDocs(t, docs)
+	sink := newFakeSink()
+	env.resolver.SetEphemeralSink(sink)
+	// 著者は既知の利用者にしておく (fanout は著者を DB から引く)。
+	bobHost, bobURI, fetched := "remote.example", "https://remote.example/users/bob", time.Now()
+	require.NoError(t, env.userRepo.Create(&model.User{ID: "bob1", Username: "bob", Host: &bobHost, URI: &bobURI, LastFetchedAt: &fetched}))
+	env.processor.SetRelayActorChecker(&stubRelayActorChecker{relayActorURI: "https://remote.example/users/alice"})
+	hook := newRecordingFanoutHook()
+	env.processor.SetFanoutHook(hook)
+	storedID := func(uri string) string {
+		t.Helper()
+		id, err := sink.NoteIDByURI(context.Background(), uri)
+		require.NoError(t, err)
+		require.NotEmpty(t, id, "the relayed note is in the ephemeral store: %s", uri)
+		return id
+	}
+
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/ek1", knownURI)))
+	known := storedID(knownURI)
+	select {
+	case call := <-hook.calls:
+		require.Equal(t, known, call.noteID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first relay Announce must publish the new note")
+	}
+
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/ek2", knownURI)))
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/ek3", aliasURI)))
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/ef1", freshURI)))
+	fresh := storedID(freshURI)
+	seenFresh := false
+	deadline := time.After(3 * time.Second)
+	for !seenFresh {
+		select {
+		case call := <-hook.calls:
+			require.NotEqual(t, known, call.noteID, "a note known to the ephemeral store was published again")
+			seenFresh = call.noteID == fresh
+		case <-deadline:
+			t.Fatal("the sentinel relay Announce was not published")
+		}
+	}
+	select {
+	case call := <-hook.calls:
+		t.Fatalf("a known note was published again (late): %s", call.noteID)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	assert.Empty(t, env.noteRepo.Notes, "the relay path keeps the notes out of the database")
 }
 
 // RelayActorChecker 未設定 (= 旧挙動) では announce は従来通り renote を作る。

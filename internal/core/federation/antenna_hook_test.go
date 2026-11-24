@@ -126,7 +126,9 @@ func TestProcess_Announce_FiresAntennaHook(t *testing.T) {
 // 無い)。antenna service は materialize しない方針なので DB は膨らまないが、
 // pushNote は走るので DB から引けない ID が ZSET (上限 200) を埋める。
 func TestProcess_RelayDeliveredNote_DoesNotFireAntennaHook(t *testing.T) {
-	env := newFullProcessor(t, aliceActor)
+	// 既知の投稿はリレーから来ても流さないので、target は seed せず取り込ませる。
+	const targetURI = "https://remote.example/notes/relay-antenna"
+	env := newFullProcessorDocs(t, relayAnnounceDocs(targetURI))
 	env.processor.SetRelayActorChecker(&stubRelayActorChecker{
 		relayActorURI: "https://remote.example/users/alice",
 	})
@@ -135,23 +137,13 @@ func TestProcess_RelayDeliveredNote_DoesNotFireAntennaHook(t *testing.T) {
 	env.processor.SetFanoutHook(fanout)
 	env.processor.SetAntennaHook(antenna)
 
-	env.noteRepo.Notes["n1"] = &model.Note{
-		ID: "n1", UserID: "bob", Visibility: model.NoteVisibilityPublic,
-	}
-	env.userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bob"}
-
-	body := []byte(`{
-		"type": "Announce",
-		"id": "https://remote.example/announces/relay-antenna",
-		"actor": "https://remote.example/users/alice",
-		"object": "https://example.com/notes/n1"
-	}`)
-	require.NoError(t, env.processor.Process(body))
+	require.NoError(t, env.processor.Process(relayAnnounce("https://remote.example/announces/relay-antenna", targetURI)))
+	target := findIngestedRemoteNote(t, env.noteRepo, targetURI)
 
 	// fanout は発火する (= リレー経由の配送自体は成立している)。
 	select {
 	case call := <-fanout.calls:
-		assert.Equal(t, "n1", call.noteID)
+		assert.Equal(t, target.ID, call.noteID)
 	case <-time.After(2 * time.Second):
 		t.Fatal("fanoutHook が呼ばれなかった (テストの前提が崩れている)")
 	}

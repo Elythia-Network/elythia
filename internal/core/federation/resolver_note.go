@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"log/slog"
 
@@ -21,8 +22,12 @@ import (
 //   - リモート URI で既に取り込み済みなら noteRepo.FindByURI で返す
 //   - 未知のリモート URI なら fetcher で取得して IngestNote で永続化
 func (r *Resolver) ResolveNote(uri string) (*model.Note, error) {
-	note, _, err := r.ResolveNoteWithCreated(uri)
-	return note, err
+	// created を使わないので claim しない (resolvedNote)。
+	rn, err := r.resolveNoteDepthOptResult(uri, 0, false, false, true, nil)
+	if err != nil {
+		return nil, err
+	}
+	return rn.note, nil
 }
 
 // ResolveNoteWithCreated is ResolveNote plus whether this call ingested the
@@ -33,11 +38,10 @@ func (r *Resolver) ResolveNote(uri string) (*model.Note, error) {
 // (`https://h/@user/1` に対し id は `https://h/notes/1`)。取得 URI で引くと何度
 // 取り込んでも空振りし、「新規のときだけ」の判定が成立しない。
 //
-// **singleflight に相乗りした呼び出しも created=true を受け取る。** 実際に
-// 作ったのは 1 つでも、同じ note を同時に解決した全員が「新規」と見る。
-// antenna の押し込み (`pushNote` の ZAdd / `antenna_note_unread` の UNIQUE) は
-// 冪等なので重複しても行は増えないが、**`PublishNote` だけは冪等でない** ので
-// WS の antenna channel に同じ note が二重に流れる。
+// **singleflight に相乗りした呼び出しのうち、created=true を受け取るのは
+// created を使う呼び出しの 1 つだけ** (resolvedNote の claim)。全員が「新規」と
+// 見ると、`PublishNote` は冪等でないので WS の antenna channel やリレーの配信に
+// 同じ note が二重に流れる。
 //
 // **note を作らずに終わる経路は error になる。** AP poll vote (reply note では
 // なく投票として処理する形) は `ingestNoteWithCreated` が (nil, false, nil) を
@@ -52,8 +56,11 @@ func (r *Resolver) ResolveNoteWithCreated(uri string) (*model.Note, bool, error)
 // ResolveNoteForInbox marks this resolution tree as an inbound worker operation
 // so local shortcut references are checked without affecting native API reads.
 func (r *Resolver) ResolveNoteForInbox(uri, sourceHost string) (*model.Note, error) {
-	note, _, err := r.resolveNoteDepthOptCreated(uri, 0, false, false, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
-	return note, err
+	rn, err := r.resolveNoteDepthOptResult(uri, 0, false, false, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
+	if err != nil {
+		return nil, err
+	}
+	return rn.note, nil
 }
 
 func (r *Resolver) ResolveNoteWithCreatedForInbox(uri, sourceHost string) (*model.Note, bool, error) {
@@ -69,10 +76,13 @@ func (r *Resolver) resolveNoteWithCreatedForInboxRetrying(uri, sourceHost string
 	return r.resolveNoteDepthOptCreated(uri, 0, false, false, true, chain)
 }
 
-func (r *Resolver) ResolveNoteEphemeralForInbox(uri, sourceHost string) (*model.Note, error) {
+// ResolveNoteEphemeralForInbox resolves a relay-delivered note and reports
+// whether this call stored it (in the ephemeral store, or in the database when
+// the store is off). A note already in the database or the ephemeral store,
+// including a local note, reports false.
+func (r *Resolver) ResolveNoteEphemeralForInbox(uri, sourceHost string) (*model.Note, bool, error) {
 	ephemeral := r.ephemeralSink != nil && r.ephemeralSink.Enabled()
-	note, _, err := r.resolveNoteDepthOptCreated(uri, 0, false, ephemeral, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
-	return note, err
+	return r.resolveNoteDepthOptCreated(uri, 0, false, ephemeral, true, &resolveChain{inboundLocalReferences: true, inboundSourceHost: sourceHost})
 }
 
 // ResolveNoteEphemeral is ResolveNote for relay-delivered notes: the note and
@@ -187,19 +197,49 @@ func (r *Resolver) resolveNoteBestEffort(uri string, depth int, chain *resolveCh
 // (#2695) をどこに効かせるかもこれで決まる。別の best-effort な呼び出し元を
 // 足すなら、判定の入口を bool から分けること (#2710 review LOW-3)。
 func (r *Resolver) resolveNoteDepthOpt(uri string, depth int, allowCrossHost, ephemeral, mayWait bool, chain *resolveChain) (*model.Note, error) {
-	note, _, err := r.resolveNoteDepthOptCreated(uri, depth, allowCrossHost, ephemeral, mayWait, chain)
-	return note, err
+	rn, err := r.resolveNoteDepthOptResult(uri, depth, allowCrossHost, ephemeral, mayWait, chain)
+	if err != nil {
+		return nil, err
+	}
+	return rn.note, nil
 }
 
 // resolvedNote carries the singleflight result so callers can tell an ingest
 // from a cache hit (#2751)。
+//
+// **created を受け取れるのは 1 つの呼び出しだけ (claimed)。** singleflight で
+// 相乗りした呼び出しは同じ *resolvedNote を受け取るので、created をそのまま
+// 返すと、同じ新しい投稿の Announce を並行に受けた全員が「新しく取り込んだ」と
+// 答え、リレーの投稿を重ねて流す。
+//
+// **claim するのは created を使う入口だけ。** Like・Undo(Like)・featured・入れ子
+// の解決のように created を捨てる呼び出しが先に取ると、相乗りした Announce が
+// 新しい投稿を「既知」と受け取り、antenna もリレーの配信も落ちる。
 type resolvedNote struct {
 	note    *model.Note
 	created bool
+	claimed atomic.Bool
 }
 
-// resolveNoteDepthOptCreated is the body of resolveNoteDepthOpt.
+// claim reports whether the note was newly stored and no other joined call has
+// been told so yet.
+func (rn *resolvedNote) claim() bool {
+	return rn.created && rn.claimed.CompareAndSwap(false, true)
+}
+
+// resolveNoteDepthOptCreated is resolveNoteDepthOptResult for callers that act
+// on created; it claims the result (resolvedNote).
 func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossHost, ephemeral, mayWait bool, chain *resolveChain) (*model.Note, bool, error) {
+	rn, err := r.resolveNoteDepthOptResult(uri, depth, allowCrossHost, ephemeral, mayWait, chain)
+	if err != nil {
+		return nil, false, err
+	}
+	return rn.note, rn.claim(), nil
+}
+
+// resolveNoteDepthOptResult is the body of resolveNoteDepthOpt. The returned
+// result is never nil when err is nil and is not claimed.
+func (r *Resolver) resolveNoteDepthOptResult(uri string, depth int, allowCrossHost, ephemeral, mayWait bool, chain *resolveChain) (*resolvedNote, error) {
 	// 同一 URI への並行呼び出しは singleflight で collapse (#300 3-7)。
 	// ResolveActor と同じく cold path の HTTP fetch + IngestNote を重複
 	// 実行しないことが目的。
@@ -226,24 +266,24 @@ func (r *Resolver) resolveNoteDepthOptCreated(uri string, depth int, allowCrossH
 		v, err = r.retryHiddenNote(uri, depth, allowCrossHost, ephemeral, mayWait, chain, err)
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if v == nil {
-		return nil, false, ErrInvalidNote
+		return nil, ErrInvalidNote
 	}
 	rn, ok := v.(*resolvedNote)
 	if !ok || rn == nil || rn.note == nil {
-		return nil, false, ErrInvalidNote
+		return nil, ErrInvalidNote
 	}
 	if chain != nil && chain.inboundLocalReferences {
 		if err := r.RequireInboundLocalNote(rn.note, chain.inboundSourceHost); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 	}
-	return rn.note, rn.created, nil
+	return rn, nil
 }
 
-// retryHiddenNote is the second stage of resolveNoteDepthOptCreated (#3915):
+// retryHiddenNote is the second stage of resolveNoteDepthOptResult (#3915):
 // after the instance actor's fetch was refused or not found (hiddenErr), it
 // resolves uri again fetching with the chain's local user key, when the chain
 // has one for uri's host.

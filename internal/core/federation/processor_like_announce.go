@@ -154,7 +154,7 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	if viaRelay {
 		// リレー経由でしか観測しない投稿は Redis に置く。ephemeral store が
 		// 未配線 / 機能無効なら ResolveNoteEphemeral が通常経路に倒れる。
-		target, err = p.resolver.ResolveNoteEphemeralForInbox(targetURI, inboundActorHost(act.Actor))
+		target, targetCreated, err = p.resolver.ResolveNoteEphemeralForInbox(targetURI, inboundActorHost(act.Actor))
 	} else {
 		// **新規取り込みかどうかは resolver から受け取る** (#2751)。取得 URI で
 		// 既存行を引く方式では、Announce の object が document id と別名の URL
@@ -179,7 +179,17 @@ func (p *Processor) handleAnnounce(act genericActivity, signer *model.User) erro
 	// Announce は renote として保存せず、target note 自体を timeline stream に
 	// publish する。renote 表示にしてしまうと「relay actor がリノートした」と
 	// いう偽装表示になり、原投稿者からの直接配送と区別がつかなくなるため。
+	//
+	// **既に知っている投稿 (ローカルの投稿を含む) なら何もしない。** 本家
+	// ApInboxService.announce も fetchNote で引けたら戻り、publish するのは新しく
+	// 取り込んだものだけ。流すと、古い投稿がストリームとタイムラインへ重複して
+	// 出る。
 	if viaRelay {
+		if !targetCreated {
+			slog.Debug("federation: skipping relay Announce of a known note",
+				"relay", act.Actor, "noteURI", targetURI)
+			return nil
+		}
 		return p.publishRelayDeliveredNote(target, targetURI, act.Actor)
 	}
 	// upstream announceNote の 2 つの skip guard (#1560、ApInboxService.ts:350-361):
