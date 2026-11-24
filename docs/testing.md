@@ -457,7 +457,7 @@ make fuzz FUZZ='^FuzzNormalize$' FUZZTIME=10m
 
 CherryPick 4.18.0-beta.1のimageで作ったDBを、今のコードで運営者の手順([migration-from-cherrypick.md](migration-from-cherrypick.md))どおりに移し、起動して確かめる。
 
-- **`make cherrypick-test`で回す。** `tests/cherrypick/run.sh`が、DBとRedisを作り直してCherryPickを起動し、`scenario.py seed`でデータを作る。CherryPickを止めて、`go build`した今のコードで次を流し、それぞれの終了コードを確かめる: `check`(3) → `migrate`(1) → `migrate -allow-cherrypick`(0) → `migrate`(1) → 選ばない`convert`(2) → `convert -apply`(0) → `migrate`(0) → `check`(0)。起動して`scenario.py verify`で確かめ、止めてから`cleanup -apply -backup-taken`を流す。もう一度`migrate`して起動し、`scenario.py verify-after-cleanup`で読み書きを確かめる。片付けは`make cherrypick-down`
+- **`make cherrypick-test`で回す。** `tests/cherrypick/run.sh`が、DBとRedisを作り直してCherryPickを起動し、`scenario.py seed`でデータを作る。CherryPickを止めて、`go build`した今のコードで次を流し、それぞれの終了コードを確かめる: `check`(3) → `migrate`(1) → `migrate -allow-cherrypick`(0) → `migrate`(1) → `serve`(1) → 選ばない`convert`(2) → `convert -apply`(0) → `migrate`(0) → `check`(0)。起動して`scenario.py verify`で確かめ、止めてから`cleanup -apply -backup-taken`を流す。もう一度`migrate`して起動し、`scenario.py verify-after-cleanup`で読み書きを確かめる。片付けは`make cherrypick-down`
 - **作るデータ:** 管理者と利用者、投稿、予約削除の投稿(期限を過去にする)、編集した投稿、通報の自動処理の規則、承認制を有効にした後の承認待ち、承認の印の無い会員(承認制の前から居る形。`approved`を行で直接`false`にする)、隔離したホスト(CherryPickに設定する口が無いので行を直接入れる)
 - **確かめること:** CherryPickのトークンとパスワードでのサインイン、承認待ちだった利用者と、`-unapproved-members suspend`を選んだ承認の印の無い会員が、サインインできず凍結されていること、承認の印の無い初期ユーザー(管理者の`approved`も行で直接`false`にする)が凍結されずにサインインできること、投稿と編集後の本文、期限を過ぎた予約削除の投稿が消えていること、隔離したホストがブロックに入ること、`repositoryUrl`と`feedbackUrl`、規則の書き出し、移った後に投稿できること
 - 単体のテストのfixture(`internal/testutil/testdata/cherrypick-4.18.0-beta.1.sql.gz`)も同じcomposeで作る(`tests/cherrypick/gen-fixture.sh`)

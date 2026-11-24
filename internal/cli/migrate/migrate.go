@@ -201,8 +201,10 @@ func run(e env, flagOut io.Writer, args []string) int {
 		return e.forceTrack(logger, cfg, *track, forceVersion)
 	}
 
+	var cherryPick maintenance.CherryPickReport
 	if *direction == "up" {
-		if code := e.checkCherryPick(logger, cfg, *allowCherryPick); code != 0 {
+		var code int
+		if cherryPick, code = e.checkCherryPick(logger, cfg, *allowCherryPick); code != 0 {
 			return code
 		}
 	}
@@ -219,6 +221,41 @@ func run(e env, flagOut io.Writer, args []string) int {
 			// migration を重ねると、失敗の原因が 2 か所に散る。
 			return code
 		}
+	}
+	if *direction == "up" {
+		return e.markCherryPickAfterUp(logger, cfg, cherryPick)
+	}
+	return 0
+}
+
+// markCherryPickAfterUp marks a CherryPick database that needed nothing as
+// converted after its first migrate up, by inspecting it again.
+//
+// elythia serve は変換済みの印が無い CherryPick の DB では起動しない。要対応が無い
+// DB では convert を流さないので、初めての migrate up の後に印を付けないと、その
+// 次の migrate up まで起動できない。印を付けるのは Elythia が流した後だけ
+// (InspectCherryPickBeforeMigrate が Migrated を見る) なので、流し終えてから確かめ
+// 直す。要対応が無い DB は、初めの 1 回だけここで数え直す。
+func (e env) markCherryPickAfterUp(logger *slog.Logger, cfg *config.Config, before maintenance.CherryPickReport) int {
+	if e.cherrypick == nil || before.Status != maintenance.CherryPickSupported || before.Converted ||
+		before.Migrated || before.Unprocessed() > 0 {
+		return 0
+	}
+	r, err := e.cherrypick(cfg)
+	if err != nil {
+		// migration は流し終えているので、失敗にはしない。印が付かないだけで、
+		// 次の migrate up で数え直して付く。それまでは serve が DB を開いたときの
+		// 確認で起動を拒む (印が無い CherryPick の DB は変換前と区別できない) ので、
+		// その旨を出す。exit 1 にしても、compose では本体が起動しないのは同じ。
+		logger.Warn("migrations are applied, but the CherryPick database could not be marked as converted; "+
+			"`elythia serve` refuses to start until it is. Run `elythia migrate` again to mark it",
+			"error", err)
+		return 0
+	}
+	if !r.Converted {
+		logger.Warn("this database came from CherryPick and was not marked as converted; "+
+			"run `elythia cherrypick check` and `elythia cherrypick convert` before starting Elythia",
+			"kindsNeedingAction", r.Unprocessed())
 	}
 	return 0
 }
@@ -272,43 +309,43 @@ func (e env) checkMaintenance(logger *slog.Logger, cfg *config.Config, opID stri
 // 足し、以後は版を見分けられなくなる (convert が対応していない版に当たる)。版を
 // 確かめられなかったとき (CherryPickStatusError) も同じ理由で通さない。allow で
 // 飛ばせるのは、件数を数えるところの失敗 (大きな DB での時間切れなど) だけ。
-func (e env) checkCherryPick(logger *slog.Logger, cfg *config.Config, allow bool) int {
+func (e env) checkCherryPick(logger *slog.Logger, cfg *config.Config, allow bool) (maintenance.CherryPickReport, int) {
 	if e.cherrypick == nil {
-		return 0
+		return maintenance.CherryPickReport{}, 0
 	}
 	r, err := e.cherrypick(cfg)
 	if err != nil {
 		var statusErr *maintenance.CherryPickStatusError
 		if allow && !errors.As(err, &statusErr) {
 			logger.Warn("could not check whether the database came from CherryPick; migrating because of -allow-cherrypick", "error", err)
-			return 0
+			return maintenance.CherryPickReport{}, 0
 		}
 		logDBError(logger, cfg, "failed to check whether the database came from CherryPick", err)
-		return 1
+		return r, 1
 	}
 	if r.Converted || r.Status == maintenance.NotCherryPick || r.Unprocessed() == 0 {
-		return 0
+		return r, 0
 	}
 	if r.Status == maintenance.CherryPickUnsupported {
 		logger.Error("this database came from a CherryPick version Elythia does not support; refusing to migrate",
 			"supportedVersion", maintenance.CherryPickVersion, "reason", r.Reason)
-		return 1
+		return r, 1
 	}
 	attrs := []any{"supportedVersion", maintenance.CherryPickVersion, "kindsNeedingAction", r.Unprocessed()}
 	if allow {
 		logger.Warn("this database came from CherryPick and needs action; migrating because of -allow-cherrypick", attrs...)
-		return 0
+		return r, 0
 	}
 	if r.Migrated {
 		// 一度 -allow-cherrypick で流した後。次にすることは convert。
 		logger.Error("this database came from CherryPick and needs action before Elythia serves it; "+
 			"run `elythia cherrypick convert` (see `elythia cherrypick check` for what)", attrs...)
-		return 1
+		return r, 1
 	}
 	logger.Error("this database came from CherryPick and needs action before Elythia serves it; "+
 		"run `elythia cherrypick check` to see what, then `elythia migrate -allow-cherrypick` and "+
 		"`elythia cherrypick convert`", attrs...)
-	return 1
+	return r, 1
 }
 
 // validateFlags returns a message for an invalid flag combination, or "".

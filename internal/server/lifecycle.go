@@ -32,6 +32,11 @@ type SupervisorDeps struct {
 	NewServer func(cfg *config.Config, db *gorm.DB, redis *cache.RedisClients) (*Server, error)
 	// CloseDB closes every pool behind db (primary and replicas).
 	CloseDB func(db *gorm.DB) error
+	// CheckDB, when set, runs on each newly opened database first. An error
+	// refuses the generation: the pool is closed and buildGeneration fails
+	// (at start the process exits; after a maintenance the maintenance
+	// handler keeps serving and the build is retried).
+	CheckDB func(db *gorm.DB) error
 	// PrepareDB, when set, runs on each newly opened database before the
 	// server generation is built on it (#3909: pg_stat_statements). It must
 	// not fail the build; it logs instead.
@@ -186,6 +191,17 @@ func (s *Supervisor) buildGeneration() (*generation, StartReport, error) {
 	rep.OpenDB = time.Since(began)
 	if err != nil {
 		return nil, rep, fmt.Errorf("connect to database: %w", err)
+	}
+	// 開いた DB で世代を作ってよいかを確かめる (CherryPick の DB で convert が
+	// 済んでいないなど)。メンテナンスの判定を通った後のここで見るので、
+	// メンテナンス中に起動したプロセスが DB を開かない設計 (#3463) を崩さない。
+	if s.deps.CheckDB != nil {
+		if err := s.deps.CheckDB(db); err != nil {
+			if cerr := s.deps.CloseDB(db); cerr != nil {
+				slog.Warn("failed to close database after a failed database check", "err", cerr)
+			}
+			return nil, rep, fmt.Errorf("check database: %w", err)
+		}
 	}
 	// 世代を作るたびに走らせる。メンテナンスの手順 (#3463) は、DB を開く前に
 	// 状態を確かめるので、ここなら手順の外で DB に触らない。戻した後に世代を

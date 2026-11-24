@@ -53,14 +53,16 @@ docker compose up -d
 
 ## 起動が止まる仕組み
 
-`migrate up`は、CherryPickのDBで要対応が残っている間は止まります。起動の前に`migrate up`を流す構成(同梱のcomposeの`migrate`サービス、UDSのentrypoint、手順どおりに`migrate`してから起動する場合)では、これで本体の起動が止まります。`elythia serve`は`migrate`を流さないので、バイナリから直接起動するときは、手順の順番を守ってください。
+`migrate up`は、CherryPickのDBで要対応が残っている間は止まります。起動の前に`migrate up`を流す構成(同梱のcomposeの`migrate`サービス、UDSのentrypoint、手順どおりに`migrate`してから起動する場合)では、これで本体の起動が止まります。
+
+`elythia serve`も、DBを開いたとき(起動のときと、メンテナンスの後に開き直すとき)に変換済みの印(下の`ElythiaCherryPickConverted`)を確かめ、CherryPickのDBで印が無ければ起動しません(メンテナンスの後なら、メンテナンスの画面のまま開き直しを繰り返します)。`migrate`を挟まずにバイナリから直接起動したときのためです。読むのは`migrations`の表の記録だけで、大きな表は読みません。CherryPickではないDBでは何もしません。`check`で要対応が無いのに起動を拒まれたとき(初めての`migrate up`が警告を出して印を付けられなかったとき)は、`elythia migrate`をもう一度流せば印が付きます。
 
 - Elythiaがまだ流していないDBで止まったときは、`check`で中身を見て、`migrate -allow-cherrypick`で一度だけ流します。**`-allow-cherrypick`を起動のコマンドに入れたままにしないでください。** 付けている間は、`convert`の前でも通ります
 - 流した後は、`convert`が済むまで止まり続けます。`convert`の前に本体が起動して、承認待ちの利用者などが通ってしまわないようにするためです。止まったときのログは`convert`を案内します
-- `convert`が済むと、`migrations`の表に印の行(`ElythiaCherryPickConverted`)を足し、以後の`migrate up`は数えません。Elythiaが流した後で要対応が無ければ、`migrate up`がその場で印を付けます
+- `convert`が済むと、`migrations`の表に印の行(`ElythiaCherryPickConverted`)を足し、以後の`migrate up`は数えません。要対応が無ければ、`migrate up`が流し終えた後に印を付けます(初めての`migrate up`では、流し終えた後にもう一度数えます)
 - 対応していない版のCherryPickのDBは、`-allow-cherrypick`を付けても止まります。一度流すと版を見分けられなくなるためです
 
-**2.3.0以前の版で、すでにCherryPickのDBにElythiaを流していた環境は、この確認が入った版へ上げると、要対応が残っている間は起動の前の`migrate up`が止まります。** `convert`を流せば通ります。
+**2.3.0以前の版で、すでにCherryPickのDBにElythiaを流していた環境は、この確認が入った版へ上げると、要対応が残っている間は起動の前の`migrate up`が止まります。`convert`の印が無い間は`elythia serve`も起動しません。** `convert`を流せば通ります。
 
 ## 外れるものと、`convert`の選択
 
