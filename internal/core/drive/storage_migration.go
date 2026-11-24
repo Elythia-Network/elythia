@@ -686,12 +686,12 @@ func (m *StorageMigrator) localIsObjectStorage(dst Storage) (string, error) {
 			slog.Warn("drive: delete the purge probe from the object storage", "key", key, "err", err)
 		}
 	}()
-	rc, err := m.local.Get(key)
-	if err != nil {
-		return "", err
+	// 置いた番兵より大きければ、もう中身は違う。ローカルの実体が別のもので置き
+	// 換わっていても、それを全部は読まない。
+	b, err := readAllLimit(m.local, key, int64(max(len(localBody), len(objectBody))))
+	if errors.Is(err, errObjectTooLarge) {
+		return "the object storage serves the local drive files", nil
 	}
-	defer rc.Close()
-	b, err := io.ReadAll(rc)
 	if err != nil {
 		return "", err
 	}
@@ -779,10 +779,17 @@ var errLocalFileMissing = errors.New("the file is not on the local storage")
 // サムネイルと webpublic の実体がローカルに無いときは飛ばす。もともと配信できて
 // いなかったもので、写した後も同じく見つからない。本体が無いときは失敗にする。
 func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model.DriveFile, token string) error {
+	// 読む大きさは、戻すとき (restoreBody / restoreVariant) と同じく縛る。本体は
+	// 行の大きさ、派生は storageMigrationVariantReadLimit まで。
 	keys := []struct {
 		key      *string
 		required bool
-	}{{f.AccessKey, true}, {f.ThumbnailAccessKey, false}, {f.WebpublicAccessKey, false}}
+		limit    int64
+	}{
+		{f.AccessKey, true, int64(f.Size)},
+		{f.ThumbnailAccessKey, false, storageMigrationVariantReadLimit},
+		{f.WebpublicAccessKey, false, storageMigrationVariantReadLimit},
+	}
 	var copied []string
 	for _, k := range keys {
 		if k.key == nil || *k.key == "" {
@@ -791,7 +798,7 @@ func (m *StorageMigrator) migrateFile(ctx context.Context, dst Storage, f *model
 			}
 			continue
 		}
-		if err := copyObject(m.local, dst, *k.key); err != nil {
+		if err := copyObject(m.local, dst, *k.key, k.limit); err != nil {
 			if errors.Is(err, ErrObjectNotFound) && !k.required {
 				continue
 			}
@@ -1273,17 +1280,19 @@ func truncateUTF8(s string, n int) string {
 	return s
 }
 
-// copyObject copies one object from src to dst.
-func copyObject(src, dst Storage, key string) error {
-	rc, err := src.Get(key)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
+// copyObject copies one object from src to dst, failing without reading
+// past limit+1 bytes when the object is larger than limit.
+func copyObject(src, dst Storage, key string, limit int64) error {
 	// S3Storage.Put は *bytes.Reader 以外を一度全部読むので、ここで読んで渡す。
-	b, err := io.ReadAll(rc)
+	b, err := readAllLimit(src, key, limit)
+	if errors.Is(err, errObjectTooLarge) {
+		return fmt.Errorf("%s on the local storage is larger than %d bytes (the recorded size or the variant limit)", key, limit)
+	}
 	if err != nil {
-		return fmt.Errorf("read %s from the local storage: %w", key, err)
+		if errors.Is(err, ErrObjectNotFound) {
+			return err
+		}
+		return fmt.Errorf("read from the local storage: %w", err)
 	}
 	if _, err := dst.Put(key, bytes.NewReader(b)); err != nil {
 		return fmt.Errorf("put %s to the object storage: %w", key, err)
