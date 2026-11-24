@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/cli/cliflag"
@@ -104,6 +105,11 @@ func WriteReport(w io.Writer, r maintenance.CherryPickReport) {
 		}
 		fmt.Fprintf(w, "    @%s  %s  %s\n", u.Username, u.ID, reason)
 	}
+	// 承認制にする前からの利用者、管理者が作ったアカウント、承認制にした後でメールの
+	// 確認を済ませた申請者。CherryPick はパスワードでのサインインを断るが、Elythia は
+	// 断らない。管理者が承認していない申請者が混ざりうるので、要対応に数える。
+	fmt.Fprintf(w, "  members without approval (they can sign in on Elythia)    %d\n", r.UnapprovedMembers)
+	writeUsernames(w, r.UnapprovedMemberNames, r.UnapprovedMembers)
 	fmt.Fprintf(w, "  abuse report resolvers (not applied)                      %d\n", r.AbuseReportResolvers)
 	fmt.Fprintf(w, "  quarantined instances (the restriction is lost)           %d\n", len(r.QuarantinedHosts))
 	for _, h := range r.QuarantinedHosts {
@@ -118,20 +124,46 @@ func WriteReport(w io.Writer, r maintenance.CherryPickReport) {
 		fmt.Fprintf(w, "  feedbackUrl still points at CherryPick                    %s\n", r.FeedbackURL)
 	}
 
+	writeStaffNotes(w, r)
+
 	fmt.Fprintln(w, "\nkept in the database but not read by Elythia:")
 	fmt.Fprintf(w, "  note edit history                          %d\n", r.NoteHistories)
 	fmt.Fprintf(w, "  events                                     %d\n", r.Events)
 	fmt.Fprintf(w, "  users with automatic deletion of old notes %d\n", r.AutoDeleteUsers)
 	fmt.Fprintf(w, "  drafts with a scheduled delete             %d\n", r.DraftScheduledDeletes)
 	fmt.Fprintf(w, "  remote notes with a scheduled delete       %d\n", r.RemoteScheduledDeletes)
-	// 承認制にする前からの利用者と、管理者が作ったアカウント。CherryPick はパスワード
-	// でのサインインを断るが、今のセッションはそのまま使わせている。申請した人では
-	// ないので、要対応には数えない。
-	fmt.Fprintf(w, "  members without the approval flag          %d  (CherryPick refuses their password sign-in; Elythia does not)\n", r.UnapprovedMembers)
 
 	if n := r.Unprocessed(); n > 0 {
 		fmt.Fprintf(w, "\n%d kind(s) of items need action before Elythia serves this database\n", n)
 		return
 	}
 	fmt.Fprintln(w, "\nnothing needs action")
+}
+
+// writeUsernames lists names (at most maintenance.CherryPickListLimit of
+// total) and says how many more there are.
+func writeUsernames(w io.Writer, names []string, total int64) {
+	for _, n := range names {
+		fmt.Fprintf(w, "    @%s\n", n)
+	}
+	if rest := total - int64(len(names)); rest > 0 {
+		fmt.Fprintf(w, "    ... and %d more\n", rest)
+	}
+}
+
+// writeStaffNotes tells which users without approval convert leaves alone
+// (the root user and administrators and moderators), and warns about
+// conditional administrator and moderator roles, whose members it does not
+// leave alone.
+func writeStaffNotes(w io.Writer, r maintenance.CherryPickReport) {
+	if len(r.UnapprovedStaff) > 0 {
+		fmt.Fprintf(w, "\nleft as they are: the root user, administrators and moderators without approval  %d\n", len(r.UnapprovedStaff))
+		for _, n := range r.UnapprovedStaff {
+			fmt.Fprintf(w, "    @%s\n", n)
+		}
+	}
+	if len(r.ConditionalStaffRoles) > 0 {
+		fmt.Fprintf(w, "\nwarning: conditional roles make users administrators or moderators; their members are not left out "+
+			"of the users above, so check the lists: %s\n", strings.Join(r.ConditionalStaffRoles, ", "))
+	}
 }

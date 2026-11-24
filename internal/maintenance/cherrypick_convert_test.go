@@ -19,6 +19,8 @@ func seedConvert(t *testing.T, db *gorm.DB) {
 		`INSERT INTO "user" (id, username, "usernameLower", approved) VALUES ('a1', 'alice', 'alice', true)`,
 		`INSERT INTO "user" (id, username, "usernameLower", approved, "signupReason") VALUES
 			('p1', 'carol', 'carol', false, 'hi'), ('p2', 'dave', 'dave', false, 'hello')`,
+		`INSERT INTO "user" (id, username, "usernameLower", approved) VALUES
+			('m1', 'erin', 'erin', false), ('m2', 'frank', 'frank', false)`,
 		`INSERT INTO abuse_report_resolver (id, "updatedAt", name, "reportContentPattern", "expiresAt", forward)
 			VALUES ('r1', now(), 'spam', 'buy now', '1week', true)`,
 		`INSERT INTO instance (id, "firstRetrievedAt", host, "quarantineLimited") VALUES
@@ -47,13 +49,14 @@ func TestApplyCherryPickSQL(t *testing.T) {
 	t.Run("suspend, block, keep, resolvers, repositoryUrl", func(t *testing.T) {
 		db := openCherryPickDB(t)
 		seedConvert(t, db)
-		require.Equal(t, 5, inspect(t, db).Unprocessed())
+		require.Equal(t, 6, inspect(t, db).Unprocessed())
 		// リモートの予約削除は「残す」の対象にしない。
 		require.NoError(t, db.Exec(`INSERT INTO note (id, "userId", "userHost", visibility, "deleteAt")
 			VALUES ('n8', 'a1', 'remote.example', 'public', ?)`, cherryPickNow.Add(time.Hour)).Error)
 
 		require.NoError(t, ApplyCherryPickSQL(ctx, db, CherryPickPlan{
 			PendingUserIDs: []string{"p1", "p2"}, PendingAction: CherryPickSuspend,
+			UnapprovedAction: CherryPickSuspend,
 			QuarantinedHosts: []string{"existing.example", "q.example"}, QuarantineAction: CherryPickBlock,
 			KeepLaterDeletes: true, DeleteResolvers: true,
 			RepositoryURL: "https://github.com/kokonect-link/cherrypick", ElythiaRepositoryURL: "https://elythia.example/repo",
@@ -63,6 +66,8 @@ func TestApplyCherryPickSQL(t *testing.T) {
 
 		r := inspect(t, db)
 		assert.Empty(t, r.PendingUsers)
+		assert.Zero(t, r.UnapprovedMembers)
+		assert.Equal(t, 1, r.Unprocessed(), "残るのは期限切れの予約削除だけ")
 		assert.Zero(t, r.AbuseReportResolvers)
 		assert.Empty(t, r.QuarantinedHosts)
 		assert.Empty(t, r.RepositoryURL)
@@ -72,8 +77,11 @@ func TestApplyCherryPickSQL(t *testing.T) {
 		assert.Equal(t, []string{"Existing.example", "q.example"}, blockedHosts(t, db), "大文字小文字が違うだけのものは足さない")
 
 		var suspended int64
-		require.NoError(t, db.Raw(`SELECT count(*) FROM "user" WHERE "isSuspended" AND id IN ('p1', 'p2')`).Scan(&suspended).Error)
-		assert.EqualValues(t, 2, suspended)
+		require.NoError(t, db.Raw(`SELECT count(*) FROM "user" WHERE "isSuspended" AND id IN ('p1', 'p2', 'm1', 'm2')`).Scan(&suspended).Error)
+		assert.EqualValues(t, 4, suspended)
+		var aliceSuspended bool
+		require.NoError(t, db.Raw(`SELECT "isSuspended" FROM "user" WHERE id = 'a1'`).Scan(&aliceSuspended).Error)
+		assert.False(t, aliceSuspended, "承認済みの利用者には触らない")
 		assert.EqualValues(t, 1, r.RemoteScheduledDeletes, "リモートの deleteAt は残る")
 		var url string
 		require.NoError(t, db.Raw(`SELECT "repositoryUrl" FROM meta`).Scan(&url).Error)
@@ -90,11 +98,13 @@ func TestApplyCherryPickSQL(t *testing.T) {
 		seedConvert(t, db)
 		require.NoError(t, ApplyCherryPickSQL(ctx, db, CherryPickPlan{
 			PendingUserIDs: []string{"p1"}, PendingAction: CherryPickApprove,
+			UnapprovedAction: CherryPickApprove,
 			QuarantinedHosts: []string{"q.example"}, QuarantineAction: CherryPickLift,
 			Now: cherryPickNow,
 		}))
 		r := inspect(t, db)
-		require.Len(t, r.PendingUsers, 1)
+		assert.Zero(t, r.UnapprovedMembers, "理由の無い利用者は承認された")
+		require.Len(t, r.PendingUsers, 1, "理由のある p2 は承認されない")
 		assert.Equal(t, "p2", r.PendingUsers[0].ID)
 		assert.Equal(t, []string{"existing.example"}, r.QuarantinedHosts)
 		assert.Equal(t, []string{"Existing.example"}, blockedHosts(t, db), "外すときはブロックへ足さない")
@@ -106,9 +116,15 @@ func TestApplyCherryPickSQL(t *testing.T) {
 		db := openCherryPickDB(t)
 		seedConvert(t, db)
 		require.NoError(t, ApplyCherryPickSQL(ctx, db, CherryPickPlan{
-			PendingUserIDs: []string{"p1", "p2"}, PendingAction: CherryPickDelete, Now: cherryPickNow,
+			PendingUserIDs: []string{"p1", "p2"}, PendingAction: CherryPickDelete,
+			UnapprovedAction: CherryPickDelete, Now: cherryPickNow,
 		}))
-		assert.Len(t, inspect(t, db).PendingUsers, 2)
+		r := inspect(t, db)
+		assert.Len(t, r.PendingUsers, 2)
+		assert.EqualValues(t, 2, r.UnapprovedMembers)
+		ids, err := CherryPickUnapprovedMemberIDs(ctx, db)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"m1", "m2"}, ids, "理由のある申請者と承認済みの利用者は含めない")
 	})
 	t.Run("unknown actions roll back", func(t *testing.T) {
 		db := openCherryPickDB(t)
@@ -119,6 +135,10 @@ func TestApplyCherryPickSQL(t *testing.T) {
 		assert.Error(t, ApplyCherryPickSQL(ctx, db, CherryPickPlan{
 			PendingUserIDs: []string{"p1"}, PendingAction: CherryPickSuspend,
 			QuarantinedHosts: []string{"q.example"}, QuarantineAction: "ignore", Now: cherryPickNow,
+		}))
+		assert.Error(t, ApplyCherryPickSQL(ctx, db, CherryPickPlan{
+			PendingUserIDs: []string{"p1"}, PendingAction: CherryPickSuspend,
+			UnapprovedAction: "ban", Now: cherryPickNow,
 		}))
 		assert.Len(t, inspect(t, db).PendingUsers, 2, "同じトランザクションの凍結も戻る")
 	})

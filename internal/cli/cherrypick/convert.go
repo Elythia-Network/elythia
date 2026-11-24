@@ -161,6 +161,7 @@ const applyTimeout = time.Hour
 // convertChoices are the operator's choices.
 type convertChoices struct {
 	pendingUsers  string
+	unapproved    string
 	quarantined   string
 	laterDeletes  string
 	resolversOut  string
@@ -182,6 +183,10 @@ func convert(e convertEnv, args []string) int {
 	var c convertChoices
 	fs.StringVar(&c.pendingUsers, "pending-users", maintenance.CherryPickSuspend,
 		"users waiting for approval: suspend (decide later from the admin page), delete or approve")
+	fs.StringVar(&c.unapproved, "unapproved-members", "",
+		"users without the approval flag and without a signup reason (members from before approval was turned on, "+
+			"accounts an administrator created, applicants who confirmed their email later): suspend, delete or approve. "+
+			"Required when there are any")
 	fs.StringVar(&c.quarantined, "quarantined", "",
 		"quarantined instances: block (add them to the blocked hosts) or lift. Required when there are any")
 	fs.StringVar(&c.laterDeletes, "later-deletes", "",
@@ -313,6 +318,20 @@ func (e convertEnv) apply(ctx context.Context, cfg *config.Config, db *gorm.DB, 
 	for _, u := range r.PendingUsers {
 		plan.PendingUserIDs = append(plan.PendingUserIDs, u.ID)
 	}
+	// 消すときは本体の削除の処理を通すので、id は SQL の前に読む (凍結・承認は
+	// 条件でまとめて更新する)。
+	var unapprovedIDs []string
+	if r.UnapprovedMembers > 0 {
+		plan.UnapprovedAction = c.unapproved
+		if c.unapproved == maintenance.CherryPickDelete {
+			ids, err := maintenance.CherryPickUnapprovedMemberIDs(ctx, db)
+			if err != nil {
+				fmt.Fprintf(e.stderr, "elythia cherrypick convert: %v\n", err)
+				return 1
+			}
+			unapprovedIDs = ids
+		}
+	}
 
 	if r.AbuseReportResolvers > 0 {
 		if err := e.writeResolvers(ctx, db, c.resolversOut); err != nil {
@@ -329,8 +348,9 @@ func (e convertEnv) apply(ctx context.Context, cfg *config.Config, db *gorm.DB, 
 
 	var accounts, notes []string
 	if c.pendingUsers == maintenance.CherryPickDelete {
-		accounts = plan.PendingUserIDs
+		accounts = append(accounts, plan.PendingUserIDs...)
 	}
+	accounts = append(accounts, unapprovedIDs...)
 	notes = append(notes, due...)
 	if c.laterDeletes == "delete" {
 		notes = append(notes, later...)
@@ -435,6 +455,11 @@ func validateChoiceValues(c convertChoices) string {
 	default:
 		return fmt.Sprintf("invalid -pending-users %q (want suspend, delete or approve)", c.pendingUsers)
 	}
+	switch c.unapproved {
+	case "", maintenance.CherryPickSuspend, maintenance.CherryPickDelete, maintenance.CherryPickApprove:
+	default:
+		return fmt.Sprintf("invalid -unapproved-members %q (want suspend, delete or approve)", c.unapproved)
+	}
 	switch c.quarantined {
 	case "", maintenance.CherryPickBlock, maintenance.CherryPickLift:
 	default:
@@ -451,6 +476,11 @@ func validateChoiceValues(c convertChoices) string {
 // missingChoices lists the choices r needs that c does not make.
 func missingChoices(r maintenance.CherryPickReport, c convertChoices) []string {
 	var missing []string
+	// 既定値を置かない。凍結を既定にすると承認制の前からの会員がまとめて
+	// サインインできなくなり、承認を既定にすると管理者が承認していない申請者を通す。
+	if r.UnapprovedMembers > 0 && c.unapproved == "" {
+		missing = append(missing, "users without the approval flag: -unapproved-members suspend|delete|approve")
+	}
 	if len(r.QuarantinedHosts) > 0 && c.quarantined == "" {
 		missing = append(missing, "quarantined instances: -quarantined block|lift")
 	}
@@ -478,6 +508,10 @@ func writePlan(w io.Writer, r maintenance.CherryPickReport, c convertChoices, du
 			fmt.Fprintf(w, "    @%s  %s  %s\n", u.Username, u.ID, reason)
 		}
 	}
+	if r.UnapprovedMembers > 0 {
+		fmt.Fprintf(w, "  users without approval      %d  -> %s\n", r.UnapprovedMembers, orChoose(c.unapproved))
+		writeUsernames(w, r.UnapprovedMemberNames, r.UnapprovedMembers)
+	}
 	if r.AbuseReportResolvers > 0 {
 		fmt.Fprintf(w, "  abuse report resolvers      %d  -> written to %s and removed\n", r.AbuseReportResolvers, orChoose(c.resolversOut))
 	}
@@ -499,6 +533,7 @@ func writePlan(w io.Writer, r maintenance.CherryPickReport, c convertChoices, du
 	if r.Unprocessed() == 0 {
 		fmt.Fprintln(w, "  nothing needs action")
 	}
+	writeStaffNotes(w, r)
 }
 
 func orChoose(s string) string {

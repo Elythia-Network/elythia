@@ -124,7 +124,7 @@ func TestInspectCherryPick_CountsWhatElythiaDrops(t *testing.T) {
 	assert.EqualValues(t, 1, r.RemoteScheduledDeletes)
 	assert.EqualValues(t, 1, r.AutoDeleteUsers, "ローカルだけ")
 	assert.EqualValues(t, 1, r.DraftScheduledDeletes)
-	assert.Equal(t, 5, r.Unprocessed())
+	assert.Equal(t, 6, r.Unprocessed(), "理由の無い dave も要対応")
 }
 
 // 承認制が無効なら、approved が false でも CherryPick はサインインさせる (その場で
@@ -207,7 +207,8 @@ func TestInspectCherryPick_AfterCleanup(t *testing.T) {
 	assert.Zero(t, r.Unprocessed())
 }
 
-// 申請の理由の列が無ければ、申請した人と見分けられないので、要対応には数えない。
+// 申請の理由の列が無ければ、申請した人と見分けられないので、承認されていない
+// 利用者として数える (要対応)。
 func TestInspectCherryPick_WithoutSignupReason(t *testing.T) {
 	db := openCherryPickDB(t)
 	require.NoError(t, db.Exec(`ALTER TABLE "user" DROP COLUMN "signupReason"`).Error)
@@ -216,7 +217,28 @@ func TestInspectCherryPick_WithoutSignupReason(t *testing.T) {
 	r := inspect(t, db)
 	assert.Empty(t, r.PendingUsers)
 	assert.EqualValues(t, 1, r.UnapprovedMembers)
-	assert.Zero(t, r.Unprocessed())
+	assert.Equal(t, 1, r.Unprocessed())
+}
+
+// 理由の無い承認されていない利用者 (承認制にした後でメールの確認を済ませた申請者を
+// 含む) は、Elythia ではサインインできてしまうので要対応に数える。選ぶまでは、
+// migrate の前の確認が変換済みの印を自分で付けない。
+func TestInspectCherryPick_UnapprovedMembersNeedAction(t *testing.T) {
+	ctx := context.Background()
+	db := openCherryPickDB(t)
+	require.NoError(t, db.Exec(`INSERT INTO "user" (id, username, "usernameLower", approved) VALUES ('u1', 'erin', 'erin', false)`).Error)
+	requireApproval(t, db, "")
+	require.NoError(t, db.Exec(`CREATE TABLE schema_migrations (version bigint PRIMARY KEY, dirty boolean NOT NULL)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO schema_migrations VALUES (1, false)`).Error)
+
+	r, err := InspectCherryPickBeforeMigrate(ctx, db, cherryPickNow)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, r.UnapprovedMembers)
+	assert.Equal(t, 1, r.Unprocessed())
+	assert.False(t, r.Converted, "選ぶまでは印を付けない")
+	converted, err := CherryPickConverted(ctx, db)
+	require.NoError(t, err)
+	assert.False(t, converted)
 }
 
 // 期限前の予約削除だけでも、要対応に数える。

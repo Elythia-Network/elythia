@@ -24,10 +24,12 @@ elythia cherrypick check -config .config/default.yml
 # 3. DBの形をElythiaにする。要対応が残っている間は、フラグが無いと止まる
 elythia migrate -config .config/default.yml -allow-cherrypick
 
-# 4. 何をするかを見てから、選んで書き込む
+# 4. 何をするかを見てから、選んで書き込む(要対応が無い項目のフラグは要らない)
+#    <suspend|delete|approve>は、下の「申請の理由が無い利用者」を読んで1つに書き換える。
+#    approveは、管理者が承認していない申請者も通す
 elythia cherrypick convert -config .config/default.yml
 elythia cherrypick convert -config .config/default.yml -apply \
-  -quarantined block -later-deletes keep \
+  -unapproved-members <suspend|delete|approve> -quarantined block -later-deletes keep \
   -resolvers-out /path/to/resolvers.json -accept-manual-reports
 ```
 
@@ -45,7 +47,7 @@ docker compose up -d --wait db redis
 docker compose run --rm migrate cherrypick check -config .config/default.yml
 docker compose run --rm migrate migrate -config .config/default.yml -allow-cherrypick
 docker compose run --rm -v "$PWD/cherrypick-out:/out" migrate cherrypick convert -config .config/default.yml -apply \
-  -quarantined block -later-deletes keep -resolvers-out /out/resolvers.json -accept-manual-reports
+  -unapproved-members <suspend|delete|approve> -quarantined block -later-deletes keep -resolvers-out /out/resolvers.json -accept-manual-reports
 docker compose up -d
 ```
 
@@ -65,6 +67,7 @@ docker compose up -d
 | CherryPickの機能 | Elythiaで起きること | `convert`がすること |
 |---|---|---|
 | 登録の承認待ち(承認制が有効で、申請の理由がある利用者) | サインインできる | `-pending-users`で選ぶ。`suspend`(既定)は凍結し、後で管理画面から解除(承認)か削除(否認)を選ぶ。`delete`はアカウントを削除する。`approve`は承認する |
+| 承認されていない、申請の理由が無い利用者(承認制が有効なとき。下の「申請の理由が無い利用者」) | サインインできる | `-unapproved-members`で選ぶ。既定は無く、いれば選ぶまで止まる。`suspend`は凍結する。`delete`はアカウントを削除する。`approve`は承認する |
 | 通報の自動処理の規則 | 適用されない | 名前と正規表現を`-resolvers-out`へJSONで書き出し、`-accept-manual-reports`で同意してから行を消す。既にあるファイルは上書きしない |
 | インスタンスの隔離 | 制限が外れる | `-quarantined block`でブロック(`meta.blockedHosts`)へ足すか、`lift`で外す |
 | ローカルの投稿の予約削除 | 時刻が来ても消えない | 期限を過ぎたものは消す。まだのものは`-later-deletes delete`で今消すか、`keep`で残す(以後は消えない) |
@@ -72,18 +75,21 @@ docker compose up -d
 
 `convert`の実行前の一覧には、承認待ちの利用者の申請の理由も出します。Elythiaは申請の理由を読まないので、凍結した後の判断の材料にしてください。
 
-### 承認待ちに数えない利用者
+### 申請の理由が無い利用者
 
-CherryPickは`approved`の列を既定値`false`で足し、それまでの利用者の行を埋めません。承認制が無効なら、サインインしたときに`true`へ書き換えます。そのため、次の利用者は`approved=false`でも承認待ちに数えず、`check`の件数を出すだけにします。
+CherryPickは`approved`の列を既定値`false`で足し、それまでの利用者の行を埋めません。承認制が無効なら、サインインしたときに`true`へ書き換えます。承認制が有効な間は、`approved=false`の利用者のパスワードでのサインインを断ります。Elythiaは`approved`を読まないので、次の利用者はサインインできるようになります。申請の理由が無いので、承認待ち(`-pending-users`)とは分けて数え、`-unapproved-members`で選びます。
 
-- 承認制を有効にする前からの利用者と、管理者が作ったアカウント(申請の理由が無い)。CherryPickはパスワードでのサインインを断りますが、今のセッションはそのまま使わせています。Elythiaではサインインできます
-- システムアカウント(`instance.actor`など)
-- 承認制が無効の間にメールの確認待ちになり、有効にした後で確認した申請者は、理由を持たないので、ここに入ります
+- 承認制を有効にする前からの利用者と、管理者が作ったアカウント。CherryPickは今のセッションはそのまま使わせています
+- 承認制が無効の間にメールの確認待ちになり、有効にした後で確認した申請者。管理者がまだ承認していない人です
+
+前の2つが多いなら`approve`、後の申請者が混ざっていて見分けたいなら`suspend`にして、管理画面から解除するのが目安です。承認制が無効なら数えません。システムアカウント(`instance.actor`など)と、凍結・削除した利用者も数えません。`check`と`convert`の一覧には、件数と、ユーザー名の順に先頭の20人の名前を出します(残りは人数だけ)。
+
+**初期ユーザー(`meta.rootUserId`)と、管理者・モデレーターのロールを割り当てた利用者(期限の切れていないもの)は、承認待ちにも申請の理由が無い利用者にも数えず、`convert`は何もしません。** 一覧には「left as they are」として別に名前を出します。CherryPickの初めの管理者は承認の印が無いまま残ることがあり、凍結すると管理画面に入れなくなり(解除の手順そのものが使えない)、削除すると管理者のアカウントが連合ごと消えるためです。Elythiaは`approved`を読まないので、この人たちはそのままサインインできます。条件付きのロールで管理者・モデレーターになる利用者は、条件をここでは評価できないので除きません。そのようなロールがあれば一覧の最後に警告とロールの名前を出すので、対象の名前に入っていないかを確かめてください。
 
 ### 削除するときの注意
 
 - アカウントと投稿の削除は、管理画面からの削除と同じ処理を通します。連合への配送はジョブとして積まれ、Elythiaを起動した後に送られます
-- 承認待ちを削除すると、管理画面からの削除と同じく、知っているリモートのサーバー全体へDelete(actor)が積まれます
+- 承認待ちと申請の理由が無い利用者を削除すると、管理画面からの削除と同じく、知っているリモートのサーバー全体へDelete(actor)が積まれます
 - 後片付けのジョブを積めなかった利用者は、IDの一覧が出ます。Elythiaを起動した後に、管理画面からもう一度削除してください。流し直しても、削除の印が立った利用者は数えません
 - 投稿の削除の配送を積み終わる前に止まったときは、流し直しても積み直されません(投稿の行は消えているため)
 - `convert`は、削除のために本体を組み立てます(待ち受けはしません)。有効なプラグインの処理も動き出します

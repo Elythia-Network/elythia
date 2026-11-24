@@ -47,6 +47,8 @@ def seed(base, path):
     ok(base, "admin/update-meta", {"disableRegistration": False}, admin)
     alice = ok(base, "signup", {"username": "alice", "password": "alicepass1"})
     a = alice["token"]
+    # 承認制より前からの会員。run.sh が approved を false にして、承認の印の無い会員にする
+    ok(base, "signup", {"username": "dave", "password": "davepass1"})
     notes = {
         "first": ok(base, "notes/create", {"text": "CherryPickからの最初の投稿"}, a)["createdNote"]["id"],
         # 予約削除。run.sh が期限を過去にする
@@ -90,6 +92,13 @@ def verify(base, path, resolvers_path):
     status, res = api(base, "admin/show-users", {"username": "carol", "origin": "local"}, state["admin"])
     carol = [u for u in (res or []) if u.get("username") == "carol"] if status == 200 else []
     check("承認待ちだった利用者は凍結されている", len(carol) == 1 and carol[0].get("isSuspended") is True, res)
+    status, _ = api(base, "signin-flow", {"username": "dave", "password": "davepass1"})
+    check("承認の印の無い会員は、選んだとおり凍結されてサインインできない", status == 403, status)
+    status, res = api(base, "admin/show-users", {"username": "dave", "origin": "local"}, state["admin"])
+    dave = [u for u in (res or []) if u.get("username") == "dave"] if status == 200 else []
+    check("承認の印の無い会員は凍結されている", len(dave) == 1 and dave[0].get("isSuspended") is True, res)
+    status, _ = api(base, "signin-flow", {"username": "admin", "password": "adminpass1"})
+    check("承認の印の無い初期ユーザーは、凍結されずにサインインできる", status == 200, status)
     status, res = api(base, "notes/show", {"noteId": state["notes"]["first"]})
     check("投稿が読める", status == 200 and res.get("text") == "CherryPickからの最初の投稿", status)
     status, res = api(base, "notes/show", {"noteId": state["notes"]["edited"]})

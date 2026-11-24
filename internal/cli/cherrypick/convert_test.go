@@ -222,6 +222,74 @@ func TestConvert_NothingForTheServer(t *testing.T) {
 	assert.True(t, converted(t, db))
 }
 
+// 理由の無い承認されていない利用者は、選ぶまで変換しない。選べばその通りに処理し、
+// 理由のある承認待ちとは別に扱う。
+func TestConvert_UnapprovedMembers(t *testing.T) {
+	base := func(t *testing.T) []string {
+		return []string{"-apply", "-quarantined", "lift", "-later-deletes", "keep",
+			"-resolvers-out", filepath.Join(t.TempDir(), "r.json"), "-accept-manual-reports"}
+	}
+	seed := func(t *testing.T) *gorm.DB {
+		db := convertDB(t)
+		require.NoError(t, db.Exec(`INSERT INTO "user" (id, username, "usernameLower", approved) VALUES ('m1', 'erin', 'erin', false)`).Error)
+		return db
+	}
+	t.Run("required", func(t *testing.T) {
+		db := seed(t)
+		h := newConvertHarness(t, db)
+		assert.Equal(t, 2, convert(h.e, base(t)))
+		assert.Contains(t, h.stdout.String(), "users without approval      1  -> (choose)")
+		assert.Contains(t, h.stderr.String(), "-unapproved-members suspend|delete|approve")
+		assert.False(t, converted(t, db))
+	})
+	t.Run("suspend", func(t *testing.T) {
+		db := seed(t)
+		h := newConvertHarness(t, db)
+		require.Equal(t, 0, convert(h.e, append(base(t), "-unapproved-members", "suspend")), h.stderr.String())
+		var suspended bool
+		require.NoError(t, db.Raw(`SELECT "isSuspended" FROM "user" WHERE id = 'm1'`).Scan(&suspended).Error)
+		assert.True(t, suspended)
+		assert.True(t, converted(t, db))
+	})
+	t.Run("delete", func(t *testing.T) {
+		db := seed(t)
+		h := newConvertHarness(t, db)
+		require.Equal(t, 0, convert(h.e, append(base(t), "-unapproved-members", "delete")), h.stderr.String())
+		assert.Equal(t, []string{"m1"}, h.deleter.accounts, "理由のある p1 は -pending-users の既定 (凍結) に従う")
+		assert.True(t, converted(t, db))
+	})
+	// 初期ユーザーと管理者は数えず、凍結もしない。誰が対象かは名前で出す。
+	t.Run("staff are left alone", func(t *testing.T) {
+		db := seed(t)
+		for _, sql := range []string{
+			`INSERT INTO "user" (id, username, "usernameLower", approved) VALUES ('root1', 'root', 'root', false), ('adm1', 'adm', 'adm', false)`,
+			`UPDATE meta SET "rootUserId" = 'root1'`,
+			`INSERT INTO role (id, "updatedAt", "lastUsedAt", name, description, "isAdministrator") VALUES ('ra', now(), now(), 'admins', '', true)`,
+			`INSERT INTO role_assignment (id, "userId", "roleId") VALUES ('as1', 'adm1', 'ra')`,
+		} {
+			require.NoError(t, db.Exec(sql).Error, sql)
+		}
+		h := newConvertHarness(t, db)
+		require.Equal(t, 0, convert(h.e, append(base(t), "-unapproved-members", "suspend")), h.stderr.String())
+		assert.Contains(t, h.stdout.String(), "users without approval      1  -> suspend\n    @erin\n")
+		assert.Contains(t, h.stdout.String(), "left as they are: the root user, administrators and moderators without approval  2\n    @adm\n    @root\n")
+		var suspended []string
+		require.NoError(t, db.Raw(`SELECT id FROM "user" WHERE "isSuspended" ORDER BY id`).Scan(&suspended).Error)
+		assert.Equal(t, []string{"m1", "p1"}, suspended, "p1 は -pending-users の既定 (凍結)")
+		assert.True(t, converted(t, db))
+	})
+	t.Run("approve", func(t *testing.T) {
+		db := seed(t)
+		h := newConvertHarness(t, db)
+		require.Equal(t, 0, convert(h.e, append(base(t), "-unapproved-members", "approve")), h.stderr.String())
+		var approved bool
+		require.NoError(t, db.Raw(`SELECT approved FROM "user" WHERE id = 'm1'`).Scan(&approved).Error)
+		assert.True(t, approved)
+		assert.Empty(t, h.deleter.accounts)
+		assert.True(t, converted(t, db))
+	})
+}
+
 func TestConvert_Failures(t *testing.T) {
 	choices := func(t *testing.T) []string {
 		return []string{"-apply", "-quarantined", "lift", "-later-deletes", "delete",
@@ -362,6 +430,7 @@ func TestConvert_ArgumentsAndSetup(t *testing.T) {
 		want string
 	}{
 		{[]string{"-pending-users", "ban"}, `invalid -pending-users "ban"`},
+		{[]string{"-unapproved-members", "ban"}, `invalid -unapproved-members "ban"`},
 		{[]string{"-quarantined", "ignore"}, `invalid -quarantined "ignore"`},
 		{[]string{"-later-deletes", "later"}, `invalid -later-deletes "later"`},
 		{[]string{"extra"}, `unexpected argument "extra"`},
@@ -497,4 +566,6 @@ func TestMissingChoices(t *testing.T) {
 	assert.Len(t, missingChoices(r, convertChoices{acceptReports: true}), 1, "書き出し先が要る")
 	assert.Empty(t, missingChoices(r, convertChoices{resolversOut: "r.json", acceptReports: true}))
 	assert.Empty(t, missingChoices(maintenance.CherryPickReport{}, convertChoices{}))
+	assert.Len(t, missingChoices(maintenance.CherryPickReport{UnapprovedMembers: 1}, convertChoices{}), 1)
+	assert.Empty(t, missingChoices(maintenance.CherryPickReport{UnapprovedMembers: 1}, convertChoices{unapproved: "approve"}))
 }

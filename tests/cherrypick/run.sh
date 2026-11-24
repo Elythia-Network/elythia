@@ -87,6 +87,11 @@ psql() { "${compose[@]}" exec -T postgres psql -U misskey -d misskey -v ON_ERROR
 # 隔離は CherryPick に設定する口が無いので、行を直接入れる。予約削除は期限を過去にする
 psql "INSERT INTO instance (id, \"firstRetrievedAt\", host, \"quarantineLimited\") VALUES ('cherrypicktestq01', now(), 'remote.example', true)"
 psql "UPDATE note SET \"deleteAt\" = now() - interval '1 hour' WHERE id = '$scheduled'"
+# 承認制より前からの会員 (承認の印が無く、申請の理由も無い)。CherryPick は approved を
+# 既定値 false で足し、既存の行を埋めないので、この形になる
+psql "UPDATE \"user\" SET approved = false WHERE \"usernameLower\" = 'dave' AND host IS NULL"
+# 初めの管理者 (初期ユーザー) も承認の印が無いことがある。convert は凍結しない
+psql "UPDATE \"user\" SET approved = false WHERE \"usernameLower\" = 'admin' AND host IS NULL"
 "${compose[@]}" stop cherrypick > /dev/null
 
 expect 3 check "$bin" cherrypick check -config "$cfg"
@@ -95,7 +100,13 @@ expect 0 migrate-allowed "$bin" migrate -config "$cfg" -allow-cherrypick
 expect 1 migrate-before-convert "$bin" migrate -config "$cfg"
 expect_log migrate-before-convert 'run `elythia cherrypick convert`'
 expect 2 convert-unchosen "$bin" cherrypick convert -config "$cfg"
-expect 0 convert "$bin" cherrypick convert -config "$cfg" -apply -quarantined block \
+expect_log convert-unchosen '-unapproved-members suspend|delete|approve'
+# 対象の会員は名前で出し、初期ユーザーは対象から外して別に出す
+expect_log convert-unchosen 'users without approval      1  -> (choose)'
+expect_log convert-unchosen '    @dave'
+expect_log convert-unchosen 'left as they are: the root user, administrators and moderators without approval  1'
+expect_log convert-unchosen '    @admin'
+expect 0 convert "$bin" cherrypick convert -config "$cfg" -apply -unapproved-members suspend -quarantined block \
 	-resolvers-out "$out/resolvers.json" -accept-manual-reports
 expect 0 migrate-after-convert "$bin" migrate -config "$cfg"
 expect 0 check-after-convert "$bin" cherrypick check -config "$cfg"
