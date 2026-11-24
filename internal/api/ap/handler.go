@@ -122,6 +122,21 @@ type Handler struct {
 	// 判定 (#3914)。配送しない相手には見せない投稿を返さない。
 	fetchDelivery        DeliveryGate
 	fetchDeliverSoftware SoftwareSuspensionChecker
+	// moderatorChecker は ap/show が凍結・退会した利用者を見せてよい閲覧者か
+	// (users/show と同じくモデレーターか) を決める。未配線なら誰にも見せない。
+	moderatorChecker ModeratorChecker
+}
+
+// ModeratorChecker reports whether a user is a moderator. *role.Service
+// satisfies it.
+type ModeratorChecker interface {
+	IsModerator(userID string) bool
+}
+
+// SetModeratorChecker wires the check ap/show uses to decide whether the
+// viewer may see suspended and deleted local users, as users/show does.
+func (h *Handler) SetModeratorChecker(m ModeratorChecker) {
+	h.moderatorChecker = m
 }
 
 // SetLocalFederationObserver wires account-level availability and first-reference tracking.
@@ -856,9 +871,17 @@ func (h *Handler) APIShow(c *echo.Context) error {
 	if userID := extractLocalID(uri, "/users/"); userID != "" {
 		bundle, err := h.userService.ShowByID(userID)
 		if err == nil && bundle.User.Host == nil {
+			// **凍結・退会した利用者は、users/show と同じくモデレーター以外には
+			// 見つからない扱いにする。** 退会しても行を残す設定 (#3207) では、
+			// ここを通すと名前や自己紹介が期限なく読める。先へ進めるとリモートの
+			// 解決で自分の URL を取りに行くだけなので、ここで NO_SUCH_OBJECT にする。
+			viewer := middleware.GetUser(c)
+			if bundle.User.HiddenFromNonModerators() && !h.viewerIsModerator(viewer) {
+				return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_OBJECT", "No such object.", "dc94d745-1262-4e63-a17d-fecaa57efc82"))
+			}
 			return c.JSON(http.StatusOK, map[string]any{
 				"type":   "User",
-				"object": h.packUserForAPI(middleware.GetUser(c), bundle.User, bundle.Profile),
+				"object": h.packUserForAPI(viewer, bundle.User, bundle.Profile),
 			})
 		}
 	}
@@ -1090,6 +1113,11 @@ func extractLocalID(uri, pathPrefix string) string {
 		id = id[:i]
 	}
 	return id
+}
+
+// viewerIsModerator reports whether viewer is a moderator. 匿名と未配線は false。
+func (h *Handler) viewerIsModerator(viewer *model.User) bool {
+	return viewer != nil && h.moderatorChecker != nil && h.moderatorChecker.IsModerator(viewer.ID)
 }
 
 // packNoteForAPI packs a note with the full Note entity schema, matching

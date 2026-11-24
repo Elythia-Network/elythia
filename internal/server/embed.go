@@ -132,10 +132,12 @@ func embedNoteIsPublic(note *model.Note) bool {
 
 // User renders /embed/user-timeline/:user.
 //
-// リモートユーザーは埋め込まない (upstream と同じ)。
+// リモートユーザーは埋め込まない (upstream と同じ)。凍結・退会した利用者も
+// 文脈なしのシェルにする。埋め込みは誰でも読めるので、users/show が
+// モデレーター以外に隠す利用者を、ここから読ませない。
 func (h *embedHandlers) User(c *echo.Context) error {
 	user, err := h.deps.UserRepo.FindByID(c.Param("user"))
-	if err != nil || user == nil || (user.Host != nil && *user.Host != "") {
+	if err != nil || user == nil || (user.Host != nil && *user.Host != "") || user.HiddenFromNonModerators() {
 		return h.render(c, nil)
 	}
 	packed, err := h.deps.PackUser(c, user)

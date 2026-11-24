@@ -545,10 +545,7 @@ func (h *Handler) Show(c *echo.Context) error {
 		// 'none' はこの経路では見ていない (単体指定と同じく upstream に合わせる)。
 		hideRemote := viewer == nil && h.ugcVisibilityNow() == ugcvisibility.Local
 		for _, b := range bundles {
-			if !iAmModerator && b.User.IsDeleted && b.User.IsLocal() {
-				continue
-			}
-			if !iAmModerator && b.User.IsSuspended {
+			if !iAmModerator && b.User.HiddenFromNonModerators() {
 				continue
 			}
 			if hideRemote && b.User.Host != nil {
@@ -613,10 +610,7 @@ func (h *Handler) Show(c *echo.Context) error {
 	// 存在しないものとして扱い NO_SUCH_USER(4362f8dc...) を返す。物理削除待ちか
 	// 行保持かを問わず local deleted user も同様に隠すが、remote user と moderator
 	// の既存契約は維持する。匿名/未配線は iAmModerator=false で fail-closed。
-	if !iAmModerator && bundle.User.IsDeleted && bundle.User.IsLocal() {
-		return apierr.JSONNoSuchUser(c)
-	}
-	if !iAmModerator && bundle.User.IsSuspended {
+	if !iAmModerator && bundle.User.HiddenFromNonModerators() {
 		return apierr.JSONNoSuchUser(c)
 	}
 
