@@ -1,0 +1,1 @@
+{"version":"https://jsonfeed.org/version/1","title":"v1","author":{"name":"Feed Author"},"items":[{"id":"a","title":"no dates","attachments":[]},{"id":"b","authors":[],"author":{"name":"Fallback"},"date_published":"not a date"}]}

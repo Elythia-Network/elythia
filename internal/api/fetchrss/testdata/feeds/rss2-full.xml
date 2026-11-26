@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Example &amp; Co &hellip;</title>
+    <link>https://blog.example/</link>
+    <atom:link href="https://blog.example/feed.xml" rel="self" type="application/rss+xml"/>
+    <description><![CDATA[A <b>blog</b> about things]]></description>
+    <language>ja</language>
+    <image>
+      <url>https://blog.example/logo.png</url>
+      <title>Example logo</title>
+      <link>https://blog.example/</link>
+    </image>
+    <itunes:author>Podcaster</itunes:author>
+    <itunes:summary>Summary of the show</itunes:summary>
+    <itunes:explicit>no</itunes:explicit>
+    <itunes:keywords>tech, news , ,radio</itunes:keywords>
+    <itunes:image href="https://blog.example/itunes.jpg"/>
+    <itunes:category text="Technology"><itunes:category text="Podcasting"/></itunes:category>
+    <itunes:category text="News"/>
+    <itunes:owner><itunes:name>Owner Name</itunes:name><itunes:email>owner@blog.example</itunes:email></itunes:owner>
+    <item>
+      <title>First &lt;post&gt; &nbsp;title</title>
+      <link>https://blog.example/1</link>
+      <guid isPermaLink="true">https://blog.example/1</guid>
+      <pubDate>Mon, 02 Jan 2006 15:04:05 +0900</pubDate>
+      <author>writer@blog.example (Writer Name)</author>
+      <dc:creator>DC Creator</dc:creator>
+      <description>&lt;p&gt;Hello &amp;amp; &lt;a href="/x"&gt;world&lt;/a&gt;&lt;/p&gt;</description>
+      <content:encoded><![CDATA[<p>Full <img src="https://blog.example/a.png"> content</p>]]></content:encoded>
+      <category>one</category>
+      <category domain="x">two</category>
+      <itunes:keywords>k1, k2</itunes:keywords>
+      <dc:subject>dcsubject</dc:subject>
+      <enclosure url="https://blog.example/a.mp3" length="12345" type="audio/mpeg"/>
+      <comments>https://blog.example/1#c</comments>
+    </item>
+    <item>
+      <title>Second</title>
+      <link href="https://blog.example/2-href"></link>
+      <guid>tag:blog.example,2006:2</guid>
+      <pubDate>Tue, 3 Jan 2006 01:02:03 GMT</pubDate>
+      <author>only@blog.example</author>
+      <dc:creator>Fallback Creator</dc:creator>
+      <description>Plain   text
+        description</description>
+      <enclosure url="https://blog.example/b.mp3" length="abc" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>Third with dc date</title>
+      <dc:date>2006-01-04T05:06:07+09:00</dc:date>
+      <dc:title>ignored</dc:title>
+      <dc:description>DC description</dc:description>
+      <itunes:author>Item iTunes Author</itunes:author>
+    </item>
+  </channel>
+</rss>

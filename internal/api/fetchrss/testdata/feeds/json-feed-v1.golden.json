@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "guid": "a",
+      "title": "no dates"
+    },
+    {
+      "creator": "Fallback",
+      "guid": "b",
+      "pubDate": "not a date"
+    }
+  ],
+  "title": "v1"
+}

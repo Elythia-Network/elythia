@@ -1,0 +1,11 @@
+{
+  "description": "old",
+  "items": [
+    {
+      "link": "https://ns.example/1",
+      "title": "old item"
+    }
+  ],
+  "link": "https://ns.example/",
+  "title": "Netscape 0.9"
+}

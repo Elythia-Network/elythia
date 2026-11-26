@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "content": "\u003cxhtml:div\u003e\u003cxhtml:p\u003ein prefixed div\u003c/xhtml:p\u003e\u003c/xhtml:div\u003e",
+      "contentSnippet": "in prefixed div",
+      "guid": "e1"
+    }
+  ],
+  "title": "prefixed"
+}

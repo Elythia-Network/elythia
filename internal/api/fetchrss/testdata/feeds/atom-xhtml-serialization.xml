@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>xhtml</title>
+  <entry>
+    <title type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">T &amp; <i>it</i></div></title>
+    <id>x1</id>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p class='q'>a &amp; b &lt; c</p><img src="i.png" alt="x"/></div></content>
+  </entry>
+  <entry>
+    <id>x2</id>
+    <content type="html"><div><p>raw html in xml</p></div></content>
+  </entry>
+</feed>

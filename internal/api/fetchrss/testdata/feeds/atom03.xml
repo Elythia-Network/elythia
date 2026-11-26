@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed version="0.3" xmlns="http://purl.org/atom/ns#">
+  <title mode="escaped">Atom 0.3</title>
+  <tagline>old tagline</tagline>
+  <link rel="alternate" type="text/html" href="https://old.example/"/>
+  <modified>2005-01-02T03:04:05Z</modified>
+  <entry>
+    <title>Old entry</title>
+    <link rel="alternate" href="https://old.example/1"/>
+    <id>tag:old.example,2005:1</id>
+    <issued>2005-01-02T03:04:05Z</issued>
+    <modified>2005-01-03T03:04:05Z</modified>
+    <summary mode="escaped">&lt;b&gt;old&lt;/b&gt;</summary>
+    <content mode="base64" type="text/html">PGI+aGk8L2I+</content>
+  </entry>
+</feed>

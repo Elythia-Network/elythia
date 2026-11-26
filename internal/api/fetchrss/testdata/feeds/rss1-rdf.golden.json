@@ -1,0 +1,25 @@
+{
+  "description": "RSS 1.0",
+  "image": {
+    "title": "RDF image",
+    "url": "https://rdf.example/img.png"
+  },
+  "items": [
+    {
+      "categories": [
+        "s1",
+        "s2"
+      ],
+      "content": "\u003cb\u003ebold\u003c/b\u003e",
+      "contentSnippet": "bold",
+      "creator": "rdf creator",
+      "isoDate": "2006-01-02T03:04:05Z",
+      "link": "https://rdf.example/a",
+      "pubDate": "2006-01-02T03:04:05+00:00",
+      "summary": "desc",
+      "title": "RDF item"
+    }
+  ],
+  "link": "https://rdf.example/",
+  "title": "RDF feed"
+}

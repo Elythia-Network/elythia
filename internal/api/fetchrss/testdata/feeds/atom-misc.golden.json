@@ -1,0 +1,15 @@
+{
+  "image": {
+    "url": "https://misc.example/icon.png"
+  },
+  "items": [
+    {
+      "creator": "EA",
+      "guid": "urn:misc:1",
+      "isoDate": "2006-01-02T03:04:05Z",
+      "pubDate": "2006-01-02T03:04:05Z",
+      "title": "With source"
+    }
+  ],
+  "title": "Misc atom"
+}

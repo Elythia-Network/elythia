@@ -1,0 +1,77 @@
+{
+  "description": "A \u003cb\u003eblog\u003c/b\u003e about things",
+  "feedUrl": "https://blog.example/feed.xml",
+  "image": {
+    "title": "Example logo",
+    "url": "https://blog.example/logo.png"
+  },
+  "items": [
+    {
+      "categories": [
+        "one",
+        "two",
+        "k1",
+        " k2",
+        "dcsubject"
+      ],
+      "content": "\u003cp\u003eFull \u003cimg src=\"https://blog.example/a.png\"\u003e content\u003c/p\u003e",
+      "contentSnippet": "Full content",
+      "creator": "Writer Name",
+      "enclosure": {
+        "length": 12345,
+        "type": "audio/mpeg",
+        "url": "https://blog.example/a.mp3"
+      },
+      "guid": "https://blog.example/1",
+      "isoDate": "2006-01-02T06:04:05Z",
+      "link": "https://blog.example/1",
+      "pubDate": "Mon, 02 Jan 2006 15:04:05 +0900",
+      "summary": "\u003cp\u003eHello \u0026amp; \u003ca href=\"/x\"\u003eworld\u003c/a\u003e\u003c/p\u003e",
+      "title": "First \u003cpost\u003e  title"
+    },
+    {
+      "contentSnippet": "Plain text description",
+      "creator": "Fallback Creator",
+      "enclosure": {
+        "type": "audio/mpeg",
+        "url": "https://blog.example/b.mp3"
+      },
+      "guid": "tag:blog.example,2006:2",
+      "isoDate": "2006-01-03T01:02:03Z",
+      "link": "https://blog.example/2-href",
+      "pubDate": "Tue, 3 Jan 2006 01:02:03 GMT",
+      "summary": "Plain   text\n        description",
+      "title": "Second"
+    },
+    {
+      "contentSnippet": "DC description",
+      "creator": "Item iTunes Author",
+      "isoDate": "2006-01-03T20:06:07Z",
+      "pubDate": "2006-01-04T05:06:07+09:00",
+      "summary": "DC description",
+      "title": "Third with dc date"
+    }
+  ],
+  "itunes": {
+    "author": "Podcaster",
+    "categories": [
+      "Technology",
+      "Podcasting",
+      "News"
+    ],
+    "explicit": "no",
+    "image": "https://blog.example/itunes.jpg",
+    "keywords": [
+      "tech",
+      "news",
+      "radio"
+    ],
+    "owner": {
+      "email": "owner@blog.example",
+      "name": "Owner Name"
+    },
+    "summary": "Summary of the show"
+  },
+  "link": "https://blog.example/",
+  "title": "Example \u0026 Co …"
+}

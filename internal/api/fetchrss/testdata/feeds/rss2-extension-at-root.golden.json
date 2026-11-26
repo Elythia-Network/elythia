@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "enclosure": {
+        "type": "audio/mpeg",
+        "url": "https://root.example/x.mp3"
+      },
+      "title": "i"
+    }
+  ],
+  "link": "https://root.example/",
+  "title": "Root ext"
+}

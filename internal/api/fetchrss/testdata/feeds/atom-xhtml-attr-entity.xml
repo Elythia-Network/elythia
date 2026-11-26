@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>attr entity</title>
+<entry><id>e1</id><content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><img alt="a&nbsp;b&amp;c&#65;" src="x.png"/><p title="&quot;q&quot;">t</p></div></content></entry>
+</feed>

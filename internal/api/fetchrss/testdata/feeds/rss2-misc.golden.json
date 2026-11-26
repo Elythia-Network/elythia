@@ -1,0 +1,18 @@
+{
+  "description": "misc",
+  "image": {
+    "url": "https://misc.example/root.png"
+  },
+  "items": [
+    {
+      "guid": "spaced guid",
+      "link": "https://misc.example/1",
+      "title": "misc item"
+    },
+    {
+      "title": "root item"
+    }
+  ],
+  "link": "https://misc.example/",
+  "title": "Misc channel"
+}

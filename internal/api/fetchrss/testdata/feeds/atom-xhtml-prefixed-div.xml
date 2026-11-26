@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:xhtml="http://www.w3.org/1999/xhtml"><title>prefixed</title>
+<entry><id>e1</id><content type="xhtml"><xhtml:div><xhtml:p>in prefixed div</xhtml:p></xhtml:div></content></entry>
+</feed>
