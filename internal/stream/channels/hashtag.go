@@ -39,16 +39,21 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 	if len(params) > 0 {
 		_ = json.Unmarshal(params, &p)
 	}
-	// upstream hashtag.ts:36-42 は `q.every(x => Array.isArray(x) && x.length >= 1)`
-	// で**全グループ**が非空であることを要求し、1 つでも空なら接続拒否する。以前は
-	// q[0] (第1グループ) のみ検証していた (#1948-20)。
-	if len(p.Q) == 0 {
+	// **形の上限を、正規化より前に全部確かめる** (本家 hashtag.ts と同じ上限)。
+	//
+	// - グループは 1〜32 個、各グループのタグは 1〜32 個。異なるタグの数 (下の
+	//   maxHashtagTopics) だけでは、同じタグを並べたグループをフレームの上限まで
+	//   書けてしまい、c.q と配信ごとの matchesTags の手間が入力の大きさに比例する
+	// - 空のタグは拒否する。以前は正規化して空になったものと一緒に捨てていたので、
+	//   ["a", ""] が ["a"] として広く一致していた
+	// - タグの長さは正規化の前の文字数で 128 まで (hashtag.name は varchar(128)。
+	//   正規化 (NFKC) の手間は入力の長さに応じて増えるので、拒否する入力に手間を
+	//   掛けない。正規化の後の長さでは拒否しない (本家と同じ))
+	//
+	// 購読より前に全部を確かめる (途中で拒否すると、それまでのタグを購読したまま
+	// 返してしまう)。
+	if !validHashtagQuery(p.Q) {
 		return stream.ErrInvalidParams
-	}
-	for _, group := range p.Q {
-		if len(group) == 0 {
-			return stream.ErrInvalidParams
-		}
 	}
 	// **購読するトピック数に上限を置く。**
 	//
@@ -56,30 +61,12 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 	// 内容に関わらずリスナー 1 本でメモリ上でマッチングするので上限が要らない
 	// が、こちらは 1 通の `connect` でトピックの枠を任意個増やせる。
 	// (Redis の購読は `PubSubService` が 1 本にまとめているので、Redis の接続は
-	// 増えない。)
+	// 増えない。) 形の上限 (32×32) の内側でも 1024 個まで増えうるので、別に見る。
 	//
 	// 値は 1 接続あたりのチャンネル数上限 (`maxChannelsPerConnection` = 32) と
 	// 揃える。実運用でタグを 32 個超える購読は想定していない。
 	if distinct := countDistinctTags(p.Q); distinct > maxHashtagTopics {
 		return stream.ErrInvalidParams
-	}
-	// **保存できる長さを超えるタグは拒否する。** hashtag.name は varchar(128)
-	// なので、それより長いタグを持つノートは無く、購読しても何も届かない。名前は
-	// 利用者が自由に決められるので、長い名前でトピックの枠と Redis のチャネル名を
-	// 膨らませる余地を残さない。購読より前に全部を確かめる (途中で拒否すると、
-	// それまでのタグを購読したまま返してしまう)。
-	//
-	// **長さは正規化の前に見る** (本家 hashtag.ts の `Array.from(y).length <= 128`)。
-	// 正規化 (NFKC) の手間は入力の長さに応じて増えるので、長い入力を正規化して
-	// から数えると、拒否する入力にも手間を掛けることになる。正規化の後の長さでは
-	// 拒否しない (本家と同じ。NFKC で膨らむ幅には上限があるので、トピック名も
-	// 正規化前の上限から決まる長さに収まる)。
-	for _, group := range p.Q {
-		for _, tag := range group {
-			if utf8.RuneCountInString(tag) > hashtag.MaxTagLength {
-				return stream.ErrInvalidParams
-			}
-		}
 	}
 	c.filter = parseNoteFilter(params)
 	// q を正規化して保持し、全グループの全タグの distinct 正規化キーを購読する。
@@ -91,6 +78,8 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 		ng := make([]string, 0, len(group))
 		for _, tag := range group {
 			key := searchnorm.Normalize(tag)
+			// 空でないタグは正規化しても空にならないので、validHashtagQuery の後では
+			// ここは通らない。正規化の実装が変わったときのために残す。
 			if key == "" {
 				continue
 			}
@@ -106,6 +95,7 @@ func (c *HashtagChannel) Init(params json.RawMessage) error {
 			c.q = append(c.q, ng)
 		}
 	}
+	// 上と同じく、今は通らない防御。
 	if len(c.topics) == 0 {
 		return stream.ErrInvalidParams
 	}
@@ -212,6 +202,33 @@ func (c *HashtagChannel) Dispose() {
 	for _, t := range c.topics {
 		c.ctx.Unsubscribe(t)
 	}
+}
+
+const (
+	// maxHashtagGroups bounds the number of OR groups in q (same as upstream).
+	maxHashtagGroups = 32
+	// maxHashtagTagsPerGroup bounds the number of AND tags in one group (same as upstream).
+	maxHashtagTagsPerGroup = 32
+)
+
+// validHashtagQuery reports whether q has 1..maxHashtagGroups groups, each with
+// 1..maxHashtagTagsPerGroup non-empty tags of at most hashtag.MaxTagLength
+// runes (counted before normalization).
+func validHashtagQuery(q [][]string) bool {
+	if len(q) == 0 || len(q) > maxHashtagGroups {
+		return false
+	}
+	for _, group := range q {
+		if len(group) == 0 || len(group) > maxHashtagTagsPerGroup {
+			return false
+		}
+		for _, tag := range group {
+			if tag == "" || utf8.RuneCountInString(tag) > hashtag.MaxTagLength {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // maxHashtagTopics bounds how many Redis subscriptions one hashtag channel

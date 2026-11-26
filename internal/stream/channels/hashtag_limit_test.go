@@ -126,3 +126,62 @@ func TestHashtag_JudgesLengthBeforeNormalization(t *testing.T) {
 	require.Len(t, ctx.subs, 1)
 	ch.Dispose()
 }
+
+// initHashtag runs Init with q and returns the subscribed topics and the error.
+func initHashtag(t *testing.T, q any) ([]string, error) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"q": q})
+	require.NoError(t, err)
+	ctx := newCtx(nil)
+	ch := NewHashtag(ctx)
+	initErr := ch.Init(json.RawMessage(body))
+	subs := append([]string(nil), ctx.subs...)
+	ch.Dispose()
+	return subs, initErr
+}
+
+// グループの数は 32 まで (本家と同じ)。同じタグを並べたグループは異なるタグの数
+// の上限に掛からないので、グループの数で別に止める。
+func TestHashtag_RejectsTooManyGroups(t *testing.T) {
+	// 上限はリテラルで書く (定数を参照すると、緩める変異と一緒に期待値が動く)。
+	groups := make([][]string, 33)
+	for i := range groups {
+		groups[i] = []string{"a", "b"}
+	}
+	subs, err := initHashtag(t, groups)
+	require.ErrorIs(t, err, stream.ErrInvalidParams, "33 groups must be rejected")
+	require.Empty(t, subs, "nothing may be subscribed after a rejection")
+
+	subs, err = initHashtag(t, groups[:32])
+	require.NoError(t, err, "exactly 32 groups must be accepted")
+	require.Len(t, subs, 2)
+}
+
+// 1 つのグループのタグの数は 32 まで (本家と同じ)。同じタグの繰り返しでも数える。
+func TestHashtag_RejectsTooManyTagsPerGroup(t *testing.T) {
+	group := make([]string, 33)
+	for i := range group {
+		group[i] = "a"
+	}
+	subs, err := initHashtag(t, [][]string{{"ok"}, group})
+	require.ErrorIs(t, err, stream.ErrInvalidParams, "a group of 33 tags must be rejected")
+	require.Empty(t, subs, "nothing may be subscribed after a rejection")
+
+	subs, err = initHashtag(t, [][]string{{"ok"}, group[:32]})
+	require.NoError(t, err, "exactly 32 tags in a group must be accepted")
+	require.Len(t, subs, 2)
+}
+
+// 空のタグは拒否する (本家と同じ)。捨てて受け付けると、["a", ""] が ["a"] として
+// 広く一致してしまう。
+func TestHashtag_RejectsEmptyTag(t *testing.T) {
+	subs, err := initHashtag(t, [][]string{{"a", ""}})
+	require.ErrorIs(t, err, stream.ErrInvalidParams)
+	require.Empty(t, subs)
+
+	// 文字列でないタグも拒否する (本家の typeof y === 'string')。encoding/json は型の
+	// 合わない要素をゼロ値 (空文字) のまま残すので、空のタグの判定で拒否される。
+	subs, err = initHashtag(t, []any{[]any{"a", 1}})
+	require.ErrorIs(t, err, stream.ErrInvalidParams)
+	require.Empty(t, subs)
+}
