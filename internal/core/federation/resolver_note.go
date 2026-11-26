@@ -656,6 +656,10 @@ func (r *Resolver) resolveQuoteURI(uri string, depth int, ephemeral bool, chain 
 	// 引用はつながらず、鍵の持ち主の actor を相手に知らせるだけになる。
 	if n, err := r.resolveNoteDepth(uri, depth+1, false, ephemeral, chain.withoutFetchKey()); err == nil {
 		return n, nil
+	} else if errors.Is(err, ErrReplyTargetNotVisible) {
+		// 引用先が、その作者から見えない返信先への返信だった。引用先を取り込めない
+		// だけで、外側のノートの参照の問題ではないので、引用を外して続ける。
+		return nil, nil
 	} else if chain != nil && chain.inboundLocalReferences &&
 		(errors.Is(err, ErrInboundLocalReferenceUnavailable) || errors.Is(err, ErrInboundLocalReferenceFailure)) {
 		return nil, err

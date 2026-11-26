@@ -40,6 +40,8 @@ func newProcessor(t *testing.T, fetcherBody string) (*federation.Processor, *tes
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	resolver := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(fetcherBody)}, idGen)
+	// 本番 (router.go) と同じく、返信先の可視性の判定にフォロー関係を引かせる。
+	resolver.SetFollowingRepo(followingRepo)
 	followingSvc := corefollowing.NewService(repo, followingRepo, testutil.NewMockFollowRequestRepository(), idGen, nil, nil, nil, nil)
 	processor := federation.NewProcessorNilDeps(resolver, followingSvc, nil, nil, repo, noteRepo)
 	return processor, repo, followingRepo, noteRepo
@@ -2968,7 +2970,12 @@ func TestProcess_UndoBlock_RemoteBlockeeSkipped(t *testing.T) {
 // 同じクランプが掛かる。これが無いと「ローカルの followers 限定 note へ
 // リモートが to:[Public] で返信」でローカル TL / 再配送に文脈が漏れる。
 func TestProcess_CreateReplyClampsVisibilityToTarget(t *testing.T) {
-	p, _, _, noteRepo := newProcessor(t, aliceActor)
+	p, repo, followingRepo, noteRepo := newProcessor(t, aliceActor)
+	// 返信先を見られる送り手 (bob のフォロワー) からの返信にする。見られない送り手
+	// からの返信は受けない (TestIngestNote_ReplyToInvisibleLocalNoteIsRejected)。
+	aliceHost, aliceURI := "remote.example", "https://remote.example/users/alice"
+	repo.Users["alice"] = &model.User{ID: "alice", Username: "alice", URI: &aliceURI, Host: &aliceHost}
+	require.NoError(t, followingRepo.Create(&model.Following{ID: "f1", FollowerID: "alice", FolloweeID: "bob"}))
 	localURI := "https://example.com/notes/followers-parent"
 	noteRepo.Notes["followers-parent"] = &model.Note{
 		ID: "followers-parent", UserID: "bob", URI: &localURI, Visibility: model.NoteVisibilityFollowers,
@@ -3000,11 +3007,14 @@ func TestProcess_CreateReplyClampsVisibilityToTarget(t *testing.T) {
 // visibleUserIds に含める必要がある (apNote.To が Public だけだと宛先が 1 件も
 // 解決できず、DM の当事者すら本文を参照できない note が残る)。
 func TestProcess_CreateReplyClampedToSpecifiedKeepsTargetVisible(t *testing.T) {
-	p, _, _, noteRepo := newProcessor(t, aliceActor)
+	p, repo, _, noteRepo := newProcessor(t, aliceActor)
+	// 返信先の宛先に入っている送り手からの返信にする。
+	aliceHost, aliceURI := "remote.example", "https://remote.example/users/alice"
+	repo.Users["alice"] = &model.User{ID: "alice", Username: "alice", URI: &aliceURI, Host: &aliceHost}
 	localURI := "https://example.com/notes/specified-parent"
 	noteRepo.Notes["specified-parent"] = &model.Note{
 		ID: "specified-parent", UserID: "bob", URI: &localURI,
-		Visibility: model.NoteVisibilitySpecified,
+		Visibility: model.NoteVisibilitySpecified, VisibleUserIDs: model.StringArray{"alice"},
 	}
 	body := []byte(`{
 		"type": "Create",

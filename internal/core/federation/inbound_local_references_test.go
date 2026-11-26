@@ -200,7 +200,7 @@ func TestIngestNoteForInboxRejectsUnavailableLocalQuoteAndReplyBeforeSaving(t *t
 			users.Users["alice"] = &model.User{ID: "alice", Username: "alice", UsernameLower: "alice", Host: &remoteHost, URI: &remoteURI, LastFetchedAt: &now}
 			users.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOff}
 			notes := testutil.NewMockNoteRepository()
-			notes.Notes["target"] = &model.Note{ID: "target", UserID: "bob"}
+			notes.Notes["target"] = &model.Note{ID: "target", UserID: "bob", Visibility: model.NoteVisibilityPublic}
 			observer := &inboundReferenceObserver{}
 			emojis := testutil.NewMockEmojiRepository()
 			files := testutil.NewMockDriveFileRepository()
@@ -271,4 +271,66 @@ func TestLocalReferenceCacheExpiresAndBoundsPositiveEntries(t *testing.T) {
 	assert.True(t, cache.hasUser("user-4095", now.Add(time.Second)))
 	assert.False(t, cache.hasUser("user-4095", now.Add(localReferenceCacheTTL+time.Second)), "positive entries must expire")
 	assert.False(t, cache.hasUser("missing", now), "negative lookups are not cached")
+}
+
+// failingExistsFollowingRepo fails every follow lookup.
+type failingExistsFollowingRepo struct {
+	*testutil.MockFollowingRepository
+	err error
+}
+
+func (f failingExistsFollowingRepo) Exists(string, string) (bool, error) { return false, f.err }
+
+// 引用先 (リモート) が、その作者から見えないローカルの返信先への返信だったら、
+// 引用を外して外側のノートは取り込む (本家と同じ結果)。inbox の連鎖でも外側ごと
+// 拒否しない。
+func TestIngestNoteForInboxDropsQuoteOfInvisibleReply(t *testing.T) {
+	users := testutil.NewMockUserRepository()
+	remoteHost, remoteURI := "remote.example", "https://remote.example/users/alice"
+	now := time.Now()
+	users.Users["alice"] = &model.User{ID: "alice", Username: "alice", UsernameLower: "alice", Host: &remoteHost, URI: &remoteURI, LastFetchedAt: &now}
+	users.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+	notes := testutil.NewMockNoteRepository()
+	notes.Notes["target"] = &model.Note{ID: "target", UserID: "bob", Visibility: model.NoteVisibilityFollowers}
+	fetcher := inboundMapFetcher{remoteURI: inboundReferenceActor()}
+	quoteURI := "https://remote.example/notes/quoted"
+	fetcher[quoteURI] = []byte(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Note","id":"` + quoteURI + `","attributedTo":"` + remoteURI + `","to":["` + activitypub.Public + `"],"content":"quoted","inReplyTo":"https://example.com/notes/target"}`)
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	r := NewResolverNilDeps(users, notes, activitypub.NewURLBuilder("https://example.com"), fetcher, idGen)
+	r.SetLocalFederationObserver(&inboundReferenceObserver{})
+	r.SetFollowingRepo(testutil.NewMockFollowingRepository())
+	outer := []byte(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Note","id":"https://remote.example/notes/outer","attributedTo":"` + remoteURI + `","to":["` + activitypub.Public + `"],"content":"outer","quoteUrl":"` + quoteURI + `"}`)
+
+	got, _, err := r.IngestNoteWithCreatedForInbox(outer, remoteURI, remoteHost)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Nil(t, got.RenoteID, "the quote must be dropped")
+	_, err = notes.FindByURI(quoteURI)
+	assert.Error(t, err, "the quoted reply must not be saved")
+}
+
+// inbox の連鎖で、返信先の可視性を見るためのフォロー関係の照会が失敗したら、
+// 参照の確認の障害 (再試行する) として返す。
+func TestIngestNoteForInboxReplyVisibilityLookupFailure(t *testing.T) {
+	users := testutil.NewMockUserRepository()
+	remoteHost, remoteURI := "remote.example", "https://remote.example/users/alice"
+	now := time.Now()
+	users.Users["alice"] = &model.User{ID: "alice", Username: "alice", UsernameLower: "alice", Host: &remoteHost, URI: &remoteURI, LastFetchedAt: &now}
+	users.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
+	notes := testutil.NewMockNoteRepository()
+	notes.Notes["target"] = &model.Note{ID: "target", UserID: "bob", Visibility: model.NoteVisibilityFollowers}
+	idGen, err := id.NewGenerator("aidx")
+	require.NoError(t, err)
+	r := NewResolverNilDeps(users, notes, activitypub.NewURLBuilder("https://example.com"), inboundMapFetcher{remoteURI: inboundReferenceActor()}, idGen)
+	r.SetLocalFederationObserver(&inboundReferenceObserver{})
+	boom := errors.New("following lookup failed")
+	r.SetFollowingRepo(failingExistsFollowingRepo{MockFollowingRepository: testutil.NewMockFollowingRepository(), err: boom})
+	body := []byte(`{"@context":"https://www.w3.org/ns/activitystreams","type":"Note","id":"https://remote.example/notes/reply","attributedTo":"` + remoteURI + `","to":["` + activitypub.Public + `"],"content":"reply","inReplyTo":"https://example.com/notes/target"}`)
+
+	_, _, err = r.IngestNoteWithCreatedForInbox(body, remoteURI, remoteHost)
+	require.ErrorIs(t, err, ErrInboundLocalReferenceFailure)
+	require.ErrorIs(t, err, boom)
+	assert.NotErrorIs(t, err, ErrInboundLocalReferenceUnavailable)
+	assert.Len(t, notes.Notes, 1, "the reply must not be saved")
 }
