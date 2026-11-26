@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "content": "\u003cp class=\"q\"\u003ea \u0026amp; b \u0026lt; c\u003c/p\u003e\u003cimg src=\"i.png\" alt=\"x\"/\u003e",
+      "contentSnippet": "a \u0026amp; b \u0026lt; c",
+      "guid": "x1",
+      "title": "T \u0026amp; \u003ci\u003eit\u003c/i\u003e"
+    },
+    {
+      "content": "\u003cp\u003eraw html in xml\u003c/p\u003e",
+      "contentSnippet": "raw html in xml",
+      "guid": "x2"
+    }
+  ],
+  "title": "xhtml"
+}

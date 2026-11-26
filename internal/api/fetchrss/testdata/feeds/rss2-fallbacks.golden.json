@@ -1,0 +1,31 @@
+{
+  "description": "Feed summary as description",
+  "feedUrl": "https://f.example/self",
+  "image": {
+    "url": "https://f.example/media.jpg"
+  },
+  "items": [
+    {
+      "contentSnippet": "item itunes summary",
+      "creator": "DC Author",
+      "isoDate": "2006-01-04T10:00:00Z",
+      "pubDate": "Wed, 04 Jan 2006 10:00:00 EST",
+      "summary": "item itunes summary",
+      "title": "DC item title"
+    },
+    {
+      "isoDate": "2006-01-05T00:00:00Z",
+      "pubDate": "not a date",
+      "title": "bad date"
+    },
+    {
+      "summary": "\u003cimg src=\"https://f.example/in-html.png\"\u003e",
+      "title": "media image only"
+    }
+  ],
+  "itunes": {
+    "summary": "Feed summary as description"
+  },
+  "link": "subtitle used as link",
+  "title": "DC Feed Title"
+}

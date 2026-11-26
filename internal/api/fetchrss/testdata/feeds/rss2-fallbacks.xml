@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:itunes="http://www.itunes.com/DTDs/PodCast-1.0.dtd" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom10="http://www.w3.org/2005/Atom">
+  <channel>
+    <dc:title>DC Feed Title</dc:title>
+    <itunes:summary>Feed summary as description</itunes:summary>
+    <itunes:subtitle>subtitle used as link</itunes:subtitle>
+    <atom10:link rel="self" href="https://f.example/self"/>
+    <media:content url="https://f.example/media.jpg" medium="image"/>
+    <item>
+      <dc:title>DC item title</dc:title>
+      <itunes:summary>item itunes summary</itunes:summary>
+      <dc:date>Wed, 04 Jan 2006 10:00:00 EST</dc:date>
+      <dc:author>dcauthor@f.example (DC Author)</dc:author>
+    </item>
+    <item>
+      <title>bad date</title>
+      <pubDate>not a date</pubDate>
+      <dc:date>2006-01-05</dc:date>
+    </item>
+    <item>
+      <title>media image only</title>
+      <description><![CDATA[<img src="https://f.example/in-html.png">]]></description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/">
+  <atom:link href="https://root.example/feed" rel="self"/>
+  <channel>
+    <title>Root ext</title>
+    <sy:updatePeriod>hourly</sy:updatePeriod>
+    <link>  https://root.example/  </link>
+    <item>
+      <title>i</title>
+      <enclosure url="https://root.example/x.mp3" type="audio/mpeg"><junk>x</junk></enclosure>
+      <source url="https://src.example/">Src</source>
+      <media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://root.example/t.png"/>
+    </item>
+  </channel>
+</rss>

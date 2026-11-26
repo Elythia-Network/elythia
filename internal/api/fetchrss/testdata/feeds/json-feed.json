@@ -1,0 +1,12 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "JSON Feed",
+  "home_page_url": "https://json.example/",
+  "feed_url": "https://json.example/feed.json",
+  "description": "A JSON feed",
+  "icon": "https://json.example/icon.png",
+  "items": [
+    {"id": "1", "url": "https://json.example/1", "title": "One", "content_html": "<p>hi</p>", "summary": "sum", "date_published": "2006-01-02T15:04:05+09:00", "authors": [{"name": "Jason (jason@json.example)"}], "tags": ["a", "b"], "attachments": [{"url": "https://json.example/a.mp3", "mime_type": "audio/mpeg", "size_in_bytes": 10, "duration_in_seconds": 60}]},
+    {"id": "2", "content_text": "text only", "date_modified": "2006-01-03T00:00:00Z", "author": {"name": "Single"}}
+  ]
+}

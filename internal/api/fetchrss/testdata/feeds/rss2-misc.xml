@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<rss version="0.92">
+  <channel>
+    <title>Misc channel</title>
+    <link>https://misc.example/</link>
+    <description>misc</description>
+    <language>en</language><copyright>c</copyright><managingEditor>ed@misc.example (Ed)</managingEditor>
+    <webMaster>wm@misc.example</webMaster><pubDate>Mon, 02 Jan 2006 15:04:05 GMT</pubDate>
+    <lastBuildDate>Mon, 02 Jan 2006 15:04:05 GMT</lastBuildDate><generator>gen</generator><docs>d</docs><ttl>60</ttl><rating>r</rating>
+    <category>chan cat</category>
+    <cloud domain="rpc.example" port="80" path="/RPC2" registerProcedure="p" protocol="xml-rpc"/>
+    <skipHours><hour>1</hour><hour>2</hour><other>x</other></skipHours>
+    <skipDays><day>Monday</day></skipDays>
+    <textInput><title>t</title><description>d</description><name>n</name><link>https://misc.example/s</link></textInput>
+    <image><url>https://misc.example/i.png</url><title>img</title><link>l</link><width>1</width><height>2</height><description>d</description><extra>e</extra></image>
+    <unknownchannelelement><nested>x</nested></unknownchannelelement>
+    <item>
+      <title>misc item</title>
+      <source url="https://src.example/">Source</source>
+      <guid isPermaLink="false">  spaced guid  </guid>
+      <link>https://misc.example/1</link>
+    </item>
+  </channel>
+  <textinput><title>root ti</title></textinput>
+  <image><url>https://misc.example/root.png</url></image>
+  <item><title>root item</title></item>
+  <unknownroot>x</unknownroot>
+</rss>

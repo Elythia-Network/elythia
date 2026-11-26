@@ -1,0 +1,17 @@
+{
+  "description": "old tagline",
+  "items": [
+    {
+      "content": "PGI+aGk8L2I+",
+      "contentSnippet": "PGI+aGk8L2I+",
+      "guid": "tag:old.example,2005:1",
+      "isoDate": "2005-01-02T03:04:05Z",
+      "link": "https://old.example/1",
+      "pubDate": "2005-01-02T03:04:05Z",
+      "summary": "\u0026lt;b\u0026gt;old\u0026lt;/b\u0026gt;",
+      "title": "Old entry"
+    }
+  ],
+  "link": "https://old.example/",
+  "title": "Atom 0.3"
+}

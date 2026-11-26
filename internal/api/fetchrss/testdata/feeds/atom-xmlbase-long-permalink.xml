@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://blog.example/"><title>t</title><id>urn:feed</id><updated>2026-11-27T00:00:00Z</updated>
+<entry xml:base="https://blog.example/2026/11/27/日本語の長いスラッグ日本語の長いスラッグ日本語の長いスラッグ日本語の長いスラッグ日本語の長いスラッグ日本語の長いスラッグ/"><id>urn:e1</id><title>e</title><updated>2026-11-27T00:00:00Z</updated><link rel="alternate" href="comments/"/></entry>
+</feed>

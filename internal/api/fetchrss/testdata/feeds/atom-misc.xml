@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Misc atom</title>
+  <id>urn:misc</id>
+  <rights>r</rights>
+  <generator uri="https://gen.example/" version="1.0">Gen</generator>
+  <icon>https://misc.example/icon.png</icon>
+  <contributor><name>Con</name><uri>https://con.example/</uri><extra>x</extra></contributor>
+  <category term="feedcat"/>
+  <media:thumbnail url="https://misc.example/t.png"/>
+  <unknownfeedelement>x</unknownfeedelement>
+  <entry>
+    <title>With source</title>
+    <id>urn:misc:1</id>
+    <rights>er</rights>
+    <issued>2006-01-02T03:04:05Z</issued>
+    <contributor><name>EC</name></contributor>
+    <author><name>EA</name><homepage>https://ea.example/</homepage><url>u</url></author>
+    <media:content url="https://misc.example/m.jpg"/>
+    <source>
+      <title>Src</title><id>urn:src</id><updated>2006-01-01T00:00:00Z</updated><subtitle>s</subtitle>
+      <link href="https://src.example/"/><generator>g</generator><icon>i</icon><logo>l</logo><rights>r</rights>
+      <contributor><name>sc</name></contributor><author><name>sa</name></author><category term="sc"/>
+      <media:thumbnail url="x"/><unknown>u</unknown>
+    </source>
+    <unknownentryelement>x</unknownentryelement>
+  </entry>
+</feed>

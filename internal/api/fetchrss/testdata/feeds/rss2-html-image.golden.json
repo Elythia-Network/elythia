@@ -1,0 +1,13 @@
+{
+  "description": "\u003cp\u003e\u003cimg src=\"https://h.example/feed.png\"\u003e\u003c/p\u003e",
+  "image": {
+    "url": "https://h.example/feed.png"
+  },
+  "items": [
+    {
+      "summary": "\u003cimg src=\"https://h.example/item.png\"\u003e",
+      "title": "item"
+    }
+  ],
+  "title": "Image only in description"
+}

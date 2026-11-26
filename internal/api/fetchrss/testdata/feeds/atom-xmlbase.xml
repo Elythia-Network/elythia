@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://base.example/blog/">
+  <title>Base</title>
+  <logo>img/logo.png</logo>
+  <link href="index.html"/>
+  <entry xml:base="https://base.example/posts/">
+    <title>Rel</title>
+    <link href="p1.html"/>
+    <id>p1</id>
+    <content type="html" xml:base="https://base.example/posts/">&lt;img src="pic.png"&gt;</content>
+  </entry>
+  <entry>
+    <title>Rel2</title>
+    <link href="p2.html"/>
+    <content type="html"><![CDATA[<a href="rel.html">x</a>]]></content>
+  </entry>
+</feed>

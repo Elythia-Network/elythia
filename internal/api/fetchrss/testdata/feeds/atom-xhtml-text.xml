@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><id>urn:feed</id><updated>2026-11-27T00:00:00Z</updated>
+<entry><id>urn:e1</id><title>e</title><updated>2026-11-27T00:00:00Z</updated>
+<content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>It's "quoted" &gt; &amp; &quot;q&quot; &apos;a&apos; &#65; x&#160;y</p><P CLASS="c">Upper</P><p/><br/>end</div></content></entry>
+</feed>

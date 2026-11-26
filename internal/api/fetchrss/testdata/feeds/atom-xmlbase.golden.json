@@ -1,0 +1,21 @@
+{
+  "image": {
+    "url": "https://base.example/blog/img/logo.png"
+  },
+  "items": [
+    {
+      "content": "\u003cimg src=\"https://base.example/posts/pic.png\"/\u003e",
+      "guid": "p1",
+      "link": "https://base.example/posts/p1.html",
+      "title": "Rel"
+    },
+    {
+      "content": "\u003ca href=\"rel.html\"\u003ex\u003c/a\u003e",
+      "contentSnippet": "x",
+      "link": "p2.html",
+      "title": "Rel2"
+    }
+  ],
+  "link": "https://base.example/blog/index.html",
+  "title": "Base"
+}

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+  <title type="text">Atom &amp; feed</title>
+  <subtitle type="html">&lt;b&gt;sub&lt;/b&gt;title</subtitle>
+  <link href="https://atom.example/"/>
+  <link rel="self" href="https://atom.example/atom.xml"/>
+  <logo>https://atom.example/logo.png</logo>
+  <icon>https://atom.example/icon.png</icon>
+  <id>urn:uuid:feed</id>
+  <updated>2006-01-02T15:04:05Z</updated>
+  <author><name>Feed Author</name><email>fa@atom.example</email></author>
+  <entry>
+    <title type="html">Entry &lt;i&gt;one&lt;/i&gt;</title>
+    <link rel="alternate" href="https://atom.example/1"/>
+    <link rel="enclosure" href="https://atom.example/1.mp3" length="999" type="audio/mpeg"/>
+    <link rel="enclosure" href="https://atom.example/1b.mp3"/>
+    <id>urn:uuid:1</id>
+    <published>2006-01-02T15:04:05+09:00</published>
+    <updated>2006-01-03T15:04:05Z</updated>
+    <author><name>Entry Author</name><email>ea@atom.example</email></author>
+    <author><name>Second Author</name></author>
+    <category term="t1"/>
+    <category term="t2" label="Label Two"/>
+    <summary>Plain summary &amp; more</summary>
+    <content type="html">&lt;p&gt;Escaped &lt;a href="https://atom.example/x"&gt;html&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Two</title>
+    <link href="https://atom.example/2"/>
+    <id>urn:uuid:2</id>
+    <updated>2006-01-04T00:00:00Z</updated>
+    <author><email>noname@atom.example</email></author>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>XHTML <b>content</b></p><br/></div></content>
+  </entry>
+  <entry>
+    <title>Three</title>
+    <id>urn:uuid:3</id>
+    <content type="html"><![CDATA[<p>CDATA <em>html</em></p>]]></content>
+    <summary type="text">  spaced   summary  </summary>
+  </entry>
+  <entry>
+    <title>Four</title>
+    <id>urn:uuid:4</id>
+    <content type="text">plain &lt;not a tag&gt;</content>
+  </entry>
+  <entry>
+    <title>Five</title>
+    <id>urn:uuid:5</id>
+    <content type="application/octet-stream">aGVsbG8gYmFzZTY0</content>
+  </entry>
+  <entry>
+    <title>Six</title>
+    <id>urn:uuid:6</id>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">one</div><div xmlns="http://www.w3.org/1999/xhtml">two</div></content>
+  </entry>
+</feed>

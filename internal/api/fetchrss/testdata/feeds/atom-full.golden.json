@@ -1,0 +1,65 @@
+{
+  "description": "\u003cb\u003esub\u003c/b\u003etitle",
+  "feedUrl": "https://atom.example/atom.xml",
+  "image": {
+    "url": "https://atom.example/logo.png"
+  },
+  "items": [
+    {
+      "categories": [
+        "t1",
+        "Label Two"
+      ],
+      "content": "\u003cp\u003eEscaped \u003ca href=\"https://atom.example/x\"\u003ehtml\u003c/a\u003e\u003c/p\u003e",
+      "contentSnippet": "Escaped html",
+      "creator": "Entry Author",
+      "enclosure": {
+        "length": 999,
+        "type": "audio/mpeg",
+        "url": "https://atom.example/1.mp3"
+      },
+      "guid": "urn:uuid:1",
+      "isoDate": "2006-01-02T06:04:05Z",
+      "link": "https://atom.example/1",
+      "pubDate": "2006-01-02T15:04:05+09:00",
+      "summary": "Plain summary \u0026 more",
+      "title": "Entry \u003ci\u003eone\u003c/i\u003e"
+    },
+    {
+      "content": "\u003cp\u003eXHTML \u003cb\u003econtent\u003c/b\u003e\u003c/p\u003e\u003cbr/\u003e",
+      "contentSnippet": "XHTML content",
+      "guid": "urn:uuid:2",
+      "isoDate": "2006-01-04T00:00:00Z",
+      "link": "https://atom.example/2",
+      "pubDate": "2006-01-04T00:00:00Z",
+      "title": "Two"
+    },
+    {
+      "content": "\u003cp\u003eCDATA \u003cem\u003ehtml\u003c/em\u003e\u003c/p\u003e",
+      "contentSnippet": "CDATA html",
+      "guid": "urn:uuid:3",
+      "summary": "spaced   summary",
+      "title": "Three"
+    },
+    {
+      "content": "plain \u003cnot a tag\u003e",
+      "contentSnippet": "plain",
+      "guid": "urn:uuid:4",
+      "title": "Four"
+    },
+    {
+      "content": "hello base64",
+      "contentSnippet": "hello base64",
+      "guid": "urn:uuid:5",
+      "title": "Five"
+    },
+    {
+      "content": "\u003cdiv xmlns=\"http://www.w3.org/1999/xhtml\"\u003eone\u003c/div\u003e\u003cdiv xmlns=\"http://www.w3.org/1999/xhtml\"\u003etwo\u003c/div\u003e",
+      "contentSnippet": "onetwo",
+      "guid": "urn:uuid:6",
+      "title": "Six"
+    }
+  ],
+  "link": "https://atom.example/",
+  "title": "Atom \u0026 feed"
+}

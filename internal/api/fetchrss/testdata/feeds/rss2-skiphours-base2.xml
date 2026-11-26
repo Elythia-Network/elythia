@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xml:base="https://base.example/dir/">
+  <channel>
+    <title>skip2</title>
+    <skipHours xml:base="https://other.example/"><hour>1</hour><other><nested>x</nested></other></skipHours>
+    <atom:link rel="self" href="feed.xml"/>
+  </channel>
+</rss>

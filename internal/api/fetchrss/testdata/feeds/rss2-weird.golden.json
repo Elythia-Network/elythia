@@ -1,0 +1,20 @@
+{
+  "description": "Mixed © case",
+  "items": [
+    {
+      "categories": [
+        "cdata cat"
+      ],
+      "contentSnippet": "a \u0026 b \u003c c",
+      "guid": "g",
+      "isoDate": "2006-01-02T22:04:05Z",
+      "pubDate": "Mon, 2 Jan 2006 15:04:05 -0700",
+      "summary": "a \u0026 b \u003c c",
+      "title": "spaced title"
+    },
+    {
+      "title": "empty"
+    }
+  ],
+  "title": "Upper case title"
+}

@@ -1,0 +1,38 @@
+{
+  "description": "A JSON feed",
+  "feedUrl": "https://json.example/feed.json",
+  "image": {
+    "url": "https://json.example/icon.png"
+  },
+  "items": [
+    {
+      "categories": [
+        "a",
+        "b"
+      ],
+      "content": "\u003cp\u003ehi\u003c/p\u003e",
+      "contentSnippet": "hi",
+      "creator": "Jason",
+      "enclosure": {
+        "length": 60,
+        "type": "audio/mpeg",
+        "url": "https://json.example/a.mp3"
+      },
+      "guid": "1",
+      "isoDate": "2006-01-02T06:04:05Z",
+      "link": "https://json.example/1",
+      "pubDate": "2006-01-02T15:04:05+09:00",
+      "summary": "sum",
+      "title": "One"
+    },
+    {
+      "content": "text only",
+      "contentSnippet": "text only",
+      "creator": "Single",
+      "guid": "2",
+      "isoDate": "2006-01-03T00:00:00Z"
+    }
+  ],
+  "link": "https://json.example/",
+  "title": "JSON Feed"
+}

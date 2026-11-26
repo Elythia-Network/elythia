@@ -1,0 +1,13 @@
+{
+  "image": {
+    "title": "t",
+    "url": "https://ns.example/i.png"
+  },
+  "items": [
+    {
+      "title": "i"
+    }
+  ],
+  "link": "https://ns.example/",
+  "title": "t"
+}

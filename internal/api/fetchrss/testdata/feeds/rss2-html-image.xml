@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Image only in description</title>
+    <description>&lt;p&gt;&lt;img src="https://h.example/feed.png"&gt;&lt;/p&gt;</description>
+    <item>
+      <title>item</title>
+      <description>&lt;img src="https://h.example/item.png"&gt;</description>
+    </item>
+  </channel>
+</rss>

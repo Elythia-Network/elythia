@@ -522,7 +522,15 @@ func (h *Handler) fetchFeed(ctx context.Context, feedURL string) (*gofeed.Feed, 
 
 	parser := h.parserPool.Get().(*gofeed.Parser)
 	defer h.parserPool.Put(parser)
+	return parseFeedWith(parser, body)
+}
 
+// parseFeed parses a fetched feed body.
+func parseFeed(body []byte) (*gofeed.Feed, error) {
+	return parseFeedWith(gofeed.NewParser(), body)
+}
+
+func parseFeedWith(parser *gofeed.Parser, body []byte) (*gofeed.Feed, error) {
 	feed, err := parser.Parse(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("parse feed: %w", err)
