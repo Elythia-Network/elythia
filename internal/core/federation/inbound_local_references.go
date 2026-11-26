@@ -8,6 +8,7 @@ import (
 
 	"github.com/elythia-network/elythia/internal/activitypub"
 	"github.com/elythia-network/elythia/internal/core/localfederation"
+	corenote "github.com/elythia-network/elythia/internal/core/note"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
 )
@@ -16,6 +17,41 @@ import (
 // inbound reference to a local account or note that cannot be federated.
 var ErrInboundLocalReferenceUnavailable = errors.New("inbound local reference is unavailable")
 var ErrInboundLocalReferenceFailure = errors.New("inbound local reference check failed")
+
+// ErrReplyTargetNotVisible rejects an inbound note whose local reply target the
+// sender cannot see (or that is localOnly). It wraps
+// ErrInboundLocalReferenceUnavailable, so the inbox worker drops it without a
+// retry.
+//
+// 引用先を取り込むときにこれが出たら、引用を外して外側のノートは取り込む
+// (resolveQuoteURI)。本家も、引用先の取り込みの失敗 (404) は引用を外すだけにする。
+var ErrReplyTargetNotVisible = fmt.Errorf("%w: reply target is not visible to the sender", ErrInboundLocalReferenceUnavailable)
+
+// replyTargetVisible reports whether actor may see the local reply target n. A
+// failure to look up the follow relation is returned as an error instead of
+// being treated as "not visible".
+func (r *Resolver) replyTargetVisible(actor *model.User, n *model.Note) (bool, error) {
+	if n.LocalOnly {
+		return false, nil
+	}
+	var lookupErr error
+	follows := func(viewerID, authorID string) bool {
+		if r.followingRepo == nil {
+			return false
+		}
+		ok, err := r.followingRepo.Exists(viewerID, authorID)
+		if err != nil {
+			lookupErr = err
+			return false
+		}
+		return ok
+	}
+	visible := corenote.CanSeeNoteFunc(actor, n, follows)
+	if lookupErr != nil {
+		return false, lookupErr
+	}
+	return visible, nil
+}
 
 type externalReferenceForUserObserver interface {
 	ObserveExternalReferenceForUser(user *model.User, reason, host string) (bool, error)

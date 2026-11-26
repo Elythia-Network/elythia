@@ -420,6 +420,10 @@ type Resolver struct {
 	publickeyExtraRepo PublickeyExtraStore         // optional: 追加公開鍵 (Ed25519 / Multikey) の永続化
 	capabilities       SignatureCapabilityDeclarer // optional: Ed25519 対応宣言の記録 (#2393)
 	pollRepo           repository.PollRepository   // optional: Question(投票)のPoll作成
+	// followingRepo は、受信したノートの返信先 (ローカル) を送り手が見られるかの
+	// 判定に使う。nil ならフォロー関係を確かめられないので、フォロワー限定の返信先は
+	// 作者本人・宛先・メンションされた人以外からの返信を受けない (fail-closed)。
+	followingRepo repository.FollowingRepository
 	// suspensionOriginRepo は凍結の由来 (local / remote) の記録先 (#2973)。
 	// **nil なら `toot:suspended` を読まない** — 由来を持てない状態で自動
 	// 凍結すると、モデレーターが `admin/unsuspend-user` で解除しても次の actor
@@ -721,6 +725,12 @@ func (r *Resolver) SetPinningRepo(repo repository.UserNotePiningRepository, idGe
 // 無視される (legacy / 元バグ挙動)。
 type PollVoter interface {
 	Vote(user *model.User, noteID string, choice int) error
+}
+
+// SetFollowingRepo attaches the following repository used to check whether
+// the sender of an inbound reply can see its local reply target.
+func (r *Resolver) SetFollowingRepo(repo repository.FollowingRepository) {
+	r.followingRepo = repo
 }
 
 // SetPollVoter attaches a PollVoter so AP votes are routed to the local

@@ -282,6 +282,30 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 			replyTarget = nil
 		}
 		if replyTarget != nil {
+			// **送り手から見えないローカルの返信先は、無いものとして扱い、ノートごと
+			// 取り込まない** (本家 ApNoteService の inReplyTo と同じ)。返信を受けると、
+			// 見られないはずのノートの返信の数・スレッド・返信の通知に載ってしまう。
+			// replyTarget を nil にして返信でないノートとして保存すると、URI が DB に
+			// 入って以後の取り直しでも返信として繋がらないので、恒久の拒否で捨てる。
+			// localOnly も、本家と同じく見えないものとして扱う (inbox 以外の取得の
+			// 経路でも同じ結果にする)。投票 (inReplyTo + name) もこの判定を先に通る
+			// (本家と同じ順)。リモートの返信先の公開範囲は配送元が決めるので、ここでは
+			// 見ない (本家と同じ)。参照の記録 (RequireInboundLocalNote) より前に見て、
+			// 拒否するノートのために記録を書かない。
+			if replyTarget.UserHost == nil {
+				visible, err := r.replyTargetVisible(actor, replyTarget)
+				if err != nil {
+					// **フォロー関係を引けない障害を「見えない」に倒さない** (#3121 と
+					// 同じ考え)。倒すと正当な返信を恒久の拒否で失う。再試行させる。
+					if chain != nil && chain.inboundLocalReferences {
+						return nil, false, fmt.Errorf("%w: ingest note: check reply target visibility: %w", ErrInboundLocalReferenceFailure, err)
+					}
+					return nil, false, fmt.Errorf("ingest note: check reply target visibility: %w", err)
+				}
+				if !visible {
+					return nil, false, fmt.Errorf("ingest note: %w", ErrReplyTargetNotVisible)
+				}
+			}
 			if chain != nil && chain.inboundLocalReferences {
 				if err := r.RequireInboundLocalNote(replyTarget, chain.inboundSourceHost); err != nil {
 					return nil, false, fmt.Errorf("ingest note: validate reply target: %w", err)
@@ -429,9 +453,13 @@ func (r *Resolver) ingestNoteWithCreated(body []byte, deliveringActorURI string,
 	if quoteErr != nil {
 		return nil, false, fmt.Errorf("ingest note: validate quote target: %w", quoteErr)
 	}
+	// ローカルの localOnly のノートも引用先にしない (本家 ApNoteService と同じ)。
+	// inbox の連鎖では resolveQuoteURI が先に拒否するが、ap/show などの取得の
+	// 経路では引用が繋がってしまうため。
 	if quoted != nil &&
 		(quoted.Visibility == model.NoteVisibilityFollowers ||
-			quoted.Visibility == model.NoteVisibilitySpecified) {
+			quoted.Visibility == model.NoteVisibilitySpecified ||
+			(quoted.UserHost == nil && quoted.LocalOnly)) {
 		quoted = nil
 	}
 	if quoted != nil && quoted.ID != note.ID {

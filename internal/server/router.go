@@ -1092,6 +1092,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 流して投票として記録する (#690)。これがないとリモートからの投票が
 	// 通常 reply として扱われ frontend に DM のように表示される。
 	federationResolver.SetPollVoter(pollService)
+	// 受信したノートの返信先 (ローカル) を、送り手が見られるかの判定に使う。
+	// 無いとフォロワー限定のノートへのフォロワーからの返信も受けなくなる。
+	federationResolver.SetFollowingRepo(followingRepo)
 	federationResolver.SetEmojiRepo(emojiRepo)
 	federationResolver.SetDriveFileRepo(driveFileRepo)
 	federationResolver.SetAttachmentProbeClient(attachmentProbeClient)

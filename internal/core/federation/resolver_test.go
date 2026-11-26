@@ -1304,7 +1304,7 @@ func TestIngestNote_NormalReplyToPollNotConfusedAsVote(t *testing.T) {
 func TestIngestNote_ReplyToLocal(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
-	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent"}
+	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent", Visibility: model.NoteVisibilityPublic}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
@@ -1325,8 +1325,8 @@ func TestIngestNote_ReplyToLocal(t *testing.T) {
 func TestIngestNote_ReplyToRemote(t *testing.T) {
 	repo := testutil.NewMockUserRepository()
 	noteRepo := testutil.NewMockNoteRepository()
-	parentURI := "https://remote.example/notes/parent"
-	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent", URI: &parentURI}
+	parentURI, parentHost := "https://remote.example/notes/parent", "remote.example"
+	noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "uparent", URI: &parentURI, UserHost: &parentHost}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
@@ -5239,7 +5239,11 @@ func TestIngestNote_MentionsIncludeRecipientsAndReplyAuthor(t *testing.T) {
 	idGen, _ := id.NewGenerator("aidx")
 	r := federation.NewResolverNilDeps(repo, noteRepo, urls, &stubFetcher{body: []byte(sampleActor)}, idGen)
 	plantLocalUsers(repo, "carol", "dave")
-	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob", Visibility: model.NoteVisibilitySpecified, VisibleUserIDs: model.StringArray{"carol"}}
+	// 返信先は、送り手 (alice) も宛先に入っている指名のノートにする。見られない
+	// 送り手からの返信は受けない。
+	alice, err := r.ResolveActor("https://remote.example/users/alice")
+	require.NoError(t, err)
+	noteRepo.Notes["bobnote"] = &model.Note{ID: "bobnote", UserID: "bob", Visibility: model.NoteVisibilitySpecified, VisibleUserIDs: model.StringArray{"carol", alice.ID}}
 
 	body := []byte(`{ "@context": "https://www.w3.org/ns/activitystreams",
 		"id": "https://remote.example/notes/dm-notag",
@@ -5328,14 +5332,14 @@ func TestIngestNote_MentionLimitCountsReplyTargetAuthor(t *testing.T) {
 
 	t.Run("reply to another user's local note is rejected", func(t *testing.T) {
 		r, noteRepo, _ := setup(t)
-		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else"}
+		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else", Visibility: model.NoteVisibilityPublic}
 		_, err := r.IngestNote(mkBody("r1", "https://example.com/notes/parent"))
 		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
 	})
 	t.Run("reply to another user's remote note is rejected", func(t *testing.T) {
 		r, noteRepo, _ := setup(t)
-		parentURI := "https://remote.example/notes/parent"
-		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else", URI: &parentURI}
+		parentURI, parentHost := "https://remote.example/notes/parent", "remote.example"
+		noteRepo.Notes["parent"] = &model.Note{ID: "parent", UserID: "someone-else", URI: &parentURI, UserHost: &parentHost}
 		_, err := r.IngestNote(mkBody("r2", parentURI))
 		require.ErrorIs(t, err, corenote.ErrContainsTooManyMentions)
 	})
@@ -7558,7 +7562,8 @@ func TestIngestNote_ReplyAndQuote(t *testing.T) {
 	noteRepo := testutil.NewMockNoteRepository()
 	replyURI := "https://remote.example/notes/reply-target"
 	quotedURI := "https://remote.example/notes/quoted"
-	noteRepo.Notes["rt"] = &model.Note{ID: "rt", URI: &replyURI, UserID: "ru"}
+	remoteHost := "remote.example"
+	noteRepo.Notes["rt"] = &model.Note{ID: "rt", URI: &replyURI, UserID: "ru", UserHost: &remoteHost}
 	noteRepo.Notes["quoted1"] = &model.Note{ID: "quoted1", URI: &quotedURI, UserID: "qu"}
 	urls := activitypub.NewURLBuilder("https://example.com")
 	idGen, _ := id.NewGenerator("aidx")
