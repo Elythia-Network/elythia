@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Upper **bold** [link](https://e.example/)\nend",
+  "withoutQuoteInline": "Upper **bold** [link](https://e.example/)\nend"
+}

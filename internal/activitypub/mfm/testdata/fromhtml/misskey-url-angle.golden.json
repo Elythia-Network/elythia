@@ -1,0 +1,4 @@
+{
+  "fromHTML": "https://example.com/a_(b) and <https://日本.example/パス>",
+  "withoutQuoteInline": "https://example.com/a_(b) and <https://日本.example/パス>"
+}

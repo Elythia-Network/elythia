@@ -1,0 +1,5 @@
+package tokens
+
+import "golang.org/x/net/html"
+
+var tokenize = html.NewTokenizer

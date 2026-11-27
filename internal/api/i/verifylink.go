@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 	"github.com/elythia-network/elythia/internal/model"
-	"golang.org/x/net/html"
 )
 
 // httpsFieldValues extracts the https:// field values from a user profile's
@@ -59,52 +59,50 @@ func verifyRelMe(client *http.Client, pageURL, myLink string) bool {
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
-	doc, err := html.Parse(io.LimitReader(resp.Body, maxVerifyLinkBytes))
-	if err != nil {
-		return false
-	}
-	return htmlLinksBackTo(doc, myLink)
+	return htmlLinksBackTo(io.LimitReader(resp.Body, maxVerifyLinkBytes), myLink)
 }
 
-// htmlLinksBackTo walks the parsed document for a back-link to myLink.
-func htmlLinksBackTo(doc *html.Node, myLink string) bool {
+// htmlLinksBackTo reads the page for a back-link to myLink. Like before, a page
+// that x/net/html's Parse could not parse (too deep, or a read error) has none.
+func htmlLinksBackTo(r io.Reader, myLink string) bool {
 	found := false
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if found {
-			return
+	sc := htmlstream.NewScanner(r)
+	for {
+		k := sc.Next()
+		if k == htmlstream.EOF {
+			return found && sc.Err() == nil
 		}
-		if n.Type == html.ElementNode && (n.Data == "a" || n.Data == "link") {
-			var href, rel string
-			for _, attr := range n.Attr {
-				switch attr.Key {
-				case "href":
-					href = attr.Val
-				case "rel":
-					rel = attr.Val
-				}
-			}
-			if href == myLink {
-				// upstream includesMyLink: 任意の <a href=myLink> (rel 不問)。
-				if n.Data == "a" {
-					found = true
-					return
-				}
-				// upstream includesRelMeLinks: <link> は rel に "me" を含むとき。
-				for _, token := range strings.Fields(rel) {
-					if token == "me" {
-						found = true
-						return
-					}
-				}
+		if found || k != htmlstream.StartElement {
+			continue
+		}
+		n := sc.Element()
+		if n.Name != "a" && n.Name != "link" {
+			continue
+		}
+		var href, rel string
+		for _, attr := range n.Attr {
+			switch attr.Key {
+			case "href":
+				href = attr.Val
+			case "rel":
+				rel = attr.Val
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+		if href != myLink {
+			continue
+		}
+		// upstream includesMyLink: 任意の <a href=myLink> (rel 不問)。
+		if n.Name == "a" {
+			found = true
+			continue
+		}
+		// upstream includesRelMeLinks: <link> は rel に "me" を含むとき。
+		for _, token := range strings.Fields(rel) {
+			if token == "me" {
+				found = true
+			}
 		}
 	}
-	walk(doc)
-	return found
 }
 
 // verifyLinks returns the subset of urls that link back to myLink, checked

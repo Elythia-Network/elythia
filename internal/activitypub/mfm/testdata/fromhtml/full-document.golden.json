@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Doc title\n\nBody **text**",
+  "withoutQuoteInline": "Doc title\n\nBody **text**"
+}

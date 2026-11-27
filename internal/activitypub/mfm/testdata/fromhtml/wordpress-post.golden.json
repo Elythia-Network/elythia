@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Post title\n\nhttps://blog.example/2026/11/post/\n\n#news #go",
+  "withoutQuoteInline": "Post title\n\nhttps://blog.example/2026/11/post/\n\n#news #go"
+}

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "[in head](https://e.example/t)\n\nRE: https://e.example/q\n\nbody",
+  "withoutQuoteInline": "[in head](https://e.example/t)\n\nbody"
+}

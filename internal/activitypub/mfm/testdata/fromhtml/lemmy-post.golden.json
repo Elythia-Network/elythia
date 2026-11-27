@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Title of the thread\n\n\nhttps://lemmy.example/post/12345\n\n\nalpha\n\nbeta\n\n\n\nSection\n\n\nSome **strong** and <i>em</i>.",
+  "withoutQuoteInline": "Title of the thread\n\n\nhttps://lemmy.example/post/12345\n\n\nalpha\n\nbeta\n\n\n\nSection\n\n\nSome **strong** and <i>em</i>."
+}

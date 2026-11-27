@@ -1,0 +1,4 @@
+{
+  "fromHTML": "this is fine\n\nRE: https://pleroma.example/objects/0000-1111",
+  "withoutQuoteInline": "this is fine"
+}

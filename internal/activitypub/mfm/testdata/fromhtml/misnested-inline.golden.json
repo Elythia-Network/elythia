@@ -1,0 +1,4 @@
+{
+  "fromHTML": "**<i>x</i>**<i>y</i>z ~~<small>q</small>~~<small>r</small>",
+  "withoutQuoteInline": "**<i>x</i>**<i>y</i>z ~~<small>q</small>~~<small>r</small>"
+}

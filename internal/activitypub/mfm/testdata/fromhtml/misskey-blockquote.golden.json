@@ -1,0 +1,4 @@
+{
+  "fromHTML": "> quoted text\n> second line\n\nreply",
+  "withoutQuoteInline": "> quoted text\n> second line\n\nreply"
+}

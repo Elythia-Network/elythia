@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/net/html"
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 	"golang.org/x/net/html/atom"
 )
 
@@ -41,8 +41,8 @@ func fromHTML(s string, dropQuoteInline bool) string {
 	s = strings.ReplaceAll(s, "<br/>\n", "\n")
 	s = strings.ReplaceAll(s, "<br />\n", "\n")
 
-	doc, err := html.Parse(strings.NewReader(s))
-	if err != nil {
+	doc, ok := readNodes(s)
+	if !ok {
 		return s
 	}
 
@@ -55,27 +55,87 @@ func fromHTML(s string, dropQuoteInline bool) string {
 	return strings.TrimSpace(b.String())
 }
 
-// removeQuoteInline removes the first child of <body> that has the class
-// `quote-inline` and contains an <a>.
-func removeQuoteInline(doc *html.Node) {
-	body := findElement(doc, atom.Body)
-	if body == nil {
-		return
+// node is an element, a text or a comment of the converted HTML. Only what the
+// conversion looks at is kept.
+type node struct {
+	el   *htmlstream.Element // nil for text and comments
+	text string
+	// comment は変換に出ないが、<pre> の中で <code> の後ろに何かあるかの判定に要る。
+	comment bool
+
+	parent, firstChild, lastChild, nextSibling *node
+}
+
+func (n *node) appendChild(c *node) {
+	c.parent = n
+	if n.lastChild == nil {
+		n.firstChild = c
+	} else {
+		n.lastChild.nextSibling = c
 	}
-	for c := body.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.ElementNode && hasClass(c, "quote-inline") && findElement(c, atom.A) != nil {
-			body.RemoveChild(c)
-			return
+	n.lastChild = c
+}
+
+func (n *node) isElement(a atom.Atom) bool { return n.el != nil && n.el.Atom == a }
+
+// readNodes reads s with htmlstream, the way x/net/html nests the elements.
+// It reports false where x/net/html's Parse returned an error (the caller then
+// keeps s as it is, as before).
+//
+// x/net/html の木の構築 (html.Parse) は使わない。htmlstream は入力の長さに比例する
+// 時間とメモリで読む。
+func readNodes(s string) (*node, bool) {
+	sc := htmlstream.NewScanner(strings.NewReader(s))
+	doc := &node{}
+	cur := doc
+	for {
+		switch sc.Next() {
+		case htmlstream.EOF:
+			return doc, sc.Err() == nil
+		case htmlstream.StartElement:
+			n := &node{el: sc.Element()}
+			cur.appendChild(n)
+			cur = n
+		case htmlstream.EndElement:
+			if cur.parent != nil {
+				cur = cur.parent
+			}
+		case htmlstream.Text:
+			// x/net/html は隣り合う文字を 1 つのノードにまとめるが、変換は文字を
+			// 順につなぐだけなので、まとめなくても結果は同じになる。
+			cur.appendChild(&node{text: sc.Text()})
+		case htmlstream.Comment:
+			cur.appendChild(&node{comment: true})
 		}
 	}
 }
 
+// removeQuoteInline removes the first child of the body that has the class
+// `quote-inline` and contains an <a>.
+func removeQuoteInline(doc *node) {
+	var prev *node
+	for c := doc.firstChild; c != nil; prev, c = c, c.nextSibling {
+		if c.el == nil || c.el.InHead || !hasClass(c, "quote-inline") || findElement(c, atom.A) == nil {
+			continue
+		}
+		if prev == nil {
+			doc.firstChild = c.nextSibling
+		} else {
+			prev.nextSibling = c.nextSibling
+		}
+		if doc.lastChild == c {
+			doc.lastChild = prev
+		}
+		return
+	}
+}
+
 // findElement returns the first element of type a in n or its descendants.
-func findElement(n *html.Node, a atom.Atom) *html.Node {
-	if n.Type == html.ElementNode && n.DataAtom == a {
+func findElement(n *node, a atom.Atom) *node {
+	if n.isElement(a) {
 		return n
 	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
+	for c := n.firstChild; c != nil; c = c.nextSibling {
 		if found := findElement(c, a); found != nil {
 			return found
 		}
@@ -84,8 +144,8 @@ func findElement(n *html.Node, a atom.Atom) *html.Node {
 }
 
 // hasClass reports whether the class attribute of n holds the token class.
-func hasClass(n *html.Node, class string) bool {
-	for _, attr := range n.Attr {
+func hasClass(n *node, class string) bool {
+	for _, attr := range n.el.Attr {
 		if attr.Namespace == "" && attr.Key == "class" && slices.Contains(strings.Fields(attr.Val), class) {
 			return true
 		}
@@ -94,42 +154,50 @@ func hasClass(n *html.Node, class string) bool {
 }
 
 // walkChildren は子ノードを順に処理する。
-func walkChildren(n *html.Node, b *strings.Builder) {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
+func walkChildren(n *node, b *strings.Builder) {
+	for c := n.firstChild; c != nil; c = c.nextSibling {
 		analyze(c, b)
 	}
 }
 
-// getText はノード配下のテキストを再帰的に収集する。
+// getText はノード配下のテキストを収集する。
 // TS の getText と同等。<br> は改行に変換する。
-func getText(n *html.Node) string {
-	if n == nil {
-		return ""
-	}
-	if n.Type == html.TextNode {
-		return n.Data
-	}
-	if n.Type == html.ElementNode && (n.DataAtom == atom.Br) {
-		return "\n"
-	}
+func getText(n *node) string {
 	var b strings.Builder
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		b.WriteString(getText(c))
-	}
+	writeText(n, &b)
 	return b.String()
 }
 
-// analyze は1つのノードを MFM に変換する。TS の analyze と同等。
-func analyze(n *html.Node, b *strings.Builder) {
-	if n.Type == html.TextNode {
-		b.WriteString(n.Data)
+// writeText は getText の中身。入れ子の段ごとに文字列を作り直さないよう、
+// 1 つの Builder に書く。
+func writeText(n *node, b *strings.Builder) {
+	if n.comment {
 		return
 	}
-	if n.Type != html.ElementNode {
+	if n.el == nil {
+		b.WriteString(n.text)
+		return
+	}
+	if n.el.Atom == atom.Br {
+		b.WriteString("\n")
+		return
+	}
+	for c := n.firstChild; c != nil; c = c.nextSibling {
+		writeText(c, b)
+	}
+}
+
+// analyze は1つのノードを MFM に変換する。TS の analyze と同等。
+func analyze(n *node, b *strings.Builder) {
+	if n.comment {
+		return
+	}
+	if n.el == nil {
+		b.WriteString(n.text)
 		return
 	}
 
-	switch n.DataAtom {
+	switch n.el.Atom {
 	case atom.Br:
 		b.WriteString("\n")
 
@@ -194,10 +262,10 @@ func analyze(n *html.Node, b *strings.Builder) {
 
 // analyzeAnchor は <a> を MFM に変換する。
 // メンション、ハッシュタグ、通常リンクを識別する。
-func analyzeAnchor(n *html.Node, b *strings.Builder) {
+func analyzeAnchor(n *node, b *strings.Builder) {
 	txt := getText(n)
-	href := getAttr(n, "href")
-	rel := getAttr(n, "rel")
+	href, _ := n.el.AttrVal("href")
+	rel, _ := n.el.AttrVal("rel")
 
 	// メンション: @で始まるテキスト (ただし rel="me ..." は除外)
 	if strings.HasPrefix(txt, "@") && !(rel != "" && strings.HasPrefix(rel, "me ")) {
@@ -258,10 +326,10 @@ func analyzeAnchor(n *html.Node, b *strings.Builder) {
 
 // analyzePre は <pre> を処理する。<pre><code>...</code></pre> の場合は
 // コードブロックに変換する。
-func analyzePre(n *html.Node, b *strings.Builder) {
+func analyzePre(n *node, b *strings.Builder) {
 	// <pre> の直下に <code> が1つだけある場合はコードブロック
 	child := firstElementChild(n)
-	if child != nil && child.DataAtom == atom.Code && child.NextSibling == nil {
+	if child != nil && child.isElement(atom.Code) && child.nextSibling == nil {
 		b.WriteString("\n```\n")
 		b.WriteString(getText(child))
 		b.WriteString("\n```\n")
@@ -270,20 +338,10 @@ func analyzePre(n *html.Node, b *strings.Builder) {
 	walkChildren(n, b)
 }
 
-// getAttr はHTML要素から指定属性の値を返す。
-func getAttr(n *html.Node, key string) string {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return a.Val
-		}
-	}
-	return ""
-}
-
 // firstElementChild は最初の Element 子ノードを返す。
-func firstElementChild(n *html.Node) *html.Node {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.ElementNode {
+func firstElementChild(n *node) *node {
+	for c := n.firstChild; c != nil; c = c.nextSibling {
+		if c.el != nil {
 			return c
 		}
 	}

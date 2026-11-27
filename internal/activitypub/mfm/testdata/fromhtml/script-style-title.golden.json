@@ -1,0 +1,4 @@
+{
+  "fromHTML": "alert(1)p{}t\n\nbodytans",
+  "withoutQuoteInline": "alert(1)p{}t\n\nbodytans"
+}

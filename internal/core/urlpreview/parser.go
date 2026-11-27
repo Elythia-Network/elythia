@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"golang.org/x/net/html"
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 )
 
 // ParseHTML extracts OGP and Twitter card metadata from HTML content.
@@ -16,13 +16,11 @@ import (
 // map の `oembed:json` / `oembed:xml` キーに格納され、Fetcher 側で 2nd
 // fetch のターゲットにする。
 func ParseHTML(r io.Reader, pageURL string) *Result {
-	doc, err := html.Parse(r)
-	if err != nil {
+	meta, ok := extractMeta(r)
+	if !ok {
 		return &Result{URL: pageURL, Player: PlayerResult{Allow: []string{}}}
 	}
 	base, _ := url.Parse(pageURL) // base は err でも nil なら resolveURL no-op
-
-	meta := extractMeta(doc)
 
 	// **取得元が決める文字列は長さを切る。** ここに来る値は攻撃者のページが
 	// 自由に決められ、結果は 24 時間 Redis に載る (fetcher.go)。上限が無いと
@@ -105,47 +103,73 @@ func clipURL(u string) string {
 
 type metaMap map[string]string
 
-func extractMeta(n *html.Node) metaMap {
+// extractMeta reads the meta, title and link elements of the page, in document
+// order (a later one wins). It reports false where x/net/html's Parse failed
+// (too deep, or a read error).
+//
+// 木 (html.Parse) を作らずに htmlstream で読む。見る要素は前と同じで、文書の順に
+// 後のものが勝つのも同じ。
+func extractMeta(r io.Reader) (metaMap, bool) {
 	m := make(metaMap)
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if n.Type == html.ElementNode {
-			switch n.Data {
-			case "meta":
-				key, val := metaKeyVal(n)
-				if key != "" && val != "" {
-					m[key] = val
-				}
-			case "title":
-				if n.FirstChild != nil && n.FirstChild.Type == html.TextNode {
-					m["title"] = strings.TrimSpace(n.FirstChild.Data)
-				}
-			case "link":
-				rel, href := attrVal(n, "rel"), attrVal(n, "href")
-				if (rel == "icon" || rel == "shortcut icon") && href != "" {
-					m["icon"] = href
-				}
-				// alternate + application/activity+json → AP ID
-				if rel == "alternate" && strings.Contains(attrVal(n, "type"), "activity+json") && href != "" {
-					m["ap:id"] = href
-				}
-				// oEmbed discovery (#639)。JSON のみサポート: XML は
-				// 仕様上有効だが現状 unmarshaler が無く fallback parser
-				// 整備するまで無視 (review #1)。
-				if rel == "alternate" && href != "" && attrVal(n, "type") == "application/json+oembed" {
-					m["oembed:json"] = href
-				}
+	sc := htmlstream.NewScanner(r)
+	// title は最初の子が文字のときだけ使う (木の FirstChild と同じ)。
+	var title *htmlstream.Element
+	var titleText strings.Builder
+	inTitleText := false
+	endTitleText := func() {
+		if inTitleText {
+			m["title"] = strings.TrimSpace(titleText.String())
+			inTitleText = false
+		}
+		title = nil
+	}
+	for {
+		k := sc.Next()
+		if k == htmlstream.Text && (title != nil || inTitleText) {
+			if title != nil {
+				title = nil
+				inTitleText = true
+				titleText.Reset()
+			}
+			titleText.WriteString(sc.Text())
+			continue
+		}
+		endTitleText()
+		if k == htmlstream.EOF {
+			return m, sc.Err() == nil
+		}
+		if k != htmlstream.StartElement {
+			continue
+		}
+		n := sc.Element()
+		switch n.Name {
+		case "meta":
+			key, val := metaKeyVal(n)
+			if key != "" && val != "" {
+				m[key] = val
+			}
+		case "title":
+			title = n
+		case "link":
+			rel, href := attrVal(n, "rel"), attrVal(n, "href")
+			if (rel == "icon" || rel == "shortcut icon") && href != "" {
+				m["icon"] = href
+			}
+			// alternate + application/activity+json → AP ID
+			if rel == "alternate" && strings.Contains(attrVal(n, "type"), "activity+json") && href != "" {
+				m["ap:id"] = href
+			}
+			// oEmbed discovery (#639)。JSON のみサポート: XML は
+			// 仕様上有効だが現状 unmarshaler が無く fallback parser
+			// 整備するまで無視 (review #1)。
+			if rel == "alternate" && href != "" && attrVal(n, "type") == "application/json+oembed" {
+				m["oembed:json"] = href
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
 	}
-	walk(n)
-	return m
 }
 
-func metaKeyVal(n *html.Node) (string, string) {
+func metaKeyVal(n *htmlstream.Element) (string, string) {
 	name := attrVal(n, "property")
 	if name == "" {
 		name = attrVal(n, "name")
@@ -154,13 +178,9 @@ func metaKeyVal(n *html.Node) (string, string) {
 	return strings.ToLower(name), content
 }
 
-func attrVal(n *html.Node, key string) string {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return a.Val
-		}
-	}
-	return ""
+func attrVal(n *htmlstream.Element, key string) string {
+	v, _ := n.AttrVal(key)
+	return v
 }
 
 func firstNonEmpty(vals ...string) string {

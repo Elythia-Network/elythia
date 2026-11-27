@@ -1,0 +1,4 @@
+{
+  "fromHTML": "@carol@other.example @dave@remote.example hi both",
+  "withoutQuoteInline": "@carol@other.example @dave@remote.example hi both"
+}

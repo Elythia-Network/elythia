@@ -1,0 +1,4 @@
+{
+  "fromHTML": "one\n\ntwo\na\nb\n\nthree",
+  "withoutQuoteInline": "one\n\ntwo\na\nb\n\nthree"
+}

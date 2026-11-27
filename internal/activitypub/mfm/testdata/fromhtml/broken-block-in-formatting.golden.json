@@ -1,0 +1,4 @@
+{
+  "fromHTML": "**bold**\n**block**aftertail",
+  "withoutQuoteInline": "**bold**\n**block**aftertail"
+}

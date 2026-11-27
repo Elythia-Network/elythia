@@ -1,0 +1,4 @@
+{
+  "fromHTML": "**bold start**\n\n**still bold?**\n\n**<i>it</i>****<i>after</i>**",
+  "withoutQuoteInline": "**bold start**\n\n**still bold?**\n\n**<i>it</i>****<i>after</i>**"
+}

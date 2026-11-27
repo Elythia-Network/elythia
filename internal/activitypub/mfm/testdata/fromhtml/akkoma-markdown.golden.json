@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Akkoma **bold** and <i>em</i>\none\ntwo\nnested\n\n`x`",
+  "withoutQuoteInline": "Akkoma **bold** and <i>em</i>\none\ntwo\nnested\n\n`x`"
+}

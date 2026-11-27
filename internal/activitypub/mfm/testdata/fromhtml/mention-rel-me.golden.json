@@ -1,0 +1,4 @@
+{
+  "fromHTML": "[@me](https://remote.example/@me) @x@remote.example",
+  "withoutQuoteInline": "[@me](https://remote.example/@me) @x@remote.example"
+}

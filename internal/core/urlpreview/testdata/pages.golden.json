@@ -1,0 +1,284 @@
+{
+  "broken-markup": {
+    "ok": true,
+    "meta": {
+      "icon": "/table.ico",
+      "og:title": "og",
+      "title": "Broken"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "comments-and-cdata": {
+    "ok": true,
+    "meta": {
+      "og:title": "real"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "deep-after-content": {
+    "ok": false,
+    "meta": null,
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "deep-nesting": {
+    "ok": false,
+    "meta": null,
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "empty": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "iframe-in-script": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "http://insecure.example/embed",
+    "iframeAllow": []
+  },
+  "iframe-variants": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "https://player.example/v/1",
+    "iframeAllow": [
+      "autoplay",
+      "encrypted-media"
+    ]
+  },
+  "indieauth-client": {
+    "ok": true,
+    "meta": {
+      "title": "App"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "indieauth-name-mismatch": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "indieauth-self-name": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "indieauth-unclosed": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "many-attributes": {
+    "ok": true,
+    "meta": {
+      "icon": "/m.ico",
+      "og:title": "many"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "mastodon-status": {
+    "ok": true,
+    "meta": {
+      "ap:id": "https://remote.example/users/alice/statuses/113000000000000001",
+      "description": "Hello world & friends",
+      "icon": "/favicon.ico",
+      "oembed:json": "https://remote.example/api/oembed?format=json&url=https%3A%2F%2Fremote.example%2F%40alice%2F113000000000000001",
+      "og:description": "Hello world & friends",
+      "og:image": "https://files.remote.example/accounts/avatars/1.png",
+      "og:site_name": "Remote Social",
+      "og:title": "Alice (@alice@remote.example)",
+      "og:type": "article",
+      "og:url": "https://remote.example/@alice/113000000000000001",
+      "title": "Alice: \"Hello world\" - Remote Social",
+      "twitter:card": "summary",
+      "viewport": "width=device-width, initial-scale=1"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "meta-in-body": {
+    "ok": true,
+    "meta": {
+      "icon": "/late.ico",
+      "og:title": "later title",
+      "title": "body title"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "misskey-note": {
+    "ok": true,
+    "meta": {
+      "ap:id": "https://misskey.example/notes/9abcdef",
+      "application-name": "Misskey",
+      "description": "ノートの本文",
+      "icon": "https://misskey.example/favicon.ico",
+      "og:description": "ノートの本文",
+      "og:image": "https://misskey.example/avatar.webp",
+      "og:site_name": "Misskey",
+      "og:title": "bob on Misskey",
+      "og:type": "article",
+      "og:url": "https://misskey.example/notes/9abcdef",
+      "title": "bob on Misskey: \"ノートの本文\" | Misskey",
+      "twitter:card": "summary"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "multiple-titles": {
+    "ok": true,
+    "meta": {
+      "title": "svg title"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "no-head-plain": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "nul-and-crlf": {
+    "ok": true,
+    "meta": {
+      "og:description": "d�e\nf",
+      "title": "a�b\nc"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "oembed-youtube-like": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "https://www.video.example/embed/xyz?feature=oembed",
+    "iframeAllow": [
+      "accelerometer",
+      "autoplay",
+      "clipboard-write",
+      "encrypted-media",
+      "gyroscope",
+      "picture-in-picture",
+      "web-share",
+      "fullscreen"
+    ]
+  },
+  "plaintext": {
+    "ok": true,
+    "meta": {
+      "og:title": "before"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "relme-anchor-no-rel": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "relme-in-svg": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "relme-link-without-me": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "relme-variants": {
+    "ok": true,
+    "meta": {},
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "select-and-template": {
+    "ok": true,
+    "meta": {
+      "icon": "/tmpl.ico",
+      "og:title": "in select"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "title-entities": {
+    "ok": true,
+    "meta": {
+      "title": "<b>not bold</b> & あ  x"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "twitter-card-only": {
+    "ok": true,
+    "meta": {
+      "icon": "/s.ico",
+      "title": "Twitter only",
+      "twitter:description": "TW desc",
+      "twitter:image:src": "/img/tw.png",
+      "twitter:title": "TW title"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "uppercase-and-unquoted": {
+    "ok": true,
+    "meta": {
+      "description": "desc",
+      "icon": "/u.ico",
+      "og:title": "Upper OG",
+      "title": "Upper"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  },
+  "wordpress": {
+    "ok": true,
+    "meta": {
+      "icon": "https://blog.example/wp-content/uploads/cropped-icon-192x192.png",
+      "oembed:json": "https://blog.example/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fblog.example%2F2026%2F11%2Fpost%2F",
+      "og:description": "Summary of the post",
+      "og:image": "https://blog.example/wp-content/uploads/2026/11/img.jpg",
+      "og:site_name": "Example Blog",
+      "og:title": "Post title",
+      "og:type": "article",
+      "og:url": "https://blog.example/2026/11/post/",
+      "title": "Post title – Example Blog",
+      "twitter:card": "summary_large_image",
+      "viewport": "width=device-width, initial-scale=1"
+    },
+    "iframeSrc": "https://video.example/embed/abc?feature=oembed",
+    "iframeAllow": [
+      "accelerometer",
+      "autoplay",
+      "clipboard-write",
+      "encrypted-media",
+      "gyroscope",
+      "picture-in-picture",
+      "web-share",
+      "fullscreen"
+    ]
+  },
+  "xhtml-selfclosing": {
+    "ok": true,
+    "meta": {
+      "icon": "/x.ico",
+      "og:title": "xhtml og",
+      "title": "XHTML"
+    },
+    "iframeSrc": "",
+    "iframeAllow": []
+  }
+}

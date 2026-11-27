@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"golang.org/x/net/html"
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 )
 
 // oEmbed JSON shape (subset). The spec defines several types (rich, video,
@@ -133,31 +133,30 @@ func parseOEmbedPlayer(doc oembedResponse) PlayerResult {
 // directive は playerAllowlist で絞り込む。allowfullscreen 単体属性も
 // "fullscreen" directive 等価として扱う。
 func extractIframe(snippet string) (string, []string) {
-	doc, err := html.Parse(strings.NewReader(snippet))
-	if err != nil {
-		return "", []string{}
-	}
 	var src string
 	var allow []string
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if src != "" {
-			return // first iframe only
+	sc := htmlstream.NewScanner(strings.NewReader(snippet))
+	for {
+		k := sc.Next()
+		if k == htmlstream.EOF {
+			break
 		}
-		if n.Type == html.ElementNode && n.Data == "iframe" {
-			src = attrVal(n, "src")
-			allow = filterAllow(attrVal(n, "allow"))
-			// allowfullscreen 単体属性も許可フラグとして扱う
-			if hasAttr(n, "allowfullscreen") {
-				allow = appendUnique(allow, "fullscreen")
-			}
-			return
+		if src != "" || k != htmlstream.StartElement || sc.Element().Name != "iframe" {
+			// src のある最初の iframe を使う。解析に失敗したら何も返さないので
+			// (木を作っていたときと同じ)、見つけた後も最後まで読む。
+			continue
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+		n := sc.Element()
+		src = attrVal(n, "src")
+		allow = filterAllow(attrVal(n, "allow"))
+		// allowfullscreen 単体属性も許可フラグとして扱う
+		if n.HasAttr("allowfullscreen") {
+			allow = appendUnique(allow, "fullscreen")
 		}
 	}
-	walk(doc)
+	if sc.Err() != nil {
+		return "", []string{}
+	}
 	if allow == nil {
 		allow = []string{}
 	}
@@ -184,17 +183,6 @@ func filterAllow(raw string) []string {
 		}
 	}
 	return out
-}
-
-// hasAttr reports whether n has the given boolean attribute. allowfullscreen
-// は HTML5 boolean attribute なので value は不要。
-func hasAttr(n *html.Node, key string) bool {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return true
-		}
-	}
-	return false
 }
 
 func appendUnique(s []string, v string) []string {

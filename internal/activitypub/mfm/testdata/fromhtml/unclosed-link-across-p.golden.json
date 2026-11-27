@@ -1,0 +1,4 @@
+{
+  "fromHTML": "[link text](https://e.example/x)\n\n[after](https://e.example/x)",
+  "withoutQuoteInline": "[link text](https://e.example/x)\n\n[after](https://e.example/x)"
+}

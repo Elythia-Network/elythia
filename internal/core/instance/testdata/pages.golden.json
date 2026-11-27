@@ -1,0 +1,122 @@
+{
+  "broken-markup": {
+    "icon": "https://remote.example/table.ico",
+    "apple": ""
+  },
+  "comments-and-cdata": {
+    "icon": "",
+    "apple": ""
+  },
+  "deep-after-content": {
+    "icon": "",
+    "apple": ""
+  },
+  "deep-nesting": {
+    "icon": "",
+    "apple": ""
+  },
+  "empty": {
+    "icon": "",
+    "apple": ""
+  },
+  "iframe-in-script": {
+    "icon": "",
+    "apple": ""
+  },
+  "iframe-variants": {
+    "icon": "",
+    "apple": ""
+  },
+  "indieauth-client": {
+    "icon": "",
+    "apple": ""
+  },
+  "indieauth-name-mismatch": {
+    "icon": "",
+    "apple": ""
+  },
+  "indieauth-self-name": {
+    "icon": "",
+    "apple": ""
+  },
+  "indieauth-unclosed": {
+    "icon": "",
+    "apple": ""
+  },
+  "many-attributes": {
+    "icon": "https://remote.example/m.ico",
+    "apple": ""
+  },
+  "mastodon-status": {
+    "icon": "https://remote.example/favicon.ico",
+    "apple": "https://remote.example/apple-touch-icon.png"
+  },
+  "meta-in-body": {
+    "icon": "https://remote.example/late.ico",
+    "apple": ""
+  },
+  "misskey-note": {
+    "icon": "https://misskey.example/favicon.ico",
+    "apple": "https://misskey.example/apple-touch-icon.png"
+  },
+  "multiple-titles": {
+    "icon": "",
+    "apple": ""
+  },
+  "no-head-plain": {
+    "icon": "",
+    "apple": ""
+  },
+  "nul-and-crlf": {
+    "icon": "",
+    "apple": ""
+  },
+  "oembed-youtube-like": {
+    "icon": "",
+    "apple": ""
+  },
+  "plaintext": {
+    "icon": "",
+    "apple": ""
+  },
+  "relme-anchor-no-rel": {
+    "icon": "",
+    "apple": ""
+  },
+  "relme-in-svg": {
+    "icon": "",
+    "apple": ""
+  },
+  "relme-link-without-me": {
+    "icon": "",
+    "apple": ""
+  },
+  "relme-variants": {
+    "icon": "",
+    "apple": ""
+  },
+  "select-and-template": {
+    "icon": "https://remote.example/tmpl.ico",
+    "apple": ""
+  },
+  "title-entities": {
+    "icon": "",
+    "apple": ""
+  },
+  "twitter-card-only": {
+    "icon": "https://remote.example/s.ico",
+    "apple": ""
+  },
+  "uppercase-and-unquoted": {
+    "icon": "https://remote.example/u.ico",
+    "apple": "https://remote.example/a.png"
+  },
+  "wordpress": {
+    "icon": "https://blog.example/wp-content/uploads/cropped-icon-32x32.png",
+    "apple": "https://blog.example/wp-content/uploads/cropped-icon-180x180.png"
+  },
+  "xhtml-selfclosing": {
+    "icon": "https://remote.example/x.ico",
+    "apple": ""
+  }
+}
