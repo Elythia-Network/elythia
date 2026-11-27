@@ -10,6 +10,7 @@
 // navigate から same-origin に変わり、Sec-Fetch-Site も Service Worker から見た値になるので、
 // サーバー (internal/server/flush.go) が、ページとしての遷移か、別のサイトから
 // 遷移させられたかを見分けられなくなる。/flush はブラウザが自分でネットワークへ送る。
+// 規則も判定もメソッドを見ないので、確かめるページのボタンが送る POST も同じく通さない。
 
 /** The page that clears what the client stores (served by internal/server/flush.go). */
 export const FLUSH_PATHNAME = '/flush';

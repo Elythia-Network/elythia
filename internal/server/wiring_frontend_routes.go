@@ -141,8 +141,10 @@ func (s *Server) wireFrontendRoutes(d frontendRoutesDeps) {
 
 	// /flush — 端末の保存データを消して開き直させる回復のページ (#4204)。登録しないと
 	// SPA catchall の通常の画面が返り、起動の失敗の画面 (public/loader/boot.js) にある
-	// /flush のリンクを押しても何も消えない。
-	s.echo.GET("/flush", flushPage(s.config.URL))
+	// /flush のリンクを押しても何も消えない。POST は確かめるページのボタンが送る。
+	flush := flushPage(s.config.URL)
+	s.echo.GET("/flush", flush)
+	s.echo.POST("/flush", flush)
 
 	// Service Worker (sw.js) — Misskey frontend は GET /sw.js を登録しにくる。
 	// SPA catchall より前に登録しないと text/html にフォールバックしてしまい
