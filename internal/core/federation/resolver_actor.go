@@ -721,7 +721,7 @@ func extractRemoteFields(attachments []any) datatypes.JSON {
 			continue
 		}
 		name = strings.TrimSpace(sanitizeRemoteText(name))
-		// FromHTML は末尾で TrimSpace 済み。NUL も x/net/html のトークナイザが
+		// FromHTML は末尾で TrimSpace 済み。NUL も FromHTML の読み取り (htmlstream) が
 		// 落とすが、経路の前提に依存しないよう明示的に落とす。
 		value = mfm.FromHTML(sanitizeRemoteText(value))
 		if name == "" || value == "" {

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "bodyfirst [q1](https://e.example/q1)second [q2](https://e.example/q2)\n\ninside p [q3](https://e.example/q3)",
+  "withoutQuoteInline": "bodysecond [q2](https://e.example/q2)\n\ninside p [q3](https://e.example/q3)"
+}

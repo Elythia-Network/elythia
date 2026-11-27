@@ -1,0 +1,4 @@
+{
+  "fromHTML": "& < > \" '   😀 � © © &foo; & � 😀",
+  "withoutQuoteInline": "& < > \" '   😀 � © © &foo; & � 😀"
+}

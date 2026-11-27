@@ -1,0 +1,4 @@
+{
+  "fromHTML": "beforeleading newline droppedCRLF tootaleading newline dropped`only code`\n\n```\ncode\n```\n`a`**bold** in pre\n```\nx\ny\n```",
+  "withoutQuoteInline": "beforeleading newline droppedCRLF tootaleading newline dropped`only code`\n\n```\ncode\n```\n`a`**bold** in pre\n```\nx\ny\n```"
+}

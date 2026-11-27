@@ -1,0 +1,4 @@
+{
+  "fromHTML": "First paragraph with [a link](https://blog.example/x).\n\n\n\nCaption here\n\n\n\n\nitem",
+  "withoutQuoteInline": "First paragraph with [a link](https://blog.example/x).\n\n\n\nCaption here\n\n\n\n\nitem"
+}

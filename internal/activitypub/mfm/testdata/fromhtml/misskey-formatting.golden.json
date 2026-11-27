@@ -1,0 +1,4 @@
+{
+  "fromHTML": "**bold** <i>italic</i> <small>small</small> ~~strike~~ `inline`",
+  "withoutQuoteInline": "**bold** <i>italic</i> <small>small</small> ~~strike~~ `inline`"
+}

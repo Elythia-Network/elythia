@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/net/html"
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 )
 
 // maxClientDocBytes caps how much of the client_id document we read.
@@ -194,39 +195,83 @@ func applyJSONMetadata(info *clientInfo, id, baseURL string, body []byte) error 
 // h-app name/logo microformats from the client document. Best-effort: parse
 // failures simply leave the defaults.
 func applyHTMLMicroformats(info *clientInfo, baseURL, id string, body []byte) {
-	doc, err := html.Parse(strings.NewReader(string(body)))
-	if err != nil {
-		return
-	}
-	// link[rel=redirect_uri][href]
-	forEachNode(doc, func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "link" {
-			if relMatches(attr(n, "rel"), "redirect_uri") {
+	var redirectURIs []string
+	// h-app は文書の順で最初の要素。p-name と u-logo は h-app (自身を含む) の中で
+	// 最初の要素。木を作らずに、開いている間だけ中として数える。
+	var hApp, nameEl, logoEl *htmlstream.Element
+	hAppOpen, nameOpen := 0, 0
+	var name strings.Builder
+	sc := htmlstream.NewScanner(bytes.NewReader(body))
+	for {
+		k := sc.Next()
+		if k == htmlstream.EOF {
+			break
+		}
+		switch k {
+		case htmlstream.Text:
+			if nameOpen > 0 {
+				name.WriteString(sc.Text())
+			}
+		case htmlstream.EndElement:
+			if hAppOpen > 0 {
+				hAppOpen--
+			}
+			if nameOpen > 0 {
+				nameOpen--
+			}
+		case htmlstream.StartElement:
+			n := sc.Element()
+			// link[rel=redirect_uri][href]
+			if n.Name == "link" && relMatches(attr(n, "rel"), "redirect_uri") {
 				if href := attr(n, "href"); href != "" {
-					info.RedirectURIs = append(info.RedirectURIs, href)
+					redirectURIs = append(redirectURIs, href)
 				}
 			}
+			if hAppOpen > 0 {
+				hAppOpen++
+			}
+			if nameOpen > 0 {
+				nameOpen++
+			}
+			class := attr(n, "class")
+			if hApp == nil && classMatches(class, "h-app") {
+				hApp = n
+				hAppOpen = 1
+			}
+			if hAppOpen == 0 {
+				continue
+			}
+			if nameEl == nil && classMatches(class, "p-name") {
+				nameEl = n
+				nameOpen = 1
+			}
+			if logoEl == nil && classMatches(class, "u-logo") {
+				logoEl = n
+			}
 		}
-	})
-	// h-app microformat (first occurrence)。
-	hApp := findClass(doc, "h-app")
+	}
+	// 解析に失敗したら (入れ子が深すぎるなど) 何も使わない (木を作っていたときと同じ)。
+	if sc.Err() != nil {
+		return
+	}
+	info.RedirectURIs = append(info.RedirectURIs, redirectURIs...)
 	if hApp == nil {
 		return
 	}
 	// .p-name: upstream は href/src が client_id に一致するときだけ name を採用。
-	if nameEl := findClass(hApp, "p-name"); nameEl != nil {
+	if nameEl != nil {
 		href := attr(nameEl, "href")
 		if href == "" {
 			href = attr(nameEl, "src")
 		}
 		if href != "" && resolveURL(baseURL, href) == normalizeURL(id) {
-			if name := strings.TrimSpace(textContent(nameEl)); name != "" {
+			if name := strings.TrimSpace(name.String()); name != "" {
 				info.Name = name
 			}
 		}
 	}
 	// .u-logo: href/src を base 解決。
-	if logoEl := findClass(hApp, "u-logo"); logoEl != nil {
+	if logoEl != nil {
 		href := attr(logoEl, "href")
 		if href == "" {
 			href = attr(logoEl, "src")
@@ -237,22 +282,9 @@ func applyHTMLMicroformats(info *clientInfo, baseURL, id string, body []byte) {
 	}
 }
 
-// --- HTML traversal helpers ---
-
-func forEachNode(n *html.Node, fn func(*html.Node)) {
-	fn(n)
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		forEachNode(c, fn)
-	}
-}
-
-func attr(n *html.Node, key string) string {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return a.Val
-		}
-	}
-	return ""
+func attr(n *htmlstream.Element, key string) string {
+	v, _ := n.AttrVal(key)
+	return v
 }
 
 // relMatches reports whether a (space-separated) rel attribute contains token.
@@ -273,37 +305,6 @@ func classMatches(class, cls string) bool {
 		}
 	}
 	return false
-}
-
-// findClass returns the first descendant (or self) element carrying the given
-// class token.
-func findClass(n *html.Node, cls string) *html.Node {
-	var found *html.Node
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if found != nil {
-			return
-		}
-		if node.Type == html.ElementNode && classMatches(attr(node, "class"), cls) {
-			found = node
-			return
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(n)
-	return found
-}
-
-func textContent(n *html.Node) string {
-	var sb strings.Builder
-	forEachNode(n, func(node *html.Node) {
-		if node.Type == html.TextNode {
-			sb.WriteString(node.Data)
-		}
-	})
-	return sb.String()
 }
 
 // --- URL helpers ---

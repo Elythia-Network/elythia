@@ -1,0 +1,4 @@
+{
+  "fromHTML": "[x](javascript:alert(1)) empty href https://e.example/  [mail](mailto:a@b.example) https://e.example/same",
+  "withoutQuoteInline": "[x](javascript:alert(1)) empty href https://e.example/  [mail](mailto:a@b.example) https://e.example/same"
+}

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "[one](https://e.example/1)[two](https://e.example/2)three",
+  "withoutQuoteInline": "[one](https://e.example/1)[two](https://e.example/2)three"
+}

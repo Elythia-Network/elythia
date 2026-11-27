@@ -1,0 +1,186 @@
+{
+  "broken-markup": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "comments-and-cdata": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "deep-after-content": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "deep-nesting": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "empty": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "iframe-in-script": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "iframe-variants": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "indieauth-client": {
+    "ID": "https://app.example/",
+    "RedirectURIs": [
+      "https://app.example/callback",
+      "https://app.example/callback2",
+      "https://app.example/callback3"
+    ],
+    "Name": "My App Name",
+    "Logo": "https://app.example/logo.png"
+  },
+  "indieauth-name-mismatch": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": "https://cdn.example/logo.png"
+  },
+  "indieauth-self-name": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "Self named",
+    "Logo": "https://app.example/"
+  },
+  "indieauth-unclosed": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "Unclosed name",
+    "Logo": ""
+  },
+  "many-attributes": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "mastodon-status": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "meta-in-body": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "misskey-note": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "multiple-titles": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "no-head-plain": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "nul-and-crlf": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "oembed-youtube-like": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "plaintext": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "relme-anchor-no-rel": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "relme-in-svg": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "relme-link-without-me": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "relme-variants": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "select-and-template": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "title-entities": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "twitter-card-only": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "uppercase-and-unquoted": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "wordpress": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  },
+  "xhtml-selfclosing": {
+    "ID": "https://app.example/",
+    "RedirectURIs": null,
+    "Name": "",
+    "Logo": ""
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "see https://www.example.com/very/long/path/to/a/page?x=1&y=2",
+  "withoutQuoteInline": "see https://www.example.com/very/long/path/to/a/page?x=1&y=2"
+}

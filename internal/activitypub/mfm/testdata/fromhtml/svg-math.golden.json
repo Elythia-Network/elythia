@@ -1,0 +1,4 @@
+{
+  "fromHTML": "before [svg link](https://e.example/svg)t\n\nfo x after",
+  "withoutQuoteInline": "before [svg link](https://e.example/svg)t\n\nfo x after"
+}

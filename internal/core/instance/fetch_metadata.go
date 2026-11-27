@@ -16,8 +16,8 @@ import (
 
 	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/csscolor"
+	"github.com/elythia-network/elythia/internal/misc/htmlstream"
 	"github.com/elythia-network/elythia/internal/repository"
-	"golang.org/x/net/html"
 )
 
 // HTTPFetcher abstracts the HTTP clients used to fetch nodeinfo documents and
@@ -302,7 +302,7 @@ func (s *FetchMetadataService) Fetch(host string) error {
 	icons := make(chan iconResult, 1)
 	go func() {
 		// **recover を付ける。** `fetchIcons` はリモートが決める HTML を
-		// `html.Parse` に通し、外向き HTTP も叩く。**別 goroutine の panic は
+		// 解析し、外向き HTTP も叩く。**別 goroutine の panic は
 		// 呼び出し元の defer では拾えない** ので、echo の `Recover` も mkq の
 		// `runHandler` も効かずプロセスごと落ちる (同じ注意書きが
 		// `internal/queue/driver/mkqdriver/server.go` にある)。
@@ -315,8 +315,8 @@ func (s *FetchMetadataService) Fetch(host string) error {
 		var res iconResult
 		defer func() {
 			if r := recover(); r != nil {
-				// **スタックまで残す。** リモートが決める HTML を html.Parse に
-				// 通した先の panic は、値だけでは発生箇所が分からない
+				// **スタックまで残す。** リモートが決める HTML を解析した先の
+				// panic は、値だけでは発生箇所が分からない
 				// (mkqdriver の recover も debug.Stack を付けている)。
 				slog.Error("instance metadata: panic while fetching icons",
 					"host", host, "panic", r, "stack", string(debug.Stack()))
@@ -508,38 +508,41 @@ func (s *FetchMetadataService) fetchIcons(host string) (iconURL, faviconURL stri
 // (or their precomposed/shortcut equivalents). Either string may be empty
 // when the corresponding tag is absent. URL は pageURL を base にして解決。
 func parseIconLinks(body []byte, pageURL string) (icon, appleTouchIcon string) {
-	doc, err := html.Parse(bytes.NewReader(body))
-	if err != nil {
-		return "", ""
-	}
 	base, err := url.Parse(pageURL)
 	if err != nil {
 		return "", ""
 	}
 	var iconHref, appleHref string
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "link" {
-			rel := strings.ToLower(attrValue(n, "rel"))
-			href := attrValue(n, "href")
-			if href != "" {
-				switch rel {
-				case "icon", "shortcut icon":
-					if iconHref == "" {
-						iconHref = href
-					}
-				case "apple-touch-icon", "apple-touch-icon-precomposed":
-					if appleHref == "" {
-						appleHref = href
-					}
-				}
+	sc := htmlstream.NewScanner(bytes.NewReader(body))
+	for {
+		k := sc.Next()
+		if k == htmlstream.EOF {
+			break
+		}
+		if k != htmlstream.StartElement || sc.Element().Name != "link" {
+			continue
+		}
+		n := sc.Element()
+		rel := strings.ToLower(attrValue(n, "rel"))
+		href := attrValue(n, "href")
+		if href == "" {
+			continue
+		}
+		switch rel {
+		case "icon", "shortcut icon":
+			if iconHref == "" {
+				iconHref = href
+			}
+		case "apple-touch-icon", "apple-touch-icon-precomposed":
+			if appleHref == "" {
+				appleHref = href
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
 	}
-	walk(doc)
+	// 木を作っていたときと同じく、解析に失敗したら (入れ子が深すぎるなど) 使わない。
+	if sc.Err() != nil {
+		return "", ""
+	}
 	return resolveAgainstBase(iconHref, base), resolveAgainstBase(appleHref, base)
 }
 
@@ -557,13 +560,9 @@ func resolveAgainstBase(href string, base *url.URL) string {
 	return base.ResolveReference(ref).String()
 }
 
-func attrValue(n *html.Node, key string) string {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return a.Val
-		}
-	}
-	return ""
+func attrValue(n *htmlstream.Element, key string) string {
+	v, _ := n.AttrVal(key)
+	return v
 }
 
 func firstNonEmptyStr(vals ...string) string {

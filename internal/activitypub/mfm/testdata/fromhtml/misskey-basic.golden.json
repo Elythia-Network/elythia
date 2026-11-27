@@ -1,0 +1,4 @@
+{
+  "fromHTML": "hello @bob@misskey.example #tag\nnext line",
+  "withoutQuoteInline": "hello @bob@misskey.example #tag\nnext line"
+}

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "hello @carol@pleroma.example\nline two\n#cats",
+  "withoutQuoteInline": "hello @carol@pleroma.example\nline two\n#cats"
+}

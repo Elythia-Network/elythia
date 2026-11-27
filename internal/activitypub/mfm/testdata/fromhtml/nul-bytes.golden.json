@@ -1,0 +1,4 @@
+{
+  "fromHTML": "ab**c**\nx",
+  "withoutQuoteInline": "ab**c**\nx"
+}

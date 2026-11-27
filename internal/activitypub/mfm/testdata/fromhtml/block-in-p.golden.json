@@ -1,0 +1,4 @@
+{
+  "fromHTML": "a\nbc\n\n\n\nd\nef",
+  "withoutQuoteInline": "a\nbc\n\n\n\nd\nef"
+}

@@ -1,0 +1,4 @@
+{
+  "fromHTML": "Text with @eve@friendica.example and #tag\n\n**bold**\nnext",
+  "withoutQuoteInline": "Text with @eve@friendica.example and #tag\n\n**bold**\nnext"
+}

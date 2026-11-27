@@ -1,0 +1,4 @@
+{
+  "fromHTML": "centeredsearch [elythia 検索](https://search.example/search?q=elythia)",
+  "withoutQuoteInline": "centeredsearch [elythia 検索](https://search.example/search?q=elythia)"
+}

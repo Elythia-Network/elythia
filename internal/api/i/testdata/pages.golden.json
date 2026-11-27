@@ -1,0 +1,122 @@
+{
+  "broken-markup": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "comments-and-cdata": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "deep-after-content": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "deep-nesting": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "empty": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "iframe-in-script": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "iframe-variants": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "indieauth-client": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "indieauth-name-mismatch": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "indieauth-self-name": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "indieauth-unclosed": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "many-attributes": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "mastodon-status": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "meta-in-body": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "misskey-note": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "multiple-titles": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "no-head-plain": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "nul-and-crlf": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "oembed-youtube-like": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "plaintext": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "relme-anchor-no-rel": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "relme-in-svg": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "relme-link-without-me": {
+    "profile": false,
+    "profileSlash": true
+  },
+  "relme-variants": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "select-and-template": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "title-entities": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "twitter-card-only": {
+    "profile": false,
+    "profileSlash": false
+  },
+  "uppercase-and-unquoted": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "wordpress": {
+    "profile": true,
+    "profileSlash": false
+  },
+  "xhtml-selfclosing": {
+    "profile": false,
+    "profileSlash": false
+  }
+}

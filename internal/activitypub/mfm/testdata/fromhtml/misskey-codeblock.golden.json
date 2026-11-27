@@ -1,0 +1,4 @@
+{
+  "fromHTML": "before\n```\nconst x = 1;\nconsole.log(x < 2);\n\n```\n\n\nafter",
+  "withoutQuoteInline": "before\n```\nconst x = 1;\nconsole.log(x < 2);\n\n```\n\n\nafter"
+}

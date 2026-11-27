@@ -1,0 +1,4 @@
+{
+  "fromHTML": "1**2**3\n\nafter table",
+  "withoutQuoteInline": "1**2**3\n\nafter table"
+}

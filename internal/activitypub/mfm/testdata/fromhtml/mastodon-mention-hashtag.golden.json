@@ -1,0 +1,4 @@
+{
+  "fromHTML": "@alice@remote.example hello #test\n\nline1\nline2",
+  "withoutQuoteInline": "@alice@remote.example hello #test\n\nline1\nline2"
+}

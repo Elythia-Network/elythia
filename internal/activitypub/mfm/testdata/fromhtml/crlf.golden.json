@@ -1,0 +1,4 @@
+{
+  "fromHTML": "line1\nline2\nline3\n\n\nx",
+  "withoutQuoteInline": "line1\nline2\nline3\n\n\nx"
+}
