@@ -521,6 +521,10 @@ func applyFollowingFields(f *model.Following, fields map[string]any) {
 			if b, ok := v.(bool); ok {
 				f.WithReplies = b
 			}
+		case "requestId":
+			if s, ok := v.(string); ok {
+				f.RequestID = &s
+			}
 		}
 	}
 }
@@ -560,6 +564,18 @@ func (m *MockFollowRequestRepository) FindByPair(followerID, followeeID string) 
 		}
 	}
 	return nil, ErrNotFound
+}
+
+func (m *MockFollowRequestRepository) UpdateRequestID(followerID, followeeID string, requestID *string) error {
+	if r, err := m.FindByPair(followerID, followeeID); err == nil {
+		if requestID == nil {
+			r.RequestID = nil
+		} else {
+			v := *requestID
+			r.RequestID = &v
+		}
+	}
+	return nil
 }
 
 func (m *MockFollowRequestRepository) Exists(followerID, followeeID string) (bool, error) {

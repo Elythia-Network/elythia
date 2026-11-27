@@ -91,7 +91,7 @@ func TestFollowingHook_OnLocalUnfollowed_Remote(t *testing.T) {
 	keypairRepo.Keypairs["alice"] = &model.UserKeypair{UserID: "alice", PrivateKey: "PEM"}
 	followee := makeRemote("bob", "remote.example", "https://remote.example/users/bob", "https://remote.example/users/bob/inbox")
 
-	hook.OnLocalUnfollowed(follower, followee)
+	hook.OnLocalUnfollowed(follower, followee, "")
 	require.Len(t, enq.calls, 1)
 
 	var got map[string]any
@@ -111,7 +111,7 @@ func TestFollowingHook_OnLocalUnfollowed_Remote(t *testing.T) {
 
 func TestFollowingHook_OnLocalUnfollowed_LocalSkipped(t *testing.T) {
 	hook, enq, _, _ := newFollowingHook(t)
-	hook.OnLocalUnfollowed(makeLocal("a"), makeLocal("b"))
+	hook.OnLocalUnfollowed(makeLocal("a"), makeLocal("b"), "")
 	assert.Empty(t, enq.calls)
 }
 
@@ -124,7 +124,7 @@ func TestFollowingHook_OnLocalUnfollowed_RemoveRemoteFollower_SendsReject(t *tes
 	userRepo.Users["alice"] = followee
 	keypairRepo.Keypairs["alice"] = &model.UserKeypair{UserID: "alice", PrivateKey: "PEM"}
 
-	hook.OnLocalUnfollowed(follower, followee)
+	hook.OnLocalUnfollowed(follower, followee, "")
 	require.Len(t, enq.calls, 1)
 
 	var got map[string]any
@@ -144,14 +144,14 @@ func TestFollowingHook_OnLocalUnfollowed_RemoveRemoteFollower_NilURIs(t *testing
 	host := "remote.example"
 	follower := &model.User{ID: "bob", Username: "bob", Host: &host}
 	followee := makeLocal("alice")
-	hook.OnLocalUnfollowed(follower, followee)
+	hook.OnLocalUnfollowed(follower, followee, "")
 	assert.Empty(t, enq.calls)
 }
 
 func TestFollowingHook_OnLocalUnfollowed_NilArgs(t *testing.T) {
 	hook, enq, _, _ := newFollowingHook(t)
-	hook.OnLocalUnfollowed(nil, makeLocal("a"))
-	hook.OnLocalUnfollowed(makeLocal("a"), nil)
+	hook.OnLocalUnfollowed(nil, makeLocal("a"), "")
+	hook.OnLocalUnfollowed(makeLocal("a"), nil, "")
 	assert.Empty(t, enq.calls)
 }
 
@@ -163,7 +163,7 @@ func TestFollowingHook_OnLocalFollowAccepted_Remote(t *testing.T) {
 	userRepo.Users["alice"] = followee
 	keypairRepo.Keypairs["alice"] = &model.UserKeypair{UserID: "alice", PrivateKey: "PEM"}
 
-	hook.OnLocalFollowAccepted(follower, followee)
+	hook.OnLocalFollowAccepted(follower, followee, "")
 	require.Len(t, enq.calls, 1)
 
 	var got map[string]any
@@ -177,14 +177,14 @@ func TestFollowingHook_OnLocalFollowAccepted_Remote(t *testing.T) {
 
 func TestFollowingHook_OnLocalFollowAccepted_NilArgs(t *testing.T) {
 	hook, enq, _, _ := newFollowingHook(t)
-	hook.OnLocalFollowAccepted(nil, makeLocal("a"))
-	hook.OnLocalFollowAccepted(makeLocal("a"), nil)
+	hook.OnLocalFollowAccepted(nil, makeLocal("a"), "")
+	hook.OnLocalFollowAccepted(makeLocal("a"), nil, "")
 	assert.Empty(t, enq.calls)
 }
 
 func TestFollowingHook_OnLocalFollowAccepted_BothLocalSkipped(t *testing.T) {
 	hook, enq, _, _ := newFollowingHook(t)
-	hook.OnLocalFollowAccepted(makeLocal("a"), makeLocal("b"))
+	hook.OnLocalFollowAccepted(makeLocal("a"), makeLocal("b"), "")
 	assert.Empty(t, enq.calls)
 }
 
@@ -192,7 +192,7 @@ func TestFollowingHook_OnLocalFollowAccepted_RemoteFolloweeSkipped(t *testing.T)
 	hook, enq, _, _ := newFollowingHook(t)
 	rem1 := makeRemote("a", "h", "https://h/a", "https://h/a/inbox")
 	rem2 := makeRemote("b", "h", "https://h/b", "https://h/b/inbox")
-	hook.OnLocalFollowAccepted(rem1, rem2)
+	hook.OnLocalFollowAccepted(rem1, rem2, "")
 	assert.Empty(t, enq.calls)
 }
 
@@ -200,7 +200,7 @@ func TestFollowingHook_OnLocalFollowAccepted_RemoteFollowerWithoutURI(t *testing
 	hook, enq, _, _ := newFollowingHook(t)
 	host := "h"
 	rem := &model.User{ID: "bob", Username: "bob", Host: &host}
-	hook.OnLocalFollowAccepted(rem, makeLocal("alice"))
+	hook.OnLocalFollowAccepted(rem, makeLocal("alice"), "")
 	assert.Empty(t, enq.calls)
 }
 
@@ -211,8 +211,8 @@ func TestFollowingHook_DeliverErrors_DoNotPanic(t *testing.T) {
 	userRepo.Users["alice"] = follower
 	followee := makeRemote("bob", "remote.example", "https://remote.example/users/bob", "https://remote.example/users/bob/inbox")
 	hook.OnLocalFollowed(follower, followee)
-	hook.OnLocalUnfollowed(follower, followee)
-	hook.OnLocalFollowAccepted(followee, follower) // ← follower=remote, followee=local だが key不在
+	hook.OnLocalUnfollowed(follower, followee, "")
+	hook.OnLocalFollowAccepted(followee, follower, "") // ← follower=remote, followee=local だが key不在
 }
 
 // --- SendRejectForInboundFollow (#1631) ---
@@ -263,3 +263,67 @@ func TestFollowingHook_SendRejectForInboundFollow_Guards(t *testing.T) {
 }
 
 func strPtrFed(s string) *string { return &s }
+
+// 本家 2026.11.1 (#18163): 解除・承認の対象の Follow の id を、中の Follow に入れる。
+// id が分からないときは以前と同じ (Undo は FollowURI、Reject / Accept は id 無し)。
+func TestFollowingHook_FollowActivityID(t *testing.T) {
+	const followID = "https://remote.example/follows/1"
+	innerOf := func(t *testing.T, enq *stubEnqueuer) map[string]any {
+		t.Helper()
+		require.Len(t, enq.calls, 1)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(enq.calls[0].Body, &got))
+		inner, ok := got["object"].(map[string]any)
+		require.True(t, ok)
+		return inner
+	}
+	remoteFollower := func() *model.User {
+		return makeRemote("bob", "remote.example", "https://remote.example/users/bob", "https://remote.example/users/bob/inbox")
+	}
+	setupLocal := func(userRepo *testutil.MockUserRepository, keypairRepo *testutil.MockUserKeypairRepository) *model.User {
+		u := makeLocal("alice")
+		userRepo.Users["alice"] = u
+		keypairRepo.Keypairs["alice"] = &model.UserKeypair{UserID: "alice", PrivateKey: "PEM"}
+		return u
+	}
+
+	t.Run("Reject on removing a remote follower wraps the Follow id", func(t *testing.T) {
+		hook, enq, userRepo, keypairRepo := newFollowingHook(t)
+		alice := setupLocal(userRepo, keypairRepo)
+		hook.OnLocalUnfollowed(remoteFollower(), alice, followID)
+		assert.Equal(t, followID, innerOf(t, enq)["id"])
+	})
+	t.Run("Reject without an id wraps a Follow without one", func(t *testing.T) {
+		hook, enq, userRepo, keypairRepo := newFollowingHook(t)
+		alice := setupLocal(userRepo, keypairRepo)
+		hook.OnLocalUnfollowed(remoteFollower(), alice, "")
+		_, has := innerOf(t, enq)["id"]
+		assert.False(t, has)
+	})
+	t.Run("Accept of a request wraps the Follow id", func(t *testing.T) {
+		hook, enq, userRepo, keypairRepo := newFollowingHook(t)
+		alice := setupLocal(userRepo, keypairRepo)
+		hook.OnLocalFollowAccepted(remoteFollower(), alice, followID)
+		assert.Equal(t, followID, innerOf(t, enq)["id"])
+	})
+	// TS から引き継いだローカル → リモートの関係は、TS が送った Follow の id を Undo する。
+	t.Run("Undo of a following taken over from TS uses the stored id", func(t *testing.T) {
+		hook, enq, userRepo, keypairRepo := newFollowingHook(t)
+		alice := setupLocal(userRepo, keypairRepo)
+		const tsFollowID = "https://example.com/follows/9abc"
+		hook.OnLocalUnfollowed(alice, remoteFollower(), tsFollowID)
+		require.Len(t, enq.calls, 1)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(enq.calls[0].Body, &got))
+		assert.Equal(t, tsFollowID+"/undo", got["id"])
+		assert.Equal(t, tsFollowID, got["object"].(map[string]any)["id"])
+	})
+	t.Run("Undo without a stored id uses the FollowURI Elythia sent", func(t *testing.T) {
+		hook, enq, userRepo, keypairRepo := newFollowingHook(t)
+		alice := setupLocal(userRepo, keypairRepo)
+		bob := remoteFollower()
+		hook.OnLocalUnfollowed(alice, bob, "")
+		want := activitypub.NewURLBuilder("https://example.com").FollowURI("alice", *bob.URI)
+		assert.Equal(t, want, innerOf(t, enq)["id"])
+	})
+}

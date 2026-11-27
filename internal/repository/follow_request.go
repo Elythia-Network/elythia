@@ -11,6 +11,10 @@ type FollowRequestRepository interface {
 	Delete(r *model.FollowRequest) error
 	FindByPair(followerID, followeeID string) (*model.FollowRequest, error)
 	Exists(followerID, followeeID string) (bool, error)
+	// UpdateRequestID replaces the id of the Follow activity kept on the
+	// (follower, followee) request (nil stores NULL). A row that already holds
+	// the same value is not written. A missing request is not an error.
+	UpdateRequestID(followerID, followeeID string, requestID *string) error
 	// FilterPendingFromAnchor returns the subset of candidateIDs that have
 	// a pending follow request initiated by anchorID (anchor → candidate
 	// direction). Used to batch-compute `hasPendingFollowRequestFromYou`
@@ -66,6 +70,13 @@ func (r *followRequestRepository) FindByPair(followerID, followeeID string) (*mo
 		return nil, err
 	}
 	return &req, nil
+}
+
+func (r *followRequestRepository) UpdateRequestID(followerID, followeeID string, requestID *string) error {
+	// 同じ id の Follow が送り直されたときは書かない
+	return r.db.Model(&model.FollowRequest{}).
+		Where("\"followerId\" = ? AND \"followeeId\" = ? AND \"requestId\" IS DISTINCT FROM ?", followerID, followeeID, requestID).
+		Update("requestId", requestID).Error
 }
 
 func (r *followRequestRepository) Exists(followerID, followeeID string) (bool, error) {

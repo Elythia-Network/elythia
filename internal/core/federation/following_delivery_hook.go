@@ -48,7 +48,11 @@ func (h *FollowingDeliveryHook) OnLocalFollowed(follower, followee *model.User) 
 //   - follower local  / followee remote: Undo(Follow)
 //   - follower remote / followee local : Reject(Follow)
 //   - それ以外 (両方ローカル等) は no-op
-func (h *FollowingDeliveryHook) OnLocalUnfollowed(follower, followee *model.User) {
+//
+// followActivityID は対象の Follow の id (following / follow_request の requestId、
+// 本家 2026.11.1 の #18163)。空なら、Undo は Elythia が送った Follow と同じ
+// FollowURI、Reject は id の無い Follow を包む (以前と同じ)。
+func (h *FollowingDeliveryHook) OnLocalUnfollowed(follower, followee *model.User, followActivityID string) {
 	if follower == nil || followee == nil {
 		return
 	}
@@ -56,7 +60,14 @@ func (h *FollowingDeliveryHook) OnLocalUnfollowed(follower, followee *model.User
 	case shouldDeliverFollow(follower, followee):
 		// 標準的な local→remote unfollow。Undo(Follow) を follower 名義で送る。
 		// renderer 経由で組み、upstream renderUndo と同じく published(.000Z) を付ける (#1993)。
+		//
+		// requestId があればその Follow を取り消す。Elythia が送った Follow は
+		// requestId を持たない (FollowURI で送る) ので、入っているのは TS から
+		// 引き継いだ関係で、TS が送った Follow の id (#4277)。
 		undo := h.renderer.RenderUndoFollow(follower.ID, *followee.URI)
+		if followActivityID != "" {
+			undo = h.renderer.RenderUndoFollowWithID(follower.ID, *followee.URI, followActivityID)
+		}
 		body, _ := json.Marshal(undo)
 		if err := h.deliver.DeliverToUser(follower.ID, followee, body); err != nil {
 			slog.Warn("following delivery: unfollow failed",
@@ -65,15 +76,10 @@ func (h *FollowingDeliveryHook) OnLocalUnfollowed(follower, followee *model.User
 	case !follower.IsLocal() && followee.IsLocal() && follower.URI != nil && *follower.URI != "":
 		// local followee が remote follower を剥がす (/following/invalidate)
 		// 場合は Reject(Follow) を followee 名義で送って相手側の Following
-		// 関係を解消させる (本家 decrementFollowing 相当)。
-		follow := &activitypub.Follow{
-			Activity: activitypub.Activity{
-				Object: activitypub.Object{Type: "Follow"},
-				Actor:  *follower.URI,
-			},
-			Object: h.urls.UserURI(followee.ID),
-		}
-		reject := h.renderer.RenderReject(followee.ID, follow)
+		// 関係を解消させる (本家 decrementFollowing 相当)。中の Follow には、受けた
+		// Follow の id を入れる (本家 2026.11.1、#18163)。相手が Follow の id で
+		// 照合する実装でも外れる。
+		reject := h.renderer.RenderReject(followee.ID, h.inboundFollow(follower, followee, followActivityID))
 		body, _ := json.Marshal(reject)
 		if err := h.deliver.DeliverToUser(followee.ID, follower, body); err != nil {
 			slog.Warn("following delivery: reject (remove follower) failed",
@@ -139,7 +145,8 @@ func (h *FollowingDeliveryHook) SendRejectForInboundFollow(follower, followee *m
 
 // OnLocalFollowAccepted sends an Accept activity to a remote follower.
 // 引数: follower がリモート、followee がローカル (Accept の actor)。
-func (h *FollowingDeliveryHook) OnLocalFollowAccepted(follower, followee *model.User) {
+// followActivityID は申請の元の Follow の id (follow_request の requestId)。
+func (h *FollowingDeliveryHook) OnLocalFollowAccepted(follower, followee *model.User, followActivityID string) {
 	if follower == nil || followee == nil {
 		return
 	}
@@ -150,21 +157,26 @@ func (h *FollowingDeliveryHook) OnLocalFollowAccepted(follower, followee *model.
 	if follower.URI == nil || *follower.URI == "" {
 		return
 	}
-	// 元の Follow を再構成する: actor は remote follower の URI、
-	// object はローカル followee の正規URI。
-	localFolloweeURI := h.urls.UserURI(followee.ID)
-	follow := &activitypub.Follow{
-		Activity: activitypub.Activity{
-			Object: activitypub.Object{Type: "Follow"},
-			Actor:  *follower.URI,
-		},
-		Object: localFolloweeURI,
-	}
-	accept := h.renderer.RenderAccept(followee.ID, follow)
+	// 元の Follow を再構成する: id は受けた Follow の id (本家 2026.11.1 の
+	// acceptFollowRequest と同じ)、actor は remote follower の URI、object は
+	// ローカル followee の正規URI。
+	accept := h.renderer.RenderAccept(followee.ID, h.inboundFollow(follower, followee, followActivityID))
 	body, _ := json.Marshal(accept)
 	if err := h.deliver.DeliverToUser(followee.ID, follower, body); err != nil {
 		slog.Warn("following delivery: accept failed",
 			"follower", follower.ID, "followee", followee.ID, "err", err)
+	}
+}
+
+// inboundFollow reconstructs the Follow a remote follower sent to a local
+// followee, with id set to followActivityID when it is known.
+func (h *FollowingDeliveryHook) inboundFollow(follower, followee *model.User, followActivityID string) *activitypub.Follow {
+	return &activitypub.Follow{
+		Activity: activitypub.Activity{
+			Object: activitypub.Object{ID: followActivityID, Type: "Follow"},
+			Actor:  *follower.URI,
+		},
+		Object: h.urls.UserURI(followee.ID),
 	}
 }
 

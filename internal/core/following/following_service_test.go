@@ -257,16 +257,21 @@ type stubFederationHook struct {
 	followed   []string
 	unfollowed []string
 	accepted   []string
+	// unfollowedIDs と acceptedIDs は、渡された Follow の id (#4277)。
+	unfollowedIDs []string
+	acceptedIDs   []string
 }
 
 func (h *stubFederationHook) OnLocalFollowed(follower, followee *model.User) {
 	h.followed = append(h.followed, follower.ID+"->"+followee.ID)
 }
-func (h *stubFederationHook) OnLocalUnfollowed(follower, followee *model.User) {
+func (h *stubFederationHook) OnLocalUnfollowed(follower, followee *model.User, followActivityID string) {
 	h.unfollowed = append(h.unfollowed, follower.ID+"->"+followee.ID)
+	h.unfollowedIDs = append(h.unfollowedIDs, followActivityID)
 }
-func (h *stubFederationHook) OnLocalFollowAccepted(follower, followee *model.User) {
+func (h *stubFederationHook) OnLocalFollowAccepted(follower, followee *model.User, followActivityID string) {
 	h.accepted = append(h.accepted, follower.ID+"->"+followee.ID)
+	h.acceptedIDs = append(h.acceptedIDs, followActivityID)
 }
 
 // ローカルからリモート (鍵でない) へのフォローは、相手の Accept が届くまで申請に
@@ -1348,11 +1353,11 @@ func (h *recordingFederationHook) OnLocalFollowed(follower, followee *model.User
 	h.follows = append(h.follows, follower.ID+"->"+followee.ID)
 }
 
-func (h *recordingFederationHook) OnLocalUnfollowed(follower, followee *model.User) {
+func (h *recordingFederationHook) OnLocalUnfollowed(follower, followee *model.User, _ string) {
 	h.unfollows = append(h.unfollows, follower.ID+"->"+followee.ID)
 }
 
-func (h *recordingFederationHook) OnLocalFollowAccepted(follower, followee *model.User) {
+func (h *recordingFederationHook) OnLocalFollowAccepted(follower, followee *model.User, _ string) {
 	h.accepts = append(h.accepts, follower.ID+"->"+followee.ID)
 }
 
