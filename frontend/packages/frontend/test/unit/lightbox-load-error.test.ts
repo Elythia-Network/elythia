@@ -32,6 +32,7 @@ vi.mock('@/utility/double-tap.js', () => ({
 	makeDoubleTapDetector: () => ({
 		onTouchstart: (ev: TouchEvent) => doubleTapTouchstart(ev),
 		onTouchmove: () => {},
+		reset: () => {},
 	}),
 }));
 
@@ -166,10 +167,11 @@ describe('lightbox load failure', () => {
 	test('does not pass a touch on the failure link to the double tap detector', async () => {
 		const item = renderItem('image');
 		await fireEvent.error(mediaEl(item, 'img'));
-		await fireEvent.touchStart(mediaEl(item, 'img'));
+		// 指が1本でないタッチは判定に渡さない (本家 2026.11.1、#18031) ので、1本で触る
+		await fireEvent.touchStart(mediaEl(item, 'img'), { touches: [{ clientX: 0, clientY: 0 }] });
 		expect(doubleTapTouchstart).toHaveBeenCalledTimes(1);
 
-		await fireEvent.touchStart(failureLink(item));
+		await fireEvent.touchStart(failureLink(item), { touches: [{ clientX: 0, clientY: 0 }] });
 
 		expect(doubleTapTouchstart).toHaveBeenCalledTimes(1);
 	});

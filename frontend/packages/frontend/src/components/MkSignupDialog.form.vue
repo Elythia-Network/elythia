@@ -336,6 +336,7 @@ function onChangePasswordRetype(): void {
 
 async function onSubmit(): Promise<void> {
 	if (submitting.value) return;
+	if (instance.emailRequiredForSignup && emailState.value !== 'ok') return;
 	submitting.value = true;
 
 	const signupPayload: Misskey.entities.SignupRequest & { federationStatus: 'pending' } = {

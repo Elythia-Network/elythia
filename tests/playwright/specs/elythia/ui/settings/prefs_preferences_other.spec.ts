@@ -40,6 +40,11 @@ test.describe('settings: preferences (Other)', () => {
       effect: { skip: 'URL プレビューの埋め込みのプレイヤー (YouTube など) を開いたときに、自動で再生するかを埋め込みの URL の引数で渡す (utility/url-preview.ts)。プレイヤーを持つ URL の要約は外部のサイトから取るので、隔離した環境では作れない' },
     },
     {
+      // 本家 2026.11.1 で増えた (#4277)。既定はオフなので、入れる向きで確かめる
+      key: 'expandUrlPreviewAutomatically', route: ROUTE, control: { kind: 'switch', on: true }, value: true,
+      effect: { skip: 'URL プレビューの要約を取り終えたとき、センシティブでなく、操作の欄を出す表示 (showActions) で、画面が裏に回っていない (KeepAlive で非表示になっていない) なら、埋め込みのプレイヤーを開いた状態にする (MkUrlPreview.vue)。プレイヤーを持つ URL の要約は外部のサイトから取るので、隔離した環境では作れない' },
+    },
+    {
       key: 'enableSeasonalScreenEffect', route: ROUTE, control: { kind: 'switch', on: true }, value: true,
       effect: { skip: '起動時に、月 (と hemisphere) で決まる季節だけ雪か桜の WebGL2 の canvas を足す (boot/main-boot.ts → utility/seasonal-screen-effect.ts)。時刻に依存する' },
     },

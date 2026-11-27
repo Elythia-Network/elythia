@@ -12,19 +12,18 @@ import { clear } from '@/utility/idb-proxy.js';
 import { $i } from '@/i.js';
 import { encodePushSubscriptionKey } from '@/utility/encode-push-subscription-key.js';
 
-export async function signout() {
+export async function signout(showWaiting = true) {
 	if (!$i) return;
 
-	waiting();
+	if (showWaiting) {
+		waiting();
+	}
 
 	if (store.s.enablePreferencesAutoCloudBackup) {
-		// Elythia: バックアップに失敗してもサインアウトを止めない (#4204)。トークンを
-		// 再生成した後は必ず失敗するので、止めると端末に古いトークンが残り、開き直すたびに
-		// 読み込み中の表示のまま止まる。無効なトークンではどのみち保存できない
 		try {
 			await cloudBackup();
-		} catch (err) {
-			console.error('signout: failed to back up the preferences', err);
+		} catch {
+			// nop
 		}
 	}
 
