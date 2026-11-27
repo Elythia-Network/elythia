@@ -28,9 +28,9 @@ func (r *rejectWebhooks) OnFollowed(_, _ *model.User) {}
 
 type rejectDelivery struct{ unfollowed int }
 
-func (r *rejectDelivery) OnLocalFollowed(_, _ *model.User)       {}
-func (r *rejectDelivery) OnLocalUnfollowed(_, _ *model.User)     { r.unfollowed++ }
-func (r *rejectDelivery) OnLocalFollowAccepted(_, _ *model.User) {}
+func (r *rejectDelivery) OnLocalFollowed(_, _ *model.User)                 {}
+func (r *rejectDelivery) OnLocalUnfollowed(_, _ *model.User, _ string)     { r.unfollowed++ }
+func (r *rejectDelivery) OnLocalFollowAccepted(_, _ *model.User, _ string) {}
 
 // 承認制のリモートの相手に出した申請が Reject(Follow) で拒否されたとき、本家
 // remoteReject と同じく申請を消し、unfollow を main stream と Webhook に 1 回

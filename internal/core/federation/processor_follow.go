@@ -56,9 +56,13 @@ func (p *Processor) handleFollow(act genericActivity) error {
 		p.accountCreatedAt(context.Background(), follower)
 	}
 	// inbound AP Follow は AP protocol で withReplies を運ばないので
-	// FollowOptions{} (default false) で作成する (#1056)。remote follower の
+	// withReplies は default false で作成する (#1056)。remote follower の
 	// per-followee withReplies preference は AP protocol 範囲外。
-	result, err := p.followingService.Follow(follower.ID, followee.ID, corefollowing.FollowOptions{})
+	//
+	// 受けた Follow の id を申請・following に残し、後の Accept・Reject の中の
+	// Follow に入れる (本家 2026.11.1、#18163)。フォロー済みの組に来たら差し替える。
+	opts := corefollowing.FollowOptions{RequestID: act.ID}
+	result, err := p.followingService.Follow(follower.ID, followee.ID, opts)
 	// block 起因の失敗は upstream UserFollowingService.follow と同じ AP 流儀で
 	// 処理する (#1631)。エラーのまま返すと inbox が retry → dead-letter になり
 	// 相手サーバーの pending follow が永遠に解消されない。
@@ -78,7 +82,7 @@ func (p *Processor) handleFollow(act genericActivity) error {
 			}
 			slog.Info("inbound follow: auto-unblocked stale remote block",
 				"follower", follower.ID, "followee", followee.ID)
-			result, err = p.followingService.Follow(follower.ID, followee.ID, corefollowing.FollowOptions{})
+			result, err = p.followingService.Follow(follower.ID, followee.ID, opts)
 		}
 	}
 	if errors.Is(err, corefollowing.ErrBlocked) && !follower.IsLocal() && followee.IsLocal() {

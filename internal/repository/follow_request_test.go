@@ -213,3 +213,47 @@ func TestFollowRequestRepository_ListReceived_ListSent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, sent, 2)
 }
+
+// follow_request."requestId" を差し替え、nil なら NULL にする。同じ値なら書かない (#4277)。
+func TestFollowRequestRepository_UpdateRequestID(t *testing.T) {
+	repo := NewFollowRequestRepository(testDB)
+	u1 := insertTestUser(t, "frr_u1", "frr_u1")
+	u2 := insertTestUser(t, "frr_u2", "frr_u2")
+	defer cleanupUser(t, u1.ID)
+	defer cleanupUser(t, u2.ID)
+
+	first := "https://remote.example/follows/1"
+	r := &model.FollowRequest{ID: "frr_1", FollowerID: u1.ID, FolloweeID: u2.ID, RequestID: &first}
+	require.NoError(t, repo.Create(r))
+	defer testDB.Exec(`DELETE FROM "follow_request" WHERE id = ?`, r.ID)
+
+	requestID := func() *string {
+		t.Helper()
+		found, err := repo.FindByPair(u1.ID, u2.ID)
+		require.NoError(t, err)
+		return found.RequestID
+	}
+	// 行を書き換えると xmin が変わる。同じ値で呼んだときに変わらないことを見る
+	xmin := func() string {
+		t.Helper()
+		var v string
+		require.NoError(t, testDB.Raw(`SELECT xmin::text FROM "follow_request" WHERE id = ?`, r.ID).Scan(&v).Error)
+		return v
+	}
+
+	second := "https://remote.example/follows/2"
+	require.NoError(t, repo.UpdateRequestID(u1.ID, u2.ID, &second))
+	require.NotNil(t, requestID())
+	assert.Equal(t, second, *requestID())
+
+	before := xmin()
+	same := second
+	require.NoError(t, repo.UpdateRequestID(u1.ID, u2.ID, &same))
+	assert.Equal(t, before, xmin(), "同じ id なら書かない")
+
+	require.NoError(t, repo.UpdateRequestID(u1.ID, u2.ID, nil))
+	assert.Nil(t, requestID())
+
+	// 申請が無くてもエラーにしない
+	require.NoError(t, repo.UpdateRequestID(u2.ID, u1.ID, &second))
+}

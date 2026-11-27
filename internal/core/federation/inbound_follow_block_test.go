@@ -241,3 +241,25 @@ func TestProcess_FollowRemoteFolloweeSkipped(t *testing.T) {
 	assert.Empty(t, acceptor.calls, "no Accept for a remote followee")
 	assert.Empty(t, acceptor.rejects, "no Reject for a remote followee")
 }
+
+// 受けた Follow の id を following に残す (本家 2026.11.1、#18163)。block を自動で
+// 解除して続けるときも同じ id で作る。
+func TestProcess_FollowKeepsTheFollowID(t *testing.T) {
+	t.Run("plain", func(t *testing.T) {
+		p, _, followingRepo, _ := newProcessorForInboundFollowBlock(t)
+		require.NoError(t, p.Process(inboundFollowBody))
+		f, err := followingRepo.FindByPair("alice1", "bob")
+		require.NoError(t, err)
+		require.NotNil(t, f.RequestID)
+		assert.Equal(t, "https://remote.example/follows/blocked1", *f.RequestID)
+	})
+	t.Run("after auto-unblock", func(t *testing.T) {
+		p, blockingRepo, followingRepo, _ := newProcessorForInboundFollowBlock(t)
+		blockingRepo.Blockings["b1"] = &model.Blocking{ID: "b1", BlockerID: "alice1", BlockeeID: "bob"}
+		require.NoError(t, p.Process(inboundFollowBody))
+		f, err := followingRepo.FindByPair("alice1", "bob")
+		require.NoError(t, err)
+		require.NotNil(t, f.RequestID)
+		assert.Equal(t, "https://remote.example/follows/blocked1", *f.RequestID)
+	})
+}

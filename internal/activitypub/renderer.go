@@ -1249,7 +1249,16 @@ func (r *Renderer) RenderUndoBlock(blockerID, blockeeURI string) *Undo {
 // .000Z published を入れる (#1993)。inner Follow の @context は upstream 同様
 // 落とす (outer Undo のみ @context を持つ)。
 func (r *Renderer) RenderUndoFollow(followerID, followeeURI string) *Undo {
+	return r.RenderUndoFollowWithID(followerID, followeeURI, r.urls.FollowURI(followerID, followeeURI))
+}
+
+// RenderUndoFollowWithID is RenderUndoFollow for a Follow whose id is followID
+// rather than the FollowURI Elythia sends: a following taken over from a TS
+// database keeps the id of the Follow TS sent in following.requestId
+// (upstream 2026.11.1, #18163).
+func (r *Renderer) RenderUndoFollowWithID(followerID, followeeURI, followID string) *Undo {
 	inner := r.RenderFollow(followerID, followeeURI)
+	inner.ID = followID
 	inner.Context = nil
 	u := &Undo{
 		Activity: Activity{

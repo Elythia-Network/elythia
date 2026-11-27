@@ -992,6 +992,33 @@ func TestFollowingRepository_UpdateRelation(t *testing.T) {
 	assert.Equal(t, newHost, *found.FollowerHost)
 }
 
+// following."requestId" (migration 000148、本家 2026.11.1 の #18163) を作るときに書き、
+// 差し替えられる。
+func TestFollowingRepository_RequestID(t *testing.T) {
+	repo := NewFollowingRepository(testDB)
+	u1 := insertTestUser(t, "frq_u1", "frq_u1")
+	u2 := insertTestUser(t, "frq_u2", "frq_u2")
+	defer cleanupUser(t, u1.ID)
+	defer cleanupUser(t, u2.ID)
+
+	first := "https://remote.example/follows/1"
+	f := &model.Following{ID: "frq_1", FollowerID: u1.ID, FolloweeID: u2.ID, RequestID: &first}
+	require.NoError(t, repo.Create(f))
+	defer testDB.Exec(`DELETE FROM "following" WHERE id = ?`, f.ID)
+
+	found, err := repo.FindByPair(u1.ID, u2.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.RequestID)
+	assert.Equal(t, first, *found.RequestID)
+
+	second := "https://remote.example/follows/2"
+	require.NoError(t, repo.UpdateRelation(u1.ID, u2.ID, map[string]any{"requestId": second}))
+	found, err = repo.FindByPair(u1.ID, u2.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.RequestID)
+	assert.Equal(t, second, *found.RequestID)
+}
+
 func TestFollowingRepository_UpdateAllByFollower(t *testing.T) {
 	repo := NewFollowingRepository(testDB)
 	u1 := insertTestUser(t, "uab_u1", "uab_u1")

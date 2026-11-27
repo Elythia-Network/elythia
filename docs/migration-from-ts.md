@@ -196,7 +196,7 @@ admin 画面 (全般 → 情報) で上書きする。
 
 **個別の migration を見て「これは安全」と判断しないこと。** 判断材料になりそうなものが 2 つあるが、どちらも当てにならない。
 
-- **`-- data loss:` の宣言。** あるのは 35 本だけで、**宣言が無いまま `DROP TABLE` / `DROP COLUMN` / `DELETE` する down が 52 本ある** (`-- data loss:` を持たず、コメント以外の行に `DROP TABLE` / `DROP COLUMN` か、文頭の `DELETE` がある `migration/*.down.sql` を数えた。`ON DELETE` は数えない。2026-11-15)。運用も一貫していない — `000076` は `meta` の設定列 1 本を落とすだけで宣言しているが、同じく `meta` の設定列を落とす `000070` は「data loss も無い」と書いている
+- **`-- data loss:` の宣言。** あるのは 36 本だけで、**宣言が無いまま `DROP TABLE` / `DROP COLUMN` / `DELETE` する down が 52 本ある** (`-- data loss:` を持たず、コメント以外の行に `DROP TABLE` / `DROP COLUMN` か、文頭の `DELETE` がある `migration/*.down.sql` を数えた。`ON DELETE` は数えない。2026-11-15)。運用も一貫していない — `000076` は `meta` の設定列 1 本を落とすだけで宣言しているが、同じく `meta` の設定列を落とす `000070` は「data loss も無い」と書いている
 - **up が冪等かどうか。** `000029` の up は大半が `IF NOT EXISTS` 付きだが、**down は無条件に DROP する**。落ちるのは `user_security_key` / `user_ip` / `user_memo` / `promo_note` / `promo_read` といった **upstream 所有のテーブル**と、`meta` / `user_profile` の 63 列、そして **TypeORM の `migrations` テーブル**。`000067` がわざわざ守っているものを、より悪い形で壊す。宣言は無い。同じ形 (up は冪等、down は無条件 DROP、対象は upstream) は `000030` / `000031` / `000032` / `000038` にもある
 
 方向が違うので別に挙げておくもの:
@@ -349,6 +349,7 @@ migration の注記やコードのコメントには、TS へ戻せることを�
 
 **操作を流したときにだけ戻らなくなるもの。** 復路の検証は次の操作を流さないので、上の表には載らない。
 
+- **Elythia でローカルの人がリモートの人へのフォローを成立させる (#4277)。** Elythia はこの関係の `following."requestId"` を残さない (送る Follow の id は決まった形の FollowURI)。TS 2026.11.1 へ戻してからそのフォローを外すと、TS は `requestId` が無いので既定の形 (`/follows/<follower の id>/<followee の id>`) の id の Follow を Undo し、Elythia が送った Follow と id が合わない。相手が Follow の id で照合する実装なら、フォローが外れない。Elythia で申請中のまま戻したフォローも同じで、TS は `/follows/<申請の id>` を Follow の id として、取り消しの Undo と、相手が承認した後に外すときの Undo に使うので、Elythia が送った Follow と id が合わない
 - **ドライブのファイルをオブジェクトストレージへ移す処理 (#4180、親 #4179)。** 写したファイルは `storedInternal=false` になり、`url` の列は `/files/<accessKey>` のまま残る。Elythia は `/files/` でオブジェクトストレージから配信するが、TS は `storedInternal=false` かつ `isLink=false` の行を配信できず、`/files/` に 204 (`Cache-Control: max-age=86400`) を返す。連合先に残っている古い URL も同じく読めなくなり、一度 204 を返すと、戻した後も最長 1 日はキャッシュに 204 が残る。**TS へ戻す前に、移したファイルをローカルへ戻す処理 (#4183。管理画面の「コントロールパネル → オブジェクトストレージ → ローカルのファイルの移行」の「ローカルへ戻す」、管理 API の `admin/drive/object-storage-migration/restore`) を流し、`status` の `migratedFiles` が 0 になったことを確かめる** (`docs/deployment.md` の「有効化前に保存したファイル」)。戻した行は `storedInternal=true` になり、TS も `/files/` で配信できる。戻せずに残ったファイル (`restoreFailures`) は、TS では `/files/` が 204 になる。**ローカルの実体を消す処理 (#4182) を流した後は、restore で `migratedFiles` が 0 になるまで、写す前の DB のバックアップへ戻してはいけない。移したファイルが表示できなくなる** (ローカルの実体を消しているため)
 
 ## drop-in 互換性の現状 (2026-05-09 時点)

@@ -8,6 +8,12 @@ type Following struct {
 	IsFollowerHibernated bool    `gorm:"column:isFollowerHibernated;default:false" json:"isFollowerHibernated"`
 	WithReplies          bool    `gorm:"column:withReplies;default:false" json:"withReplies"`
 	Notify               *string `gorm:"column:notify;type:varchar(32)" json:"notify"`
+	// RequestID は関係の元になった Follow アクティビティの id (本家 2026.11.1、#18163)。
+	// リモートからのフォローでは受けた Follow の id で、Reject の中の Follow に入れる。
+	// ローカルからリモートへのフォローでは NULL で、Undo には FollowURI を使う
+	// (TS から引き継いだ DB では、TS が送った Follow の id が入っていることがある)。
+	// 列を足す前に作られた関係では NULL。
+	RequestID *string `gorm:"column:requestId;type:varchar(512)" json:"requestId"`
 	// Denormalized fields
 	FollowerHost        *string `gorm:"column:followerHost;type:varchar(128)" json:"followerHost"`
 	FollowerInbox       *string `gorm:"column:followerInbox;type:varchar(512)" json:"followerInbox"`

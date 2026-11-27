@@ -824,7 +824,7 @@ worker 数は既定値がキューごとに違い、`stuck 検出` は**キュ�
 
 ```
   ok    config.url   https://example.com
-  ok    database     接続 ok / migration version 147
+  ok    database     接続 ok / migration version 148
   ok    database-health dead tuple と VACUUM に問題なし (122 テーブル)
   ok    pg-stat-statements 使っていない (shared_preload_libraries に無い)
   ok    root user    meta.rootUserId 設定済み

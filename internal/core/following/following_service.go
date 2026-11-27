@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elythia-network/elythia/internal/entity"
+	"github.com/elythia-network/elythia/internal/misc/colfit"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/repository"
@@ -53,7 +54,7 @@ type FollowResult struct {
 
 // FollowOptions controls behavior of the Follow operation.
 // upstream Misskey TS UserFollowingService.follow() の options object と
-// 同等の役割。今後 silent / requestId 等の field を追加する余地を残す。
+// 同等の役割。
 type FollowOptions struct {
 	// WithReplies sets the initial value of `Following.withReplies` (and the
 	// bridging `FollowRequest.withReplies` for locked followees) for the
@@ -68,6 +69,37 @@ type FollowOptions struct {
 	// フォローの CSV インポート (core/transfer) と、silent の付いた
 	// relationship キューの follow ジョブが使う。
 	Silent bool
+	// RequestID is the id of the Follow activity received from a remote
+	// follower. It is kept on the follow request and the following so that a
+	// later Accept / Reject wraps the same Follow (upstream 2026.11.1, #18163).
+	RequestID string
+}
+
+// 列の長さ (follow_request は本家と同じ varchar(128)、following は varchar(512))。
+// 長すぎる id は残さない。行の作成ごと失敗させると、フォローそのものを受けられない。
+const (
+	maxFollowRequestActivityIDLen = 128
+	maxFollowingActivityIDLen     = 512
+)
+
+// activityIDFor returns id as a column value, or nil when it is empty or the
+// column cannot store it (colfit.Fits: longer than max characters, NUL, or
+// invalid UTF-8).
+func activityIDFor(id string, max int) *string {
+	// 長さだけを見ない。NUL を含む id は INSERT / UPDATE ごと 22021 で落ち、フォローそのものを
+	// 受けられなくなる (docs/divergence/security.md の、リモート由来の文字列を列に入れるときの規則)
+	if id == "" || !colfit.Fits(id, max) {
+		return nil
+	}
+	return &id
+}
+
+// derefID returns the stored activity id, or "" when there is none.
+func derefID(id *string) string {
+	if id == nil {
+		return ""
+	}
+	return *id
 }
 
 // NotificationHook is invoked after follow/follow-request events to create
@@ -84,10 +116,13 @@ type NotificationHook interface {
 // FederationHook is invoked after follow/unfollow/accept events involving a
 // remote user so that the ActivityPub layer can deliver Follow/Undo/Accept
 // activities. パッケージ間の循環依存を避けるためinterfaceで受け取る。
+//
+// followActivityID は解除・承認の対象の Follow アクティビティの id (本家 2026.11.1、
+// #18163。follow_request / following の requestId)。空なら持っていない。
 type FederationHook interface {
 	OnLocalFollowed(follower, followee *model.User)
-	OnLocalUnfollowed(follower, followee *model.User)
-	OnLocalFollowAccepted(follower, followee *model.User)
+	OnLocalUnfollowed(follower, followee *model.User, followActivityID string)
+	OnLocalFollowAccepted(follower, followee *model.User, followActivityID string)
 }
 
 // ChartHook is invoked after follow / unfollow events so the chart
@@ -501,6 +536,14 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 	if exists, err := s.followingRepo.Exists(followerID, followeeID); err != nil {
 		return nil, err
 	} else if exists {
+		// リモートからのフォロー済みの組に Follow が来たら、以後の Reject が最新の
+		// Follow を参照するよう id を差し替える (本家 2026.11.1、#18163)。呼び出し元
+		// (handleFollow) は ErrAlreadyFollowing を受けて Accept を送り直す。
+		if id := activityIDFor(opts.RequestID, maxFollowingActivityIDLen); id != nil && !follower.IsLocal() && followee.IsLocal() {
+			if err := s.followingRepo.UpdateRelation(followerID, followeeID, map[string]any{"requestId": *id}); err != nil {
+				return nil, err
+			}
+		}
 		return nil, ErrAlreadyFollowing
 	}
 
@@ -582,6 +625,16 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		if exists, err := s.followRequestRepo.Exists(followerID, followeeID); err != nil {
 			return nil, err
 		} else if exists {
+			// 申請中のリモートの人から新しい Follow が来たら、承認の Accept・拒否の Reject が
+			// 最新の Follow を参照するよう id を差し替える (本家 createFollowRequest は申請を
+			// 作り直すので、同じく最新の id になる。#4277)。新しい Follow の id が列に入らない
+			// (または無い) ときも本家と同じく NULL にする。前の Follow の id を残しても、新しい
+			// Follow には一致しない
+			if !follower.IsLocal() && followee.IsLocal() {
+				if err := s.followRequestRepo.UpdateRequestID(followerID, followeeID, activityIDFor(opts.RequestID, maxFollowRequestActivityIDLen)); err != nil {
+					return nil, err
+				}
+			}
 			return nil, ErrAlreadyRequested
 		}
 		req := &model.FollowRequest{
@@ -591,6 +644,9 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 			FollowerHost: follower.Host,
 			FolloweeHost: followee.Host,
 			WithReplies:  opts.WithReplies,
+			// 受けた Follow の id を残し、承認の Accept・拒否の Reject・承認後の
+			// following に引き継ぐ (本家 createFollowRequest と同じ)。
+			RequestID: activityIDFor(opts.RequestID, maxFollowRequestActivityIDLen),
 		}
 		if err := s.followRequestRepo.Create(req); err != nil {
 			// 確かめた後に並行の要求が同じ組を作った (一意制約)。500 にしない。
@@ -626,6 +682,8 @@ func (s *Service) Follow(followerID, followeeID string, opts FollowOptions) (*Fo
 		FollowerHost: follower.Host,
 		FolloweeHost: followee.Host,
 		WithReplies:  opts.WithReplies,
+		// 受けた Follow の id。外すときの Reject に入れる (本家 insertFollowingDoc)。
+		RequestID: activityIDFor(opts.RequestID, maxFollowingActivityIDLen),
 	}
 	// どちらかが移行済みなら、カウント・instance の集計列・chart を動かさない。
 	// 本家 insertFollowingDoc の `if (!followeeUser.movedToUri &&
@@ -776,7 +834,7 @@ func (s *Service) unfollow(followerID, followeeID string, opts unfollowOpts) err
 			// rejecter へ逆配送しない。chart / webhook / main stream は upstream
 			// remoteReject も publishUnfollow するので維持する。
 			if opts.deliver && s.federationHook != nil {
-				s.federationHook.OnLocalUnfollowed(follower, followee)
+				s.federationHook.OnLocalUnfollowed(follower, followee, derefID(f.RequestID))
 			}
 			// チャートもカウントと同じく、どちらかが移行済みなら触らない。本家
 			// decrementFollowing は perUserFollowingChart / instanceChart の更新を
@@ -855,6 +913,10 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		FollowerHost: req.FollowerHost,
 		FolloweeHost: req.FolloweeHost,
 		WithReplies:  req.WithReplies,
+		// 後で Reject するときに元の Follow を参照できるよう、申請の Follow の id を
+		// 引き継ぐ (本家 2026.11.1、#18163)。ローカルからリモートへの申請は id を
+		// 持たない (Elythia は FollowURI で送る) ので NULL のまま。
+		RequestID: req.RequestID,
 	}
 	// 承認でも本家は insertFollowingDoc を通るので、Follow と同じ移行済みの
 	// ガードを掛ける (#3330)。
@@ -901,7 +963,7 @@ func (s *Service) AcceptRequest(followeeID, followerID string) error {
 		followee, eerr := s.userRepo.FindByID(req.FolloweeID)
 		if ferr == nil && eerr == nil {
 			if s.federationHook != nil {
-				s.federationHook.OnLocalFollowAccepted(follower, followee)
+				s.federationHook.OnLocalFollowAccepted(follower, followee, derefID(req.RequestID))
 			}
 			if s.chartHook != nil && !moved {
 				s.chartHook.OnFollow(follower, followee)
@@ -982,13 +1044,28 @@ func (s *Service) rejectRequest(followeeID, followerID string, ev requestEvents)
 	// UserFollowingService.rejectFollowRequest 相当)。OnLocalUnfollowed は
 	// follower=remote / followee=local 時に Reject を送る分岐を持っている。
 	if s.federationHook != nil && ferr == nil {
-		s.federationHook.OnLocalUnfollowed(follower, followee)
+		s.federationHook.OnLocalUnfollowed(follower, followee, s.rejectedFollowActivityID(req))
 	}
 	if ferr != nil {
 		follower = nil
 	}
 	s.publishRequestRemoved(follower, followee, ev)
 	return nil
+}
+
+// rejectedFollowActivityID returns the id of the Follow a Reject of req wraps:
+// the request's own id, then the following's (upstream deliverReject).
+//
+// 申請とフォローが両方残った過去の行 (AcceptRequest の alreadyFollowing を参照) では、
+// 申請に id が無くてもフォローの行が持っていることがある。
+func (s *Service) rejectedFollowActivityID(req *model.FollowRequest) string {
+	if id := derefID(req.RequestID); id != "" {
+		return id
+	}
+	if f, err := s.followingRepo.FindByPair(req.FollowerID, req.FolloweeID); err == nil && f != nil {
+		return derefID(f.RequestID)
+	}
+	return ""
 }
 
 // CancelRequest cancels an outgoing follow request created by the follower.
@@ -1031,7 +1108,8 @@ func (s *Service) cancelRequest(followerID, followeeID string, ev requestEvents)
 	// followee の meUpdated は続ける。
 	follower, ferr := s.userRepo.FindByID(followerID)
 	if s.federationHook != nil && ferr == nil {
-		s.federationHook.OnLocalUnfollowed(follower, followee)
+		// ローカルからリモートへの申請は id を持たないので、Undo は FollowURI になる。
+		s.federationHook.OnLocalUnfollowed(follower, followee, derefID(req.RequestID))
 	}
 	if ferr != nil {
 		follower = nil

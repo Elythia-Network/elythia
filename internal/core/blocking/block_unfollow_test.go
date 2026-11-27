@@ -80,10 +80,10 @@ func TestBlock_UnfollowsBothDirectionsBeforeBlockDelivery(t *testing.T) {
 type recordingFollowFederation struct{ unfollowed []string }
 
 func (h *recordingFollowFederation) OnLocalFollowed(*model.User, *model.User) {}
-func (h *recordingFollowFederation) OnLocalUnfollowed(follower, followee *model.User) {
+func (h *recordingFollowFederation) OnLocalUnfollowed(follower, followee *model.User, _ string) {
 	h.unfollowed = append(h.unfollowed, follower.ID+"->"+followee.ID)
 }
-func (h *recordingFollowFederation) OnLocalFollowAccepted(*model.User, *model.User) {}
+func (h *recordingFollowFederation) OnLocalFollowAccepted(*model.User, *model.User, string) {}
 
 type recordingFollowChart struct{ unfollows []string }
 
