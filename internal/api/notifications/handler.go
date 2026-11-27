@@ -46,7 +46,10 @@ type Handler struct {
 	// mutingRepo は read 時の valid-notifier filter で viewer の muting set
 	// (ListMuteeIDs) を引くための optional 依存 (#1775)。未配線なら muting filter
 	// は素通り (suspended / mutedInstances filter は引き続き効く)。
-	mutingRepo           repository.MutingRepository
+	mutingRepo repository.MutingRepository
+	// relationCache は mutingRepo の代わりにミュートの一覧を読む (#4273)。
+	// 一覧を要求ごとに DB から引かないため。nil なら mutingRepo を読む。
+	relationCache        *repository.RelationCache
 	instanceRepo         repository.InstanceRepository
 	emojiRepo            repository.EmojiRepository
 	testNotifier         TestNotifier
@@ -647,7 +650,7 @@ func (h *Handler) collectNotificationsWithDropped(c *echo.Context, user *model.U
 
 	// 2-pass で組み立てる:
 	//   pass 1: followReq filter を通して残った rows と notifierID を集約
-	//   pass 2: userRepo.FindManyByIDs / noteRepo.FindManyByIDsWithUser で
+	//   pass 2: userRepo.FindManyByIDs / noteRepo.FindManyByIDsWithKnownUsers で
 	//           まとめて引き、map で O(1) 解決して PackNotifications に渡す
 	// (旧実装は 1 通知ごとに FindByID + FindByIDWithRelations を呼んで最大
 	// 600 round-trip の N+1 を出していた。#515)。
@@ -674,15 +677,27 @@ func (h *Handler) collectNotificationsWithDropped(c *echo.Context, user *model.U
 	// notifier-required 通知を drop する (transient な FindManyByIDs 失敗で全件 mass-drop
 	// しないため)。userRepo 未配線 / notifier 不要のときは false のままで drop しない。
 	notifierFetchOK := false
+	// knownUsers は、この要求で読んだ利用者の行。ノートの著者を引くときに使い回す
+	// (#4273)。**閲覧者も同じ文で引く。** 自分のノートへのリアクション・返信・
+	// 引用の通知では、ノート (と返信先・引用先) の著者が閲覧者なので、送り手だけを
+	// 引くとノートの側で `user` の IN がもう 1 本出る。閲覧者は notifierByID には
+	// 入れない (通知の送り手の判定に混ぜない)。
+	knownUsers := map[string]*model.User{}
 	if h.userRepo != nil && len(notifierIDSet) > 0 {
-		ids := make([]string, 0, len(notifierIDSet))
+		ids := make([]string, 0, len(notifierIDSet)+1)
 		for id := range notifierIDSet {
 			ids = append(ids, id)
+		}
+		if _, isNotifier := notifierIDSet[user.ID]; !isNotifier {
+			ids = append(ids, user.ID)
 		}
 		if users, err := h.userRepo.FindManyByIDs(ids); err == nil {
 			notifierFetchOK = true
 			for _, u := range users {
-				notifierByID[u.ID] = u
+				knownUsers[u.ID] = u
+				if _, isNotifier := notifierIDSet[u.ID]; isNotifier {
+					notifierByID[u.ID] = u
+				}
 			}
 		}
 	}
@@ -753,7 +768,7 @@ func (h *Handler) collectNotificationsWithDropped(c *echo.Context, user *model.U
 		for id := range noteIDSet {
 			ids = append(ids, id)
 		}
-		if notes, err := h.noteRepo.FindManyByIDsWithUser(ids); err == nil {
+		if notes, err := h.noteRepo.FindManyByIDsWithKnownUsers(ids, knownUsers); err == nil {
 			visible := h.queryService.FilterVisible(user, notes)
 			for _, nn := range visible {
 				noteByID[nn.ID] = nn
@@ -814,6 +829,31 @@ func (h *Handler) SetMutingRepo(r repository.MutingRepository) {
 	h.mutingRepo = r
 }
 
+// SetRelationCache wires the per-user relation cache the read-time
+// valid-notifier filter reads the viewer's muting set from (#4273). nil keeps
+// reading mutingRepo.
+func (h *Handler) SetRelationCache(rc *repository.RelationCache) {
+	h.relationCache = rc
+}
+
+// mutedUserIDs returns the viewer's active mutes, from the relation cache when
+// wired. ok is false when neither source is wired or the read failed.
+func (h *Handler) mutedUserIDs(viewerID string) (ids []string, ok bool) {
+	var err error
+	switch {
+	case h.relationCache != nil:
+		// キャッシュは期限付きのミュートを読むたびに判定するので、ListMuteeIDs
+		// と同じ一覧になる。ミュートの書き込みは repository の側でキャッシュを
+		// 捨てる (#3607)。
+		ids, err = h.relationCache.MutedUserIDs(viewerID)
+	case h.mutingRepo != nil:
+		ids, err = h.mutingRepo.ListMuteeIDs(viewerID)
+	default:
+		return nil, false
+	}
+	return ids, err == nil
+}
+
 // filterValidNotifiers drops notifications whose notifier is no longer a valid
 // source for the viewer at READ time, mirroring upstream
 // NotificationEntityService #validateNotifier (#1775):
@@ -827,7 +867,7 @@ func (h *Handler) SetMutingRepo(r repository.MutingRepository) {
 // 呼び出し元で、notifier の fetch に成功したときだけ (notifierFetchOK、#2106 N6)。
 //
 // **fail-open が 3 箇所ある。** notifier の FindManyByIDs (呼び出し元)、mute 一覧の
-// ListMuteeIDs、instance-mute の FindProfileByUserID。どれも失敗を握り潰して
+// 読み込み (mutedUserIDs)、instance-mute の FindProfileByUserID。どれも失敗を握り潰して
 // 「その filter は無かったこと」にするので、**3 つすべてが成功したページでだけ**
 // endpoint として upstream と同じになる。upstream は該当 fetch を await して
 // そのまま throw する (= 500 で行を返さない) 側。一覧を全滅させるより残すほうが
@@ -841,11 +881,9 @@ func (h *Handler) filterValidNotifiers(viewerID string, rows []*notification.Not
 	rows = h.filterModerationNotifications(viewerID, rows)
 
 	muted := map[string]bool{}
-	if h.mutingRepo != nil {
-		if ids, err := h.mutingRepo.ListMuteeIDs(viewerID); err == nil {
-			for _, id := range ids {
-				muted[id] = true
-			}
+	if ids, ok := h.mutedUserIDs(viewerID); ok {
+		for _, id := range ids {
+			muted[id] = true
 		}
 	}
 	mutedInstances := map[string]bool{}

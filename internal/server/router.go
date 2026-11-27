@@ -2292,6 +2292,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		channelsHandler:          channelsHandler,
 		antennasHandler:          antennasHandler,
 		clipsHandler:             clipsHandler,
+		notificationsHandler:     notificationsHandler,
 		notePublisher:            notePublisher,
 	})
 

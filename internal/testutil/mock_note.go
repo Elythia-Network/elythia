@@ -28,6 +28,10 @@ type MockNoteRepository struct {
 	// with a non-not-found error, for exercising the paths that must retry
 	// instead of acking (#3121).
 	FindErr error
+	// FindManyErr, when set, is returned by FindManyByIDsWithUser and
+	// FindManyByIDsWithKnownUsers, for exercising the paths that must survive
+	// a failed batch read (#4273).
+	FindManyErr error
 	// Following は ListByUserIDFiltered の visibility push-down (followers note
 	// の follow 判定) に使う followerID -> followeeIDs map。未設定なら follow
 	// なし扱い (= 非 follower viewer)。testutil は core/note を import すると
@@ -503,6 +507,9 @@ func (m *MockNoteRepository) ExistingNoteIDsOnPrimary(ids []string) ([]string, e
 }
 
 func (m *MockNoteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
+	if m.FindManyErr != nil {
+		return nil, m.FindManyErr
+	}
 	out := make([]*model.Note, 0, len(ids))
 	for _, id := range ids {
 		if n, ok := m.Notes[id]; ok {
@@ -510,6 +517,31 @@ func (m *MockNoteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note,
 		}
 	}
 	return out, nil
+}
+
+// FindManyByIDsWithKnownUsers is a simplified stand-in for the repository:
+// for the top-level notes only, an author found in known is attached as is,
+// and the others keep the User the stored note carries (the mock's "read").
+// Unlike the repository, the authors of the reply and renote targets are not
+// replaced from known. The stored notes are not modified; a note whose author
+// comes from known is returned as a shallow copy.
+//
+// A wrapper that overrides FindManyByIDsWithUser to inject a failure must
+// override this method too: embedding does not dispatch virtually, so the
+// call below does not go through the wrapper. FindManyErr fails both.
+func (m *MockNoteRepository) FindManyByIDsWithKnownUsers(ids []string, known map[string]*model.User) ([]*model.Note, error) {
+	notes, err := m.FindManyByIDsWithUser(ids)
+	if err != nil {
+		return nil, err
+	}
+	for i, n := range notes {
+		if u := known[n.UserID]; u != nil {
+			cp := *n
+			cp.User = u
+			notes[i] = &cp
+		}
+	}
+	return notes, nil
 }
 
 func (m *MockNoteRepository) FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error) {

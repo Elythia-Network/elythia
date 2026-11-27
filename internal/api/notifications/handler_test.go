@@ -821,6 +821,11 @@ func (c *countingNotifNoteRepo) FindManyByIDsWithUser(ids []string) ([]*model.No
 	return c.MockNoteRepository.FindManyByIDsWithUser(ids)
 }
 
+func (c *countingNotifNoteRepo) FindManyByIDsWithKnownUsers(ids []string, known map[string]*model.User) ([]*model.Note, error) {
+	c.findManyByIDsWithUserCalls++
+	return c.MockNoteRepository.FindManyByIDsWithKnownUsers(ids, known)
+}
+
 // 通知 5 件 (異なる notifier / note) を返すケースで、user と note が batch
 // 1 回ずつだけ DB に問い合わされ、per-row FindByID 経路が使われていないこと
 // を担保する (#515 N+1 解消)。
@@ -862,12 +867,12 @@ func TestShow_BatchFetchesNotifierAndNote(t *testing.T) {
 		"per-row userRepo.FindByID must not be called (N+1 must be eliminated)")
 	assert.Equal(t, 1, userRepo.findManyByIDsCalls,
 		"userRepo.FindManyByIDs should be called exactly once per request")
-	assert.Equal(t, 5, userRepo.findManyByIDsCallSize,
-		"all 5 notifier IDs should be coalesced into a single batch")
+	assert.Equal(t, 6, userRepo.findManyByIDsCallSize,
+		"all 5 notifier IDs and the viewer should be coalesced into a single batch")
 	assert.Equal(t, 0, noteRepo.findByIDWithRelationsCalls,
 		"per-row noteRepo.FindByIDWithRelations must not be called")
 	assert.Equal(t, 1, noteRepo.findManyByIDsWithUserCalls,
-		"noteRepo.FindManyByIDsWithUser should be called exactly once per request")
+		"the note batch (FindManyByIDsWithUser / FindManyByIDsWithKnownUsers) should be called exactly once per request")
 
 	// Devin #516 INFO-3: batch fetch しても resolved user / note が response
 	// に正しく入ることを self-contained で担保する。
