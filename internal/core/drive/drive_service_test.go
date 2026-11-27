@@ -145,6 +145,22 @@ func TestUpload_FolderNotFound(t *testing.T) {
 	require.ErrorIs(t, err, drive.ErrFolderNotFound)
 }
 
+// 同じ中身のファイルが既にあっても、宛先のフォルダが無ければ既存のファイルを返さずに
+// 断る (本家 2026.11.1、#18151)。既定のアップロード先のフォルダを消した利用者が、
+// 失敗に気付かないまま別の場所のファイルを受け取らないようにする。
+func TestUpload_FolderNotFoundBeforeDedup(t *testing.T) {
+	svc, fileRepo, _ := newSvc(t)
+	user := &model.User{ID: "u1"}
+	_, err := svc.Upload(context.Background(), drive.UploadInput{User: user, Body: []byte("data"), Name: "a"})
+	require.NoError(t, err)
+
+	folderID := "ghost"
+	f, err := svc.Upload(context.Background(), drive.UploadInput{User: user, Body: []byte("data"), Name: "b", FolderID: &folderID})
+	require.ErrorIs(t, err, drive.ErrFolderNotFound)
+	assert.Nil(t, f)
+	assert.Len(t, fileRepo.Files, 1)
+}
+
 // 他人所有の宛先 folder は「不在」扱いで ErrFolderNotFound、ACCESS_DENIED に
 // しない (folder 存在 oracle を閉じる、#1908)。
 func TestUpload_OtherOwnerFolderNotFound(t *testing.T) {

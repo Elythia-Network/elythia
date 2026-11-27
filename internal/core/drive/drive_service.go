@@ -899,17 +899,15 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		}
 	}
 
-	if in.User != nil && !in.Force {
-		if existing, err := s.fileRepo.FindByMD5(in.User.ID, info.MD5); err == nil {
-			return existing, nil
-		}
-	}
-
 	// 宛先 folder の所有権チェック (system file は folder を持たない前提なので skip)。
 	// 他人所有 folder も「不在」として ErrFolderNotFound に統一する: missing と
 	// others' で response が変わると folder 存在 oracle になる。upstream addFile は
-	// 両者とも folder-not-found error (→ 500) で区別しない。mk-go は missing を
-	// 既に NO_SUCH_FOLDER(404) で返すため others' も揃えて oracle を閉じる (#1908)。
+	// 両者とも NO_SUCH_FOLDER で区別しない (2026.11.1 の #18151 までは 500)。
+	//
+	// **同じ中身のファイルを返す分岐 (FindByMD5) より前に置く (本家 2026.11.1、#18151)。**
+	// 後ろにあると、force=false で消えたフォルダを指定したときに既存のファイルが返り、
+	// 既定のアップロード先のフォルダを消した利用者が、失敗に気付かないまま別の場所の
+	// ファイルを受け取る。
 	if in.User != nil && in.FolderID != nil {
 		folder, err := s.folderRepo.FindByID(*in.FolderID)
 		if err != nil {
@@ -921,6 +919,12 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*model.DriveFile,
 		}
 		if folder.UserID == nil || *folder.UserID != in.User.ID {
 			return nil, ErrFolderNotFound
+		}
+	}
+
+	if in.User != nil && !in.Force {
+		if existing, err := s.fileRepo.FindByMD5(in.User.ID, info.MD5); err == nil {
+			return existing, nil
 		}
 	}
 
