@@ -260,7 +260,32 @@ type Handler struct {
 	// entityPacker は利用者や投稿を包むときの依存 (role 由来の値、メディアのプロキシ等) を
 	// 持つ (#3792)。組み立てで渡す。
 	entityPacker *entity.Packer
+	// meUpdatedPublisher と profileUpdateHook は、管理者がローカルの人のアイコン・
+	// バナーを外したとき、本人の画面 (meUpdated) とリモートのフォロワー
+	// (Update(Person)) に伝える (本家 2026.11.1、#18175)。未配線なら伝えない。
+	meUpdatedPublisher MeUpdatedPublisher
+	profileUpdateHook  ProfileUpdateHook
 }
+
+// MeUpdatedPublisher emits `meUpdated` with the user's MeDetailed on their
+// main stream. Implemented by i.Handler.
+type MeUpdatedPublisher interface {
+	PublishMeUpdated(userID string)
+}
+
+// ProfileUpdateHook delivers Update(Person) for a local user to their remote
+// followers. Implemented by core/federation.ProfileUpdateDeliveryHook.
+type ProfileUpdateHook interface {
+	OnLocalProfileUpdated(userID string)
+}
+
+// SetMeUpdatedPublisher wires the publisher of `meUpdated` used when an admin
+// unsets a local user's avatar or banner. nil disables it.
+func (h *Handler) SetMeUpdatedPublisher(p MeUpdatedPublisher) { h.meUpdatedPublisher = p }
+
+// SetProfileUpdateHook wires the Update(Person) delivery used when an admin
+// unsets a local user's avatar or banner. nil disables it.
+func (h *Handler) SetProfileUpdateHook(hook ProfileUpdateHook) { h.profileUpdateHook = hook }
 
 // SetSelfPacker wires the Packer that promotes the viewer's own entry into
 // MeDetailed. Unset promotes without the handler-only fields.

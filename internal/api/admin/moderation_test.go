@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	apiadmin "github.com/elythia-network/elythia/internal/api/admin"
 	"github.com/elythia-network/elythia/internal/model"
 	"github.com/elythia-network/elythia/internal/testutil"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -332,4 +334,75 @@ func TestUnsetUserBanner_AlreadyUnsetNoLog(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, doPost(h.UnsetUserBanner, `{"userId":"u2"}`, adminUser).Code)
 	time.Sleep(50 * time.Millisecond)
 	assert.Empty(t, repo.Snapshot())
+}
+
+// --- 本家 2026.11.1 (#18175): アイコン・バナーを外したら伝える ---
+
+type recordingUserCalls struct{ calls []string }
+
+func (r *recordingUserCalls) PublishMeUpdated(userID string)      { r.calls = append(r.calls, userID) }
+func (r *recordingUserCalls) OnLocalProfileUpdated(userID string) { r.calls = append(r.calls, userID) }
+
+// 管理者がローカルの人のアイコン・バナーを外したら、認証のキャッシュの利用者を捨て、
+// 本人の画面へ meUpdated を流し、リモートのフォロワーへ Update(Person) を配る。
+// リモートの人には、どれも出さない (利用者のキャッシュは UpdateUser が捨てる)。
+func TestUnsetUserImage_PublishesTheChange(t *testing.T) {
+	remoteHost := "remote.example"
+	image := "https://remote.example/i.webp"
+	fileID := "f1"
+	cases := []struct {
+		name    string
+		handler func(h *apiadmin.Handler) func(*echo.Context) error
+		user    model.User
+	}{
+		{"avatar", func(h *apiadmin.Handler) func(*echo.Context) error { return h.UnsetUserAvatar },
+			model.User{ID: "u1", Username: "alice", AvatarID: &fileID, AvatarURL: &image}},
+		{"banner", func(h *apiadmin.Handler) func(*echo.Context) error { return h.UnsetUserBanner },
+			model.User{ID: "u1", Username: "alice", BannerID: &fileID, BannerURL: &image}},
+	}
+	for _, tc := range cases {
+		for _, local := range []bool{true, false} {
+			name := tc.name + "/local"
+			if !local {
+				name = tc.name + "/remote"
+			}
+			t.Run(name, func(t *testing.T) {
+				h, userRepo, _, _ := newTestHandler(t)
+				u := tc.user
+				if !local {
+					u.Host = &remoteHost
+				}
+				userRepo.Users["u1"] = &u
+				inv := &stubUserTokenInvalidator{}
+				h.SetUserTokenInvalidatorForTest(inv)
+				me := &recordingUserCalls{}
+				h.SetMeUpdatedPublisher(me)
+				fed := &recordingUserCalls{}
+				h.SetProfileUpdateHook(fed)
+
+				require.Equal(t, http.StatusNoContent, doPost(tc.handler(h), `{"userId":"u1"}`, adminUser).Code)
+
+				var want []string
+				if local {
+					want = []string{"u1"}
+				}
+				assert.Equal(t, want, inv.calls, "認証のキャッシュの利用者を捨てる")
+				assert.Equal(t, want, me.calls, "meUpdated を流す")
+				assert.Equal(t, want, fed.calls, "Update(Person) を配る")
+			})
+		}
+	}
+}
+
+// 外すものが無ければ (何も変えないので) 何も伝えない。
+func TestUnsetUserImage_NoChangeNoPublish(t *testing.T) {
+	h, userRepo, _, _ := newTestHandler(t)
+	userRepo.Users["u1"] = &model.User{ID: "u1", Username: "alice"}
+	me := &recordingUserCalls{}
+	h.SetMeUpdatedPublisher(me)
+	h.SetProfileUpdateHook(me)
+
+	require.Equal(t, http.StatusNoContent, doPost(h.UnsetUserAvatar, `{"userId":"u1"}`, adminUser).Code)
+	require.Equal(t, http.StatusNoContent, doPost(h.UnsetUserBanner, `{"userId":"u1"}`, adminUser).Code)
+	assert.Empty(t, me.calls)
 }
