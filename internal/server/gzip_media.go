@@ -132,10 +132,17 @@ func (w *gzipSwitchWriter) decide() {
 
 // skipGzipForResponse reports whether a response must be sent without gzip:
 // already encoded bodies, partial content, and media that is compressed by
-// its own format (image / video / audio except SVG).
+// its own format (image / video / audio except SVG and ICO).
 //
 // 206 は Content-Range が元の表現のバイト位置を指すので、本文だけを gzip で
 // 包むと関係が崩れる。SVG は XML のテキストなので今どおり圧縮する。
+// ICO (/favicon.ico など) は中身が非圧縮のビットマップのことが多く、gzip で
+// 縮む (同梱の favicon.ico は、この middleware の gzip.DefaultCompression で
+// 32,038 → 23,135 バイト)。#3966 で画像をまとめて外したときに巻き込まれていた
+// ので戻す (#4268)。型で決めるので、/files (ドライブの ICO) と /proxy (変換
+// せずに返す ICO) の利用者のファイルも対象になり、Content-Length が消える。
+// HEAD でも gzip の側に倒れて Content-Length が消える (Content-Encoding は
+// 付かない)。octet-stream やテキストで前からある形と同じ。
 func skipGzipForResponse(code int, h http.Header) bool {
 	if code == http.StatusPartialContent || h.Get(echo.HeaderContentEncoding) != "" {
 		return true
@@ -144,7 +151,8 @@ func skipGzipForResponse(code int, h http.Header) bool {
 	// こともある。圧縮するかは型だけで決まるので、`;` の前だけを見る。
 	mediaType, _, _ := strings.Cut(h.Get(echo.HeaderContentType), ";")
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
-	if mediaType == "image/svg+xml" {
+	switch mediaType {
+	case "image/svg+xml", "image/vnd.microsoft.icon", "image/x-icon":
 		return false
 	}
 	return strings.HasPrefix(mediaType, "image/") ||
