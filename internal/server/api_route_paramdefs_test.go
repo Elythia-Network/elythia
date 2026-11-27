@@ -73,8 +73,9 @@ func upstreamDirectRoutes(t *testing.T) map[string]bool {
 	}
 	// 書式が変わって1件も読めないと、下のゲートは「本家が直に登録するroute」を
 	// 宣言の無いrouteとして落とすので空振りはしないが、読めていることを名指しで
-	// 確かめる。
-	for _, name := range []string{"signup", "signin-flow", "miauth/:session/check", "v1/instance/peers"} {
+	// 確かめる。clear-browser-cache は本家 2026.11.1 (#18190) から fastify.route の形で
+	// 登録されるので、その形も読めていることを見る (#4277)。
+	for _, name := range []string{"signup", "signin-flow", "miauth/:session/check", "v1/instance/peers", "clear-browser-cache"} {
 		require.True(t, out[name], "directRoutes of upstream_paramdefs.json has no %s", name)
 	}
 	return out

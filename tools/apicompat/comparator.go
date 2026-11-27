@@ -157,6 +157,62 @@ type tsDirectRoute struct {
 // `'` は含めてよい (`'hcaptcha-response'?: string;` のような body の型がある)。
 var fastifyDirectRe = regexp.MustCompile(`fastify\.(post|get|all)\s*(?:<[^()]*?>)?\s*\(\s*'([^']+)'\s*[,)]`)
 
+// fastifyRouteRe matches the head of a `fastify.route({ ... })` registration,
+// used since upstream 2026.11.1 (#18190) to register only GET and POST. It
+// captures the options before `handler:` (the handler body has braces, the
+// options before it do not).
+var fastifyRouteRe = regexp.MustCompile(`fastify\.route\s*(?:<[^()]*?>)?\s*\(\s*\{([^{}]*?)\bhandler\s*:`)
+
+// fastifyRouteURLRe and fastifyRouteMethodRe read `url` and `method` out of
+// the options fastifyRouteRe captured. method is a string or an array of them.
+var (
+	fastifyRouteURLRe    = regexp.MustCompile(`\burl\s*:\s*([^,]+),`)
+	fastifyRouteMethodRe = regexp.MustCompile(`\bmethod\s*:\s*(\[[^\]]*\]|'[^']*')`)
+	quotedRe             = regexp.MustCompile(`'([^']*)'`)
+)
+
+// fastifyRouteDirectRoutes returns the routes registered with
+// `fastify.route({ method, url, handler })` whose url is a literal. The
+// per-endpoint registration (`url: '/' + endpoint.name`) is counted by the
+// endpoints/ walk and skipped here.
+//
+// **読めない形は黙って落とさない。** `fastify.route(` の数と、読めた登録の数が
+// 合わなければエラーにする (handler を url より前に書いた形など)。
+func fastifyRouteDirectRoutes(src string) ([]tsDirectRoute, error) {
+	var out []tsDirectRoute
+	matches := fastifyRouteRe.FindAllStringSubmatch(src, -1)
+	if n := strings.Count(src, "fastify.route"); n != len(matches) {
+		return nil, fmt.Errorf("fastify.route: read %d of %d registrations (format changed?)", len(matches), n)
+	}
+	for _, m := range matches {
+		opts := m[1]
+		u := fastifyRouteURLRe.FindStringSubmatch(opts)
+		if u == nil {
+			return nil, fmt.Errorf("fastify.route without a url: %q", opts)
+		}
+		url := strings.TrimSpace(u[1])
+		if url == "'/' + endpoint.name" {
+			continue
+		}
+		lit := quotedRe.FindStringSubmatch(url)
+		if lit == nil || lit[0] != url {
+			return nil, fmt.Errorf("fastify.route with an unsupported url: %q", url)
+		}
+		p := lit[1]
+		if p == "/*" {
+			continue
+		}
+		mm := fastifyRouteMethodRe.FindStringSubmatch(opts)
+		if mm == nil {
+			return nil, fmt.Errorf("fastify.route %s without a method", p)
+		}
+		for _, q := range quotedRe.FindAllStringSubmatch(mm[1], -1) {
+			out = append(out, tsDirectRoute{Method: strings.ToUpper(q[1]), Path: "/api" + p})
+		}
+	}
+	return out, nil
+}
+
 // collectTSDirectRoutes parses ApiServerService.ts and returns the routes it
 // registers straight on fastify (i.e. outside endpoints/).
 //
@@ -190,6 +246,11 @@ func collectTSDirectRoutes(path string) ([]tsDirectRoute, error) {
 		}
 		out = append(out, tsDirectRoute{Method: method, Path: "/api" + p})
 	}
+	routed, err := fastifyRouteDirectRoutes(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	out = append(out, routed...)
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no direct fastify routes found in %s (format changed?)", path)
 	}
