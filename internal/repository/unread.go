@@ -165,5 +165,9 @@ func (r *noteUnreadRepository) DeleteByUserNote(userID, noteID string) error {
 }
 
 func (r *noteUnreadRepository) DeleteAllByUser(userID string) error {
-	return r.db.Where(`"userId" = ?`, userID).Delete(&model.NoteUnread{}).Error
+	// 1 本の DELETE として送る (#4273)。GORM の Delete は既定で書き込みを
+	// トランザクションで包み、BEGIN・DELETE・COMMIT の 3 往復になる。文が 1 つ
+	// なら、それ自体が原子的なので包む意味が無い。i/notifications の暗黙既読で
+	// 毎回通るので、往復の数がそのまま効く。
+	return r.db.Exec(`DELETE FROM "note_unread" WHERE "userId" = ?`, userID).Error
 }
