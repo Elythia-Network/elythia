@@ -193,6 +193,34 @@ func TestFilesCreate_FolderNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// 存在しないフォルダへのアップロードは、本家 2026.11.1 の drive/files/create の
+// noSuchFolder と同じ id を返す (#18151)。frontend はこの id で文言を出し分けるので、
+// 分割アップロードの経路も同じ id にする。
+func TestFolderNotFoundErrorIDMatchesUpstream(t *testing.T) {
+	const want = "b9adda75-abe9-4c6d-bf12-b5575833960d"
+	errorID := func(t *testing.T, rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		e, ok := decodeJSON(t, rec)["error"].(map[string]any)
+		require.True(t, ok, "response must carry a Misskey error envelope: %s", rec.Body.String())
+		return e["id"].(string)
+	}
+
+	t.Run("files/create", func(t *testing.T) {
+		h, _, _ := newHandler(t)
+		c, rec := newMultipartReq(t, "hello.txt", "hello", map[string]string{"folderId": "ghost"})
+		setUser(c, "u1")
+		require.NoError(t, h.FilesCreate(c))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, want, errorID(t, rec))
+	})
+	t.Run("chunked upload", func(t *testing.T) {
+		h, _, _ := newChunkedHandler(t)
+		c, rec := newJSONReq(t, `{}`)
+		require.NoError(t, h.chunkedError(c, coredrive.ErrFolderNotFound))
+		assert.Equal(t, want, errorID(t, rec))
+	})
+}
+
 // 他人所有の宛先 folder は NO_SUCH_FOLDER(404) で返す (missing と同じ response、
 // folder 存在 oracle を閉じる、#1908)。
 func TestFilesCreate_OtherOwnerFolderNotFound(t *testing.T) {

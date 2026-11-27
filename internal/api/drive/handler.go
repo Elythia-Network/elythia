@@ -444,7 +444,9 @@ func (h *Handler) FilesCreate(c *echo.Context) error {
 	if err != nil {
 		switch {
 		case errors.Is(err, coredrive.ErrFolderNotFound):
-			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FOLDER", "No such folder.", "d77545ec-1283-4b73-bbe1-e90e1da6a4e7"))
+			// upstream drive/files/create の noSuchFolder (2026.11.1、#18151)。frontend は
+			// この UUID で文言を出し分ける (utility/drive.ts の showUploadError)。
+			return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FOLDER", "No such folder.", "b9adda75-abe9-4c6d-bf12-b5575833960d"))
 		case errors.Is(err, coredrive.ErrAccessDenied):
 			return c.JSON(http.StatusBadRequest, apierr.Error("ACCESS_DENIED", "Access denied.", "fe8d7103-0ea8-4ec3-814d-f8b401dc69e9"))
 		case errors.Is(err, coredrive.ErrUnallowedFileType):

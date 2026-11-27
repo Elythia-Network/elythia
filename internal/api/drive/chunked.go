@@ -265,7 +265,7 @@ func (h *Handler) chunkedError(c *echo.Context, err error) error {
 	// 以降は drive/files/create と同じ code / UUID を返す。同じ制約に当たった
 	// ときに経路で error が変わるとフロントエンドが分岐を二重に持つことになる。
 	case errors.Is(err, coredrive.ErrFolderNotFound):
-		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FOLDER", "No such folder.", "d77545ec-1283-4b73-bbe1-e90e1da6a4e7"))
+		return c.JSON(http.StatusBadRequest, apierr.Error("NO_SUCH_FOLDER", "No such folder.", "b9adda75-abe9-4c6d-bf12-b5575833960d"))
 	case errors.Is(err, coredrive.ErrUnallowedFileType):
 		return c.JSON(http.StatusBadRequest, apierr.Error("UNALLOWED_FILE_TYPE",
 			"Cannot upload the file because it is an unallowed file type.",
