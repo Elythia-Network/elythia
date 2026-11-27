@@ -316,7 +316,7 @@ var cacheEntries = map[string]cacheEntry{
 	"internal/stream.Dispatcher": {kindPerConnection, "1本の接続のチャンネルと購読",
 		[]string{"bus", "busCancels", "channels", "conn", "mu", "noteCancels", "noteElems", "noteFollowGates", "noteOrder", "noteSubMu", "noteSubs", "noteVisibility", "notifReader", "registry", "topics", "ugcVisibility"}, nil},
 	"internal/stream.Manager": {kindPerConnection, "今ある接続の一覧と、接続ごとの購読の解除",
-		[]string{"bus", "busCancelMu", "busCancels", "closing", "conns", "followingLookup", "hardMute", "lastActive", "mu", "muteBlockLookup", "nextID", "noteVisibility", "notifReader", "policyProvider", "registry", "revokeMu", "revokeObservers", "revokeRecheck", "revokeSettle", "ugcVisibility"}, nil},
+		[]string{"bus", "busCancelMu", "busCancels", "closing", "conns", "followingLookup", "hardMute", "lastActive", "lastActiveEvery", "mu", "muteBlockLookup", "nextID", "noteVisibility", "notifReader", "policyProvider", "registry", "revokeMu", "revokeObservers", "revokeRecheck", "revokeSettle", "ugcVisibility"}, nil},
 	"internal/stream.NotePublisher": {kindDropLocal, "",
 		[]string{"cachedBody", "cachedID", "emojiLookup", "entityPacker", "fieldResolver", "idGen", "instanceLookup", "mu", "pub", "reactionPairReader", "reactionReader"}, nil},
 	"internal/stream.QueueStatsPublisher": {kindNotCache, "queueの統計の直近の記録(前回の処理数の累計を含む)。queueを観測した値で、DBから読んだ値ではない",

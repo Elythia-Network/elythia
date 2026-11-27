@@ -230,14 +230,22 @@ func TestManager_AcceptDispatchesConnectMessages(t *testing.T) {
 // --- lastActiveDate tracking (onlineStatus の source) ---
 
 type recordingLastActive struct {
-	mu  sync.Mutex
-	ids []string
+	mu         sync.Mutex
+	ids        []string
+	hibernated []bool
 }
 
-func (r *recordingLastActive) RecordActive(userID string) {
+func (r *recordingLastActive) RecordActive(userID string, hibernated bool) {
 	r.mu.Lock()
 	r.ids = append(r.ids, userID)
+	r.hibernated = append(r.hibernated, hibernated)
 	r.mu.Unlock()
+}
+
+func (r *recordingLastActive) hibernatedFlags() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool(nil), r.hibernated...)
 }
 
 func (r *recordingLastActive) calls() []string {
@@ -257,6 +265,42 @@ func TestManager_TrackLastActiveRecordsOnConnect(t *testing.T) {
 	stop()
 	// stop 後に ticker goroutine が終了していること (二重 close で panic しない)。
 	assert.NotPanics(t, func() { _ = m.trackLastActive(&model.User{ID: "u2"}) })
+}
+
+// 接続した利用者の休眠の印を recorder へ渡す。休眠していない利用者に休眠の解除の文を
+// 流さないため (#4270)。休眠している利用者は、今どおり起こす (#4019)。
+func TestManager_TrackLastActivePassesHibernation(t *testing.T) {
+	m := NewManager(nil, nil, nil, nil, nil, nil)
+	rec := &recordingLastActive{}
+	m.SetLastActiveRecorder(rec)
+
+	m.trackLastActive(&model.User{ID: "awake"})()
+	m.trackLastActive(&model.User{ID: "hibernated", IsHibernated: true})()
+	assert.Equal(t, []string{"awake", "hibernated"}, rec.calls())
+	assert.Equal(t, []bool{false, true}, rec.hibernatedFlags())
+}
+
+// 5 分ごとの更新でも、接続を受けた時点の休眠の印を渡す。接続時の解除に失敗しても
+// やり直すため (#4270)。本家も接続時の行を持ったまま 5 分ごとに更新する。
+func TestManager_TrackLastActiveTickerKeepsHibernation(t *testing.T) {
+	for _, hibernated := range []bool{false, true} {
+		m := NewManager(nil, nil, nil, nil, nil, nil)
+		m.lastActiveEvery = 5 * time.Millisecond
+		rec := &recordingLastActive{}
+		m.SetLastActiveRecorder(rec)
+
+		var once sync.Once
+		stopTicker := m.trackLastActive(&model.User{ID: "u4270", IsHibernated: hibernated})
+		stop := func() { once.Do(stopTicker) }
+		// require.Eventually が落ちても ticker の goroutine を残さない。
+		t.Cleanup(stop)
+		require.Eventually(t, func() bool { return len(rec.calls()) >= 3 }, 5*time.Second, time.Millisecond,
+			"the ticker does not record lastActiveDate")
+		stop()
+		for i, got := range rec.hibernatedFlags() {
+			assert.Equal(t, hibernated, got, "hibernated=%v: call %d", hibernated, i)
+		}
+	}
 }
 
 // 匿名接続 / recorder 未配線では何もしない。返る stop は安全に呼べる。

@@ -60,7 +60,7 @@ type lastActiveRecorderAdapter struct {
 	background *bgwork.Group
 }
 
-func (a *lastActiveRecorderAdapter) RecordActive(userID string) {
+func (a *lastActiveRecorderAdapter) RecordActive(userID string, hibernated bool) {
 	if a.userRepo == nil || userID == "" {
 		return
 	}
@@ -70,8 +70,12 @@ func (a *lastActiveRecorderAdapter) RecordActive(userID string) {
 		}
 		// 本家と同じく、戻ってきた休眠中の利用者の印を外す (#4019)。外さないと、
 		// フォローしている人のノートがホームタイムラインに配られないままになる。
+		// 印が立っていない利用者では 0 行に当たるだけなので、文を流さない (#4270)。
 		// lastActiveDate の失敗 (Debug) と違い、失敗すると配信が止まったままになるので
 		// Warn にする
+		if !hibernated {
+			return
+		}
 		if _, err := a.userRepo.WakeFromHibernation(userID); err != nil {
 			slog.Warn("streaming: waking a hibernated user failed", "userId", userID, "err", err)
 		}

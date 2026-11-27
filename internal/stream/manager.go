@@ -47,6 +47,9 @@ type Manager struct {
 	policyProvider  role.PolicyProvider
 	ugcVisibility   UGCVisibilityLookup
 	lastActive      LastActiveRecorder
+	// lastActiveEvery は接続中に lastActiveDate を更新する間隔。0 以下なら既定値
+	// (lastActiveInterval) を使う。テストが 5 分を待たずに ticker の経路を通すため。
+	lastActiveEvery time.Duration
 
 	// revokeSettle は失効 event を受けてから実際に接続を閉じるまでの猶予。
 	// 0 以下なら既定値 (defaultRevokeSettle) を使う。stream_revoke.go 参照。
@@ -78,8 +81,11 @@ const ServiceRestartCloseCode = 1012
 // LastActiveRecorder bumps a user's `lastActiveDate`. upstream の
 // StreamingApiServerService は WebSocket 接続時と 5 分ごとにこれを呼ぶ。
 // 「オンライン」の定義が WebSocket 接続なので、REST リクエストでは更新しない。
+//
+// hibernated reports whether the connecting user was hibernated when the
+// connection was accepted; only then does the recorder wake the user (#4270).
 type LastActiveRecorder interface {
-	RecordActive(userID string)
+	RecordActive(userID string, hibernated bool)
 }
 
 // lastActiveInterval mirrors upstream の setInterval(1000 * 60 * 5)。
@@ -97,14 +103,25 @@ func (m *Manager) trackLastActive(user *model.User) (stop func()) {
 	if m.lastActive == nil || user == nil {
 		return func() {}
 	}
-	m.lastActive.RecordActive(user.ID)
-	ticker := time.NewTicker(lastActiveInterval)
+	// 休眠の印は接続を受けた時点の行で決め、5 分ごとの更新でもそれを使う。本家の
+	// StreamingApiServerService も接続時の user を持ったまま updateLastActiveDate を
+	// 呼び、その行の isHibernated で起こすかどうかを分ける。休眠していない利用者に
+	// 休眠の解除の文を流しても 0 行に当たるだけなので、流さない (#4270)。印が立って
+	// いた接続では、解除に失敗しても 5 分ごとにやり直す (外せた後は 0 行に当たる)。
+	// 5 分ごとに DB から引き直さないのは、本家と同じ形にし、往復を増やさないため
+	hibernated := user.IsHibernated
+	m.lastActive.RecordActive(user.ID, hibernated)
+	every := m.lastActiveEvery
+	if every <= 0 {
+		every = lastActiveInterval
+	}
+	ticker := time.NewTicker(every)
 	done := make(chan struct{})
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				m.lastActive.RecordActive(user.ID)
+				m.lastActive.RecordActive(user.ID, hibernated)
 			case <-done:
 				return
 			}
