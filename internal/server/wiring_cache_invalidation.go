@@ -13,6 +13,7 @@ import (
 	"github.com/elythia-network/elythia/internal/api/meta"
 	"github.com/elythia-network/elythia/internal/api/nodeinfo"
 	"github.com/elythia-network/elythia/internal/api/notes"
+	"github.com/elythia-network/elythia/internal/api/notifications"
 	"github.com/elythia-network/elythia/internal/api/stats"
 	"github.com/elythia-network/elythia/internal/api/users"
 	"github.com/elythia-network/elythia/internal/core/avatardecoration"
@@ -72,6 +73,7 @@ type cacheInvalidationDeps struct {
 	channelsHandler          *channels.Handler
 	antennasHandler          *antennas.Handler
 	clipsHandler             *clips.Handler
+	notificationsHandler     *notifications.Handler
 	notePublisher            *stream.NotePublisher
 }
 
@@ -115,6 +117,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	channelsHandler := d.channelsHandler
 	antennasHandler := d.antennasHandler
 	clipsHandler := d.clipsHandler
+	notificationsHandler := d.notificationsHandler
 	notePublisher := d.notePublisher
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
@@ -282,6 +285,8 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	antennasHandler.SetRelationCache(s.relationCache)
 	channelsHandler.SetRelationCache(s.relationCache)
 	clipsHandler.SetRelationCache(s.relationCache)
+	// 通知の一覧は、読むときの送り手のミュートの判定に使う (#4273)。
+	notificationsHandler.SetRelationCache(s.relationCache)
 
 	// #3664: インスタンスの停止判定の cross-worker invalidation。停止の操作は
 	// Web のプロセスで受け、配送の判定は MK_ONLY_QUEUE のプロセスで走るので、

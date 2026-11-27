@@ -861,6 +861,40 @@ func TestNoteRepository_FindManyByIDsWithUser(t *testing.T) {
 	assert.Empty(t, out)
 }
 
+// FindManyByIDsWithKnownUsers attaches the authors given in known as is and
+// reads only the missing ones (#4273).
+func TestNoteRepository_FindManyByIDsWithKnownUsers(t *testing.T) {
+	repo := NewNoteRepository(testDB)
+	ua := insertTestUser(t, "u_ku_a", "ku_author")
+	up := insertTestUser(t, "u_ku_p", "ku_parent")
+	defer cleanupUser(t, ua.ID)
+	defer cleanupUser(t, up.ID)
+
+	parent := &model.Note{ID: "n_ku_p", UserID: up.ID, Visibility: model.NoteVisibilityPublic, Reactions: datatypes.JSON([]byte("{}"))}
+	require.NoError(t, repo.Create(parent))
+	t.Cleanup(func() { cleanupNote(t, parent.ID) })
+	reply := &model.Note{ID: "n_ku_r", UserID: ua.ID, Visibility: model.NoteVisibilityPublic, ReplyID: &parent.ID, Reactions: datatypes.JSON([]byte("{}"))}
+	require.NoError(t, repo.Create(reply))
+	t.Cleanup(func() { cleanupNote(t, reply.ID) })
+
+	// known の値をそのまま使うことを、DB に無い username で見分ける。
+	knownAuthor := &model.User{ID: ua.ID, Username: "from_known"}
+	out, err := repo.FindManyByIDsWithKnownUsers([]string{reply.ID}, map[string]*model.User{ua.ID: knownAuthor})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Same(t, knownAuthor, out[0].User, "a known author must be attached as is")
+	require.NotNil(t, out[0].Reply)
+	require.NotNil(t, out[0].Reply.User, "an author missing from known must be read")
+	assert.Equal(t, "ku_parent", out[0].Reply.User.Username)
+
+	out, err = repo.FindManyByIDsWithKnownUsers([]string{reply.ID}, nil)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.NotNil(t, out[0].User)
+	assert.Equal(t, "ku_author", out[0].User.Username, "nil known reads every author")
+	require.NotNil(t, out[0].Reply.User)
+}
+
 // TestNoteRepository_FindManyByIDsWithUser_HydratesRelations は hydrated shape
 // (User / Renote{.User,.Poll} / Reply{.User,.Poll} / Poll) を全て検証する強い
 // oracle。hydration の実装を入れ替える (preload → batch 等) 際の wiring 回帰を

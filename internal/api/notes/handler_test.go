@@ -947,6 +947,9 @@ func (f *failingNoteRepo) ListLocalByChannelID(_, _, _, _ string, _ int) ([]*mod
 func (f *failingNoteRepo) FindManyByIDsWithUser(_ []string) ([]*model.Note, error) {
 	return nil, nil
 }
+func (f *failingNoteRepo) FindManyByIDsWithKnownUsers(_ []string, _ map[string]*model.User) ([]*model.Note, error) {
+	return nil, nil
+}
 func (f *failingNoteRepo) FindManyLocalReferenceMetadataByIDs(_ []string) ([]*model.Note, error) {
 	return nil, nil
 }

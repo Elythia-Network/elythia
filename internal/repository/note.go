@@ -133,6 +133,17 @@ type NoteRepository interface {
 	// generateUgcVisibilityQueryForVisitor).
 	ListLocalByChannelID(channelID, viewerID, untilID, sinceID string, limit int) ([]*model.Note, error)
 	FindManyByIDsWithUser(ids []string) ([]*model.Note, error)
+	// FindManyByIDsWithKnownUsers is FindManyByIDsWithUser that takes the
+	// authors found in known instead of reading them again, and reads only the
+	// authors missing from it. The values of known must be full user rows read
+	// in the same request (they are attached to the notes as is). nil or empty
+	// known behaves like FindManyByIDsWithUser.
+	//
+	// The returned notes' User is the very value given in known, which the
+	// caller may share with other notes and with a process-wide cache (the
+	// CachedUserRepository entries); treat it as read-only and do not modify
+	// it in place.
+	FindManyByIDsWithKnownUsers(ids []string, known map[string]*model.User) ([]*model.Note, error)
 	// FindManyLocalReferenceMetadataByIDs loads only the fields needed to validate
 	// inbound local references, without hydrating note relations.
 	FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error)
@@ -831,7 +842,14 @@ func (r *noteRepository) ExistingNoteIDsOnPrimary(ids []string) ([]string, error
 // Notes that are not found are simply omitted from the result.
 func (r *noteRepository) FindManyByIDsWithUser(ids []string) ([]*model.Note, error) {
 	ids = storableIDs(ids)
-	return r.findManyByIDsWithUser(ids, false)
+	return r.findManyByIDsWithUser(ids, false, nil)
+}
+
+// FindManyByIDsWithKnownUsers is FindManyByIDsWithUser reusing the authors in
+// known (see the interface).
+func (r *noteRepository) FindManyByIDsWithKnownUsers(ids []string, known map[string]*model.User) ([]*model.Note, error) {
+	ids = storableIDs(ids)
+	return r.findManyByIDsWithUser(ids, false, known)
 }
 
 func (r *noteRepository) FindManyLocalReferenceMetadataByIDs(ids []string) ([]*model.Note, error) {
@@ -856,7 +874,7 @@ func (r *noteRepository) FindManyLocalReferenceMetadataByIDs(ids []string) ([]*m
 	return ordered, nil
 }
 
-func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*model.Note, error) {
+func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool, known map[string]*model.User) ([]*model.Note, error) {
 	ids = storableIDs(ids)
 	if len(ids) == 0 {
 		return nil, nil
@@ -869,7 +887,7 @@ func (r *noteRepository) findManyByIDsWithUser(ids []string, primary bool) ([]*m
 	if len(notes) == 0 {
 		return nil, nil
 	}
-	if err := hydrateNoteRelations(db, notes); err != nil {
+	if err := hydrateNoteRelationsWithUsers(db, notes, known); err != nil {
 		return nil, err
 	}
 
@@ -934,6 +952,12 @@ func (r *noteRepository) HydrateNotes(notes []*model.Note) error {
 // 子を持たないため、reply target の子は辿らない。この深さを変えるときは、
 // 可視性のゲート (notehide / note_filter / webpush / webhook) も同じ深さに揃える。
 func hydrateNoteRelations(db func() *gorm.DB, notes []*model.Note) error {
+	return hydrateNoteRelationsWithUsers(db, notes, nil)
+}
+
+// hydrateNoteRelationsWithUsers is hydrateNoteRelations taking the authors in
+// known instead of reading them; only the authors missing from known are read.
+func hydrateNoteRelationsWithUsers(db func() *gorm.DB, notes []*model.Note, known map[string]*model.User) error {
 	if len(notes) == 0 {
 		return nil
 	}
@@ -1020,22 +1044,32 @@ func hydrateNoteRelations(db func() *gorm.DB, notes []*model.Note) error {
 		hydrate = append(hydrate, s)
 	}
 
-	// (3) author user を 1 query で取得し配線する。
+	// (3) author user を 1 query で取得し配線する。呼び出し元が同じ要求の中で
+	// 読んだ利用者 (known) はそのまま使い、足りない分だけを引く (#4273)。
+	// i/notifications は通知の送り手と閲覧者を先に引いており、ノートの著者は
+	// ほとんどがそのどちらかなので、同じ行をもう 1 度読まずに済む。
 	userIDSet := make(map[string]struct{}, len(hydrate))
+	userByID := make(map[string]*model.User, len(hydrate))
 	for _, n := range hydrate {
-		if n.UserID != "" {
-			userIDSet[n.UserID] = struct{}{}
+		if n.UserID == "" {
+			continue
 		}
+		if u := known[n.UserID]; u != nil {
+			userByID[n.UserID] = u
+			continue
+		}
+		userIDSet[n.UserID] = struct{}{}
 	}
 	if len(userIDSet) > 0 {
 		var users []*model.User
 		if err := db().Where("id IN ?", mapKeys(userIDSet)).Find(&users).Error; err != nil {
 			return err
 		}
-		userByID := make(map[string]*model.User, len(users))
 		for _, u := range users {
 			userByID[u.ID] = u
 		}
+	}
+	if len(userByID) > 0 || len(userIDSet) > 0 {
 		for _, n := range hydrate {
 			n.User = userByID[n.UserID]
 		}
@@ -1072,7 +1106,7 @@ func hydrateNoteRelations(db func() *gorm.DB, notes []*model.Note) error {
 
 func (r *noteRepository) FindManyByIDsWithUserOnPrimary(ids []string) ([]*model.Note, error) {
 	ids = storableIDs(ids)
-	return r.findManyByIDsWithUser(ids, true)
+	return r.findManyByIDsWithUser(ids, true, nil)
 }
 
 // mapKeys returns the keys of a string-set as a slice (順序不定)。
