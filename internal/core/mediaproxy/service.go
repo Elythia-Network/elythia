@@ -530,17 +530,15 @@ func (s *Service) resolveLocal(ctx context.Context, rawURL, filesPrefix string, 
 	// resize する。default mode で DB を引かないようにする (#637 review
 	// UR-014)。
 	if s.driveLookup != nil && isResizeMode(mode) {
-		if swapped, mt, ok := s.swapToVariant(primaryKey, mode); ok {
+		// swap しないが lookup は成功している場合、stored MIME を後段の
+		// MIME 判定で活用する (HEIC/AVIF/JXL の DetectContentType 誤判定対策、
+		// #637 review UR-017)。swapToVariant がそのとき引いた行の MIME を返す
+		// ので、同じ行をもう一度引かない (#4269)。
+		swapped, mt, ok := s.swapToVariant(primaryKey, mode)
+		if ok {
 			accessKey = swapped
-			storedMIME = mt
-		} else {
-			// swap しないが lookup は成功している場合、stored MIME を後段
-			// MIME 判定で活用する (HEIC/AVIF/JXL の DetectContentType
-			// 誤判定対策、#637 review UR-017)。
-			if v, err := s.driveLookup.FindByAccessKey(primaryKey); err == nil {
-				storedMIME = v.MimeType
-			}
 		}
+		storedMIME = mt
 	}
 
 	body, err := s.driveStorage.Get(accessKey)
@@ -614,10 +612,10 @@ func (s *Service) resolveLocal(ctx context.Context, rawURL, filesPrefix string, 
 }
 
 // swapToVariant looks up the DriveFile by access key and returns the
-// thumbnail / webpublic access key when one matches the requested mode,
-// along with the variant's expected MIME (which `http.DetectContentType`
-// can sniff but stored MIME is more reliable). Returns (key, mime, true)
-// on swap, ("", "", false) otherwise.
+// thumbnail / webpublic access key when one matches the requested mode.
+// Returns (key, "", true) on swap. Otherwise it returns ("", mime, false),
+// where mime is the stored MIME of the looked-up row, or "" when the lookup
+// failed, so the caller can use it without looking the row up again.
 func (s *Service) swapToVariant(accessKey string, mode ProxyMode) (string, string, bool) {
 	v, err := s.driveLookup.FindByAccessKey(accessKey)
 	if err != nil {
@@ -626,7 +624,7 @@ func (s *Service) swapToVariant(accessKey string, mode ProxyMode) (string, strin
 	// 既に primary 以外 (= 既に variant の access key) を要求されているなら
 	// 二重に swap しない。
 	if v.AccessKey == nil || *v.AccessKey != accessKey {
-		return "", "", false
+		return "", v.MimeType, false
 	}
 	// Variant の MIME は driveFile 上に直接持たないので空文字を返し、
 	// 呼び出し側で `http.DetectContentType` フォールバックさせる。stored
@@ -649,7 +647,7 @@ func (s *Service) swapToVariant(accessKey string, mode ProxyMode) (string, strin
 			return *v.WebpublicAccessKey, "", true
 		}
 	}
-	return "", "", false
+	return "", v.MimeType, false
 }
 
 // fetchRemote downloads a file from a remote URL.
