@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 
 	"github.com/elythia-network/elythia/internal/model"
@@ -232,20 +233,34 @@ type userListVisibilityPayload struct {
 
 // userListReplyPayload は reply gate が参照する最小 fields。
 type userListReplyPayload struct {
-	UserID string     `json:"userId"`
-	Reply  *replyMeta `json:"reply"`
+	UserID string               `json:"userId"`
+	Reply  *userListReplyTarget `json:"reply"`
 }
 
-// userListReplyShouldEmit applies upstream user-list.ts の per-member withReplies
-// reply gate (#2020):
-//   - 投稿者 (note.userId) の withReplies が true: reply 先が followers visibility で
-//     viewer が reply.userId を follow していなければ drop。
-//   - withReplies が false: 「接続主 (viewer) への reply」「接続主自身の投稿」「投稿者の
-//     自己 reply」のいずれでもなければ drop。
+// userListReplyTarget is the embedded `note.reply` with what the user list
+// channel needs to tell whether the viewer can see it (upstream
+// Channel.isNoteVisibleForMe).
+type userListReplyTarget struct {
+	UserID         string   `json:"userId"`
+	Visibility     string   `json:"visibility"`
+	VisibleUserIDs []string `json:"visibleUserIds"`
+	Mentions       []string `json:"mentions"`
+	// Reply は返信先の返信先。本家の判定 (「自分の投稿への返信」) と同じ形で見るが、
+	// 埋め込みは返信先までなので (internal/entity の packNoteAtDepth)、今は届かない。
+	Reply *struct {
+		UserID string `json:"userId"`
+	} `json:"reply"`
+}
+
+// userListReplyShouldEmit applies upstream user-list.ts の返信の判定
+// (2026.11.1、#18166):
+//   - 「接続主への返信」「接続主の返信」「投稿者の自分への返信」は、投稿者の
+//     withReplies にかかわらず pass。
+//   - それ以外は、投稿者 (note.userId) の withReplies が有効で、かつ返信先が
+//     接続主に見える (userListReplyVisible) ときだけ pass。
 //
 // reply でない note / parse 失敗は pass (visibility gate 側で fail-closed 済)。
-// authorWithReplies は投稿者 (note.userId) の membership withReplies (呼び出し側で
-// lookup 済)。
+// authorWithReplies は投稿者の membership withReplies (呼び出し側で lookup 済)。
 func userListReplyShouldEmit(payload []byte, viewerID string, authorWithReplies bool, following map[string]bool) bool {
 	var note userListReplyPayload
 	if err := decodeStreamPayload(payload, &note); err != nil || note.Reply == nil {
@@ -257,20 +272,44 @@ func userListReplyShouldEmit(payload []byte, viewerID string, authorWithReplies 
 // userListReplyAllows is the decision of userListReplyShouldEmit over an
 // already decoded note whose Reply is non-nil.
 func userListReplyAllows(note *userListReplyPayload, viewerID string, authorWithReplies bool, following map[string]bool) bool {
-	isMe := viewerID != "" && viewerID == note.UserID
-	if authorWithReplies {
-		if note.Reply.Visibility == "followers" {
-			if following == nil {
-				return false
-			}
-			_, follows := following[note.Reply.UserID]
-			return follows
-		}
+	// リストのチャンネルは未ログインでは購読できない (Init で断る)。viewerID が空のまま
+	// 来たら、返信先の userId が欠けた埋め込みと「接続主への返信」を取り違えないよう、
+	// 例外を当てない。
+	if viewerID != "" && (note.Reply.UserID == viewerID || note.UserID == viewerID || note.Reply.UserID == note.UserID) {
 		return true
 	}
-	// withReplies=false: 接続主への reply / 接続主の投稿 / 自己 reply 以外は drop。
-	if note.Reply.UserID != viewerID && !isMe && note.Reply.UserID != note.UserID {
+	if !authorWithReplies {
 		return false
+	}
+	return userListReplyVisible(note.Reply, viewerID, following)
+}
+
+// userListReplyVisible reports whether the viewer can see the reply target,
+// in the shape of upstream Channel.isNoteVisibleForMe: a specified note needs
+// the viewer in visibleUserIds, a followers note needs the viewer to follow
+// its author, be its author, be replied to by it, or be mentioned in it.
+//
+// following は接続主のフォローの一覧。nil (取れなかった) なら followers の返信先は
+// 見えないものとして落とす。
+func userListReplyVisible(r *userListReplyTarget, viewerID string, following map[string]bool) bool {
+	switch r.Visibility {
+	case "specified":
+		if viewerID == "" {
+			return false
+		}
+		return viewerID == r.UserID || slices.Contains(r.VisibleUserIDs, viewerID)
+	case "followers":
+		if viewerID == "" {
+			return false
+		}
+		if viewerID == r.UserID || (r.Reply != nil && r.Reply.UserID == viewerID) || slices.Contains(r.Mentions, viewerID) {
+			return true
+		}
+		if following == nil {
+			return false
+		}
+		_, follows := following[r.UserID]
+		return follows
 	}
 	return true
 }

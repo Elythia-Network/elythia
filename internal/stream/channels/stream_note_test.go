@@ -293,8 +293,16 @@ func streamNoteCorpus() map[string]string {
 		"reply-mention":        note("n7", "author2", a2, `,"mentions":["viewer"],"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"public"}`),
 		"reply-specified-dest": note("n8", "author2", a2, `,"visibility":"specified","visibleUserIds":["viewer"],"mentions":["viewer"],"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"public"}`),
 		"reply-no-embed":       note("n9", "author2", a2, `,"replyId":"r1"`),
-		"renote-myreaction":    pure("n10", "author1", a1, reacted),
-		"renote-truncated":     pure("n11", "author1", a1, truncated),
+		// リストの返信の判定 (本家 2026.11.1、#18166) が返信先の見え方を見る組。
+		// author1 は userList の build で withReplies が有効なメンバー
+		"reply-specified-hidden":        note("n60", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"specified","visibleUserIds":["other"]}`),
+		"reply-specified-shown":         note("n61", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"specified","visibleUserIds":["viewer"]}`),
+		"reply-followers-mention":       note("n62", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"followers","mentions":["viewer"]}`),
+		"reply-followers-viewer-own":    note("n63", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"viewer","visibility":"followers"}`),
+		"reply-followers-self":          note("n64", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"author1","visibility":"followers"}`),
+		"reply-followers-reply-to-view": note("n65", "author1", a1, `,"replyId":"r1","reply":{"id":"r1","userId":"stranger","visibility":"followers","reply":{"id":"r0","userId":"viewer","visibility":"public"}}`),
+		"renote-myreaction":             pure("n10", "author1", a1, reacted),
+		"renote-truncated":              pure("n11", "author1", a1, truncated),
 		"renote-of-followers-reply": pure("n12", "author1", a1,
 			note("t1", "author2", a2, `,"replyId":"r2","reply":`+followersBy("r2", "stranger", stranger))),
 		"renote-hidden-embed":   pure("n13", "author1", a1, followersBy("t1", "stranger", stranger)),

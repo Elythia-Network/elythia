@@ -1152,6 +1152,47 @@ func TestUserList_PerMemberWithRepliesGate(t *testing.T) {
 	assert.Equal(t, 1, send(`{"id":"n5","userId":"bob","visibility":"public"}`), "reply でない note は pass")
 }
 
+// 返信の判定を本家 2026.11.1 (#18166) に揃える。「接続主への返信」「接続主の返信」
+// 「投稿者の自分への返信」は withReplies と返信先の見え方にかかわらず通し、それ以外は
+// withReplies が有効で、返信先が接続主に見えるものだけを通す。
+func TestUserList_ReplyGateMatchesUpstream(t *testing.T) {
+	ctx := newCtx(&model.User{ID: "alice"}) // viewer = alice (list owner)
+	ctx.followingSnap = map[string]bool{}   // alice は誰もフォローしていない
+	lookup := &stubMembershipLookup{ownerID: "alice", members: []*model.UserListMembership{
+		{UserID: "bob", WithReplies: false},
+		{UserID: "carol", WithReplies: true},
+	}}
+	ch := NewUserListFactory(lookup).New(ctx)
+	require.NoError(t, ch.Init(json.RawMessage(`{"listId":"l1"}`)))
+
+	send := func(payload string) int {
+		ctx.sentType = nil
+		ch.OnRedisEvent([]byte(payload))
+		return len(ctx.sentType)
+	}
+
+	// 接続主自身の followers の投稿への返信は、接続主への返信なので通す。
+	// 以前は withReplies が有効なときに返信先の作者 (= 接続主) をフォローの一覧で探して落としていた
+	assert.Equal(t, 1, send(`{"id":"n1","userId":"carol","visibility":"public","reply":{"userId":"alice","visibility":"followers"}}`),
+		"接続主の followers の投稿への返信は通す")
+	// 投稿者が自分の followers の投稿へ返信したものは、接続主が投稿者をフォローしていなくても通す
+	assert.Equal(t, 1, send(`{"id":"n2","userId":"carol","visibility":"public","reply":{"userId":"carol","visibility":"followers"}}`),
+		"投稿者の自分への返信は通す")
+	// 返信先が specified で、接続主が宛先にいなければ落とす。以前は通していた
+	assert.Equal(t, 0, send(`{"id":"n3","userId":"carol","visibility":"public","reply":{"userId":"dave","visibility":"specified","visibleUserIds":["erin"]}}`),
+		"接続主に見えない specified の返信先への返信は落とす")
+	assert.Equal(t, 1, send(`{"id":"n4","userId":"carol","visibility":"public","reply":{"userId":"dave","visibility":"specified","visibleUserIds":["alice"]}}`),
+		"接続主が宛先にいる specified の返信先なら通す")
+	// followers の返信先は、接続主へのメンションがあれば見えるので通す
+	assert.Equal(t, 1, send(`{"id":"n5","userId":"carol","visibility":"public","reply":{"userId":"dave","visibility":"followers","mentions":["alice"]}}`),
+		"接続主へのメンションを含む followers の返信先なら通す")
+	assert.Equal(t, 0, send(`{"id":"n6","userId":"carol","visibility":"public","reply":{"userId":"dave","visibility":"followers"}}`),
+		"フォローしていない相手の followers の返信先は落とす")
+	// withReplies が無効なメンバーは、返信先が見えても第三者への返信を落とす
+	assert.Equal(t, 0, send(`{"id":"n7","userId":"bob","visibility":"public","reply":{"userId":"dave","visibility":"specified","visibleUserIds":["alice"]}}`),
+		"withReplies が無効なら第三者への返信は落とす")
+}
+
 // 接続主が所有しない list は購読できない (本家 user-list.ts の owner check 相当)。
 func TestUserList_NotOwner_Rejected(t *testing.T) {
 	ctx := newCtx(&model.User{ID: "bob"}) // l1 の owner は alice
