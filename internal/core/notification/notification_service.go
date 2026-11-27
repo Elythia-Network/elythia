@@ -1003,6 +1003,13 @@ func (s *Service) MarkAllAsRead(ctx context.Context, userID string, force bool) 
 // rows when the repo is wired. Failures are logged but not surfaced; callers
 // should invoke this after their own Redis writes succeed so the two stores
 // stay in sync (or tolerate the caller's no-write early-return case).
+//
+// **既読位置が進まなかったときも消す (#4273)。** note_unread の行は通知と別に
+// 作られる (hooks.go の recordNoteUnreads は、通知を作らない宛先指定の投稿や、
+// 受け手がミュートしている相手のメンションでも行を作る)。既読位置が進んだかで
+// 飛ばすと、通知の無いまま残った行で hasUnreadSpecifiedNotes が立ちっぱなしに
+// なる。行があるかを先に確かめても 1 往復かかるので、DELETE を
+// 1 本 (トランザクションで包まない) 送るのが最小になる。
 func (s *Service) clearNoteUnread(userID string) {
 	if s.noteUnreadRepo == nil {
 		return

@@ -101,3 +101,39 @@ func TestNoteUnreadRepository_HasAny_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, hasM)
 }
+
+// DeleteAllByUser removes every note_unread row of the user and only those
+// (#4273: it is now a single raw DELETE, so the WHERE must stay scoped).
+func TestNoteUnreadRepository_DeleteAllByUser(t *testing.T) {
+	repo := NewNoteUnreadRepository(testDB)
+	author := insertTestUser(t, "nu_da_author", "nudaauthor")
+	defer cleanupUser(t, author.ID)
+	reader := insertTestUser(t, "nu_da_reader", "nudareader")
+	defer cleanupUser(t, reader.ID)
+	other := insertTestUser(t, "nu_da_other", "nudaother")
+	defer cleanupUser(t, other.ID)
+
+	for _, id := range []string{"nu_da_n1", "nu_da_n2"} {
+		require.NoError(t, testDB.Create(&model.Note{ID: id, UserID: author.ID, Visibility: "specified"}).Error)
+		defer testDB.Exec(`DELETE FROM "note" WHERE id = ?`, id)
+	}
+	defer testDB.Exec(`DELETE FROM "note_unread" WHERE "userId" IN (?, ?)`, reader.ID, other.ID)
+	for _, row := range []*model.NoteUnread{
+		{ID: "nu_da_1", UserID: reader.ID, NoteID: "nu_da_n1", NoteUserID: author.ID, IsSpecified: true},
+		{ID: "nu_da_2", UserID: reader.ID, NoteID: "nu_da_n2", NoteUserID: author.ID, IsMentioned: true},
+		{ID: "nu_da_3", UserID: other.ID, NoteID: "nu_da_n1", NoteUserID: author.ID, IsSpecified: true},
+	} {
+		require.NoError(t, repo.Upsert(row))
+	}
+
+	require.NoError(t, repo.DeleteAllByUser(reader.ID))
+	var left int64
+	require.NoError(t, testDB.Raw(`SELECT count(*) FROM "note_unread" WHERE "userId" = ?`, reader.ID).Scan(&left).Error)
+	assert.Zero(t, left, "every row of the reader must be deleted")
+	has, err := repo.HasAnySpecified(other.ID)
+	require.NoError(t, err)
+	assert.True(t, has, "another user's rows must be kept")
+
+	// 行が無くてもエラーにしない (i/notifications の暗黙既読は毎回これを呼ぶ)。
+	require.NoError(t, repo.DeleteAllByUser(reader.ID))
+}
