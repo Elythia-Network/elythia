@@ -35,6 +35,7 @@ func (h *Handler) UnsetUserAvatar(c *echo.Context) error {
 		info := moderationlog.UserInfo(user)
 		info["fileId"] = fileID
 		h.logModeration(c, moderationlog.LogUnsetUserAvatar, info)
+		h.publishUserImageUnset(user)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -65,8 +66,30 @@ func (h *Handler) UnsetUserBanner(c *echo.Context) error {
 		info := moderationlog.UserInfo(user)
 		info["fileId"] = fileID
 		h.logModeration(c, moderationlog.LogUnsetUserBanner, info)
+		h.publishUserImageUnset(user)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// publishUserImageUnset tells the change of an avatar or banner unset by an
+// admin to where the user's copies live (upstream 2026.11.1, #18175).
+//
+// 本家は、ローカルの人なら localUserUpdated・meUpdated・フォロワーへの
+// Update(Person) を、リモートの人なら remoteUserUpdated を出す。Elythia では
+// localUserUpdated に当たるのが認証のキャッシュの利用者を捨てること (i/update と同じ)、
+// remoteUserUpdated に当たるのが UpdateUser の中で利用者のキャッシュを捨てること
+// (CachedUserRepository が他のプロセスへも伝える) なので、リモートの人には何もしない。
+func (h *Handler) publishUserImageUnset(user *model.User) {
+	if !user.IsLocal() {
+		return
+	}
+	h.invalidateUserTokenCache(user.ID)
+	if h.meUpdatedPublisher != nil {
+		h.meUpdatedPublisher.PublishMeUpdated(user.ID)
+	}
+	if h.profileUpdateHook != nil {
+		h.profileUpdateHook.OnLocalProfileUpdated(user.ID)
+	}
 }
 
 // UpdateUserNote handles POST /api/admin/update-user-note. user_profile の

@@ -2795,6 +2795,10 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	adminHandler.SetRestoredCopyReleaser(driveStorageMigrator)
 	adminHandler.SetServerPlugins(serverPluginInfos(registeredPlugins, s.config.Plugins))
 	adminHandler.SetPluginOrphanSchemas(s.pluginOrphanSchemaLister(registeredPlugins))
+	// 管理者がローカルの人のアイコン・バナーを外したら、本人の画面とリモートの
+	// フォロワーに伝える (本家 2026.11.1、#18175)。i/update と同じ部品を使う。
+	adminHandler.SetMeUpdatedPublisher(iHandler)
+	adminHandler.SetProfileUpdateHook(profileUpdateHook)
 
 	// API catchall。
 	//
