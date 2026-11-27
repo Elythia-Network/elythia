@@ -922,13 +922,23 @@ func TestSignup_EmailRequired_NoSender(t *testing.T) {
 	assert.Len(t, pendingRepo.Rows, 1)
 }
 
-func TestSetTestMode(t *testing.T) {
-	h, _, metaRepo := newTestHandler(t)
-	metaRepo.Meta.EmailRequiredForSignup = true
-	// testMode で email-required branch をバイパスして通常 path に流す
+// testMode でも emailRequiredForSignup は迂回しない (本家と同じ。#4277)。本家の
+// backend e2e は testMode の Elythia に対して、仮登録が 204 になることを確かめる。
+func TestSetTestMode_KeepsEmailRequired(t *testing.T) {
+	userRepo := testutil.NewMockUserRepository()
+	metaRepo := testutil.NewMockMetaRepository()
+	metaRepo.Meta = &model.Meta{ID: "x", EmailRequiredForSignup: true}
+	pendingRepo := testutil.NewMockUserPendingRepository()
+	idGen, _ := id.NewGenerator("aidx")
+	svc := coresignup.NewService(userRepo, metaRepo, idGen, nil, nil, nil)
+	svc.SetUserPendingRepo(pendingRepo)
+	h := apisignup.NewHandler(svc, metaRepo, idGen, nil, nil, nil)
 	h.SetTestMode(true)
-	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234"}`)
-	assert.Equal(t, http.StatusOK, rec.Code)
+
+	rec := doPost(h.Signup, `{"username":"alice","password":"pass1234","emailAddress":"alice@example.com"}`)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Len(t, pendingRepo.Rows, 1)
+	assert.Empty(t, userRepo.Users, "仮登録の段ではアカウントを作らない")
 }
 
 func TestSetEmailValidationClient(t *testing.T) {

@@ -2811,9 +2811,12 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 実装が出揃うまで pass-through にしている。実装漏れは warn ログで検知する。
 	api.Group.Match(anyMethods, "/*", apiCatchall)
 
-	// clear-browser-cache — 本家が endpoint の仕組みの外で fastify.all に直接
-	// 登録する route (ApiServerService.ts)。どのメソッドでも受け、GET と POST
-	// 以外は handler が 405 を返す。endpoint ではないので、本文の検査
+	// clear-browser-cache — 本家が endpoint の仕組みの外で直接登録する route
+	// (ApiServerService.ts)。本家は 2026.11.1 (#18190) から fastify.route で GET と POST
+	// だけを登録する。HEAD は fastify の exposeHeadRoutes (既定で有効) が同じ handler に
+	// 届けて 405 になり、それ以外のメソッドは fastify の既定の 404 になる。Elythia は
+	// どのメソッドでも受け、GET と POST 以外は handler が 405 を返す
+	// (docs/divergence/api.md)。endpoint ではないので、本文の検査
 	// (apiRoutes の requireObjectBody) と引数の検証を通さない (#3926)。
 	api.Group.Match(anyMethods, "/clear-browser-cache", meta.ClearBrowserCache)
 

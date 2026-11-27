@@ -303,6 +303,7 @@
     "id",
     "isFollowerHibernated",
     "notify",
+    "requestId",
     "withReplies"
   ],
   "gallery_like": [
