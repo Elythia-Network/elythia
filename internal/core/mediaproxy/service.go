@@ -259,6 +259,8 @@ type ProxyResult struct {
 	// 応答が chunked になり、受け手は全体の大きさを知らずに読むことになる。
 	// 0 を「不明」に使うのは、Size を埋めずに作った結果 (テストの stub など)
 	// に Content-Length: 0 を付けて本文を切り捨てないため。
+	// ただし gzip の対象の型 (SVG・ICO など。internal/server/gzip_media.go) を
+	// 圧縮して返すときは、middleware が Content-Length を外す。
 	Size int64
 }
 

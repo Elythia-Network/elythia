@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"io/fs"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -72,7 +75,7 @@ func TestGzipMiddleware_FilesImageIsNotCompressed(t *testing.T) {
 	assert.True(t, bytes.Equal(body[100:2100], rec.Body.Bytes()))
 }
 
-// 型ごとの判定。画像・動画・音声 (SVG を除く) と 206 は圧縮しない。
+// 型ごとの判定。画像・動画・音声 (SVG と ICO を除く) と 206 は圧縮しない。
 func TestGzipMiddleware_CompressionByContentType(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -88,6 +91,10 @@ func TestGzipMiddleware_CompressionByContentType(t *testing.T) {
 		{"image with duplicate params", "image/png; a=1; a=2", http.StatusOK, false},
 		{"upper case image", "IMAGE/PNG", http.StatusOK, false},
 		{"svg stays compressed", "image/svg+xml", http.StatusOK, true},
+		{"ico is compressed", "image/vnd.microsoft.icon", http.StatusOK, true},
+		{"legacy ico is compressed", "image/x-icon", http.StatusOK, true},
+		{"upper case ico with params", "IMAGE/X-ICON; charset=binary", http.StatusOK, true},
+		{"partial ico", "image/vnd.microsoft.icon", http.StatusPartialContent, false},
 		{"json", "application/json; charset=UTF-8", http.StatusOK, true},
 		{"html", "text/html; charset=utf-8", http.StatusOK, true},
 		{"activity json", "application/activity+json; charset=utf-8", http.StatusOK, true},
@@ -119,6 +126,38 @@ func TestGzipMiddleware_CompressionByContentType(t *testing.T) {
 			assert.Equal(t, payload, string(decoded))
 		})
 	}
+}
+
+// /favicon.ico は本物のファイルと本物のルートの形 (FileFS) で、gzip で返る (#4268)。
+// 中身は非圧縮のビットマップなので、PNG や JPEG と違って縮む。
+func TestGzipMiddleware_FaviconIsCompressed(t *testing.T) {
+	staticFS := os.DirFS(filepath.Join("..", "..", "frontend", "assets"))
+	raw, err := fs.ReadFile(staticFS, "favicon.ico")
+	require.NoError(t, err)
+
+	e := echo.New()
+	e.Use(gzipMiddleware())
+	e.FileFS("/favicon.ico", "favicon.ico", staticFS)
+
+	rec := gzipServe(t, e, http.MethodGet, "/favicon.ico", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/vnd.microsoft.icon", rec.Result().Header.Get(echo.HeaderContentType))
+	require.Equal(t, "gzip", rec.Result().Header.Get(echo.HeaderContentEncoding))
+	t.Logf("favicon.ico: %d bytes raw, %d bytes on the wire", len(raw), rec.Body.Len())
+	// 縮み幅は同梱のファイルの中身で変わるので、元より小さいことだけを見る。
+	assert.Less(t, rec.Body.Len(), len(raw))
+	gr, err := gzip.NewReader(rec.Body)
+	require.NoError(t, err)
+	decoded, err := io.ReadAll(gr)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(raw, decoded))
+
+	// Range の 206 は今どおり包まない。
+	rec = gzipServe(t, e, http.MethodGet, "/favicon.ico", map[string]string{"Range": "bytes=0-1999"})
+	require.Equal(t, http.StatusPartialContent, rec.Code)
+	assert.Empty(t, rec.Result().Header.Get(echo.HeaderContentEncoding))
+	assert.Equal(t, "2000", rec.Result().Header.Get(echo.HeaderContentLength))
+	assert.True(t, bytes.Equal(raw[:2000], rec.Body.Bytes()))
 }
 
 // Content-Type を付けずに書いた本文は、推定した型で判定する。
