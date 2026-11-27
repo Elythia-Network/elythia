@@ -126,6 +126,21 @@ func (n *streamNote) hardMuteProbe() *hardMuteProbe {
 	}
 }
 
+// userListReplyTarget returns what the user list channel reads of a reply
+// target (nil when n is absent).
+func (n *streamNote) userListReplyTarget() *userListReplyTarget {
+	if n == nil {
+		return nil
+	}
+	t := &userListReplyTarget{UserID: n.UserID, Visibility: n.Visibility, VisibleUserIDs: n.VisibleUserIDs, Mentions: n.Mentions}
+	if n.Reply != nil {
+		t.Reply = &struct {
+			UserID string `json:"userId"`
+		}{UserID: n.Reply.UserID}
+	}
+	return t
+}
+
 func (n *streamNote) replyMeta() *replyMeta {
 	if n == nil {
 		return nil
@@ -391,7 +406,7 @@ func (v noteView) userListReplyShouldEmit(viewerID string, authorWithReplies boo
 	if v.n.Reply == nil {
 		return true
 	}
-	note := userListReplyPayload{UserID: v.n.UserID, Reply: v.n.Reply.replyMeta()}
+	note := userListReplyPayload{UserID: v.n.UserID, Reply: v.n.Reply.userListReplyTarget()}
 	return userListReplyAllows(&note, viewerID, authorWithReplies, following)
 }
 
