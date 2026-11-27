@@ -21,10 +21,11 @@ const fakePattern = (init: URLPatternInit): FakePattern => ({
 });
 
 // 先に一致した規則の source を返す (Static Routing API の決め方)。
-function routeOf(rules: RouterRule[], url: string, mode: RequestMode): RouterRule['source'] | undefined {
+function routeOf(rules: RouterRule[], url: string, mode: RequestMode, method = 'GET'): RouterRule['source'] | undefined {
 	for (const rule of rules) {
-		const { requestMode, urlPattern } = rule.condition as { requestMode?: string; urlPattern?: FakePattern };
+		const { requestMode, requestMethod, urlPattern } = rule.condition as { requestMode?: string; requestMethod?: string; urlPattern?: FakePattern };
 		if (requestMode !== undefined && requestMode !== mode) continue;
+		if (requestMethod !== undefined && requestMethod.toUpperCase() !== method) continue;
 		if (urlPattern !== undefined && !urlPattern.test(url)) continue;
 		return rule.source;
 	}
@@ -48,6 +49,11 @@ describe('routerRules', () => {
 
 	it.each(routeCases)('%s (%s) goes to %s', (url, mode, want) => {
 		expect(routeOf(rules, url, mode)).toBe(want);
+	});
+
+	// 確かめるページのボタンは、/flush へ POST で遷移する。これも Service Worker に通さない。
+	it.each(['https://example.test/flush', 'https://example.test/flush?x=1'])('a POST navigation to %s goes to the network', (url) => {
+		expect(routeOf(rules, url, 'navigate', 'POST')).toBe('network');
 	});
 
 	it('the fallback sends everything to the fetch handler', () => {
@@ -80,5 +86,13 @@ describe('respondsToFetch', () => {
 		['a navigation to /a/flush', req('https://example.test/a/flush', { 'sec-fetch-dest': 'document' }), true],
 	])('%s', (_label, request, want) => {
 		expect(respondsToFetch(request)).toBe(want);
+	});
+
+	it('a POST navigation to /flush (the confirm page\'s button)', () => {
+		const request = new Request('https://example.test/flush', {
+			method: 'POST',
+			headers: { 'sec-fetch-dest': 'document', accept: 'text/html', 'content-type': 'application/x-www-form-urlencoded' },
+		});
+		expect(respondsToFetch(request)).toBe(false);
 	});
 });
