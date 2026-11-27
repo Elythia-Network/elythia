@@ -181,7 +181,8 @@ func TestSupervisor_StopGenerationBoundsTheBackgroundWait(t *testing.T) {
 
 type countingUserUpdates struct {
 	repository.UserRepository
-	n atomic.Int32
+	n     atomic.Int32
+	wakes atomic.Int32
 }
 
 func (c *countingUserUpdates) UpdateUser(string, map[string]any) error {
@@ -189,7 +190,10 @@ func (c *countingUserUpdates) UpdateUser(string, map[string]any) error {
 	return nil
 }
 
-func (c *countingUserUpdates) WakeFromHibernation(string) (bool, error) { return false, nil }
+func (c *countingUserUpdates) WakeFromHibernation(string) (bool, error) {
+	c.wakes.Add(1)
+	return false, nil
+}
 
 // TestLastActiveRecorder_RunsInTheGenerationGroup checks that the
 // lastActiveDate update of a streaming connection starts in the group of the
@@ -199,11 +203,11 @@ func TestLastActiveRecorder_RunsInTheGenerationGroup(t *testing.T) {
 	repo := &countingUserUpdates{}
 	g := bgwork.New()
 	a := &lastActiveRecorderAdapter{userRepo: repo, background: g}
-	a.RecordActive("u1")
+	a.RecordActive("u1", false)
 	require.Zero(t, g.Stop(context.Background()))
 	assert.EqualValues(t, 1, repo.n.Load(), "世代の停止が更新を待たなかった")
 
-	a.RecordActive("u1")
+	a.RecordActive("u1", false)
 	time.Sleep(50 * time.Millisecond)
 	assert.EqualValues(t, 1, repo.n.Load(), "世代を止めた後に lastActiveDate を書きに行った")
 	assert.EqualValues(t, 1, g.Dropped())
@@ -218,7 +222,20 @@ func TestLastActiveRecorder_WakesHibernatedUser(t *testing.T) {
 	repo.Users["u4019"] = &model.User{ID: "u4019", IsHibernated: true}
 	g := bgwork.New()
 	a := &lastActiveRecorderAdapter{userRepo: repo, background: g}
-	a.RecordActive("u4019")
+	a.RecordActive("u4019", true)
 	require.Zero(t, g.Stop(context.Background()))
 	assert.False(t, repo.Users["u4019"].IsHibernated)
+}
+
+// TestLastActiveRecorder_SkipsWakeForAwakeUser checks that a connection of a
+// user who is not hibernated records lastActiveDate without the statement
+// clearing the hibernation (#4270). 0 行に当たるだけの文を接続のたびに流していた。
+func TestLastActiveRecorder_SkipsWakeForAwakeUser(t *testing.T) {
+	repo := &countingUserUpdates{}
+	g := bgwork.New()
+	a := &lastActiveRecorderAdapter{userRepo: repo, background: g}
+	a.RecordActive("u4270", false)
+	require.Zero(t, g.Stop(context.Background()))
+	assert.EqualValues(t, 1, repo.n.Load(), "lastActiveDate is not recorded")
+	assert.Zero(t, repo.wakes.Load(), "an awake user is woken")
 }

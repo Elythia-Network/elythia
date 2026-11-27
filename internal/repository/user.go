@@ -523,9 +523,10 @@ func (r *userRepository) UpdateUser(userID string, fields map[string]any) error 
 // WakeFromHibernation implements UserRepository.
 //
 // 休眠は TS 版から移した DB にだけある (Elythia は休眠させない)。ストリーミングの
-// 接続のたび (接続時と 5 分ごと) に呼ばれるので、1 文にして往復を 1 回にする。休眠して
-// いない利用者では、条件付きの UPDATE が 0 行に当たるだけで何も書かない。フォローの行は、
-// 利用者の印を外したときだけ外す (本家と同じ)。1 文なので、片方だけ外れることは無い。
+// 接続のうち、接続を受けた時点で休眠していた利用者の分 (接続時と 5 分ごと) に呼ばれる
+// (#4270) ので、1 文にして往復を 1 回にする。休眠していない利用者では、条件付きの
+// UPDATE が 0 行に当たるだけで何も書かない。フォローの行は、利用者の印を外したとき
+// だけ外す (本家と同じ)。1 文なので、片方だけ外れることは無い。
 func (r *userRepository) WakeFromHibernation(userID string) (bool, error) {
 	var woke int64
 	err := r.db.Raw(`
