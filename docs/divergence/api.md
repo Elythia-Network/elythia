@@ -209,7 +209,7 @@ GETで登録したルートは、本家(Fastifyの`exposeHeadRoutes`。既定で
 | 項目 | 本家 | Elythia |
 |---|---|---|
 | handlerから見たメソッド | `HEAD` | `GET`。本文が無いこと以外はGETと同じに扱わせる(RFC 9110)。本文を読まずに済ませたいhandler(`/files`、`/backup-download`、圧縮済みの静的ファイル)だけが、`internal/misc/headreq`でHEADを見分ける。それ以外(`c.File`で返す静的ファイルなど)は本文を作り、net/httpが捨てる |
-| `allowGet`の`/api/<名前>`へのHEAD | `fastify.all`で登録しているので、`ApiCallService`の`request.method === 'GET'`の分岐に入らない。引数をquery stringでなく本文(HEADなので無い)から読み、`cacheSec`の`Cache-Control`も付けない | GETと同じく引数をquery stringから読み、`Cache-Control`もGETと同じに付ける |
+| `allowGet`の`/api/<名前>`へのHEAD | HEADのままhandlerに届く(2026.11.0までは`fastify.all`で登録し、2026.11.1からはGETのルートに`exposeHeadRoutes`がHEADのルートを足す)ので、`ApiCallService`の`request.method === 'GET'`の分岐に入らない。引数をquery stringでなく本文(HEADなので無い)から読み、`cacheSec`の`Cache-Control`も付けない | GETと同じく引数をquery stringから読み、`Cache-Control`もGETと同じに付ける |
 | POSTだけの`/api/<名前>`へのHEAD | `allowGet`の検査はGETだけを見るので、HEADでもエンドポイントを引数なしで実行する | GETと同じく、`/api/*`のcatch-allが404(`UNKNOWN_API_ENDPOINT`)を返す |
 
 全メソッドで登録したルート(`/api/*`のcatch-all、`/oauth/*`など。echoのv4の`Any`と同じメソッドを`Match`で登録する。`internal/server/echo_v5.go`の`anyMethods`)はHEADのルートを持つので振り分けず、handlerにはHEADのまま届く。ただし、それより具体的なGETのルートがあるパス(`/api/emojis`など)は、本家と同じくそのGETのルートが答える。`/api/*`のcatch-allは、HEADにもGETと同じ404を返す(本家の`fastify.get('/*')`と同じ)。
@@ -240,11 +240,11 @@ echoのv5へ上げて (#4239)、frontendのビルドの配信 (`/vite/*`・`/emb
 
 ## `/api/clear-browser-cache`に無効なtokenを付けたとき (#3926)
 
-`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し (別のサイトが起こした要求は下の例外)、それ以外のメソッドには405を返す。本家はこのrouteをendpointの仕組みの外で`fastify.all`に直接登録するので、認証を通らない。Elythiaでは全ルートに掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenの検索がDBの失敗で落ちたときは500を返し、同じく`Clear-Site-Data`を付けない(#4212)。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
+`/api/clear-browser-cache`は、本家と同じくGETとPOSTに204と`Clear-Site-Data`を返し (別のサイトが起こした要求は下の例外)、それ以外のメソッドには405を返す。**本家は2026.11.1 (#18190) から、このrouteをGETとPOSTだけで登録する** (`fastify.route`) ので、GET・POST・HEAD以外のメソッドはfastifyの既定の404になる (2026.11.0までは`fastify.all`で受けて405を返していた)。HEADは、fastifyの`exposeHeadRoutes` (既定で有効。本家は指定していない) が同じhandlerに届けるので、本家もElythiaも405を返す。本体のfrontendはGETで呼ぶので、この違いを踏まない (#4277)。本家はこのrouteをendpointの仕組みの外で直接登録するので、認証を通らない。Elythiaでは全ルートに掛かる認証(`auth.Authenticate`)が先に走るので、**無効なtoken**(`i`、`Authorization: Bearer`)を付けると401(`AUTHENTICATION_FAILED`)を返し、`Clear-Site-Data`を付けない。tokenの検索がDBの失敗で落ちたときは500を返し、同じく`Clear-Site-Data`を付けない(#4212)。tokenを付けないとき・正しいtokenを付けたときは本家と同じ。
 
 本体のfrontendは、tokenを付けずに呼ぶ(`misskeyApiGet('clear-browser-cache', {})`)ので、この違いを踏まない。踏むのは、失効したtokenを付けたまま呼ぶ他のクライアントだけなので、全体の認証にこのパスの例外を足すことはしていない。
 
-**別のサイトが起こした要求 (`Sec-Fetch-Site`が`cross-site`か`same-site`) には、204を返すが`Clear-Site-Data`を付けない。** 本家は付ける。`executionContexts`は、このサーバーの開いているタブをすべて読み込み直させるので、別のサイトの`<img>`や遷移で、書きかけの投稿などを失わせられる。本体のfrontendは自分のオリジンから呼ぶ (`same-origin`) ので、この違いを踏まない。`Sec-Fetch-Site`を送らないクライアントでは本家と同じ。
+**別のサイトが起こした要求 (`Sec-Fetch-Site`が`cross-site`か`same-site`) には、204を返すが`Clear-Site-Data`を付けない。** 本体のfrontendは自分のオリジンから呼ぶ (`same-origin`) ので、これに当たらない。`Sec-Fetch-Site`を送らないクライアントには`Clear-Site-Data`を付ける。
 
 ## ロールのメンバー一覧と`usersCount`から、凍結中と削除済みを外す (#3999)
 
@@ -325,7 +325,7 @@ Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると
 
 ## 1. API endpoint
 
-upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。
+upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `/clear-browser-cache` (2026.11.1 からは `fastify.route` で GET と POST だけを登録する) は GET と POST の 2 件と数える (#3926)。
 
 ### 1-1. Elythia にしかない (119)
 

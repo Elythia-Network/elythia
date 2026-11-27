@@ -275,8 +275,10 @@ func (h *Handler) Signup(c *echo.Context) error {
 
 	// emailRequiredForSignup=true: 即時に user は作らず user_pending に積み、
 	// 確認メールを送って /api/signup-pending で本登録させる Misskey TS 互換フロー。
-	// testMode は完全バイパスしてフロント test での通常 signup を妨げない。
-	if !h.testMode && meta.EmailRequiredForSignup {
+	// **testMode でも迂回しない。** 本家が test で迂回するのは captcha と
+	// disableRegistration だけで、本家の backend e2e は emailRequiredForSignup を
+	// 有効にして仮登録の応答 (204) を確かめる (#4277)。
+	if meta.EmailRequiredForSignup {
 		if req.EmailAddress == "" {
 			return c.JSON(http.StatusBadRequest, apierr.Error("INVALID_PARAM", "emailAddress is required.", "3d81ceae-475f-4600-b2a8-2bc116157532"))
 		}

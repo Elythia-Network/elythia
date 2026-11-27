@@ -11,7 +11,8 @@ import (
 )
 
 // GET and POST clear the browser caches with 204 + Clear-Site-Data; any other
-// method is 405 without the header, like upstream (#3926).
+// method is 405 without the header (#3926). Upstream 2026.11.1 answers HEAD with
+// 405 too and the other methods with 404 (docs/divergence/api.md).
 func TestClearBrowserCache(t *testing.T) {
 	for _, tc := range []struct {
 		method string
@@ -39,9 +40,9 @@ func TestClearBrowserCache(t *testing.T) {
 	}
 }
 
-// A request another site started (an <img>, a navigation) answers 204 without
-// Clear-Site-Data, so another site cannot make every open tab reload; the
-// frontend calls it from its own origin.
+// A request another site started (Sec-Fetch-Site cross-site or same-site)
+// answers 204 without Clear-Site-Data; the frontend calls it from its own
+// origin.
 func TestClearBrowserCache_NotForAnotherSite(t *testing.T) {
 	for value, clears := range map[string]bool{
 		"cross-site":  false,
