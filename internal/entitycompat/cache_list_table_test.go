@@ -22,7 +22,7 @@ var cacheEntries = map[string]cacheEntry{
 	"internal/api/emojis.Handler": {kindFollowsRegistered, "encodedは/api/emojisの符号化済みの応答(#3593)。CachedEmojiRepository.ListLocal(一覧のemojis)が返したsliceと同じかを使うたびに比べ、違えば作り直すので、emojisを捨てれば追従する",
 		[]string{"emojiRepo", "encoded", "exportQueue"}, nil},
 	"internal/api/fetchrss.Handler": {kindDropLocal, "",
-		[]string{"cache", "cacheGen", "cacheMaxLen", "cacheMu", "cacheTTL", "httpClient", "inflight", "inflightMu", "maxConcurrent", "now", "parserPool", "sf", "userAgent"}, map[string]string{
+		[]string{"cache", "cacheGen", "cacheMaxLen", "cacheMu", "cacheTTL", "httpClient", "inflight", "inflightMu", "maxConcurrent", "now", "sf", "userAgent"}, map[string]string{
 			"inflight": "同時実行の上限の数え。鍵に世代の番号を含めるので、捨てた後の取得も上限に数える(4.4)",
 			"sf":       "実行中の取得をまとめるsingleflight。鍵に世代の番号を含めるので、捨てた後の呼び出しは相乗りしない",
 		}},

@@ -38,22 +38,16 @@ var knownHTMLImporters = []string{
 
 // otherHTMLParsers lists packages that parse HTML into a tree internally (with
 // their subpackages), the non-test files allowed to import each, and the route
-// they are reached by.
+// they are reached by. どれも今は許していない (fetch-rss のフィードは自前で読む)。
 var otherHTMLParsers = map[string]map[string]string{
-	"github.com/mmcdole/gofeed": {
-		"internal/api/fetchrss/handler.go": "fetch-rss parses the fetched feed",
-	},
+	"github.com/mmcdole/gofeed":      {},
 	"github.com/PuerkitoBio/goquery": {},
 }
 
 // dependencyTreeParsers lists the packages outside this repository, reached
 // from its non-test code, that build an x/net/html tree, and the route the
-// HTML they parse comes by.
-var dependencyTreeParsers = map[string]string{
-	"github.com/mmcdole/gofeed":                 "fetch-rss: gofeed looks for an image in the HTML of a feed's description",
-	"github.com/mmcdole/gofeed/internal/shared": "fetch-rss: gofeed resolves xml:base in the HTML of an Atom content",
-	"github.com/PuerkitoBio/goquery":            "fetch-rss: gofeed reads the HTML of a feed through goquery",
-}
+// HTML they parse comes by. どれも今は無い (fetch-rss は gofeed を使わない)。
+var dependencyTreeParsers = map[string]string{}
 
 // checkSource reports, for one Go file, the uses of x/net/html that build a
 // tree (calls and function values, under any import name), a dot import of
