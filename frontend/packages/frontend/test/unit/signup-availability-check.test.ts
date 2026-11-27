@@ -287,3 +287,34 @@ describe('MkSignupDialog.form unmount', () => {
 		expect(misskeyApi).not.toHaveBeenCalled();
 	});
 });
+
+// 送信時のメールの確認のガード (本家 2026.11.1 の #18106 から採った、#4277)。送信ボタンは
+// 確認が済むまで押せないが、Enter での送信は form の submit から onSubmit に届くので、
+// そこでもメールの確認が 'ok' でなければ送らない。
+describe('MkSignupDialog.form submit guard', () => {
+	test('does not send the signup until the email address is confirmed available', async () => {
+		instance.emailRequiredForSignup = true;
+		const fetch = vi.spyOn(window, 'fetch').mockImplementation(() => new Promise(() => {}));
+		try {
+			const view = renderForm();
+			await fillPasswords(view);
+			await typeAndSettle(inputOf(view, 'signup-username'), 'alice');
+			const held = holdNextCall();
+			await typeAndSettle(inputOf(view, 'signup-email'), 'alice@example.com');
+			const form = view.container.querySelector('form');
+			if (form == null) throw new Error('no form');
+
+			// メールの確認がまだ返っていない ('wait')
+			await fireEvent.submit(form);
+			expect(fetch).not.toHaveBeenCalled();
+
+			// 確認が済めば送る
+			held.resolve({ available: true, reason: null });
+			await vi.advanceTimersByTimeAsync(0);
+			await fireEvent.submit(form);
+			expect(fetch).toHaveBeenCalledTimes(1);
+		} finally {
+			fetch.mockRestore();
+		}
+	});
+});

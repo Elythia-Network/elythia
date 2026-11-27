@@ -46,9 +46,8 @@ func flushPage(siteURL string) echo.HandlerFunc {
 		h := c.Response().Header()
 		// 本家は付けないが、消去の指示を中継のキャッシュに残させない。
 		h.Set("Cache-Control", "private, no-store")
-		// **別のサイトから遷移させられたときは、消さずに確かめる。** 本家は確かめずに消すので、
-		// 別のサイトのリンクやスクリプトで遷移させるだけで、ログインと端末の設定を消させられる
-		// (トップレベルの遷移には Origin が付かないので、下の判定を素通りする)。
+		// **別のサイトから遷移させられたときは、消さずに確かめる。** 確かめるページのリンクを
+		// 押すと、自分のオリジンからの遷移になって消える。
 		if secfetch.FromOtherSite(c.Request()) {
 			return c.HTML(http.StatusOK, flushConfirmHTML)
 		}

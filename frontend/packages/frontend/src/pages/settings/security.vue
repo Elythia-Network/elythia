@@ -65,6 +65,9 @@ import MkButton from '@/components/MkButton.vue';
 import MkPagination from '@/components/MkPagination.vue';
 import * as os from '@/os.js';
 import { i18n } from '@/i18n.js';
+import { cloudBackup } from '@/preferences/utility.js';
+import { signout } from '@/signout.js';
+import { store } from '@/store.js';
 import { definePage } from '@/page.js';
 import MkFeatureBanner from '@/components/MkFeatureBanner.vue';
 import { Paginator } from '@/utility/paginator.js';
@@ -110,12 +113,32 @@ async function regenerateToken() {
 	const auth = await os.authenticateDialog();
 	if (auth.canceled) return;
 
+	const hideWaiting = os.waiting();
+
+	// トークンが消えるので先にバックアップを終わらせる
+	if (store.s.enablePreferencesAutoCloudBackup) {
+		try {
+			await cloudBackup();
+		} catch {
+			// nop
+		}
+	}
+
+	hideWaiting();
+
 	// Elythia: 二要素認証が有効ならサーバーがコードも検査する。失敗を黙って捨てない
-	// ように apiWithDialog で呼ぶ (本家は misskeyApi を投げっぱなしで、何も表示しない)
-	await os.apiWithDialog('i/regenerate-token', {
-		password: auth.result.password,
-		token: auth.result.token,
-	});
+	// ように apiWithDialog で呼ぶ (本家は misskeyApi で呼び、失敗しても何も表示しない)。
+	// 失敗はダイアログに出したので、サインアウトせずに戻る
+	try {
+		await os.apiWithDialog('i/regenerate-token', {
+			password: auth.result.password,
+			token: auth.result.token,
+		});
+	} catch {
+		return;
+	}
+
+	await signout();
 }
 
 const headerActions = computed(() => []);

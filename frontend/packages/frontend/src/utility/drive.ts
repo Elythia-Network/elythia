@@ -116,6 +116,12 @@ function showUploadError(status: number, rawResponse: string | null): void {
 			title: i18n.ts.failedToUpload,
 			text: i18n.ts.cannotUploadBecauseUnallowedFileType,
 		});
+	} else if (res.error?.id === 'b9adda75-abe9-4c6d-bf12-b5575833960d') {
+		os.alert({
+			type: 'error',
+			title: i18n.ts.failedToUpload,
+			text: i18n.ts.cannotUploadBecauseNoSuchFolder,
+		});
 	// 以下は mk-go の分割アップロード固有 (#2313)。純正 Misskey では発生しない。
 	} else if (res.error?.code === 'CHUNKED_UPLOAD_NOT_ALLOWED') {
 		os.alert({

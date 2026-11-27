@@ -65,9 +65,9 @@ function sleep(ms: number): Promise<void> {
 const LOCKED = 'Follow requests require approval';
 const AUTO_ACCEPT = "Automatically approve follow requests from users you're following";
 const LOCAL_APPROVAL = 'Follows from local users';
-const REMOTE_APPROVAL = 'Follows from remote users';
+const REMOTE_APPROVAL = 'Follows from remote servers';
 const APPROVAL_ACTION = 'Follows from accounts younger than the period';
-const CUSTOM_PERIOD = 'Specify a period';
+const CUSTOM_PERIOD = 'Specified time period';
 const FOLLOWERS_ONLY_BEFORE = 'Make past notes to be displayed only to followers';
 const HIDDEN_BEFORE = 'Make past notes private';
 const OLDER_THAN_DATE = 'Notes before the specified date and time';

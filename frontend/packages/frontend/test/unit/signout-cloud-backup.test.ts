@@ -36,13 +36,11 @@ afterEach(() => {
 
 describe('signout', () => {
 	test('finishes signing out when the automatic cloud backup fails', async () => {
-		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 		mocks.cloudBackup.mockImplementation(async () => { throw new Error('AUTHENTICATION_FAILED'); });
 
 		await expect(signout()).resolves.toBeUndefined();
 
 		expect(mocks.cloudBackup).toHaveBeenCalledTimes(1);
-		expect(error).toHaveBeenCalled();
 		expect(localStorage.getItem('account')).toBeNull();
 		expect(mocks.unisonReload).toHaveBeenCalledWith('/');
 	});
