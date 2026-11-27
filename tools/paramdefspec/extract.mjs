@@ -419,6 +419,24 @@ function readDirectRoutes() {
 	if (!mod) fail(`cannot read ${file}`);
 	const routes = new Set();
 	const visit = (node) => {
+		// 本家 2026.11.1 (#18190) から、GET と POST だけを登録する
+		// `fastify.route({ method, url, handler })` の形でも登録する。url を読む。
+		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === 'fastify' && node.expression.name.text === 'route') {
+			const opts = node.arguments[0];
+			const url = opts && ts.isObjectLiteralExpression(opts)
+				? opts.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'url')
+				: undefined;
+			if (!url) fail(`unsupported route registration in ${file}: ${node.getText().slice(0, 120)}`);
+			const a = url.initializer;
+			if (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) {
+				if (a.text !== '/*') {
+					if (!a.text.startsWith('/')) fail(`unexpected route path ${a.text} in ${file}`);
+					routes.add(a.text.slice(1));
+				}
+			} else if (!(ts.isBinaryExpression(a) && a.getText() === "'/' + endpoint.name")) {
+				fail(`unsupported route registration in ${file}: ${node.getText().slice(0, 120)}`);
+			}
+		}
 		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === 'fastify' && ['get', 'post', 'all', 'put', 'delete', 'patch'].includes(node.expression.name.text)) {
 			const a = node.arguments[0];
 			if (a && (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a))) {

@@ -270,6 +270,74 @@ func TestCollectTSDirectRoutes(t *testing.T) {
 	}
 }
 
+// 本家 2026.11.1 (#18190) から、GET と POST だけを `fastify.route({ method, url,
+// handler })` で登録する。endpoint ごとの登録 (url が `'/' + endpoint.name`) は
+// 拾わず、url が literal のものを method ごとに拾う (#4277)。
+func TestCollectTSDirectRoutes_RouteForm(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ApiServerService.ts")
+	src := `
+		fastify.route<{
+			Params: { endpoint: string; },
+		}>({
+			method: ['GET', 'POST'],
+			url: '/' + endpoint.name,
+			bodyLimit: 1024 * 1024,
+			handler: async (request, reply) => {
+				return reply;
+			},
+		});
+
+		fastify.post<{ Body: { code: string; } }>('/signup-pending', (request, reply) => x);
+
+		fastify.route({
+			method: ['GET', 'POST'],
+			url: '/clear-browser-cache',
+			handler: (request, reply) => {
+				reply.code(204);
+			},
+		});
+	`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	got, err := collectTSDirectRoutes(path)
+	if err != nil {
+		t.Fatalf("collectTSDirectRoutes: %v", err)
+	}
+	want := []tsDirectRoute{
+		{Method: "GET", Path: "/api/clear-browser-cache"},
+		{Method: "POST", Path: "/api/clear-browser-cache"},
+		{Method: "POST", Path: "/api/signup-pending"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("direct routes mismatch\n got %v\nwant %v", got, want)
+	}
+}
+
+// 読めない形の fastify.route (handler を url より前に書いた形など) は、黙って
+// 落とさずにエラーにする。
+func TestCollectTSDirectRoutes_UnreadableRouteFormIsError(t *testing.T) {
+	for name, route := range map[string]string{
+		"handler before url": `fastify.route({
+			handler: (request, reply) => { reply.code(204); },
+			method: ['GET', 'POST'],
+			url: '/clear-browser-cache',
+		});`,
+		"options in a variable": `fastify.route(clearBrowserCacheRoute);`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ApiServerService.ts")
+			src := "fastify.post('/signup', (request, reply) => x);\n" + route
+			if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			if _, err := collectTSDirectRoutes(path); err == nil {
+				t.Fatal("expected error for an unreadable fastify.route registration")
+			}
+		})
+	}
+}
+
 // 書式が変わって 1 件も取れなくなったら、静かに空集合を返さずエラーにする
 // (直登録 endpoint が丸ごと "mk-go only" に誤分類されるのを防ぐ)。
 func TestCollectTSDirectRoutes_EmptyIsError(t *testing.T) {
