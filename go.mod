@@ -31,7 +31,6 @@ require (
 	github.com/kovidgoyal/imaging v1.8.21
 	github.com/labstack/echo/v5 v5.4.6
 	github.com/meilisearch/meilisearch-go v0.36.1
-	github.com/mmcdole/gofeed v1.3.0
 	github.com/moby/patternmatcher v0.6.1
 	github.com/mrjoshuak/go-jpeg2000 v1.2.1
 	github.com/multiformats/go-multibase v0.3.0
@@ -70,9 +69,7 @@ require (
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect
-	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
@@ -123,7 +120,6 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mdelapenya/tlscert v0.2.0 // indirect
-	github.com/mmcdole/goxpp v1.1.1-0.20240225020742-a0c311522b23 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.3.0 // indirect
 	github.com/moby/moby/api v1.54.1 // indirect

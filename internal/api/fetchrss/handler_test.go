@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/mmcdole/gofeed"
-	ext "github.com/mmcdole/gofeed/extensions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -269,7 +267,7 @@ func TestFetchRSS_UnparseableBody(t *testing.T) {
 func TestFetchRSS_OversizedBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Cap is 1 MiB; send 2 MiB. ReadAllLimit returns ErrMaxBytesExceeded so
-		// fetchFeed surfaces FETCH_RSS_FAILED before we ever call gofeed.
+		// fetchFeed surfaces FETCH_RSS_FAILED before we ever parse the feed.
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", 2<<20))
 		_, _ = w.Write(make([]byte, 2<<20))
 	}))
@@ -642,7 +640,7 @@ func TestPackImage_Nil(t *testing.T) {
 
 func TestPackEnclosure_BadLength(t *testing.T) {
 	// length が parse できない値の場合は length フィールドだけ省略し、url/type は残す
-	out := packEnclosure([]*gofeed.Enclosure{{
+	out := packEnclosure([]*feedEnclosure{{
 		URL:    "https://example.com/audio.mp3",
 		Type:   "audio/mpeg",
 		Length: "not-a-number",
@@ -656,17 +654,17 @@ func TestPackEnclosure_BadLength(t *testing.T) {
 
 func TestPackEnclosure_Empty(t *testing.T) {
 	assert.Nil(t, packEnclosure(nil))
-	assert.Nil(t, packEnclosure([]*gofeed.Enclosure{nil}))
-	assert.Nil(t, packEnclosure([]*gofeed.Enclosure{{}}))
+	assert.Nil(t, packEnclosure([]*feedEnclosure{nil}))
+	assert.Nil(t, packEnclosure([]*feedEnclosure{{}}))
 }
 
 func TestPackImage_TitleOnly(t *testing.T) {
 	// URL 空の Image (本来は schema 違反だが防御的に省略する)
-	assert.Nil(t, packImage(&gofeed.Image{Title: "lonely"}))
+	assert.Nil(t, packImage(&feedImage{Title: "lonely"}))
 }
 
 func TestPackImage_NoTitle(t *testing.T) {
-	out := packImage(&gofeed.Image{URL: "https://example.com/i.png"})
+	out := packImage(&feedImage{URL: "https://example.com/i.png"})
 	require.NotNil(t, out)
 	assert.Equal(t, "https://example.com/i.png", out["url"])
 	_, hasTitle := out["title"]
@@ -674,30 +672,30 @@ func TestPackImage_NoTitle(t *testing.T) {
 }
 
 func TestPackITunes_Nil(t *testing.T) {
-	assert.Nil(t, packITunes(&gofeed.Feed{}))
+	assert.Nil(t, packITunes(&feed{}))
 	// extension 全フィールド空 → 結果も nil
-	assert.Nil(t, packITunes(&gofeed.Feed{ITunesExt: &ext.ITunesFeedExtension{}}))
+	assert.Nil(t, packITunes(&feed{ITunes: &itunesFeed{}}))
 }
 
 func TestPackITunes_Full(t *testing.T) {
-	feed := &gofeed.Feed{ITunesExt: &ext.ITunesFeedExtension{
+	f := &feed{ITunes: &itunesFeed{
 		Image:    "https://example.com/cover.jpg",
 		Author:   "Show Host",
 		Summary:  "All about feeds",
 		Explicit: "no",
 		Keywords: "tech, golang , , rss",
-		Owner: &ext.ITunesOwner{
+		Owner: &itunesOwner{
 			Name:  "Owner Name",
 			Email: "owner@example.com",
 		},
-		Categories: []*ext.ITunesCategory{
-			{Text: "Technology", Subcategory: &ext.ITunesCategory{Text: "Programming"}},
+		Categories: []*itunesCategory{
+			{Text: "Technology", Subcategory: &itunesCategory{Text: "Programming"}},
 			{Text: "News"},
 			nil,
 			{Text: ""},
 		},
 	}}
-	out := packITunes(feed)
+	out := packITunes(f)
 	require.NotNil(t, out)
 	assert.Equal(t, "https://example.com/cover.jpg", out["image"])
 	assert.Equal(t, "Show Host", out["author"])
@@ -711,7 +709,7 @@ func TestPackITunes_Full(t *testing.T) {
 }
 
 func TestPackITunes_KeywordsAllBlank(t *testing.T) {
-	out := packITunes(&gofeed.Feed{ITunesExt: &ext.ITunesFeedExtension{
+	out := packITunes(&feed{ITunes: &itunesFeed{
 		Keywords: ", ,  ,",
 	}})
 	// blank-only keywords は categories と同じく省略する
@@ -719,8 +717,8 @@ func TestPackITunes_KeywordsAllBlank(t *testing.T) {
 }
 
 func TestPackITunes_OwnerNameOnly(t *testing.T) {
-	out := packITunes(&gofeed.Feed{ITunesExt: &ext.ITunesFeedExtension{
-		Owner: &ext.ITunesOwner{Name: "Solo"},
+	out := packITunes(&feed{ITunes: &itunesFeed{
+		Owner: &itunesOwner{Name: "Solo"},
 	}})
 	require.NotNil(t, out)
 	owner := out["owner"].(map[string]any)
@@ -730,47 +728,47 @@ func TestPackITunes_OwnerNameOnly(t *testing.T) {
 }
 
 func TestItemCreator_Authors(t *testing.T) {
-	got := itemCreator(&gofeed.Item{
-		Authors: []*gofeed.Person{{Name: "Atom Author"}},
-		Author:  &gofeed.Person{Name: "Deprecated"},
+	got := itemCreator(&feedItem{
+		Authors: []*feedPerson{{Name: "Atom Author"}},
+		Author:  &feedPerson{Name: "Deprecated"},
 	})
 	assert.Equal(t, "Atom Author", got)
 }
 
 func TestItemCreator_DeprecatedAuthor(t *testing.T) {
-	got := itemCreator(&gofeed.Item{
-		Author: &gofeed.Person{Name: "Old Author"},
+	got := itemCreator(&feedItem{
+		Author: &feedPerson{Name: "Old Author"},
 	})
 	assert.Equal(t, "Old Author", got)
 }
 
 func TestItemCreator_DublinCoreFallback(t *testing.T) {
-	got := itemCreator(&gofeed.Item{
-		DublinCoreExt: &ext.DublinCoreExtension{Creator: []string{"DC Creator"}},
+	got := itemCreator(&feedItem{
+		DCCreator: []string{"DC Creator"},
 	})
 	assert.Equal(t, "DC Creator", got)
 }
 
 func TestItemCreator_Empty(t *testing.T) {
-	assert.Equal(t, "", itemCreator(&gofeed.Item{}))
+	assert.Equal(t, "", itemCreator(&feedItem{}))
 	// nil authors / empty arrays
-	assert.Equal(t, "", itemCreator(&gofeed.Item{Authors: []*gofeed.Person{nil}}))
-	assert.Equal(t, "", itemCreator(&gofeed.Item{Authors: []*gofeed.Person{{}}}))
+	assert.Equal(t, "", itemCreator(&feedItem{Authors: []*feedPerson{nil}}))
+	assert.Equal(t, "", itemCreator(&feedItem{Authors: []*feedPerson{{}}}))
 }
 
 func TestContentSnippet_Empty(t *testing.T) {
-	assert.Equal(t, "", contentSnippet(&gofeed.Item{}))
+	assert.Equal(t, "", contentSnippet(&feedItem{}))
 }
 
 func TestContentSnippet_DescriptionFallback(t *testing.T) {
-	got := contentSnippet(&gofeed.Item{Description: "<b>Hello</b>"})
+	got := contentSnippet(&feedItem{Description: "<b>Hello</b>"})
 	assert.Equal(t, "Hello", got)
 }
 
 func TestPackItem_PublishedFallback(t *testing.T) {
 	// PublishedParsed が無く UpdatedParsed しか無い場合 isoDate は updated 由来
 	updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	out := packItem(&gofeed.Item{
+	out := packItem(&feedItem{
 		Title:         "x",
 		UpdatedParsed: &updated,
 	})

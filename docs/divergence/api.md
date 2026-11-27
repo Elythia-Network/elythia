@@ -308,6 +308,21 @@ Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると
 - ログインしているローカルの利用者には絞らない。`notes/show`以外のAPI (`users/notes`・タイムライン・検索など) と、リノート元・返信先として埋め込まれたノートも絞らない。公開のノートは、これらの経路から読める
 - `/notes/:id`をWebページとして取られたときのOGPは、自分のホストを入れても、絞ったノートでは出さないまま (#4199)。取りに来るのは主にリンクカードを作る他のサーバーで、どのサーバーかを確かめられないため
 
+## `fetch-rss`のフィードの読み方
+
+フィードは、HTMLを木として解析せずに読む (`internal/api/fetchrss`)。以前は`github.com/mmcdole/gofeed`で読んでいたが、gofeedは本文のHTMLを木として解析する箇所を持つため、外から来るHTMLを木にせずに読むようにしたとき (`internal/misc/htmlstream`、[security.md](security.md)) にやめた。応答の値はgofeedのときと同じにしてあり、`testdata/feeds`の各フィードについて、gofeedが返した応答 (gofeedをやめる前のコミットで作ったgolden) と突き合わせている (`TestParseFeed_MatchesGofeed`)。違うのは、gofeedがHTMLを解析して作っていた次の値と、下の箇条書きの名前空間の宣言の有効範囲の扱いだけで、表の上の2つは本家 (`rss-parser`) の応答に近づく向き。
+
+| 項目 | 本家 (rss-parser) | gofeedのとき | 今 |
+|---|---|---|---|
+| フィードの`image` | `<image>`の`url`だけ | `<image>`・`itunes:image`・`media:content`が無いと、`description`のHTMLの最初の`<img>`を使った | `description`のHTMLは見ない (`<image>`・`itunes:image`・`media:content`は今までどおり) |
+| Atomの本文 (`content`・`summary`・`title`) の中の相対URL | 解決しない | `xml:base`があると、HTMLの中の`href`・`src`などを解決し、HTMLとして書き直していた | 解決しない。HTMLは元の文字列のまま |
+| Atomの`type="xhtml"`の本文と、タグをエスケープせずに書いた`type="html"`の本文 | XMLとして書き直す (xml2jsの`Builder`) | 外側の`div`を外し、HTMLとして書き直していた | 外側の`div`を外し、中身は元のXMLのまま返す。属性だけは、gofeedのときと同じく二重引用符で書き直し、属性の値の中の実体参照 (`&nbsp;`など) も同じく解く。接頭辞の付いた`div` (`xhtml:div`) は、gofeedと同じく外さない。gofeedと違うのは、中身の文字 (gofeedはHTMLとして書き直していたので、`'`を`&#39;`に、`"`を`&#34;`にし、`&#65;`・`&#160;`などの文字参照を解き、タグ名と属性名を小文字にし、`<p/>`を閉じない`<p>`として後ろの要素をその中に入れていた。今は元のXMLのまま)、値の無い属性 (gofeedは空の値、今は名前と同じ値)、HTMLでは`head`へ移る要素 (`link`など) が`div`の前にあるとき (gofeedは`div`を外し、今は外さない) |
+
+- `xml:base`による`link`・`logo`・`icon`・`id`などのURLの解決は、gofeedと同じく行う (HTMLの中ではないため)
+- 名前空間の宣言は、XMLの宣言の有効範囲どおりに扱う。gofeedは、読み飛ばした要素 (応答に使わない要素など) で宣言した接頭辞と、読み飛ばした要素を中に持つ要素で宣言した接頭辞を、その要素の後ろにも持ち越していたので、同じURIを別の接頭辞で宣言し直した後ろの要素 (RSSの`atom:link rel="self"`など) の読み方が変わり、`feedUrl`などが違う値になることがある
+- JSON Feedは、gofeedのときと同じく読む (本家は読まない)。応答に使わない項目も、gofeedと同じく型の誤りで失敗する
+- フィードは、入力の長さに比例する時間とメモリで読む。要素の入れ子の深さ (根の要素を1段目として数える。閉じていない要素は、外側の要素の終わりのタグで閉じるまで数える)、1つの要素の属性の数 (名前空間の宣言 `xmlns` も数える)、文書全体で宣言する名前空間の数 (URIの数。同じURIの宣言し直しは数えない)、名前空間を宣言する要素の入れ子の深さに上限を置き、超えるフィードは解析する前に拒否する (`FETCH_RSS_FAILED`)。エスケープせずにHTMLを書いた本文は、閉じていない`<br>`などを数千個まで含んでも読める (gofeedは数に関わらず読めた)。`xml:base`は、解決したURLの長さ、入れ子で積んだものの長さの合計、文書全体で解決したものの長さの合計 (フィードの長さに比例する量) に上限を置き、超えたものは解決に使わない (その外側の`xml:base`のまま読む)。長さはpercent-encodeした後のバイト数で数える (ASCIIでない文字は、UTF-8の1バイトが3バイトになる)。1つの上限は、日本語などの長いパーマリンクも入る大きさにしてある。XMLの解析と日付の読み取りには時間の上限 (取得の残り時間がそれより短ければ、その時間) もある (JSON Feedの、JSONそのものの読み取りには掛からない)。本文の上限 (1MiB) は今までどおり
+
 ## 1. API endpoint
 
 upstream の endpoint は `endpoints/` 配下 438 件 + `ApiServerService.ts` の fastify 直登録 8 件 (POST 6 / GET 2) = **446 件**。うち **446 件すべてを実装済み (coverage 100.0%)**。直登録の `fastify.all` (`/clear-browser-cache`) は GET と POST の 2 件と数える (#3926)。

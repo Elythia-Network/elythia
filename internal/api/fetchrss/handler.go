@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -25,7 +24,6 @@ import (
 	"github.com/elythia-network/elythia/internal/safehttp"
 	"github.com/elythia-network/elythia/internal/server/middleware"
 	"github.com/labstack/echo/v5"
-	"github.com/mmcdole/gofeed"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -63,7 +61,7 @@ const DefaultCacheMaxEntries = 1024
 
 // Handler serves /api/fetch-rss. The HTTP client must be wired with an
 // SSRF-safe transport (see internal/server/outbound_http.go); the handler
-// itself adds only request-shape validation and gofeed translation. Note
+// itself adds only request-shape validation and feed translation. Note
 // that safehttp.NewSSRFSafeTransport applies the private-IP guard on every
 // dial, so HTTP redirects to private IPs are also blocked — the handler
 // can rely on the transport for redirect-chain SSRF defense.
@@ -75,7 +73,6 @@ const DefaultCacheMaxEntries = 1024
 type Handler struct {
 	httpClient *http.Client
 	userAgent  string
-	parserPool *sync.Pool
 
 	// Cache configuration.
 	cacheTTL    time.Duration
@@ -120,12 +117,8 @@ type cacheEntry struct {
 // `Elythia/<ver>` identification used everywhere else.
 func New(httpClient *http.Client, userAgent string) *Handler {
 	return &Handler{
-		httpClient: httpClient,
-		userAgent:  userAgent,
-		// gofeed.Parser の goroutine 安全性は明記されていないため pool 経由で
-		// 1 リクエスト 1 インスタンスに分離する。Pool reuse でアロケーションは
-		// 実質ゼロに保つ。
-		parserPool:    &sync.Pool{New: func() any { return gofeed.NewParser() }},
+		httpClient:    httpClient,
+		userAgent:     userAgent,
 		cacheTTL:      time.Duration(CacheSeconds) * time.Second,
 		cacheMaxLen:   DefaultCacheMaxEntries,
 		cache:         make(map[string]cacheEntry),
@@ -480,9 +473,9 @@ func (h *Handler) evictOldestLocked() {
 	}
 }
 
-// fetchFeed performs the GET + body cap + gofeed parse. Kept separate so
+// fetchFeed performs the GET + body cap + feed parse. Kept separate so
 // tests can stub at a coarser layer.
-func (h *Handler) fetchFeed(ctx context.Context, feedURL string) (*gofeed.Feed, error) {
+func (h *Handler) fetchFeed(ctx context.Context, feedURL string) (*feed, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -520,32 +513,23 @@ func (h *Handler) fetchFeed(ctx context.Context, feedURL string) (*gofeed.Feed, 
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	parser := h.parserPool.Get().(*gofeed.Parser)
-	defer h.parserPool.Put(parser)
-	return parseFeedWith(parser, body)
-}
-
-// parseFeed parses a fetched feed body.
-func parseFeed(body []byte) (*gofeed.Feed, error) {
-	return parseFeedWith(gofeed.NewParser(), body)
-}
-
-func parseFeedWith(parser *gofeed.Parser, body []byte) (*gofeed.Feed, error) {
-	feed, err := parser.Parse(bytes.NewReader(body))
+	// 解析にも時間の上限を置く。取得の残り時間 (ctx の期限) を超えては続けない。
+	deadline := time.Now().Add(feedParseTime())
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	parsed, err := parseFeedUntil(body, deadline)
 	if err != nil {
 		return nil, fmt.Errorf("parse feed: %w", err)
 	}
-	if feed == nil {
-		return nil, errors.New("parser returned nil feed")
-	}
-	return feed, nil
+	return parsed, nil
 }
 
-// packFeed maps gofeed.Feed onto the Misskey-compatible response shape. Empty
+// packFeed maps a parsed feed onto the Misskey-compatible response shape. Empty
 // fields are omitted entirely (Misskey TS marks them `optional: true` and
 // rss-parser leaves them undefined). `items` is always present as an array,
 // matching the `optional: false` declaration in the upstream meta.
-func packFeed(feed *gofeed.Feed) map[string]any {
+func packFeed(feed *feed) map[string]any {
 	out := map[string]any{}
 	if feed.Title != "" {
 		out["title"] = feed.Title
@@ -573,9 +557,8 @@ func packFeed(feed *gofeed.Feed) map[string]any {
 	out["items"] = items
 
 	// upstream は RFC5005 の atom:link rel=self/first/next/last/prev を
-	// paginationLinks (optional) として返すが、gofeed の universal Feed は
-	// link の rel 属性を unified model に surface しない (Feed.Links は href のみ)。
-	// 取得には atom 専用 re-parse が必要だが、(1) optional かつ paging を advertise
+	// paginationLinks (optional) として返すが、Elythia は読んでいない (以前使って
+	// いた gofeed が link の rel 属性を返さなかったため)。(1) optional かつ paging を advertise
 	// する feed は稀、(2) drop-in frontend は paginationLinks を消費しない
 	// (misskey-js autogen 型に存在するのみ) ため、本フィールドは意図的に omit する
 	// (#1778)。
@@ -583,7 +566,7 @@ func packFeed(feed *gofeed.Feed) map[string]any {
 	return out
 }
 
-func packImage(img *gofeed.Image) map[string]any {
+func packImage(img *feedImage) map[string]any {
 	if img == nil || img.URL == "" {
 		return nil
 	}
@@ -594,8 +577,8 @@ func packImage(img *gofeed.Image) map[string]any {
 	return out
 }
 
-func packITunes(feed *gofeed.Feed) map[string]any {
-	ext := feed.ITunesExt
+func packITunes(feed *feed) map[string]any {
+	ext := feed.ITunes
 	if ext == nil {
 		return nil
 	}
@@ -613,7 +596,7 @@ func packITunes(feed *gofeed.Feed) map[string]any {
 		out["explicit"] = ext.Explicit
 	}
 	if len(ext.Categories) > 0 {
-		// gofeed の Categories は階層 ([{Text, Subcategory}]) だが、Misskey は
+		// itunes:category は階層 ([{Text, Subcategory}]) だが、Misskey は
 		// flat string[] を期待するので flatten する。
 		cats := make([]string, 0, len(ext.Categories))
 		for _, cat := range ext.Categories {
@@ -630,7 +613,7 @@ func packITunes(feed *gofeed.Feed) map[string]any {
 		}
 	}
 	if ext.Keywords != "" {
-		// gofeed は keywords を生のまま string で持つ (RSS itunes は CSV)。
+		// keywords は生のまま string で持つ (RSS itunes は CSV)。
 		// Misskey schema は array なので rss-parser 互換に split + trim する。
 		parts := strings.Split(ext.Keywords, ",")
 		kws := make([]string, 0, len(parts))
@@ -661,7 +644,7 @@ func packITunes(feed *gofeed.Feed) map[string]any {
 	return out
 }
 
-func packItem(it *gofeed.Item) map[string]any {
+func packItem(it *feedItem) map[string]any {
 	out := map[string]any{}
 	if it.Title != "" {
 		out["title"] = it.Title
@@ -703,7 +686,7 @@ func packItem(it *gofeed.Item) map[string]any {
 	return out
 }
 
-func itemCreator(it *gofeed.Item) string {
+func itemCreator(it *feedItem) string {
 	// Atom は <author><name>...</name></author>、RSS 2.0 は <dc:creator>...</dc:creator>
 	// が一般的。両系統を rss-parser と同じ優先順で見る。
 	if len(it.Authors) > 0 && it.Authors[0] != nil && it.Authors[0].Name != "" {
@@ -712,13 +695,13 @@ func itemCreator(it *gofeed.Item) string {
 	if it.Author != nil && it.Author.Name != "" {
 		return it.Author.Name
 	}
-	if it.DublinCoreExt != nil && len(it.DublinCoreExt.Creator) > 0 {
-		return it.DublinCoreExt.Creator[0]
+	if len(it.DCCreator) > 0 {
+		return it.DCCreator[0]
 	}
 	return ""
 }
 
-func packEnclosure(encs []*gofeed.Enclosure) map[string]any {
+func packEnclosure(encs []*feedEnclosure) map[string]any {
 	if len(encs) == 0 {
 		return nil
 	}
@@ -732,7 +715,7 @@ func packEnclosure(encs []*gofeed.Enclosure) map[string]any {
 	}
 	if e.Length != "" {
 		// rss-parser は length を Number に変換するため schema は number。
-		// gofeed は string で持つので int 変換、失敗時は省略する。
+		// 文字列で持つので int 変換、失敗時は省略する。
 		if n, err := strconv.ParseInt(e.Length, 10, 64); err == nil {
 			out["length"] = n
 		}
@@ -749,7 +732,7 @@ var (
 // description から HTML タグを除去し、whitespace を 1 個に正規化、前後 trim。
 // frontend MFM レンダラに直接渡されることはないが、ticker のテキスト表示で
 // 使われる場合があるため形だけ揃える。
-func contentSnippet(it *gofeed.Item) string {
+func contentSnippet(it *feedItem) string {
 	src := it.Content
 	if src == "" {
 		src = it.Description
