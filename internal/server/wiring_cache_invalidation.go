@@ -76,6 +76,8 @@ type cacheInvalidationDeps struct {
 	notificationsHandler     *notifications.Handler
 	notePublisher            *stream.NotePublisher
 	serverStatsPub           *stream.ServerStatsPublisher
+	adRepo                   *repository.CachedAdRepository
+	proxyAccountNames        *proxyAccountNames
 }
 
 // wireCacheInvalidation connects the caches other processes must hear about
@@ -121,6 +123,8 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	notificationsHandler := d.notificationsHandler
 	notePublisher := d.notePublisher
 	serverStatsPub := d.serverStatsPub
+	adRepo := d.adRepo
+	proxyAccountNames := d.proxyAccountNames
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
 	// internal:metaUpdated を publish し、各 worker は受信して自プロセスの
@@ -170,6 +174,10 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	// meta の系統のキャッシュを一覧に登録する (#3721)。捨てる順は下の hook と購読と
 	// 同じで、meta 行を先に捨てる (逆だと、間に来たリクエストが古い行から組み直す)。
 	s.addCache("cachedMeta", cacheFromDB, cachedMeta)
+	// 広告は /api/meta の応答の元なので、その前に捨てる (#4276)。
+	s.addCache("ads", cacheFromDB, adRepo)
+	// プロキシの名前も /api/meta と /nodeinfo の応答の元 (#4276)。
+	s.addCache("proxyAccountName", cacheFromDB, proxyAccountNames)
 	s.addCache("metaResponse", cacheFromDB, metaHandler)
 	s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
 	// captchaとリアクションの切り替えはmetaから読み直す項目として登録する(#3777)。
@@ -277,6 +285,20 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	})
 	internalPubSub.Subscribe(context.Background(), "userWebhookUpdated", func([]byte) {
 		cachedWebhook.Invalidate()
+	})
+
+	// #4276: 広告の cross-worker cache invalidation。webhook と同じ形で、書き込んだ
+	// プロセスが自分のキャッシュを捨ててから internal:adsUpdated を publish し、他の
+	// プロセスは受けて捨てる。/api/meta の応答のキャッシュも広告を含むので、一緒に
+	// 捨てる (書き込んだプロセスでは admin の handler が捨てる)。広告を先に捨てる。
+	adRepo.SetInvalidationHook(func() {
+		if err := internalPubSub.Publish(context.Background(), "adsUpdated", struct{}{}); err != nil {
+			slog.Warn("ad: publish adsUpdated failed", "err", err)
+		}
+	})
+	internalPubSub.Subscribe(context.Background(), "adsUpdated", func([]byte) {
+		adRepo.Invalidate()
+		metaHandler.InvalidateResponseCache()
 	})
 
 	// #3607: 閲覧者ごとの関係のキャッシュの cross-worker invalidation。

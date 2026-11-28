@@ -20,9 +20,11 @@ import (
 //
 // TTL 分だけ残るのは次の 4 つ:
 //
-//   - 他 worker が処理した ads の変更 (meta と違って cross-worker 経路が無い)
+//   - 他 worker が処理した ads の変更のうち、internal:adsUpdated (#4276) が
+//     この worker に届かなかったもの
 //   - ads の startsAt / expiresAt の境界またぎ
-//   - proxyAccountName の変更 (system_account の insert は meta 更新を伴わない)
+//   - proxyAccountName が初めて作られたとき (system_account の insert は meta
+//     更新を伴わない。一度見つかった名前は変わらないので、プロセスに持つ。#4276)
 //   - invalidate がこの worker に届かなかった meta 更新。CachedMetaRepository を
 //     経由しない書き込みのほか、metaUpdated の publish 失敗 (router は warn を
 //     出すだけ) や subscriber の切断中に流れた分も含む。Redis pub/sub は再送

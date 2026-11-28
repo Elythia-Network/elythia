@@ -274,7 +274,7 @@ func (s *Server) wireAccounts(d accountsDeps) (*corefederation.RemoteStatsFetche
 	// relationship queue (#2403) に載るので AP 配送を詰まらせない。
 	accountMover.SetFollowQueue(s.queueClient)
 	// proxy account はリスト購読のため機械的に follow しているだけなので
-	// 引き継ぎ対象から外す。newProxyAccountResolver は username を返す別用途の
+	// 引き継ぎ対象から外す。newProxyAccountNames は username を返す別用途の
 	// resolver なので、ここでは user id を引く専用のもの (moveSystemAccountRepo) を渡す。
 	accountMover.SetProxyAccountResolver(func() (string, bool) {
 		sa, err := moveSystemAccountRepo.FindByType("proxy")
