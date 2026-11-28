@@ -30,6 +30,11 @@ type TouchBuffer struct {
 	pending map[string]time.Time // host → 最新観測時刻
 	stopCh  chan struct{}
 	doneCh  chan struct{}
+	// armCh は、空だった pending に最初の 1 件が積まれたことを runLoop へ知らせる。
+	// 待機中も 1 秒ごとに起きていた (2026-11-26 の監査で毎分 60 回) ので、積まれた
+	// ものがある間だけタイマーを動かす (#4276)。容量 1 で、送れなければ既に知らせが
+	// 届いているので捨ててよい。
+	armCh   chan struct{}
 	flushIn time.Duration
 	// started=true は Start() が既に bg goroutine を起動済であることを表す。
 	// Close は started=false なら doneCh を待たずに pending だけ flush する
@@ -40,6 +45,9 @@ type TouchBuffer struct {
 	// 閉じた後の pending は誰も flush しないので、積むと黙って消える (#3662)。
 	// mu で守る。
 	closed bool
+	// onTimer はテスト専用。timer が発火して flush する前に呼ばれる。Start より
+	// 前にだけ設定する。
+	onTimer func()
 }
 
 // NewTouchBuffer returns a buffer that flushes every flushInterval.
@@ -54,6 +62,7 @@ func NewTouchBuffer(target TouchTarget, flushInterval time.Duration) *TouchBuffe
 		pending: make(map[string]time.Time),
 		stopCh:  make(chan struct{}),
 		doneCh:  make(chan struct{}),
+		armCh:   make(chan struct{}, 1),
 		flushIn: flushInterval,
 	}
 }
@@ -102,8 +111,15 @@ func (b *TouchBuffer) MarkRequestReceived(host string) error {
 		b.mu.Unlock()
 		return b.target.MarkRequestReceived(host)
 	}
+	wasEmpty := len(b.pending) == 0
 	b.pending[host] = b.clock()
 	b.mu.Unlock()
+	if wasEmpty {
+		select {
+		case b.armCh <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 
@@ -116,15 +132,28 @@ func (b *TouchBuffer) markClosed() {
 }
 
 // FlushNow drains the pending map and applies updates synchronously.
-// Test 用。production 経路は runLoop が定期 flush する。
+// Test 用。production 経路は runLoop が、積まれてから flushIn 後に flush する。
 func (b *TouchBuffer) FlushNow() {
 	b.flushOnce()
 }
 
+// runLoop flushes the pending map flushIn after its first entry was stored,
+// and does not wake while nothing is pending.
 func (b *TouchBuffer) runLoop(ctx context.Context) {
 	defer close(b.doneCh)
-	ticker := time.NewTicker(b.flushIn)
-	defer ticker.Stop()
+	timer := time.NewTimer(b.flushIn)
+	timer.Stop()
+	defer timer.Stop()
+	// armed は timer が動いている間だけ timer.C を指す。nil の channel は select で
+	// 選ばれないので、何も積まれていない間はどの case でも起きない。
+	var armed <-chan time.Time
+	// Start より前に積まれた分 (テストなど) も、次の flush で書く。
+	b.mu.Lock()
+	if len(b.pending) > 0 {
+		timer.Reset(b.flushIn)
+		armed = timer.C
+	}
+	b.mu.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -134,7 +163,19 @@ func (b *TouchBuffer) runLoop(ctx context.Context) {
 		case <-b.stopCh:
 			b.flushOnce()
 			return
-		case <-ticker.C:
+		case <-b.armCh:
+			// 既に動いているなら、その発火で一緒に書く。
+			if armed == nil {
+				timer.Reset(b.flushIn)
+				armed = timer.C
+			}
+		case <-armed:
+			armed = nil
+			if b.onTimer != nil {
+				b.onTimer()
+			}
+			// flush で pending を空にした後に積まれた分は、armCh が次の timer を
+			// 動かす。
 			b.flushOnce()
 		}
 	}

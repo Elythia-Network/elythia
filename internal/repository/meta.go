@@ -6,6 +6,7 @@ import (
 	"github.com/elythia-network/elythia/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/plugin/dbresolver"
 )
 
 // defaultMetaID is the row id used when the singleton meta row has to be
@@ -72,7 +73,17 @@ func NewMetaRepository(db *gorm.DB) MetaRepository {
 
 func (r *metaRepository) Fetch() (*model.Meta, error) {
 	var meta model.Meta
-	err := r.db.First(&meta).Error
+	// **レプリカから読まない (dbresolver.Write)。** CachedMetaRepository は meta の
+	// 更新 (internal:metaUpdated) で捨てた直後にここで読み直し、MetaCacheTTL の間
+	// 持つ。まだ複製されていないレプリカへ振られると、更新の前の行を TTL の間持ち
+	// 続ける。サーバーの統計は無効の間 tick を止めていて、更新のときの読み直しで
+	// 有効になったことを知るので、古い行を読むと最大で TTL まで流れ始めない
+	// (#4276)。サーバーで読むのは CachedMetaRepository の miss のときだけなので、
+	// primary の負荷は小さい (RelationCache.load と同じ考え方)。キャッシュを通さない
+	// 呼び出し元 (strongauth の DB の照合、backfill の CLI) も、回数は少ない。
+	// 行が無いときに作った後の読み直しと、EnsureInitial の中の有無の確認も
+	// primary を読む (作った直後の行はレプリカにまだ無い)。
+	err := r.db.Clauses(dbresolver.Write).First(&meta).Error
 	if err == nil {
 		return &meta, nil
 	}
@@ -86,7 +97,7 @@ func (r *metaRepository) Fetch() (*model.Meta, error) {
 	if err := r.EnsureInitial(defaultMetaID); err != nil {
 		return nil, err
 	}
-	if err := r.db.First(&meta).Error; err != nil {
+	if err := r.db.Clauses(dbresolver.Write).First(&meta).Error; err != nil {
 		return nil, err
 	}
 	return &meta, nil
@@ -124,7 +135,7 @@ func (r *metaRepository) UpdateChecked(fields map[string]any, check func(current
 // Fetch as a fail-safe when the row disappears afterwards.
 func (r *metaRepository) EnsureInitial(id string) error {
 	var meta model.Meta
-	err := r.db.First(&meta).Error
+	err := r.db.Clauses(dbresolver.Write).First(&meta).Error
 	if err == nil {
 		return nil
 	}

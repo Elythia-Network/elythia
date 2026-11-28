@@ -2258,6 +2258,16 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	broadcastPublisher := streamSvcs.broadcastPublisher
 	chatPublisher := streamSvcs.chatPublisher
 
+	// サーバーの統計の publisher (#344)。無効のあいだは集めも流しもしない (本家
+	// ServerStatsService と同じ)。判定は構築子の必須の引数で渡す (#3827)。無効の間は
+	// tick を止め、meta の更新で Reevaluate を呼んで切り替えるので、管理画面での
+	// 切り替えは再起動を待たずに効く。その配線 (wireCacheInvalidation) より前に作る
+	// (#4276)。起動の登録と、channel の factory への受け渡しは wireStreaming で行う。
+	serverStatsPub := stream.NewServerStatsPublisher(streamPubSub, 0, func() bool {
+		m, err := metaRepo.Fetch()
+		return err == nil && m != nil && m.EnableServerMachineStats
+	})
+
 	// cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (#3901 で関数へ移した。
 	// 呼ぶ位置と中の文の順は元のまま)。
 	s.wireCacheInvalidation(cacheInvalidationDeps{
@@ -2294,6 +2304,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		clipsHandler:             clipsHandler,
 		notificationsHandler:     notificationsHandler,
 		notePublisher:            notePublisher,
+		serverStatsPub:           serverStatsPub,
 	})
 
 	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
@@ -2303,13 +2314,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ストリーミングの接続の管理と publisher、reversi・バブルゲームの対戦・chat の service
 	// とチャンネル、/streaming の登録 (#3901 で関数へ移した。呼ぶ位置と中の文の順は元のまま。
 	// 購読を始める位置も変わらない。作った service は同じ名前で受ける)。
-	abuseCreatedNotifier, serverStatsPub, reversiService, bubbleVersusPublisher, bubbleVersusService, chatService, chatRoomFactory := s.wireStreaming(streamingDeps{
+	abuseCreatedNotifier, reversiService, bubbleVersusPublisher, bubbleVersusService, chatService, chatRoomFactory := s.wireStreaming(streamingDeps{
 		idGen:                        idGen,
 		streamPubSub:                 streamPubSub,
 		mainStreamPublisher:          mainStreamPublisher,
 		userRepo:                     userRepo,
 		noteRepo:                     noteRepo,
-		metaRepo:                     metaRepo,
+		serverStatsPub:               serverStatsPub,
 		followingRepo:                followingRepo,
 		piningRepo:                   piningRepo,
 		reactionRepo:                 reactionRepo,

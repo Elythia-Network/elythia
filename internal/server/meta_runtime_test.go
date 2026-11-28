@@ -45,7 +45,7 @@ type metaRuntimeHarness struct {
 
 // metaRuntimeColumns are the meta columns the #3663 tests change. 元の値を
 // 戻さないと、同じパッケージの後続のテストが変えた値で起動する。
-var metaRuntimeColumns = []string{"name", "deeplAuthKey", "deeplIsPro", "enableReactionsBuffering", "enableIpLogging"}
+var metaRuntimeColumns = []string{"name", "deeplAuthKey", "deeplIsPro", "enableReactionsBuffering", "enableIpLogging", "enableServerMachineStats"}
 
 func newMetaRuntimeHarness(t *testing.T, beforeSetup ...func(*Server)) *metaRuntimeHarness {
 	t.Helper()
@@ -84,6 +84,7 @@ func newMetaRuntimeHarnessWith(t *testing.T, opts metaRuntimeOptions, beforeSetu
 	})
 	require.NoError(t, db.Model(&model.Meta{}).Where("1 = 1").Updates(map[string]any{
 		"name": "before", "deeplAuthKey": nil, "deeplIsPro": false, "enableReactionsBuffering": false,
+		"enableServerMachineStats": false,
 	}).Error)
 
 	mr := miniredis.RunT(t)
@@ -523,4 +524,46 @@ func TestMetaRuntime_HandledHookRunsAfterProcessing(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("this process did not handle internal:metaUpdated")
 	}
+}
+
+// サーバーの統計は、無効の間は tick を止めている (#4276)。管理画面で有効にしたとき
+// も、他のプロセスが有効にしたときも、再起動なしで流れ始める。無効の間に見直す
+// 間隔 (1 分) を待たずに流れることを見る。
+func TestMetaRuntime_ServerStatsFollowMetaUpdated(t *testing.T) {
+	h := newMetaRuntimeHarnessWith(t, metaRuntimeOptions{onlyServer: "1", startBackground: true})
+	sub := h.rdb.Subscribe(context.Background(), "stream:serverStats")
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err := sub.Receive(context.Background())
+	require.NoError(t, err)
+	msgs := sub.Channel()
+	waitStats := func(what string) {
+		t.Helper()
+		select {
+		case <-msgs:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("server stats did not start after %s", what)
+		}
+	}
+
+	h.updateMetaHere(map[string]any{"enableServerMachineStats": true})
+	waitStats("enabling them in this process")
+
+	h.updateMetaHere(map[string]any{"enableServerMachineStats": false})
+	// 無効にする前に発火していた tick の分を捨て、止まったことを確かめてから、他の
+	// プロセスの更新を待つ。tick の間隔 (2 秒) より長く何も届かなければ、loop は
+	// 無効になっている。確かめないと、遅れて届いた古い tick で次の確認が通る。
+	quiet := time.NewTimer(2500 * time.Millisecond)
+	deadline := time.After(15 * time.Second)
+	for stopped := false; !stopped; {
+		select {
+		case <-msgs:
+			quiet.Reset(2500 * time.Millisecond)
+		case <-quiet.C:
+			stopped = true
+		case <-deadline:
+			t.Fatal("server stats kept being published after disabling them")
+		}
+	}
+	h.updateMetaElsewhere(map[string]any{"enableServerMachineStats": true})
+	waitStats("another process enabled them")
 }

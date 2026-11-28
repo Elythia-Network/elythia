@@ -49,7 +49,7 @@ type streamingDeps struct {
 	mainStreamPublisher          *stream.MainStreamPublisher
 	userRepo                     repository.UserRepository
 	noteRepo                     repository.NoteRepository
-	metaRepo                     repository.MetaRepository
+	serverStatsPub               *stream.ServerStatsPublisher
 	followingRepo                repository.FollowingRepository
 	piningRepo                   repository.UserNotePiningRepository
 	reactionRepo                 repository.NoteReactionRepository
@@ -120,13 +120,13 @@ type streamingDeps struct {
 // construction (docs/architecture.md 4.1), and receives the services it
 // returns under the same names. It binds every field of d to the name
 // setupRoutes uses, so the moved statements read the same as before (#3901).
-func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *stream.ServerStatsPublisher, *corereversi.Service, *stream.BubbleVersusPublisher, *corebubbleversus.Service, *corechat.Service, *channels.ChatRoomFactory) {
+func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *corereversi.Service, *stream.BubbleVersusPublisher, *corebubbleversus.Service, *corechat.Service, *channels.ChatRoomFactory) {
 	idGen := d.idGen
 	streamPubSub := d.streamPubSub
 	mainStreamPublisher := d.mainStreamPublisher
 	userRepo := d.userRepo
 	noteRepo := d.noteRepo
-	metaRepo := d.metaRepo
+	serverStatsPub := d.serverStatsPub
 	followingRepo := d.followingRepo
 	piningRepo := d.piningRepo
 	reactionRepo := d.reactionRepo
@@ -296,13 +296,8 @@ func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *st
 	// factory の登録は role に関係なく行う (WebSocket が生えるのは server
 	// role だけなので、queue role では誰も subscribe しない)。
 	//
-	// 無効のあいだは集めも流しもしない (本家 ServerStatsService と同じ)。
-	// tick ごとに見るので、管理画面での切り替えは再起動を待たずに効く。判定は
-	// 構築子の必須の引数で渡す (#3827)。
-	serverStatsPub := stream.NewServerStatsPublisher(streamPubSub, 0, func() bool {
-		m, err := metaRepo.Fetch()
-		return err == nil && m != nil && m.EnableServerMachineStats
-	})
+	// serverStatsPub は setupRoutes が作る。meta の更新で Reevaluate を呼ぶため、
+	// キャッシュの無効化の配線 (wireCacheInvalidation) より前に要る (#4276)。
 	if s.role.RunsServer() {
 		s.addPlainStartStopper("serverStatsPub", serverStatsPub)
 	}
@@ -448,5 +443,5 @@ func (s *Server) wireStreaming(d streamingDeps) (*coreabuse.CreatedNotifier, *st
 	// 5. /streaming エンドポイント配線
 	streamingHandler := streaming.NewHandler(streamManager)
 	s.echo.GET("/streaming", streamingHandler.Stream)
-	return abuseCreatedNotifier, serverStatsPub, reversiService, bubbleVersusPublisher, bubbleVersusService, chatService, chatRoomFactory
+	return abuseCreatedNotifier, reversiService, bubbleVersusPublisher, bubbleVersusService, chatService, chatRoomFactory
 }
