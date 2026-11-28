@@ -97,6 +97,12 @@ func TestEscapeJSONForScript(t *testing.T) {
 			want:  `{"text":"a\u0026b"}`,
 		},
 		{
+			// json.Marshal を通らない値でも、本家の htmlSafeJsonStringify と同じく潰す (#4271)。
+			name:  "line and paragraph separators are escaped",
+			input: "{\"text\":\"a\u2028b\u2029c\"}",
+			want:  `{"text":"a\u2028b\u2029c"}`,
+		},
+		{
 			name:  "plain json is unchanged",
 			input: `{"a":1}`,
 			want:  `{"a":1}`,

@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -224,4 +225,44 @@ func TestShow_AuthenticatedRequireSigninStillUsesVisibilityACL(t *testing.T) {
 	assert.Equal(t, text, showText(), "authenticated direct recipient receives specified note despite requireSignin")
 	n.VisibleUserIDs = nil
 	assert.Nil(t, showText(), "authentication and pin do not grant specified access by themselves")
+}
+
+// ShowForVisitor is what the note page embeds (#4271): the note as an
+// anonymous notes/show returns it, and nothing whenever notes/show declines.
+func TestShowForVisitor(t *testing.T) {
+	h, noteRepo := newShowHandler(t)
+	seedReactionNote(noteRepo, "n1", "public")
+	got, ok := h.ShowForVisitor(context.Background(), "n1")
+	require.True(t, ok)
+	c, rec := newJSONRequest(t, "/api/notes/show", `{"noteId":"n1"}`)
+	require.NoError(t, h.Show(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, rec.Body.String(), string(raw), "the same as an anonymous notes/show")
+
+	for _, tt := range []struct {
+		name    string
+		id      string
+		prepare func(*Handler, *testutil.MockNoteRepository)
+	}{
+		{name: "missing", id: "nope"},
+		{name: "empty id", id: ""},
+		{name: "author requires sign-in", id: "n1", prepare: func(_ *Handler, r *testutil.MockNoteRepository) {
+			r.Notes["n1"].User.RequireSigninToViewContents = true
+		}},
+		{name: "server hides all", id: "n1", prepare: func(h *Handler, _ *testutil.MockNoteRepository) {
+			h.ugcVisibilityFn = func() string { return "none" }
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, noteRepo := newShowHandler(t)
+			seedReactionNote(noteRepo, "n1", "public")
+			if tt.prepare != nil {
+				tt.prepare(h, noteRepo)
+			}
+			_, ok := h.ShowForVisitor(context.Background(), tt.id)
+			assert.False(t, ok)
+		})
+	}
 }

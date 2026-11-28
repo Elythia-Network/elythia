@@ -32,7 +32,7 @@ func newSSRTestHandler(t *testing.T) (*ssrMetaHandler, *testutil.MockUserReposit
 	h := newSSRMetaHandler(
 		&config.Config{URL: "https://example.test", Host: "example.test"},
 		metaRepo, nil, nil, nil, nil,
-		ssrMetaDeps{User: userRepo, Note: noteRepo, IDGen: testIDGen(t)}, nil, nil)
+		ssrMetaDeps{User: userRepo, Note: noteRepo, IDGen: testIDGen(t)}, nil, nil, ssrClientCtx{})
 
 	return h, userRepo, noteRepo
 }
@@ -251,7 +251,7 @@ func TestPrefersHTML(t *testing.T) {
 func TestSSRHandlers_NilReposServeShell(t *testing.T) {
 	metaRepo := testutil.NewMockMetaRepository()
 	metaRepo.Meta = &model.Meta{ID: "x"}
-	h := newSSRMetaHandler(&config.Config{URL: "https://example.test"}, metaRepo, nil, nil, nil, nil, ssrMetaDeps{IDGen: testIDGen(t)}, nil, nil)
+	h := newSSRMetaHandler(&config.Config{URL: "https://example.test"}, metaRepo, nil, nil, nil, nil, ssrMetaDeps{IDGen: testIDGen(t)}, nil, nil, ssrClientCtx{})
 
 	for name, handler := range map[string]echo.HandlerFunc{
 		"user":    h.UserPage,

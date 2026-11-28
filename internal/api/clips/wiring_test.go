@@ -1,10 +1,12 @@
 package clips
 
 import (
+	"context"
 	"testing"
 
 	"github.com/elythia-network/elythia/internal/entity"
 	"github.com/elythia-network/elythia/internal/model"
+	"github.com/elythia-network/elythia/internal/repository"
 	"github.com/elythia-network/elythia/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,6 +27,22 @@ func TestOptionalSetters(t *testing.T) {
 
 	h.SetEmojiRepo(testutil.NewMockEmojiRepository())
 	assert.NotNil(t, h.emojiLookup())
+
+	assert.Nil(t, h.reactionReader(), "未配線なら buffered reactions を読まない")
+	reader := stubReactionReader{}
+	h.SetReactionReader(reader)
+	assert.Equal(t, reader, h.reactionReader())
+
+	rc := repository.NewRelationCache(nil)
+	h.SetRelationCache(rc)
+	assert.Same(t, rc, h.relationCache)
+}
+
+// stubReactionReader is a BufferedReactionsReader with nothing buffered.
+type stubReactionReader struct{}
+
+func (stubReactionReader) GetBufferedMany(context.Context, []string) (map[string]map[string]int64, error) {
+	return nil, nil
 }
 
 // blockedHosts は meta 未配線なら nil、配線済みなら meta の値を返す。

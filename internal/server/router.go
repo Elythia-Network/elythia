@@ -2152,6 +2152,13 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// ActivityPub のリソースと、同じ path の SSR・フィード、discovery、OAuth、inbox の登録と、
 	// 連合の API の配線 (#3901 で関数へ移した。呼ぶ位置と中の文の順は元のまま。作った
 	// handler は同じ名前で受ける)。
+	// ページの HTML に埋める中身は、未ログインの notes/show・users/show・clips/show と
+	// 同じ関数で組む (#4271)。
+	pageClientCtx := ssrClientCtx{
+		Note: func(ctx context.Context, noteID string) (any, bool) { return notesHandler.ShowForVisitor(ctx, noteID) },
+		User: usersHandler.ShowForVisitor,
+		Clip: func(clipID string) (any, bool) { return clipsHandler.ShowForVisitor(clipID) },
+	}
 	ssrMeta, feedH, twemojiBadge, oauthHandler, inboxHandler := s.wireFederationRoutes(federationRoutesDeps{
 		idGen:                   idGen,
 		userRepo:                userRepo,
@@ -2198,6 +2205,7 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		wellknownHandler:        wellknownHandler,
 		nodeinfoHandler:         nodeinfoHandler,
 		federationHandler:       federationHandler,
+		pageClientCtx:           pageClientCtx,
 	})
 
 	// Channels endpoints (Phase 4.2)

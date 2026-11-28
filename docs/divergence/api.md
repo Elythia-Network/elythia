@@ -9,7 +9,7 @@
 - 匿名: 現在ピン留め中、`public` / `home`、かつ `requireSigninToViewContents=false` と確認できる場合だけ、`makeNotesHiddenBefore` / `makeNotesFollowersOnlyBefore` を迂回する。
 - 認証済み: 現在ピン留め中の `public` / `home` は作者ロックを迂回する。ログインしただけで `followers` / `specified` を読めるようにはならない。
 - 状態遷移: ここでいう「現在ピン留め中」は user profile の `user_note_pining` にリクエスト時点で行があることを指し、frontend の gitlink 等とは無関係である。unpin、visibility 変更、`requireSigninToViewContents` 変更は primary の現在値で判定し、保存済みノートの visibility や作者設定は変更しない。
-- 適用経路: `notes/show`、利用者を UserDetailed で返す応答の `pinnedNotes`、ノート permalink の SSR metadata。`pinnedNotes` はすべて `internal/api/users` の `fillPinnedNotes` で組み、同じ `notehide.Hider.HideProfilePinnedNotes` を通す (#3330)。通る経路は、単体の `users/show`、一覧の `users` / `pinned-users` / `users/search` / `users/search-by-username-and-host` / `users/show` (`userIds` 指定) / `users/recommendation` / `users/get-frequently-replied-users` / `users/followers` / `users/following` / `blocking/list` / `mute/list` / `renote-mute/list` / `hashtags/users` / `federation/users` / `federation/followers` / `federation/following` / `following/list` / `roles/users` / `admin/show-users` / `admin/roles/users` / `admin/abuse-user-reports` / `admin/show-moderation-logs`、単体の `ap/show` / `admin/accounts/find-by-email` / `admin/update-proxy-account` / `auth/session/userkey` / miauth の check / `page-push` の `pageEvent` / `blocking/create`・`delete`、main stream の `follow` / `unfollow` と同名の Webhook。一覧では本家 `packMany` と同じく、匿名の閲覧者にはピン留めを載せない (`pinnedNoteIds` / `pinnedNotes` は空)。`admin/abuse-user-reports` と `admin/show-moderation-logs` は本家と同じく閲覧者なし (`packMany(users, null)`) で組むので、モデレーターが呼んでもピン留めは空になる。`find-by-email`・`userkey`・miauth の check は本家と同じく閲覧者なし (`pack(user, null)`) として判定する。`update-proxy-account` は proxy 自身を、`page-push` はページの持ち主を閲覧者として判定する (本家 `pack(proxy.id, proxy)` / `pack(me.id, {id: page.userId})`)。pin lookup または作者設定の確認に失敗した匿名の pin 例外は fail-closed とする。ActivityPub Note / Note activity / user outbox / featured collection は連合互換性のため従来どおり `visibility` と `localOnly` だけで公開可否を判定し、この Web 閲覧向け例外の対象外とする。
+- 適用経路: `notes/show`、利用者を UserDetailed で返す応答の `pinnedNotes`、ノート permalink の SSR metadata、ノート・利用者のページの HTML に埋める中身 (`misskey_clientCtx`、#4271。未ログインの `notes/show` / 単体の `users/show` と同じ関数で組む)。`pinnedNotes` はすべて `internal/api/users` の `fillPinnedNotes` で組み、同じ `notehide.Hider.HideProfilePinnedNotes` を通す (#3330)。通る経路は、単体の `users/show`、一覧の `users` / `pinned-users` / `users/search` / `users/search-by-username-and-host` / `users/show` (`userIds` 指定) / `users/recommendation` / `users/get-frequently-replied-users` / `users/followers` / `users/following` / `blocking/list` / `mute/list` / `renote-mute/list` / `hashtags/users` / `federation/users` / `federation/followers` / `federation/following` / `following/list` / `roles/users` / `admin/show-users` / `admin/roles/users` / `admin/abuse-user-reports` / `admin/show-moderation-logs`、単体の `ap/show` / `admin/accounts/find-by-email` / `admin/update-proxy-account` / `auth/session/userkey` / miauth の check / `page-push` の `pageEvent` / `blocking/create`・`delete`、main stream の `follow` / `unfollow` と同名の Webhook。一覧では本家 `packMany` と同じく、匿名の閲覧者にはピン留めを載せない (`pinnedNoteIds` / `pinnedNotes` は空)。`admin/abuse-user-reports` と `admin/show-moderation-logs` は本家と同じく閲覧者なし (`packMany(users, null)`) で組むので、モデレーターが呼んでもピン留めは空になる。`find-by-email`・`userkey`・miauth の check は本家と同じく閲覧者なし (`pack(user, null)`) として判定する。`update-proxy-account` は proxy 自身を、`page-push` はページの持ち主を閲覧者として判定する (本家 `pack(proxy.id, proxy)` / `pack(me.id, {id: page.userId})`)。pin lookup または作者設定の確認に失敗した匿名の pin 例外は fail-closed とする。ActivityPub Note / Note activity / user outbox / featured collection は連合互換性のため従来どおり `visibility` と `localOnly` だけで公開可否を判定し、この Web 閲覧向け例外の対象外とする。
 
 これは vanilla Misskey の一般的な visibility 判定を置き換えるものではなく、Elythia が pin を作者の明示的な公開意思として一貫して扱うための限定的な divergence である。
 
@@ -306,7 +306,19 @@ Elythiaは、`canPurgeAccount`がfalseのロールの利用者が退会すると
 - 条件を読めないとき (プラグインの障害) も見せない。**障害のあいだは、どのノートに条件があるかも読めないので、条件を付けていないノートも含めて、このサーバーのローカルのノートをすべて上の3つの経路で伏せる。** 見せるほうに倒すと、絞ったノートが漏れるため
 - ActivityPubの照会 (`/notes/:id`をactivity+jsonで取るものなど) で、署名もUser-Agentのホストも無い相手も、同じく自分のホストとして判定する。分けると、excludeに自分のホストを入れたノートが、Webでは伏せられ、同じURLをactivity+jsonで取ると本文ごと読める
 - ログインしているローカルの利用者には絞らない。`notes/show`以外のAPI (`users/notes`・タイムライン・検索など) と、リノート元・返信先として埋め込まれたノートも絞らない。公開のノートは、これらの経路から読める
-- `/notes/:id`をWebページとして取られたときのOGPは、自分のホストを入れても、絞ったノートでは出さないまま (#4199)。取りに来るのは主にリンクカードを作る他のサーバーで、どのサーバーかを確かめられないため
+- `/notes/:id`をWebページとして取られたときのOGPは、自分のホストを入れても、絞ったノートでは出さないまま (#4199)。取りに来るのは主にリンクカードを作る他のサーバーで、どのサーバーかを確かめられないため。ページのHTMLに埋めるノート (`misskey_clientCtx`、#4271) も、OGPを出さないノートでは埋めない。frontendは本家と同じく、埋めたものが無ければ`notes/show`を取り直す
+
+## ページのHTMLに埋める中身 (`misskey_clientCtx`、#4271)
+
+本家と同じく、ノート・利用者・クリップのページ (`/notes/:id`・`/@:acct`とそのサブパス・`/clips/:id`) のHTMLに、ページの中身を`<script type="application/json" id="misskey_clientCtx">`で埋める。frontendはログインしていないときだけこれで描き、埋めたものが無ければ`notes/show`・`users/show`・`clips/show`を取り直す。中身は、未ログインの`notes/show`・単体の`users/show`・`clips/show`と同じ関数で組み、APIが断るときは埋めない。本家と違うのは次の点。
+
+| 場面 | 本家 | Elythia |
+|---|---|---|
+| リモートの利用者のページ | 埋める | 埋めない。`users/show`はリモートの利用者のカウントを相手のサーバーから取り直す (`RemoteStatsFetcher`、#943。Elythia独自)。HTMLで同じ関数を通すと、キャッシュに無いときHTMLの応答がその取得を最大5秒待ち、クローラの取得でも相手への要求が出る。本家のpackは取りに行かない。作者がリモートのノートのページは埋める (`notes/show`は作者を`UserLite`で包み、この取得をしない) |
+| OGPを出さないノート | 公開範囲が`public`・`home`で、作者が`requireSigninToViewContents`でなく、`ugcVisibilityForVisitor`が許すなら埋める | OGPを出す分岐でだけ埋める。期間の設定 (`makeNotesHiddenBefore`など) で隠れるノートと、配送先を絞るプラグインの条件があるノート (#4203) には埋めない |
+
+- 閲覧数のチャートは、本家と同じくHTMLの組み立てでは数えない。frontendの利用者のページ (`pages/user/index.vue`) は埋めたものがあると`users/show`を呼ばず、タブの切り替えでも取り直さないので、未ログインの人が`/@acct`とそのタブ (`/@acct/notes`など) を開いた最初の表示は数えない。数えるのは、引っ張って更新したときと、`/@acct/following`・`/@acct/followers` (埋めたものを読まず、毎回`users/show`を呼ぶ) を開いたとき。#4271より前のElythiaは、最初の表示も`users/show`で数えていた
+- HTMLは閲覧者を見ずに作る。`Cache-Control`は本家と同じ`public, max-age=15`
 
 ## `fetch-rss`のフィードの読み方
 

@@ -242,6 +242,7 @@ Misskey TS の `users/show` は **自インスタンスで観測した範囲** �
 - SSRF guard: `safehttp.NewSSRFSafeTransport` 経由 (private IP / metadata service block)
 - host validation: URL injection (`/`, `?`, `#`, `@`, ` ` 混入) を url.Parse で reject
 - 失敗時は silent fallback で local 観測値を維持
+- 利用者のページの HTML に埋める中身 (`misskey_clientCtx`、#4271) は、リモートの利用者には埋めない。HTML の応答がこの取得を待たないようにするため ([divergence/api.md](divergence/api.md#ページのhtmlに埋める中身-misskey_clientctx4271))
 - フォロー一覧 / フォロワー一覧 endpoint は **自インスタンス上に存在する関係のみ** (= 数値だけ remote、一覧は local の非対称設計)
 
 ### mediaproxy のアニメ pass-through (#941)

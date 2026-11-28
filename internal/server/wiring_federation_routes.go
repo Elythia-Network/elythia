@@ -79,6 +79,7 @@ type federationRoutesDeps struct {
 	wellknownHandler        *wellknown.Handler
 	nodeinfoHandler         *nodeinfo.Handler
 	federationHandler       *federation.Handler
+	pageClientCtx           ssrClientCtx
 }
 
 // wireFederationRoutes registers the routes outside /api that other servers
@@ -136,6 +137,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 	wellknownHandler := d.wellknownHandler
 	nodeinfoHandler := d.nodeinfoHandler
 	federationHandler := d.federationHandler
+	pageClientCtx := d.pageClientCtx
 
 	// ActivityPub resource endpoints
 	// ap/show は、instance actor に見せなかった投稿を照会した人の鍵で取り直す (#3915)。
@@ -211,6 +213,7 @@ func (s *Server) wireFederationRoutes(d federationRoutesDeps) (*ssrMetaHandler, 
 		},
 		entityPacker,   // #3796: SSR の OGP 画像のファイルを包む
 		s.noteDelivery, // #4199: 配送先を絞ったノートは OGP を出さない
+		pageClientCtx,  // #4271: 未ログインの API と同じ中身を HTML に埋める
 	)
 	s.echo.GET("/notes/:id", func(c *echo.Context) error {
 		// 同一 URL が Accept 次第で HTML / AP JSON / 302 を返すので、HTML 変種

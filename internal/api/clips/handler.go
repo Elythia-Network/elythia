@@ -270,6 +270,22 @@ func (h *Handler) Show(c *echo.Context) error {
 	return c.JSON(http.StatusOK, h.clipToMap(cl, user))
 }
 
+// ShowForVisitor returns what clips/show returns to a signed-out visitor, and
+// false whenever clips/show would answer with an error instead.
+//
+// クリップのページの HTML に埋める中身 (misskey_clientCtx、#4271) はこれだけを
+// 通す。clips/show と同じく service の Show で公開かどうかを判定してから包む。
+func (h *Handler) ShowForVisitor(clipID string) (map[string]any, bool) {
+	if clipID == "" {
+		return nil, false
+	}
+	cl, err := h.svc.Show("", clipID)
+	if err != nil {
+		return nil, false
+	}
+	return h.clipToMap(cl, nil), true
+}
+
 // UpdateRequest is the request body for clips/update.
 type UpdateRequest struct {
 	ClipID string `json:"clipId"`

@@ -373,11 +373,15 @@ func (h *embedHandlers) buildHTML(instanceName, iconURL, appleTouchIconURL, them
 // 現状の呼び出し元はどちらも encoding/json 由来で、Go の json.Marshal は
 // 既定で `<` `>` `&` を escape する。つまり二重の防御だが、JSON の生成方法が
 // 変わったときに黙って穴が開かないよう、埋め込む側でも明示的に潰しておく。
+// U+2028 / U+2029 は古い JS エンジンで文字列リテラルの中の改行として扱われるので、
+// 本家の htmlSafeJsonStringify と同じく潰す (#4271)。
 func escapeJSONForScript(s string) string {
 	return strings.NewReplacer(
 		"<", `\u003c`,
 		">", `\u003e`,
 		"&", `\u0026`,
+		"\u2028", `\u2028`,
+		"\u2029", `\u2029`,
 	).Replace(s)
 }
 

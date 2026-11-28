@@ -184,6 +184,29 @@ func TestShow_AnonymousPrivateHidden(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "NO_SUCH_CLIP")
 }
 
+// ShowForVisitor is what the clip page embeds (#4271): the public clip as an
+// anonymous clips/show returns it, and nothing for a private or missing clip.
+func TestShowForVisitor(t *testing.T) {
+	h, repo, _, _ := newHandler(t)
+	repo.Clips["pub"] = &model.Clip{ID: "pub", UserID: "alice", Name: "public", IsPublic: true}
+	repo.Clips["priv"] = &model.Clip{ID: "priv", UserID: "alice", Name: "private", IsPublic: false}
+
+	got, ok := h.ShowForVisitor("pub")
+	require.True(t, ok)
+	c, rec := newReq(t, `{"clipId":"pub"}`)
+	require.NoError(t, h.Show(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, rec.Body.String(), string(raw), "the same as an anonymous clips/show")
+
+	for _, id := range []string{"priv", "missing", ""} {
+		got, ok := h.ShowForVisitor(id)
+		assert.False(t, ok, id)
+		assert.Nil(t, got, id)
+	}
+}
+
 // --- Update ----------------------------------------------------------------
 
 func TestUpdate_Success(t *testing.T) {

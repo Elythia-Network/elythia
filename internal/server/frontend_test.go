@@ -966,7 +966,7 @@ func TestShells_ReadLoaderAtConstruction(t *testing.T) {
 			}
 		}},
 		{name: "permalink SSR", dir: spa, build: func() echo.HandlerFunc {
-			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, nil, ssrMetaDeps{}, nil, nil)
+			h := newSSRMetaHandler(cfg, repo, nil, nil, nil, nil, ssrMetaDeps{}, nil, nil, ssrClientCtx{})
 			return func(c *echo.Context) error { return h.render(c, shellOverrides{}) }
 		}},
 		{name: "embed", dir: embedDir, build: func() echo.HandlerFunc {
