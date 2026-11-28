@@ -342,6 +342,23 @@ func TestRoleAssignmentRepository_VisibleByRole(t *testing.T) {
 		require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "vis_a" + u.id[len(u.id)-1:], UserID: u.id, RoleID: role.ID}))
 	}
 
+	// 期限切れの割り当ては、見せる人でも見せない人でも数えない (#4263)。人数は
+	// 「割り当ての数 − 見せない人の割り当ての数」で数えるので、両方の側で期限を
+	// 見ていないと、凍結中の人の期限切れの分だけ人数が減る。
+	expired := now.Add(-time.Hour)
+	for _, u := range []struct {
+		id, set string
+	}{
+		{"vis_u8", `"isSuspended" = true`},
+		{"vis_u9", ``},
+	} {
+		createTestUser(t, u.id)
+		if u.set != "" {
+			require.NoError(t, testDB.Exec(`UPDATE "user" SET `+u.set+` WHERE id = ?`, u.id).Error)
+		}
+		require.NoError(t, assignRepo.Create(&model.RoleAssignment{ID: "vis_a" + u.id[len(u.id)-1:], UserID: u.id, RoleID: role.ID, ExpiresAt: &expired}))
+	}
+
 	ids := func(as []*model.RoleAssignment) []string {
 		out := make([]string, 0, len(as))
 		for _, a := range as {

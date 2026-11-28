@@ -157,7 +157,35 @@ func (r *roleAssignmentRepository) ListByUser(userID string) ([]*model.RoleAssig
 // 条件 (#3999)。users/show が隠す利用者 (凍結中と、ローカルの削除済み) に揃える。
 // リモートの削除済みは users/show が出しているので、ここでも残す。ローカルの
 // 判定は model.User.IsLocal と同じく、host が空文字の行もローカルとみなす。
+//
+// **変えたら、人数を数える hiddenUserCond と migration 000150 の述語も変える**
+// (#4263)。片方だけだと一覧と usersCount がずれる
+// (TestCountVisibleByRole_MatchesListVisibleByRole が落とす)。
 const visibleAssigneeCond = `EXISTS (SELECT 1 FROM "user" u WHERE u.id = "role_assignment"."userId" AND u."isSuspended" = false AND (COALESCE(u.host, '') <> '' OR u."isDeleted" = false))`
+
+// hiddenUserCond は visibleAssigneeCond が残さない利用者 (凍結中か、ローカルの
+// 削除済み) の条件で、visibleAssigneeCond の中の条件の否定と同じ式 (#4263)。
+// isSuspended / isDeleted は NOT NULL なので、否定は NULL を考えずに書ける。
+//
+// **式を migration 000150 の IDX_user_hidden_id の述語と同じ形に保つ。** 形が
+// 変わると planner が部分 index の述語を満たすと判定できず、数えるたびに "user"
+// を全部読む形に戻る (TestCountVisibleByRole_UsesHiddenUserIndex が落とす)。
+const hiddenUserCond = `(u."isSuspended" OR (u."isDeleted" AND COALESCE(u.host, '') = ''))`
+
+// countVisibleByRoleSQL は、見せてよい人数を「割り当ての数 − 見せない利用者の
+// 割り当ての数」で数える (#4263)。visibleAssigneeCond で数えると、見せない人は
+// ごく一部なのに「見せる人がいること」を割り当てごとに確かめるので、planner は
+// 割り当て全部と "user" の全行を突き合わせる (利用者 2.2 万人で Seq Scan on
+// "user" と Hash Join)。見せない側だけを数えれば、IDX_user_hidden_id の index
+// only scan から割り当てを引く形で済む。
+//
+// 引き算で同じ数になるのは、role_assignment."userId" が "user" への FK
+// (ON DELETE CASCADE) で、利用者の無い割り当てが無いため。
+const countVisibleByRoleSQL = `SELECT
+	(SELECT count(*) FROM "role_assignment"
+	  WHERE "roleId" = ? AND ("expiresAt" IS NULL OR "expiresAt" > ?))
+	- (SELECT count(*) FROM "role_assignment" ra JOIN "user" u ON u.id = ra."userId"
+	  WHERE ra."roleId" = ? AND (ra."expiresAt" IS NULL OR ra."expiresAt" > ?) AND ` + hiddenUserCond + `)`
 
 func (r *roleAssignmentRepository) ListByRole(roleID string, untilID, sinceID string, limit int) ([]*model.RoleAssignment, error) {
 	return r.listByRole(roleID, untilID, sinceID, limit, false)
@@ -195,22 +223,20 @@ func (r *roleAssignmentRepository) listByRole(roleID string, untilID, sinceID st
 }
 
 func (r *roleAssignmentRepository) CountActiveByRole(roleID string) (int, error) {
-	return r.countByRole(roleID, false)
+	var count int64
+	now := time.Now()
+	err := r.db.Model(&model.RoleAssignment{}).
+		Where("\"roleId\" = ? AND (\"expiresAt\" IS NULL OR \"expiresAt\" > ?)", roleID, now).
+		Count(&count).Error
+	return int(count), err
 }
 
 func (r *roleAssignmentRepository) CountVisibleByRole(roleID string) (int, error) {
-	return r.countByRole(roleID, true)
-}
-
-func (r *roleAssignmentRepository) countByRole(roleID string, visibleOnly bool) (int, error) {
 	var count int64
 	now := time.Now()
-	q := r.db.Model(&model.RoleAssignment{}).
-		Where("\"roleId\" = ? AND (\"expiresAt\" IS NULL OR \"expiresAt\" > ?)", roleID, now)
-	if visibleOnly {
-		q = q.Where(visibleAssigneeCond)
-	}
-	err := q.Count(&count).Error
+	// Scan ではなく Row で読む。結果は 1 行 1 列で、Row なら文が logger の
+	// ParamsFilter を通るので、計画のテストが実際に流れる SQL を拾える。
+	err := r.db.Raw(countVisibleByRoleSQL, roleID, now, roleID, now).Row().Scan(&count)
 	return int(count), err
 }
 
