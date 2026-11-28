@@ -2185,7 +2185,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 
 | 節 | ファイル | 移した範囲 | 受け取る名前 | 返す名前 |
 |---|---|---|---|---|
-| `wireCacheInvalidation` | `wiring_cache_invalidation.go` | cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (`urlPreview` より前の分) | 32 | 0 |
+| `wireCacheInvalidation` | `wiring_cache_invalidation.go` | cross-worker のキャッシュの無効化と、キャッシュの一覧への登録 (`urlPreview` より前の分) | 36 | 0 |
 | `wireFrontendRoutes` | `wiring_frontend_routes.go` | /api の外のフロントエンドの配信 (アセット・twemoji・identicon・manifest・Service Worker・埋め込みページ) と SPA の catchall。プラグインの準備の `return` より後 | 13 | 0 |
 | `wireAdmin` | `wiring_admin.go` | 管理画面の API の handler と配線 (通報の webhook・メール、ロール、絵文字の申請、連合など) と、DB のバックアップの管理画面の handler・再認証・`/backup-download` | 69 | 4 (`adminHandler`・`emojiApplicationService`・`emojiApplicationHandler`・`backupHandler`) |
 | `wireStreaming` | `wiring_streaming.go` | ストリーミングの接続の管理 (lookup と、server role で始める購読)、queue の統計の publisher と、server の統計の publisher の起動の登録 (server の統計の publisher は #4276 から `setupRoutes()` が作る)、既存の service への publisher の注入、reversi・バブルゲームの対戦・chat の service とチャンネルの登録、`/streaming` の登録 | 65 | 6 (`abuseCreatedNotifier`・`reversiService`・`bubbleVersusPublisher`・`bubbleVersusService`・`chatService`・`chatRoomFactory`) |
@@ -2909,6 +2909,8 @@ Supervisorの側は変えていない。停止のエラーの使われ方は次�
 setupRoutes()
   s.wireCacheInvalidation(…)   // #3901 から、urlPreview より前の登録はこの節 (wiring_cache_invalidation.go)
     s.addCache("cachedMeta", cacheFromDB, cachedMeta)
+    s.addCache("ads", cacheFromDB, adRepo)                 // #4276。/api/meta の応答の元
+    s.addCache("proxyAccountName", cacheFromDB, proxyAccountNames)  // #4276。見つかったプロキシの名前
     s.addCache("metaResponse", cacheFromDB, metaHandler)
     s.addCache("nodeinfo", cacheFromDB, nodeinfoHandler)
     s.addCache("captcha", cacheFromDB, reloadOnDrop(reloadCaptcha))   // #3777。捨てずに読み直す
@@ -2960,7 +2962,7 @@ setupRoutes()
 
 | 系統 | 一覧の名前 | issue |
 |---|---|---|
-| meta | `cachedMeta`・`metaResponse`・`nodeinfo` | #3721 |
+| meta | `cachedMeta`・`ads` (`CachedAdRepository`。期限の切れていない広告、#4276)・`proxyAccountName` (`proxyAccountNames`。見つかったプロキシのシステムアカウントの名前、#4276)・`metaResponse`・`nodeinfo` | #3721 |
 | 利用者と関係 | `userCache` (`CachedUserRepository`)・`relationCache` (`RelationCache`)・`authTokens` (`AuthMiddleware` の tokenCache) | #3723 |
 | ロール | `roles` (`role.Service`。利用者のロール・ロールの一覧と、プラグインの policy の結果) | #3725 |
 | 絵文字とデコレーション | `emojis` (`CachedEmojiRepository`。ローカルの一覧と (name, host) の entry)・`emojiDecorations` (`avatardecoration.EmojiResolver`)・`avatarDecorations` (`avatardecoration.Resolver`。catalog) | #3727 |

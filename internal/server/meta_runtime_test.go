@@ -9,13 +9,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/labstack/echo/v5"
 	redis "github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -566,4 +569,75 @@ func TestMetaRuntime_ServerStatsFollowMetaUpdated(t *testing.T) {
 	}
 	h.updateMetaElsewhere(map[string]any{"enableServerMachineStats": true})
 	waitStats("another process enabled them")
+}
+
+// HTML は広告を要求のたびに引かず、変えた後の次の HTML には反映する (#4276)。
+// このプロセスの管理画面で変えたときも、他のプロセスが変えて internal:adsUpdated を
+// 送ったときも、キャッシュの TTL (1 分) を待たない。
+func TestMetaRuntime_HTMLAdsAreCachedAndFollowChanges(t *testing.T) {
+	if serverIntegrationDB == nil {
+		t.Skip("PostgreSQL unavailable")
+	}
+	db := serverIntegrationDB
+	const prefix = "metartad"
+	clean := func() { db.Exec(`DELETE FROM "ad" WHERE id LIKE ?`, prefix+"%") }
+	clean()
+	t.Cleanup(clean)
+	// callback は、DB を使うサーバーを組み立てる前に入れる (stream_hibernation_test.go と同じ)。
+	var adQueries atomic.Int64
+	record := func(tx *gorm.DB) {
+		if tx.Statement.Table == "ad" {
+			adQueries.Add(1)
+		}
+	}
+	const cbName = "test:htmlads4276"
+	cb := db.Callback()
+	require.NoError(t, cb.Query().After("gorm:query").Register(cbName, record))
+	t.Cleanup(func() { _ = cb.Query().Remove(cbName) })
+
+	h := newMetaRuntimeHarness(t)
+	html := func() string {
+		t.Helper()
+		rec := h.get("/")
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec.Body.String()
+	}
+	html()
+	before := adQueries.Load()
+	for range 5 {
+		html()
+	}
+	assert.Equal(t, before, adQueries.Load(), "the HTML must not query the ads each time")
+
+	// 書いたプロセスは他のプロセスへ internal:adsUpdated を送る。
+	sub := h.rdb.Subscribe(context.Background(), "internal:adsUpdated")
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err := sub.Receive(context.Background())
+	require.NoError(t, err)
+	now := time.Now()
+	rec := h.post("/api/admin/ad/create", h.rootToken, map[string]any{
+		"url": "https://ad.example/here", "imageUrl": "https://ad.example/here.png", "place": "square",
+		"memo": "", "priority": "middle", "ratio": 1, "dayOfWeek": 0,
+		"startsAt": now.Add(-time.Hour).UnixMilli(), "expiresAt": now.Add(time.Hour).UnixMilli(),
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	t.Cleanup(func() { db.Exec(`DELETE FROM "ad" WHERE id = ?`, created.ID) })
+	assert.Contains(t, html(), created.ID, "an ad created in this process must be in the next HTML")
+	select {
+	case <-sub.Channel():
+	case <-time.After(10 * time.Second):
+		t.Fatal("creating an ad must publish internal:adsUpdated to the other processes")
+	}
+
+	// 他のプロセスの書き込み: 行を書き、internal:adsUpdated を送る。
+	require.NoError(t, db.Create(&model.Ad{ID: prefix + "else", URL: "https://ad.example/else", ImageURL: "https://ad.example/else.png",
+		Place: "square", Priority: "middle", Ratio: 1, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}).Error)
+	require.NotContains(t, html(), prefix+"else", "the ad written behind the cache must not show up before the notification")
+	require.NoError(t, h.rdb.Publish(context.Background(), "internal:adsUpdated", "{}").Err())
+	require.Eventually(t, func() bool { return strings.Contains(html(), prefix+"else") }, 10*time.Second, 10*time.Millisecond,
+		"an ad changed by another process must be in the HTML after internal:adsUpdated")
 }

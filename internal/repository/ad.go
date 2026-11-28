@@ -50,6 +50,16 @@ func (r *adRepository) ListActive(now time.Time) ([]*model.Ad, error) {
 	return ads, nil
 }
 
+// ListUnexpired returns the ads whose expiresAt is after now, including those
+// not started yet, ordered by id DESC (CachedAdRepository, #4276).
+func (r *adRepository) ListUnexpired(now time.Time) ([]*model.Ad, error) {
+	var ads []*model.Ad
+	if err := r.db.Where(`"expiresAt" > ?`, now).Order(`id DESC`).Find(&ads).Error; err != nil {
+		return nil, err
+	}
+	return ads, nil
+}
+
 func (r *adRepository) Create(a *model.Ad) error {
 	return r.db.Create(a).Error
 }

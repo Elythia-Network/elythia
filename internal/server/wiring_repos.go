@@ -103,7 +103,8 @@ type repos struct {
 	gallery              repository.GalleryRepository
 	accessToken          repository.AccessTokenRepository
 	publickeyExtra       repository.UserPublickeyExtraRepository
-	ad                   repository.AdRepository
+	// ad は有効な広告をプロセスに持つ (#4276)。無効化の hook と購読はこの値に繋ぐ。
+	ad *repository.CachedAdRepository
 }
 
 // buildRepos constructs the repositories of one server generation.
@@ -206,7 +207,7 @@ func (s *Server) buildRepos() repos {
 	recipientRepo := repository.NewAbuseReportNotificationRecipientRepository(s.db)
 	ipLookupLogRepo := repository.NewIPLookupLogRepository(s.db)
 	// system account の行。accountMover (proxy account の user id)、
-	// newProxyAccountResolver (username)、coresystemaccount の service が共有する。
+	// newProxyAccountNames (username)、coresystemaccount の service が共有する。
 	systemAccountRepo := repository.NewSystemAccountRepository(s.db)
 	// 以下は setupRoutes の中で、使う場所の近くで作っていたもの (#3684 でここへ移した)。
 	noteUnreadRepo := repository.NewNoteUnreadRepository(s.db)
@@ -226,7 +227,7 @@ func (s *Server) buildRepos() repos {
 	galleryRepo := repository.NewGalleryRepository(s.db)
 	accessTokenRepo := repository.NewAccessTokenRepository(s.db)
 	publickeyExtraRepo := repository.NewUserPublickeyExtraRepository(s.db)
-	adRepo := repository.NewAdRepository(s.db)
+	adRepo := repository.NewCachedAdRepositoryFromDB(s.db)
 
 	return repos{
 		user:                 userRepo,

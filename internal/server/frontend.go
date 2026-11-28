@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elythia-network/elythia/internal/api/meta"
@@ -575,24 +576,69 @@ func buildMetaJSON(cfg *config.Config, m *model.Meta, proxyAccountResolver meta.
 	return string(data)
 }
 
-// newProxyAccountResolver returns a ProxyAccountResolver that looks up the
-// system_account with type='proxy' and resolves the corresponding username.
-// Read-only: if the row does not exist yet (_, false) is returned.
+// proxyAccountNames resolves the username of the system_account with
+// type='proxy' (its Resolve is the meta.ProxyAccountResolver the meta and
+// nodeinfo handlers and the frontend HTML share). Read-only: if the row does
+// not exist yet (_, false) is returned.
 // 本家TSのsystemAccountService.fetchは未存在時に自動作成するが、/api/metaの
 // 副作用としてシステムアカウントが勝手に生成されるのを避けるため、Go側は
 // 明示セットアップ経路 (admin系エンドポイント) に生成を寄せている。
-func newProxyAccountResolver(saRepo repository.SystemAccountRepository, userRepo repository.UserRepository) meta.ProxyAccountResolver {
-	return func() (string, bool) {
-		sa, err := saRepo.FindByType("proxy")
-		if err != nil || sa == nil {
-			return "", false
-		}
-		user, err := userRepo.FindByID(sa.UserID)
-		if err != nil || user == nil {
-			return "", false
-		}
-		return user.Username, true
+//
+// A name once found is kept until DropLocal.
+// HTML を返すたび・/api/meta と /nodeinfo を組み立てるたびに system_account を
+// 引いていた (#4276)。システムアカウントの行と利用者名は作った後に変わらない
+// (本家も作った後は変えない) ので、見つかった名前はプロセスの中に持つ。まだ無い
+// ときは持たず、次の要求で引き直す。別のプロセスが作ったものも、そこで見える。
+// キャッシュの一覧 (docs/architecture.md 4.4) に登録し、DropLocal で捨てる。
+type proxyAccountNames struct {
+	saRepo   repository.SystemAccountRepository
+	userRepo repository.UserRepository
+
+	mu    sync.Mutex
+	found *string
+	// gen は DropLocal のたびに進む。読み始めた後に捨てられたら、読んだ名前を
+	// 保存しない。
+	gen uint64
+}
+
+func newProxyAccountNames(saRepo repository.SystemAccountRepository, userRepo repository.UserRepository) *proxyAccountNames {
+	return &proxyAccountNames{saRepo: saRepo, userRepo: userRepo}
+}
+
+// Resolve returns the proxy account's username.
+func (p *proxyAccountNames) Resolve() (string, bool) {
+	p.mu.Lock()
+	if p.found != nil {
+		name := *p.found
+		p.mu.Unlock()
+		return name, true
 	}
+	gen := p.gen
+	p.mu.Unlock()
+	sa, err := p.saRepo.FindByType("proxy")
+	if err != nil || sa == nil {
+		return "", false
+	}
+	user, err := p.userRepo.FindByID(sa.UserID)
+	if err != nil || user == nil {
+		return "", false
+	}
+	name := user.Username
+	p.mu.Lock()
+	if p.gen == gen {
+		p.found = &name
+	}
+	p.mu.Unlock()
+	return name, true
+}
+
+// DropLocal forgets the name found, so the next Resolve reads it again. No
+// other process is told.
+func (p *proxyAccountNames) DropLocal() {
+	p.mu.Lock()
+	p.found = nil
+	p.gen++
+	p.mu.Unlock()
 }
 
 // resolveProxyAccountNameForSSR resolves the proxy account name for the

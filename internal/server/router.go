@@ -507,7 +507,9 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// i/regenerate-token を使い切れる (passwordguard の package doc)。
 	passwordFailureGuard := passwordguard.NewRedisGuard(s.redis.Default)
 	// proxy account の username。meta / nodeinfo の handler と、frontend の HTML が共有する。
-	proxyAccountResolver := newProxyAccountResolver(systemAccountRepo, userRepo)
+	// 見つかった名前を持つので、キャッシュの一覧に登録する (#4276、wireCacheInvalidation)。
+	proxyAccountNames := newProxyAccountNames(systemAccountRepo, userRepo)
+	proxyAccountResolver := meta.ProxyAccountResolver(proxyAccountNames.Resolve)
 	// DB の健全性 (#3095)。統計はプライマリから読み、1 分キャッシュする。
 	dbHealth := dbhealth.NewService(s.db, s.config.DBReplications && len(s.config.DBSlaves) > 0)
 	// ドライブ使用量の集計 (#3053)。キャッシュの一覧に登録するので (#3738)、管理画面の
@@ -2305,6 +2307,8 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 		notificationsHandler:     notificationsHandler,
 		notePublisher:            notePublisher,
 		serverStatsPub:           serverStatsPub,
+		adRepo:                   adRepo,
+		proxyAccountNames:        proxyAccountNames,
 	})
 
 	// 取り消したリノート / 削除した引用の通知を消す (#3201)。**配線しないと build も
