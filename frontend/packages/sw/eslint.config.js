@@ -13,6 +13,8 @@ export default [
 				_DEV_: false,
 				_LANGS_: false,
 				_VERSION_: false,
+				// Elythia: locale の中身の hash (build.js、#4264)
+				_LOCALE_HASH_: false,
 				_ENV_: false,
 				_PERF_PREFIX_: false,
 			},

@@ -33,8 +33,9 @@ export type MaintenanceStore = {
 };
 
 /**
- * Whether activate keeps the cache named name. The locale cache of this
- * version and the maintenance page survive; everything else is dropped.
+ * Whether activate keeps the cache named name. The current locale cache
+ * (langCacheName, named after the version and the locale content) and the
+ * maintenance page survive; everything else is dropped.
  */
 export function keepCacheOnActivate(name: string, langCacheName: string): boolean {
 	return name === langCacheName || name === MAINTENANCE_CACHE;
