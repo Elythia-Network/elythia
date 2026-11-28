@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -360,16 +361,20 @@ func TestStorageMigratorReleaseRestoredCopies(t *testing.T) {
 	})
 	t.Run("the list fails", func(t *testing.T) {
 		f := restoredFixture(t, nil, "a")
-		m := NewStorageMigrator(&failingMigrationRepo{memMigrationRepo: f.repo, fail: "ListRestoredCopiesOfFile"}, f.local, f.dst, f.enq, f.lock)
+		m := NewStorageMigrator(&failingMigrationRepo{memMigrationRepo: f.repo, fail: "ListRestoredCopiesOfFiles"}, f.local, f.dst, f.enq, f.lock)
 		m.ReleaseRestoredCopies(ctx, "a")
 		assert.Contains(t, f.dst.objects, "ak-a")
 	})
 }
 
-type recordingReleaser struct{ ids []string }
+type recordingReleaser struct {
+	ids   []string
+	calls int
+}
 
-func (r *recordingReleaser) ReleaseRestoredCopies(_ context.Context, fileID string) {
-	r.ids = append(r.ids, fileID)
+func (r *recordingReleaser) ReleaseRestoredCopiesOfFiles(_ context.Context, fileIDs []string) {
+	r.calls++
+	r.ids = append(r.ids, fileIDs...)
 }
 
 // 戻したファイルの写しを消すのは、ローカルの行を消したときだけ (#4197)。
@@ -384,6 +389,151 @@ func TestDeleteMigrationCopiesReleasesTheRestoredCopies(t *testing.T) {
 	// link 行は storedInternal が true でも実体を持たない。
 	s.deleteMigrationCopies(&model.DriveFile{ID: "locallink", StoredInternal: true, IsLink: true, AccessKey: &key})
 	assert.Equal(t, []string{"local"}, r.ids)
+}
+
+// keyRecordingEnqueuer records the keys queued for deletion from object
+// storage.
+type keyRecordingEnqueuer struct{ keys []string }
+
+func (e *keyRecordingEnqueuer) EnqueueDeleteObjectStorageFile(key string) error {
+	e.keys = append(e.keys, key)
+	return nil
+}
+
+// deleteBatchFixture is a batch of a deleted account's files: a and b were
+// moved back and have copies in object storage, d is local without copies, e
+// is in object storage, x is in object storage again with a stale record of
+// a copy, and l is a link row. c was moved back too but is not in the batch.
+type deleteBatchFixture struct {
+	*migrationFixture
+	svc   *Service
+	enq   *keyRecordingEnqueuer
+	asked int
+	batch []*model.DriveFile
+}
+
+func newDeleteBatchFixture(t *testing.T) *deleteBatchFixture {
+	t.Helper()
+	f := &deleteBatchFixture{migrationFixture: restoredFixture(t, nil, "a", "b", "c"), enq: &keyRecordingEnqueuer{}}
+	f.addLocal(t, "d")
+	ek, xk, lk := "ak-e", "ak-x", "ak-l"
+	f.dst.objects[ek] = []byte("e")
+	f.dst.objects[xk] = []byte("x")
+	f.repo.files = append(f.repo.files,
+		model.DriveFile{ID: "e", AccessKey: &ek},
+		model.DriveFile{ID: "x", AccessKey: &xk},
+		model.DriveFile{ID: "l", IsLink: true, AccessKey: &lk})
+	f.repo.copies[xk] = model.DriveObjectStorageRestoredCopy{Key: xk, FileID: "x", Location: xk}
+	for _, id := range []string{"a", "b", "d", "e", "x", "l"} {
+		row := f.repo.file(id)
+		require.Equal(t, id, row.ID)
+		f.batch = append(f.batch, &row)
+	}
+	f.svc = &Service{storage: f.dst, localStorage: f.local}
+	f.svc.SetObjectDeleteEnqueuer(f.enq)
+	f.svc.SetRestoredCopyReleaser(f.m)
+	f.svc.SetStorageMigrationRunning(func() bool {
+		f.asked++
+		return true
+	})
+	f.repo.copyLists = 0
+	return f
+}
+
+// state returns what is left: the objects in object storage, the recorded
+// copies, the queued deletions and the local objects of the batch.
+func (f *deleteBatchFixture) state(t *testing.T) (objects, copies, queued, local []string) {
+	t.Helper()
+	for k := range f.dst.objects {
+		objects = append(objects, k)
+	}
+	for k := range f.repo.copies {
+		copies = append(copies, k)
+	}
+	queued = slices.Clone(f.enq.keys)
+	for _, k := range variantKeys("a", "b", "c", "d") {
+		if f.localBody(t, k) != "" {
+			local = append(local, k)
+		}
+	}
+	slices.Sort(objects)
+	slices.Sort(copies)
+	slices.Sort(queued)
+	return objects, copies, queued, local
+}
+
+// アカウントの削除はバッチの戻した写しを 1 本で引き、移す処理が実行中かを 1 回だけ聞く。
+// 消す写しは 1 件ずつ消したときと同じ (#4267)。
+func TestDeleteFilesObjectsReleasesTheRestoredCopiesOfTheBatch(t *testing.T) {
+	one := newDeleteBatchFixture(t)
+	for _, f := range one.batch {
+		require.Equal(t, []error{nil}, one.svc.DeleteFilesObjects([]*model.DriveFile{f}), f.ID)
+	}
+	batch := newDeleteBatchFixture(t)
+	errs := batch.svc.DeleteFilesObjects(batch.batch)
+	require.Len(t, errs, len(batch.batch))
+	for i, err := range errs {
+		require.NoError(t, err, batch.batch[i].ID)
+	}
+	assert.Equal(t, 1, batch.repo.copyLists, "the restored copies were not read once for the batch")
+	assert.Equal(t, 1, batch.asked, "whether the migration runs was not asked once for the batch")
+
+	objects, copies, queued, local := batch.state(t)
+	// a と b の写しだけを消す。c はバッチに無く、x はオブジェクトストレージから配っているので残す。
+	assert.Equal(t, []string{"ak-c", "ak-e", "ak-x", "tk-c", "wk-c"}, objects)
+	assert.Equal(t, []string{"ak-c", "ak-x", "tk-c", "wk-c"}, copies)
+	// e と x の本体と、移す処理の実行中に消したローカルの行 (a, b, d) の写しの候補。
+	assert.Equal(t, []string{"ak-a", "ak-b", "ak-d", "ak-e", "ak-x", "tk-a", "tk-b", "tk-d", "wk-a", "wk-b", "wk-d"}, queued)
+	assert.Equal(t, variantKeys("c"), local)
+
+	oObjects, oCopies, oQueued, oLocal := one.state(t)
+	assert.Equal(t, oObjects, objects, "the batch left other objects than one by one")
+	assert.Equal(t, oCopies, copies, "the batch left other records than one by one")
+	assert.Equal(t, oQueued, queued, "the batch queued other deletions than one by one")
+	assert.Equal(t, oLocal, local, "the batch left other local objects than one by one")
+}
+
+// 移す処理が実行中かは、答えが要るローカルの行があるときだけ聞く (#4267)。
+func TestDeleteFilesObjectsAsksWhetherTheMigrationRunsOnlyWhenNeeded(t *testing.T) {
+	f := newDeleteBatchFixture(t)
+	var objectOnly []*model.DriveFile
+	for _, file := range f.batch {
+		if !file.StoredInternal {
+			objectOnly = append(objectOnly, file)
+		}
+	}
+	require.Len(t, objectOnly, 3)
+	f.svc.DeleteFilesObjects(objectOnly)
+	assert.Zero(t, f.asked)
+	assert.Zero(t, f.repo.copyLists, "the restored copies were read for a batch without local rows")
+	assert.Empty(t, f.svc.DeleteFilesObjects(nil))
+}
+
+// 本体を消せなかったファイルも、バッチの中で写しを消す (1 件ずつ消していたときと同じ)。
+func TestDeleteFilesObjectsReleasesTheCopiesOfAFileItCannotDelete(t *testing.T) {
+	f := newDeleteBatchFixture(t)
+	f.svc.localStorage = failingLocalDelete{f.local, "ak-a"}
+	errs := f.svc.DeleteFilesObjects(f.batch)
+	require.Error(t, errs[0])
+	for _, err := range errs[1:] {
+		assert.NoError(t, err)
+	}
+	for _, k := range variantKeys("a", "b") {
+		assert.NotContains(t, f.dst.objects, k, "the copy %s was kept", k)
+	}
+}
+
+// failingLocalDelete fails the deletion of key.
+type failingLocalDelete struct {
+	*LocalStorage
+	key string
+}
+
+func (s failingLocalDelete) Delete(key string) error {
+	if key == s.key {
+		return errors.New("disk error")
+	}
+	return s.LocalStorage.Delete(key)
 }
 
 // ローカルとバケットが同じ実体なら、写しを消すとローカルも消える。何も消さずに止める (#4197)。
@@ -664,4 +814,202 @@ func TestStorageMigrationChecksTheVariantsAfterTakingTheLockBack(t *testing.T) {
 	}}, f.enq, f.lock)
 	require.NoError(t, f.m.RunBatch(ctx, j.token, j.afterID))
 	assert.True(t, f.repo.file("a").StoredInternal, "the row was marked as migrated without its thumbnail")
+}
+
+// eventStorage records the deletions from the local storage in events.
+type eventStorage struct {
+	Storage
+	events *[]string
+}
+
+func (s eventStorage) Delete(key string) error {
+	*s.events = append(*s.events, "delete "+key)
+	return s.Storage.Delete(key)
+}
+
+// eventEnqueuer records the queued deletions in events.
+type eventEnqueuer struct{ events *[]string }
+
+func (e eventEnqueuer) EnqueueDeleteObjectStorageFile(key string) error {
+	*e.events = append(*e.events, "queue "+key)
+	return nil
+}
+
+// eventReleaser records in events when the restored copies are released.
+type eventReleaser struct {
+	RestoredCopiesReleaser
+	events *[]string
+}
+
+func (r eventReleaser) ReleaseRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) {
+	*r.events = append(*r.events, "release")
+	r.RestoredCopiesReleaser.ReleaseRestoredCopiesOfFiles(ctx, fileIDs)
+}
+
+// 移す処理が実行中かは、バッチの本体を消し終えた直後、戻した写しを消すより前に読む。後で
+// 読むと、移す処理が終わったときに写しを消すジョブを積み損ねる窓が、戻した写しを消す時間
+// だけ広がる (#4267)。
+func TestDeleteFilesObjectsAsksWhetherTheMigrationRunsBeforeReleasingTheCopies(t *testing.T) {
+	f := newDeleteBatchFixture(t)
+	var events []string
+	f.svc.localStorage = eventStorage{Storage: f.local, events: &events}
+	f.svc.SetObjectDeleteEnqueuer(eventEnqueuer{events: &events})
+	f.svc.SetRestoredCopyReleaser(eventReleaser{RestoredCopiesReleaser: f.m, events: &events})
+	f.svc.SetStorageMigrationRunning(func() bool {
+		events = append(events, "asked")
+		return true
+	})
+	f.svc.DeleteFilesObjects(f.batch)
+
+	asked := slices.Index(events, "asked")
+	require.NotEqual(t, -1, asked, "%v", events)
+	assert.Equal(t, 1, countOf(events, "asked"), "asked more than once: %v", events)
+	release := slices.Index(events, "release")
+	require.NotEqual(t, -1, release, "%v", events)
+	assert.Less(t, asked, release, "asked after releasing the restored copies: %v", events)
+	primaries := append(variantKeys("a", "b", "d"), "ak-e", "ak-x")
+	for _, k := range primaries {
+		i := slices.IndexFunc(events, func(e string) bool { return e == "delete "+k || e == "queue "+k })
+		require.NotEqual(t, -1, i, "the primary %s was not deleted: %v", k, events)
+		assert.Less(t, i, asked, "asked before deleting the primary %s: %v", k, events)
+	}
+}
+
+// releaseStepKey tags the context that releaseTimeout made: one step of
+// ReleaseRestoredCopiesOfFiles for several files, or the whole release for one.
+type releaseStepKey struct{}
+
+// countReleaseSteps makes m tag the context of each step with its number,
+// and returns the number of steps.
+func countReleaseSteps(m *StorageMigrator) *int {
+	steps := 0
+	next := m.releaseTimeout
+	m.releaseTimeout = func(ctx context.Context) (context.Context, context.CancelFunc) {
+		steps++
+		return next(context.WithValue(ctx, releaseStepKey{}, steps))
+	}
+	return &steps
+}
+
+// ctxRecordingRepo records the context each copy is deleted with.
+type ctxRecordingRepo struct {
+	*memMigrationRepo
+	finds []ctxRecord
+}
+
+type ctxRecord struct {
+	fileID   string
+	step     any
+	deadline time.Duration
+	hasLimit bool
+}
+
+func (r *ctxRecordingRepo) FindDriveFile(ctx context.Context, id string) (*model.DriveFile, error) {
+	dl, ok := ctx.Deadline()
+	r.finds = append(r.finds, ctxRecord{fileID: id, step: ctx.Value(releaseStepKey{}), deadline: time.Until(dl), hasLimit: ok})
+	return r.memMigrationRepo.FindDriveFile(ctx, id)
+}
+
+// stepsByFile returns the step each file's copies were deleted in, failing
+// when the copies of one file were deleted in different steps.
+func (r *ctxRecordingRepo) stepsByFile(t *testing.T) map[string]any {
+	t.Helper()
+	steps := map[string]any{}
+	for _, c := range r.finds {
+		if s, ok := steps[c.fileID]; ok {
+			assert.Equal(t, s, c.step, "the copies of %s were deleted in different steps", c.fileID)
+		}
+		steps[c.fileID] = c.step
+	}
+	return steps
+}
+
+// 写しを消す時間の上限は、バッチ全体でなくファイルごとに置く。まとめると、写しの多い
+// バッチで後ろのファイルの写しが時間切れで残る (#4267)。
+func TestReleaseRestoredCopiesOfFilesBoundsEachFile(t *testing.T) {
+	f := restoredFixture(t, nil, "a", "b")
+	repo := &ctxRecordingRepo{memMigrationRepo: f.repo}
+	m := NewStorageMigrator(repo, f.local, f.dst, f.enq, f.lock)
+	countReleaseSteps(m)
+	m.ReleaseRestoredCopiesOfFiles(context.Background(), []string{"a", "b"})
+
+	require.Len(t, repo.finds, 6)
+	for _, r := range repo.finds {
+		require.True(t, r.hasLimit, "the copy of %s was deleted without a time limit", r.fileID)
+		assert.Positive(t, r.deadline, r.fileID)
+		assert.LessOrEqual(t, r.deadline, restoredCopyReleaseTimeout, r.fileID)
+	}
+	// 1 は一覧の取得。続くファイルごとに上限を取り直す。
+	assert.Equal(t, map[string]any{"a": 2, "b": 3}, repo.stepsByFile(t))
+	for _, k := range variantKeys("a", "b") {
+		assert.NotContains(t, f.dst.objects, k, k)
+	}
+}
+
+// 1 件のファイルでは、一覧と写しの削除を 1 つの上限 (30 秒) で包む。段ごとに取り直すと、
+// 利用者の削除の待ちが最悪で倍になる (#4267)。
+func TestReleaseRestoredCopiesOfOneFileBoundsTheWhole(t *testing.T) {
+	for name, release := range map[string]func(m *StorageMigrator){
+		"ReleaseRestoredCopies":        func(m *StorageMigrator) { m.ReleaseRestoredCopies(context.Background(), "a") },
+		"ReleaseRestoredCopiesOfFiles": func(m *StorageMigrator) { m.ReleaseRestoredCopiesOfFiles(context.Background(), []string{"a"}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := restoredFixture(t, nil, "a", "b")
+			repo := &ctxRecordingRepo{memMigrationRepo: f.repo}
+			m := NewStorageMigrator(repo, f.local, f.dst, f.enq, f.lock)
+			steps := countReleaseSteps(m)
+			release(m)
+
+			require.Len(t, repo.finds, 3)
+			for _, r := range repo.finds {
+				require.True(t, r.hasLimit, "the copy of %s was deleted without a time limit", r.fileID)
+				assert.LessOrEqual(t, r.deadline, restoredCopyReleaseTimeout)
+			}
+			assert.Equal(t, 1, *steps, "the list and the deletion took separate limits")
+			assert.Equal(t, map[string]any{"a": 1}, repo.stepsByFile(t))
+			for _, k := range variantKeys("a") {
+				assert.NotContains(t, f.dst.objects, k, k)
+			}
+			for _, k := range variantKeys("b") {
+				assert.Contains(t, f.dst.objects, k, "a copy of another file was deleted")
+			}
+		})
+	}
+}
+
+// 写しは並び順に頼らずファイルごとにまとめる (#4267)。
+func TestReleaseRestoredCopiesOfFilesGroupsUnorderedCopies(t *testing.T) {
+	f := restoredFixture(t, nil, "a", "b")
+	repo := &unorderedCopiesRepo{ctxRecordingRepo: ctxRecordingRepo{memMigrationRepo: f.repo}}
+	m := NewStorageMigrator(repo, f.local, f.dst, f.enq, f.lock)
+	countReleaseSteps(m)
+	m.ReleaseRestoredCopiesOfFiles(context.Background(), []string{"a", "b"})
+
+	require.Len(t, repo.finds, 6)
+	assert.Equal(t, map[string]any{"a": 2, "b": 3}, repo.stepsByFile(t))
+	for _, k := range variantKeys("a", "b") {
+		assert.NotContains(t, f.dst.objects, k, k)
+	}
+}
+
+// unorderedCopiesRepo returns the copies interleaving the files.
+type unorderedCopiesRepo struct{ ctxRecordingRepo }
+
+func (r *unorderedCopiesRepo) ListRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	copies, err := r.memMigrationRepo.ListRestoredCopiesOfFiles(ctx, fileIDs)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(copies, func(a, b model.DriveObjectStorageRestoredCopy) int { return strings.Compare(a.Key, b.Key) })
+	return copies, nil
+}
+
+func countOf(events []string, e string) int {
+	n := 0
+	for _, x := range events {
+		if x == e {
+			n++
+		}
+	}
+	return n
 }

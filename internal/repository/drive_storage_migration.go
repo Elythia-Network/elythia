@@ -237,14 +237,19 @@ func (r *DriveStorageMigrationRepository) ListRestoredCopies(ctx context.Context
 	return out, nil
 }
 
-// ListRestoredCopiesOfFile returns the recorded copies of the file (#4197).
-func (r *DriveStorageMigrationRepository) ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
-	if !storable(fileID) {
+// ListRestoredCopiesOfFiles returns the recorded copies of the files, ordered
+// by file id and key (#4267).
+//
+// アカウントの削除は 100 件ずつ消すので、ファイルごとに引かず 1 本で引く。この表は
+// ローカルへ戻した (#4183) 構成でしか行を持たないので、ほとんどは空を返す。
+func (r *DriveStorageMigrationRepository) ListRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	fileIDs = storableIDs(fileIDs)
+	if len(fileIDs) == 0 {
 		return nil, nil
 	}
 	var out []model.DriveObjectStorageRestoredCopy
-	if err := r.db.WithContext(ctx).Where(`"fileId" = ?`, fileID).
-		Order(`"key" ASC`).Find(&out).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where(`"fileId" IN ?`, fileIDs).
+		Order(`"fileId" ASC, "key" ASC`).Find(&out).Error; err != nil {
 		return nil, err
 	}
 	return out, nil

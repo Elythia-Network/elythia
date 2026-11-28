@@ -44,10 +44,11 @@ type DeleteAccountProcessor struct {
 	driveObjects DriveFileObjectDeleter
 }
 
-// DriveFileObjectDeleter removes the stored objects of one drive file without
-// deleting its row. *drive.Service satisfies it (DeleteFileObjects).
+// DriveFileObjectDeleter removes the stored objects of drive files without
+// deleting their rows, returning the error of each file at the same index.
+// *drive.Service satisfies it (DeleteFilesObjects).
 type DriveFileObjectDeleter interface {
-	DeleteFileObjects(f *model.DriveFile) error
+	DeleteFilesObjects(files []*model.DriveFile) []error
 }
 
 // SetDriveFileObjectDeleter wires what deletes the stored objects of the
@@ -88,14 +89,21 @@ func (p *DeleteAccountProcessor) deleteDriveFiles(ctx context.Context, userID st
 		}
 		ids := make([]string, 0, len(files))
 		queued := false
-		for _, f := range files {
+		// 戻した写しの表と移す処理の lock は、バッチごとにまとめて引く (#4267)。
+		errs := p.driveObjects.DeleteFilesObjects(files)
+		if len(errs) != len(files) {
+			// 実装の契約違反。行はこのまま消し、合わない分の失敗は記録できないことだけを残す。
+			slog.Warn("delete-account: the drive object deleter returned errors for another number of files",
+				"userId", userID, "files", len(files), "errors", len(errs))
+		}
+		for i, f := range files {
 			// オブジェクトストレージの実体は削除のジョブに積む (ローカルはその場で消し、
 			// リンク行は何もしない)。待つのは、積んだバッチの後だけにする。移行の実行中に
 			// ローカルの行の写しを消すジョブ (deleteMigrationCopies) は数えない。
 			queued = queued || (!f.StoredInternal && !f.IsLink)
-			if err := p.driveObjects.DeleteFileObjects(f); err != nil {
+			if i < len(errs) && errs[i] != nil {
 				slog.Warn("delete-account: drive object delete failed (the object may be orphaned)",
-					"userId", userID, "fileId", f.ID, "err", err)
+					"userId", userID, "fileId", f.ID, "err", errs[i])
 			}
 			ids = append(ids, f.ID)
 		}
