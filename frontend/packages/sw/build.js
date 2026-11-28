@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import locales from 'i18n';
 import meta from '../../package.json' with { type: 'json' };
+import { localeHash } from './locale-hash.js';
 
 const watch = process.argv[2]?.includes('watch');
 
@@ -23,6 +24,8 @@ const buildOptions = {
 	define: {
 		_DEV_: JSON.stringify(process.env.NODE_ENV !== 'production'),
 		_ENV_: JSON.stringify(process.env.NODE_ENV ?? ''), // `NODE_ENV`が`undefined`なとき`JSON.stringify`が`undefined`を返してエラーになってしまうので`??`を使っている
+		// Elythia: 配る locale の中身の hash (#4264)。i18n の writeFrontendLocalesJson が書くのと同じ build() の結果から求める
+		_LOCALE_HASH_: JSON.stringify(localeHash(locales)),
 		_LANGS_: JSON.stringify(Object.entries(locales).map(([k, v]) => [k, v._lang_])),
 		_PERF_PREFIX_: JSON.stringify('Misskey:'),
 		_VERSION_: JSON.stringify(meta.version),

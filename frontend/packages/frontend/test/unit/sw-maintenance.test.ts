@@ -121,8 +121,10 @@ describe('maintenanceAwareNavigation', () => {
 
 describe('keepCacheOnActivate', () => {
 	it('keeps the locale cache and the maintenance page only', () => {
-		expect(keepCacheOnActivate('mk-cache-1.0.0', 'mk-cache-1.0.0')).toBe(true);
-		expect(keepCacheOnActivate(MAINTENANCE_CACHE, 'mk-cache-1.0.0')).toBe(true);
-		expect(keepCacheOnActivate('mk-cache-0.9.0', 'mk-cache-1.0.0')).toBe(false);
+		expect(keepCacheOnActivate('mk-cache-1.0.0-bbbb', 'mk-cache-1.0.0-bbbb')).toBe(true);
+		expect(keepCacheOnActivate(MAINTENANCE_CACHE, 'mk-cache-1.0.0-bbbb')).toBe(true);
+		expect(keepCacheOnActivate('mk-cache-0.9.0-bbbb', 'mk-cache-1.0.0-bbbb')).toBe(false);
+		// 同じ版でも、locale の中身が変わった古いキャッシュは消す (#4264)
+		expect(keepCacheOnActivate('mk-cache-1.0.0-aaaa', 'mk-cache-1.0.0-bbbb')).toBe(false);
 	});
 });

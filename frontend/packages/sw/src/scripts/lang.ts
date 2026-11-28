@@ -9,10 +9,12 @@
 import { get, set } from 'idb-keyval';
 import { I18n } from '@@/js/i18n.js';
 import { FETCH_TIMEOUT_MS } from '@/const.js';
+import { localeCacheName, localeFetchInit } from '@/scripts/locale-cache.js';
 import type { Locale } from 'i18n';
 
 class SwLang {
-	public cacheName = `mk-cache-${_VERSION_}`;
+	// Elythia: 名前に locale の中身の hash を入れる (#4264)
+	public cacheName = localeCacheName(_VERSION_, _LOCALE_HASH_);
 
 	public lang: Promise<string> = get('lang').then(async prelang => {
 		if (!prelang) return 'en-US';
@@ -44,7 +46,8 @@ class SwLang {
 			}, FETCH_TIMEOUT_MS);
 
 			try {
-				localeRes = await fetch(localeUrl, { signal: controller.signal });
+				// Elythia: URL は中身が変わっても同じなので、HTTP のキャッシュを確かめ直す (#4264)
+				localeRes = await fetch(localeUrl, localeFetchInit(controller.signal));
 
 				const clone = localeRes.clone();
 				if (!clone.clone().ok) throw new Error('locale fetching error');
