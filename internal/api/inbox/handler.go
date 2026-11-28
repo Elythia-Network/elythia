@@ -2,9 +2,7 @@
 package inbox
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -329,7 +327,13 @@ func (h *Handler) Inbox(c *echo.Context) error {
 	// upstream ActivityPubServerService.inbox (#17558): actor を持たない activity は
 	// authenticate 不能なので enqueue せず 400 で弾く。mk-go は actor 欠落で worker 側が
 	// drop する (crash はしない) が、無駄な enqueue/retry を避けるため早期 reject する。
-	if !bodyHasActor(body) {
+	//
+	// actor の有無と、本文が名指すローカルの参照は 1 回の走査で読む (#4276)。以前は
+	// actor のためだけに本文全体をもう 1 回 decode していた。参照を使う (DB を引く)
+	// のは、actor の検査を通った後の observeLocalInboxBodyTargets だけで、順序は
+	// 変わらない。
+	hasActor, bodyUserIDs, bodyNoteIDs := h.resolver.ScanInboxBody(body)
+	if !hasActor {
 		// admitInbox を通っているので parsed は非 nil。body の actor は読めない
 		// から捨てているので出しようが無く、相手を示せるのは署名側だけ (#2725)。
 		slog.Warn("inbox rejected: activity has no actor",
@@ -337,7 +341,7 @@ func (h *Handler) Inbox(c *echo.Context) error {
 		return c.NoContent(http.StatusBadRequest)
 	}
 
-	if err := h.observeLocalInboxBodyTargets(body, signerHostOf(parsed)); err != nil {
+	if err := h.observeLocalInboxBodyTargets(bodyUserIDs, bodyNoteIDs, signerHostOf(parsed)); err != nil {
 		if errors.Is(err, errLocalInboxTooManyReferences) {
 			return c.NoContent(http.StatusBadRequest)
 		}
@@ -424,12 +428,12 @@ func (h *Handler) observeLocalInboxPathTarget(c *echo.Context, host string) erro
 
 // observeLocalInboxBodyTargets validates all semantic body references first,
 // then records availability. Body-derived identities are not inspected until
-// inbox admission and the required actor check have both succeeded.
-func (h *Handler) observeLocalInboxBodyTargets(body []byte, host string) error {
+// inbox admission and the required actor check have both succeeded. userIDs
+// and noteIDs are the references ScanInboxBody read from the body.
+func (h *Handler) observeLocalInboxBodyTargets(userIDs, noteIDs []string, host string) error {
 	if h.userRepo == nil || h.localFederationObserver == nil || h.resolver == nil {
 		return nil
 	}
-	userIDs, noteIDs := h.resolver.ExtractLocalAPReferences(body)
 	if len(userIDs)+len(noteIDs) > maxInboxBodyReferences {
 		return errLocalInboxTooManyReferences
 	}
@@ -582,27 +586,4 @@ func (h *Handler) commitChart(actor *model.User) {
 		return
 	}
 	h.chartHook.OnInboxReceived(*actor.Host)
-}
-
-// bodyHasActor reports whether the inbox activity body is a JSON object whose
-// `actor` can name an actor: a non-empty string, an object or an array.
-// upstream #17558: actor 無し activity は authenticate 不能なので enqueue 前に
-// 弾く。数値・真偽値・空文字列は actor を名指せないので、null と同じく弾く
-// (worker の authorizeActor も落とすが、無駄な enqueue を避ける。2026-10-31 の監査)。
-func bodyHasActor(body []byte) bool {
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return false // object でない (= 不正) → reject
-	}
-	actor := bytes.TrimSpace(probe["actor"])
-	if len(actor) == 0 {
-		return false
-	}
-	switch actor[0] {
-	case '"':
-		return len(actor) > 2 // `""` は名指していない
-	case '{', '[':
-		return true
-	}
-	return false
 }
