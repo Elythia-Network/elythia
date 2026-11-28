@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,13 +17,6 @@ import (
 )
 
 const replayDigestTestBody = `{"id":"https://remote.example/follows/3988","type":"Follow","actor":"https://remote.example/users/alice","object":"https://example.com/users/bob"}`
-
-// endReplayKeyTransition moves the processor's clock past the window in which
-// it also uses the replay key of before #3988.
-func endReplayKeyTransition(p *processors.InboxProcessor) {
-	after := p.LegacyReplayKeysUntilForTest().Add(time.Second)
-	p.SetNowForTest(func() time.Time { return after })
-}
 
 // replayDigestFixture returns a verifier for the remote actor and the key it
 // signs with.
@@ -44,26 +36,14 @@ func replayDigestTask(t *testing.T, payload queue.InboxPayload) driver.RawTask {
 	return driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
 }
 
-// The window starts when the processor is built and lasts inboxReplayTTL: a
-// key remembered before the switch expires within that time.
-func TestInboxProcessor_LegacyReplayKeyWindowIsReplayTTL(t *testing.T) {
-	before := time.Now()
-	p := processors.NewInboxProcessor(&stubFedProcessor{}, nil, nil, nil, nil, newMemReplayGuard())
-	after := time.Now()
-	until := p.LegacyReplayKeysUntilForTest()
-	assert.False(t, until.Before(before.Add(processors.InboxReplayTTLForTest)))
-	assert.False(t, until.After(after.Add(processors.InboxReplayTTLForTest)))
-}
-
-// #3988: 再投函の鍵は、署名が覆った Date と Digest から作る。切り替えの窓の後は
-// その鍵だけを覚え、同じリクエストの再投函を捨てる。
+// #3988: 再投函の鍵は、署名が覆った Date と Digest から作る。起動の直後から
+// その鍵だけを覚え、同じリクエストの再投函を捨てる (#4275 で前の形の鍵をやめた)。
 func TestInboxProcessor_ReplayKeyIsSignedDateAndDigest(t *testing.T) {
 	verifier, key := replayDigestFixture(t)
 	payload := signedInboxPayloadWithDate(t, key, []byte(replayDigestTestBody), "", true)
 	stub := &stubFedProcessor{}
 	guard := newMemReplayGuard()
 	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
-	endReplayKeyTransition(p)
 
 	require.NoError(t, p.Handle(context.Background(), replayDigestTask(t, payload)))
 	require.Len(t, stub.calls, 1)
@@ -79,40 +59,34 @@ func TestInboxProcessor_ReplayKeyIsSignedDateAndDigest(t *testing.T) {
 	assert.Len(t, stub.calls, 2, "a different body under the same Date is a different request")
 }
 
-// #3988: 鍵の形を変えた直後 (inboxReplayTTL の間) は、前の形の鍵 (本文の
-// ダイジェスト) で覚えたリクエストの再投函も捨て、両方の形で覚える。窓の後は
-// 前の形の鍵を見ない (その頃には Redis から消えている)。
-func TestInboxProcessor_ReplayKeyTransitionHonoursPreviousKeys(t *testing.T) {
-	t.Run("replay of a request remembered before the switch is dropped", func(t *testing.T) {
+// #4275: 起動の直後も、#3988 より前の形の鍵 (Date と本文の SHA-256) は計算せず、
+// 見ず、覚えない。2.2.0 と 2.3.0 は起動から inboxReplayTTL の間だけ前の形の鍵も
+// 使っていたが、前の形の鍵だけで覚えたリリースは無く、大きな本文の受信を重くするだけだった。
+func TestInboxProcessor_PreviousReplayKeyIsNotUsedRightAfterStart(t *testing.T) {
+	t.Run("a request remembered by the previous key is not a replay", func(t *testing.T) {
 		verifier, payload := signedReplayFixture(t, []byte(replayDigestTestBody))
+		previous := replayKeyOf(payload.Headers["Date"], payload.Body)
 		stub := &stubFedProcessor{}
 		guard := newMemReplayGuard()
-		guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)] = true
+		guard.seen[previous] = true
 		p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
 		require.NoError(t, p.Handle(context.Background(), replayDigestTask(t, payload)))
-		assert.Empty(t, stub.calls, "a request processed before the switch must not be processed again")
+		assert.Len(t, stub.calls, 1, "the previous key must not be consulted")
+		assert.Empty(t, guard.claims)
 	})
-	t.Run("both keys are remembered inside the window", func(t *testing.T) {
+	t.Run("only the current key is remembered", func(t *testing.T) {
 		verifier, payload := signedReplayFixture(t, []byte(replayDigestTestBody))
 		stub := &stubFedProcessor{}
 		guard := newMemReplayGuard()
 		p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
+
 		require.NoError(t, p.Handle(context.Background(), replayDigestTask(t, payload)))
 		require.Len(t, stub.calls, 1)
 		assert.Equal(t, map[string]bool{
 			digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"]): true,
-			replayKeyOf(payload.Headers["Date"], payload.Body):                    true,
-		}, guard.seen)
-	})
-	t.Run("the previous key is not consulted after the window", func(t *testing.T) {
-		verifier, payload := signedReplayFixture(t, []byte(replayDigestTestBody))
-		stub := &stubFedProcessor{}
-		guard := newMemReplayGuard()
-		guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)] = true
-		p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
-		endReplayKeyTransition(p)
-		require.NoError(t, p.Handle(context.Background(), replayDigestTask(t, payload)))
-		assert.Len(t, stub.calls, 1)
+		}, guard.seen, "the previous key must not be remembered")
+		assert.Empty(t, guard.claims)
 	})
 }
 

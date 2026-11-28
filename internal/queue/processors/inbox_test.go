@@ -1029,32 +1029,13 @@ func TestInboxProcessor_RetryOfTheSameJobPassesItsMark(t *testing.T) {
 	stub := &stubFedProcessor{}
 	guard := newMemReplayGuard()
 	// 落ちたジョブ 7 が残した印。
-	for _, key := range []string{digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"]), replayKeyOf(payload.Headers["Date"], payload.Body)} {
-		guard.claims[key] = "job:7"
-	}
+	guard.claims[digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"])] = "job:7"
 	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
 
 	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "8"), task))
 	assert.Empty(t, stub.calls, "another job is a replay")
 	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "7"), task))
 	assert.Len(t, stub.calls, 1, "the same job's retry is processed")
-}
-
-// **一部の鍵だけを取れたときは、取った印を外して再投函として扱う。** 外さないと、
-// 取った鍵に印が残り、印の期限まで同じリクエストを処理し直せない。
-func TestInboxProcessor_PartialClaimReleasesTheMarksItTook(t *testing.T) {
-	body := []byte(`{"id":"https://remote.example/follows/p","type":"Follow","actor":"https://remote.example/users/alice"}`)
-	verifier, payload := signedReplayFixture(t, body)
-	task := driver.RawTask{TypeName: queue.TaskTypeInbox, Body: mustEncode(t, payload)}
-	stub := &stubFedProcessor{}
-	guard := newMemReplayGuard()
-	// 前の形の鍵 (2 つ目) だけが処理済み。
-	guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)] = true
-	p := processors.NewInboxProcessor(stub, verifier, nil, nil, nil, guard)
-
-	require.NoError(t, p.Handle(driver.WithJobID(context.Background(), "1"), task))
-	assert.Empty(t, stub.calls, "a request processed under the previous key is a replay")
-	assert.Empty(t, guard.claims, "the mark on the first key was left behind")
 }
 
 // **処理が失敗したら、印を外す。** 外さないと、印の期限まで同じリクエストを処理し

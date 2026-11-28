@@ -212,11 +212,6 @@ type InboxProcessor struct {
 	// 同一 remote actor からの連続 activity で x509 パースを 1 回に集約できる
 	// (#1436 の DeliverProcessor.keyCache と対になる inbound 側最適化)。
 	keyCache *activitypub.PublicKeyCache
-	// legacyReplayKeysUntil is until when replayKeys also uses the replay key
-	// of before #3988 (activityReplayKey of the body); see replayKeys.
-	legacyReplayKeysUntil time.Time
-	// now is the clock replayKeys reads; time.Now unless a test replaces it.
-	now func() time.Time
 }
 
 // NewInboxProcessor constructs an InboxProcessor wrapping the supplied
@@ -239,9 +234,6 @@ func NewInboxProcessor(p FederationProcessor, verifier SignatureVerifier, hostBl
 		metadataRefresher: metadataRefresher,
 		replayGuard:       replayGuard,
 		keyCache:          activitypub.NewPublicKeyCache(0),
-		// 起動の前に処理したリクエストの鍵は、長くても inboxReplayTTL で消える。
-		legacyReplayKeysUntil: time.Now().Add(inboxReplayTTL),
-		now:                   time.Now,
 	}
 }
 
@@ -331,11 +323,11 @@ func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 	// 再投函ガードの処理中の印の持ち主。処理が成功しないまま戻るときは印を外す
 	// (外さないと、印の期限まで、同じリクエストを別のジョブで処理し直せない)。
 	owner := replayOwner(ctx)
-	var claimed []string
+	claimed := ""
 	remembered := false
 	defer func() {
 		if !remembered {
-			p.releaseReplayKeys(claimed, owner)
+			p.releaseReplayKey(claimed, owner)
 		}
 	}()
 
@@ -368,9 +360,9 @@ func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 	// 未署名の body から採った id は相手の申告でしかなく、覚えると他人の id を
 	// 先に登録して本物を落とせる。
 	activityID := ""
-	// replayKeys は再投函ガードの鍵 (署名が覆った Date と Digest。replayKeys を参照)。
+	// replayKey は再投函ガードの鍵 (署名が覆った Date と Digest。requestReplayKey を参照)。
 	// activityID と同じく、署名検証と actor の認可を通った経路でだけ埋まる。
-	var replayKeys []string
+	replayKey := ""
 	// body は dispatch する本文。転送経路では authorizeActor が署名済みの内容へ
 	// 差し替える。
 	body := payload.Body
@@ -492,9 +484,9 @@ func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 		// `published` 無し) の再フォローを捨てる。再投函は捕まえた署名付きリクエストを
 		// そのまま投げ直す形なので、署名された Date を足せば過不足なく捕まえられる。
 		// 本文は、受付が本文との一致を確かめた Digest で表す (#3988)。
-		replayKeys = p.replayKeys(payload.Headers, payload.Body, digestSigned)
+		replayKey = requestReplayKey(payload.Headers, payload.Body, digestSigned)
 		var replay bool
-		claimed, replay = p.claimReplayKeys(replayKeys, owner)
+		claimed, replay = p.claimReplayKey(replayKey, owner)
 		if replay {
 			slog.Debug("inbox: activity already processed, dropping replay",
 				"host", host, "activityId", activityID)
@@ -556,50 +548,41 @@ func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 	}
 	// **成功してから覚える。** 先に覚えると、処理が落ちてキューが再試行した
 	// ときに自分の再試行を再投函として捨ててしまう。
-	p.rememberActivity(replayKeys, activityID)
+	p.rememberActivity(replayKey, activityID)
 	remembered = true
 	p.recordInboxTelemetry(host, deliveryhealth.ClassAccepted, started, "")
 	return nil
 }
 
-// claimReplayKeys places owner's processing mark on every replay key, and
-// reports replay when a key is already processed or marked by another job;
-// claimed are the keys it marked (Release them when the processing does not
-// succeed). 1 つでも取れなければ、取った印を外して再投函として扱う。
+// claimReplayKey places owner's processing mark on the replay key, and
+// reports replay when the key is already processed or marked by another job;
+// claimed is the key it marked ("" when none; Release it when the processing
+// does not succeed).
 //
 // guard の障害では**落とさない** (fail-open)。Redis が不調なだけで連合の受信が
 // 止まると、再投函を防ぐより害が大きい。
-func (p *InboxProcessor) claimReplayKeys(replayKeys []string, owner string) (claimed []string, replay bool) {
-	if p.replayGuard == nil {
-		return nil, false
+func (p *InboxProcessor) claimReplayKey(key, owner string) (claimed string, replay bool) {
+	if p.replayGuard == nil || key == "" {
+		return "", false
 	}
-	for _, key := range replayKeys {
-		if key == "" {
-			continue
-		}
-		held, err := p.replayGuard.Claim(context.Background(), key, owner)
-		if err != nil {
-			slog.Warn("inbox: replay guard degraded, accepting without the check", "err", err)
-			return claimed, false
-		}
-		if !held {
-			p.releaseReplayKeys(claimed, owner)
-			return nil, true
-		}
-		claimed = append(claimed, key)
+	held, err := p.replayGuard.Claim(context.Background(), key, owner)
+	if err != nil {
+		slog.Warn("inbox: replay guard degraded, accepting without the check", "err", err)
+		return "", false
 	}
-	return claimed, false
+	if !held {
+		return "", true
+	}
+	return key, false
 }
 
-// releaseReplayKeys drops owner's processing marks on keys.
-func (p *InboxProcessor) releaseReplayKeys(keys []string, owner string) {
-	if p.replayGuard == nil {
+// releaseReplayKey drops owner's processing mark on key ("" is a no-op).
+func (p *InboxProcessor) releaseReplayKey(key, owner string) {
+	if p.replayGuard == nil || key == "" {
 		return
 	}
-	for _, key := range keys {
-		if err := p.replayGuard.Release(context.Background(), key, owner); err != nil {
-			slog.Warn("inbox: failed to release the replay guard's processing mark", "err", err)
-		}
+	if err := p.replayGuard.Release(context.Background(), key, owner); err != nil {
+		slog.Warn("inbox: failed to release the replay guard's processing mark", "err", err)
 	}
 }
 
@@ -616,18 +599,13 @@ func replayOwner(ctx context.Context) string {
 }
 
 // rememberActivity records a successfully processed request by its replay
-// keys. activityID is only for the log.
-func (p *InboxProcessor) rememberActivity(replayKeys []string, activityID string) {
-	if p.replayGuard == nil {
+// key. activityID is only for the log.
+func (p *InboxProcessor) rememberActivity(replayKey, activityID string) {
+	if p.replayGuard == nil || replayKey == "" {
 		return
 	}
-	for _, key := range replayKeys {
-		if key == "" {
-			continue
-		}
-		if err := p.replayGuard.Remember(context.Background(), key); err != nil {
-			slog.Warn("inbox: failed to record processed activity", "activityId", activityID, "err", err)
-		}
+	if err := p.replayGuard.Remember(context.Background(), replayKey); err != nil {
+		slog.Warn("inbox: failed to record processed activity", "activityId", activityID, "err", err)
 	}
 }
 
@@ -640,7 +618,7 @@ func (p *InboxProcessor) rememberActivity(replayKeys []string, activityID string
 // target)` を含む header 集合だけが必要なので、これで足りる。
 // 戻り値の KeyType は検証に成功した鍵の種別で、署名方式の観測記録に使う
 // (#2393、err != nil のとき無意味)。digestSigned は、検証した署名が SHA-256 の
-// Digest ヘッダーを覆っているか (再投函の鍵に使えるか。replayKeys)。
+// Digest ヘッダーを覆っているか (再投函の鍵に使えるか。requestReplayKey)。
 func (p *InboxProcessor) verifyPayload(payload queue.InboxPayload) (actor *model.User, kt activitypub.KeyType, digestSigned bool, err error) {
 	parsed, err := activitypub.ParseSignatureHeader(payload.Headers["Signature"])
 	if err != nil {
