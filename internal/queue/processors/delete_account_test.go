@@ -644,13 +644,28 @@ type recordingDriveObjectDeleter struct {
 	deleted     []string
 	rowsPresent []bool
 	err         error
+	// batches are the sizes of the batches passed (#4267).
+	batches []int
+	// errs, when set, is returned for the batch instead of err for each file.
+	errs []error
 }
 
-func (d *recordingDriveObjectDeleter) DeleteFileObjects(f *model.DriveFile) error {
-	d.deleted = append(d.deleted, f.ID)
-	_, ok := d.driveRepo.Files[f.ID]
-	d.rowsPresent = append(d.rowsPresent, ok)
-	return d.err
+func (d *recordingDriveObjectDeleter) DeleteFilesObjects(files []*model.DriveFile) []error {
+	d.batches = append(d.batches, len(files))
+	if d.errs != nil {
+		for _, f := range files {
+			d.deleted = append(d.deleted, f.ID)
+		}
+		return d.errs
+	}
+	errs := make([]error, len(files))
+	for i, f := range files {
+		d.deleted = append(d.deleted, f.ID)
+		_, ok := d.driveRepo.Files[f.ID]
+		d.rowsPresent = append(d.rowsPresent, ok)
+		errs[i] = d.err
+	}
+	return errs
 }
 
 // Deleting an account deletes the stored objects of its drive files before
@@ -689,6 +704,8 @@ func TestDeleteAccountProcessor_DeletesDriveObjectsAcrossBatches(t *testing.T) {
 	start := time.Now()
 	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
 	assert.Len(t, objects.deleted, n)
+	// 戻した写しの表と移す処理の lock をバッチごとにまとめて引けるよう、バッチを 1 回で渡す (#4267)。
+	assert.Equal(t, []int{100, 100, 50}, objects.batches, "the files were not passed a batch at a time")
 	assert.Empty(t, driveRepo.Files)
 	// 3 batches with a pause (deleteAccountBatchSleep, 250ms) after each full one.
 	assert.GreaterOrEqual(t, time.Since(start), 500*time.Millisecond, "batches are paced like the note deletion")
@@ -707,6 +724,26 @@ func TestDeleteAccountProcessor_DriveObjectFailureStillDeletesRows(t *testing.T)
 	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
 	assert.Equal(t, []string{"f-target"}, objects.deleted)
 	assert.Empty(t, driveRepo.Files)
+}
+
+// A deleter returning fewer errors than files (a broken implementation) does
+// not crash the job, the rows are still deleted, and the mismatch is logged.
+func TestDeleteAccountProcessor_ShortDriveObjectErrors(t *testing.T) {
+	logs := captureLogs(t)
+	driveRepo := testutil.NewMockDriveFileRepository()
+	uid := "target"
+	driveRepo.Files["f-1"] = &model.DriveFile{ID: "f-1", UserID: &uid}
+	driveRepo.Files["f-2"] = &model.DriveFile{ID: "f-2", UserID: &uid}
+	objects := &recordingDriveObjectDeleter{driveRepo: driveRepo, errs: []error{errors.New("storage down")}}
+	p := processors.NewDeleteAccountProcessor(nil, driveRepo, nil, nil, nil)
+	p.SetDriveFileObjectDeleter(objects)
+
+	require.NoError(t, p.Handle(context.Background(), deleteAccountTask(t, queue.DeleteAccountPayload{UserID: "target"})))
+	assert.Len(t, objects.deleted, 2)
+	assert.Empty(t, driveRepo.Files)
+	rec := findLogRecord(t, logs, "returned errors for another number of files")
+	assert.EqualValues(t, 2, rec["files"])
+	assert.EqualValues(t, 1, rec["errors"])
 }
 
 // A batch whose rows are not deleted fails the job instead of reading the
@@ -750,9 +787,9 @@ type cancelingDriveObjectDeleter struct {
 	cancel context.CancelFunc
 }
 
-func (d *cancelingDriveObjectDeleter) DeleteFileObjects(f *model.DriveFile) error {
+func (d *cancelingDriveObjectDeleter) DeleteFilesObjects(files []*model.DriveFile) []error {
 	d.cancel()
-	return d.recordingDriveObjectDeleter.DeleteFileObjects(f)
+	return d.recordingDriveObjectDeleter.DeleteFilesObjects(files)
 }
 
 // A job canceled while deleting the drive files stops between batches and

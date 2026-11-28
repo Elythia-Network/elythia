@@ -89,7 +89,7 @@ func (r onlyFileRepo) ListMigrated(ctx context.Context, afterID string, limit in
 }
 
 func (r onlyFileRepo) ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error) {
-	copies, err := r.DriveStorageMigrationRepository.ListRestoredCopiesOfFile(ctx, r.id)
+	copies, err := r.DriveStorageMigrationRepository.ListRestoredCopiesOfFiles(ctx, []string{r.id})
 	if err != nil {
 		return nil, err
 	}

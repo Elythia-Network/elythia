@@ -457,14 +457,14 @@ func TestDriveStorageMigrationRepository_RestoredCopies(t *testing.T) {
 	assert.Equal(t, "tk-r2", got[0].Key)
 	assert.Equal(t, "r2", got[0].FileID)
 	assert.Equal(t, "b/tk-r2", got[0].Location)
-	of, err := repo.ListRestoredCopiesOfFile(ctx, "r1")
+	of, err := repo.ListRestoredCopiesOfFiles(ctx, []string{"r1"})
 	require.NoError(t, err)
 	assert.Len(t, of, 2)
 	for _, bad := range []string{"a\x00b"} {
 		got, err := repo.ListRestoredCopies(ctx, bad, 3)
 		require.NoError(t, err)
 		assert.Empty(t, got)
-		of, err := repo.ListRestoredCopiesOfFile(ctx, bad)
+		of, err := repo.ListRestoredCopiesOfFiles(ctx, []string{bad})
 		require.NoError(t, err)
 		assert.Empty(t, of)
 	}
@@ -495,10 +495,10 @@ func TestDriveStorageMigrationRepository_RestoredCopies(t *testing.T) {
 	ok, err = repo.MarkMigrated(ctx, "r1", at.Add(time.Hour))
 	require.NoError(t, err)
 	require.True(t, ok)
-	of, err = repo.ListRestoredCopiesOfFile(ctx, "r1")
+	of, err = repo.ListRestoredCopiesOfFiles(ctx, []string{"r1"})
 	require.NoError(t, err)
 	assert.Empty(t, of, "the records of a file migrated again were kept")
-	of, err = repo.ListRestoredCopiesOfFile(ctx, "r2")
+	of, err = repo.ListRestoredCopiesOfFiles(ctx, []string{"r2"})
 	require.NoError(t, err)
 	assert.Len(t, of, 2, "the records of another file were dropped")
 	found, err := repo.FindDriveFile(ctx, "r1")
@@ -511,7 +511,7 @@ func TestDriveStorageMigrationRepository_RestoredCopies(t *testing.T) {
 	ok, err = repo.MarkRestored(ctx, "r1", at.Add(time.Hour), nil, copies("r1", "c"))
 	require.NoError(t, err)
 	require.True(t, ok)
-	of, err = repo.ListRestoredCopiesOfFile(ctx, "r1")
+	of, err = repo.ListRestoredCopiesOfFiles(ctx, []string{"r1"})
 	require.NoError(t, err)
 	require.Len(t, of, 2)
 	assert.Equal(t, "c/ak-r1", of[0].Location)
@@ -529,7 +529,37 @@ func TestDriveStorageMigrationRepository_RestoredCopies(t *testing.T) {
 
 	// ファイルの行を消しても、記録は残る (写しはバケットに残るので、消す手掛かりを失わない)。
 	require.NoError(t, db.Exec(`DELETE FROM "drive_file" WHERE "id" = 'r2'`).Error)
-	of, err = repo.ListRestoredCopiesOfFile(ctx, "r2")
+	of, err = repo.ListRestoredCopiesOfFiles(ctx, []string{"r2"})
 	require.NoError(t, err)
 	assert.Len(t, of, 2, "deleting the file dropped the records of its copies")
+}
+
+// 削除のバッチの写しは 1 本で引き、バッチに無いファイルの写しは返さない (#4267)。
+func TestDriveStorageMigrationRepository_ListRestoredCopiesOfFiles(t *testing.T) {
+	ctx := context.Background()
+	db := driveStorageMigrationDB(t)
+	repo := NewDriveStorageMigrationRepository(db)
+	at := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct{ key, fileID string }{
+		{"tk-r2", "r2"}, {"ak-r2", "r2"}, {"ak-r1", "r1"}, {"wk-r1", "r1"}, {"ak-r3", "r3"},
+	} {
+		require.NoError(t, db.Create(&model.DriveObjectStorageRestoredCopy{Key: c.key, FileID: c.fileID, Location: "b/" + c.key, RestoredAt: at}).Error)
+	}
+	keys := func(ids ...string) []string {
+		t.Helper()
+		got, err := repo.ListRestoredCopiesOfFiles(ctx, ids)
+		require.NoError(t, err)
+		out := make([]string, 0, len(got))
+		for _, c := range got {
+			out = append(out, c.FileID+"/"+c.Key)
+		}
+		return out
+	}
+	assert.Equal(t, []string{"r1/ak-r1", "r1/wk-r1", "r2/ak-r2", "r2/tk-r2"}, keys("r2", "r1", "none"))
+	assert.Equal(t, []string{"r3/ak-r3"}, keys("r3"))
+	// NUL を含む id は落とし、残りの id は引く。
+	assert.Equal(t, []string{"r3/ak-r3"}, keys("a\x00b", "r3"))
+	assert.Empty(t, keys("a\x00b"))
+	assert.Empty(t, keys())
+	assert.Empty(t, keys("none"))
 }

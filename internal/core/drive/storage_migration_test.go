@@ -91,6 +91,8 @@ type memMigrationRepo struct {
 	// the remote cache cleanup had expired it meanwhile.
 	linkOnMark string
 	listErr    error
+	// copyLists counts the ListRestoredCopiesOfFiles calls (#4267).
+	copyLists int
 }
 
 func newMemMigrationRepo() *memMigrationRepo {
@@ -265,16 +267,22 @@ func (r *memMigrationRepo) ListRestoredCopies(_ context.Context, afterKey string
 	return out[:min(len(out), limit)], nil
 }
 
-func (r *memMigrationRepo) ListRestoredCopiesOfFile(_ context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
+func (r *memMigrationRepo) ListRestoredCopiesOfFiles(_ context.Context, fileIDs []string) ([]model.DriveObjectStorageRestoredCopy, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.copyLists++
 	var out []model.DriveObjectStorageRestoredCopy
 	for _, c := range r.copies {
-		if c.FileID == fileID {
+		if slices.Contains(fileIDs, c.FileID) {
 			out = append(out, c)
 		}
 	}
-	slices.SortFunc(out, func(a, b model.DriveObjectStorageRestoredCopy) int { return strings.Compare(a.Key, b.Key) })
+	slices.SortFunc(out, func(a, b model.DriveObjectStorageRestoredCopy) int {
+		if c := strings.Compare(a.FileID, b.FileID); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Key, b.Key)
+	})
 	return out, nil
 }
 
@@ -1024,11 +1032,11 @@ func (r *failingMigrationRepo) ListRestoredCopies(ctx context.Context, afterKey 
 	return r.memMigrationRepo.ListRestoredCopies(ctx, afterKey, limit)
 }
 
-func (r *failingMigrationRepo) ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error) {
-	if err := r.err("ListRestoredCopiesOfFile"); err != nil {
+func (r *failingMigrationRepo) ListRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) ([]model.DriveObjectStorageRestoredCopy, error) {
+	if err := r.err("ListRestoredCopiesOfFiles"); err != nil {
 		return nil, err
 	}
-	return r.memMigrationRepo.ListRestoredCopiesOfFile(ctx, fileID)
+	return r.memMigrationRepo.ListRestoredCopiesOfFiles(ctx, fileIDs)
 }
 
 func (r *failingMigrationRepo) DeleteRestoredCopy(ctx context.Context, key, location string) error {

@@ -108,7 +108,9 @@ type StorageMigrationRepository interface {
 	MarkLocalDeleted(ctx context.Context, id string, migratedAt, at time.Time) (bool, error)
 	MarkRestored(ctx context.Context, id string, migratedAt time.Time, localDeletedAt *time.Time, copies []model.DriveObjectStorageRestoredCopy) (bool, error)
 	ListRestoredCopies(ctx context.Context, afterKey string, limit int) ([]model.DriveObjectStorageRestoredCopy, error)
-	ListRestoredCopiesOfFile(ctx context.Context, fileID string) ([]model.DriveObjectStorageRestoredCopy, error)
+	// ListRestoredCopiesOfFiles returns the recorded copies of the files,
+	// ordered by file id and key.
+	ListRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) ([]model.DriveObjectStorageRestoredCopy, error)
 	DeleteRestoredCopy(ctx context.Context, key, location string) error
 	RecordRestoredCopyFailure(ctx context.Context, key, location, msg string, at time.Time) error
 	ListRestoredCopyFailures(ctx context.Context, limit int) ([]model.DriveObjectStorageRestoredCopy, error)
@@ -206,6 +208,12 @@ type StorageMigrator struct {
 	now     func() time.Time
 	// onFUSE reports whether a directory is on a FUSE file system.
 	onFUSE func(dir string) (bool, error)
+	// releaseTimeout bounds the release of restored copies. For one file it
+	// bounds the whole release (listing and deleting share one deadline); for
+	// several files it bounds each step of ReleaseRestoredCopiesOfFiles (listing
+	// the copies, or deleting the copies of one file). Tests replace it to see
+	// which step a context belongs to.
+	releaseTimeout func(ctx context.Context) (context.Context, context.CancelFunc)
 }
 
 // NewStorageMigrator constructs a StorageMigrator. local is the local storage
@@ -213,7 +221,10 @@ type StorageMigrator struct {
 // MetaStorage); the migration copies only while primary resolves to object
 // storage.
 func NewStorageMigrator(repo StorageMigrationRepository, local, primary Storage, enq StorageMigrationEnqueuer, lock StorageMigrationLock) *StorageMigrator {
-	return &StorageMigrator{repo: repo, local: local, primary: primary, enq: enq, lock: lock, now: time.Now, onFUSE: onFUSE}
+	return &StorageMigrator{repo: repo, local: local, primary: primary, enq: enq, lock: lock, now: time.Now, onFUSE: onFUSE,
+		releaseTimeout: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return context.WithTimeout(ctx, restoredCopyReleaseTimeout)
+		}}
 }
 
 // objectStorage returns the object storage files are copied to, or nil when
@@ -574,7 +585,9 @@ func (m *StorageMigrator) localCopyMatches(f *model.DriveFile, key string) (bool
 	return true, nil
 }
 
-// restoredCopyReleaseTimeout bounds ReleaseRestoredCopies.
+// restoredCopyReleaseTimeout bounds releasing the copies of one file being
+// deleted (reading its copies and deleting them), and, for several files,
+// reading their copies and deleting the copies of each of them.
 const restoredCopyReleaseTimeout = 30 * time.Second
 
 // ReleaseRestoredCopies deletes the copies the file left in object storage
@@ -584,12 +597,38 @@ const restoredCopyReleaseTimeout = 30 * time.Second
 // 戻した行は storedInternal=true なので、削除はローカルだけを消す (本家と同じ)。
 // 写しはバケットに残り、public-read なら消したファイルが取れ続けるので、ここで消す。
 func (m *StorageMigrator) ReleaseRestoredCopies(ctx context.Context, fileID string) {
-	// 利用者の削除の中で動くので、DB の待ちで削除を止め続けない。
-	ctx, cancel := context.WithTimeout(ctx, restoredCopyReleaseTimeout)
+	// 利用者の削除の中で動くので、DB や S3 の待ちで削除を止め続けない。一覧と写しの削除を
+	// 1 つの上限で包む (#4267 より前と同じ)。段ごとに取り直すと、最悪の待ちが倍になる。
+	ctx, cancel := m.releaseTimeout(ctx)
 	defer cancel()
-	copies, err := m.repo.ListRestoredCopiesOfFile(ctx, fileID)
+	m.releaseRestoredCopies(ctx, []string{fileID}, func(ctx context.Context) (context.Context, context.CancelFunc) {
+		return ctx, func() {}
+	})
+}
+
+// ReleaseRestoredCopiesOfFiles does what ReleaseRestoredCopies does for each
+// of the files, reading their copies at once (#4267). With one file it is
+// ReleaseRestoredCopies.
+func (m *StorageMigrator) ReleaseRestoredCopiesOfFiles(ctx context.Context, fileIDs []string) {
+	if len(fileIDs) == 1 {
+		m.ReleaseRestoredCopies(ctx, fileIDs[0])
+		return
+	}
+	m.releaseRestoredCopies(ctx, fileIDs, m.releaseTimeout)
+}
+
+// releaseRestoredCopies reads the copies of the files and deletes them.
+// step bounds reading the copies, and deleting the copies of each file.
+func (m *StorageMigrator) releaseRestoredCopies(ctx context.Context, fileIDs []string, step func(context.Context) (context.Context, context.CancelFunc)) {
+	if len(fileIDs) == 0 {
+		return
+	}
+	listCtx, cancel := step(ctx)
+	copies, err := m.repo.ListRestoredCopiesOfFiles(listCtx, fileIDs)
+	cancel()
 	if err != nil {
-		slog.Warn("drive: list the copies left by moving a deleted file back", "fileId", fileID, "err", err)
+		slog.Warn("drive: list the copies left by moving a deleted file back",
+			"files", len(fileIDs), "fileIds", fileIDs[:min(len(fileIDs), restoredCopyLogIDs)], "err", err)
 		return
 	}
 	if len(copies) == 0 {
@@ -600,9 +639,33 @@ func (m *StorageMigrator) ReleaseRestoredCopies(ctx context.Context, fileID stri
 		// オブジェクトストレージを無効にしている。記録を残し、有効に戻してから消す。
 		return
 	}
+	// 複数のファイルでは、写しを消す時間の上限を、1 件ずつ引いていたときと同じくファイル
+	// ごとに置く。まとめて置くと、写しの多いバッチの後ろのファイルが時間切れで写しを残す。
+	// 並び順には頼らず、ファイルごとにまとめる (順は最初に出てきた順)。
+	byFile := map[string][]model.DriveObjectStorageRestoredCopy{}
+	var order []string
+	for _, c := range copies {
+		if _, ok := byFile[c.FileID]; !ok {
+			order = append(order, c.FileID)
+		}
+		byFile[c.FileID] = append(byFile[c.FileID], c)
+	}
+	for _, id := range order {
+		m.releaseCopiesOfFile(ctx, dst, byFile[id], step)
+	}
+}
+
+// restoredCopyLogIDs is how many file ids a failure to list the copies logs.
+const restoredCopyLogIDs = 5
+
+// releaseCopiesOfFile deletes copies, the recorded copies of one file,
+// within a context step returns.
+func (m *StorageMigrator) releaseCopiesOfFile(ctx context.Context, dst Storage, copies []model.DriveObjectStorageRestoredCopy, step func(context.Context) (context.Context, context.CancelFunc)) {
+	ctx, cancel := step(ctx)
+	defer cancel()
 	for i := range copies {
 		if err := m.deleteRestoredCopy(ctx, dst, &copies[i], ""); err != nil {
-			slog.Warn("drive: delete a copy left by moving a deleted file back", "fileId", fileID, "key", copies[i].Key, "err", err)
+			slog.Warn("drive: delete a copy left by moving a deleted file back", "fileId", copies[i].FileID, "key", copies[i].Key, "err", err)
 			msg := truncateUTF8(err.Error(), maxStorageMigrationError)
 			if rerr := m.repo.RecordRestoredCopyFailure(ctx, copies[i].Key, copies[i].Location, msg, m.now()); rerr != nil {
 				slog.Warn("drive: record the failure of a copy", "key", copies[i].Key, "err", rerr)
