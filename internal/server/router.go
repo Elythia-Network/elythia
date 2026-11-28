@@ -1320,15 +1320,15 @@ func (s *Server) setupRoutes(plugins []plugin.Definition, openPluginStorage plug
 	// 第 5 引数で、受信のたびに相手の nodeinfo を取り直す (#3564)。受信を拒否した相手も
 	// 取り直し、拒否の判定を新しい版で行えるようにする。
 	// 第 6 引数は処理済み activity の再投函を弾く guard。署名の Date に窓を入れても、
-	// 窓の内側はまだ投げ直せる。**Default インスタンスを使う** — 2FA の replay guard と
-	// 同じ用途 (短命の使用済みマーカー) で、timelines / reactions のような
-	// 用途別インスタンスに載せる理由が無い。
+	// 窓の内側はまだ投げ直せる。記録の期限は inbox のジョブの再試行の回数から決める。
+	// **Default インスタンスを使う** — 2FA の replay guard と同じ用途 (短命の使用済み
+	// マーカー) で、timelines / reactions のような用途別インスタンスに載せる理由が無い。
 	inboxProcessor := processors.NewInboxProcessor(federationProcessor,
 		federationResolver,
 		instanceService,
 		inboxSoftwareChecker,
 		metadataRefresher,
-		processors.NewRedisInboxReplayGuard(s.redis.Default))
+		processors.NewRedisInboxReplayGuard(s.redis.Default, inboxMaxRetryDelay(s.config)))
 	inboxProcessor.SetChartHook(chartHooks)
 	// LD-Signature 検証で解決する著者に「リレー由来」の印を付ける (#2340)。
 	inboxProcessor.SetRelayActorChecker(relaySvc)

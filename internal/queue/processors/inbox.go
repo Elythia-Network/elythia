@@ -479,7 +479,7 @@ func (p *InboxProcessor) Handle(ctx context.Context, t driver.Task) error {
 		// **再投函の鍵は署名が覆った Date と本文。** id だけを鍵にすると、同じ id で
 		// 中身の違う活動を 2 つ目から捨てる。本家 Misskey の Undo(Follow) は
 		// `<Follow の id>/undo` の決定的な id で `published` だけが変わるので、
-		// 15 分以内の 2 回目のフォロー解除が届かず、フォロワーのまま残っていた
+		// 記録の期限の内側の 2 回目のフォロー解除が届かず、フォロワーのまま残っていた
 		// (2026-10-31 の監査)。本文だけでも、Elythia 自身の Follow (決定的な id で
 		// `published` 無し) の再フォローを捨てる。再投函は捕まえた署名付きリクエストを
 		// そのまま投げ直す形なので、署名された Date を足せば過不足なく捕まえられる。

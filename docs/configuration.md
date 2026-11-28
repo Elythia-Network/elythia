@@ -145,7 +145,7 @@ cp .config/docker.yml.example .config/docker.yml
 | `inboxJobPerSec` | int | - | Inbox処理レート上限 (tasks/sec) (#534)。**未設定なら上限なし** (本家は未設定でも 32。[本家との違い](divergence/config.md#4-3-job-queue-の構成差分))。設定すると `mkq.WithRateLimit` で worker dispatch が back-pressure される |
 | `relationshipJobPerSec` | int | - | relationship 処理のレート上限 (tasks/sec)。**未設定なら上限なし** (本家は未設定でも 64。[本家との違い](divergence/config.md#4-3-job-queue-の構成差分))。設定すると `mkq.WithRateLimit` で worker dispatch が back-pressure される (#2403) |
 | `deliverJobMaxAttempts` | int | driver 既定 | AP配信の**総試行回数** (初回 + retry) のdefault。BullMQ `attempts` と同じ意味で、TS Misskey YAML 互換。EnqueueDeliver で `WithMaxRetry` 未指定時にだけ適用される (#495)。例: `deliverJobMaxAttempts: 8` で 1 回失敗するごとに retry されて最大 8 回試行 |
-| `inboxJobMaxAttempts` | int | driver 既定 | Inbox処理の**総試行回数** (#534)。BullMQ `attempts` と同じ意味で、TS Misskey YAML 互換。EnqueueInbox で `WithMaxRetry` 未指定時にだけ適用される |
+| `inboxJobMaxAttempts` | int | driver 既定 | Inbox処理の**総試行回数** (#534)。BullMQ `attempts` と同じ意味で、TS Misskey YAML 互換。EnqueueInbox で `WithMaxRetry` 未指定時にだけ適用される。受信の再投函の記録の期限もこの値から決める (再試行の 1 回の待ちの最大が延びる分だけ長くなり、10 時間 51 分で止まる)。**受付と worker を別のノードで動かすときは、両方で同じ値にする。** 値を下げるときは、変える前に積んだ受信のジョブがなくなってから下げる |
 | `jobQueueAutoScale` | bool | `false` | AIMD auto-scale controller (#1120) を opt-in 有効化。`true` で個別 `<queue>JobConcurrency` 未設定の queue が `[minWorkers, maxWorkers]` 範囲で動的に伸縮する。詳細は `docs/design/auto-scale-job-workers.md`。 |
 | `maxWorkers` | int | `runtime.NumCPU() × 16` | auto-scale の **per-queue 上限**。`jobQueueAutoScale: true` のときだけ意味を持つ。例: 8-core で default 128 per queue。 |
 | `minWorkers` | int | `4` | auto-scale の **per-queue 下限**。idle 状態でも各 queue で常時起動する worker 数。 |

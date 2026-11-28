@@ -1628,7 +1628,7 @@ setter の呼び出しは行頭が `<名前>Handler.Set` の 385 行。受け手
   `softwareBlocker`・`metadataRefresher`・`replayGuard`を受ける
   (`inboxProcessor := processors.NewInboxProcessor(federationProcessor, federationResolver,
   instanceService, inboxSoftwareChecker, metadataRefresher,
-  processors.NewRedisInboxReplayGuard(s.redis.Default))`)。replay guardは元のsetterと同じ式で、
+  processors.NewRedisInboxReplayGuard(s.redis.Default, inboxMaxRetryDelay(s.config)))`)。replay guardは元のsetterと同じ式で、
   構築子の引数の中で作る。guardの構築子はRedisに触らない。`s.redis.Default`(`*redis.Client`)がnilのときも、
   `redis.UniversalClient`で受けた値はnilでないので、中のclientがnilのguardを返す。interfaceの
   引数としてはnilでない。これは元の`SetInboxReplayGuard`と同じで、以前の

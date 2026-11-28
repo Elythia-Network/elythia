@@ -48,7 +48,7 @@ type VerifiedLDActivity struct {
 // 縛り、HTTP 署名の Date のような鮮度を持たない。転送経路では HTTP 署名は
 // 転送者 (= 攻撃者でもありうる) のものなので、一度受け取った署名付き activity は
 // 何年後でも投げ直せる (削除済みノートの Create を再送して復活させる、古い
-// Update で本文を巻き戻す等)。replay guard (inbox_replay.go) は 15 分しか覚えない。
+// Update で本文を巻き戻す等)。replay guard (inbox_replay.go) が覚えるのは長くても約 11 時間。
 //
 // 窓の根拠: `created` は署名した時刻 (Mastodon の LinkedDataSignature#sign! も
 // upstream の signRsaSignature2017 も配送用に render した時点の now) で、転送者は

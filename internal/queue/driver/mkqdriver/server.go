@@ -450,9 +450,7 @@ func (s *Server) Start() error {
 		// Misskey TS httpRelatedBackoff で enqueue されるので、worker 側で同じ
 		// 式を再現して drop-in 一致させる (#1406, mkq#67)。built-in backoff
 		// (fixed / exponential) の job には影響しない。
-		optsBase = append(optsBase, mkq.WithBackoffStrategy(func(attemptsMade int) time.Duration {
-			return httpRelatedBackoff(attemptsMade, nil)
-		}))
+		optsBase = append(optsBase, mkq.WithBackoffStrategy(federationBackoffStrategy))
 
 		pool := &workerPool{
 			queue:           s.driver.queues[name],
