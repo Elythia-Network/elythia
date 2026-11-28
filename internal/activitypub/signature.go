@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 )
 
@@ -167,24 +166,34 @@ type ParsedSignature struct {
 	Signature string
 }
 
-var sigKVPattern = regexp.MustCompile(`(\w+)="([^"]+)"`)
-
 // ParseSignatureHeader parses an HTTP Signature header into its components.
+//
+// Parameters are read as name="value" pairs from left to right; a repeated
+// parameter keeps its last value. Parameters other than keyId, algorithm,
+// headers and signature, unquoted values and empty values are ignored.
 func ParseSignatureHeader(header string) (*ParsedSignature, error) {
 	if header == "" {
 		return nil, errors.New("missing signature header")
 	}
 	out := &ParsedSignature{}
-	for _, m := range sigKVPattern.FindAllStringSubmatch(header, -1) {
-		switch m[1] {
+	// 受付では署名を確かめる前に誰の要求でも通るので、正規表現(1回約6µs)をやめて
+	// 手で走査する(#4265)。結果は以前の`(\w+)="([^"]+)"`のFindAllStringSubmatchと
+	// 同じで、signature_parse_test.goがその正規表現と突き合わせている
+	for rest := header; ; {
+		name, value, next, ok := nextSignatureParam(rest)
+		if !ok {
+			break
+		}
+		rest = next
+		switch name {
 		case "keyId":
-			out.KeyID = m[2]
+			out.KeyID = value
 		case "algorithm":
-			out.Algorithm = m[2]
+			out.Algorithm = value
 		case "headers":
-			out.Headers = strings.Fields(m[2])
+			out.Headers = strings.Fields(value)
 		case "signature":
-			out.Signature = m[2]
+			out.Signature = value
 		}
 	}
 	if out.KeyID == "" || out.Signature == "" {
@@ -195,6 +204,48 @@ func ParseSignatureHeader(header string) (*ParsedSignature, error) {
 		out.Headers = []string{"date"}
 	}
 	return out, nil
+}
+
+// nextSignatureParam finds the leftmost name="value" pair in s, where name is
+// a run of ASCII letters, digits and '_' and value is one or more bytes other
+// than '"'. It returns the pair and the rest of s after the closing quote, or
+// ok=false when s has no such pair.
+func nextSignatureParam(s string) (name, value, rest string, ok bool) {
+	for i := 0; i < len(s); {
+		if !isSignatureNameByte(s[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(s) && isSignatureNameByte(s[i]) {
+			i++
+		}
+		// 名前は語の文字の並びを最後まで取る(途中で切ると次が語の文字で、=に当たらない)
+		if i+1 >= len(s) || s[i] != '=' || s[i+1] != '"' {
+			continue
+		}
+		n := strings.IndexByte(s[i+2:], '"')
+		if n < 0 {
+			// 閉じる"がこの先に無いなら、この先のどの名前も組にならない(組になるには
+			// ="の"がこの先に要り、それ自体がs[i+2:]の中の"になる)。なので打ち切っても
+			// 結果は変わらない。continueでも計算量は線形のまま(この先に="は無く、
+			// IndexByteが末尾まで読むのはこの1回だけ)で、残りを1バイトずつ飛ばす手間を省く
+			return "", "", "", false
+		}
+		if n == 0 {
+			// 値が空(="")のものは組にしない。=の次から走査を続ける
+			continue
+		}
+		valueStart := i + 2
+		return s[start:i], s[valueStart : valueStart+n], s[valueStart+n+1:], true
+	}
+	return "", "", "", false
+}
+
+// isSignatureNameByte reports whether c is in the \w class of Go regular
+// expressions ([0-9A-Za-z_]).
+func isSignatureNameByte(c byte) bool {
+	return c == '_' || ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }
 
 // VerifyRequest verifies an incoming HTTP request signature against the
