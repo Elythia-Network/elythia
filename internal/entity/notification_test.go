@@ -1,6 +1,11 @@
 package entity
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -249,9 +254,9 @@ func TestPackNotification_RoleAssigned_PacksRole(t *testing.T) {
 		Type:      notification.TypeRoleAssigned,
 		Extra:     map[string]any{"roleId": "r1"},
 	}
-	lookup := func(roleID string) (map[string]any, bool) {
+	lookup := func(roleID string) (map[string]any, bool, error) {
 		assert.Equal(t, "r1", roleID)
-		return map[string]any{"id": "r1", "name": "VIP"}, true
+		return map[string]any{"id": "r1", "name": "VIP"}, true, nil
 	}
 	out := currentPacker().PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup))
 	require.NotNil(t, out)
@@ -272,8 +277,132 @@ func TestPackNotification_RoleAssigned_DroppedWhenRoleDeleted(t *testing.T) {
 		Type:      notification.TypeRoleAssigned,
 		Extra:     map[string]any{"roleId": "gone"},
 	}
-	lookup := func(string) (map[string]any, bool) { return nil, false }
+	lookup := func(string) (map[string]any, bool, error) { return nil, false, nil }
 	assert.Nil(t, currentPacker().PackNotification(n, nil, nil, idGen, nil, nil, WithRoleLookup(lookup)))
+}
+
+// #4263: 1 ページの中では、同じロールの lookup を 1 回にまとめる。lookup はロールの
+// 取得と人数を数える文を流すので、通知ごとに呼ぶと同じ問い合わせが件数分走る。
+// 削除済み (false、エラーなし) は覚えて、そのロールの通知はどれも落とす。
+// 失敗 (エラーあり) は覚えず、次の通知で引き直す。取得の失敗はその通知だけを
+// 落とし、人数の失敗 (ok で 0 人) はその通知を出す。
+func TestPackNotifications_RoleAssigned_LooksUpEachRoleOnce(t *testing.T) {
+	idGen, _ := id.NewGenerator("aidx")
+	var items []NotificationItem
+	for _, roleID := range []string{"r1", "gone", "r1", "fetchfail", "r2", "gone", "fetchfail", "countfail", "r1", "countfail"} {
+		items = append(items, NotificationItem{N: &notification.Notification{
+			ID:        idGen.Generate(time.Now()),
+			CreatedAt: time.Now(),
+			Type:      notification.TypeRoleAssigned,
+			Extra:     map[string]any{"roleId": roleID},
+		}})
+	}
+	calls := map[string]int{}
+	lookup := func(roleID string) (map[string]any, bool, error) {
+		calls[roleID]++
+		switch roleID {
+		case "gone":
+			return nil, false, nil
+		case "fetchfail":
+			return nil, false, errors.New("role fetch failed")
+		case "countfail":
+			return map[string]any{"id": roleID, "usersCount": 0}, true, errors.New("count failed")
+		}
+		return map[string]any{"id": roleID}, true, nil
+	}
+	out := currentPacker().PackNotifications(items, idGen, nil, nil, WithRoleLookup(lookup))
+	got := make([]any, 0, len(out))
+	for _, o := range out {
+		got = append(got, o["role"].(map[string]any)["id"])
+	}
+	assert.Equal(t, []any{"r1", "r1", "r2", "countfail", "r1", "countfail"}, got,
+		"削除済みと取得に失敗したロールの通知だけを落とし、順序を保つ")
+	assert.Equal(t, map[string]int{"r1": 1, "gone": 1, "r2": 1, "fetchfail": 2, "countfail": 2}, calls,
+		"成功と削除済みは 1 回、失敗は通知ごとに引き直す")
+
+	// 別のページ (別の呼び出し) では引き直す。覚えるのは 1 回の呼び出しの中だけ。
+	currentPacker().PackNotifications(items[:1], idGen, nil, nil, WithRoleLookup(lookup))
+	assert.Equal(t, 2, calls["r1"])
+}
+
+// #4263: 失敗は引き直すが、記録はロールごとに 1 回だけにする。引き直すたびに記録すると、
+// 1 ページ (最大 100 件) の同じロールの通知の数だけログが出る。
+func TestMemoizeRoleLookup_WarnsOncePerRole(t *testing.T) {
+	calls := map[string]int{}
+	lookup := func(roleID string) (map[string]any, bool, error) {
+		calls[roleID]++
+		if roleID == "countfail" {
+			return map[string]any{"id": roleID, "usersCount": 0}, true, errors.New("count failed")
+		}
+		return nil, false, errors.New("role fetch failed")
+	}
+	warned := map[string]int{}
+	memo := memoizeRoleLookup(lookup, func(roleID string, _ bool, err error) {
+		require.Error(t, err)
+		warned[roleID]++
+	})
+	for _, roleID := range []string{"fetchfail", "fetchfail", "countfail", "fetchfail", "countfail", "countfail"} {
+		_, _, err := memo(roleID)
+		assert.Error(t, err, "失敗は呼び出し元にも返す")
+	}
+	assert.Equal(t, map[string]int{"fetchfail": 3, "countfail": 3}, calls, "失敗は覚えずに引き直す")
+	assert.Equal(t, map[string]int{"fetchfail": 1, "countfail": 1}, warned, "記録はロールごとに 1 回")
+}
+
+// #4263: 本番の経路 (PackNotifications が渡す warnRoleLookupFailure) で、失敗が
+// ロールごとに 1 行だけ記録され、落としたのか (取得の失敗) 0 人で出したのか (人数の
+// 失敗) が属性で分かる。slog の既定はプロセス全体の状態なので、張り替えて
+// t.Cleanup で戻す (t.Parallel は使わない)。
+func TestPackNotifications_RoleAssigned_WarnsOncePerFailingRole(t *testing.T) {
+	var logs lockedLogBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	idGen, _ := id.NewGenerator("aidx")
+	var items []NotificationItem
+	for _, roleID := range []string{"fetchfail", "r1", "countfail", "fetchfail", "countfail", "r1"} {
+		items = append(items, NotificationItem{N: &notification.Notification{
+			ID:        idGen.Generate(time.Now()),
+			CreatedAt: time.Now(),
+			Type:      notification.TypeRoleAssigned,
+			Extra:     map[string]any{"roleId": roleID},
+		}})
+	}
+	lookup := func(roleID string) (map[string]any, bool, error) {
+		switch roleID {
+		case "fetchfail":
+			return nil, false, errors.New("role fetch failed")
+		case "countfail":
+			return map[string]any{"id": roleID, "usersCount": 0}, true, errors.New("count failed")
+		}
+		return map[string]any{"id": roleID}, true, nil
+	}
+	out := currentPacker().PackNotifications(items, idGen, nil, nil, WithRoleLookup(lookup))
+	assert.Len(t, out, 4, "取得の失敗の 2 件だけを落とす")
+
+	output := logs.String()
+	assert.Equalf(t, 2, strings.Count(output, "roleAssigned role lookup failed"), "logs:\n%s", output)
+	assert.Equalf(t, 1, strings.Count(output, "roleId=fetchfail dropped=true"), "logs:\n%s", output)
+	assert.Equalf(t, 1, strings.Count(output, "roleId=countfail dropped=false"), "logs:\n%s", output)
+}
+
+// lockedLogBuffer is a bytes.Buffer safe to share with a slog handler.
+type lockedLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // role lookup 未配線でも安全側に倒して通知を drop する。

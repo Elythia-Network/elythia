@@ -345,8 +345,8 @@ func TestNotificationPublisher_RoleAssigned_PacksRole(t *testing.T) {
 	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "alice", Username: "alice"}}, &stubNotifNoteRepo{}, idGen)
-	np.SetRoleLookup(func(roleID string) (map[string]any, bool) {
-		return map[string]any{"id": roleID, "name": "VIP"}, true
+	np.SetRoleLookup(func(roleID string) (map[string]any, bool, error) {
+		return map[string]any{"id": roleID, "name": "VIP"}, true, nil
 	})
 	n := &corenotification.Notification{
 		ID:    idGen.Generate(time.Now()),
@@ -372,7 +372,7 @@ func TestNotificationPublisher_RoleAssigned_DroppedWhenRoleDeleted(t *testing.T)
 	np := NewNotificationPublisher(pub, nil)
 	idGen, _ := id.NewGenerator("aidx")
 	np.SetRepos(&stubNotifUserRepo{user: &model.User{ID: "alice", Username: "alice"}}, &stubNotifNoteRepo{}, idGen)
-	np.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
+	np.SetRoleLookup(func(string) (map[string]any, bool, error) { return nil, false, nil })
 	n := &corenotification.Notification{
 		ID:    idGen.Generate(time.Now()),
 		Type:  corenotification.TypeRoleAssigned,

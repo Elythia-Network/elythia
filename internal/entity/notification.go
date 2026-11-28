@@ -8,6 +8,8 @@ package entity
 // want to avoid the transitive dependency should pass primitives instead.
 
 import (
+	"log/slog"
+
 	"github.com/elythia-network/elythia/internal/core/notification"
 	"github.com/elythia-network/elythia/internal/misc/id"
 	"github.com/elythia-network/elythia/internal/model"
@@ -23,11 +25,65 @@ type NotificationItem struct {
 	Note *model.Note
 }
 
-// RoleLookup resolves a role ID to its packed representation, returning false
-// when the role no longer exists. Used to embed `role` on roleAssigned
-// notifications and to drop the notification when the role was deleted
-// (upstream NotificationEntityService が role==null で null を返すのと同じ)。
-type RoleLookup func(roleID string) (map[string]any, bool)
+// RoleLookup resolves a role ID to its packed representation. Used to embed
+// `role` on roleAssigned notifications and to drop the notification when the
+// role was deleted (upstream NotificationEntityService が role==null で null を
+// 返すのと同じ)。
+//
+//   - ok=false, err=nil: the role no longer exists; the notification is dropped.
+//   - err != nil: the lookup failed (role fetch or usersCount). The packed role
+//     is still used when ok is true (e.g. usersCount fell back to 0), and the
+//     notification is dropped otherwise. A failed result is never memoized.
+//
+// Implementations must not log err themselves: PackNotifications logs the
+// first failure of each role once per call, so a page of notifications for a
+// failing role yields one warning instead of one per notification.
+type RoleLookup func(roleID string) (packed map[string]any, ok bool, err error)
+
+// memoizeRoleLookup wraps fn so each role ID is resolved at most once, except
+// that failed lookups (err != nil) are retried on the next call. warn is
+// called for the first failure of each role ID only. It is not safe for
+// concurrent use; PackNotifications packs one page sequentially.
+//
+// roleAssigned の lookup はロールの取得と人数を数える文を 1 本ずつ流す (#4263)。
+// 同じロールを割り当てた通知がページに並ぶと同じ問い合わせが件数分走るので、
+// ページの中では 1 回にまとめる。削除済み (false) は覚えて引き直さない。
+// **失敗した結果は覚えない。** 覚えると、一過性のエラーで 1 件だけ落ちる (か
+// 人数が 0 になる) はずの通知が、同じロールの通知すべてに広がる。
+// 引き直すたびに記録するとログが通知の件数に比例する (1 ページ最大 100 件) ので、
+// 記録はロールごとに最初の 1 回だけにする。
+// 返す map は同じロールの通知で共有する (後から書き換える処理は無い)。
+func memoizeRoleLookup(fn RoleLookup, warn func(roleID string, ok bool, err error)) RoleLookup {
+	if fn == nil {
+		return nil
+	}
+	type result struct {
+		packed map[string]any
+		ok     bool
+	}
+	seen := map[string]result{}
+	warned := map[string]bool{}
+	return func(roleID string) (map[string]any, bool, error) {
+		if r, hit := seen[roleID]; hit {
+			return r.packed, r.ok, nil
+		}
+		packed, ok, err := fn(roleID)
+		if err == nil {
+			seen[roleID] = result{packed: packed, ok: ok}
+		} else if !warned[roleID] {
+			warned[roleID] = true
+			warn(roleID, ok, err)
+		}
+		return packed, ok, err
+	}
+}
+
+// warnRoleLookupFailure logs a failed roleAssigned role lookup. dropped tells
+// whether the notification was dropped (the role could not be read) or shown
+// with a fallback usersCount of 0 (ok was true).
+func warnRoleLookupFailure(roleID string, ok bool, err error) {
+	slog.Warn("notifications: roleAssigned role lookup failed", "roleId", roleID, "dropped", !ok, "err", err)
+}
 
 // ChatInvitationLookup resolves a chat room invitation ID to its packed
 // representation for the given viewer, returning false when the invitation no
@@ -220,6 +276,7 @@ func (pkr *Packer) PackNotification(n *notification.Notification, user *model.Us
 // items 内で N == nil の要素は単純に skip する。残りは入力順序を保って返す。
 func (pkr *Packer) PackNotifications(items []NotificationItem, idGen id.Generator, instLookup InstanceLookup, emojiLookup EmojiLookup, opts ...NotificationOption) []map[string]any {
 	packOpts := buildPackOptions(opts)
+	packOpts.role = memoizeRoleLookup(packOpts.role, warnRoleLookupFailure)
 	// 全 item の notifier user + 埋め込み note.user / Renote/Reply author を
 	// flatten して resolver の入力にする。
 	notifierUsers := make([]*model.User, 0, len(items))
@@ -322,7 +379,8 @@ func (pkr *Packer) packNotificationCore(n *notification.Notification, user *mode
 		if opts == nil || opts.role == nil {
 			return nil
 		}
-		packed, ok := opts.role(roleID)
+		// err は memo の側で記録済み。ok なら劣化した値 (人数 0) でも出す。
+		packed, ok, _ := opts.role(roleID)
 		if !ok {
 			return nil
 		}

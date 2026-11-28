@@ -440,7 +440,7 @@ func TestGrouped_DroppedRoleAssignedDoesNotPanic(t *testing.T) {
 	userRepo.Users["bob"] = &model.User{ID: "bob", Username: "bobuser"}
 	h.SetRepos(userRepo, noteRepo)
 	// role 削除済 = lookup が false を返す
-	h.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
+	h.SetRoleLookup(func(string) (map[string]any, bool, error) { return nil, false, nil })
 
 	ctx := context.Background()
 	_, err := svc.Create(ctx, notification.CreateInput{
@@ -549,7 +549,7 @@ func TestGrouped_GroupingSurvivesDroppedNotification(t *testing.T) {
 	}
 	h.SetRepos(userRepo, noteRepo)
 	h.SetQueryService(corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository()))
-	h.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
+	h.SetRoleLookup(func(string) (map[string]any, bool, error) { return nil, false, nil })
 
 	ctx := context.Background()
 	// 古い順に作る (一覧は newest first)。drop される roleAssigned は末尾 (= 最古)。
@@ -601,7 +601,7 @@ func TestGrouped_DroppedHeadKeepsGrouping(t *testing.T) {
 	}
 	h.SetRepos(userRepo, noteRepo)
 	h.SetQueryService(corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository()))
-	h.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
+	h.SetRoleLookup(func(string) (map[string]any, bool, error) { return nil, false, nil })
 
 	ctx := context.Background()
 	// 古い順に作る。一覧は newest first なので drop される roleAssigned が先頭に来る。
@@ -647,7 +647,7 @@ func TestGrouped_DroppedNotificationBreaksGrouping(t *testing.T) {
 	}
 	h.SetRepos(userRepo, noteRepo)
 	h.SetQueryService(corenote.NewQueryService(noteRepo, testutil.NewMockFollowingRepository()))
-	h.SetRoleLookup(func(string) (map[string]any, bool) { return nil, false })
+	h.SetRoleLookup(func(string) (map[string]any, bool, error) { return nil, false, nil })
 
 	ctx := context.Background()
 	// 古い順: reaction(bob) → drop される roleAssigned → reaction(carol)。
