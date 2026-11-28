@@ -53,7 +53,7 @@ type InboxReplayGuard interface {
 
 // activityReplayKey derives the replay guard's key from the signed Date header
 // and the signed request body. It is the key for requests without a usable
-// Digest header (digestReplayKey), and the key before #3988.
+// Digest header (digestReplayKey).
 func activityReplayKey(date string, body []byte) string {
 	h := sha256.New()
 	h.Write([]byte(date))
@@ -87,42 +87,26 @@ func digestReplayKey(date, digest string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// replayKeys returns the replay guard keys of a request whose HTTP signature
-// was verified: the first is the key to remember the request by from now on,
-// and every key is checked when looking for a replay.
+// requestReplayKey returns the replay guard key of a request whose HTTP signature
+// was verified.
 //
 // Digest が使えない (無い・署名が覆っていない・SHA-256 ではない) ときは、
 // 今までどおり本文から鍵を作る。受付はそうしたリクエストを積まないが、受付を
 // 通らずに積まれた payload (テストなど) でも、本文が違えば鍵が違う性質を保つ。
-func (p *InboxProcessor) replayKeys(headers map[string]string, body []byte, digestSigned bool) []string {
+//
+// **#3988 より前の形の鍵 (Date と本文の SHA-256) は見ない (#4275)。** 2.2.0 と 2.3.0 は、
+// 起動から inboxReplayTTL の間、前の形の鍵も計算して見て、覚えていた。しかし前の形の鍵だけで
+// 覚えたリリースは無く (1.3.0〜2.1.0 は activity の id が鍵。前の形だけの版はリリースの間の
+// develop にだけあった)、リリースからの更新を守ったことが無いのに、起動のたびに 15 分、大きな
+// 本文の受信を重くしていた (63KB の本文で約 +29%)。2.1.0 以前から上げた直後の再投函は
+// 2.2.0 からの既知の差 (docs/deployment.md)。
+func requestReplayKey(headers map[string]string, body []byte, digestSigned bool) string {
 	date := headers["Date"]
 	digest := headers["Digest"]
 	if !digestSigned || digest == "" {
-		return []string{activityReplayKey(date, body)}
+		return activityReplayKey(date, body)
 	}
-	keys := []string{digestReplayKey(date, digest)}
-	// **鍵の形を変えた直後は、前の形の鍵も見て、覚える。** 切り替える前に処理した
-	// リクエストは前の形の鍵でしか Redis に残っていないので、新しい鍵だけを見ると、
-	// 切り替えの直後 inboxReplayTTL の間はそれらを 1 回ずつ再投函できてしまう。
-	// 前の形の鍵も覚えるのは、入れ替えの途中で古い版のプロセスが同時に動いて
-	// いる間、そちらにも新しい版が処理したリクエストを見せるため。起動から
-	// inboxReplayTTL が過ぎれば、前の形の鍵は全部期限が切れているので計算しない。
-	//
-	// **前提は、新旧の版が並んで動くのが inboxReplayTTL より短いこと。** 古い版の
-	// worker を窓より長く併走させると、窓の後は両方の向きで 1 回ずつ再投函を通す。
-	// 新しい版が処理したリクエストを、古い版は新しい形の鍵で見つけられない。古い版が
-	// 前の形の鍵でだけ覚えたリクエストを、新しい版は窓の後には前の形の鍵を見ないので
-	// 見つけられない。新しい版から古い版へ
-	// 戻した直後も同じで、古い版は新しい形の鍵を見ないので、戻す前の inboxReplayTTL
-	// の間に処理したリクエストを 1 回ずつ通す。
-	now := time.Now
-	if p.now != nil {
-		now = p.now
-	}
-	if now().Before(p.legacyReplayKeysUntil) {
-		keys = append(keys, activityReplayKey(date, body))
-	}
-	return keys
+	return digestReplayKey(date, digest)
 }
 
 // inboxReplayTTL is how long a processed activity is remembered.

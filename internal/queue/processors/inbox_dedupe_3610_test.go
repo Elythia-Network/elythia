@@ -68,18 +68,14 @@ func TestInboxProcessor_DirectActivityIsDispatchedNormalized(t *testing.T) {
 	}, got.Fields())
 	assert.Same(t, verifier.actor, rec.signers[0], "the verified signer row must be handed over")
 	// 再投函の鍵は署名が覆った Date と Digest (id ではない。2026-10-31 の監査、#3988)。
-	// 起動の直後なので、前の形の鍵 (本文のダイジェスト) も覚える。
-	assert.True(t, guard.seen[digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"])], "the replay guard must remember the signed request")
-	assert.True(t, guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)], "the previous key must be remembered too right after the switch")
-	assert.Len(t, guard.seen, 2)
+	assert.Equal(t, map[string]bool{digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"]): true}, guard.seen, "the replay guard must remember the signed request by its key alone")
 
 	require.NoError(t, p.Handle(context.Background(), task))
 	assert.Len(t, rec.normalized, 1, "the replay must be dropped")
 }
 
 // replayKeyOf mirrors the processor's replay key for requests without a
-// usable Digest (and the key before #3988): the SHA-256 of the signed Date
-// header and the signed body.
+// usable Digest: the SHA-256 of the signed Date header and the signed body.
 func replayKeyOf(date string, body []byte) string {
 	h := sha256.New()
 	h.Write([]byte(date))
@@ -131,9 +127,7 @@ func TestInboxProcessor_ForwardedActivityIsDispatchedFromCompactedBody(t *testin
 	got := rec.normalized[0]
 	assert.Equal(t, compacted, got.Source(), "a forwarded activity must be processed from the compacted document")
 	assert.Equal(t, "https://origin.example/creates/1#signed", got.Fields().ID)
-	assert.True(t, guard.seen[digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"])], "the replay guard must remember the signed request")
-	assert.True(t, guard.seen[replayKeyOf(payload.Headers["Date"], payload.Body)], "the previous key must be remembered too right after the switch")
-	assert.Len(t, guard.seen, 2)
+	assert.Equal(t, map[string]bool{digestReplayKeyOf(payload.Headers["Date"], payload.Headers["Digest"]): true}, guard.seen, "the replay guard must remember the signed request by its key alone")
 	assert.Equal(t, "relay", rec.signers[0].ID, "the HTTP signer (not the LD creator) is handed over")
 }
 
