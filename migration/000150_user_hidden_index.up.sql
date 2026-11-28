@@ -1,0 +1,24 @@
+-- #4263: 凍結中か、ローカルの削除済みの利用者の id だけを持つ部分 index を張る。
+--
+-- ロールの人数 (`CountVisibleByRole`、roles/list・roles/show・i/notifications の
+-- roleAssigned) は、モデレーターでない人に見せない利用者を外して数える (#3999)。
+-- 「割り当ての数 − 見せない利用者の割り当ての数」で数え、見せない側をこの index の
+-- index only scan から引く。index が無いと見せない側が "user" を seq scan する
+-- (利用者 2.2 万人、凍結 72 人とローカルの削除済み 41 人の使い捨ての DB で、
+-- 2.2 万人のロールを数える 1 本が 9.8〜12.0ms → 3.5〜3.6ms。pgbench の extended
+-- protocol で 300 回を 3 回流した平均の幅、PostgreSQL 18.6、キャッシュに載った状態)。
+--
+-- 述語は internal/repository/role.go の hiddenUserCond と同じ形で書く。形がずれると
+-- planner が述語を満たすと判定できず、この index は使われない。bind 変数を含まないので、
+-- prepared statement の generic plan でも使える。
+--
+-- 000125 の IDX_user_isSuspended_id (凍結だけ) とローカルの削除済みの index の 2 本を
+-- BitmapOr で使う形も比べたが、heap を読む分だけ遅く (同じ DB・同じ測り方で
+-- 4.0〜4.2ms)、index も 2 本に分かれるので、1 本にした。
+--
+-- 本家にはこの index は無い (Elythia の数え方に合わせたもの)。TS 版から移した DB でも
+-- 同じ名前の index は無いので二重にならない。入るのは凍結・削除の行だけなので小さく、
+-- 普通の利用者の更新では書かれない。`user` は大きくなりうるので CONCURRENTLY で
+-- 書き込みを止めずに作る。失敗したときの回復は docs/deployment.md の
+-- 「大きな表に index を足す migration」にある。
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_user_hidden_id" ON "user" ("id") WHERE "isSuspended" OR ("isDeleted" AND COALESCE("host", '') = '');
