@@ -35,7 +35,7 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # 対象 14 個 x 2 分 + ビルド。対象が増えたら FUZZTIME か timeout を見直す
+    # 対象 15 個 x 2 分 + ビルド。対象が増えたら FUZZTIME か timeout を見直す
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

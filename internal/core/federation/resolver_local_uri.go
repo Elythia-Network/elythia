@@ -7,13 +7,15 @@ import (
 	"github.com/elythia-network/elythia/internal/activitypub"
 )
 
-// ExtractLocalAPReferences delegates to the shared semantic ActivityPub reference
-// extractor using this resolver's canonical local origin.
-func (r *Resolver) ExtractLocalAPReferences(serialized []byte) (userIDs []string, noteIDs []string) {
-	if r == nil || r.urls == nil {
-		return nil, nil
+// ScanInboxBody delegates to activitypub.ScanInboxBody using this resolver's
+// canonical local origin. A nil resolver (or one without URLs) still reports
+// whether the body names an actor, and returns no references.
+func (r *Resolver) ScanInboxBody(serialized []byte) (hasActor bool, userIDs []string, noteIDs []string) {
+	baseURL := ""
+	if r != nil && r.urls != nil {
+		baseURL = r.urls.BaseURL()
 	}
-	return activitypub.ExtractLocalAPReferences(r.urls.BaseURL(), serialized)
+	return activitypub.ScanInboxBody(baseURL, serialized)
 }
 
 // ExtractLocalUserID returns the user ID a local URI names the way upstream

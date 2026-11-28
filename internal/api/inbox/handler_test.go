@@ -902,6 +902,13 @@ func (r *failingNthInboxUserRepo) FindManyByIDs(ids []string) ([]*model.User, er
 	return r.MockUserRepository.FindManyByIDs(ids)
 }
 
+// observeBodyTargets reads the references of body the way Inbox does and
+// passes them to observeLocalInboxBodyTargets.
+func observeBodyTargets(h *Handler, body []byte, host string) error {
+	_, users, notes := h.resolver.ScanInboxBody(body)
+	return h.observeLocalInboxBodyTargets(users, notes, host)
+}
+
 func TestInbox_BodyReferencePreflightFinishesBeforeObservation(t *testing.T) {
 	h, baseRepo, _ := newHandler(t, "")
 	baseRepo.Users["bob"] = &model.User{ID: "bob", FederationStatus: model.FederationStatusOn}
@@ -911,7 +918,7 @@ func TestInbox_BodyReferencePreflightFinishesBeforeObservation(t *testing.T) {
 	observer := &localFederationObserverStub{available: true}
 	h.SetLocalFederationObserver(observer)
 	body := []byte(`{"actor":"https://example.com/users/bob","object":"https://example.com/users/carol"}`)
-	assert.Error(t, h.observeLocalInboxBodyTargets(body, "remote.example"))
+	assert.Error(t, observeBodyTargets(h, body, "remote.example"))
 	assert.Empty(t, observer.recorded, "all body lookups must finish before the first observation")
 }
 func TestInbox_BodyTargetsAreBoundedAndSemantic(t *testing.T) {
@@ -925,7 +932,7 @@ func TestInbox_BodyTargetsAreBoundedAndSemantic(t *testing.T) {
 			refs[i] = fmt.Sprintf(`"https://example.com/users/user-%d"`, i)
 		}
 		body := []byte(fmt.Sprintf(`{"actor":"https://remote.example/users/alice","object":[%s]}`, strings.Join(refs, ",")))
-		assert.ErrorIs(t, h.observeLocalInboxBodyTargets(body, "remote.example"), errLocalInboxTooManyReferences)
+		assert.ErrorIs(t, observeBodyTargets(h, body, "remote.example"), errLocalInboxTooManyReferences)
 	})
 
 	t.Run("deduplicate canonical refs and ignore ordinary links", func(t *testing.T) {
@@ -936,7 +943,7 @@ func TestInbox_BodyTargetsAreBoundedAndSemantic(t *testing.T) {
 		h.SetUserRepo(repo)
 		h.SetLocalFederationObserver(observer)
 		body := []byte(`{"actor":"https://example.com/users/bob","object":["https://example.com/users/bob","https://example.com/users/bob/followers"],"content":"https://example.com/users/channel https://example.com/notes/missing"}`)
-		assert.NoError(t, h.observeLocalInboxBodyTargets(body, "remote.example"))
+		assert.NoError(t, observeBodyTargets(h, body, "remote.example"))
 		assert.Equal(t, []string{"bob:inbox:remote.example"}, observer.recorded)
 	})
 }
@@ -962,7 +969,8 @@ func TestInbox_HostSignedAndMatchAccepted(t *testing.T) {
 	assert.Len(t, followingRepo.Followings, 1)
 }
 
-// #2069 (upstream #17558): bodyHasActor は actor を持つ object のみ true。
+// #2069 (upstream #17558): 受付は actor を持つ object のみ通す (#4276 から
+// ScanInboxBody が参照の走査と一緒に判定する)。
 func TestBodyHasActor(t *testing.T) {
 	cases := []struct {
 		name string
@@ -985,7 +993,8 @@ func TestBodyHasActor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, bodyHasActor([]byte(tc.body)))
+			got, _, _ := activitypub.ScanInboxBody("https://example.com", []byte(tc.body))
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
