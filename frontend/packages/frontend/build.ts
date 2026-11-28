@@ -37,7 +37,13 @@ async function buildAllLocale() {
 	inliner.collectsModifications();
 
 	await inliner.saveAllLocales(locales);
-	await inliner.savePreloads();
+	// Elythia: 起動の HTML から先読みする一覧 (#3613)。_boot_.ts はアイコンの CSS を
+	// `await import` し終えるまで mainBoot() に進まないので、この CSS も並べる (#4266)。
+	await inliner.savePreloads({
+		dynamicImports: {
+			'src/_boot_.ts': ['icons-subsetter/built/tabler-icons-frontend.css'],
+		},
+	});
 
 	if (logger.errorCount > 0) {
 		throw new Error(`Build failed with ${logger.errorCount} errors and ${logger.warningCount} warnings.`);

@@ -158,9 +158,10 @@ export class LocaleInliner {
 		for (const chunk of this.chunks) {
 			if (!chunk.isEntry || chunk.src == null) continue;
 			const files = closureOf(chunk.fileName).map(f => `${this.scriptsDir}/${f}`);
-			// Elythia: entry が動き出してすぐ動的に読むもの (embed のアイコンの CSS と ui.vue) も
-			// 並べる (#3992)。動的 import は manifest にも chunk の中にも静的な形で残らないので、
-			// 呼び出し側が manifest のキー (か、その末尾のパス) で名指しする。名指しが外れたらビルドを落とす
+			// Elythia: entry が動き出してすぐ動的に読むもの (embed のアイコンの CSS と ui.vue、
+			// 本体のアイコンの CSS) も並べる (#3992、#4266)。動的 import は manifest にも chunk の
+			// 中にも静的な形で残らないので、呼び出し側が manifest のキー (か、その末尾のパス) で
+			// 名指しする。名指しが外れたらビルドを落とす
 			// (黙って一覧が短くなると、先読みが消えたことに気付けない)。
 			for (const key of options.dynamicImports?.[chunk.src] ?? []) {
 				for (const file of this.#dynamicImportFiles(key, closureOf)) {

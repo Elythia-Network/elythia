@@ -1221,5 +1221,27 @@ func TestRenderFrontendShell_ClientPreloads(t *testing.T) {
 	t.Run("empty without preloads.json", func(t *testing.T) {
 		body, _ := render(t, frontendutil.ClientEntryInfo{Script: "scripts/entry-AAAAAAAA.js"})
 		assert.Contains(t, body, `const CLIENT_PRELOADS = [];`)
+		assert.NotContains(t, body, `rel="preload"`)
+	})
+
+	// _boot_.ts が `await import` するアイコンの CSS は、HTML から先に取りに行かせる (#4266)
+	t.Run("preloads the stylesheets the entry imports dynamically", func(t *testing.T) {
+		body, _ := render(t, frontendutil.ClientEntryInfo{
+			Script:        "scripts/entry-AAAAAAAA.js",
+			CSS:           []string{"assets/entry-AAAAAAAA.css"},
+			PreloadStyles: []string{"assets/icons-DDDDDDDD.css"},
+		})
+		// crossorigin が無いと、vite が CORS で差し込む stylesheet と一致せず二重に取りに行く
+		assert.Contains(t, body, `<link rel="preload" as="style" href="/vite/assets/icons-DDDDDDDD.css" crossorigin>`)
+		assert.Equal(t, 1, strings.Count(body, "assets/icons-DDDDDDDD.css"))
+		// stylesheet として適用はしない (適用は entry が import したとき)
+		assert.NotContains(t, body, `<link rel="stylesheet" href="/vite/assets/icons-DDDDDDDD.css">`)
+		assert.Contains(t, body, `<link rel="stylesheet" href="/vite/assets/entry-AAAAAAAA.css">`)
+	})
+
+	// dev (vite の dev server) では entry が無く、先読みする CSS も出さない
+	t.Run("no stylesheet preload without a built entry", func(t *testing.T) {
+		body, _ := render(t, frontendutil.ClientEntryInfo{PreloadStyles: []string{"assets/icons-DDDDDDDD.css"}})
+		assert.NotContains(t, body, `rel="preload"`)
 	})
 }

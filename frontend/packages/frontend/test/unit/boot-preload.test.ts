@@ -79,7 +79,7 @@ describe('LocaleInliner.collectPreloads with dynamic imports', () => {
 		return li;
 	}
 
-	it('lists only the static closure without the option (the client build)', () => {
+	it('lists only the static closure without the option', () => {
 		expect(inliner().collectPreloads()['src/boot.ts']).toEqual(['scripts/a-BBBBBBBB.js']);
 	});
 
@@ -114,6 +114,20 @@ describe('LocaleInliner.collectPreloads with dynamic imports', () => {
 		const source = readFileSync(join(__dirname, '../../../frontend-embed/build.ts'), 'utf8');
 		const call = source.match(/inliner\.savePreloads\(([\s\S]*?)\);/);
 		expect(call?.[1]).toContain("'src/boot.ts': ['icons-subsetter/built/tabler-icons-frontendEmbed.css', 'src/ui.vue']");
+	});
+
+	// 本体のビルドも、_boot_.ts が `await import` するアイコンの CSS を書く (#4266)。
+	// 書かないと HTML の preload が黙って消え、entry の JS の後に 1 往復が直列に入る。
+	it('is written by the client build for _boot_.ts', () => {
+		const source = readFileSync(join(__dirname, '../../build.ts'), 'utf8');
+		const call = source.match(/inliner\.savePreloads\(([\s\S]*?)\);/);
+		expect(call?.[1]).toContain("'src/_boot_.ts': ['icons-subsetter/built/tabler-icons-frontend.css']");
+	});
+
+	// 名指しするのは _boot_.ts が本番で読む CSS と同じファイル (別の名前だと先読みが外れる)
+	it('names the stylesheet that _boot_.ts imports in production', () => {
+		const boot = readFileSync(join(__dirname, '../../src/_boot_.ts'), 'utf8');
+		expect(boot).toContain("await import('icons-subsetter/built/tabler-icons-frontend.css');");
 	});
 
 	it('fails the build when a named import is missing or ambiguous', () => {

@@ -140,8 +140,8 @@ func RepoAssetsDir() string {
 //
 // PreloadStyles is the stylesheets listed in `preloads.json` that the entry
 // loads only after it has started (CSS imported dynamically, or the CSS of a
-// dynamically imported chunk), leaving out the ones already in CSS. Only the
-// embed build lists them.
+// dynamically imported chunk), leaving out the ones already in CSS. Both
+// builds list the icon stylesheet; the embed build also lists the CSS of ui.vue.
 type ClientEntryInfo struct {
 	Script         string
 	CSS            []string
@@ -259,7 +259,8 @@ var preloadStyleRe = regexp.MustCompile(`^assets/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.c
 // ファイルが無い (古いビルド) か読めないときは nil を返し、modulepreload を出さない
 // だけにする。entry 自身と、形の合わない名前は落とす。
 //
-// CSS (`assets/*.css`) は embed のビルドだけが書く (#3992)。chunk はロケールごとの
+// CSS (`assets/*.css`) は、動き出してから読む CSS を先読みさせるために書く。embed は
+// アイコンの CSS と ui.vue の CSS (#3992)、本体はアイコンの CSS (#4266)。chunk はロケールごとの
 // ディレクトリに分かれるが、CSS はロケールに依らないので別に返す。entry の CSS として
 // 既に `<link rel="stylesheet">` で出すものは落とす。
 func readPreloads(dir, entryKey, entryFile string, entryCSS []string) ([]string, []string) {

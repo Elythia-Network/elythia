@@ -247,6 +247,17 @@ func renderFrontendShell(c *echo.Context, cfg *config.Config, metaRepo repositor
 		for _, css := range clientEntry.CSS {
 			cssLinkTags += fmt.Sprintf(`<link rel="stylesheet" href="/vite/%s">`, css) + "\n"
 		}
+		// _boot_.ts が `await import` するアイコンの CSS を先に取りに行かせる (#4266)。
+		// entry はこれを読み終えるまで mainBoot() に進まないので、無いと entry の JS →
+		// アイコンの CSS → `/api/i` と UI の部品、と 1 往復が直列に入る。`as="style"` の
+		// preload は適用されないので、描画は変わらない。
+		//
+		// **`crossorigin` を付ける。** vite は動的 import の CSS を
+		// `<link rel="stylesheet" crossorigin="">` (CORS) で差し込むので、付けないと
+		// preload (no-cors) の応答と一致せず、同じ CSS をもう一度取りに行く (embed.go と同じ)。
+		for _, css := range clientEntry.PreloadStyles {
+			cssLinkTags += fmt.Sprintf(`<link rel="preload" as="style" href="/vite/%s" crossorigin>`, stdhtml.EscapeString(css)) + "\n"
+		}
 	}
 
 	// permalink (note / user 等) は自前の OGP を持ち込む (ssr_meta.go)。
