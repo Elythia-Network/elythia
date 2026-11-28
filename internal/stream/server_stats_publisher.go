@@ -26,10 +26,15 @@ import (
 type ServerStatsPublisher struct {
 	pub      PubSubPublisher
 	interval time.Duration
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	started  bool
-	mu       sync.Mutex
+	// idleRecheck は、無効の間に有効になったかを見直す間隔。切り替えは Reevaluate
+	// で届くので、これは metaUpdated を取りこぼしたときの上限としてだけ置く。
+	idleRecheck time.Duration
+	stopCh      chan struct{}
+	// wakeCh は Reevaluate の知らせ。容量 1 で、送れなければ既に届いている。
+	wakeCh  chan struct{}
+	wg      sync.WaitGroup
+	started bool
+	mu      sync.Mutex
 
 	// 前回tickのnet counter値。差分を秒速に変換するため保持する。
 	prevNetRx uint64
@@ -54,6 +59,13 @@ type ServerStatsPublisher struct {
 // ServerStatsLogMax は requestLog 応答で返す最大件数。TS 本家と同じ 200。
 const ServerStatsLogMax = 200
 
+// serverStatsIdleRecheck is how often a disabled publisher looks at the gate on
+// its own. 無効の間も 2 秒ごとに起きて meta を見ていた (2026-11-26 の監査で毎分
+// 30 回、meta のキャッシュが切れた回は SELECT も流れた)。切り替えは meta の更新で
+// Reevaluate が知らせるので、これは知らせを取りこぼしたとき (metaUpdated の
+// publish の失敗など) に、再起動を待たずに追いつくための上限 (#4276)。
+const serverStatsIdleRecheck = time.Minute
+
 // NewServerStatsPublisher constructs a ServerStatsPublisher. interval<=0 は
 // デフォルト (2秒) を使用する。
 //
@@ -66,11 +78,24 @@ func NewServerStatsPublisher(pub PubSubPublisher, interval time.Duration, enable
 		interval = 2 * time.Second
 	}
 	return &ServerStatsPublisher{
-		pub:      pub,
-		interval: interval,
-		stopCh:   make(chan struct{}),
-		logBuf:   newStatsRingBuffer(ServerStatsLogMax),
-		enabled:  enabled,
+		pub:         pub,
+		interval:    interval,
+		idleRecheck: serverStatsIdleRecheck,
+		stopCh:      make(chan struct{}),
+		wakeCh:      make(chan struct{}, 1),
+		logBuf:      newStatsRingBuffer(ServerStatsLogMax),
+		enabled:     enabled,
+	}
+}
+
+// Reevaluate makes the loop look at the gate now. The router calls it after
+// the meta row cache was dropped (a local update or `metaUpdated` from another
+// process), so enabling the stats in the control panel starts publishing
+// without a restart, and disabling them stops it at once. It never blocks.
+func (p *ServerStatsPublisher) Reevaluate() {
+	select {
+	case p.wakeCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -106,18 +131,48 @@ func (p *ServerStatsPublisher) Stop() {
 	p.wg.Wait()
 }
 
+// loop ticks every interval while the gate is open. While it is closed, it
+// only wakes on Reevaluate or after idleRecheck.
 func (p *ServerStatsPublisher) loop() {
 	defer p.wg.Done()
 	// 初回tickは即時実行して接続直後のウィジェットに早く値を届ける。
-	p.tick()
-	t := time.NewTicker(p.interval)
-	defer t.Stop()
+	enabled := p.tick()
+	var ticker *time.Ticker
+	idle := time.NewTimer(p.idleRecheck)
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+		idle.Stop()
+	}()
 	for {
+		var next <-chan time.Time
+		if enabled {
+			idle.Stop()
+			if ticker == nil {
+				ticker = time.NewTicker(p.interval)
+			}
+			next = ticker.C
+		} else {
+			if ticker != nil {
+				ticker.Stop()
+				ticker = nil
+			}
+			idle.Reset(p.idleRecheck)
+			next = idle.C
+		}
 		select {
 		case <-p.stopCh:
 			return
-		case <-t.C:
-			p.tick()
+		case <-next:
+			enabled = p.tick()
+		case <-p.wakeCh:
+			// 切り替わったときだけ tick する。有効のままの meta の更新で tick すると、
+			// 2 秒の間隔の途中で 1 回余分に流れる。有効になったときは、起動のときと
+			// 同じく最初の値をすぐに届ける。
+			if p.isEnabled() != enabled {
+				enabled = p.tick()
+			}
 		}
 	}
 }
@@ -141,25 +196,28 @@ type serverStatsSnapshot struct {
 	} `json:"fs"`
 }
 
-func (p *ServerStatsPublisher) tick() {
+// tick collects and publishes one snapshot when the gate is open. It reports
+// whether the gate was open.
+func (p *ServerStatsPublisher) tick() bool {
 	if !p.isEnabled() {
 		// 管理画面で無効にした後は、有効だったあいだの履歴も requestLog で
 		// 返さない。差分の起点も捨て、再び有効にした最初の tick を初回として扱う。
 		p.logBuf.Reset()
 		p.prevTick = time.Time{}
-		return
+		return false
 	}
 	snap := p.collect()
 	body, err := json.Marshal(snap)
 	if err != nil {
 		slog.Warn("server stats: marshal failed", "err", err)
-		return
+		return true
 	}
 	raw := json.RawMessage(body)
 	p.logBuf.Append(raw)
 	if err := p.pub.Publish(context.Background(), "serverStats", raw); err != nil {
 		slog.Warn("server stats: publish failed", "err", err)
 	}
+	return true
 }
 
 // Log returns the most recent up to maxLen snapshots, newest first. maxLen<=0

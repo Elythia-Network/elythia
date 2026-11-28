@@ -235,3 +235,72 @@ func TestStatsRingBuffer_Reset(t *testing.T) {
 	require.Len(t, logs, 1)
 	assert.JSONEq(t, `3`, string(logs[0]))
 }
+
+// 無効の間は interval ごとに起きない (#4276)。以前は無効でも 2 秒ごとに起きて
+// meta を見ていた。Reevaluate で有効になったら、再起動なしで流れ始め、無効に
+// 戻したら止まる。
+func TestServerStatsPublisher_LoopSleepsWhileDisabled(t *testing.T) {
+	pub := &capturePubSub{}
+	var enabled atomic.Bool
+	var checks atomic.Int64
+	p := NewServerStatsPublisher(pub, 5*time.Millisecond, func() bool {
+		checks.Add(1)
+		return enabled.Load()
+	})
+	p.idleRecheck = time.Hour
+	p.Start()
+	t.Cleanup(p.Stop)
+
+	time.Sleep(60 * time.Millisecond)
+	assert.Equal(t, int64(1), checks.Load(), "a disabled publisher must only look at the gate once at start")
+	assert.Empty(t, pub.snapshot())
+
+	enabled.Store(true)
+	p.Reevaluate()
+	require.Eventually(t, func() bool { return len(pub.snapshot()) >= 3 }, 5*time.Second, time.Millisecond,
+		"enabling must start the ticks without a restart")
+
+	enabled.Store(false)
+	p.Reevaluate()
+	assert.Empty(t, p.Log(0))
+	// 止める前に発火していた tick が流れることはあるので、件数が増えなくなるまで
+	// 待ってから数える (-race で遅いときに、決まった時間の待ちでは足りない)。
+	// tick が止まらなければ落ち着かないので、ここで落ちる。
+	var n int
+	require.Eventually(t, func() bool {
+		n = len(pub.snapshot())
+		time.Sleep(30 * time.Millisecond)
+		return len(pub.snapshot()) == n
+	}, 5*time.Second, time.Millisecond, "disabling must stop the ticks")
+	time.Sleep(60 * time.Millisecond)
+	assert.Len(t, pub.snapshot(), n, "disabling must stop the ticks")
+}
+
+// metaUpdated を取りこぼしても、idleRecheck の後には有効になったことに追いつく。
+func TestServerStatsPublisher_IdleRecheckCatchesUp(t *testing.T) {
+	pub := &capturePubSub{}
+	var enabled atomic.Bool
+	p := NewServerStatsPublisher(pub, time.Hour, enabled.Load)
+	p.idleRecheck = 10 * time.Millisecond
+	p.Start()
+	t.Cleanup(p.Stop)
+
+	time.Sleep(20 * time.Millisecond)
+	enabled.Store(true)
+	require.Eventually(t, func() bool { return len(pub.snapshot()) == 1 }, 5*time.Second, time.Millisecond)
+}
+
+// 有効のままの meta の更新では、interval の途中で余分に流さない。
+func TestServerStatsPublisher_ReevaluateWithoutChangeDoesNotTick(t *testing.T) {
+	pub := &capturePubSub{}
+	p := newEnabledServerStatsPublisher(pub, time.Hour)
+	p.Start()
+	t.Cleanup(p.Stop)
+	require.Eventually(t, func() bool { return len(pub.snapshot()) == 1 }, 5*time.Second, time.Millisecond)
+
+	for range 3 {
+		p.Reevaluate()
+	}
+	time.Sleep(30 * time.Millisecond)
+	assert.Len(t, pub.snapshot(), 1)
+}

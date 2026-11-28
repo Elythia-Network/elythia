@@ -75,6 +75,7 @@ type cacheInvalidationDeps struct {
 	clipsHandler             *clips.Handler
 	notificationsHandler     *notifications.Handler
 	notePublisher            *stream.NotePublisher
+	serverStatsPub           *stream.ServerStatsPublisher
 }
 
 // wireCacheInvalidation connects the caches other processes must hear about
@@ -119,6 +120,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 	clipsHandler := d.clipsHandler
 	notificationsHandler := d.notificationsHandler
 	notePublisher := d.notePublisher
+	serverStatsPub := d.serverStatsPub
 
 	// #1740: meta 更新の cross-worker cache invalidation。更新した worker は
 	// internal:metaUpdated を publish し、各 worker は受信して自プロセスの
@@ -181,6 +183,9 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 		nodeinfoHandler.InvalidateCache()
 		reloadCaptcha()
 		reloadReactionBuffering()
+		// サーバーの統計は、無効の間は tick を止めている。有効にした meta を読み直させる
+		// (#4276)。meta 行を捨てた後に呼ぶ (先だと古い行で判定する)。
+		serverStatsPub.Reevaluate()
 		if err := internalPubSub.Publish(context.Background(), "metaUpdated", struct{}{}); err != nil {
 			slog.Warn("meta: publish metaUpdated failed", "err", err)
 		}
@@ -191,6 +196,7 @@ func (s *Server) wireCacheInvalidation(d cacheInvalidationDeps) {
 		nodeinfoHandler.InvalidateCache()
 		reloadCaptcha()
 		reloadReactionBuffering()
+		serverStatsPub.Reevaluate()
 		if hook := s.metaUpdatedHandled.Load(); hook != nil {
 			(*hook)(payload)
 		}

@@ -196,3 +196,42 @@ func TestTouchBuffer_ClosesBeforeTheLastFlush(t *testing.T) {
 	defer target.mu.Unlock()
 	assert.ElementsMatch(t, []string{"first.example", "late.example"}, target.hosts)
 }
+
+// 何も積まれていない間は timer を動かさない (#4276)。待機中も flushIn ごとに
+// 起きていた。積まれたら flushIn の後に書き、書いた後に積まれた分は次の timer で
+// 書く。
+func TestTouchBuffer_TimerRunsOnlyWhilePending(t *testing.T) {
+	target := &recordingTarget{}
+	buf := instance.NewTouchBuffer(target, 5*time.Millisecond)
+	var fired atomic.Int64
+	instance.SetTouchBufferTimerHook(buf, func() { fired.Add(1) })
+	buf.Start(context.Background())
+	t.Cleanup(buf.Close)
+
+	time.Sleep(60 * time.Millisecond)
+	assert.Zero(t, fired.Load(), "the timer must not fire while nothing is pending")
+
+	require.NoError(t, buf.MarkRequestReceived("a.example"))
+	require.Eventually(t, func() bool { return target.calls.Load() == 1 }, 5*time.Second, time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
+	assert.Equal(t, int64(1), fired.Load(), "the timer must stop once the pending map was flushed")
+
+	require.NoError(t, buf.MarkRequestReceived("b.example"))
+	require.Eventually(t, func() bool { return target.calls.Load() == 2 }, 5*time.Second, time.Millisecond,
+		"an entry stored after a flush must be flushed by the next timer")
+	target.mu.Lock()
+	assert.Equal(t, []string{"a.example", "b.example"}, target.hosts)
+	target.mu.Unlock()
+}
+
+// Start より前に積まれた分も、Start の後の timer で書く。
+func TestTouchBuffer_FlushesEntriesStoredBeforeStart(t *testing.T) {
+	target := &recordingTarget{}
+	buf := instance.NewTouchBuffer(target, 5*time.Millisecond)
+	require.NoError(t, buf.MarkRequestReceived("a.example"))
+	// 積んだときの知らせを捨て、Start が pending を見て timer を動かすことを確かめる。
+	instance.DrainTouchBufferArm(buf)
+	buf.Start(context.Background())
+	t.Cleanup(buf.Close)
+	require.Eventually(t, func() bool { return target.calls.Load() == 1 }, 5*time.Second, time.Millisecond)
+}
