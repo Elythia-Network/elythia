@@ -1,6 +1,8 @@
 package users
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,4 +54,43 @@ func TestShow_UgcVisibilityAllShowsRemoteToAnonymous(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, showStatus(t, h, `{"userId":"remote2"}`, nil),
 		"ugcVisibility=all does not gate anonymous remote view")
+}
+
+// ShowForVisitor is what the user page embeds (#4271): the single-user
+// users/show as an anonymous visitor gets it, and nothing whenever users/show
+// declines.
+func TestShowForVisitor(t *testing.T) {
+	h, repo := newTestHandler(t)
+	h.SetUGCVisibility("local")
+	host := "remote.example"
+	add := func(id string, mutate func(*model.User)) {
+		u := &model.User{ID: id, Username: id, UsernameLower: id, AvatarDecorations: datatypes.JSON([]byte("[]"))}
+		if mutate != nil {
+			mutate(u)
+		}
+		repo.Users[id] = u
+		repo.Profiles[id] = &model.UserProfile{UserID: id, Fields: datatypes.JSON([]byte("[]"))}
+	}
+	add("alice", nil)
+	add("frozen", func(u *model.User) { u.IsSuspended = true })
+	add("gone", func(u *model.User) { u.IsDeleted = true })
+	add("faraway", func(u *model.User) { u.Host = &host })
+
+	got, ok := h.ShowForVisitor(context.Background(), "alice")
+	require.True(t, ok)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/users/show", strings.NewReader(`{"userId":"alice"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.Show(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, rec.Body.String(), string(raw), "the same as an anonymous users/show")
+
+	for _, id := range []string{"frozen", "gone", "faraway", "nobody", ""} {
+		got, ok := h.ShowForVisitor(context.Background(), id)
+		assert.False(t, ok, id)
+		assert.Nil(t, got, id)
+	}
 }

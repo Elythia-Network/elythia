@@ -606,17 +606,7 @@ func (h *Handler) Show(c *echo.Context) error {
 		return apierr.JSONNoSuchUser(c)
 	}
 
-	// upstream show.ts:173-175: 非 moderator viewer に対して suspended user は
-	// 存在しないものとして扱い NO_SUCH_USER(4362f8dc...) を返す。物理削除待ちか
-	// 行保持かを問わず local deleted user も同様に隠すが、remote user と moderator
-	// の既存契約は維持する。匿名/未配線は iAmModerator=false で fail-closed。
-	if !iAmModerator && bundle.User.HiddenFromNonModerators() {
-		return apierr.JSONNoSuchUser(c)
-	}
-
-	// #2106 S3: ugcVisibilityForVisitor='local' のとき匿名 visitor に remote user を
-	// 出さない (upstream show.ts:177-179)。userId 指定経路もここでカバーする。
-	if viewer == nil && bundle.User.Host != nil && h.ugcVisibilityNow() == "local" {
+	if !h.singleVisible(viewer, iAmModerator, bundle) {
 		return apierr.JSONNoSuchUser(c)
 	}
 
@@ -636,6 +626,61 @@ func (h *Handler) Show(c *echo.Context) error {
 		h.chartHook.OnUserShow(bundle.User.ID, viewerID, visitorKey)
 	}
 
+	return c.JSON(http.StatusOK, h.packSingle(c.Request().Context(), viewer, iAmModerator, bundle))
+}
+
+// ShowForVisitor returns what users/show {userId} returns to a signed-out
+// visitor, and false whenever users/show would answer with an error instead.
+//
+// 利用者のページの HTML に埋める中身 (misskey_clientCtx、#4271) はこれだけを通す。
+// HTML の側で別に組み立てると、未ログインに伏せる規則 (凍結・削除、
+// ugcVisibilityForVisitor、ピン留めの公開境界 #3310、カウントの公開範囲) に後から
+// 入る修正が HTML だけ取り残される。
+//
+// **閲覧数のチャートは数えない。** 本家も HTML の組み立て (ClientServerService) では
+// 数えず、クライアントが users/show を呼んだときだけ数える。HTML はクローラも取るので、
+// ここで数えると JS を動かさない取得まで閲覧に入る。
+//
+// **その結果、未ログインの人が `/@acct` とそのタブ (`/@acct/notes` など) を開いた最初の
+// 表示は数えない。** frontend の利用者のページ (pages/user/index.vue) は、埋めたものが
+// あると users/show を呼ばないため。タブの切り替えも取り直さない。数えるのは、引っ張って
+// 更新したとき (refreshUser) と、`/@acct/following`・`/@acct/followers` (埋めたものを読まず、
+// 毎回 users/show を呼ぶ) を開いたとき。#4271 より前の Elythia は最初の表示も数えて
+// いたので、未ログインの閲覧の数は減る (本家と同じ挙動になる)。
+func (h *Handler) ShowForVisitor(ctx context.Context, userID string) (any, bool) {
+	if userID == "" {
+		return nil, false
+	}
+	bundle, err := h.userService.ShowByID(userID)
+	if err != nil || !h.singleVisible(nil, false, bundle) {
+		return nil, false
+	}
+	return h.packSingle(ctx, nil, false, bundle), true
+}
+
+// singleVisible reports whether the single-user form of users/show may return
+// bundle to viewer (false = NO_SUCH_USER).
+func (h *Handler) singleVisible(viewer *model.User, iAmModerator bool, bundle *user.UserWithProfile) bool {
+	// upstream show.ts:173-175: 非 moderator viewer に対して suspended user は
+	// 存在しないものとして扱い NO_SUCH_USER(4362f8dc...) を返す。物理削除待ちか
+	// 行保持かを問わず local deleted user も同様に隠すが、remote user と moderator
+	// の既存契約は維持する。匿名/未配線は iAmModerator=false で fail-closed。
+	if !iAmModerator && bundle.User.HiddenFromNonModerators() {
+		return false
+	}
+
+	// #2106 S3: ugcVisibilityForVisitor='local' のとき匿名 visitor に remote user を
+	// 出さない (upstream show.ts:177-179)。userId 指定経路もここでカバーする。
+	if viewer == nil && bundle.User.Host != nil && h.ugcVisibilityNow() == "local" {
+		return false
+	}
+
+	return true
+}
+
+// packSingle packs the single-user users/show response for viewer. Show and
+// ShowForVisitor share it so that the page HTML embeds exactly the API response.
+func (h *Handler) packSingle(ctx context.Context, viewer *model.User, iAmModerator bool, bundle *user.UserWithProfile) any {
 	detailed := h.entityPacker.PackUserDetailed(bundle.User, bundle.Profile, h.idGen)
 	h.applyModerationNote(&detailed, iAmModerator, bundle.Profile)
 	// moderator が他ユーザーを見るときは twoFactorEnabled/usePasswordLessLogin/
@@ -653,8 +698,13 @@ func (h *Handler) Show(c *echo.Context) error {
 	// 仕様で remote user の数値が実体より小さく出るが、本拡張で「リモートサーバー
 	// 上の実値」を表示する。失敗時は local 観測値 (PackUserDetailed の値) を
 	// fallback として残す。
+	//
+	// **取得の条件を変えるときは、利用者のページの HTML の除外 (internal/server の
+	// userClientCtx) も見直す。** HTML はこの取得を待たないよう、リモートの利用者には
+	// ShowForVisitor の結果を埋めない (#4271)。取得がローカルの利用者でも走るように
+	// なると、HTML がその取得を待つ。
 	if h.remoteStatsFetcher != nil && bundle.User.Host != nil && *bundle.User.Host != "" {
-		if stats := h.remoteStatsFetcher.Fetch(c.Request().Context(), *bundle.User.Host, bundle.User.Username); stats != nil {
+		if stats := h.remoteStatsFetcher.Fetch(ctx, *bundle.User.Host, bundle.User.Username); stats != nil {
 			detailed.NotesCount = stats.NotesCount
 			// **ゲートが入れ直す値も更新する。** 表示値だけ書くと、後で
 			// `GateCountVisibility` が元の値で上書きする。
@@ -681,7 +731,7 @@ func (h *Handler) Show(c *echo.Context) error {
 
 	// Phase 7-3 (#245): ピン止めnote / ピン止めpage を埋める。viewer は
 	// pinned note の myReaction を埋めるのに使う (#426)。
-	h.fillPinned(c.Request().Context(), viewer, bundle.User, bundle.Profile, &detailed)
+	h.fillPinned(ctx, viewer, bundle.User, bundle.Profile, &detailed)
 
 	// viewer→target の relation block を共有 resolver で解決し detailed に反映する。
 	// blocking/create・delete と同じ計算で、二重実装を避けるため抽出した (#1802)。
@@ -703,13 +753,13 @@ func (h *Handler) Show(c *echo.Context) error {
 		// meself が /api/i の handler (= 全依存を持つ) に委譲して埋めるので、
 		// self-view の field set と値が /api/i と一致する。Enricher 未配線の
 		// unit test 経路では MeDetailed の既定値のままになる。
-		return c.JSON(http.StatusOK, h.selfPacker.PackMe(c.Request().Context(), detailed, bundle.User, bundle.Profile))
+		return h.selfPacker.PackMe(ctx, detailed, bundle.User, bundle.Profile)
 	}
 	// followers/following count を visibility で gate する (#1558)。ここに来るのは
 	// non-self (anonymous 含む)。isMe=false、isFollowing は relation ブロックで
 	// 解決済 (anonymous / 未配線なら false = 非 follower 扱い)。
 	entity.GateCountVisibility(&detailed, false, iAmModerator, viewerIsFollowing)
-	return c.JSON(http.StatusOK, detailed)
+	return detailed
 }
 
 // SearchRequest is the request body for users/search.

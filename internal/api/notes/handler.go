@@ -795,11 +795,49 @@ func (h *Handler) Show(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.NoteID == "" {
 		return apierr.JSONInvalidParam(c)
 	}
-
-	viewer := middleware.GetUser(c)
-	n, err := h.lookupForShow(req.NoteID)
-	if err != nil {
+	packed, refusal := h.show(c.Request().Context(), middleware.GetUser(c), req.NoteID)
+	switch refusal {
+	case showNoSuchNote:
 		return apierr.JSONNoSuchNote(c)
+	case showRestrictedByUser:
+		return c.JSON(http.StatusBadRequest, apierr.Error("CONTENT_RESTRICTED_BY_USER", "This content is not available because the author requires sign-in to view it.", "fbcc002d-37d9-4944-a6b0-d9e29f2d33ab"))
+	case showRestrictedByServer:
+		return c.JSON(http.StatusBadRequest, apierr.Error("CONTENT_RESTRICTED_BY_SERVER", "This content is not available for visitors on this server.", "145f88d2-b03d-4087-8143-a78928883c4b"))
+	}
+	return c.JSON(http.StatusOK, packed)
+}
+
+// showRefusal is the reason notes/show declines to return a note.
+type showRefusal int
+
+const (
+	showOK showRefusal = iota
+	showNoSuchNote
+	showRestrictedByUser
+	showRestrictedByServer
+)
+
+// ShowForVisitor returns what notes/show returns to a signed-out visitor, and
+// false whenever notes/show would answer with an error instead.
+//
+// ノートのページの HTML に埋める中身 (misskey_clientCtx、#4271) はこれだけを通す。
+// HTML の側で別に組み立てると、未ログインに伏せる規則 (公開範囲、作者の設定、
+// ピン留め、プラグインの条件) に後から入る修正が HTML だけ取り残され、本文が
+// HTML から読めてしまう。
+func (h *Handler) ShowForVisitor(ctx context.Context, noteID string) (entity.NoteEntity, bool) {
+	if noteID == "" {
+		return entity.NoteEntity{}, false
+	}
+	packed, refusal := h.show(ctx, nil, noteID)
+	return packed, refusal == showOK
+}
+
+// show is notes/show without the HTTP layer. Show and ShowForVisitor share it
+// so that the page HTML embeds exactly the API response.
+func (h *Handler) show(ctx context.Context, viewer *model.User, noteID string) (entity.NoteEntity, showRefusal) {
+	n, err := h.lookupForShow(noteID)
+	if err != nil {
+		return entity.NoteEntity{}, showNoSuchNote
 	}
 
 	// 未ログイン閲覧の制限 (upstream notes/show.ts:69-79, #1538)。
@@ -809,14 +847,14 @@ func (h *Handler) Show(c *echo.Context) error {
 	// ログイン済み viewer には一切適用しない。
 	if viewer == nil {
 		if n.User != nil && n.User.RequireSigninToViewContents {
-			return c.JSON(http.StatusBadRequest, apierr.Error("CONTENT_RESTRICTED_BY_USER", "This content is not available because the author requires sign-in to view it.", "fbcc002d-37d9-4944-a6b0-d9e29f2d33ab"))
+			return entity.NoteEntity{}, showRestrictedByUser
 		}
 		if v := h.ugcVisibilityNow(); v == "none" || (v == "local" && n.UserHost != nil) {
-			return c.JSON(http.StatusBadRequest, apierr.Error("CONTENT_RESTRICTED_BY_SERVER", "This content is not available for visitors on this server.", "145f88d2-b03d-4087-8143-a78928883c4b"))
+			return entity.NoteEntity{}, showRestrictedByServer
 		}
 	}
 
-	packed := h.entityPacker.PackNoteWithInstance(c.Request().Context(), n, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
+	packed := h.entityPacker.PackNoteWithInstance(ctx, n, h.idGen, h.instanceLookup(), h.emojiLookup(), h.reactionReader())
 	s := []entity.NoteEntity{packed}
 	h.fieldResolver().Apply(s, viewer)
 	if h.isCurrentlyPinned(n) {
@@ -835,10 +873,10 @@ func (h *Handler) Show(c *echo.Context) error {
 	// プラグインの条件で自分のホストに見せないノートは、ログインしていない閲覧者には
 	// 本文を伏せる (#4203)。見られない公開範囲のノートと同じ形 (200 + isHidden) に
 	// するので、本家のクライアントはそのまま表示できる。
-	if viewer == nil && n.UserHost == nil && h.noteDelivery.HiddenFromVisitors(c.Request().Context(), []string{n.ID})[n.ID] {
+	if viewer == nil && n.UserHost == nil && h.noteDelivery.HiddenFromVisitors(ctx, []string{n.ID})[n.ID] {
 		entity.HideNoteEntity(&s[0])
 	}
-	return c.JSON(http.StatusOK, s[0])
+	return s[0], showOK
 }
 
 func (h *Handler) isCurrentlyPinned(n *model.Note) bool {

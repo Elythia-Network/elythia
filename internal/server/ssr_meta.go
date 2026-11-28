@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	stdhtml "html"
 	"strconv"
@@ -60,6 +61,27 @@ type ssrMetaHandler struct {
 	// noteDelivery はプラグインが配送先を絞ったノートを見分ける (#4199)。nil なら
 	// 絞らない。渡し忘れをビルドで止めるため、構築子の引数で受ける。
 	noteDelivery *notedelivery.Registry
+	// clientCtx はページの HTML に埋める中身を、未ログインの API と同じ関数で組む
+	// (#4271)。
+	clientCtx ssrClientCtx
+}
+
+// ssrClientCtx packs the entity a permalink page embeds as misskey_clientCtx
+// (#4271). Each function must be the signed-out form of the matching API
+// (notes/show, users/show, clips/show) and return false whenever that API
+// answers with an error. A nil function embeds nothing.
+//
+// 本家は利用者・ノート・クリップのページに、pack した実体を
+// `<script type="application/json" id="misskey_clientCtx">` で入れ、frontend は
+// ログインしていないときだけそれで描く (server-context.ts)。無いと JS を読み終えて
+// から API を 1 往復待つ。
+//
+// **HTML の側で組み立てない。** OGP と違い本文・添付をすべて含むので、未ログインに
+// 伏せる規則が API とずれると、伏せたはずの中身が HTML から読める。
+type ssrClientCtx struct {
+	Note func(ctx context.Context, noteID string) (any, bool)
+	User func(ctx context.Context, userID string) (any, bool)
+	Clip func(clipID string) (any, bool)
 }
 
 // ssrMetaDeps carries the repositories the permalink pages read from.
@@ -93,6 +115,7 @@ func newSSRMetaHandler(
 	deps ssrMetaDeps,
 	entityPacker *entity.Packer,
 	noteDelivery *notedelivery.Registry,
+	clientCtx ssrClientCtx,
 ) *ssrMetaHandler {
 	return &ssrMetaHandler{
 		cfg:           cfg,
@@ -117,7 +140,62 @@ func newSSRMetaHandler(
 		idGen:         deps.IDGen,
 		entityPacker:  entityPacker,
 		noteDelivery:  noteDelivery,
+		clientCtx:     clientCtx,
 	}
+}
+
+// clientCtxJSON renders {key: v} for the misskey_clientCtx script element, or
+// "" when pack is nil or declines (= the API would answer with an error).
+//
+// `</script>` や `<!--` で要素から抜けられないよう、`<` `>` `&` と U+2028 / U+2029 を
+// エスケープする (本家の htmlSafeJsonStringify と同じ文字)。
+func clientCtxJSON(key string, pack func() (any, bool)) string {
+	v, ok := pack()
+	if !ok {
+		return ""
+	}
+	b, err := json.Marshal(map[string]any{key: v})
+	if err != nil {
+		return ""
+	}
+	return escapeJSONForScript(string(b))
+}
+
+// noteClientCtx is the misskey_clientCtx of the note page.
+//
+// 作者がリモートのノートも埋める。notes/show は作者を UserLite で包み、#943 の
+// カウントの取得 (users/show の単体の形だけが行う) は走らない。
+func (h *ssrMetaHandler) noteClientCtx(ctx context.Context, noteID string) string {
+	if h.clientCtx.Note == nil {
+		return ""
+	}
+	return clientCtxJSON("note", func() (any, bool) { return h.clientCtx.Note(ctx, noteID) })
+}
+
+// userClientCtx is the misskey_clientCtx of the user page. It embeds nothing
+// for a remote user.
+//
+// **リモートの利用者には埋めない (本家と違う)。** users/show はリモートの利用者の
+// カウントを相手のサーバーから取り直す (#943、Elythia 独自)。HTML で同じ関数を通すと、
+// キャッシュに無いとき HTML の応答がその取得を最大 5 秒待ち、ログインしている人も
+// クローラも待たされる。クローラの取得でも相手への要求が出る。本家の pack は取りに
+// 行かないので、本家はリモートの利用者にも埋める。埋めなければ frontend は今までどおり
+// users/show を呼ぶので、表示は変わらない。除外の条件は、users の packSingle が
+// #943 の取得を行う条件 (作者のホストが空でない) と揃えている。あちらを変えるときは
+// ここも見直す。
+func (h *ssrMetaHandler) userClientCtx(ctx context.Context, u *model.User) string {
+	if h.clientCtx.User == nil || u == nil || remoteHost(u.Host) {
+		return ""
+	}
+	return clientCtxJSON("user", func() (any, bool) { return h.clientCtx.User(ctx, u.ID) })
+}
+
+// clipClientCtx is the misskey_clientCtx of the clip page.
+func (h *ssrMetaHandler) clipClientCtx(clipID string) string {
+	if h.clientCtx.Clip == nil {
+		return ""
+	}
+	return clientCtxJSON("clip", func() (any, bool) { return h.clientCtx.Clip(clipID) })
 }
 
 // render serves the shell with the given per-page overrides.
@@ -668,6 +746,7 @@ func (h *ssrMetaHandler) UserPage(c *echo.Context) error {
 		Description:  desc,
 		CacheControl: ssrPermalinkCacheControl,
 		RobotsTag:    robotsTagsFor(p),
+		ClientCtx:    h.userClientCtx(c.Request().Context(), u),
 	})
 }
 
@@ -792,6 +871,7 @@ func (h *ssrMetaHandler) NotePage(c *echo.Context) error {
 		Description:  &summary,
 		CacheControl: ssrPermalinkCacheControl,
 		RobotsTag:    robotsTagsFor(profile),
+		ClientCtx:    h.noteClientCtx(c.Request().Context(), note.ID),
 	})
 }
 
@@ -839,6 +919,7 @@ func (h *ssrMetaHandler) ClipPage(c *echo.Context) error {
 		Description:  strOrEmpty(clip.Description),
 		CacheControl: ssrPermalinkCacheControl,
 		RobotsTag:    robotsTagsFor(profile),
+		ClientCtx:    h.clipClientCtx(clip.ID),
 	})
 }
 

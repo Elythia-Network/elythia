@@ -91,6 +91,9 @@ type shellOverrides struct {
 	// ユーザーのページで noimageai / noai を出す。HTML を解析しないクローラにも
 	// 効くのが meta 版との違い。
 	RobotsTag []string
+	// ClientCtx is the HTML-safe JSON of misskey_clientCtx (#4271)。空なら要素を
+	// 出さない。中身は ssr_meta.go が未ログインの API と同じ関数で組む。
+	ClientCtx string
 }
 
 // clientPreloadsJS returns the JS array literal of the chunks the boot loader
@@ -342,6 +345,15 @@ func renderFrontendShell(c *echo.Context, cfg *config.Config, metaRepo repositor
 	// loader は inline のときだけ hash が要る (外部参照なら 'self' で通る)。
 	cspExtra.Script = append(cspExtra.Script, cspScriptHashes(bootGlobals, loader.JS)...)
 
+	generatedAt := time.Now().UnixMilli()
+	// ページの中身 (#4271)。本家 base.tsx と同じく misskey_meta の後、loader の前に
+	// 置く。type="application/json" は実行されないので、CSP の script-src に hash を
+	// 足さなくてよい (misskey_meta と同じ)。
+	clientCtxTag := ""
+	if ov.ClientCtx != "" {
+		clientCtxTag = fmt.Sprintf(`<script type="application/json" id="misskey_clientCtx" data-generated-at="%d">%s</script>`, generatedAt, ov.ClientCtx) + "\n"
+	}
+
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
@@ -364,7 +376,7 @@ func renderFrontendShell(c *echo.Context, cfg *config.Config, metaRepo repositor
 %s
 <script>%s</script>
 <script type="application/json" id="misskey_meta" data-generated-at="%d">%s</script>
-%s
+%s%s
 </head><body>
 <noscript><p>Please turn on your JavaScript</p></noscript>
 %s
@@ -375,7 +387,7 @@ func renderFrontendShell(c *echo.Context, cfg *config.Config, metaRepo repositor
 		pageTitleEsc, baseURLEsc,
 		prefetchTags, ov.OG+ov.Head, viteClientTag, cssLinkTags,
 		loaderCSSTag, bootGlobals,
-		time.Now().UnixMilli(), metaJSON, loaderJSTag,
+		generatedAt, metaJSON, clientCtxTag, loaderJSTag,
 		fmt.Sprintf(splashMarkup, stdhtml.EscapeString(splashIconURL)))
 
 	// **shell を返す経路でだけ CSP を付ける** (#2425)。ここを通るのは catch-all と
