@@ -42,7 +42,8 @@ func within(t *testing.T, fn func()) {
 
 // FuzzParseSignatureHeader checks that a parsed Signature header always has
 // the parts the verification uses: a key id, a signature and at least one
-// header name, each without white space.
+// header name, each without white space, and that it is the same as what the
+// regular expression used before #4265 returns.
 func FuzzParseSignatureHeader(f *testing.F) {
 	for _, s := range []string{
 		`keyId="https://remote.example/users/a#main-key",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="c2ln"`,
@@ -54,6 +55,14 @@ func FuzzParseSignatureHeader(f *testing.F) {
 		`keyId=k,signature=s`,
 		`keyId="a"keyId="b",signature="s"`,
 		`hs2019 keyId="k",created=1,expires=2,signature="s"`,
+		`keyId="a\"b",signature="s"`,
+		`x="keyId="k",signature="s"`,
+		"k\xc3\xa9yId=\"\xff\",keyId=\"k\",signature=\"s\"",
+		// 計算量の悪化の種。fuzzInputMax(64KiB)の種では、手元で開始3秒に約1万回に
+		// 達した後、新しい入力の実行が0回/秒のまま進まなかった(種なしでは30秒で約43万回)
+		// ので4KiBにする。1MBでの線形はTestParseSignatureHeader_LinearTimeが確かめる
+		strings.Repeat(`a="`, 4<<10/3),
+		strings.Repeat(`a=""`, 4<<10/4),
 		``,
 	} {
 		f.Add(s)
@@ -65,6 +74,7 @@ func FuzzParseSignatureHeader(f *testing.F) {
 		var parsed *ParsedSignature
 		var err error
 		within(t, func() { parsed, err = ParseSignatureHeader(in) })
+		assertSameAsReference(t, in)
 		if err != nil {
 			if parsed != nil {
 				t.Fatalf("error %v with a result %+v", err, parsed)
