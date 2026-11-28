@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1041,8 +1043,9 @@ func (f *failingAssignRepo) CountActiveByRole(_ string) (int, error) {
 	return 0, assert.AnError
 }
 
+// エラーと一緒に 0 以外を返し、失敗のときに repo の値を使わず 0 にすることを確かめる。
 func (f *failingAssignRepo) CountVisibleByRole(_ string) (int, error) {
-	return 0, assert.AnError
+	return 7, assert.AnError
 }
 
 // CountAssignedUsers は active assignment 数を返す。
@@ -1055,7 +1058,17 @@ func TestCountAssignedUsers_Counts(t *testing.T) {
 }
 
 // repo error 時は fail-open で 0 を返す (pack 全体を失敗させない)。
+//
+// #4263: CountVisibleAssignedUsers は失敗を記録し、Err 版は記録しない (記録は
+// 呼び出し元の通知のパックが 1 ページに 1 回だけ行う)。slog の既定はプロセス全体の
+// 状態なので、張り替えて t.Cleanup で戻す (t.Parallel は使わない)。
 func TestCountAssignedUsers_FailOpen(t *testing.T) {
+	var logs lockedBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	const visibleWarn = "role: CountVisibleByRole failed; usersCount falls back to 0"
+
 	roleRepo := testutil.NewMockRoleRepository()
 	assignRepo := &failingAssignRepo{testutil.NewMockRoleAssignmentRepository(roleRepo)}
 	metaRepo := testutil.NewMockMetaRepository()
@@ -1063,6 +1076,14 @@ func TestCountAssignedUsers_FailOpen(t *testing.T) {
 	svc := role.NewService(roleRepo, assignRepo, metaRepo, idGen)
 	assert.Equal(t, 0, svc.CountAssignedUsers("r1"))
 	assert.Equal(t, 0, svc.CountVisibleAssignedUsers("r1"))
+	output := logs.String()
+	assert.Equalf(t, 1, strings.Count(output, visibleWarn), "CountVisibleAssignedUsers は失敗を 1 行記録する。logs:\n%s", output)
+	// #4263: 通知の lookup が 0 人を覚えないよう、Err 版はエラーも返す。
+	n, err := svc.CountVisibleAssignedUsersErr("r1")
+	assert.Equal(t, 0, n)
+	assert.ErrorIs(t, err, assert.AnError)
+	output = logs.String()
+	assert.Equalf(t, 1, strings.Count(output, visibleWarn), "Err 版は記録しない。logs:\n%s", output)
 }
 
 // #3999: CountVisibleAssignedUsers は凍結中とローカルの削除済みを数えない。
@@ -1082,6 +1103,9 @@ func TestCountVisibleAssignedUsers_SkipsHiddenMembers(t *testing.T) {
 	}
 	assert.Equal(t, 4, svc.CountAssignedUsers("r1"))
 	assert.Equal(t, 1, svc.CountVisibleAssignedUsers("r1"))
+	n, err := svc.CountVisibleAssignedUsersErr("r1")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, n)
 }
 
 type failingRoleRepo struct {

@@ -403,8 +403,8 @@ func TestNotificationShapeL2(t *testing.T) {
 	}
 
 	idGenRole, _ := id.NewGenerator("aidx")
-	roleLookup := entity.WithRoleLookup(func(string) (map[string]any, bool) {
-		return entity.PackRole(&model.Role{ID: "r1", Name: "VIP", IsPublic: true}, 0, idGenRole, corerole.DefaultPolicies()), true
+	roleLookup := entity.WithRoleLookup(func(string) (map[string]any, bool, error) {
+		return entity.PackRole(&model.Role{ID: "r1", Name: "VIP", IsPublic: true}, 0, idGenRole, corerole.DefaultPolicies()), true, nil
 	})
 	// #2868: abuseReport は read 時に通報の状態を引く。**渡さないと通知ごと
 	// drop される** (fail-closed) ので、shape を検査するには必須。

@@ -92,7 +92,7 @@ type streamingDeps struct {
 	profileUpdateHook            *corefederation.ProfileUpdateDeliveryHook
 	pinDeliveryHook              *corefederation.PinDeliveryHook
 	reactionCountWriter          *corereaction.SwitchableWriter
-	roleNotifLookup              func(roleID string) (map[string]any, bool)
+	roleNotifLookup              entity.RoleLookup
 	emojiApplicationNotifLookup  func(applicationID string) (entity.EmojiApplicationStatus, bool)
 	signupApplicationNotifLookup func(applicationID string) (entity.SignupApplicationStatus, bool)
 	abuseNotifLookup             func(reportID string) (entity.AbuseReportStatus, bool)

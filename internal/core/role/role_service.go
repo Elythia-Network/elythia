@@ -2161,12 +2161,22 @@ func (s *Service) CountAssignedUsers(roleID string) int {
 // the members roles/users shows them (#3999). Errors fall back to 0 like
 // CountAssignedUsers.
 func (s *Service) CountVisibleAssignedUsers(roleID string) int {
-	n, err := s.assignmentRepo.CountVisibleByRole(roleID)
+	n, err := s.CountVisibleAssignedUsersErr(roleID)
 	if err != nil {
 		slog.Warn("role: CountVisibleByRole failed; usersCount falls back to 0", "roleId", roleID, "err", err)
-		return 0
 	}
 	return n
+}
+
+// CountVisibleAssignedUsersErr is CountVisibleAssignedUsers that returns the
+// repository error instead of logging it, for callers that must not cache a
+// fallback 0 and log it themselves (#4263). On error it returns 0.
+func (s *Service) CountVisibleAssignedUsersErr(roleID string) (int, error) {
+	n, err := s.assignmentRepo.CountVisibleByRole(roleID)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // UpdateFields updates the named columns of an existing role and
