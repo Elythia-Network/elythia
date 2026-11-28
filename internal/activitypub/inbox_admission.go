@@ -243,7 +243,7 @@ func verifyDateSkew(dateHeader string) error {
 // **RFC1123Z (`... +0000`) と ISO8601 (`2009-11-10T23:00:00Z`) は失敗する**
 // 一方、JS の `new Date()` は両方読む。この差があると、そういう Date を出す
 // peer からの署名付きリクエストは**30 日前のものでも skew 検査を丸ごと飛ばして
-// 通る** — replay guard の TTL (2*InboxDateSkew + 5m) が切れた後は、同じ
+// 通る** — replay guard の記録 (processors.InboxReplayRecordTTL) が切れた後は、同じ
 // activity を無期限に再投函できる。`InboxDateSkew` が存在する理由そのものの層。
 func parseSignatureDate(raw string) (time.Time, bool) {
 	if t, err := http.ParseTime(raw); err == nil {

@@ -17,7 +17,7 @@ import (
 func TestRedisInboxReplayGuard_Claim(t *testing.T) {
 	testutil.SkipIfNoDocker(t)
 	tr := withRedis(t)
-	g := NewRedisInboxReplayGuard(tr.Client)
+	g := NewRedisInboxReplayGuard(tr.Client, 0)
 	ctx := context.Background()
 
 	held, err := g.Claim(ctx, "k1", "job:1")

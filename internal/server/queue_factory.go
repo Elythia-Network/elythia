@@ -150,6 +150,20 @@ const (
 	defaultInboxJobMaxAttempts   = 8
 )
 
+// inboxMaxRetryDelay returns the longest single retry delay of an inbox job
+// under cfg's inboxJobMaxAttempts. The inbox replay guard adds it to the
+// record lifetime (processors.InboxReplayRecordTTL).
+//
+// 回数は applyClientPolicies と同じ buildPolicy で決め、待ちの長さは worker が使う
+// backoff の式 (mkqdriver.FederationMaxRetryDelay) から出す。inbox の Policy は
+// backoff を上書きしないので、式はいつも federation の backoff になる。
+// 回数はジョブを積んだプロセスの設定で決まるので、受付と worker を別のプロセスで
+// 動かすときは、両方に同じ inboxJobMaxAttempts を設定している前提になる。
+func inboxMaxRetryDelay(cfg *config.Config) time.Duration {
+	p := buildPolicy(cfg.InboxJobMaxAttempts, defaultInboxJobMaxAttempts, nil, nil)
+	return mkqdriver.FederationMaxRetryDelay(p.MaxAttempts)
+}
+
 // defaultKeepFailed bounds the failed bucket retention applied to inbox /
 // deliver enqueue when operator が config で明示しない場合の安全側 default。
 // 1000 件あれば admin UI の Errored Instances panel (host aggregation で

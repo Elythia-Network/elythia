@@ -1559,7 +1559,7 @@ func TestInboxProcessor_ActorlessBodyIsRejectedBeforeTheReplayGuard(t *testing.T
 
 // **同じ id で中身の違う活動は再投函ではない。** 本家 Misskey の Undo(Follow) は
 // `<Follow の id>/undo` の決定的な id を使い、違うのは `published` だけ。id を鍵に
-// すると 15 分以内の 2 回目のフォロー解除が捨てられ、フォロワーのまま残る
+// すると記録の期限の内側の 2 回目のフォロー解除が捨てられ、フォロワーのまま残る
 // (2026-10-31 の監査)。鍵は署名が覆った本文のダイジェストにする。
 func TestInboxProcessor_SameIDWithDifferentBodyIsNotAReplay(t *testing.T) {
 	undo := func(published string) []byte {
@@ -1589,7 +1589,7 @@ func TestInboxProcessor_SameIDWithDifferentBodyIsNotAReplay(t *testing.T) {
 }
 
 // **同じ本文でも Date が違えば再投函ではない。** Elythia 自身の Follow は決定的な
-// id で `published` を持たないので、解除してから 15 分以内の再フォローは本文が
+// id で `published` を持たないので、解除してから記録の期限の内側の再フォローは本文が
 // 同じバイト列になる。鍵に署名された Date を含めるので、送り直しは通り、捕まえた
 // リクエストの再投函 (Date も同じ) は捨てる (2026-10-31 の監査のレビュー)。
 func TestInboxProcessor_SameBodyWithNewDateIsNotAReplay(t *testing.T) {

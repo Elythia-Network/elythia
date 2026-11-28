@@ -580,3 +580,15 @@ func TestApplyClientPolicies_RegistersPluginQueueRetention(t *testing.T) {
 	require.Positive(t, rec.lastOpts.KeepCompleted)
 	require.True(t, rec.lastOpts.KeepFailedSet)
 }
+
+// The inbox replay guard's retry delay follows the inbox job's attempts: the
+// default 8, an operator's value, and 0 (no retry).
+func TestInboxMaxRetryDelay(t *testing.T) {
+	assert.Equal(t, mkqdriver.FederationMaxRetryDelay(8), inboxMaxRetryDelay(&config.Config{}))
+	assert.Equal(t, 152*time.Minute+24*time.Second, inboxMaxRetryDelay(&config.Config{}))
+	assert.Equal(t, mkqdriver.FederationMaxRetryDelay(9), inboxMaxRetryDelay(&config.Config{InboxJobMaxAttempts: intp(9)}))
+	assert.Greater(t, inboxMaxRetryDelay(&config.Config{InboxJobMaxAttempts: intp(9)}), inboxMaxRetryDelay(&config.Config{}))
+	assert.Zero(t, inboxMaxRetryDelay(&config.Config{InboxJobMaxAttempts: intp(0)}))
+	// deliver の回数は関係しない。
+	assert.Equal(t, inboxMaxRetryDelay(&config.Config{}), inboxMaxRetryDelay(&config.Config{DeliverJobMaxAttempts: intp(1)}))
+}

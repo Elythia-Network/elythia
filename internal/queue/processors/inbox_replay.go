@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -28,8 +29,8 @@ import (
 // 値で、使えなければ activityReplayKey で本文から作る)。id を鍵にすると、同じ id で
 // 中身の違う活動 (本家 Misskey の Undo(Follow) は `<Follow の id>/undo` で決定的、
 // 違うのは `published` だけ) を 2 つ目から捨てる。本文だけを鍵にしても、Elythia 自身の Follow は決定的な id で
-// `published` も無いので、解除してから 15 分以内の再フォローが同じバイト列になり
-// 捨てられる。Date は受付が署名の対象として必須にしているので改変できず、捕まえた
+// `published` も無いので、解除してから記録の期限の内側の再フォローが同じバイト列に
+// なり捨てられる。Date は受付が署名の対象として必須にしているので改変できず、捕まえた
 // リクエストの再投函では同じ値、正当な送り直しでは新しい値になる。これが「同じ
 // リクエスト」の過不足ない定義になる (2026-10-31 の監査とそのレビュー)。
 //
@@ -109,12 +110,36 @@ func requestReplayKey(headers map[string]string, body []byte, digestSigned bool)
 	return digestReplayKey(date, digest)
 }
 
-// inboxReplayTTL is how long a processed activity is remembered.
+// inboxReplayTTL is the part of the guard's record lifetime that covers the
+// signed Date window, and the lifetime records had before the retry delay was
+// added (InboxReplayRecordTTL).
 //
-// **Date の窓より長くする。** 署名は `now-skew` から `now+skew` まで受理される
-// ので、最も早く受け取ってから最も遅く再投函されるまで最大 2*skew 開く。
-// そこに時計のずれ分の余裕を足す。
+// 署名は `now-skew` から `now+skew` まで受理されるので、最も早く受け取ってから
+// 最も遅く再投函されるまで最大 2*skew 開く。そこに時計のずれ分の余裕を足す。
+// 期限を延ばす前の版が書いた記録は、この長さで消える。
 const inboxReplayTTL = 2*activitypub.InboxDateSkew + 5*time.Minute
+
+// inboxReplayQueueMargin is added on top of the Date window and the longest
+// retry delay, for the time an attempt waits in the queue and runs.
+const inboxReplayQueueMargin = time.Hour
+
+// InboxReplayRecordTTL returns how long the guard remembers a request when one
+// retry of the inbox job can wait up to maxRetryDelay (see
+// mkqdriver.FederationMaxRetryDelay). The sum saturates instead of overflowing.
+//
+// **記録の期限を、受付を通った受信が処理されうる最長の時間より長くする。**
+// Date の窓 (inboxReplayTTL) に、再試行の 1 回の待ちの最大と、キューでの待ちと
+// 処理の余裕を足す。
+func InboxReplayRecordTTL(maxRetryDelay time.Duration) time.Duration {
+	ttl := inboxReplayTTL + inboxReplayQueueMargin
+	if maxRetryDelay <= 0 {
+		return ttl
+	}
+	if maxRetryDelay > math.MaxInt64-ttl {
+		return math.MaxInt64
+	}
+	return ttl + maxRetryDelay
+}
 
 // inboxReplayKeyPrefix namespaces the guard's Redis keys.
 const inboxReplayKeyPrefix = "mk:ap:inbox:seen:"
@@ -125,13 +150,17 @@ type RedisInboxReplayGuard struct {
 	ttl    time.Duration
 }
 
-// NewRedisInboxReplayGuard returns a guard backed by client. nil client returns
-// nil so callers can treat "未配線 = 保護なし" uniformly.
-func NewRedisInboxReplayGuard(client redis.UniversalClient) *RedisInboxReplayGuard {
+// NewRedisInboxReplayGuard returns a guard backed by client that remembers a
+// request for InboxReplayRecordTTL(maxRetryDelay); maxRetryDelay is the
+// longest single retry delay of the inbox job. nil client returns nil so
+// callers can treat "未配線 = 保護なし" uniformly.
+//
+// 処理中の印 (Claim) と処理済みの記録 (Remember) は同じ期限を使う。
+func NewRedisInboxReplayGuard(client redis.UniversalClient, maxRetryDelay time.Duration) *RedisInboxReplayGuard {
 	if client == nil {
 		return nil
 	}
-	return &RedisInboxReplayGuard{client: client, ttl: inboxReplayTTL}
+	return &RedisInboxReplayGuard{client: client, ttl: InboxReplayRecordTTL(maxRetryDelay)}
 }
 
 // inboxReplayKey hashes the activity ID.

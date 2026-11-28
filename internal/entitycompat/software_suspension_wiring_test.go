@@ -33,7 +33,7 @@ func TestQueueProcessorSoftwareCheckersAreWired(t *testing.T) {
 	assertWired(t, serverPkg,
 		"inboxProcessor := processors.NewInboxProcessor(federationProcessor, federationResolver, "+
 			"instanceService, inboxSoftwareChecker, metadataRefresher, "+
-			"processors.NewRedisInboxReplayGuard(s.redis.Default))",
+			"processors.NewRedisInboxReplayGuard(s.redis.Default, inboxMaxRetryDelay(s.config)))",
 		"受信の processor が受信の拒否 (inboxSuspendedSoftware) の判定を受け取っていない。\n"+
 			"管理画面で受信を拒否したソフトウェアの activity を受け付ける (#3362)")
 	// resolver も受信の拒否の判定を受ける (#3563)。#3833 で構築子の必須の引数にした。

@@ -42,3 +42,26 @@ func httpRelatedBackoff(attemptsMade int, rng func() float64) time.Duration {
 	backoff += time.Duration(float64(backoff) * rng() * httpRelatedBackoffJitter)
 	return backoff
 }
+
+// federationBackoffStrategy is the retry delay the workers register for jobs
+// enqueued with the federation backoff (driver.WithFederationBackoff).
+// FederationMaxRetryDelay bounds it with the same formula.
+func federationBackoffStrategy(attemptsMade int) time.Duration {
+	return httpRelatedBackoff(attemptsMade, nil)
+}
+
+// FederationMaxRetryDelay returns the longest single retry delay of a job
+// enqueued with the federation backoff and maxAttempts total tries: the delay
+// before its last try, with the jitter at its upper bound. maxAttempts of 1 or
+// less has no retry and returns 0.
+//
+// 待ちは回数とともに伸びて上限で止まるので、最後の試行の前の待ちが最大になる。
+// worker と同じ httpRelatedBackoff を jitter の上限で呼ぶ。上限への丸めは
+// httpRelatedBackoff の中で jitter を足す前に行われるので、起点や上限を変えても
+// この値は worker の待ちの最大と一致する。
+func FederationMaxRetryDelay(maxAttempts int) time.Duration {
+	if maxAttempts <= 1 {
+		return 0
+	}
+	return httpRelatedBackoff(maxAttempts-1, func() float64 { return 1 })
+}
