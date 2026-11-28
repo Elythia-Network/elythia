@@ -56,6 +56,13 @@ version: ## Elythia / 互換 Misskey / 追従している本家のバージョ�
 # 書き直してしまう。plugin-api.ts を壊してもサンプル側で検出されなくなる。
 FRONTEND_PLUGINS_GENERATED = frontend/packages/frontend/src/server-plugins.generated.ts
 
+# frontend-dts が作る型定義の入口。frontend-check が有無を見る (#4264)。
+FRONTEND_DTS_FILES = \
+	frontend/packages/i18n/built/index.d.ts \
+	frontend/packages/misskey-js/built/index.d.ts \
+	frontend/packages/misskey-reversi/built/index.d.ts \
+	frontend/packages/misskey-bubble-game/built/index.d.ts
+
 $(FRONTEND_PLUGINS_GENERATED):
 	GOWORK=off go run ./tools/pluginbuild
 
@@ -64,6 +71,15 @@ frontend-check: | $(FRONTEND_PLUGINS_GENERATED) ## frontend/ を型チェック�
 	# pnpm -r build) は本番が bind-mount している frontend/built を書き換えるため、
 	# 本番のチェックアウトで検証目的に使わないこと。
 	# 型を見るだけならこちらで済む (Docker 不要、出力物も作らない)。
+	# vue-tsc は workspace package の d.ts (packages/*/built) を読む。e2e-frontend-build
+	# は production で d.ts を作らない (#4264) ので、無ければ 1000 件を超える型エラーより
+	# 先に、作り方を出して止める。
+	@missing=; for f in $(FRONTEND_DTS_FILES); do [ -f "$$f" ] || missing="$$missing $$f"; done; \
+	if [ -n "$$missing" ]; then \
+		echo "==> 型定義 (d.ts) が無い:$$missing" >&2; \
+		echo "    make frontend-dts で作る (e2e-frontend-build は d.ts を作らない、#4264)" >&2; \
+		exit 1; \
+	fi
 	cd frontend/packages/frontend && npx vue-tsc --noEmit
 	# frontend/ のソースを読むゲート。frontend/ を本体で追跡するようになった (#3379)
 	# ので skip せず、required の `test` でも走る。frontend を触ったときに手元で
@@ -271,14 +287,14 @@ docker-update: ## pull → ビルド → 再起動 → 検証 (Docker Compose �
 	$(MAKE) docker-rebuild
 	$(MAKE) docker-restart
 
-uds-update: ## pull → ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮 (UDS 本番構成)
+uds-update: ## pull → ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮 → 型定義 (UDS 本番構成)
 	$(MAKE) pull
 	@# pull の後の段は、pull で取ってきた Makefile で動かす。make は動いている
 	@# レシピを読み直さないので、ここに段を並べると、段を足した版を取り込んだ回
 	@# だけ古い段のまま走る (#3682)
 	$(MAKE) uds-deploy
 
-uds-deploy: ## uds-update の pull より後 (ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮)
+uds-deploy: ## uds-update の pull より後 (ビルド → 再起動 → 検証 → バックアップの image → 事前圧縮 → 型定義)
 	$(MAKE) uds-rebuild
 	$(MAKE) uds-restart
 	@# バックアップの image の失敗は本体の反映の失敗ではない。古い版のまま残ると
@@ -294,6 +310,10 @@ uds-deploy: ## uds-update の pull より後 (ビルド → 再起動 → 検証
 	@# uds-update の終了コードは反映の成否だけで決める。
 	@$(MAKE) frontend-precompress || \
 		echo "==> 警告: 事前圧縮 (make frontend-precompress) に失敗した。反映は済んでいて、配信はその場の gzip で続く。原因を直して make frontend-precompress だけをやり直す" >&2
+	@# 型定義 (d.ts) は配信に要らず、このチェックアウトの型検査のためだけに作る
+	@# (#4264)。再起動の後に流し、失敗は警告にとどめる (圧縮と同じ理由)
+	@$(MAKE) frontend-dts || \
+		echo "==> 警告: 型定義の生成 (make frontend-dts) に失敗した。反映は済んでいる。このチェックアウトで frontend-check などを回す前に、原因を直して make frontend-dts だけをやり直す" >&2
 
 
 # Binary output
@@ -867,6 +887,29 @@ FRONTEND_NODE_DISTRO ?= trixie
 # NODE_MODULE_VERSION 不一致で落ちる。**ホストも `.node-version` に揃えるのが前提**
 # (devcontainer は postCreate.sh がそうする)。ずれた場合はホスト側で
 # `pnpm install` を流し直せば直る。
+#
+# **`pnpm build` には `NODE_ENV=production` を渡す (#4264)。** sw / i18n / misskey-js
+# などの build スクリプトは自分で NODE_ENV を見ており、渡さないと Service Worker が
+# minify されず、`_DEV_` が真のまま配られる (翻訳を使うたびに locale を取り直す)。
+# frontend / frontend-embed の `_DEV_` などは vite が自分で production にするので
+# 変わらない。取り込む misskey-js などが minify 済みになるので、frontend の chunk の
+# 一部は書き方が変わり、hash が付け替わる (2026.11.1 で 2 個、動きは同じ)。
+# 配布用の Dockerfile.bundled と本家の Dockerfile も production でビルドしている。
+# `pnpm install` には渡さない。pnpm 12.20.0 は渡しても devDependencies を入れた
+# (実測) が、ホストの target も使う node_modules の中身を NODE_ENV に左右させない。
+#
+# **production では i18n / misskey-js / misskey-reversi / misskey-bubble-game の
+# d.ts が作られない** (各 build スクリプトが飛ばす)。配信には要らないが、同じ
+# チェックアウトの `frontend-check` の vue-tsc が `packages/*/built/*.d.ts` を読む
+# ので、無いと型が解決できずに落ちる (実測で 1357 件のエラー)。d.ts は下の
+# `frontend-dts` で別に作る。このビルドの後ろにつながないのは、そこで失敗すると
+# uds-deploy が再起動の前で止まり、frontend/built を消した後の 404 が残るため。
+# 失敗しなくても、404 の時間が tsc の分だけ延びる。uds-deploy は再起動の後に流し、
+# 失敗は警告にとどめる (uds-deploy の frontend-precompress と同じ形)。docker-update は
+# 呼ばない — d.ts を使うのは、同じチェックアウトで frontend-check を回す人だけ。
+# 出力先は $(CURDIR) で決める。$(PWD) は呼び出し元の環境変数なので、
+# `make -C <別のチェックアウト>` で呼ぶと呼び出し元 (本番のチェックアウトなど) を
+# mount してしまう。
 e2e-frontend-build: plugins ## フロントエンドをビルド (本番の bind-mount 先を上書きするので注意)
 	@node_ver=$$(tr -d '[:space:]' < frontend/.node-version); \
 	node_tag="$$node_ver-$(FRONTEND_NODE_DISTRO)"; \
@@ -875,9 +918,32 @@ e2e-frontend-build: plugins ## フロントエンドをビルド (本番の bind
 	if [ -z "$$node_ver" ]; then echo "frontend/.node-version を読めない" >&2; exit 1; fi; \
 	if [ -z "$$pnpm_ver" ]; then echo "package.json の packageManager を読めない" >&2; exit 1; fi; \
 	echo "==> node:$$node_tag / pnpm@$$pnpm_ver でビルドする"; \
-	docker run --rm -e CI=true -v $(PWD):$(E2E_WORKDIR) -w $(E2E_WORKDIR)/frontend \
+	docker run --rm -e CI=true -v "$(CURDIR):$(E2E_WORKDIR)" -w $(E2E_WORKDIR)/frontend \
 		"node:$$node_tag" \
-		bash -lc "npm i -g pnpm@$$pnpm_ver && pnpm install --frozen-lockfile && pnpm build"
+		bash -lc "npm i -g pnpm@$$pnpm_ver && pnpm install --frozen-lockfile && NODE_ENV=production pnpm build"
+
+.PHONY: frontend-dts
+# frontend/ の workspace package の型定義 (d.ts) だけを作る (#4264)。e2e-frontend-build
+# (production) は作らないので、その後に同じチェックアウトで frontend-check などの
+# 型検査を回すときに要る。書くのは `packages/<pkg>/built` の d.ts だけで、配信物
+# (frontend/built) は触らない。引数は各 build スクリプトの buildDts() と同じ。
+# tsc は buildDts() (`pnpm run build` の中) と同じく root の node_modules/.bin の
+# `tsc` (@typescript/native、TypeScript 7.0.2) を引く (`pnpm exec` と `pnpm run` で
+# 同じ版になるのを実測。`pnpm --filter <pkg> exec tsc --version` と、`pnpm --filter
+# misskey-js run typecheck --version` (`tsc --noEmit --version`) がどちらも 7.0.2 を出す)。
+# packages/*/built は e2e-frontend-build のコンテナ (root) が
+# 作るので、同じ node のコンテナで流す。node_modules は e2e-frontend-build が入れる。
+frontend-dts: ## frontend/ の型定義 (d.ts) だけを作る (配信物は触らない。e2e-frontend-build の後に)
+	@node_ver=$$(tr -d '[:space:]' < frontend/.node-version); \
+	pnpm_ver=$$(sed -n 's/.*"packageManager"[[:space:]]*:[[:space:]]*"pnpm@\([^"+]*\).*/\1/p' \
+		frontend/package.json | head -1); \
+	if [ -z "$$node_ver" ]; then echo "frontend/.node-version を読めない" >&2; exit 1; fi; \
+	if [ -z "$$pnpm_ver" ]; then echo "package.json の packageManager を読めない" >&2; exit 1; fi; \
+	docker run --rm -e CI=true -v "$(CURDIR):$(E2E_WORKDIR)" -w $(E2E_WORKDIR)/frontend \
+		"node:$$node_ver-$(FRONTEND_NODE_DISTRO)" \
+		bash -lc "npm i -g pnpm@$$pnpm_ver && \
+			pnpm --filter i18n exec tsc --project tsconfig.json --rootDir src --outDir built --declaration true --emitDeclarationOnly true && \
+			pnpm --filter misskey-js --filter misskey-reversi --filter misskey-bubble-game exec tsc --project tsconfig.json --outDir built --declaration true --emitDeclarationOnly true"
 
 .PHONY: frontend-precompress
 # frontend/built に .br / .gz を足す (#3593)。サーバーは Accept-Encoding に応じて

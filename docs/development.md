@@ -418,8 +418,8 @@ make plugin-dev             # 編集しながら動かす (PLUGIN=plugins/status
 
 # 更新 (運用)
 make pull                   # 本体 + plugins/ の独立リポジトリを一括 pull
-make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 → バックアップの image → 事前圧縮 (UDS 本番)
-make docker-update          # 同上 (Docker Compose 構成)
+make uds-update             # pull → ビルド → 再起動 → 配信 entry の検証 → バックアップの image → 事前圧縮 → 型定義 (UDS 本番)
+make docker-update          # pull → ビルド → 再起動 → 配信 entry の検証 (Docker Compose 構成)
 make uds-restart            # mkgo を再起動して配信 entry を検証だけする
                             # **`up -d` は再起動を保証しない** — frontend は bind mount
                             # なので frontend だけ更新すると recreate されず、Elythia が

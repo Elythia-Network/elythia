@@ -1510,7 +1510,10 @@ make uds-rebuild           # フロントエンド + イメージ (docker 構成
 make uds-restart           # 再起動 + 配信アセットの検証 (同 docker-restart)
 make uds-backup-refresh    # backup-daemon (と作ってあれば backup) の image を作り直す (UDS だけ、#3682)
 make frontend-precompress  # 事前圧縮 (.br / .gz) を足す。再起動の後でよい (#3593)
+make frontend-dts          # 型定義 (d.ts) を作る。配信には要らず、再起動の後でよい (#4264)
 ```
+
+`make frontend-dts` は、`frontend/packages/` の i18n / misskey-js / misskey-reversi / misskey-bubble-game の型定義 (d.ts) だけを作る。フロントエンドのビルド (`e2e-frontend-build` / `uds-frontend-build`) は `NODE_ENV=production` で流すので d.ts を作らず、同じチェックアウトで `make frontend-check` などの型検査を回すときにだけ要る。配信物 (`frontend/built`) は触らない。`make uds-update` は再起動の後にこれを呼び、**失敗しても失敗にしない** (警告を出すだけ)。`make docker-update` は呼ばない (使うなら手で流す)。フロントエンドを手でビルドしたチェックアウトで型検査を回すときは、先に `make frontend-dts` を流す。
 
 `make frontend-precompress` は、`frontend/built` の JS / CSS などに brotli と gzip で圧縮したファイル (`.br` / `.gz`) を足す。Elythia は `Accept-Encoding` に応じてそれをそのまま返し、無いファイルはその場で gzip する。**ビルドの中では圧縮しない** — 圧縮には 8 コアで約 1 分かかり、ビルドの中に入れると下の 404 の窓がその分延びる。再起動の後に流せば、窓は今までと同じ長さで済み、圧縮が終わるまではその場の gzip で配信される。書き込みは一時ファイルからの rename なので、作りかけのファイルは配信されない。途中で止めても、もう一度流せば残りだけを作る。対象は名前に内容の hash が付いたファイルだけ (`manifest.json` や `loader/*` には作らず、作っても使わない)。
 
